@@ -1562,6 +1562,7 @@ export const activityTable = table("activities")
     classification: string(),
     classificationConfidence: number().optional(),
     classificationJobType: string().optional(),
+    fallbackClassification: string().optional(),
     isRead: boolean(),
     isThreadActivity: boolean().optional(),
     createdAt: number(),

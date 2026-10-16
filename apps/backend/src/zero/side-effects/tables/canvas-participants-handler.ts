@@ -101,7 +101,8 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         actionSourceId,
         canvasId,
         actorId: this.ctx.userID,
-        classification: ActivityClassification.ACTIONABLE,
+        // Fallback only — the worker classifies it (XOR → LLM) and uses this when both give no answer.
+        classification: ActivityClassification.FYI,
         ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
       })),
     );

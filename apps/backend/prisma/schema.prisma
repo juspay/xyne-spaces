@@ -2807,9 +2807,10 @@ model Activity {
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
-  classification  String                 @default("PENDING")
+  classification  String                 @default("PENDING_CLASSIFY")
   classificationConfidence Float?
   classificationJobType String?
+  fallbackClassification String? // Label used when XOR and the LLM both give no answer: set by whoever created the activity
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())

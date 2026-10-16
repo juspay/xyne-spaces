@@ -142,7 +142,7 @@ export async function createSpecialMentionActivities(
     messageId: messageId,
     channelId,
     isThreadActivity: options?.isThreadActivity,
-    classification: options?.classification ?? ActivityClassification.PENDING,
+    classification: options?.classification ?? ActivityClassification.PENDING_CLASSIFY,
   }));
 
   await activityService.createActivities(activities);

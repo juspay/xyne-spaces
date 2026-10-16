@@ -96,7 +96,7 @@ export class RecordingSharingNotificationService {
           actionSource: 'call' as const,
           actionSourceId: call.id,
           callId: call.id,
-          classification: ActivityClassification.PENDING,
+          classification: ActivityClassification.PENDING_CLASSIFY,
         })),
       ),
       notificationService.createRecordingSharedNotifications(

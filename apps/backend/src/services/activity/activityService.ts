@@ -13,6 +13,19 @@ import {
   sdlcTicketConversation,
 } from '@/sdlc/sdlcNavTarget';
 
+/**
+ * Every activity is classified by the worker — XOR, then the LLM, then a fallback — so it is
+ * always stored as PENDING_CLASSIFY. The label a caller passes is not the final label: it is
+ * kept as that last fallback, used only when XOR and the LLM both give no answer.
+ */
+const pendingWithFallback = (classification?: ActivityClassification | null) => ({
+  classification: ActivityClassification.PENDING_CLASSIFY,
+  fallbackClassification:
+    classification === ActivityClassification.ACTIONABLE || classification === ActivityClassification.FYI
+      ? classification
+      : null,
+});
+
 export interface CreateActivityParams {
   id?: string;
   userId: string;
@@ -335,7 +348,7 @@ export class ActivityService {
           : {}),
         channelId: activity.channelId,
         actorId: activity.actorId,
-        ...(activity.classification ? { classification: activity.classification } : {}),
+        ...pendingWithFallback(activity.classification),
         ...(activity.classificationJobType !== undefined
           ? { classificationJobType: activity.classificationJobType }
           : {}),
@@ -413,7 +426,7 @@ export class ActivityService {
           : {}),
         channelId: a.channelId,
         actorId: a.actorId,
-        ...(a.classification ? { classification: a.classification } : {}),
+        ...pendingWithFallback(a.classification),
         ...(a.classificationJobType !== undefined
           ? { classificationJobType: a.classificationJobType }
           : {}),
@@ -506,6 +519,9 @@ export class ActivityService {
           actorId: actorId,
           isRead: false,
           updatedAt: new Date(), // intentional: re-surface in the feed
+          // A new reactor: classify it again.
+          ...pendingWithFallback(ActivityClassification.FYI),
+          classificationJobType: null,
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
           ...owned,
@@ -554,7 +570,7 @@ export class ActivityService {
         channelId: activity.channelId,
         actorId: activity.actorId,
         isRead: false,
-        classification: activity.classification,
+        ...pendingWithFallback(activity.classification),
         ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
         ...(activity.conversationSeenCutoffAt
           ? { conversationSeenCutoffAt: activity.conversationSeenCutoffAt }
@@ -655,6 +671,9 @@ export class ActivityService {
             messageId: latestReplyMessageId,
             actionSourceId: latestReplyMessageId,
             updatedAt: new Date(), // intentional: re-surface in the feed
+            // Now about the latest reply: classify it again.
+            ...pendingWithFallback(ActivityClassification.FYI),
+            classificationJobType: null,
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
             ...owned,
           },
@@ -692,7 +711,7 @@ export class ActivityService {
           actorId: actorId,
           isRead: false,
           isThreadActivity: true,
-          classification: ActivityClassification.FYI,
+          ...pendingWithFallback(ActivityClassification.FYI),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
       });

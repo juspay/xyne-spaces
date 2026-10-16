@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { Activity } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -6,38 +5,44 @@ import { extractAllMentions } from '@/utils/mentionParser';
 import { extractSpecialMentions } from '@/utils/mentionUtils';
 import { generatePlainTextContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
+import { ActivityClassification } from '@xyne/shared';
+import { AgentsConfig } from '@/agents/config';
 import {
-  getActivityClassificationPrompt,
-  type ActivityClassificationPromptResult,
-} from '@/services/activity/activityClassificationLangfusePrompts';
-import { config as envConfig } from '@/config/env';
-import { LLMClient, createUserMessage } from 'agentic-framework';
-import type { LLMClientConfig } from 'agentic-framework';
-import { OrgLLMServiceAccountPurpose, ActivityClassification } from '@xyne/shared';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+  classifyActivityWithXor,
+  type ActivityInputKind,
+  type ActivityLabel,
+} from '@/services/activity/activityClassificationXor';
+import { classifyActivityWithLlm } from '@/services/activity/activityClassificationLlm';
 
-const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
-const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
-const ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS = 30000;
-
-export const ACTIVITY_CLASSIFICATION_MODEL =
-  envConfig.activityClassification?.model ?? 'glm-latest';
-const LANGFUSE_PROMPT_LABEL = 'production';
-const LANGFUSE_PROMPT_NAMES = {
-  direct_message: 'activityDMPrompt',
-  mention: 'activityGeneralPrompt',
-  audience: 'activityGeneralPrompt',
-} as const;
 const ACTIVITY_CLASSIFICATION_CONTEXT_LIMIT = 0;
 const ACTIVITY_CLASSIFICATION_THREAD_LIMIT = 10;
 const GROUP_MEMBER_LIMIT = 10;
+/** Message text sent with a non-message activity (e.g. a reaction) is cut to this. */
+const EVENT_MESSAGE_TEXT_LIMIT = 500;
 
-const ActivityClassificationOutputSchema = z.object({
-  classification: z.enum(['ACTIONABLE', 'FYI', 'SKIP']),
-  confidence: z.coerce.number().min(0).max(1).optional(),
-});
+/** Notifications judged on the message itself; other message activities (reactions…) are events. */
+const MESSAGE_ACTIONS = new Set([
+  'mentioned_user',
+  'group_mention',
+  'keyword_match',
+  'direct_message',
+  'replied',
+  'replied_v2',
+]);
 
-type ActivityClassificationOutput = z.infer<typeof ActivityClassificationOutputSchema>;
+/**
+ * Plain words for action codes that don't explain themselves; any other code is used with
+ * underscores turned into spaces ("ticket_assigned" → "ticket assigned").
+ */
+const EVENT_DESCRIPTIONS: Record<string, string> = {
+  added_v2: 'reacted with an emoji to a message the recipient wrote',
+  added: 'reacted with an emoji to a message the recipient wrote',
+  removed: 'removed their emoji reaction from a message the recipient wrote',
+  kb_ingestion_completed: 'finished importing files into a knowledge base the recipient owns',
+};
+
+type DecidedBy = 'xor' | 'llm' | 'fallback';
+type Decision = { label: ActivityLabel; confidence: number | null; by: DecidedBy };
 
 type GroupMemberSummary = {
   memberCount: number;
@@ -167,48 +172,17 @@ type ThreadContextResult = {
 };
 
 export class ActivityClassificationService {
-  // private readonly model = 'glm-46-fp8';
-  private readonly model = ACTIVITY_CLASSIFICATION_MODEL;
 
-  private async getLLMClient(workspaceId: string | null | undefined): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      workspaceId,
-      OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
-    );
-
-    if (!credential) {
-      return null;
-    }
-
-    const llmConfig: LLMClientConfig = {
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: envConfig.llm?.requestTimeoutMs,
-          customHeaders: {
-            'x-litellm-disable-logging': 'true',
-          },
-        },
-      },
-      defaultModel: credential.defaultModel ?? this.model,
-      temperature: 0.2,
-      retry: {
-        maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
-        baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
-        maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
-        exponentialBackoff: true,
-      },
-    };
-    return new LLMClient(llmConfig);
-  }
-
+  /**
+   * Classify one activity: XOR first, the LLM when XOR has no answer or is unsure, and the
+   * label its creator passed (fallbackClassification) when both give no answer. Always ends
+   * ACTIONABLE or FYI (or SKIP, which deletes a DM activity), so Actionable + FYI = All.
+   */
   async classifyActivity(activityId: string): Promise<{
-    status: 'classified' | 'pending' | 'error' | 'skipped';
+    status: 'classified' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedLLM?: boolean;
+    decidedBy?: DecidedBy;
     reason?: string;
   }> {
     logger.debug('[ActivityClassification] Starting classification', { activityId });
@@ -221,133 +195,42 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'not_found' };
     }
 
-    if (activity.classification) {
-      const pendingStates = new Set<ActivityClassification>([
-        ActivityClassification.PENDING,
-        ActivityClassification.PROCESSING,
-      ]);
-      if (!pendingStates.has(activity.classification as ActivityClassification)) {
-        logger.debug('[ActivityClassification] Activity already classified, skipping', {
-          activityId,
-          classification: activity.classification,
-        });
-        return {
-          status: 'skipped',
-          reason: 'already_classified',
-          classification: activity.classification as ActivityClassification,
-        };
-      }
-    }
-
-    if (activity.actionSource !== 'message') {
-      await this.updateClassification(activity.id, ActivityClassification.FYI, null);
+    const pendingStates = new Set<string>([
+      ActivityClassification.PENDING,
+      ActivityClassification.PENDING_CLASSIFY,
+      ActivityClassification.PROCESSING,
+    ]);
+    if (!pendingStates.has(activity.classification)) {
+      logger.debug('[ActivityClassification] Activity already classified, skipping', {
+        activityId,
+        classification: activity.classification,
+      });
       return {
-        status: 'classified',
-        classification: ActivityClassification.FYI,
-        confidence: null,
-        usedLLM: false,
+        status: 'skipped',
+        reason: 'already_classified',
+        classification: activity.classification as ActivityClassification,
       };
     }
 
-    const llmClient = await this.getLLMClient(activity.workspaceId);
-    if (!llmClient) {
-      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping classification.', {
-        activityId,
-        workspaceId: activity.workspaceId,
-      });
-      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
-    }
+    // A notification about a message is judged on the message; anything else (a ticket,
+    // canvas, KB, call, PR, view, reaction…) on what happened and what it happened to.
+    const messageInput =
+      activity.actionSource === 'message' && MESSAGE_ACTIONS.has(activity.actorAction)
+        ? await this.buildClassificationInput(activity)
+        : null;
+    const kind: ActivityInputKind = messageInput ? 'message' : 'event';
+    const input = messageInput ?? (await this.buildEventInput(activity));
 
-    logger.debug('[ActivityClassification] Building classification input', { activityId });
-    const inputPayload = await this.buildClassificationInput(activity);
-    if (!inputPayload) {
-      logger.error('[ActivityClassification] Failed to build classification input', { activityId });
-      await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'input_build_failed' };
-    }
-
-    const promptType =
-      inputPayload.actorAction === 'direct_message' ? 'direct_message' : 'mention';
-    const promptName = LANGFUSE_PROMPT_NAMES[promptType];
-    const inputJson = JSON.stringify(inputPayload, null, 2);
-    let promptResult: ActivityClassificationPromptResult;
-    try {
-      promptResult = await getActivityClassificationPrompt({
-        name: promptName,
-        label: LANGFUSE_PROMPT_LABEL,
-        templateVariables: { INPUT_JSON: inputJson },
-      });
-    } catch (error) {
-      logger.error('[ActivityClassification] Failed to resolve Langfuse prompt', {
-        activityId,
-        promptType,
-        promptName,
-        promptLabel: LANGFUSE_PROMPT_LABEL,
-        errorMessage: error instanceof Error ? error.message : String(error ?? 'unknown error'),
-      });
-      await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'prompt_fetch_failed' };
-    }
-
-    const prompt = promptResult.prompt;
-    logger.debug('[ActivityClassification] Prompt resolved', {
-      activityId,
-      promptType,
-      promptName,
-      promptLabel: LANGFUSE_PROMPT_LABEL,
+    const decision = await this.decide(input as unknown as Record<string, unknown>, {
+      kind,
+      allowSkip: kind === 'message' && activity.actorAction === 'direct_message',
+      logId: activityId,
+      workspaceId: activity.workspaceId,
+      fallback: activity.fallbackClassification,
     });
-
-    try {
-      logger.info('[ActivityClassification] Sending request to LLM', {
-        activityId,
-        model: this.model,
-      });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
-
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse LLM response', {
-          activityId,
-          response: responseContent,
-        });
-        await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
-      }
-
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        activity.actorAction
-      );
-
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Classification parsed', {
-        activityId,
-        classification: mappedClassification,
-        confidence,
-        rawClassification: parsed.classification,
-      });
-      await this.updateClassification(activity.id, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] LLM classification failed', {
-        activityId,
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      // Leave as PENDING for retry
-      return { status: 'pending', usedLLM: true, reason: 'llm_failed' };
-    }
+    const classification = this.mapClassification(decision.label, activity.actorAction);
+    await this.updateClassification(activity.id, classification, decision.confidence);
+    return { status: 'classified', classification, confidence: decision.confidence, decidedBy: decision.by };
   }
 
   async classifySpecialMentionAudience(params: {
@@ -356,10 +239,10 @@ export class ActivityClassificationService {
     channelId: string;
     recipientUserIds: string[];
   }): Promise<{
-    status: 'classified' | 'pending' | 'error' | 'skipped';
+    status: 'classified' | 'skipped';
     classification?: ActivityClassification;
     confidence?: number | null;
-    usedLLM?: boolean;
+    decidedBy?: DecidedBy;
     reason?: string;
   }> {
     const { activityIds, messageId, channelId, recipientUserIds } = params;
@@ -367,120 +250,172 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'empty_audience' };
     }
 
-    const credentialActivity = await db.activity.findFirst({
-      where: { id: { in: activityIds } },
-      select: { workspaceId: true },
+    // Every row of one audience is created together, with the same fallback and workspace.
+    const first = await db.activity.findUnique({
+      where: { id: activityIds[0] },
+      select: { workspaceId: true, fallbackClassification: true },
     });
-    const llmClient = await this.getLLMClient(credentialActivity?.workspaceId);
-    if (!llmClient) {
-      logger.warn('[ActivityClassification] Org LiteLLM credentials are not configured. Skipping audience classification.', {
-        messageId,
-        channelId,
-        workspaceId: credentialActivity?.workspaceId,
-        activityCount: activityIds.length,
-      });
-      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
-    }
-
-    logger.debug('[ActivityClassification] Building audience classification input', {
-      messageId,
-      channelId,
-      recipientCount: recipientUserIds.length,
-    });
+    const logId = `${messageId} (${activityIds.length} recipients)`;
     const inputPayload = await this.buildAudienceClassificationInput(
       messageId,
       channelId,
       recipientUserIds
     );
-    if (!inputPayload) {
-      logger.error('[ActivityClassification] Failed to build audience classification input', {
-        messageId,
-        channelId,
-      });
-      await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'input_build_failed' };
+
+    // One decision for the whole audience. Never SKIP: it is not a DM.
+    const decision = inputPayload
+      ? await this.decide(inputPayload as unknown as Record<string, unknown>, {
+          kind: 'audience',
+          allowSkip: false,
+          logId,
+          workspaceId: first?.workspaceId ?? null,
+          fallback: first?.fallbackClassification ?? null,
+        })
+      : this.fallbackDecision(logId, first?.fallbackClassification ?? null, 'input_build_failed', 'skipped');
+    const classification = this.mapClassification(decision.label, 'group_mention');
+    await this.updateClassificationAudience(activityIds, classification, decision.confidence);
+    return { status: 'classified', classification, confidence: decision.confidence, decidedBy: decision.by };
+  }
+
+  /** XOR → LLM → fallback. Each step runs only when its CAC switch is on. */
+  private async decide(
+    input: Record<string, unknown>,
+    options: {
+      kind: ActivityInputKind;
+      allowSkip: boolean;
+      logId: string;
+      workspaceId: string | null;
+      fallback: string | null;
+    },
+  ): Promise<Decision> {
+    const cac = await AgentsConfig.fetch();
+
+    let xorReason = 'off';
+    if (cac.activityClassificationXorEnabled) {
+      const xor = await classifyActivityWithXor(input, options);
+      if (xor.ok) return { label: xor.classification, confidence: xor.confidence, by: 'xor' };
+      xorReason = xor.reason;
     }
 
-    const promptType = 'audience';
-    const promptName = LANGFUSE_PROMPT_NAMES[promptType];
-    const inputJson = JSON.stringify(inputPayload, null, 2);
-    let promptResult: ActivityClassificationPromptResult;
-    try {
-      promptResult = await getActivityClassificationPrompt({
-        name: promptName,
-        label: LANGFUSE_PROMPT_LABEL,
-        templateVariables: { INPUT_JSON: inputJson },
-      });
-    } catch (error) {
-      logger.error('[ActivityClassification] Failed to resolve audience Langfuse prompt', {
-        messageId,
-        promptType,
-        promptName,
-        promptLabel: LANGFUSE_PROMPT_LABEL,
-        errorMessage: error instanceof Error ? error.message : String(error ?? 'unknown error'),
-      });
-      await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-      return { status: 'error', usedLLM: false, reason: 'prompt_fetch_failed' };
+    let llmReason = 'off';
+    if (cac.activityClassificationLlmEnabled) {
+      const llm = await classifyActivityWithLlm(input, options);
+      if (llm.ok) return { label: llm.classification, confidence: llm.confidence, by: 'llm' };
+      llmReason = llm.reason;
     }
 
-    const prompt = promptResult.prompt;
-    logger.debug('[ActivityClassification] Audience prompt resolved', {
-      messageId,
-      promptType,
-      promptName,
-      promptLabel: LANGFUSE_PROMPT_LABEL,
-    });
+    return this.fallbackDecision(options.logId, options.fallback, xorReason, llmReason);
+  }
 
-    try {
-      logger.info('[ActivityClassification] Sending audience request to LLM', {
-        messageId,
-        model: this.model,
-      });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
+  /** The label the activity's creator passed; FYI when it passed none. */
+  private fallbackDecision(logId: string, fallback: string | null, xorReason: string, llmReason: string): Decision {
+    const label: ActivityLabel = fallback === ActivityClassification.ACTIONABLE ? 'ACTIONABLE' : 'FYI';
+    logger.info(
+      `[ACTIVITY][FALLBACK] ${logId}  fallback label ${label}  (xor: ${xorReason}, llm: ${llmReason})`,
+      { logId, label, fallback, xorReason, llmReason },
+    );
+    return { label, confidence: null, by: 'fallback' };
+  }
 
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse audience LLM response', {
-          messageId,
-          response: responseContent,
+  /**
+   * Input for an activity that is not a message notification: what happened (`actorAction`),
+   * who did it, and what it happened to — the ticket, canvas, KB, call, PR, view, track or
+   * message it points at. Lookups that fail are left out rather than failing the activity.
+   */
+  private async buildEventInput(activity: Activity): Promise<Record<string, unknown>> {
+    const names = await this.getUserNameMap([activity.userId, activity.actorId]);
+    const subject: Record<string, unknown> = {};
+    const lookup = async (key: string, fetch: () => Promise<unknown>) => {
+      try {
+        const value = await fetch();
+        if (value) subject[key] = value;
+      } catch (error) {
+        logger.debug('[ActivityClassification] Event subject lookup failed', {
+          activityId: activity.id,
+          key,
+          errorMessage: error instanceof Error ? error.message : String(error),
         });
-        await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
       }
+    };
 
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        inputPayload.actorAction
-      );
+    await Promise.all([
+      activity.ticketId &&
+        lookup('ticket', () =>
+          db.ticket.findUnique({
+            where: { id: activity.ticketId! },
+            select: { title: true, status: true, priority: true },
+          }),
+        ),
+      activity.canvasId &&
+        lookup('canvas', () =>
+          db.canvas.findUnique({ where: { id: activity.canvasId! }, select: { title: true } }),
+        ),
+      activity.actionSource === 'collection' &&
+        lookup('knowledgeBase', async () => {
+          const collection = await db.collection.findUnique({
+            where: { id: activity.actionSourceId },
+            select: { name: true },
+          });
+          // KB ingestion activities freeze "succeeded,failed" in blockId.
+          const [succeeded, failed] = (activity.blockId ?? '').split(',').map(Number);
+          return {
+            name: collection?.name ?? null,
+            ...(Number.isFinite(succeeded) && Number.isFinite(failed) ? { filesAdded: succeeded, filesFailed: failed } : {}),
+          };
+        }),
+      activity.callId &&
+        lookup('call', () =>
+          db.call.findUnique({
+            where: { id: activity.callId! },
+            select: { title: true, callType: true, status: true },
+          }),
+        ),
+      activity.pullRequestId &&
+        lookup('pullRequest', () =>
+          db.pullRequests.findUnique({
+            where: { id: activity.pullRequestId! },
+            select: { repoName: true, sourceBranchName: true, destinationBranchName: true, status: true },
+          }),
+        ),
+      activity.savedViewId &&
+        lookup('view', () =>
+          db.savedUserConfiguration.findUnique({
+            where: { id: activity.savedViewId! },
+            select: { name: true },
+          }),
+        ),
+      activity.trackId &&
+        lookup('track', () =>
+          db.sdlcTrack.findUnique({ where: { id: activity.trackId! }, select: { name: true, status: true } }),
+        ),
+      activity.channelId &&
+        lookup('channel', () =>
+          db.channel.findUnique({ where: { id: activity.channelId! }, select: { name: true, type: true } }),
+        ),
+      activity.messageId &&
+        // For a reaction this is the recipient's own message that was reacted to, not a
+        // message sent to them — named so, or its text reads like a request.
+        lookup(activity.actorAction === 'added_v2' ? 'theirMessageThatWasReactedTo' : 'message', async () => {
+          const message = await db.message.findUnique({
+            where: { messageId: activity.messageId! },
+            select: { content: true },
+          });
+          const text = message ? generatePlainTextContent(message.content || '') : '';
+          return text ? { contentText: text.slice(0, EVENT_MESSAGE_TEXT_LIMIT) } : null;
+        }),
+    ]);
 
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Audience classification parsed', {
-        messageId,
-        classification: mappedClassification,
-        confidence,
-      });
-      await this.updateClassificationAudience(activityIds, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] Audience LLM classification failed', {
-        messageId,
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      // Leave as PENDING for retry
-      return { status: 'pending', usedLLM: true, reason: 'llm_failed' };
-    }
+    return {
+      happened: EVENT_DESCRIPTIONS[activity.actorAction] ?? activity.actorAction.replace(/_/g, ' '),
+      actorAction: activity.actorAction,
+      actionSource: activity.actionSource,
+      recipient: { name: names.get(activity.userId) ?? null },
+      actor: {
+        name: names.get(activity.actorId) ?? null,
+        isRecipient: activity.actorId === activity.userId,
+      },
+      subject,
+    };
   }
 
   private async buildClassificationInput(
@@ -1133,59 +1068,8 @@ export class ActivityClassificationService {
     return links.size;
   }
 
-  private parseLLMResponse(content?: string | null): ActivityClassificationOutput | null {
-    logger.debug('[ActivityClassification] Parsing LLM response');
-    if (!content) return null;
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const normalized =
-        typeof parsed?.classification === 'string'
-          ? { ...parsed, classification: parsed.classification.toUpperCase() }
-          : parsed;
-
-      let normalizedConfidence = normalized?.confidence;
-      if (normalizedConfidence === null) {
-        normalizedConfidence = undefined;
-      }
-      if (typeof normalizedConfidence === 'string') {
-        const parsedValue = Number(normalizedConfidence);
-        if (!Number.isNaN(parsedValue)) {
-          normalizedConfidence = parsedValue;
-        }
-      }
-      if (typeof normalizedConfidence === 'number' && normalizedConfidence > 1) {
-        normalizedConfidence = normalizedConfidence / 100;
-      }
-
-      const result = ActivityClassificationOutputSchema.safeParse({
-        ...normalized,
-        confidence: normalizedConfidence,
-      });
-
-      if (!result.success) {
-        logger.warn('[ActivityClassification] LLM response validation failed', {
-          issues: result.error.issues,
-        });
-        return null;
-      }
-
-      return result.data;
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] Failed to parse LLM response', {
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      return null;
-    }
-  }
-
   private mapClassification(
-    classification: ActivityClassificationOutput['classification'],
+    classification: 'ACTIONABLE' | 'FYI' | 'SKIP',
     actorAction: string
   ): ActivityClassification {
     if (classification === 'SKIP' && actorAction !== 'direct_message') {
