@@ -11,6 +11,9 @@ export interface OtherUserBusySlot {
   endsAt: number | null;
   id?: string;
   title?: string;
+  status?: string;
+  isRecurring?: boolean;
+  participantIds?: string[];
 }
 
 export interface OtherUserCalls {

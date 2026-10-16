@@ -1,5 +1,8 @@
 import { ReactElement } from 'react';
 import { formatTime } from './CalenderViewUtils';
+import { OtherUserCallDetails } from './OtherUserCallDetails';
+import type { OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
+import { Popover } from '../../components/ui/Popover/Popover';
 
 interface OtherUserEventBlockProps {
   top: number;
@@ -10,6 +13,11 @@ interface OtherUserEventBlockProps {
   title: string | undefined;
   startsAt: number;
   endsAt: number | null;
+  /**
+   * The slot as the API returned it. A public calendar's slot carries a title and
+   * participants and opens a details popover on click; a busy slot stays read-only.
+   */
+  details?: OtherUserBusySlot | undefined;
   /** Inline offset around the 2px gutter (default 2px, use 1px for week view) */
   gutterPx?: number;
   /** z-index class (default 'z-[3]') */
@@ -25,7 +33,8 @@ interface OtherUserEventBlockProps {
 }
 
 /**
- * Read-only event block for another user's busy slot rendered in the time grid.
+ * Event block for another user's slot rendered in the time grid. Read-only for a busy
+ * slot; a public calendar's slot opens its details on click.
  * Pass interactive=true + stopPropagation handlers when wrapping with a Tooltip.
  */
 export function OtherUserEventBlock({
@@ -37,6 +46,7 @@ export function OtherUserEventBlock({
   title,
   startsAt,
   endsAt,
+  details,
   gutterPx = 2,
   zClass = 'z-[3]',
   interactive = false,
@@ -46,12 +56,16 @@ export function OtherUserEventBlock({
   const timeLabel = endsAt
     ? `${formatTime(startsAt)} - ${formatTime(endsAt)}`
     : formatTime(startsAt);
+  const showsDetails = details?.title !== undefined;
+  const isInteractive = interactive || showsDetails;
 
-  return (
+  const block = (
     <div
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      className={`absolute rounded overflow-hidden ${zClass} ${interactive ? 'cursor-default' : 'pointer-events-none'}`}
+      role={isInteractive ? 'button' : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      className={`absolute rounded overflow-hidden ${zClass} ${
+        showsDetails ? 'cursor-pointer' : isInteractive ? 'cursor-default' : 'pointer-events-none'
+      }`}
       style={{
         top,
         height,
@@ -60,18 +74,26 @@ export function OtherUserEventBlock({
         backgroundColor: `${color}26`,
         borderLeft: `3px solid ${color}`,
       }}
+      data-calendar-pill={showsDetails ? 'true' : undefined}
       data-track-category='CALENDAR'
       data-track-name='other-user-event-block'
-      onClick={onClick}
+      onClick={e => {
+        // Keep the click off the grid underneath, which would start a new call there.
+        if (showsDetails) e.stopPropagation();
+        onClick?.(e);
+      }}
       onKeyDown={
-        interactive && onClick
+        interactive && onClick && !showsDetails
           ? e => {
               if (e.key === 'Enter' || e.key === ' ')
                 onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
             }
           : undefined
       }
-      onPointerDown={onPointerDown}
+      onPointerDown={e => {
+        if (showsDetails) e.stopPropagation();
+        onPointerDown?.(e);
+      }}
     >
       <div className='px-1.5 py-1 h-full flex flex-col justify-start overflow-hidden pointer-events-none'>
         <span className='truncate text-[12px] leading-[18px] font-medium' style={{ color }}>
@@ -87,5 +109,13 @@ export function OtherUserEventBlock({
         )}
       </div>
     </div>
+  );
+
+  if (!details || !showsDetails) return block;
+
+  return (
+    <Popover trigger={block} side='left' align='start' sideOffset={8} collisionPadding={8}>
+      <OtherUserCallDetails details={details} />
+    </Popover>
   );
 }

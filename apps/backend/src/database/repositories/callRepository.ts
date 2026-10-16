@@ -688,12 +688,13 @@ export class CallRepository {
     queueCallVespaDelete(id, { source: 'CallRepository.delete' });
   }
 
-  async getScheduledCallsForUser(userId: string, from: Date, to: Date) {
+  async getCalendarCallsForUser(userId: string, from: Date, to: Date) {
     return DatabaseClient.getInstance().call.findMany({
       where: {
         participants: { some: { userId } },
-        status: CallStatus.SCHEDULED,
-        startsAt: { gte: from, lte: to },
+        status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
+        startsAt: { lt: to },
+        endsAt: { gt: from },
       },
       include: {
         participants: {

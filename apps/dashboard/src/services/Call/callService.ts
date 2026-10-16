@@ -899,11 +899,27 @@ export class CallService {
     to: Date,
   ): Promise<{
     calendarVisibility: CalendarVisibility;
-    calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+    calls: {
+      startsAt: number;
+      endsAt: number | null;
+      id?: string;
+      title?: string;
+      status?: string;
+      isRecurring?: boolean;
+      participantIds?: string[];
+    }[];
   }> {
     const response = await apiInstance.get<{
       calendarVisibility: CalendarVisibility;
-      calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+      calls: {
+        startsAt: number;
+        endsAt: number | null;
+        id?: string;
+        title?: string;
+        status?: string;
+        isRecurring?: boolean;
+        participantIds?: string[];
+      }[];
     }>(`/calls/user/${userId}/scheduled`, {
       params: { from: from.toISOString(), to: to.toISOString() },
     });
