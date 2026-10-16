@@ -30,7 +30,6 @@ import { TicketStageRequestsSideEffectHandler } from './tables/ticket-stage-requ
 import {
   CanvasFoldersSideEffectHandler,
   ReposSideEffectHandler,
-  SdlcArtifactsSideEffectHandler,
   SdlcEntityLinksSideEffectHandler,
   SdlcFoldersSideEffectHandler,
   SdlcTracksSideEffectHandler,
@@ -103,8 +102,6 @@ export class SideEffectHandlerFactory {
         return new SdlcFoldersSideEffectHandler(ctx);
       case 'canvas_folders':
         return new CanvasFoldersSideEffectHandler(ctx);
-      case 'sdlc_artifacts':
-        return new SdlcArtifactsSideEffectHandler(ctx);
       case 'repos':
         return new ReposSideEffectHandler(ctx);
 

@@ -638,13 +638,10 @@ export type InsertDocument =
  * sdlcContainerType, sdlcBranch, sdlcTrackId, sdlcScopeIds, sdlcPath), so nothing else is fed.
  * Empty when the item is in no hub. Shared by documents (`file`) and messages.
  */
-export interface SdlcPlacementFields {
-  /** id:sdlc_container:sdlc_container::<trackId|folderId>, or '' outside SDLC. */
-  sdlcContainerRef: string;
-}
-
 /** An SDLC document (a canvas filed in a hub, or an upload filed in a track) in `file`. */
-export interface SdlcFileFields extends SdlcPlacementFields {
+export interface SdlcFileFields {
+  /** The container it sits in: id:<namespace>:sdlc_container::<trackId|folderId>. */
+  sdlcContainerRef: string;
   /** Canvases only: the name of the document's canvas folder, e.g. "PRDs". '' for uploads. */
   sdlcTypeName: string;
   /** ACTIVE | ARCHIVED (sdlc_artifacts.artifactStatus); '' for uploads. */
@@ -658,7 +655,9 @@ export interface SdlcFileFields extends SdlcPlacementFields {
  * document's container and names the document; started on a track or folder, the document
  * is ''.
  */
-export interface SdlcDiscussionFields extends SdlcPlacementFields {
+export interface SdlcDiscussionFields {
+  /** The container it sits in: id:<namespace>:sdlc_container::<trackId|folderId>. */
+  sdlcContainerRef: string;
   /** The file docId (canvas or upload) it was started on, or ''. */
   sdlcDocumentId: string;
 }

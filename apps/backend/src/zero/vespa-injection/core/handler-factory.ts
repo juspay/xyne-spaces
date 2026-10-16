@@ -15,7 +15,7 @@ import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-ha
 import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 import { FormEntityValuesVespaHandler } from '../tables/form-entity-values-handler';
 import { AppsVespaHandler } from '../tables/apps-handler';
-import { ReposVespaHandler, SdlcFoldersVespaHandler, SdlcTracksVespaHandler } from '../tables/sdlc-handlers';
+import { ReposVespaHandler } from '../tables/sdlc-handlers';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -74,11 +74,7 @@ export class VespaHandlerFactory {
       case 'apps':
         return new AppsVespaHandler(ctx);
 
-      // SDLC Hub search: deleted tracks, folders and repositories (other changes: side effects)
-      case 'sdlc_tracks':
-        return new SdlcTracksVespaHandler(ctx);
-      case 'sdlc_folders':
-        return new SdlcFoldersVespaHandler(ctx);
+      // SDLC Hub search: a deleted repository (other changes: side effects)
       case 'repos':
         return new ReposVespaHandler(ctx);
 
