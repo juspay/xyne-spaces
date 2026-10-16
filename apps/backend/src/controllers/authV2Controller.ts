@@ -1,3 +1,4 @@
+import { OrgCoupon, OrgCouponError, orgCouponService } from '@/services/orgCouponService';
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
@@ -1793,12 +1794,49 @@ export class AuthV2Controller {
   };
 
   /**
+   * Checks a typed coupon code for the create-org screen (public)
+   * POST /api/auth/org-coupon/validate
+   */
+  validateOrgCoupon = async (req: Request, res: Response): Promise<void> => {
+    const { code } = req.body as { code?: unknown };
+    try {
+      const coupon = orgCouponService.validate(typeof code === 'string' ? code : '');
+      res.status(200).json({ amountUsd: coupon.amountUsd });
+    } catch (error) {
+      if (error instanceof OrgCouponError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error validating organization coupon:', error);
+      res.status(500).json({ error: 'Failed to validate coupon' });
+    }
+  };
+
+  /**
    * Create a new organization and workspace
    * POST /api/auth/create-org
    */
   createOrg = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { orgName, workspaceName } = req.body as { orgName: string; workspaceName: string };
+      const { orgName, workspaceName, couponCode } = req.body as {
+        orgName: string;
+        workspaceName: string;
+        couponCode?: string;
+      };
+
+      // Validate before anything is created so a bad code can be corrected and resubmitted.
+      let coupon: OrgCoupon | undefined;
+      if (typeof couponCode === 'string' && couponCode.trim()) {
+        try {
+          coupon = orgCouponService.validate(couponCode);
+        } catch (error) {
+          if (error instanceof OrgCouponError) {
+            res.status(error.statusCode).json({ error: 'Invalid coupon', message: error.message });
+            return;
+          }
+          throw error;
+        }
+      }
 
       // Get pending auth data from cookie
       const pendingAuthCookie = req.cookies?.google_access_token;
@@ -1841,7 +1879,8 @@ export class AuthV2Controller {
         userData,
         orgName,
         workspaceName,
-        provider
+        provider,
+        coupon
       );
 
       // Check if user is inactive or has left the workspace
@@ -1957,7 +1996,9 @@ export class AuthV2Controller {
           name: workspaceUser.name,
           picture: workspaceUser.picture,
           role: workspaceUser.role,
-          workspaceId: workspaceUser.workspaceId
+          workspaceId: workspaceUser.workspaceId,
+          orgRole: OrgRole.OWNER,
+          memberId: workspaceUser.orgMemberId,
         },
         isNewUser,
         selfDmChannelId,
@@ -2102,6 +2143,7 @@ export class AuthV2Controller {
           picture: targetUser.picture,
           workspaceId: targetUser.workspaceId,
           role: targetUser.role,
+          orgRole: targetUser.orgMember?.role ?? '',
           memberId: targetUser.orgMemberId,
         },
         selfDmChannelId,
@@ -2225,7 +2267,7 @@ export class AuthV2Controller {
           },
         });
 
-        const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
+        const { organization, workspace, workspaceUser, orgRole } = await this.userService.createWorkspaceInOrg(
           { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
           {
@@ -2324,6 +2366,8 @@ export class AuthV2Controller {
             name: workspaceUser.name,
             picture: workspaceUser.picture,
             workspaceId: workspaceUser.workspaceId,
+            orgRole,
+            memberId: workspaceUser.orgMemberId,
           },
           selfDmChannelId,
           landingChannelId: workspaceRecord?.landingChannelId ?? null,
@@ -2381,7 +2425,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
+      const { organization, workspace, workspaceUser, orgRole } = await this.userService.createWorkspaceInOrg(
         { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
         {
@@ -2460,6 +2504,8 @@ export class AuthV2Controller {
           name: workspaceUser.name,
           picture: workspaceUser.picture,
           workspaceId: workspaceUser.workspaceId,
+          orgRole,
+          memberId: workspaceUser.orgMemberId,
         },
         isNewUser,
         selfDmChannelId,

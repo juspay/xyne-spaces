@@ -20,6 +20,7 @@ import {
   SlowSessionsTable,
   ToolLatencyTable,
 } from '@/components/ClawAgents/metrics/MetricsTables';
+import { OrgCreditsPanel } from '@/components/ClawAgents/metrics/OrgCreditsPanel';
 import { SentimentPanel } from '@/components/ClawAgents/metrics/SentimentPanel';
 
 const DAY_OPTIONS: Array<{ label: string; value: ClawMetricsDays }> = [
@@ -47,6 +48,7 @@ const ClawMetricsScreen = (): ReactElement => {
 
   return (
     <div className='mx-auto w-full max-w-7xl px-6 py-8'>
+      <OrgCreditsPanel />
       <div className='mb-5 flex flex-wrap items-start justify-between gap-4'>
         <div className='flex items-start gap-3'>
           <div className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted'>

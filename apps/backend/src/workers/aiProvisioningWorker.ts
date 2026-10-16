@@ -26,6 +26,7 @@ import {
   litellmProvisioningClient,
 } from '@/services/litellmProvisioningClient';
 import { decrypt, encrypt } from '@/services/encryptionService';
+import { orgCouponService } from '@/services/orgCouponService';
 import { logger } from '@/utils/logger';
 
 interface OrgLiteLLMServiceAccountCredentials {
@@ -177,6 +178,9 @@ class AIProvisioningWorker {
       case AIProvisioningSubjectType.USER:
         await this.provisionUser(subjectId);
         return;
+      case AIProvisioningSubjectType.ORG_BUDGET:
+        await this.provisionOrgBudget(subjectId);
+        return;
       default:
         throw new ClawSpacesSyncError(`Unknown AI provisioning subject type: ${subjectType}`, {
           retryable: false,
@@ -189,6 +193,24 @@ class AIProvisioningWorker {
     await clawSpacesSyncClient.syncOrg(orgPayload);
     const teamId = await this.ensureLiteLLMTeamForOrg(orgPayload);
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
+  }
+
+  // The ORG job may still be creating the team (e.g. on another worker), so a missing team
+  // is retried instead of treated as done: ending here would mark the row SUCCESS, which is
+  // never re-run, and the coupon would stay recorded but never applied.
+  private async provisionOrgBudget(orgId: string): Promise<void> {
+    const coupon = await orgCouponService.getApplied(orgId);
+    if (!coupon) {
+      return;
+    }
+    const teamId = await this.getOrgLiteLLMTeamId(orgId);
+    if (!teamId) {
+      throw new LiteLLMProvisioningError(
+        `LiteLLM team for org ${orgId} does not exist yet; retrying coupon budget sync`,
+        { retryable: true },
+      );
+    }
+    await litellmProvisioningClient.updateTeamBudget(teamId, coupon.amountUsd);
   }
 
   private async provisionWorkspace(workspaceId: string): Promise<void> {
@@ -291,6 +313,7 @@ class AIProvisioningWorker {
 
   private async ensureLiteLLMTeamForOrg(orgPayload: ClawSyncOrgPayload): Promise<string> {
     const existing = await this.getOrgLiteLLMTeamId(orgPayload.spacesOrgId);
+    const coupon = await orgCouponService.getApplied(orgPayload.spacesOrgId);
 
     if (existing) {
       await litellmProvisioningClient.storeTeam({
@@ -305,6 +328,7 @@ class AIProvisioningWorker {
     const team = await litellmProvisioningClient.createTeam({
       orgId: orgPayload.spacesOrgId,
       teamAlias: orgPayload.name,
+      ...(coupon ? { maxBudget: coupon.amountUsd } : {}),
     });
 
     await litellmProvisioningClient.storeTeam({

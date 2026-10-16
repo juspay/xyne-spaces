@@ -289,6 +289,7 @@ export const AIProvisioningSubjectType = {
   ORG: 'ORG',
   WORKSPACE: 'WORKSPACE',
   USER: 'USER',
+  ORG_BUDGET: 'ORG_BUDGET',
 } as const;
 
 export type AIProvisioningSubjectType =

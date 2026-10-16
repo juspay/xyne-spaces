@@ -13,6 +13,10 @@ class AIProvisioningService {
     return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.ORG, spacesOrgId);
   }
 
+  async enqueueOrgBudgetSync(spacesOrgId: string) {
+    return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.ORG_BUDGET, spacesOrgId);
+  }
+
   async enqueueWorkspaceSync(spacesWorkspaceId: string) {
     return this.ensureStatusAndEnqueue(
       AIProvisioningSubjectType.WORKSPACE,
