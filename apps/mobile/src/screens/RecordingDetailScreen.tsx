@@ -30,7 +30,12 @@ import { logRecordingError, formatRecordingDuration } from '@/src/utils/recordin
 import { haptics } from '@/src/utils/haptics';
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import type { RecordingDetail } from '@/src/types/recordings';
-import { HeaderBackButton } from '@/src/components/ui/header-icon-button';
+import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
+import { XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
+import { getChannelById } from '@/src/hooks/useChannels';
+import { useQuery } from '@/src/hooks/useQuery';
+import { queries } from '@/src/zero/queries';
 
 const SHEET_TOP_RADIUS = 28;
 
@@ -207,6 +212,13 @@ export function RecordingDetailScreen({ recordingId }: RecordingDetailScreenProp
   const [isDeleting, setIsDeleting] = useState(false);
   const [mediaUri, setMediaUri] = useState<string | null>(null);
 
+  const [message] = useQuery(
+    queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
+    {
+      enabled: Boolean(recording?.messageId),
+    },
+  );
+
   // ── Load ─────────────────────────────────────────────────────────────────
 
   const loadRecording = useCallback(async (id: string): Promise<void> => {
@@ -262,6 +274,22 @@ export function RecordingDetailScreen({ recordingId }: RecordingDetailScreenProp
   const handleShare = useCallback((): void => {
     setShowShareSheet(true);
   }, []);
+
+  // ── Ask AI ───────────────────────────────────────────────────────────────
+
+  const handleAskAI = useCallback((): void => {
+    if (!recording?.conversationId) return;
+    const attachmentIds = (message?.attachments ?? []).map(attachment => attachment.id);
+    router.push({
+      pathname: '/xyne-ai',
+      params: {
+        ...channelScopeParams(getChannelById(recording.channelId ?? '')),
+        conversationId: recording.conversationId,
+        previewText: recording.title || 'Recording Transcript',
+        ...(attachmentIds.length > 0 ? { attachmentIds: attachmentIds.join(',') } : {}),
+      },
+    });
+  }, [message, recording, router]);
 
   // ── Delete ───────────────────────────────────────────────────────────────
 
@@ -326,21 +354,29 @@ export function RecordingDetailScreen({ recordingId }: RecordingDetailScreenProp
             onPress={() => router.back()}
           />
 
-          {recording &&
-            (isEditingTitle ? (
-              <View className='flex-row items-center gap-3'>
-                <Pressable hitSlop={8} onPress={() => void handleSaveTitle()}>
-                  <Check size={18} color='#6366f1' />
+          {recording && (
+            <View className='flex-row items-center gap-3'>
+              {recording.conversationId && !isEditingTitle ? (
+                <HeaderIconButton liquidGlass accessibilityLabel='Ask AI' onPress={handleAskAI}>
+                  <XyneAIStarIcon />
+                </HeaderIconButton>
+              ) : null}
+              {isEditingTitle ? (
+                <>
+                  <Pressable hitSlop={8} onPress={() => void handleSaveTitle()}>
+                    <Check size={18} color='#6366f1' />
+                  </Pressable>
+                  <Pressable hitSlop={8} onPress={handleCancelEdit}>
+                    <X size={18} color={mutedColor} />
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable hitSlop={8} onPress={handleEditTitle}>
+                  <Pencil size={18} color={mutedColor} />
                 </Pressable>
-                <Pressable hitSlop={8} onPress={handleCancelEdit}>
-                  <X size={18} color={mutedColor} />
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable hitSlop={8} onPress={handleEditTitle}>
-                <Pencil size={18} color={mutedColor} />
-              </Pressable>
-            ))}
+              )}
+            </View>
+          )}
         </AppHeader>
 
         <KeyboardAvoidingView

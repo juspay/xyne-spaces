@@ -205,6 +205,12 @@ export const useChannelById = (channelId: string): Channel | undefined => {
   return fromAll ?? fromVisible;
 };
 
+/** A one-off lookup for event handlers: no subscription, so rows pay nothing until tapped. */
+export const getChannelById = (channelId: string): Channel | undefined => {
+  const { allChannels, visibleChannels } = stateMachineActor.getSnapshot().context;
+  return allChannels.find(c => c.id === channelId) ?? visibleChannels.find(c => c.id === channelId);
+};
+
 /**
  * Hook to retrieve a specific visible channel by its ID (includes channelStats).
  *
