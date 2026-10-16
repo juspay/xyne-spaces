@@ -255,12 +255,14 @@ export function buildTestCommand(targets: string[]): string {
     return 'pnpm run test';
   }
 
-  return targets
-    .map((t) => {
-      if (t === 'tests/01_api') return 'pnpm run test:api';
-      if (t === 'tests/02_ui') return 'pnpm run test:ui';
-      if (t === 'tests/03_e2e') return 'pnpm run test:e2e';
-      return `pnpm exec ts-node --project tsconfig.json scripts/run-gauge.ts ${JSON.stringify(t)}`;
-    })
-    .join(' && ');
+  if (targets.length === 1) {
+    if (targets[0] === 'tests/01_api') return 'pnpm run test:api';
+    if (targets[0] === 'tests/02_ui') return 'pnpm run test:ui';
+    if (targets[0] === 'tests/03_e2e') return 'pnpm run test:e2e';
+  }
+
+  // One Gauge run for all targets: separate runs each write their own result set, and only one
+  // of them is copied back, so the report silently dropped every target after the first.
+  const quoted = targets.map((t) => JSON.stringify(t)).join(' ');
+  return `pnpm exec ts-node --project tsconfig.json scripts/run-gauge.ts ${quoted}`;
 }

@@ -10,6 +10,7 @@ import {
   assertValidMessageAlias,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { clickHoverActionOnMessage } from '@/tests/shared/support/message-hover';
 
 function ensureDmContext(userAlias: string, dmAlias: string): void {
   const user = getStoredUser(userAlias);
@@ -44,32 +45,26 @@ function getStoredChannelMessageText(
   return message.text;
 }
 
-async function clickHoverActionOnMessage(
-  hoverActionSelector: string,
-  messageText: string
-): Promise<void> {
-  const page = testContext.activePage;
-  const message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
-  await message.waitFor({ state: 'visible' });
+function getStoredDmMessageText(userAlias: string, dmAlias: string, messageAlias: string): string {
+  assertValidUserAlias(userAlias);
+  assertValidDmAlias(dmAlias);
+  assertValidMessageAlias(messageAlias);
+  const user = getStoredUser(userAlias);
+  const message = user.dms[dmAlias]?.messages[messageAlias];
+  assert.ok(
+    message?.text,
+    `No stored DM message "${messageAlias}" found for user "${userAlias}" in DM "${dmAlias}".`
+  );
+  return message.text;
+}
 
-  const actionButton = page.locator(hoverActionSelector).first();
-  // The toolbar hides whenever the list scrolls (e.g. a new message arrives), and
-  // re-hovering the same point fires no new pointerover, so move the pointer off
-  // the list first to make every attempt a fresh hover.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    await page.mouse.move(0, 0);
-    await message.scrollIntoViewIfNeeded();
-    await message.hover({ force: true });
-    try {
-      await actionButton.waitFor({ state: 'visible', timeout: 5000 });
-      await actionButton.click({ force: true, timeout: 5000 });
-      return;
-    } catch (error) {
-      if (attempt === 3) {
-        throw error;
-      }
-    }
-  }
+async function readClipboardText(): Promise<string> {
+  return testContext.activePage.evaluate(() => {
+    const clipboardNavigator = navigator as Navigator & {
+      clipboard: { readText: () => Promise<string> };
+    };
+    return clipboardNavigator.clipboard.readText();
+  });
 }
 
 export default class MessagingSteps {
@@ -227,6 +222,106 @@ export default class MessagingSteps {
     await expect(
       testContext.activePage.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
     ).toHaveCount(0, { timeout: 15000 });
+  }
+
+  @Step(
+    'forwarding stored user <userAlias> dm <dmAlias> message <messageAlias> to user <targetUserAlias>'
+  )
+  public async forwardStoredDmMessageToUser(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    targetUserAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(targetUserAlias);
+
+    await clickHoverActionOnMessage(
+      "[data-testid='hover-action-more']",
+      getStoredDmMessageText(userAlias, dmAlias, messageAlias)
+    );
+    await testContext.activePage.locator("[data-testid='hover-action-forward-message']").click();
+    await this.pickForwardTargetUser(targetUserAlias);
+  }
+
+  @Step(
+    'verifying clipboard contains stored dm message <messageAlias> for user <userAlias> dm <dmAlias>'
+  )
+  public async verifyClipboardContainsStoredDmMessage(
+    messageAlias: string,
+    userAlias: string,
+    dmAlias: string
+  ): Promise<void> {
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+
+    const messageText = getStoredDmMessageText(userAlias, dmAlias, messageAlias);
+    const clipboardText = await readClipboardText();
+    assert.ok(
+      clipboardText.includes(messageText),
+      `Expected clipboard text to include "${messageText}" but got "${clipboardText}".`
+    );
+  }
+
+  @Step('verifying clipboard contains copied dm message link for user <userAlias> dm <dmAlias>')
+  public async verifyClipboardContainsCopiedDmMessageLink(
+    userAlias: string,
+    dmAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+
+    const dm = getStoredUser(userAlias).dms[dmAlias];
+    assert.ok(dm?.url, `No stored DM URL found for user "${userAlias}" DM "${dmAlias}".`);
+    // The DM URL ends in /chat/dir/<dmId>; the copied link uses the same path segment.
+    const dmPath = new URL(dm.url).pathname.replace(/^.*(\/chat\/dir\/[^/]+).*$/, '$1');
+
+    await expect
+      .poll(readClipboardText, {
+        timeout: 10000,
+        message: `Expected clipboard to contain copied link for DM "${dmAlias}".`,
+      })
+      .toContain(dmPath);
+  }
+
+  @Step(
+    'sending clipboard text as stored dm message <messageAlias> in dm <dmAlias> for user <userAlias>'
+  )
+  public async sendClipboardTextAsStoredDmMessage(
+    messageAlias: string,
+    dmAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidMessageAlias(messageAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidUserAlias(userAlias);
+    ensureDmContext(userAlias, dmAlias);
+
+    const clipboardText = await readClipboardText();
+    assert.ok(clipboardText.trim(), 'Expected clipboard text to be non-empty.');
+
+    getStoredUser(userAlias).dms[dmAlias].messages[messageAlias] = {
+      alias: messageAlias,
+      baseText: clipboardText,
+      text: clipboardText,
+    };
+
+    await testContext.activePage.locator("[data-testid='message-input']").fill(clipboardText);
+    await testContext.activePage.locator("[data-testid='send-message-button']").click();
+  }
+
+  @Step('verifying copied message link preview is visible in current conversation')
+  public async verifyCopiedMessageLinkPreviewVisible(): Promise<void> {
+    // A DM has no channel name, so the label may fall back to "View message".
+    await expect(
+      testContext.activePage
+        .locator("[data-testid='virtuoso-item-list']")
+        .getByText(/^(Message in .+|View message)$/)
+        .last()
+    ).toBeVisible({ timeout: 15000 });
   }
 
   @Step(

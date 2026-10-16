@@ -84,6 +84,7 @@ export interface VariationResult {
   video?: string | null;
   title?: string;
   themeApplied?: boolean | null;
+  textChecks?: Array<{ text: string; kind: "expect" | "reject"; ok: boolean }> | null;
   externalStubbed?: number;
   externalHosts?: string[];
   error?: string;
@@ -148,6 +149,9 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
   for (const e of (result.consoleErrors ?? []).slice(0, 3)) {
     if (expectedErrors && /status of [45]\d\d/.test(e)) continue;
     add("warn", "runtime", `console error: ${e}`);
+  }
+  for (const t of result.textChecks ?? []) {
+    if (!t.ok) add("fail", "dom", t.kind === "expect" ? `expected text not on the page: "${t.text}"` : `text that must not appear is on the page: "${t.text}"`);
   }
   if (result.theme === "dark" && result.themeApplied === false) add("warn", "fixture", "dark theme was requested but the page rendered light — set spec.themeStorageKey to the key the app reads (the probe's \"Theme storage keys\" line lists the ones found in the source)");
   if (result.apiRequests === 0 && !result.error) add("warn", "fixture", `no API request was intercepted on ${result.finalUrl ?? result.path ?? "the page"} — check baseUrl, path and apiPattern`);

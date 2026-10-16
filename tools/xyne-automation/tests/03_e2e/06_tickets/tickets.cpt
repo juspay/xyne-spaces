@@ -28,7 +28,7 @@
 
 # Verifying ticket <ticketAlias> was created
 * clicking on "[data-testid='channel-tab-tickets']"
-* waiting for "[data-testid^='ticket-card-']" to appear
+* waiting for "[data-testid^='ticket-card-'], [data-testid^='ticket-row-']" to appear
 
 # Creating ticket <ticketAlias> from chat for user <userAlias>
 * ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
