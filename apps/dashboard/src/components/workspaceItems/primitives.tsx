@@ -3,10 +3,13 @@ import { API_BASE_URL } from '../../config';
 import { fetchFile } from '../../services/clients/fileFetchService';
 import { FilePreview } from '../FilePreview';
 import ReadmeViewer from '../FileViewer/ReadmeViewer';
+import { LoadError } from '../InAppBrowser/LoadError';
 import { previewFileFor } from './itemDescriptor';
-import { iframeSandboxFor } from './iframeSandbox';
+import { previewFrameMode, type PreviewFrameMode } from './previewFrame';
 
-export { IFRAME_SANDBOX } from './iframeSandbox';
+export { IFRAME_SANDBOX, previewFrameMode, type PreviewFrameMode } from './previewFrame';
+
+const FRAME_LOAD_TIMEOUT_MS = 20_000;
 
 export function Centered({ children }: { children: ReactNode }): ReactElement {
   return (
@@ -56,14 +59,71 @@ export function useRemoteFile(
   return { file, loading, error };
 }
 
-export function SandboxedFrame({ url, title }: { url: string; title: string }): ReactElement {
+function PreviewFrame({
+  url,
+  title,
+  mode,
+  onRetry,
+}: {
+  url: string;
+  title: string;
+  mode: Extract<PreviewFrameMode, { kind: 'frame' }>;
+  onRetry: () => void;
+}): ReactElement {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'timedOut'>('loading');
+
+  useEffect(() => {
+    if (status !== 'loading') return undefined;
+    const timer = window.setTimeout(() => setStatus('timedOut'), FRAME_LOAD_TIMEOUT_MS);
+    return (): void => window.clearTimeout(timer);
+  }, [status]);
+
   return (
-    <iframe
-      src={url}
+    <div className='relative h-full w-full'>
+      <iframe
+        src={url}
+        title={title}
+        sandbox={mode.sandbox}
+        {...(mode.allow ? { allow: mode.allow } : {})}
+        onLoad={() => setStatus('ready')}
+        className='h-full w-full border-0 bg-background'
+        referrerPolicy='no-referrer'
+      />
+      {status === 'loading' && (
+        <div className='absolute inset-0 bg-background'>
+          <Spinner />
+        </div>
+      )}
+      {status === 'timedOut' && (
+        <LoadError
+          error={{ code: -7, description: '', url }}
+          onRetry={onRetry}
+          trackCategory='Workspace'
+        />
+      )}
+    </div>
+  );
+}
+
+export function SandboxedFrame({ url, title }: { url: string; title: string }): ReactElement {
+  const [attempt, setAttempt] = useState(0);
+  const mode = previewFrameMode(url);
+
+  if (mode.kind === 'shares-dashboard-origin') {
+    return (
+      <Centered>
+        This preview needs the dedicated preview host and can&apos;t be shown here.
+      </Centered>
+    );
+  }
+
+  return (
+    <PreviewFrame
+      key={`${url}:${attempt}`}
+      url={url}
       title={title}
-      sandbox={iframeSandboxFor(url)}
-      className='h-full w-full border-0 bg-background'
-      referrerPolicy='no-referrer'
+      mode={mode}
+      onRetry={() => setAttempt(current => current + 1)}
     />
   );
 }
