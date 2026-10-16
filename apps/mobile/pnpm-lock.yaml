@@ -285,6 +285,9 @@ importers:
       expo-secure-store:
         specifier: 57.0.1
         version: 57.0.1(expo@57.0.11)
+      expo-speech-recognition:
+        specifier: 57.1.1
+        version: 57.1.1(expo@57.0.11)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       expo-splash-screen:
         specifier: 57.0.5
         version: 57.0.5(expo@57.0.11)(typescript@6.0.3)
@@ -5592,6 +5595,13 @@ packages:
   expo-server@57.0.3:
     resolution: {integrity: sha512-aK+LdKzauHSGmsOStZtyxdzv0zWssCkxTw3m4QuOhfDSJsZaMRTd9O41d8ixU/QfELTbaJ0oRNcF7JFV/7O9YQ==}
     engines: {node: '>=20.16.0'}
+
+  expo-speech-recognition@57.1.1:
+    resolution: {integrity: sha512-e1RalFEvc7yui9Jnf1NiEYHT0jSPeH4hbMTafj1yjvcKN7HhZ7VrQigGUhBDB9AnDNjtPugbyPuCIjwHBBOCyw==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
 
   expo-splash-screen@57.0.5:
     resolution: {integrity: sha512-ZN0LDXlhHRNFjXTYZDojXk8IfaoUIu7qa3hhoBTXgyj1UB/iewGlH6+M3Nvhun2lY2d/+xhwqMhv0hIRoBo09Q==}
@@ -15484,6 +15494,12 @@ snapshots:
       expo: 57.0.11(4a9c4637dc8e26983a1e3a019e992cfb)
 
   expo-server@57.0.3: {}
+
+  expo-speech-recognition@57.1.1(expo@57.0.11)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
+    dependencies:
+      expo: 57.0.11(4a9c4637dc8e26983a1e3a019e992cfb)
+      react: 19.2.3
+      react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
 
   expo-splash-screen@57.0.5(expo@57.0.11)(typescript@6.0.3):
     dependencies:

@@ -34,6 +34,7 @@ import {
   Hash,
   ImageIcon,
   MessageCircleMore,
+  Mic,
   Paperclip,
   Pencil,
   Plus,
@@ -79,11 +80,13 @@ import {
   pickKey,
   togglePick,
 } from '../model/contextPicks';
+import { useDictation } from '../hooks/useDictation';
 import { activeMention, insertMention } from '../model/mentionTrigger';
 import { THINKING_OPTIONS, modelPillLabel } from '../model/modelSelection';
 import { AgentDot } from './AgentDot';
 import { CollectionsSheet } from './CollectionsSheet';
 import { ContextPickerSheet, ICONS } from './ContextPickerSheet';
+import { DictationWaveform } from './DictationWaveform';
 import { MentionSuggestions } from './MentionSuggestions';
 import {
   AgentSheet,
@@ -173,6 +176,32 @@ const ModeChip = ({
     />
   ) : null;
 };
+
+const ToolbarButton = ({
+  label,
+  onPress,
+  disabled = false,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}): ReactElement => (
+  <Pressable
+    accessibilityRole='button'
+    accessibilityLabel={label}
+    disabled={disabled}
+    onPress={(): void => {
+      void haptics.buttonTap();
+      onPress();
+    }}
+    className={`items-center justify-center rounded-full bg-conversation-input-pill-bg active:opacity-60 ${disabled ? 'opacity-40' : ''}`}
+    style={{ width: TOOLBAR_BUTTON_SIZE, height: TOOLBAR_BUTTON_SIZE }}
+  >
+    {children}
+  </Pressable>
+);
 
 const SendButton = ({
   isStreaming,
@@ -527,7 +556,13 @@ export const XyneAIComposer = ({
     Keyboard.dismiss();
     setSheet(name);
   }, []);
-  useImperativeHandle(ref, () => ({ setText }), []);
+  const dictation = useDictation(text, setText);
+  useImperativeHandle(ref, () => ({
+    setText: (next: string): void => {
+      dictation.interrupt();
+      setText(next);
+    },
+  }));
   const onCommand = useCallback(
     (name: string): void => setText(current => withCommand(current, name)),
     [],
@@ -561,9 +596,9 @@ export const XyneAIComposer = ({
     modes.deepResearch.enabled ||
     context.length + attachments.length > 0;
 
-  const submit = (): void => {
-    if (text.trim() === '') return;
-    onSubmit(text, context, attachments);
+  const submit = (value = text): void => {
+    if (value.trim() === '') return;
+    onSubmit(value, context, attachments);
     setText('');
     setContext([]);
     setAttachments([]);
@@ -573,6 +608,7 @@ export const XyneAIComposer = ({
 
   // A "/" starting the message opens the commands picker instead of being typed.
   const handleChangeText = (next: string): void => {
+    dictation.interrupt();
     if (text === '' && next === '/') openSheet('commands');
     else setText(next);
   };
@@ -588,20 +624,36 @@ export const XyneAIComposer = ({
     );
   };
 
-  const plusButton = (
-    <Pressable
-      accessibilityRole='button'
-      accessibilityLabel='Add to message'
-      onPress={(): void => {
-        void haptics.buttonTap();
-        openSheet('plus');
-      }}
-      className='items-center justify-center rounded-full bg-conversation-input-pill-bg active:opacity-60'
-      style={{ width: TOOLBAR_BUTTON_SIZE, height: TOOLBAR_BUTTON_SIZE }}
-    >
-      <Plus size={22} color={iconColor} />
-    </Pressable>
-  );
+  const toolbar =
+    dictation.status === 'listening' ? (
+      <>
+        <ToolbarButton label='Cancel dictation' onPress={dictation.cancel}>
+          <X size={20} color={iconColor} />
+        </ToolbarButton>
+        <DictationWaveform height={TOOLBAR_BUTTON_SIZE} />
+        <ToolbarButton label='Stop dictation' onPress={(): void => void dictation.stop()}>
+          <Square size={14} color={iconColor} fill={iconColor} />
+        </ToolbarButton>
+      </>
+    ) : (
+      <>
+        <ToolbarButton label='Add to message' onPress={(): void => openSheet('plus')}>
+          <Plus size={22} color={iconColor} />
+        </ToolbarButton>
+        <ModelPill selection={selection} onPress={(): void => openSheet('model')} />
+        <View className='flex-1' />
+        <ToolbarButton
+          label='Dictate'
+          disabled={dictation.status === 'stopping'}
+          onPress={(): void => {
+            Keyboard.dismiss();
+            void dictation.start();
+          }}
+        >
+          <Mic size={20} color={iconColor} />
+        </ToolbarButton>
+      </>
+    );
   const sendButton = (
     <SendButton
       isStreaming={isStreaming}
@@ -609,7 +661,8 @@ export const XyneAIComposer = ({
       onPress={(): void => {
         void haptics.buttonTap();
         if (isStreaming) onStop();
-        else submit();
+        else if (dictation.status === 'idle') submit();
+        else void dictation.stop().then(submit);
       }}
     />
   );
@@ -718,9 +771,7 @@ export const XyneAIComposer = ({
           style={[styles.input, { color: textColor }]}
         />
         <View className='flex-row items-center gap-2 px-2 pb-2 pt-1'>
-          {plusButton}
-          <ModelPill selection={selection} onPress={(): void => openSheet('model')} />
-          <View className='flex-1' />
+          {toolbar}
           {sendButton}
         </View>
         <ComposerSheets

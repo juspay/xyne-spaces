@@ -118,6 +118,7 @@
     "expo-router": "57.0.11",
     "expo-screen-orientation": "57.0.1",
     "expo-secure-store": "57.0.1",
+    "expo-speech-recognition": "57.1.1",
     "expo-splash-screen": "57.0.5",
     "expo-task-manager": "57.0.8",
     "expo-video": "57.0.2",
