@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, MoreVertical, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { Check, RotateCcw, X } from 'lucide-react';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,13 +21,10 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
 import Button from '../../ui/Button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import { CanvasCommentDeleteDialog } from '../CanvasCommentDeleteDialog';
+import { CanvasCommentActions } from '../CanvasCommentActions';
+import { useCanvasCommentMutations } from '../useCanvasCommentMutations';
 import { CanvasCommentComposer } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import type { CanvasCommentAnchor } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import { OverlayZIndexContext } from '../../../contexts/OverlayZIndexContext';
@@ -197,6 +194,7 @@ export function CanvasInlineCommentThread({
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
+  const commentMutations = useCanvasCommentMutations(editable);
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
   const commentsScrollRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -206,7 +204,7 @@ export function CanvasInlineCommentThread({
   const [createdThread, setCreatedThread] = useState<CanvasCommentHighlightThread | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+  const [commentToDelete, setCommentToDelete] = useState<CanvasComment | null>(null);
   const {
     results,
     allUsers: mentionUsers,
@@ -440,49 +438,14 @@ export function CanvasInlineCommentThread({
   const updateComment = async (
     comment: CanvasComment,
     payload: { body: string; mentionedUserIds: string[] },
-  ): Promise<void> => {
-    if (!editable || comment.createdBy !== user?.id || comment.deletedAt) return;
-    setSavingCommentId(comment.id);
-    try {
-      const result = await zero.mutate(
-        mutators.canvasComment.updateComment({
-          commentId: comment.id,
-          ...payload,
-          timestamp: Date.now(),
-        }),
-      ).server;
-      if (result.type === 'error') {
-        toast.error('Unable to update comment');
-        return;
-      }
+  ): Promise<boolean> => {
+    const succeeded = await commentMutations.updateComment(comment, payload);
+    if (succeeded) {
       const previousMentions = new Set(parseMentionedUserIds(comment.mentionedUserIds));
       sendMentionNotifications(payload.mentionedUserIds.filter(id => !previousMentions.has(id)));
-      setEditingCommentId(null);
-    } catch (error) {
-      toast.error('Unable to update comment');
-      logger.error(Event.API_CALL_FAILED, {
-        reason: error,
-        context: 'canvas_inline_comment_update',
-      });
-    } finally {
-      setSavingCommentId(null);
+      setEditingCommentId(current => (current === comment.id ? null : current));
     }
-  };
-
-  const deleteComment = async (comment: CanvasComment): Promise<void> => {
-    if (!editable || comment.createdBy !== user?.id || comment.deletedAt) return;
-    try {
-      const result = await zero.mutate(
-        mutators.canvasComment.deleteComment({ commentId: comment.id, timestamp: Date.now() }),
-      ).server;
-      if (result.type === 'error') toast.error('Unable to delete comment');
-    } catch (error) {
-      toast.error('Unable to delete comment');
-      logger.error(Event.API_CALL_FAILED, {
-        reason: error,
-        context: 'canvas_inline_comment_delete',
-      });
-    }
+    return succeeded;
   };
 
   const setThreadStatus = (status: CanvasCommentThreadStatus): void => {
@@ -599,40 +562,11 @@ export function CanvasInlineCommentThread({
                   </span>
                   <span className='flex-1' />
                   {editable && comment.createdBy === user?.id && !isDeleted && !isEditing && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant='ghost'
-                          size='iconSm'
-                          className='size-6 shrink-0 text-muted-foreground'
-                          aria-label='Comment actions'
-                          title='Comment actions'
-                          data-track-category='CANVAS'
-                          data-track-name='OPEN_INLINE_COMMENT_ACTIONS'
-                        >
-                          <MoreVertical className='size-[15px]' />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='end' className='z-[100]'>
-                        <DropdownMenuItem
-                          onSelect={() => setEditingCommentId(comment.id)}
-                          data-track-category='CANVAS'
-                          data-track-name='EDIT_INLINE_COMMENT'
-                        >
-                          <Pencil className='size-4' />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className='text-destructive focus:text-destructive'
-                          onSelect={() => void deleteComment(comment)}
-                          data-track-category='CANVAS'
-                          data-track-name='DELETE_INLINE_COMMENT'
-                        >
-                          <Trash2 className='size-4' />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <CanvasCommentActions
+                      onEdit={() => setEditingCommentId(comment.id)}
+                      onDelete={() => setCommentToDelete(comment)}
+                      disabled={commentMutations.pendingCommentId !== null}
+                    />
                   )}
                   {index === 0 && threadActions}
                 </div>
@@ -646,15 +580,16 @@ export function CanvasInlineCommentThread({
                         currentUserId={user?.id}
                         placeholder='Edit comment'
                         value={comment.body}
-                        disabled={savingCommentId === comment.id}
+                        preserveOnSubmit
+                        disabled={commentMutations.pendingCommentId !== null}
                         fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
                         minHeightClassName='min-h-[38px]'
-                        onSubmit={payload => void updateComment(comment, payload)}
+                        onSubmit={payload => updateComment(comment, payload)}
                         actions={
                           <Button
                             variant='ghost'
                             size='sm'
-                            disabled={savingCommentId === comment.id}
+                            disabled={commentMutations.pendingCommentId !== null}
                             onClick={() => setEditingCommentId(null)}
                             data-track-category='CANVAS'
                             data-track-name='CANCEL_EDIT_INLINE_COMMENT'
@@ -706,6 +641,14 @@ export function CanvasInlineCommentThread({
         </div>
       )}
 
+      <CanvasCommentDeleteDialog
+        open={commentToDelete !== null}
+        onCancel={() => setCommentToDelete(null)}
+        onConfirm={() => {
+          if (commentToDelete) void commentMutations.deleteComment(commentToDelete);
+          setCommentToDelete(null);
+        }}
+      />
       {editable && (
         <div
           className={cn(

@@ -93,7 +93,8 @@ interface NotificationData {
 
 // Router is /:workspaceId/... so cross-workspace deep links need the prefix.
 const withWorkspacePrefix = (url: string, workspaceId?: string): string => {
-  return prefixWorkspacePath(url, workspaceId) as string;
+  const prefixed = prefixWorkspacePath(url, workspaceId);
+  return typeof prefixed === 'string' ? prefixed : url;
 };
 
 const buildChatActionUrl = (notification: NotificationData['notification']): string | undefined => {
