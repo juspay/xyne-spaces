@@ -101,6 +101,7 @@ import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
+import { BoardHasNoStagesError, BOARD_HAS_NO_STAGES_USER_MESSAGE } from '@/utils/boardHasNoStagesError';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -920,6 +921,11 @@ export class TicketController {
       } catch (error) {
         if (error instanceof TicketCreateAccessError) {
           res.status(403).json({ error: error.message, code: error.code });
+          return;
+        }
+        if (error instanceof BoardHasNoStagesError) {
+          logger.warn(`[Ticket Creation] Rejected: board ${error.boardId} has no stages`);
+          res.status(422).json({ error: BOARD_HAS_NO_STAGES_USER_MESSAGE, code: error.code, boardId: error.boardId });
           return;
         }
         throw error;

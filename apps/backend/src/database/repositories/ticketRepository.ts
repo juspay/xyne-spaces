@@ -6,6 +6,7 @@ import { websocketService } from '@/services/websocketService';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { logger } from '@/utils/logger';
+import { BoardHasNoStagesError } from '@/utils/boardHasNoStagesError';
 import { DatabaseClient } from '@/database/client';
 import {
   BaseTicketType,
@@ -204,7 +205,7 @@ export class TicketRepository {
     });
 
     if (!stages || stages.length === 0) {
-      throw new Error(`No stages found for board ${data.boardId}. Board must have at least one stage.`);
+      throw new BoardHasNoStagesError(data.boardId);
     }
 
     // Get the stage - use provided stageName if it exists in stages, otherwise use first stage
