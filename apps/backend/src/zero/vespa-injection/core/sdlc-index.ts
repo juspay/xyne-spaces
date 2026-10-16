@@ -109,16 +109,11 @@ function sdlcHub(hubId: string) {
     };
   });
 
-  let hubChannel: Promise<{ projectId: string | null } | null> | undefined;
-
   /** A track or folder's sdlc_container document; null when it is not placed in the hub. */
   const container = once(async (id: string): Promise<VespaSdlcContainerDocument | null> => {
     // 1. The hub must be an SDLC hub.
-    hubChannel ??= db.channel
-      .findUnique({ where: { id: hubId }, select: { type: true, projectId: true } })
-      .then(channel => (channel?.type === ChannelType.SDLC ? channel : null));
-    const channel = await hubChannel;
-    if (!channel) return null;
+    const channel = await db.channel.findUnique({ where: { id: hubId }, select: { type: true, projectId: true } });
+    if (channel?.type !== ChannelType.SDLC) return null;
 
     // 2. Its chain: the containers above it up to the hub, with how each is placed.
     const placements = new Map<string, Placement>([[id, await placementOf(id)]]);
