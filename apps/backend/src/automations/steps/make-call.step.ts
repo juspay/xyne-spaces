@@ -5,7 +5,7 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
-import { livekitService, LIVEKIT_ROOM_MAX_PARTICIPANTS } from '@/services/liveKitService';
+import { livekitService } from '@/services/liveKitService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -13,8 +13,7 @@ import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 
-// One slot is taken by the caller.
-const MAX_CALL_INVITEES = LIVEKIT_ROOM_MAX_PARTICIPANTS - 1;
+const MAX_CALL_INVITEES = 499;
 
 const MakeCallConfigSchema = z
   .object({
@@ -22,7 +21,7 @@ const MakeCallConfigSchema = z
     invitedUserIds: z.array(variableRef(z.string().min(1))).optional(),
     userGroupIds: z.array(variableRef(z.string().min(1))).optional(),
     callType: z.nativeEnum(CallType).default(CallType.AUDIO),
-    maxParticipants: z.number().int().min(2).max(LIVEKIT_ROOM_MAX_PARTICIPANTS).optional(),
+    maxParticipants: z.number().int().min(2).max(500).optional(),
     emptyTimeout: z.number().int().min(10).optional(),
   })
   .refine(
@@ -250,7 +249,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     });
 
     const effectiveMaxParticipants = Math.max(
-      config.maxParticipants ?? LIVEKIT_ROOM_MAX_PARTICIPANTS,
+      config.maxParticipants ?? 100,
       allInvitedUserIds.length + 1
     );
 
