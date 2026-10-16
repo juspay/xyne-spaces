@@ -279,6 +279,10 @@ export interface RoomContext {
 export interface JoinMediaOverrides {
   mic?: boolean;
   camera?: boolean;
+  // Devices picked before joining (the external lobby's preview). Unset means
+  // the system default, which is what every other entry point gets.
+  audioDeviceId?: string;
+  videoDeviceId?: string;
 }
 
 // Events for Room operations
@@ -293,6 +297,8 @@ export type RoomMachineEvent =
       // Set when the call window takes over a call the main window joined:
       // the rest of the context that join produced.
       handoff?: CallWindowHandoff;
+      // What the user chose on a pre-join screen (the external lobby).
+      joinMediaOverrides?: JoinMediaOverrides;
     }
   | {
       type: 'INITIATE_CALL';
@@ -1451,6 +1457,10 @@ export const roomMachine = setup({
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       externalId: ({ event }) => (event.type === 'CONNECT' ? event.externalId : null),
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
+      joinMediaOverrides: ({ event, context }) =>
+        event.type === 'CONNECT'
+          ? (event.joinMediaOverrides ?? context.joinMediaOverrides)
+          : context.joinMediaOverrides,
     }),
 
     // The call window's CONNECT carries what the main window's join produced.
@@ -1623,13 +1633,25 @@ export const roomMachine = setup({
               !cameraTurnedOffByHost &&
               (urlOverrides?.camera ?? mediaOverrides?.camera ?? !joinWithoutVideo);
 
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            const audioDeviceId = mediaOverrides?.audioDeviceId;
+            const videoDeviceId = mediaOverrides?.videoDeviceId;
 
-            await context.room!.localParticipant.setCameraEnabled(enableCamera);
+            await context.room!.localParticipant.setMicrophoneEnabled(
+              enableMic,
+              audioDeviceId ? { deviceId: audioDeviceId } : undefined,
+            );
 
-            // Always select default audio devices regardless of mute state
-            await context.room!.switchActiveDevice('audioinput', 'default');
+            await context.room!.localParticipant.setCameraEnabled(
+              enableCamera,
+              videoDeviceId ? { deviceId: videoDeviceId } : undefined,
+            );
+
+            // Select the pre-join pick, else the default, regardless of mute state
+            await context.room!.switchActiveDevice('audioinput', audioDeviceId ?? 'default');
             await context.room!.switchActiveDevice('audiooutput', 'default');
+            if (videoDeviceId) {
+              await context.room!.switchActiveDevice('videoinput', videoDeviceId);
+            }
           } catch {
             // Fail silently - error will be handled by MediaDevicesError event listener
           }
