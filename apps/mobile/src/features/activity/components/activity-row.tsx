@@ -37,7 +37,8 @@ import {
 import type { ActivityRowData } from '../model/row';
 import { openActivityTarget } from '../presentation/openActivityTarget';
 import { activityRow$ } from '../state/rows-store';
-import { ActivityMessageBody } from './activity-body';
+import { appliedActivityPreferences$ } from '../state/preferences-store';
+import { ActivityAttachments, ActivityMessageBody } from './activity-body';
 import { ActivityBadge } from './activity-badge';
 
 /**
@@ -120,6 +121,7 @@ function Time(): ReactElement {
 /** "mentioned  #payments-core" — a verb and, when there is one, its pill. */
 function Summary(): ReactElement {
   const row$ = useRowNode();
+  const isUnread = useValue(() => row$.isUnread.get());
   const verb = useValue(() => row$.verb.get());
   const subject = useValue(() => row$.subject.get());
   const label =
@@ -142,7 +144,12 @@ function Summary(): ReactElement {
         {verb ?? ''}
       </Text>
       {label !== null ? (
-        <View className='shrink rounded-md bg-spaces-surface px-1.5'>
+        <View
+          className={cn(
+            'shrink rounded-md px-1.5',
+            isUnread ? 'bg-spaces-accent/14' : 'bg-spaces-surface',
+          )}
+        >
           <Text
             numberOfLines={1}
             style={{ fontSize: ACTIVITY_CHIP_SIZE, lineHeight: ACTIVITY_SUMMARY_LINE_HEIGHT - 4 }}
@@ -156,19 +163,29 @@ function Summary(): ReactElement {
   );
 }
 
-/** A message as rich text, a composed sentence as plain text, or nothing. */
+/** A message as rich text and attachments, a composed sentence as plain text, or nothing. */
 function Body(): ReactElement | null {
   const row$ = useRowNode();
   const body = useValue(() => row$.body.get());
+  // Condensed leaves attachments out; the row's text is the same either way.
+  const showsAttachments = useValue(appliedActivityPreferences$.viewMode) === 'detailed';
   if (body === undefined || body.kind === 'none') return null;
 
   return (
     <View style={{ marginTop: ACTIVITY_BODY_GAP }}>
       {body.kind === 'message' ? (
-        <ActivityMessageBody content={body.content} senderId={body.senderId} />
+        <>
+          <ActivityMessageBody content={body.content} senderId={body.senderId} />
+          {showsAttachments ? (
+            <ActivityAttachments
+              attachments={body.attachments}
+              conversationId={body.conversationId}
+            />
+          ) : null}
+        </>
       ) : (
         <Text
-          numberOfLines={3}
+          numberOfLines={2}
           ellipsizeMode='tail'
           style={{ fontSize: ACTIVITY_BODY_SIZE, lineHeight: ACTIVITY_BODY_LINE_HEIGHT }}
           className='text-spaces-foreground'
@@ -199,8 +216,12 @@ function Surface({
       accessibilityRole='button'
       onPress={onPress}
       className={cn(
-        'flex-row border-spaces-muted/15 active:opacity-70',
-        isUnread ? 'bg-spaces-accent/10' : 'bg-spaces-background',
+        'flex-row border-spaces-muted/15',
+        // Pressing deepens the row's own background, so the tap is shown as a
+        // surface being pressed rather than as the content fading.
+        isUnread
+          ? 'bg-spaces-accent/8 active:bg-spaces-accent/18'
+          : 'bg-spaces-background active:bg-spaces-surface',
       )}
       style={{
         paddingHorizontal: ACTIVITY_ROW_PADDING_X,

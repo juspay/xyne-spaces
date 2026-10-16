@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { useCSSVariable, useUniwind } from 'uniwind';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
+import { MessageAttachmentsGrid } from '@/src/components/chat/all-threads-list/message-attachments-grid';
 import { RichInlineText } from '@/src/components/conversation-composer/rich-inline-text';
 import {
   htmlToMD,
@@ -12,6 +13,7 @@ import { buildComposerMarkdownStyle } from '@/src/components/conversation-compos
 import { useSelf } from '@/src/hooks/useUsers';
 
 import { ACTIVITY_BODY_LINES, ACTIVITY_PREVIEW_CACHE_SIZE } from '../constants';
+import type { ActivityAttachment } from '../model/row';
 
 type BodyEnvironment = {
   markdownStyle: MarkdownStyle;
@@ -91,16 +93,20 @@ type MessageBodyProps = {
 
 /**
  * The message, as the same inline rich text the classic compact preview uses —
- * mentions, links and emoji — clamped to three lines. Always the compact path:
+ * mentions, links and emoji — clamped to two lines. Always the compact path:
  * the full composer tree the classic card falls back to is far heavier than a
  * list row should carry.
+ *
+ * Draws nothing for a message that is only attachments, rather than an empty
+ * text view with a line's height.
  */
 export const ActivityMessageBody = memo(function ActivityMessageBody({
   content,
   senderId,
-}: MessageBodyProps): ReactElement {
+}: MessageBodyProps): ReactElement | null {
   const { markdownStyle, currentUserId } = useActivityBodyEnvironment();
   const markdown = useMemo(() => toPreviewMarkdown(content), [content]);
+  if (markdown.trim() === '') return null;
 
   return (
     <View pointerEvents='none'>
@@ -114,4 +120,22 @@ export const ActivityMessageBody = memo(function ActivityMessageBody({
       />
     </View>
   );
+});
+
+type ActivityAttachmentsProps = {
+  attachments: readonly ActivityAttachment[];
+  conversationId: string;
+};
+
+/**
+ * A message's attachments, in the grid the Threads screen uses: up to four
+ * media tiles with an overflow count, files as cards beneath. Tapping one
+ * opens the attachments viewer; tapping anywhere else still opens the activity.
+ */
+export const ActivityAttachments = memo(function ActivityAttachments({
+  attachments,
+  conversationId,
+}: ActivityAttachmentsProps): ReactElement | null {
+  if (attachments.length === 0) return null;
+  return <MessageAttachmentsGrid attachments={attachments} conversationId={conversationId} />;
 });

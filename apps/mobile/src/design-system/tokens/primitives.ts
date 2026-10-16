@@ -22,7 +22,7 @@
 export const neutral = {
   0: '#ffffff',
   50: '#f8f8f8',
-  100: '#f0f0f0',
+  100: '#f2f2f2',
   200: '#e5e5e5',
   300: '#cfcfcf',
   400: '#9b9b9b',

@@ -6,10 +6,10 @@
 @layer theme {
   :root {
     @variant light {
-      --color-spaces-background: #f8f8f8;
+      --color-spaces-background: #ffffff;
       --color-spaces-foreground: #181819;
       --color-spaces-muted: #595959;
-      --color-spaces-surface: #f0f0f0;
+      --color-spaces-surface: #f2f2f2;
       --color-spaces-surface-raised: #ffffff;
       --color-spaces-accent: #F0716A;
       --color-spaces-accent-foreground: #ffffff;

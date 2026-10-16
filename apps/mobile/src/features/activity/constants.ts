@@ -29,7 +29,7 @@ export const ACTIVITY_CHIP_SIZE = 14;
 
 export const ACTIVITY_BODY_SIZE = 16;
 export const ACTIVITY_BODY_LINE_HEIGHT = 24;
-export const ACTIVITY_BODY_LINES = 3;
+export const ACTIVITY_BODY_LINES = 2;
 export const ACTIVITY_BODY_GAP = 4;
 
 /** Rows of lead time before `onEndReached`, in viewports. */
