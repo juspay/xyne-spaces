@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import {
-  EventStreamHttpError,
-  EventStreamNetworkError,
-  openEventStream,
-} from '@/src/services/http/eventStream';
+import { EventStreamHttpError, openEventStream } from '@/src/services/http/eventStream';
 import { RequestAbortedError } from '@/src/services/http/request-errors';
-import type { SseMessage } from '@/src/services/http/sseParser';
 
 /** Minimal stand-in for React Native's XHR: tests drive it by hand. */
 class FakeXhr {
@@ -83,7 +78,7 @@ describe('openEventStream', () => {
   });
 
   it('delivers messages incrementally before the response completes', async () => {
-    const messages: SseMessage[] = [];
+    const messages: string[] = [];
     const promise = openEventStream('https://example.test/stream', {
       prepareHeaders: passthrough,
       onMessage: message => messages.push(message),
@@ -92,16 +87,10 @@ describe('openEventStream', () => {
     const xhr = lastXhr();
 
     xhr.receive(200, 'data: one\n\ndata: tw');
-    assert.deepEqual(
-      messages.map(m => m.data),
-      ['one'],
-    );
+    assert.deepEqual(messages, ['one']);
 
     xhr.receive(200, 'o\n\n');
-    assert.deepEqual(
-      messages.map(m => m.data),
-      ['one', 'two'],
-    );
+    assert.deepEqual(messages, ['one', 'two']);
 
     xhr.finish();
     await promise;
@@ -126,9 +115,23 @@ describe('openEventStream', () => {
     assert.equal(xhr.aborted, true);
   });
 
-  it('sends the method, merged headers and body', async () => {
+  it('gets without a body', async () => {
+    const promise = openEventStream('https://example.test/live', {
+      prepareHeaders: passthrough,
+      onMessage: () => {},
+    });
+    await tick();
+    const xhr = lastXhr();
+    xhr.receive(200, '');
+    xhr.finish();
+    await promise;
+
+    assert.equal(xhr.method, 'GET');
+    assert.equal(xhr.sent, null);
+  });
+
+  it('posts the merged headers and body', async () => {
     const promise = openEventStream('https://example.test/stream', {
-      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{"a":1}',
       prepareHeaders: passthrough,
@@ -150,7 +153,7 @@ describe('openEventStream', () => {
     });
   });
 
-  it('defaults to GET with no body', async () => {
+  it('sends no body unless given one', async () => {
     const promise = openEventStream('https://example.test/stream', {
       prepareHeaders: passthrough,
       onMessage: () => {},
@@ -160,12 +163,11 @@ describe('openEventStream', () => {
     xhr.receive(200, '');
     xhr.finish();
     await promise;
-    assert.equal(xhr.method, 'GET');
     assert.equal(xhr.sent, null);
   });
 
   it('rejects non-2xx responses without putting the body in the message', async () => {
-    const messages: SseMessage[] = [];
+    const messages: string[] = [];
     const promise = openEventStream('https://example.test/stream', {
       prepareHeaders: passthrough,
       onMessage: message => messages.push(message),
@@ -192,7 +194,7 @@ describe('openEventStream', () => {
     });
     await tick();
     lastXhr().onerror?.();
-    await assert.rejects(promise, EventStreamNetworkError);
+    await assert.rejects(promise, { message: 'Event stream network error' });
   });
 
   it('carries the native failure reason React Native reports as the response text', async () => {
@@ -205,7 +207,6 @@ describe('openEventStream', () => {
     xhr.responseText = 'The certificate for this server is invalid.';
     xhr.onerror?.();
     await assert.rejects(promise, {
-      name: 'EventStreamNetworkError',
       message: 'Event stream network error: The certificate for this server is invalid.',
     });
   });
@@ -240,7 +241,7 @@ describe('openEventStream', () => {
 
   it('aborts the request mid-stream and stops delivering messages', async () => {
     const controller = new AbortController();
-    const messages: SseMessage[] = [];
+    const messages: string[] = [];
     const promise = openEventStream('https://example.test/stream', {
       signal: controller.signal,
       prepareHeaders: passthrough,
@@ -256,10 +257,7 @@ describe('openEventStream', () => {
 
     xhr.receive(200, 'data: late\n\n');
     xhr.finish();
-    assert.deepEqual(
-      messages.map(m => m.data),
-      ['one'],
-    );
+    assert.deepEqual(messages, ['one']);
   });
 
   it('does not react to the signal after the stream has settled', async () => {
@@ -280,7 +278,7 @@ describe('openEventStream', () => {
   });
 
   it('ignores errors and further data after settling', async () => {
-    const messages: SseMessage[] = [];
+    const messages: string[] = [];
     const promise = openEventStream('https://example.test/stream', {
       prepareHeaders: passthrough,
       onMessage: message => messages.push(message),
@@ -288,7 +286,7 @@ describe('openEventStream', () => {
     await tick();
     const xhr = lastXhr();
     xhr.onerror?.();
-    await assert.rejects(promise, EventStreamNetworkError);
+    await assert.rejects(promise, { message: 'Event stream network error' });
 
     xhr.receive(200, 'data: late\n\n');
     xhr.finish();

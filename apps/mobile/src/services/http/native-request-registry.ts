@@ -20,8 +20,6 @@ type CancellableCertificateModule = {
 const CertificateModule = NativeModules['CertificateModule'] as
   CancellableCertificateModule | undefined;
 
-export { RequestAbortedError, RequestTimeoutError } from './request-errors';
-
 /** Native reject codes that mean "we cancelled this on purpose", not "it failed". */
 const CANCELLED_CODES = new Set(['MTLS_CANCELLED', 'ERR_CANCELED']);
 

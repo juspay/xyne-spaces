@@ -15,13 +15,12 @@ const tools: ToolInvocation[] = [
     toolName: 'spaces',
     args: {},
     status: 'completed',
-    durationMs: 0,
     citations: [
       { kind: 'canvas', chunkIndex: 1, label: 'Plan' },
       { kind: 'external', chunkIndex: 2, url: 'https://x.dev' },
     ],
   },
-  { toolCallId: 'b', toolName: 'other', args: {}, status: 'completed', durationMs: 0 },
+  { toolCallId: 'b', toolName: 'other', args: {}, status: 'completed' },
 ];
 const sources = citationSources(tools);
 
@@ -41,9 +40,28 @@ describe('citations', () => {
   it('links markers, groups adjacent ones and drops unknown ones', () => {
     const numbers = citationNumbers('[clf-a#1][clf-a#2]', sources);
     assert.equal(
-      linkCitations('One [clf-a#1]. Two [clf-a#1] [clf-a#2]. Gone [clf-b#1].', numbers),
-      'One [1.1](xyne-cite://clf-a#1). Two [+2](xyne-cite-group://clf-a#1,clf-a#2). Gone .',
+      linkCitations('One [clf-a#1]. Two [clf-a#1] [clf-a#2]. Gone [clf-b#1].', numbers, sources),
+      'One [Plan](xyne-cite://clf-a#1). Two [+2](xyne-cite-group://clf-a#1,clf-a#2). Gone .',
     );
+  });
+
+  it('drops citation tokens and links that no tool backs', () => {
+    const numbers = citationNumbers('[clf-a#1]', sources);
+    assert.equal(
+      linkCitations(
+        'A [tool-read#0-#1] B [x](cite:clf-a#1) C [x](xyne-cite://clf-b#1) D [clf-a#1]',
+        numbers,
+        sources,
+      ),
+      'A  B  C  D [Plan](xyne-cite://clf-a#1)',
+    );
+  });
+
+  it('splits a list of chunks from one call into separate citations', () => {
+    const numbers = citationNumbers('[clf-a#1]', sources);
+    const grouped = 'X [+2](xyne-cite-group://clf-a#1,clf-a#2); Y';
+    assert.equal(linkCitations('X [clf-a#1, #2]; Y', numbers, sources), grouped);
+    assert.equal(linkCitations('X [clf-a#1], #2]; Y', numbers, sources), grouped);
   });
 
   it('resolves a tapped link to its citation or sources', () => {

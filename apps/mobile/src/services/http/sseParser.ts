@@ -1,24 +1,19 @@
-export interface SseMessage {
-  event: string;
-  data: string;
-}
-
-export interface SseParser {
+interface SseParser {
   push(chunk: string): void;
 }
 
 // A trailing `\r` is held back because the next chunk may start with its `\n`.
 const LINE_BREAK = /\r\n|\r(?!$)|\n/;
 
-/** Incremental Server-Sent Events parser; chunk boundaries may fall anywhere. */
-export function createSseParser(onMessage: (message: SseMessage) => void): SseParser {
+/** Incremental Server-Sent Events parser; chunk boundaries may fall anywhere. `event` is empty for unnamed events. */
+export function createSseParser(onMessage: (data: string, event: string) => void): SseParser {
   let buffer = '';
   let event = '';
   let data: string[] = [];
 
   function processLine(line: string): void {
     if (line === '') {
-      if (data.length > 0) onMessage({ event: event || 'message', data: data.join('\n') });
+      if (data.length > 0) onMessage(data.join('\n'), event);
       event = '';
       data = [];
       return;
@@ -29,8 +24,8 @@ export function createSseParser(onMessage: (message: SseMessage) => void): SsePa
 
     const field = colon === -1 ? line : line.slice(0, colon);
     const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
-    if (field === 'event') event = value;
-    else if (field === 'data') data.push(value);
+    if (field === 'data') data.push(value);
+    else if (field === 'event') event = value;
   }
 
   return {

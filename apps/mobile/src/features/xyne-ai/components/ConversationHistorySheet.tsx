@@ -1,11 +1,12 @@
 import { useState, type ReactElement } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { BottomSheetFlatList, BottomSheetTextInput } from '@gorhom/bottom-sheet';
-import { MenuView } from '@react-native-menu/menu';
-import { Pin } from 'lucide-react-native';
+import { Pencil, Pin, PinOff, Trash2 } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
+import { ListRow, ListRowDivider } from '@/src/components/ui/settings-list';
+import { haptics } from '@/src/utils/haptics';
 import { FilterSheetHeader } from '@/src/features/global-search/components/filters/filter-sheet-header';
 import {
   useMountWhileOpen,
@@ -15,6 +16,7 @@ import {
 import type { ConversationSummary } from '../api/xyneAIConversations';
 import { useXyneAIConversations } from '../hooks/useXyneAIConversations';
 import { groupConversations } from '../model/conversationGroups';
+import { PickerSheet, SheetCard, useAfterDismiss, useSheetBottomPadding } from './PickerSheet';
 
 type Item = { header: string } | { conversation: ConversationSummary };
 
@@ -22,59 +24,44 @@ const ConversationRow = ({
   conversation,
   isRenaming,
   onOpen,
+  onShowActions,
   onRename,
-  onStartRename,
-  onTogglePin,
-  onDelete,
 }: {
   conversation: ConversationSummary;
   isRenaming: boolean;
   onOpen: () => void;
+  onShowActions: () => void;
   onRename: (title: string) => void;
-  onStartRename: () => void;
-  onTogglePin: () => void;
-  onDelete: () => void;
 }): ReactElement => {
   const muted = useCSSVariable('--color-secondary-foreground') as string;
   const title = conversation.title || 'New chat';
 
-  return (
-    <MenuView
-      shouldOpenOnLongPress
-      actions={[
-        { id: 'rename', title: 'Rename' },
-        { id: 'pin', title: conversation.pinned ? 'Unpin' : 'Pin' },
-        { id: 'delete', title: 'Delete', attributes: { destructive: true } },
-      ]}
-      onPressAction={({ nativeEvent }): void => {
-        if (nativeEvent.event === 'rename') onStartRename();
-        else if (nativeEvent.event === 'pin') onTogglePin();
-        else onDelete();
+  return isRenaming ? (
+    <BottomSheetTextInput
+      ref={(input): void => input?.focus()}
+      selectTextOnFocus
+      defaultValue={title}
+      returnKeyType='done'
+      onSubmitEditing={({ nativeEvent }): void => onRename(nativeEvent.text)}
+      onBlur={(): void => onRename(title)}
+      className='mx-4 rounded-xl border border-border px-3 py-2.5 text-[15px] text-foreground'
+    />
+  ) : (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityHint='Long press for more options'
+      onPress={onOpen}
+      onLongPress={(): void => {
+        void haptics.buttonTap();
+        onShowActions();
       }}
+      className='min-h-12 flex-row items-center gap-2 px-5 py-3 active:bg-secondary'
     >
-      {isRenaming ? (
-        <BottomSheetTextInput
-          ref={(input): void => input?.focus()}
-          selectTextOnFocus
-          defaultValue={title}
-          returnKeyType='done'
-          onSubmitEditing={({ nativeEvent }): void => onRename(nativeEvent.text)}
-          onBlur={(): void => onRename(title)}
-          className='mx-4 rounded-xl border border-border px-3 py-2.5 text-[15px] text-foreground'
-        />
-      ) : (
-        <Pressable
-          accessibilityRole='button'
-          onPress={onOpen}
-          className='flex-row items-center gap-2 px-5 py-3 active:opacity-60'
-        >
-          <Text numberOfLines={1} className='min-w-0 flex-1 text-[15px] text-foreground'>
-            {title}
-          </Text>
-          {conversation.pinned ? <Pin size={14} color={muted} /> : null}
-        </Pressable>
-      )}
-    </MenuView>
+      <Text numberOfLines={1} className='min-w-0 flex-1 text-[15px] text-foreground'>
+        {title}
+      </Text>
+      {conversation.pinned ? <Pin size={14} color={muted} /> : null}
+    </Pressable>
   );
 };
 
@@ -90,6 +77,11 @@ function ConversationHistoryBody({
 }): ReactElement {
   const { list, update, remove } = useXyneAIConversations();
   const [renamingId, setRenamingId] = useState<string>();
+  // Kept after closing so the sheet's content stays put while it animates away.
+  const [actionsFor, setActionsFor] = useState<ConversationSummary>();
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const actionsDismiss = useAfterDismiss();
+  const paddingBottom = useSheetBottomPadding();
 
   const items: Item[] = groupConversations(list.data ?? []).flatMap(group => [
     { header: group.label },
@@ -140,15 +132,11 @@ function ConversationHistoryBody({
                 conversation={item.conversation}
                 isRenaming={renamingId === item.conversation.rowId}
                 onOpen={(): void => onOpenConversation(item.conversation)}
+                onShowActions={(): void => {
+                  setActionsFor(item.conversation);
+                  setIsActionsOpen(true);
+                }}
                 onRename={(text): void => rename(item.conversation, text)}
-                onStartRename={(): void => setRenamingId(item.conversation.rowId)}
-                onTogglePin={(): void =>
-                  update.mutate({
-                    conversation: item.conversation,
-                    patch: { pinned: !item.conversation.pinned },
-                  })
-                }
-                onDelete={(): void => confirmDelete(item.conversation)}
               />
             )
           }
@@ -161,8 +149,47 @@ function ConversationHistoryBody({
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
           }}
           keyboardShouldPersistTaps='handled'
+          contentContainerStyle={{ paddingBottom }}
         />
       )}
+      <PickerSheet
+        isOpen={isActionsOpen}
+        onOpenChange={setIsActionsOpen}
+        onDismiss={actionsDismiss.onDismiss}
+        title={actionsFor?.title || 'New chat'}
+      >
+        {actionsFor ? (
+          <SheetCard>
+            <ListRow
+              icon={Pencil}
+              label='Rename'
+              onPress={(): void => {
+                setIsActionsOpen(false);
+                setRenamingId(actionsFor.rowId);
+              }}
+            />
+            <ListRowDivider />
+            <ListRow
+              icon={actionsFor.pinned ? PinOff : Pin}
+              label={actionsFor.pinned ? 'Unpin' : 'Pin'}
+              onPress={(): void => {
+                setIsActionsOpen(false);
+                update.mutate({ conversation: actionsFor, patch: { pinned: !actionsFor.pinned } });
+              }}
+            />
+            <ListRowDivider />
+            <ListRow
+              icon={Trash2}
+              label='Delete'
+              destructive
+              onPress={(): void => {
+                actionsDismiss.afterDismiss(() => confirmDelete(actionsFor));
+                setIsActionsOpen(false);
+              }}
+            />
+          </SheetCard>
+        ) : null}
+      </PickerSheet>
     </AppBottomSheet>
   );
 }

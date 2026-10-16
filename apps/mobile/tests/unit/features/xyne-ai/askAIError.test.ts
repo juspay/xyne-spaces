@@ -8,6 +8,17 @@ describe('getAskAIErrorInfo', () => {
     assert.equal(getAskAIErrorInfo('slow down', 429).title, 'Rate limit reached');
   });
 
+  it('names the error by status or class, and leaves transport failures without a code', () => {
+    assert.equal(getAskAIErrorInfo('slow down', 429).code, 'HTTP_429');
+    assert.equal(getAskAIErrorInfo(undefined, 507).code, 'HTTP_507');
+    assert.equal(getAskAIErrorInfo('BudgetExceededError', undefined).code, 'BUDGET_EXCEEDED');
+    assert.equal(
+      getAskAIErrorInfo('maximum input length', undefined).code,
+      'CONTEXT_LIMIT_EXCEEDED',
+    );
+    assert.equal(getTransportErrorInfo(undefined).code, undefined);
+  });
+
   it('describes an unmapped status', () => {
     const unavailable = getAskAIErrorInfo(undefined, 507);
     assert.equal(unavailable.title, 'Request failed');

@@ -1,39 +1,73 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 import { EventStreamHttpError } from '@/src/services/http/eventStream';
 import { RequestAbortedError } from '@/src/services/http/request-errors';
 import { Event, logger } from '@/src/utils/logger';
 
-import type { XyneAIEvent } from '../api/xyneAIEvents';
-import type { AttachedContextItem, XyneAIStreamRequest } from '../api/xyneAIRequest';
-import { cancelXyneAI, streamXyneAI } from '../api/xyneAIStream';
+import { fetchConversationMessages } from '../api/xyneAIConversations';
+import { DEFAULT_AGENT_SLUG } from '../api/xyneAICatalog';
+import type { PendingAction, XyneAIEvent } from '../api/xyneAIEvents';
+import type { AttachedContextItem, AttachedFile, XyneAIStreamRequest } from '../api/xyneAIRequest';
 import {
+  cancelXyneAI,
+  respondToPendingAction,
+  streamLiveConversation,
+  streamXyneAI,
+} from '../api/xyneAIStream';
+import {
+  activePath,
+  isBranched,
   reduceAssistantTurn,
   settleAssistantTurn,
   startAssistantTurn,
+  turnsFromMessages,
+  versionsOf,
   type AssistantTurn,
   type ChatTurn,
   type StreamOutcome,
 } from '../model/assistantTurn';
+import { pickKey } from '../model/contextPicks';
 import type { XyneAIRequestOptions } from './useXyneAISelection';
 
-export interface XyneAIChat {
+interface XyneAIChat {
+  /** The turns on screen: one version of each question. */
   turns: ChatTurn[];
   isStreaming: boolean;
-  send: (query: string, context?: AttachedContextItem[]) => void;
+  /** False for chats stored before branching, which cannot fork. */
+  canBranch: boolean;
+  send: (query: string, context?: AttachedContextItem[], attachments?: AttachedFile[]) => void;
   /** Replaces the chat with a stored conversation, so follow-ups continue it. */
-  open: (turns: ChatTurn[], sessionId: string) => void;
+  open: (turns: ChatTurn[], sessionId: string, canBranch: boolean) => void;
   /** Clears the chat when it is the one just deleted. */
   forget: (sessionId: string) => void;
   regenerate: () => void;
+  /** Sends the decision, then follows the run it resumes, if any. */
+  respondToAction: (turnId: string, action: PendingAction, approved: boolean) => Promise<void>;
+  /** Sends a new version of a question, keeping the old one as another branch. */
+  edit: (
+    turn: ChatTurn,
+    query: string,
+    context?: AttachedContextItem[],
+    attachments?: AttachedFile[],
+  ) => void;
+  /** Where a question sits among its versions, once it has more than one. */
+  versionOf: (turn: ChatTurn) => { index: number; total: number } | undefined;
+  switchVersion: (turn: ChatTurn, step: 1 | -1) => void;
   stop: () => void;
   reset: () => void;
 }
 
 const API = 'xyne_ai_stream';
 
-type Branch = Pick<XyneAIStreamRequest, 'parentMessageId' | 'isRegenerate'>;
+type Branch = { parentId: string | undefined } & Pick<
+  XyneAIStreamRequest,
+  | 'parentMessageId'
+  | 'isRegenerate'
+  | 'isEditUserMessage'
+  | 'editedUserMessageId'
+  | 'parentAssistantMessageId'
+>;
 
 function outcomeOf(error: unknown): StreamOutcome {
   if (error instanceof RequestAbortedError) return { kind: 'stopped' };
@@ -47,15 +81,48 @@ function outcomeOf(error: unknown): StreamOutcome {
   return { kind: 'failed', httpStatus };
 }
 
+/** Applies events at most once per frame, so a fast stream re-renders per frame rather than per token. */
+function frameBatcher(apply: (events: XyneAIEvent[]) => void): {
+  push: (event: XyneAIEvent) => void;
+  flush: () => void;
+} {
+  let queued: XyneAIEvent[] = [];
+  let frame: number | undefined;
+  const flush = (): void => {
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    frame = undefined;
+    const events = queued;
+    queued = [];
+    if (events.length > 0) apply(events);
+  };
+  return {
+    push: (event): void => {
+      queued.push(event);
+      frame ??= requestAnimationFrame(flush);
+    },
+    flush,
+  };
+}
+
 /**
- * One Xyne AI conversation. Stream events are applied at most once per frame,
- * so a fast stream re-renders the answer per frame rather than per token.
+ * One Xyne AI conversation.
  */
 export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [allTurns, setAllTurns] = useState<ChatTurn[]>([]);
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  const [canBranch, setCanBranch] = useState(true);
+  const turns = useMemo(() => activePath(allTurns, chosen), [allTurns, chosen]);
   const sessionId = useRef('');
   const traceId = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
+
+  const updateReply = useCallback(
+    (turnId: string, update: (reply: AssistantTurn) => AssistantTurn): void =>
+      setAllTurns(current =>
+        current.map(turn => (turn.id === turnId ? { ...turn, reply: update(turn.reply) } : turn)),
+      ),
+    [],
+  );
 
   const stop = useCallback((): void => {
     if (traceId.current) cancelXyneAI(traceId.current).catch(() => undefined);
@@ -65,14 +132,18 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
   const reset = useCallback((): void => {
     stop();
     sessionId.current = '';
-    setTurns([]);
+    setAllTurns([]);
+    setChosen({});
+    setCanBranch(true);
   }, [stop]);
 
   const open = useCallback(
-    (stored: ChatTurn[], storedSessionId: string): void => {
+    (stored: ChatTurn[], storedSessionId: string, storedCanBranch: boolean): void => {
       stop();
       sessionId.current = storedSessionId;
-      setTurns(stored);
+      setAllTurns(stored);
+      setChosen({});
+      setCanBranch(storedCanBranch);
     },
     [stop],
   );
@@ -85,7 +156,12 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
   );
 
   const start = useCallback(
-    (query: string, context: AttachedContextItem[] = [], branch?: Branch): void => {
+    (
+      query: string,
+      context: AttachedContextItem[] = [],
+      attachments: AttachedFile[] = [],
+      { parentId, ...branch }: Branch = { parentId: undefined },
+    ): void => {
       const text = query.trim();
       if (text === '') return;
 
@@ -96,38 +172,33 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
       controller.current = abort;
 
       const id = uuidv4();
-      setTurns(current => [
-        ...current,
-        { id, query: text, context, reply: startAssistantTurn(Date.now()) },
+      // A first message that never reached the server has no session; the retry replaces it.
+      const keepsHistory = sessionId.current !== '';
+      setAllTurns(current => [
+        ...(keepsHistory ? current : []),
+        { id, parentId, query: text, context, attachments, reply: startAssistantTurn(Date.now()) },
       ]);
+      setChosen(current => ({ ...current, [parentId ?? '']: id }));
 
-      const updateReply = (update: (reply: AssistantTurn) => AssistantTurn): void =>
-        setTurns(current =>
-          current.map(turn => (turn.id === id ? { ...turn, reply: update(turn.reply) } : turn)),
-        );
-
-      let queued: XyneAIEvent[] = [];
-      let frame: number | undefined;
-      const flush = (): void => {
-        if (frame !== undefined) cancelAnimationFrame(frame);
-        frame = undefined;
-        const events = queued;
-        queued = [];
+      const batch = frameBatcher(events => {
         const now = Date.now();
-        if (events.length > 0) {
-          updateReply(reply =>
-            events.reduce((turn, event) => reduceAssistantTurn(turn, event, now), reply),
-          );
-        }
-      };
+        updateReply(id, reply =>
+          events.reduce((turn, event) => reduceAssistantTurn(turn, event, now), reply),
+        );
+      });
 
+      const scope = options.attachedContext ?? [];
       void streamXyneAI(
         {
           ...options,
           ...branch,
           query: text,
           sessionId: sessionId.current,
-          attachedContext: context,
+          attachedContext: [
+            ...scope,
+            ...context.filter(item => !scope.some(other => pickKey(other) === pickKey(item))),
+          ],
+          attachments,
         },
         {
           signal: abort.signal,
@@ -146,41 +217,182 @@ export function useXyneAIChat(options: XyneAIRequestOptions): XyneAIChat {
                 error: event.message,
               });
             }
-            queued.push(event);
-            frame ??= requestAnimationFrame(flush);
+            batch.push(event);
           },
         },
       )
         .then((): StreamOutcome => ({ kind: 'closed' }), outcomeOf)
         .then(outcome => {
-          flush();
-          updateReply(reply => settleAssistantTurn(reply, outcome, Date.now()));
+          batch.flush();
+          updateReply(id, reply => settleAssistantTurn(reply, outcome, Date.now()));
           if (controller.current === abort) controller.current = null;
         });
     },
-    [options],
+    [options, updateReply],
+  );
+
+  const send = useCallback(
+    (query: string, context?: AttachedContextItem[], attachments?: AttachedFile[]): void => {
+      const last = sessionId.current ? turns.at(-1) : undefined;
+      const parentMessageId = canBranch ? last?.reply.messageId : undefined;
+      start(query, context, attachments, { parentId: last?.id, parentMessageId });
+    },
+    [turns, canBranch, start],
   );
 
   const regenerate = useCallback((): void => {
     const last = turns.at(-1);
     if (!last || last.reply.status === 'streaming') return;
-    setTurns(current => current.slice(0, -1));
+    setAllTurns(current => current.filter(({ id }) => id !== last.id));
     const { userMessageId } = last.reply;
-    start(last.query, last.context, {
-      isRegenerate: true,
-      ...(userMessageId && { parentMessageId: userMessageId }),
-    });
-  }, [turns, start]);
+    // A question the server never acknowledged has nothing to regenerate: ask it again.
+    const retryParent = canBranch
+      ? allTurns.find(({ id }) => id === last.parentId)?.reply.messageId
+      : undefined;
+    start(
+      last.query,
+      last.context,
+      last.attachments,
+      userMessageId
+        ? { parentId: last.parentId, isRegenerate: true, parentMessageId: userMessageId }
+        : { parentId: last.parentId, parentMessageId: retryParent },
+    );
+  }, [turns, allTurns, canBranch, start]);
+
+  // A resumed run is not part of any stream this device opened, so it is followed on `/live`.
+  const followResumedRun = useCallback(
+    async (turnId: string): Promise<void> => {
+      controller.current?.abort();
+      const abort = new AbortController();
+      controller.current = abort;
+      const conversation = {
+        conversationId: sessionId.current,
+        agentSlug: options.agentSlug ?? DEFAULT_AGENT_SLUG,
+      };
+      let isLive = false;
+      let isDone = false;
+      const batch = frameBatcher(events => {
+        const now = Date.now();
+        updateReply(turnId, reply =>
+          events.reduce((turn, event) => reduceAssistantTurn(turn, event, now), reply),
+        );
+      });
+
+      await streamLiveConversation(conversation, {
+        signal: abort.signal,
+        onFrame: ({ events, ended, isSnapshot }) => {
+          if (isSnapshot) {
+            batch.flush();
+            updateReply(turnId, reply => ({
+              ...reply,
+              parts: reply.parts.filter(({ id }) => !id.startsWith('live-')),
+            }));
+          }
+          if (events.length > 0 && !isLive) {
+            isLive = true;
+            updateReply(turnId, reply => ({ ...reply, status: 'streaming' }));
+          }
+          events.forEach(batch.push);
+          if (ended) {
+            isDone = true;
+            abort.abort();
+          }
+        },
+      }).catch(() => undefined);
+
+      batch.flush();
+      // No run was live, so the stored transcript already matches the screen.
+      if (!isLive) return;
+      const isStopped = abort.signal.aborted && !isDone;
+      updateReply(turnId, reply =>
+        settleAssistantTurn(reply, { kind: isStopped ? 'stopped' : 'closed' }, Date.now()),
+      );
+      if (isStopped) return;
+
+      const stored = await fetchConversationMessages(conversation).catch(() => undefined);
+      if (
+        stored &&
+        controller.current === abort &&
+        sessionId.current === conversation.conversationId
+      ) {
+        open(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
+      }
+    },
+    [options.agentSlug, updateReply, open],
+  );
+
+  const respondToAction = useCallback(
+    async (turnId: string, action: PendingAction, approved: boolean): Promise<void> => {
+      const agentSlug = options.agentSlug ?? DEFAULT_AGENT_SLUG;
+      await respondToPendingAction({ sessionId: sessionId.current, agentSlug }, action, approved);
+      const resolution = approved ? 'approved' : 'declined';
+      updateReply(turnId, reply => ({
+        ...reply,
+        pendingActions: reply.pendingActions.map(pending =>
+          pending.id === action.id ? { ...pending, resolution } : pending,
+        ),
+      }));
+      void followResumedRun(turnId);
+    },
+    [options.agentSlug, updateReply, followResumedRun],
+  );
+
+  const edit = useCallback(
+    (
+      turn: ChatTurn,
+      query: string,
+      context: AttachedContextItem[] = [],
+      attachments: AttachedFile[] = [],
+    ): void => {
+      const parentMessageId = allTurns.find(({ id }) => id === turn.parentId)?.reply.messageId;
+      // The original picks go with the new version, plus anything added while editing.
+      const original = new Set(turn.context.map(pickKey));
+      const added = context.filter(item => !original.has(pickKey(item)));
+      start(query, [...turn.context, ...added], [...turn.attachments, ...attachments], {
+        parentId: turn.parentId,
+        parentMessageId,
+        parentAssistantMessageId: parentMessageId,
+        isEditUserMessage: true,
+        editedUserMessageId: turn.reply.userMessageId,
+      });
+    },
+    [allTurns, start],
+  );
+
+  const versionOf = useCallback(
+    (turn: ChatTurn): { index: number; total: number } | undefined => {
+      const versions = versionsOf(allTurns, turn);
+      return versions.length > 1
+        ? { index: versions.findIndex(({ id }) => id === turn.id), total: versions.length }
+        : undefined;
+    },
+    [allTurns],
+  );
+
+  const switchVersion = useCallback(
+    (turn: ChatTurn, step: 1 | -1): void => {
+      const versions = versionsOf(allTurns, turn);
+      const index = versions.findIndex(({ id }) => id === turn.id);
+      const next = versions[(index + step + versions.length) % versions.length];
+      if (next) setChosen(current => ({ ...current, [turn.parentId ?? '']: next.id }));
+    },
+    [allTurns],
+  );
 
   useEffect(() => stop, [stop]);
 
   return {
     turns,
-    isStreaming: turns.at(-1)?.reply.status === 'streaming',
-    send: start,
+    isStreaming: allTurns.some(({ reply }) => reply.status === 'streaming'),
+    canBranch,
+    send,
     open,
     forget,
     regenerate,
+    respondToAction,
+    edit,
+    versionOf,
+    switchVersion,
     stop,
     reset,
   };

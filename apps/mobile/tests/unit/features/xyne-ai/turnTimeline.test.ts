@@ -5,6 +5,8 @@ import type { ToolInvocation, TurnPart } from '@/src/features/xyne-ai/api/xyneAI
 import {
   formatSeconds,
   groupTurnParts,
+  clipDetail,
+  formatArgs,
   humanizeToolName,
   liveActivity,
   previewOf,
@@ -23,7 +25,6 @@ const call = (
   toolName,
   args: {},
   status: 'completed',
-  durationMs: 0,
   ...extra,
 });
 const lookup = (...calls: ToolInvocation[]): Map<string, ToolInvocation> =>
@@ -130,5 +131,11 @@ describe('tool detail', () => {
     const wrapped = JSON.stringify({ content: [{ type: 'text', text: 'a' }, { type: 'image' }] });
     assert.equal(readableResult(wrapped), 'a');
     assert.equal(readableResult('plain'), 'plain');
+  });
+
+  it('formats arguments and clips long detail', () => {
+    assert.equal(formatArgs({ a: 1 }), '{\n  "a": 1\n}');
+    assert.equal(clipDetail('short'), 'short');
+    assert.match(clipDetail('x'.repeat(4010)), /\n… 10 more characters$/);
   });
 });

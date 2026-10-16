@@ -1,44 +1,63 @@
-import { useMemo, useRef, useState, type ReactElement } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import * as Clipboard from 'expo-clipboard';
+import { Image } from 'expo-image';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Alert, Keyboard, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import {
-  Alert,
-  ScrollView,
-  Text,
-  useWindowDimensions,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
-import { KeyboardAvoidingView, useKeyboardState } from 'react-native-keyboard-controller';
+  KeyboardAvoidingView,
+  KeyboardChatScrollView,
+  KeyboardStickyView,
+} from 'react-native-keyboard-controller';
+import Reanimated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { History, SquarePen } from 'lucide-react-native';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  History,
+  Paperclip,
+  Pencil,
+  SquarePen,
+} from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
+import { XyneAIStarIcon } from '@/src/components/icons';
 import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
 import { SafeAreaView } from '@/src/components/ui/safe-area-view';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { ChatComposerScrollToBottomButton } from '@/src/features/chat/v2/components/chat/chat-composer-dock';
 import { useMentionPress } from '@/src/features/chat/v2/components/conversation-composer/utils/useMentionPress';
-import {
-  CHAT_COMPOSER_SURFACE_TOP_PADDING,
-  getChatComposerBottomPadding,
-} from '@/src/features/chat/v3/composer/chatKeyboardConfig';
 import { ChatRenderProvider } from '@/src/features/chat/v3/theme/ChatRenderProvider';
 import { BRIEF_SERIF_FONT } from '@/src/features/morning-brief/components/BriefTitle';
 import { useChatRenderTokens } from '@/src/theme/useChatRenderTokens';
+import { haptics } from '@/src/utils/haptics';
 import { formatTime } from '@/src/utils/timeSelection';
 
 import { DEFAULT_AGENT_SLUG } from '../api/xyneAICatalog';
-import type { AttachedContextItem } from '../api/xyneAIRequest';
+import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import { fetchConversationMessages, type ConversationSummary } from '../api/xyneAIConversations';
 import { useXyneAIChat } from '../hooks/useXyneAIChat';
 import { useXyneAISelection } from '../hooks/useXyneAISelection';
-import { turnsFromMessages } from '../model/assistantTurn';
+import { isBranched, turnsFromMessages, type ChatTurn } from '../model/assistantTurn';
+import { channelPick } from '../model/contextPicks';
 import { firstName, greeting } from '../model/greeting';
 import { AssistantReply } from './AssistantReply';
+import { ICONS } from './ContextPickerSheet';
 import { ConversationHistorySheet } from './ConversationHistorySheet';
-import { XyneAIComposer } from './XyneAIComposer';
+import { XyneAIComposer, type XyneAIComposerHandle } from './XyneAIComposer';
 
-const NEAR_BOTTOM_PX = 120;
+const COMPOSER_KEYBOARD_GAP = 8;
+const COPIED_MS = 1500;
+const THUMBNAIL_SIZE = 160;
+
+/** Route params from "Ask AI" on a message, thread or channel: what this chat is about. */
+type AskAIParams = Partial<
+  Record<
+    'conversationId' | 'previewText' | 'senderId' | 'attachmentIds' | 'channelId' | 'channelName',
+    string
+  >
+>;
 
 const Greeting = (): ReactElement => {
   const { user } = useAuth();
@@ -47,41 +66,154 @@ const Greeting = (): ReactElement => {
     [user?.name, user?.email],
   );
   return (
-    <Text
-      accessibilityRole='header'
-      className='text-center text-foreground'
-      style={{ fontFamily: BRIEF_SERIF_FONT, fontSize: 24, lineHeight: 32 }}
-    >
-      {text}
-    </Text>
+    <View className='items-center gap-3'>
+      <XyneAIStarIcon size={36} />
+      <Text
+        accessibilityRole='header'
+        className='text-center text-foreground'
+        style={{ fontFamily: BRIEF_SERIF_FONT, fontSize: 24, lineHeight: 32 }}
+      >
+        {text}
+      </Text>
+    </View>
   );
 };
 
-const UserBubble = ({ query, sentAt }: { query: string; sentAt: number }): ReactElement => (
-  <View className='max-w-[78%] items-end gap-1 self-end'>
-    <View className='rounded-3xl bg-secondary px-4 py-2.5'>
-      <Text selectable className='text-[15px] leading-6 text-foreground'>
-        {query}
+const FileChip = ({ filename }: { filename: string }): ReactElement => {
+  const muted = useCSSVariable('--color-secondary-foreground') as string;
+  return (
+    <View className='max-w-full flex-row items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5'>
+      <Paperclip size={13} color={muted} />
+      <Text numberOfLines={1} className='shrink text-[13px] text-foreground'>
+        {filename}
       </Text>
     </View>
-    <Text className='px-1 text-[11px] text-secondary-foreground'>
-      {formatTime(new Date(sentAt))}
-    </Text>
-  </View>
+  );
+};
+
+// Files reloaded from history carry no bytes, so only a fresh upload can show a thumbnail.
+const Attachment = ({ file }: { file: AttachedFile }): ReactElement =>
+  file.data && file.mimeType.startsWith('image/') ? (
+    <Image
+      accessibilityLabel={file.filename}
+      contentFit='cover'
+      source={{ uri: `data:${file.mimeType};base64,${file.data}` }}
+      style={{ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, borderRadius: 16 }}
+    />
+  ) : (
+    <FileChip filename={file.filename} />
+  );
+
+const ContextPills = ({ items }: { items: AttachedContextItem[] }): ReactElement => {
+  const muted = useCSSVariable('--color-secondary-foreground') as string;
+  return (
+    <View className='flex-row flex-wrap justify-end gap-1.5'>
+      {items.map(({ type, id, title }) => {
+        const Icon = ICONS[type];
+        return (
+          <View
+            key={`${type}:${id}`}
+            className='h-6 max-w-[200px] flex-row items-center gap-1 rounded-full border border-border px-2'
+          >
+            {Icon ? <Icon size={12} color={muted} /> : null}
+            <Text numberOfLines={1} className='shrink text-[12px] text-secondary-foreground'>
+              {title}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+};
+
+const IconButton = ({
+  label,
+  onPress,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  children: ReactNode;
+}): ReactElement => (
+  <Pressable
+    accessibilityRole='button'
+    accessibilityLabel={label}
+    hitSlop={8}
+    onPress={(): void => {
+      void haptics.buttonTap();
+      onPress();
+    }}
+    className='p-1 active:opacity-60'
+  >
+    {children}
+  </Pressable>
 );
 
-const ComposerDock = ({ children }: { children: ReactElement }): ReactElement => {
-  const insets = useSafeAreaInsets();
-  const isKeyboardVisible = useKeyboardState(state => state.isVisible);
+const UserBubble = ({
+  turn,
+  version,
+  onSwitchVersion,
+  onEdit,
+}: {
+  turn: ChatTurn;
+  version: { index: number; total: number } | undefined;
+  onSwitchVersion: (step: 1 | -1) => void;
+  /** Absent when this message cannot be rewritten. */
+  onEdit: (() => void) | undefined;
+}): ReactElement => {
+  const muted = useCSSVariable('--color-secondary-foreground') as string;
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return (): void => clearTimeout(timer);
+  }, [copied]);
+
+  const CopyIcon = copied ? Check : Copy;
   return (
-    <View
-      className='bg-conversation-input-surface px-4'
-      style={{
-        paddingTop: CHAT_COMPOSER_SURFACE_TOP_PADDING,
-        paddingBottom: getChatComposerBottomPadding(insets.bottom, !isKeyboardVisible),
-      }}
-    >
-      {children}
+    <View className='max-w-[78%] items-end gap-1 self-end'>
+      {turn.attachments.map((file, index) => (
+        <Attachment key={`${index}:${file.filename}`} file={file} />
+      ))}
+      <View className='rounded-3xl bg-secondary px-4 py-2.5'>
+        <Text selectable className='text-[15px] leading-6 text-foreground'>
+          {turn.query}
+        </Text>
+      </View>
+      {turn.context.length > 0 ? <ContextPills items={turn.context} /> : null}
+      <View className='flex-row items-center gap-1 px-1'>
+        {version ? (
+          <>
+            <IconButton label='Previous version' onPress={(): void => onSwitchVersion(-1)}>
+              <ChevronLeft size={16} color={muted} />
+            </IconButton>
+            <Text className='text-[12px] text-secondary-foreground'>
+              {`${version.index + 1}/${version.total}`}
+            </Text>
+            <IconButton label='Next version' onPress={(): void => onSwitchVersion(1)}>
+              <ChevronRight size={16} color={muted} />
+            </IconButton>
+          </>
+        ) : null}
+        <IconButton
+          label='Copy message'
+          onPress={(): void => {
+            void Clipboard.setStringAsync(turn.query);
+            setCopied(true);
+          }}
+        >
+          <CopyIcon size={16} color={muted} />
+        </IconButton>
+        {onEdit ? (
+          <IconButton label='Edit message' onPress={onEdit}>
+            <Pencil size={16} color={muted} />
+          </IconButton>
+        ) : null}
+        <Text className='text-[11px] text-secondary-foreground'>
+          {formatTime(new Date(turn.reply.startedAt))}
+        </Text>
+      </View>
     </View>
   );
 };
@@ -93,28 +225,87 @@ export const XyneAIScreen = (): ReactElement => {
   const renderTokens = useChatRenderTokens(width);
   const openUrl = useMentionPress();
   const selection = useXyneAISelection();
-  const { turns, isStreaming, send, open, forget, regenerate, stop, reset } = useXyneAIChat(
-    selection.requestOptions,
+  // "Ask AI" on a message pushes a new screen, so each ask starts from its own params.
+  const {
+    conversationId,
+    previewText = '',
+    senderId,
+    attachmentIds,
+    channelId,
+    channelName = '',
+  } = useLocalSearchParams<AskAIParams>();
+  const [channel, setChannel] = useState(() =>
+    channelId ? channelPick(channelId, channelName) : undefined,
   );
+  const [thread, setThread] = useState(() =>
+    conversationId
+      ? { conversationId, previewText, senderId, attachmentIds: attachmentIds?.split(',') ?? [] }
+      : undefined,
+  );
+  const requestOptions = useMemo(
+    () => ({
+      ...selection.requestOptions,
+      attachedContext: channel && [channel],
+      conversationId: thread?.conversationId,
+      messageAttachmentIds: thread?.attachmentIds,
+    }),
+    [selection.requestOptions, channel, thread],
+  );
+  const {
+    turns,
+    isStreaming,
+    canBranch,
+    send,
+    open,
+    forget,
+    regenerate,
+    respondToAction,
+    edit,
+    versionOf,
+    switchVersion,
+    stop,
+    reset,
+  } = useXyneAIChat(requestOptions);
   const foreground = useCSSVariable('--color-foreground') as string;
-  const [draft, setDraft] = useState('');
-  const [context, setContext] = useState<AttachedContextItem[]>([]);
+  const composerRef = useRef<XyneAIComposerHandle>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // The turn itself, so an edit still targets it if it leaves the visible path.
+  const [editing, setEditing] = useState<ChatTurn>();
 
-  const scrollRef = useRef<ScrollView>(null);
-  const isNearBottom = useRef(true);
+  const [isAtEnd, setIsAtEnd] = useState(true);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+  const bottomGap = Math.max(insets.bottom, COMPOSER_KEYBOARD_GAP);
+  const scrollRef = useRef<Reanimated.ScrollView>(null);
+  const viewportHeight = useRef(0);
+  const composerHeight = useSharedValue(0);
+  const greetingStyle = useAnimatedStyle(() => ({ paddingBottom: composerHeight.value }));
+  // Room under the newest question so it sits at the top while its answer streams in.
+  const blankSpace = useSharedValue(0);
 
-  const onScroll = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>): void => {
-    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-    isNearBottom.current =
-      contentSize.height - contentOffset.y - layoutMeasurement.height < NEAR_BOTTOM_PX;
+  // Set before turns change; applied once the new content is laid out.
+  const pendingScroll = useRef<'animated' | 'instant' | null>(null);
+
+  const scrollToEnd = (): void => scrollRef.current?.scrollToEnd({ animated: true });
+
+  const submit: typeof send = (...message) => {
+    pendingScroll.current = 'animated';
+    if (editing) edit(editing, ...message);
+    else send(...message);
+    setEditing(undefined);
   };
 
-  const submit = (): void => {
-    isNearBottom.current = true;
-    send(draft, context);
-    setDraft('');
-    setContext([]);
+  const startEditing = (turn: ChatTurn): void => {
+    setEditing(turn);
+    composerRef.current?.setText(turn.query);
+  };
+
+  const cancelEditing = (): void => {
+    setEditing(undefined);
+    composerRef.current?.setText('');
+  };
+  const leaveChat = (): void => {
+    if (editing) cancelEditing();
   };
 
   const openConversation = (conversation: ConversationSummary): void => {
@@ -124,9 +315,21 @@ export const XyneAIScreen = (): ReactElement => {
         selection.selectAgent(
           conversation.agentSlug === DEFAULT_AGENT_SLUG ? undefined : conversation.agentSlug,
         );
-        open(turnsFromMessages(stored), conversation.conversationId);
+        setChannel(undefined);
+        setThread(undefined);
+        leaveChat();
+        blankSpace.value = 0;
+        pendingScroll.current = 'instant';
+        open(turnsFromMessages(stored), conversation.conversationId, isBranched(stored));
       })
       .catch(() => Alert.alert('Could not open this chat', 'Please try again.'));
+  };
+
+  const startNewChat = (): void => {
+    setChannel(undefined);
+    setThread(undefined);
+    leaveChat();
+    reset();
   };
 
   const selectAgent = (slug: string | undefined): void => {
@@ -142,8 +345,8 @@ export const XyneAIScreen = (): ReactElement => {
       <View className='min-h-14 flex-row items-center gap-3 px-2'>
         <HeaderBackButton liquidGlass onPress={(): void => router.back()} />
         <Text
-          className='min-w-0 flex-1 text-[15px] font-semibold text-foreground'
-          numberOfLines={1}
+          accessibilityRole='header'
+          className='flex-1 text-[17px] font-semibold text-foreground'
         >
           Xyne AI
         </Text>
@@ -158,63 +361,135 @@ export const XyneAIScreen = (): ReactElement => {
           liquidGlass
           accessibilityLabel='New chat'
           disabled={turns.length === 0}
-          onPress={reset}
+          onPress={startNewChat}
         >
           <SquarePen size={20} color={foreground} />
         </HeaderIconButton>
       </View>
 
-      <KeyboardAvoidingView behavior='padding' className='flex-1'>
+      <View className='flex-1'>
         {turns.length === 0 ? (
-          <View className='flex-1 justify-center px-4'>
-            <Greeting />
-          </View>
+          <KeyboardAvoidingView behavior='padding' className='flex-1'>
+            <Reanimated.View className='flex-1' style={greetingStyle}>
+              <Pressable
+                accessible={false}
+                onPress={Keyboard.dismiss}
+                className='flex-1 justify-center px-4'
+              >
+                <Greeting />
+              </Pressable>
+            </Reanimated.View>
+          </KeyboardAvoidingView>
         ) : (
           <ChatRenderProvider value={renderTokens}>
-            <ScrollView
+            <KeyboardChatScrollView
               ref={scrollRef}
-              className='flex-1'
-              contentContainerClassName='gap-6 p-4'
-              keyboardDismissMode='on-drag'
-              keyboardShouldPersistTaps='handled'
-              scrollEventThrottle={16}
-              onScroll={onScroll}
+              keyboardLiftBehavior='whenAtEnd'
+              // iOS: without it the blank space under the newest turn does not take scroll gestures.
+              applyWorkaroundForContentInsetHitTestBug
+              offset={insets.bottom}
+              extraContentPadding={composerHeight}
+              blankSpace={blankSpace}
+              freeze={isSheetOpen || isHistoryOpen}
+              onEndVisible={setIsAtEnd}
               onContentSizeChange={(): void => {
-                if (isNearBottom.current) scrollRef.current?.scrollToEnd({ animated: false });
+                if (!pendingScroll.current) return;
+                scrollRef.current?.scrollToEnd({ animated: pendingScroll.current === 'animated' });
+                pendingScroll.current = null;
               }}
+              onLayout={({ nativeEvent }): void => {
+                viewportHeight.current = nativeEvent.layout.height;
+              }}
+              contentContainerClassName='gap-6 p-4'
+              keyboardDismissMode='interactive'
+              keyboardShouldPersistTaps='handled'
             >
-              {turns.map((turn, index) => (
-                <View key={turn.id} className='gap-6'>
-                  <UserBubble query={turn.query} sentAt={turn.reply.startedAt} />
-                  <AssistantReply
-                    turn={turn.reply}
-                    isLatest={index === turns.length - 1}
-                    viewerId={user?.user_id ?? ''}
-                    onOpenUrl={(url): void => {
-                      void openUrl(url);
-                    }}
-                    onFollowUp={setDraft}
-                    onRegenerate={regenerate}
-                  />
-                </View>
-              ))}
-            </ScrollView>
+              {turns.map((turn, index) => {
+                const isLatest = index === turns.length - 1;
+                return (
+                  <View
+                    key={turn.id}
+                    className='gap-6'
+                    onLayout={
+                      isLatest && isStreaming
+                        ? ({ nativeEvent }): void => {
+                            blankSpace.value = Math.max(
+                              0,
+                              viewportHeight.current - nativeEvent.layout.height,
+                            );
+                          }
+                        : undefined
+                    }
+                  >
+                    <UserBubble
+                      turn={turn}
+                      version={versionOf(turn)}
+                      onSwitchVersion={(step): void => switchVersion(turn, step)}
+                      onEdit={
+                        canBranch && isLatest && !isStreaming && turn.reply.userMessageId
+                          ? (): void => startEditing(turn)
+                          : undefined
+                      }
+                    />
+                    <AssistantReply
+                      turn={turn.reply}
+                      isLatest={isLatest}
+                      viewerId={user?.user_id ?? ''}
+                      onOpenUrl={(url): void => {
+                        void openUrl(url);
+                      }}
+                      onFollowUp={(suggestion): void => composerRef.current?.setText(suggestion)}
+                      onRegenerate={regenerate}
+                      onPendingAction={(action, approved): Promise<void> =>
+                        respondToAction(turn.id, action, approved)
+                      }
+                    />
+                  </View>
+                );
+              })}
+            </KeyboardChatScrollView>
+            <ChatComposerScrollToBottomButton
+              composerHeight={composerHeight}
+              enabled
+              visible={!isAtEnd}
+              onPress={scrollToEnd}
+            />
           </ChatRenderProvider>
         )}
-        <ComposerDock>
-          <XyneAIComposer
-            value={draft}
-            onChangeText={setDraft}
-            isStreaming={isStreaming}
-            onSubmit={submit}
-            onStop={stop}
-            selection={selection}
-            onSelectAgent={selectAgent}
-            context={context}
-            onContextChange={setContext}
-          />
-        </ComposerDock>
-      </KeyboardAvoidingView>
+        <KeyboardStickyView
+          offset={{ closed: 0, opened: bottomGap - COMPOSER_KEYBOARD_GAP }}
+          className='absolute inset-x-0 bottom-0'
+        >
+          <View
+            className='px-4 pt-2'
+            style={{ paddingBottom: bottomGap }}
+            onLayout={({ nativeEvent }): void => {
+              composerHeight.value = nativeEvent.layout.height;
+            }}
+          >
+            <XyneAIComposer
+              ref={composerRef}
+              isStreaming={isStreaming}
+              onSubmit={submit}
+              onStop={stop}
+              selection={selection}
+              onSelectAgent={selectAgent}
+              onSheetChange={setIsSheetOpen}
+              editing={editing && { onCancel: cancelEditing }}
+              channel={
+                channel && { label: channel.title, onRemove: (): void => setChannel(undefined) }
+              }
+              thread={
+                thread && {
+                  label: thread.previewText,
+                  senderId: thread.senderId,
+                  onRemove: (): void => setThread(undefined),
+                }
+              }
+            />
+          </View>
+        </KeyboardStickyView>
+      </View>
       <ConversationHistorySheet
         isOpen={isHistoryOpen}
         onClose={(): void => setIsHistoryOpen(false)}

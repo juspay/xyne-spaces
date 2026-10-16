@@ -1,12 +1,17 @@
 import type { StoredConversation } from '../api/xyneAIConversations';
 import {
+  decodeAttachments,
   decodeParts,
+  decodePendingActions,
+  type PendingAction,
   type PlanTodo,
+  type TurnAttachment,
   type ToolInvocation,
   type TurnPart,
+  type UserTags,
   type XyneAIEvent,
 } from '../api/xyneAIEvents';
-import type { AttachedContextItem } from '../api/xyneAIRequest';
+import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import type { Rating } from '../api/xyneAIStream';
 import { getAskAIErrorInfo, getTransportErrorInfo, type AskAIErrorInfo } from './askAIError';
 
@@ -18,20 +23,25 @@ export interface AssistantTurn {
   tools: ToolInvocation[];
   plan: { title: string | undefined; todos: PlanTodo[] } | undefined;
   followUps: string[];
+  userTags: UserTags | undefined;
+  attachments: TurnAttachment[];
+  pendingActions: PendingAction[];
   messageId: string | undefined;
   /** The server's id for the question this turn answers; a regenerated answer branches from it. */
   userMessageId: string | undefined;
   error: AskAIErrorInfo | undefined;
   startedAt: number;
   durationMs: number | undefined;
-  /** The viewer's saved rating of a reloaded answer. */
   rating: Rating | undefined;
 }
 
 export interface ChatTurn {
   id: string;
+  /** The turn this one follows; turns sharing a parent are versions of one question. */
+  parentId?: string | undefined;
   query: string;
   context: AttachedContextItem[];
+  attachments: AttachedFile[];
   reply: AssistantTurn;
 }
 
@@ -41,6 +51,9 @@ export const startAssistantTurn = (now: number): AssistantTurn => ({
   tools: [],
   plan: undefined,
   followUps: [],
+  userTags: undefined,
+  attachments: [],
+  pendingActions: [],
   messageId: undefined,
   userMessageId: undefined,
   error: undefined,
@@ -107,6 +120,13 @@ function withFinalText(parts: TurnPart[], content: string | undefined): TurnPart
     : [...parts, { type: 'text', id: `text-${parts.length}`, text: content }];
 }
 
+// A run that failed after thinking or a tool call stores its text only in `content`.
+function withFallbackText(parts: TurnPart[], content: string | undefined): TurnPart[] {
+  return !content?.trim() || parts.some(isShownText)
+    ? parts
+    : [...parts, { type: 'text', id: `text-${parts.length}`, text: content }];
+}
+
 export function reduceAssistantTurn(
   turn: AssistantTurn,
   event: XyneAIEvent,
@@ -131,7 +151,13 @@ export function reduceAssistantTurn(
       return {
         ...turn,
         status: 'complete',
-        parts: event.parts ?? withFinalText(closeReasoning(turn.parts, now), event.content),
+        parts: withFallbackText(
+          event.parts ?? withFinalText(closeReasoning(turn.parts, now), event.content),
+          event.content,
+        ),
+        userTags: event.userTags,
+        attachments: event.attachments,
+        pendingActions: event.pendingActions,
         messageId: event.messageId,
         userMessageId: event.userMessageId,
         followUps: event.followUps.length > 0 ? event.followUps : turn.followUps,
@@ -186,27 +212,54 @@ export const answerText = (turn: AssistantTurn): string =>
     .map(part => part.text)
     .join('\n\n');
 
+/** Conversations stored before branching have no parent links, so their turns form one chain. */
+export const isBranched = ({ data }: StoredConversation): boolean =>
+  data.some(message => message.parentId);
+
+const ROOT = '';
+
+/** The turns on screen: at each fork the chosen version, else the newest. */
+export function activePath(turns: ChatTurn[], chosen: Record<string, string>): ChatTurn[] {
+  const path: ChatTurn[] = [];
+  let parentId = ROOT;
+  for (;;) {
+    const versions = turns.filter(turn => (turn.parentId ?? ROOT) === parentId);
+    const next = versions.find(turn => turn.id === chosen[parentId]) ?? versions.at(-1);
+    if (!next) return path;
+    path.push(next);
+    parentId = next.id;
+  }
+}
+
+export const versionsOf = (turns: ChatTurn[], { parentId }: ChatTurn): ChatTurn[] =>
+  turns.filter(turn => turn.parentId === parentId);
+
 /**
  * Rebuilds the turns of a stored conversation. A question with several stored
  * answers (regenerated) shows the latest; an unanswered one shows as stopped.
  */
-export function turnsFromMessages({
-  data,
-  invocationsByMsgId = {},
-  ratingByMsgId = {},
-}: StoredConversation): ChatTurn[] {
+export function turnsFromMessages(stored: StoredConversation): ChatTurn[] {
+  const { data, invocationsByMsgId = {}, ratingByMsgId = {} } = stored;
+  const branched = isBranched(stored);
   const turns: ChatTurn[] = [];
+  const turnOfAnswer = new Map<string, string>();
   for (const message of data) {
-    const turn = turns.at(-1);
+    const turn = branched ? turns.find(({ id }) => id === message.parentId) : turns.at(-1);
     if (message.role === 'user') {
       const startedAt = Date.parse(message.createdAt);
       turns.push({
         id: message.id,
+        parentId: branched ? turnOfAnswer.get(message.parentId ?? '') : turns.at(-1)?.id,
         query: message.content,
         context: message.attachedContext ?? [],
+        attachments: (message.attachments ?? []).map(({ originalFilename, mimeType }) => ({
+          filename: originalFilename,
+          mimeType,
+        })),
         reply: settleAssistantTurn(startAssistantTurn(startedAt), { kind: 'stopped' }, startedAt),
       });
     } else if (turn) {
+      turnOfAnswer.set(message.id, turn.id);
       const events: XyneAIEvent[] = [
         ...(invocationsByMsgId[message.id] ?? []).map(invocation => ({
           type: 'tool' as const,
@@ -220,6 +273,9 @@ export function turnsFromMessages({
           followUps: message.followUpSuggestions ?? [],
           durationMs: message.durationMs,
           parts: decodeParts(message.parts),
+          userTags: undefined,
+          attachments: decodeAttachments(message.attachments),
+          pendingActions: decodePendingActions(message.pendingActions),
         },
       ];
       const now = Date.parse(message.createdAt);

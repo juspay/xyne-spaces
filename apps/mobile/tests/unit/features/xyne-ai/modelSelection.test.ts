@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  AUTO_MODEL_DESCRIPTION,
-  autoModelDescription,
-  modelPillLabel,
-  modelSummary,
-} from '@/src/features/xyne-ai/model/modelSelection';
+import { autoModelDescription, modelPillLabel } from '@/src/features/xyne-ai/model/modelSelection';
 
+const AUTO_DESCRIPTION = 'Balanced quality and speed recommended for most tasks';
 const sonnet = { id: 'claude-sonnet-4-20250514', name: 'Sonnet 4', description: 'Fast' };
 const plain = { id: 'gpt-4o' };
 
@@ -19,11 +15,8 @@ describe('model labels', () => {
     assert.equal(modelPillLabel(plain), 'gpt-4o');
   });
 
-  it('summarises the choice', () => {
-    assert.equal(modelSummary(undefined), AUTO_MODEL_DESCRIPTION);
-    assert.equal(modelSummary(sonnet), 'Fast');
-    assert.equal(modelSummary(plain), 'Every message in this chat runs on gpt-4o');
+  it('describes the Auto choice', () => {
     assert.equal(autoModelDescription('Sonnet 4'), 'Uses Sonnet 4 by default');
-    assert.equal(autoModelDescription(undefined), AUTO_MODEL_DESCRIPTION);
+    assert.equal(autoModelDescription(undefined), AUTO_DESCRIPTION);
   });
 });

@@ -14,10 +14,10 @@ import axios from 'axios';
 import { isApprovedTransportDestination, isLocalOrInsecureUrl } from './mtlsTransportPolicy';
 import {
   newRequestId,
-  RequestTimeoutError,
   withDeadline,
   withNativeAbort,
 } from '@/src/services/http/native-request-registry';
+import { RequestTimeoutError } from '@/src/services/http/request-errors';
 import { API_ORIGIN, isMtlsFeatureEnabled } from '../config';
 import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { v4 as uuidv4 } from 'uuid';

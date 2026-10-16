@@ -20,7 +20,7 @@ const text = (delta: string, partId?: string): XyneAIEvent => ({ type: 'text', d
 const thought = (delta: string): XyneAIEvent => ({ type: 'reasoning', delta, partId: undefined });
 const tool = (overrides: Partial<ToolInvocation>): XyneAIEvent => ({
   type: 'tool',
-  invocation: { toolName: 'search', args: {}, status: 'running', durationMs: 0, ...overrides },
+  invocation: { toolName: 'search', args: {}, status: 'running', ...overrides },
 });
 const complete = (content: string | undefined, extra: Partial<XyneAIEvent> = {}): XyneAIEvent =>
   ({
@@ -31,6 +31,9 @@ const complete = (content: string | undefined, extra: Partial<XyneAIEvent> = {})
     followUps: [],
     durationMs: undefined,
     parts: undefined,
+    userTags: undefined,
+    attachments: [],
+    pendingActions: [],
     ...extra,
   }) as XyneAIEvent;
 
@@ -89,12 +92,36 @@ describe('reduceAssistantTurn', () => {
     assert.equal(answerText(server), 'rewrite');
   });
 
+  it('falls back to the final content when the run produced no shown text', () => {
+    assert.equal(
+      answerText(replay(thought('Hmm'), complete('Something failed'))),
+      'Something failed',
+    );
+    const superseded = complete('Final', {
+      parts: [{ type: 'text', id: 't1', text: 'draft', superseded: true }],
+    } as Partial<XyneAIEvent>);
+    assert.equal(answerText(replay(superseded)), 'Final');
+    assert.equal(answerText(replay(thought('Hmm'), complete('  '))), '');
+  });
+
   it('records message ids and the turn duration', () => {
     const turn = replay(text('Hi'), complete('Hi'));
     assert.equal(turn.userMessageId, 'u1');
     assert.equal(turn.messageId, 'm1');
     assert.equal(turn.durationMs, 2000);
     assert.equal(replay(complete('Hi', { durationMs: 42 } as Partial<XyneAIEvent>)).durationMs, 42);
+  });
+
+  it('keeps the attachments and pending actions of the completed turn', () => {
+    const attachments = [
+      { id: 'a1', filename: 'f.pdf', mimeType: 'application/pdf', data: undefined, app: undefined },
+    ];
+    const pendingActions = [
+      { id: 'p1', serverType: 's', tool: 't', params: {}, signature: 'x', resolution: undefined },
+    ];
+    const turn = replay(complete('Done', { attachments, pendingActions }));
+    assert.deepEqual(turn.attachments, attachments);
+    assert.deepEqual(turn.pendingActions, pendingActions);
   });
 
   it('takes follow-ups that arrive after completion', () => {

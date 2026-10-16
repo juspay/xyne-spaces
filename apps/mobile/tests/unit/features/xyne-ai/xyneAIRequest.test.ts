@@ -59,6 +59,22 @@ describe('buildStreamRequestBody', () => {
     assert.equal(body['is_regenerate'], true);
   });
 
+  it('sends an edited question as a sibling under the web client keys', () => {
+    const body = buildStreamRequestBody({
+      query: 'hi',
+      sessionId: 's1',
+      parentMessageId: 'a1',
+      isEditUserMessage: true,
+      editedUserMessageId: 'u1',
+      parentAssistantMessageId: 'a1',
+    });
+    assert.equal(body['parent_message_id'], 'a1');
+    assert.equal(body['is_edit_user_message'], true);
+    assert.equal(body['edited_user_message_id'], 'u1');
+    assert.equal(body['parent_assistant_message_id'], 'a1');
+    assert.equal('is_regenerate' in body, false);
+  });
+
   it('sends picked context as ids per kind plus the attached context, like the web client', () => {
     const attachedContext = [
       { type: 'channel', id: 'c1', title: 'general' },
@@ -79,5 +95,57 @@ describe('buildStreamRequestBody', () => {
     const body = buildStreamRequestBody({ query: 'hi', sessionId: '', attachedContext: [] });
     assert.equal('attached_context' in body, false);
     assert.equal('ticket_ids' in body, false);
+  });
+
+  it('sends collection, folder and file picks only as attached context, like the web client', () => {
+    const attachedContext = [
+      { type: 'collection', id: 'col1', title: 'Handbook' },
+      { type: 'folder', id: 'fol1', title: 'Policies' },
+      { type: 'file', id: 'item1', title: 'Leave.pdf' },
+    ];
+    const body = buildStreamRequestBody({ query: 'hi', sessionId: '', attachedContext });
+    assert.deepEqual(body['attached_context'], attachedContext);
+    assert.deepEqual(body['channel_ids'], []);
+    assert.deepEqual(body['ticket_ids'], []);
+  });
+
+  it('sends attached files as raw base64 and skips ones reloaded without data', () => {
+    const body = buildStreamRequestBody({
+      query: 'hi',
+      sessionId: '',
+      attachments: [
+        { filename: 'a.txt', mimeType: 'text/plain', data: 'aGk=' },
+        { filename: 'old.png', mimeType: 'image/png' },
+      ],
+    });
+    assert.deepEqual(body['attachments'], [
+      { filename: 'a.txt', mime_type: 'text/plain', data: 'aGk=' },
+    ]);
+  });
+
+  it('leaves the attachments key out when there are none', () => {
+    const body = buildStreamRequestBody({ query: 'hi', sessionId: '', attachments: [] });
+    assert.equal('attachments' in body, false);
+  });
+
+  it('scopes the chat to a message thread and its attachments, like the web client', () => {
+    const body = buildStreamRequestBody({
+      query: 'hi',
+      sessionId: '',
+      conversationId: 'conv1',
+      messageAttachmentIds: ['a1', 'a2'],
+    });
+    assert.equal(body['conversation_id'], 'conv1');
+    assert.deepEqual(body['message_attachment_ids'], ['a1', 'a2']);
+  });
+
+  it('leaves the message attachment ids out when the thread has none', () => {
+    const body = buildStreamRequestBody({
+      query: 'hi',
+      sessionId: '',
+      conversationId: 'conv1',
+      messageAttachmentIds: [],
+    });
+    assert.equal('message_attachment_ids' in body, false);
   });
 });

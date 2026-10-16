@@ -4,7 +4,7 @@ import { HTML_TAG_OR_EMPTY, stripHtmlTags } from '@/src/utils/htmlText';
 import type { AttachedContextItem } from '../api/xyneAIRequest';
 
 /** The server drops all attached context past this many items. */
-export const MAX_ATTACHED = 20;
+const MAX_ATTACHED = 20;
 
 const MESSAGE_LABEL_MAX = 80;
 
@@ -20,6 +20,22 @@ function location(ids: Record<string, string | undefined>): Pick<AttachedContext
 }
 
 export const pickKey = ({ type, id }: AttachedContextItem): string => `${type}:${id}`;
+
+export const isCollectionPick = ({ type }: AttachedContextItem): boolean =>
+  type === 'collection' || type === 'folder' || type === 'file';
+
+/** Adds or removes `pick`; adding also keeps `root`, the collection a folder or file is read through. */
+export function togglePick(
+  picks: AttachedContextItem[],
+  pick: AttachedContextItem,
+  root?: AttachedContextItem,
+): AttachedContextItem[] {
+  const has = (item: AttachedContextItem): boolean =>
+    picks.some(other => pickKey(other) === pickKey(item));
+  if (has(pick)) return picks.filter(other => pickKey(other) !== pickKey(pick));
+  const added = root && !has(root) ? [root, pick] : [pick];
+  return picks.length + added.length <= MAX_ATTACHED ? [...picks, ...added] : picks;
+}
 
 export const personPick = (id: string, name: string): AttachedContextItem => ({
   type: 'user',

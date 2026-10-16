@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  PLACEHOLDERS,
-  firstName,
-  greeting,
-  pickPlaceholder,
-} from '@/src/features/xyne-ai/model/greeting';
+import { firstName, greeting } from '@/src/features/xyne-ai/model/greeting';
 
 const at = (hour: number): Date => new Date(2026, 0, 1, hour);
 
@@ -24,12 +19,5 @@ describe('firstName', () => {
     assert.equal(firstName('om kumar', 'x@y.z'), 'Om');
     assert.equal(firstName('', 'krishan.saini@juspay.in'), 'Krishan');
     assert.equal(firstName(undefined, undefined), undefined);
-  });
-});
-
-describe('pickPlaceholder', () => {
-  it('picks from the list', () => {
-    assert.equal(pickPlaceholder(0), PLACEHOLDERS[0]);
-    assert.equal(pickPlaceholder(0.999), PLACEHOLDERS.at(-1));
   });
 });

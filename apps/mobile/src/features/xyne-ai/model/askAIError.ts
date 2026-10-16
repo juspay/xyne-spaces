@@ -1,4 +1,6 @@
 export interface AskAIErrorInfo {
+  /** Absent for failures that never reached a model provider. */
+  code: string | undefined;
   title: string;
   message: string;
   helpText: string | undefined;
@@ -7,6 +9,7 @@ export interface AskAIErrorInfo {
 }
 
 const info = (title: string, message: string, helpText?: string): AskAIErrorInfo => ({
+  code: undefined,
   title,
   message,
   helpText,
@@ -69,12 +72,14 @@ const CONTEXT_TOO_LARGE_HELP =
   'Try removing some channel context, long thread history, canvas selections, or attachments, then send the query again.';
 
 // Checked in order: the first class with a keyword in the lowercased error wins.
-const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
+const ERROR_CLASSES: { code: string; keywords: string[]; error: AskAIErrorInfo }[] = [
   {
+    code: 'CONTEXT_LIMIT_EXCEEDED',
     keywords: ['contextexceedederror', 'contextwindowexceedederror'],
     error: info(CONTEXT_TOO_LARGE_TITLE, CONTEXT_TOO_LARGE_MESSAGE, CONTEXT_TOO_LARGE_HELP),
   },
   {
+    code: 'BUDGET_EXCEEDED',
     keywords: ['budgetexceedederror'],
     error: info(
       'Usage limit reached',
@@ -83,6 +88,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'PROXY_ERROR',
     keywords: ['proxyexception'],
     error: info(
       'Model service unavailable',
@@ -91,6 +97,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'INTERNAL_SERVER_ERROR',
     keywords: ['internalservererror'],
     error: info(
       'Server error',
@@ -99,6 +106,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'MIDSTREAM_FALLBACK_ERROR',
     keywords: ['midstreamfallbackerror'],
     error: info(
       'Response interrupted',
@@ -107,6 +115,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'TIMEOUT',
     keywords: ['readtimeout', 'timeout', 'terminated'],
     error: info(
       'Request timed out',
@@ -115,6 +124,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'BAD_REQUEST',
     keywords: ['badrequesterror', 'httpexception'],
     error: info(
       'Request could not be processed',
@@ -123,6 +133,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'LLM_ERROR',
     keywords: ['basellmexception'],
     error: info(
       'Model error',
@@ -131,6 +142,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'ASSERTION_ERROR',
     keywords: ['assertionerror'],
     error: info(
       'Internal validation error',
@@ -139,6 +151,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'TYPE_ERROR',
     keywords: ['typeerror'],
     error: info(
       'Internal processing error',
@@ -147,6 +160,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'EXCEPTION',
     keywords: ['exception'],
     error: info(
       "Ask AI couldn't complete this request",
@@ -155,6 +169,7 @@ const ERROR_CLASSES: { keywords: string[]; error: AskAIErrorInfo }[] = [
     ),
   },
   {
+    code: 'NETWORK_ERROR',
     keywords: ['fetch failed', 'econnrefused', 'networkerror'],
     error: info(
       'Network error',
@@ -200,21 +215,27 @@ function classify(text: string, httpStatus: number | undefined): AskAIErrorInfo 
       : statusFromText(text);
 
   if (status !== undefined) {
-    return (
-      HTTP_STATUS_ERRORS[status] ??
-      info(
-        'Request failed',
-        `Ask AI received an error from the model provider (HTTP ${status}).`,
-        'Try again. If this keeps happening, reduce context or contact a workspace administrator.',
-      )
-    );
+    return {
+      ...(HTTP_STATUS_ERRORS[status] ??
+        info(
+          'Request failed',
+          `Ask AI received an error from the model provider (HTTP ${status}).`,
+          'Try again. If this keeps happening, reduce context or contact a workspace administrator.',
+        )),
+      code: `HTTP_${status}`,
+    };
   }
   if (CONTEXT_LIMIT_PHRASES.some(phrase => lowered.includes(phrase))) {
-    return info(CONTEXT_TOO_LARGE_TITLE, contextLimitMessage(text), CONTEXT_TOO_LARGE_HELP);
+    return {
+      ...info(CONTEXT_TOO_LARGE_TITLE, contextLimitMessage(text), CONTEXT_TOO_LARGE_HELP),
+      code: 'CONTEXT_LIMIT_EXCEEDED',
+    };
   }
+  const matched = ERROR_CLASSES.find(({ keywords }) =>
+    keywords.some(keyword => lowered.includes(keyword)),
+  );
   return (
-    ERROR_CLASSES.find(({ keywords }) => keywords.some(keyword => lowered.includes(keyword)))
-      ?.error ??
+    (matched && { ...matched.error, code: matched.code }) ??
     info(
       "Ask AI couldn't complete this request",
       text || 'Something went wrong while generating a response.',

@@ -5,7 +5,11 @@ import type {
   ConversationSummary,
   StoredMessage,
 } from '@/src/features/xyne-ai/api/xyneAIConversations';
-import { answerText, turnsFromMessages } from '@/src/features/xyne-ai/model/assistantTurn';
+import {
+  activePath,
+  answerText,
+  turnsFromMessages,
+} from '@/src/features/xyne-ai/model/assistantTurn';
 import { groupConversations } from '@/src/features/xyne-ai/model/conversationGroups';
 
 const user = (id: string, extra: Partial<StoredMessage> = {}): StoredMessage => ({
@@ -36,9 +40,7 @@ describe('turnsFromMessages', () => {
         assistant('a1', 'Hello', { followUpSuggestions: ['More?'], durationMs: 4000 }),
       ],
       invocationsByMsgId: {
-        a1: [
-          { toolName: 'search', toolCallId: 't1', args: {}, status: 'completed', durationMs: 5 },
-        ],
+        a1: [{ toolName: 'search', toolCallId: 't1', args: {}, status: 'completed' }],
       },
       ratingByMsgId: { a1: { rating: 'up' } },
     });
@@ -55,6 +57,39 @@ describe('turnsFromMessages', () => {
     assert.deepEqual(turn?.reply.followUps, ['More?']);
     assert.equal(turn?.reply.durationMs, 4000);
     assert.equal(turn?.reply.rating, 'up');
+  });
+
+  it('keeps the file names attached to a question', () => {
+    const [turn] = turnsFromMessages({
+      data: [
+        user('u1', {
+          attachments: [
+            {
+              id: 'f1',
+              originalFilename: 'notes.pdf',
+              mimeType: 'application/pdf',
+              width: null,
+              height: null,
+            },
+          ],
+        }),
+      ],
+    });
+    assert.deepEqual(turn?.attachments, [{ filename: 'notes.pdf', mimeType: 'application/pdf' }]);
+  });
+
+  it('restores the decision on a stored pending action', () => {
+    const [turn] = turnsFromMessages({
+      data: [
+        user('u1'),
+        assistant('a1', 'Needs approval', {
+          pendingActions: [
+            { id: 'p1', tool: 'srv__send', signature: 'sig', params: {}, resolution: 'approved' },
+          ],
+        }),
+      ],
+    });
+    assert.equal(turn?.reply.pendingActions[0]?.resolution, 'approved');
   });
 
   it('shows the latest of several answers and stops an unanswered question', () => {
@@ -77,6 +112,45 @@ describe('turnsFromMessages', () => {
     });
     assert.equal(answerText(turn!.reply), 'from parts');
   });
+
+  it('links a stored edit as another version of the same question', () => {
+    const turns = turnsFromMessages({
+      data: [
+        user('u1', { parentId: null }),
+        assistant('a1', 'first', { parentId: 'u1' }),
+        user('u2', { parentId: 'a1' }),
+        assistant('a2', 'second', { parentId: 'u2' }),
+        user('u3', { parentId: 'a1' }),
+        assistant('a3', 'edited', { parentId: 'u3' }),
+      ],
+    });
+    assert.deepEqual(
+      turns.map(({ id, parentId }) => [id, parentId]),
+      [
+        ['u1', undefined],
+        ['u2', 'u1'],
+        ['u3', 'u1'],
+      ],
+    );
+    assert.deepEqual(
+      activePath(turns, {}).map(({ id }) => id),
+      ['u1', 'u3'],
+    );
+    assert.deepEqual(
+      activePath(turns, { u1: 'u2' }).map(({ id }) => id),
+      ['u1', 'u2'],
+    );
+  });
+
+  it('chains a conversation stored before branching', () => {
+    const turns = turnsFromMessages({
+      data: [user('u1'), assistant('a1', 'one'), user('u2'), assistant('a2', 'two')],
+    });
+    assert.deepEqual(
+      activePath(turns, {}).map(({ id }) => id),
+      ['u1', 'u2'],
+    );
+  });
 });
 
 describe('groupConversations', () => {
@@ -95,6 +169,7 @@ describe('groupConversations', () => {
       [
         at('old', '2026-01-01T09:00:00'),
         at('week', '2026-03-05T09:00:00'),
+        at('month', '2026-02-20T09:00:00'),
         at('yesterday', '2026-03-09T23:00:00'),
         at('today', '2026-03-10T08:00:00'),
         at('pinned', '2025-01-01T09:00:00', true),
@@ -108,6 +183,7 @@ describe('groupConversations', () => {
         ['Today', ['today']],
         ['Yesterday', ['yesterday']],
         ['Previous 7 days', ['week']],
+        ['Previous 30 days', ['month']],
         ['Older', ['old']],
       ],
     );

@@ -1,16 +1,26 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { AlertCircle, AlertTriangle, Check, Circle, CornerDownRight } from 'lucide-react-native';
+import {
+  AlertCircle,
+  AlertTriangle,
+  Check,
+  Circle,
+  CornerDownRight,
+  RefreshCw,
+} from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import type { BriefCitation } from '@/src/features/morning-brief/api/dailyBriefApi';
 import { CitationSourcesSheet } from '@/src/features/morning-brief/components/CitationSourcesSheet';
 import { useOpenCitation } from '@/src/features/morning-brief/hooks/useBriefRenderContext';
+import { DASHBOARD_ORIGIN, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { useUsers } from '@/src/hooks/useUsers';
 import { haptics } from '@/src/utils/haptics';
 import { formatTime } from '@/src/utils/timeSelection';
 
-import type { PlanTodo } from '../api/xyneAIEvents';
+import type { PendingAction, PlanTodo } from '../api/xyneAIEvents';
 import { answerText, type AssistantTurn } from '../model/assistantTurn';
+import { absolutizeDashboardLinks, buildMentionResolver, linkMentions } from '../model/answerLinks';
 import type { AskAIErrorInfo } from '../model/askAIError';
 import {
   citationNumbers,
@@ -19,8 +29,10 @@ import {
   resolveCitationLink,
 } from '../model/citations';
 import { turnDurationLabel } from '../model/turnTimeline';
+import { PendingActions } from './PendingActions';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { TurnActions } from './TurnActions';
+import { TurnOutputs } from './TurnOutputs';
 import { TurnTimeline } from './TurnTimeline';
 
 const TodoIcon = ({ status }: { status: PlanTodo['status'] }): ReactElement => {
@@ -54,7 +66,13 @@ const PlanChecklist = ({ plan }: { plan: NonNullable<AssistantTurn['plan']> }): 
   </View>
 );
 
-const TurnErrorCard = ({ error }: { error: AskAIErrorInfo }): ReactElement => {
+const TurnErrorCard = ({
+  error,
+  onRetry,
+}: {
+  error: AskAIErrorInfo;
+  onRetry: (() => void) | undefined;
+}): ReactElement => {
   const [showRaw, setShowRaw] = useState(false);
   const danger = useCSSVariable('--color-settings-icon-red') as string;
 
@@ -65,7 +83,10 @@ const TurnErrorCard = ({ error }: { error: AskAIErrorInfo }): ReactElement => {
     >
       <AlertTriangle size={16} color={danger} />
       <View className='min-w-0 flex-1 gap-1'>
-        <Text className='text-[14px] font-medium text-settings-icon-red'>{error.title}</Text>
+        <Text className='text-[14px] font-medium text-settings-icon-red'>
+          {error.title}
+          {error.code ? <Text className='text-[11px] opacity-70'> ({error.code})</Text> : null}
+        </Text>
         <Text className='text-[14px] text-foreground'>{error.message}</Text>
         {error.helpText ? (
           <Text className='text-[13px] text-secondary-foreground'>{error.helpText}</Text>
@@ -86,6 +107,16 @@ const TurnErrorCard = ({ error }: { error: AskAIErrorInfo }): ReactElement => {
               </Text>
             ) : null}
           </>
+        ) : null}
+        {onRetry ? (
+          <Pressable
+            accessibilityRole='button'
+            onPress={onRetry}
+            className='mt-1 flex-row items-center gap-1.5 self-start rounded-lg border border-settings-icon-red/30 px-3 py-1.5 active:opacity-60'
+          >
+            <RefreshCw size={13} color={danger} />
+            <Text className='text-[13px] font-medium text-settings-icon-red'>Retry</Text>
+          </Pressable>
         ) : null}
       </View>
     </View>
@@ -142,6 +173,7 @@ export const AssistantReply = ({
   onOpenUrl,
   onFollowUp,
   onRegenerate,
+  onPendingAction,
 }: {
   turn: AssistantTurn;
   isLatest: boolean;
@@ -149,6 +181,8 @@ export const AssistantReply = ({
   onOpenUrl: (url: string) => void;
   onFollowUp: (suggestion: string) => void;
   onRegenerate: () => void;
+  /** Sends the user's decision for a paused tool call; without it, pending calls are not shown. */
+  onPendingAction?: (action: PendingAction, approved: boolean) => Promise<void>;
 }): ReactElement => {
   const [sourceGroup, setSourceGroup] = useState<BriefCitation[] | null>(null);
   const openCitation = useOpenCitation();
@@ -158,6 +192,17 @@ export const AssistantReply = ({
   const sources = useMemo(() => citationSources(turn.tools), [turn.tools]);
   const answer = answerText(turn);
   const numbers = useMemo(() => citationNumbers(answer, sources), [answer, sources]);
+
+  const users = useUsers();
+  const resolveMention = useMemo(
+    () => buildMentionResolver(turn.userTags, users),
+    [turn.userTags, users],
+  );
+  const renderableMarkdown = (text: string): string =>
+    absolutizeDashboardLinks(linkMentions(linkCitations(text, numbers, sources), resolveMention), {
+      app: PUBLIC_DEEP_LINK_ORIGIN,
+      dashboard: DASHBOARD_ORIGIN,
+    });
 
   const openLink = (url: string): void => {
     const tap = resolveCitationLink(url, sources);
@@ -174,7 +219,7 @@ export const AssistantReply = ({
         turn={turn}
         renderText={(text, isStreaming): ReactElement => (
           <StreamingMarkdown
-            markdown={linkCitations(text, numbers)}
+            markdown={renderableMarkdown(text)}
             isStreaming={isStreaming}
             viewerId={viewerId}
             onOpenUrl={openLink}
@@ -182,7 +227,15 @@ export const AssistantReply = ({
         )}
       />
       {turn.plan ? <PlanChecklist plan={turn.plan} /> : null}
-      {turn.error ? <TurnErrorCard error={turn.error} /> : null}
+      {onPendingAction && turn.pendingActions.length > 0 ? (
+        <PendingActions actions={turn.pendingActions} onRespond={onPendingAction} />
+      ) : null}
+      {isDone ? (
+        <TurnOutputs turn={turn} onOpenUrl={onOpenUrl} onOpenCanvas={openCitation} />
+      ) : null}
+      {turn.error ? (
+        <TurnErrorCard error={turn.error} onRetry={isLatest ? onRegenerate : undefined} />
+      ) : null}
       {isDone && isLatest && turn.followUps.length > 0 ? (
         <FollowUps suggestions={turn.followUps} onSelect={onFollowUp} />
       ) : null}

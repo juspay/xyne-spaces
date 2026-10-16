@@ -12,6 +12,8 @@ import { useCSSVariable } from 'uniwind';
 import type { ToolInvocation, TurnPart } from '../api/xyneAIEvents';
 import type { AssistantTurn } from '../model/assistantTurn';
 import {
+  clipDetail,
+  formatArgs,
   formatSeconds,
   groupTurnParts,
   humanizeToolName,
@@ -103,6 +105,26 @@ const ThinkingStep = ({
   );
 };
 
+const ToolDetail = ({
+  label,
+  text,
+  failed = false,
+}: {
+  label: string;
+  text: string;
+  failed?: boolean;
+}): ReactElement => (
+  <View className='mb-2'>
+    <Text className='mb-0.5 text-[10px] uppercase text-secondary-foreground'>{label}</Text>
+    <Text
+      selectable
+      className={`font-mono text-[11px] leading-[18px] ${failed ? 'text-settings-icon-red' : 'text-secondary-foreground'}`}
+    >
+      {text}
+    </Text>
+  </View>
+);
+
 const ToolStep = ({ call }: { call: ToolInvocation }): ReactElement => {
   const [open, setOpen] = useState(false);
   const muted = useCSSVariable('--color-secondary-foreground') as string;
@@ -141,12 +163,20 @@ const ToolStep = ({ call }: { call: ToolInvocation }): ReactElement => {
           className='mx-3 mb-2'
           style={{ maxHeight: RESULT_MAX_HEIGHT }}
         >
-          <Text
-            selectable
-            className={`font-mono text-[11px] leading-[18px] ${failed ? 'text-settings-icon-red' : 'text-secondary-foreground'}`}
-          >
-            {(call.result && readableResult(call.result)) || 'No output'}
-          </Text>
+          {Object.keys(call.args).length > 0 ? (
+            <ToolDetail label='Arguments' text={formatArgs(call.args)} />
+          ) : null}
+          {call.status === 'running' ? null : call.status === 'stopped' ? (
+            <Text className='text-[11px] italic text-secondary-foreground'>
+              Stopped before completion
+            </Text>
+          ) : (
+            <ToolDetail
+              label='Result'
+              text={clipDetail((call.result && readableResult(call.result)) || 'No output')}
+              failed={failed}
+            />
+          )}
         </ScrollView>
       ) : null}
     </View>

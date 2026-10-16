@@ -1,7 +1,17 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { Text, View } from 'react-native';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { FileText, Hash, MessageCircle, Mic, Paperclip, Ticket } from 'lucide-react-native';
+import {
+  BookOpen,
+  FileText,
+  Folder,
+  Hash,
+  MessageCircle,
+  Mic,
+  Paperclip,
+  Ticket,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { ChatFilterTabs, type ChatFilterTabOption } from '@/src/components/chat/chat-filter-tabs';
@@ -28,10 +38,10 @@ import type { DisplaySearchResult } from '@/src/types/search';
 import type { AttachedContextItem } from '../api/xyneAIRequest';
 import {
   channelPick,
-  MAX_ATTACHED,
   personPick,
   pickFromResult,
   pickKey,
+  togglePick,
 } from '../model/contextPicks';
 
 type PickerTab = 'all' | 'people' | 'messages' | 'channels' | 'files' | 'canvas' | 'tickets';
@@ -50,7 +60,10 @@ const TABS: ChatFilterTabOption<PickerTab>[] = [
 const ALL_SOURCES: Source[] = ['people', 'messages', 'channels', 'files', 'canvas', 'tickets'];
 const ALL_TAB_ROWS_PER_SOURCE = 5;
 
-const ICONS = {
+export const ICONS: Partial<Record<string, LucideIcon>> = {
+  collection: BookOpen,
+  folder: Folder,
+  file: FileText,
   channel: Hash,
   message: MessageCircle,
   ticket: Ticket,
@@ -81,10 +94,10 @@ const useRemoteResults = (tab: GlobalSearchTab, isEnabled: boolean, query: strin
       : null,
   );
 
-const Leading = ({ pick }: { pick: AttachedContextItem }): ReactElement => {
+export const Leading = ({ pick }: { pick: AttachedContextItem }): ReactElement => {
   const muted = useCSSVariable('--color-secondary-foreground') as string;
-  if (pick.type === 'user') return <Avatar userIds={[pick.id]} size={36} />;
-  const Icon = ICONS[pick.type as keyof typeof ICONS];
+  const Icon = ICONS[pick.type];
+  if (!Icon) return <Avatar userIds={[pick.id]} size={36} />;
   return (
     <View className='size-9 items-center justify-center rounded-full bg-foreground/5'>
       <Icon size={18} color={muted} />
@@ -138,15 +151,6 @@ function ContextPickerBody({
   const selectedKeys = new Set(draft.map(pickKey));
   const isLoading = [messages, files, tickets].some(({ status }) => status === 'loading');
 
-  const toggle = (pick: AttachedContextItem): void =>
-    setDraft(current =>
-      selectedKeys.has(pickKey(pick))
-        ? current.filter(item => pickKey(item) !== pickKey(pick))
-        : current.length < MAX_ATTACHED
-          ? [...current, pick]
-          : current,
-    );
-
   return (
     <FilterMultiSelectSheet
       isOpen={isOpen}
@@ -188,7 +192,7 @@ function ContextPickerBody({
               {...(item.subtitle ? { subtitle: item.subtitle } : {})}
               query={query}
               isSelected={selectedKeys.has(pickKey(item.pick))}
-              onPress={(): void => toggle(item.pick)}
+              onPress={(): void => setDraft(current => togglePick(current, item.pick))}
             />
           )}
           keyboardShouldPersistTaps='handled'

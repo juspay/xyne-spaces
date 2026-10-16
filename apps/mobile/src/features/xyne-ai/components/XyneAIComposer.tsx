@@ -1,39 +1,90 @@
-import { useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { Keyboard, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+  type Dispatch,
+  type ReactElement,
+  type ReactNode,
+  type Ref,
+  type SetStateAction,
+} from 'react';
+import {
+  Alert,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import {
   ArrowUp,
   AtSign,
+  BookOpen,
   Bot,
+  Camera,
+  Check,
+  FileText,
   Globe,
+  Hash,
+  ImageIcon,
+  MessageCircleMore,
+  Paperclip,
+  Pencil,
   Plus,
   Square,
+  SquareSlash,
   Target,
   X,
   type LucideIcon,
 } from 'lucide-react-native';
-import { useCSSVariable } from 'uniwind';
+import * as FileSystem from 'expo-file-system/legacy';
+import { useCSSVariable, useUniwind } from 'uniwind';
 
 import {
   COMPOSER_SEND_BUTTON_SIZE,
   composerSendOpacity,
 } from '@/src/components/input-composer/composer-input-typography';
-import { ListRow, ListRowDivider, SectionCard } from '@/src/components/ui/settings-list';
-import { Switch } from '@/src/components/ui/switch';
+import type { ComposerAttachment } from '@/src/components/input-composer/input-composer.types';
+import { MAX_COMPOSER_ATTACHMENT_COUNT } from '@/src/components/input-composer/utils/attachmentPolicy';
+import {
+  pickFromCamera,
+  pickFromFiles,
+  pickFromGallery,
+  type AttachmentPicker,
+} from '@/src/components/input-composer/utils/composer-attachments-picker';
+import Avatar from '@/src/components/ui/avatar';
+import { GlassSurface } from '@/src/components/ui/glass-surface';
+import { ListRow, ListRowDivider } from '@/src/components/ui/settings-list';
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { haptics } from '@/src/utils/haptics';
 
-import type { AttachedContextItem } from '../api/xyneAIRequest';
+import type { AttachedContextItem, AttachedFile } from '../api/xyneAIRequest';
 import type { ModeState, XyneAISelection } from '../hooks/useXyneAISelection';
-import { pickPlaceholder } from '../model/greeting';
-import { modelPillLabel } from '../model/modelSelection';
+import { MAX_FILES, fileLimitError, withCommand } from '../model/composerInputs';
+import { isCollectionPick } from '../model/contextPicks';
+import { THINKING_OPTIONS, modelPillLabel } from '../model/modelSelection';
 import { AgentDot } from './AgentDot';
-import { AgentSheet } from './AgentSheet';
-import { ContextPickerSheet } from './ContextPickerSheet';
-import { ModelSheet } from './ModelSheet';
-import { PickerSheet } from './PickerSheet';
+import { CollectionsSheet } from './CollectionsSheet';
+import { ContextPickerSheet, ICONS } from './ContextPickerSheet';
+import {
+  AgentSheet,
+  ModelSheet,
+  PickerSheet,
+  SheetCard,
+  SlashCommandSheet,
+  useAfterDismiss,
+} from './PickerSheet';
 
 const INPUT_FONT_SIZE = 15;
 const INPUT_LINE_HEIGHT = 24;
 const INPUT_MAX_HEIGHT = 220;
+const COMPOSER_RADIUS = 24;
+const TOOLBAR_BUTTON_SIZE = 36;
 
 const Chip = ({
   label,
@@ -57,7 +108,7 @@ const Chip = ({
       void haptics.buttonTap();
       onPress();
     }}
-    className={`h-7 max-w-full flex-row items-center gap-1.5 rounded-full border px-2.5 active:opacity-60 ${className}`}
+    className={`h-7 max-w-[200px] flex-row items-center gap-1.5 rounded-full border px-2.5 active:opacity-60 ${className}`}
   >
     {leading}
     <Text numberOfLines={1} className={`shrink text-[13px] ${textClassName}`}>
@@ -65,6 +116,25 @@ const Chip = ({
     </Text>
     <X size={12} color={iconColor} />
   </Pressable>
+);
+
+// One line that scrolls sideways, so chips never push the input or its buttons around.
+const ChipRow = ({
+  className,
+  children,
+}: {
+  className: string;
+  children: ReactNode;
+}): ReactElement => (
+  <ScrollView
+    horizontal
+    showsHorizontalScrollIndicator={false}
+    keyboardShouldPersistTaps='handled'
+    className={className}
+    contentContainerClassName='items-center gap-1.5'
+  >
+    {children}
+  </ScrollView>
 );
 
 const ModeChip = ({
@@ -88,32 +158,6 @@ const ModeChip = ({
       onPress={mode.toggle}
     />
   ) : null;
-};
-
-const ComposerChips = ({
-  selection,
-  onSelectAgent,
-}: {
-  selection: XyneAISelection;
-  onSelectAgent: (slug: string | undefined) => void;
-}): ReactElement => {
-  const muted = useCSSVariable('--color-conversation-input-toolbar-icon') as string;
-  const { agent, modes } = selection;
-
-  return (
-    <View className='min-w-0 flex-1 flex-row flex-wrap gap-1.5'>
-      {agent ? (
-        <Chip
-          label={agent.name}
-          iconColor={muted}
-          leading={<AgentDot color={agent.color} />}
-          onPress={(): void => onSelectAgent(undefined)}
-        />
-      ) : null}
-      <ModeChip icon={Globe} label='Web search' mode={modes.webSearch} />
-      <ModeChip icon={Target} label='Deep search' mode={modes.deepResearch} />
-    </View>
-  );
 };
 
 const SendButton = ({
@@ -151,180 +195,249 @@ const SendButton = ({
   );
 };
 
+const ModelPill = ({
+  selection,
+  onPress,
+}: {
+  selection: XyneAISelection;
+  onPress: () => void;
+}): ReactElement => {
+  const name = modelPillLabel(selection.models.find(({ id }) => id === selection.model));
+  const thinking = selection.thinkingLevel
+    ? THINKING_OPTIONS.find(({ value }) => value === selection.thinkingLevel)?.label
+    : undefined;
+  return (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityLabel={`Model, ${name}`}
+      accessibilityHint='Choose the model for this chat'
+      onPress={(): void => {
+        void haptics.buttonTap();
+        onPress();
+      }}
+      className='min-w-0 shrink flex-row items-center rounded-full bg-conversation-input-pill-bg px-3 active:opacity-60'
+      style={{ height: TOOLBAR_BUTTON_SIZE }}
+    >
+      <Text numberOfLines={1} className='text-[14px] text-conversation-input-text'>
+        {name}
+        {thinking ? <Text className='text-secondary-foreground'>{` ${thinking}`}</Text> : null}
+      </Text>
+    </Pressable>
+  );
+};
+
+const AttachTile = ({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onPress: () => void;
+}): ReactElement => {
+  const Icon = icon;
+  const color = useCSSVariable('--color-foreground') as string;
+  return (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityLabel={label}
+      onPress={(): void => {
+        void haptics.buttonTap();
+        onPress();
+      }}
+      className='flex-1 items-center gap-2 rounded-2xl bg-bottomsheet-container-bg py-4 active:opacity-60'
+    >
+      <Icon size={24} color={color} />
+      <Text className='text-[14px] text-foreground'>{label}</Text>
+    </Pressable>
+  );
+};
+
 const ModeRow = ({
   icon,
   label,
   mode,
+  onToggle,
 }: {
   icon: LucideIcon;
   label: string;
   mode: ModeState;
-}): ReactElement => (
-  <ListRow
-    icon={icon}
-    label={label}
-    trailing={
-      <Switch isSelected={mode.enabled} onSelectedChange={mode.toggle} accessibilityLabel={label} />
-    }
-  />
-);
+  onToggle: () => void;
+}): ReactElement => {
+  const { accentText } = useBubbleAccent();
+  return (
+    <ListRow
+      icon={icon}
+      label={label}
+      description={mode.accessible ? undefined : 'Not available'}
+      onPress={mode.accessible ? onToggle : undefined}
+      trailing={mode.enabled ? <Check size={20} color={accentText} /> : undefined}
+    />
+  );
+};
 
 const PlusSheet = ({
   isOpen,
   onOpenChange,
   selection,
-  onOpenAgents,
-  onOpenContext,
+  collectionCount,
+  onOpen,
+  onAttach,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   selection: XyneAISelection;
-  onOpenAgents: () => void;
-  onOpenContext: () => void;
+  collectionCount: number;
+  onOpen: (sheet: Sheet) => void;
+  onAttach: (picker: AttachmentPicker) => void;
 }): ReactElement => {
   const { webSearch, deepResearch } = selection.modes;
+  const { afterDismiss, onDismiss } = useAfterDismiss();
+  const attach = (picker: AttachmentPicker) => (): void => {
+    afterDismiss(() => onAttach(picker));
+    onOpenChange(false);
+  };
+  // Like ChatGPT and Claude: the sheet closes so the mode's tag shows in the composer it covers.
+  const toggleAndClose = (mode: ModeState) => (): void => {
+    mode.toggle();
+    onOpenChange(false);
+  };
 
   return (
-    <PickerSheet isOpen={isOpen} onOpenChange={onOpenChange}>
-      <SectionCard>
-        {webSearch.accessible ? <ModeRow icon={Globe} label='Web search' mode={webSearch} /> : null}
-        {webSearch.accessible && deepResearch.accessible ? <ListRowDivider /> : null}
-        {deepResearch.accessible ? (
-          <ModeRow icon={Target} label='Deep search' mode={deepResearch} />
-        ) : null}
-        {webSearch.accessible || deepResearch.accessible ? <ListRowDivider inset={0} /> : null}
+    <PickerSheet
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      onDismiss={onDismiss}
+      title='Add to Chat'
+    >
+      <View className='flex-row gap-3'>
+        <AttachTile icon={Camera} label='Camera' onPress={attach(pickFromCamera)} />
+        <AttachTile
+          icon={ImageIcon}
+          label='Photos'
+          onPress={attach(pickFromGallery)}
+        />
+        <AttachTile icon={FileText} label='Files' onPress={attach(pickFromFiles)} />
+      </View>
+      <SheetCard>
+        <ModeRow
+          icon={Globe}
+          label='Web search'
+          mode={webSearch}
+          onToggle={toggleAndClose(webSearch)}
+        />
+        <ListRowDivider />
+        <ModeRow
+          icon={Target}
+          label='Deep search'
+          mode={deepResearch}
+          onToggle={toggleAndClose(deepResearch)}
+        />
+      </SheetCard>
+      <SheetCard>
+        <ListRow
+          icon={BookOpen}
+          label='Collections'
+          value={collectionCount > 0 ? String(collectionCount) : undefined}
+          showChevron
+          onPress={(): void => onOpen('collections')}
+        />
+        <ListRowDivider />
         <ListRow
           icon={Bot}
           label='Agent'
           value={selection.agent?.name ?? 'Ask AI'}
           showChevron
-          onPress={onOpenAgents}
+          onPress={(): void => onOpen('agent')}
         />
-        <ListRowDivider inset={0} />
-        <ListRow icon={AtSign} label='Add context' showChevron onPress={onOpenContext} />
-      </SectionCard>
+        <ListRowDivider />
+        <ListRow
+          icon={SquareSlash}
+          label='Slash commands'
+          showChevron
+          onPress={(): void => onOpen('commands')}
+        />
+        <ListRowDivider />
+        <ListRow
+          icon={AtSign}
+          label='Add context'
+          showChevron
+          onPress={(): void => onOpen('context')}
+        />
+      </SheetCard>
     </PickerSheet>
   );
 };
 
-type Sheet = 'plus' | 'agent' | 'model' | 'context';
+type Sheet = 'plus' | 'agent' | 'model' | 'context' | 'collections' | 'commands';
 
-export const XyneAIComposer = ({
-  value,
-  onChangeText,
-  isStreaming,
-  onSubmit,
-  onStop,
-  selection,
-  onSelectAgent,
-  context,
-  onContextChange,
-}: {
-  value: string;
-  onChangeText: (text: string) => void;
-  isStreaming: boolean;
-  onSubmit: () => void;
-  onStop: () => void;
+const toAttachedFile = async ({
+  localUri,
+  originalFilename,
+  mimetype,
+}: ComposerAttachment): Promise<AttachedFile> => ({
+  filename: originalFilename,
+  mimeType: mimetype,
+  data: await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 }),
+});
+
+interface ComposerSheetsProps {
+  sheet: Sheet | undefined;
+  setSheet: Dispatch<SetStateAction<Sheet | undefined>>;
+  openSheet: (sheet: Sheet) => void;
   selection: XyneAISelection;
   onSelectAgent: (slug: string | undefined) => void;
   context: AttachedContextItem[];
   onContextChange: (context: AttachedContextItem[]) => void;
-}): ReactElement => {
-  const [sheet, setSheet] = useState<Sheet>();
-  const placeholder = useRef(pickPlaceholder()).current;
-  const textColor = useCSSVariable('--color-conversation-input-text') as string;
-  const placeholderColor = useCSSVariable('--color-conversation-input-placeholder') as string;
-  const iconColor = useCSSVariable('--color-conversation-input-toolbar-icon') as string;
-  const selectedModel = selection.models.find(({ id }) => id === selection.model);
-  const openSheet = (name: Sheet): void => {
-    Keyboard.dismiss();
-    setSheet(name);
-  };
+  onAttach: (picker: AttachmentPicker) => void;
+  onCommand: (name: string) => void;
+}
+
+// Memoised so typing, which re-renders the composer on every key, never re-renders the sheets.
+const ComposerSheets = memo(function ComposerSheets({
+  sheet,
+  setSheet,
+  openSheet,
+  selection,
+  onSelectAgent,
+  context,
+  onContextChange,
+  onAttach,
+  onCommand,
+}: ComposerSheetsProps): ReactElement {
+  // A sheet only ever closes itself: the "+" sheet reports closing after the next sheet has opened.
+  const close = (name: Sheet): void =>
+    setSheet(current => (current === name ? undefined : current));
   const bindSheet = (name: Sheet): { isOpen: boolean; onOpenChange: (open: boolean) => void } => ({
     isOpen: sheet === name,
-    onOpenChange: (open): void => setSheet(open ? name : undefined),
+    onOpenChange: (open): void => (open ? setSheet(name) : close(name)),
   });
 
-  // A fresh "@" opens the context picker instead of being typed.
-  const handleChangeText = (text: string): void => {
-    const typedAt = text.length === value.length + 1 && text.endsWith('@') && /(^|\s)$/.test(value);
-    if (typedAt) openSheet('context');
-    else onChangeText(text);
-  };
-
   return (
-    <View className='overflow-hidden rounded-[20px] border border-border bg-conversation-input-bg'>
-      {context.length > 0 ? (
-        <View className='flex-row flex-wrap gap-1.5 px-3 pt-3'>
-          {context.map(item => (
-            <Chip
-              key={`${item.type}:${item.id}`}
-              label={item.title}
-              iconColor={iconColor}
-              onPress={(): void => onContextChange(context.filter(other => other !== item))}
-            />
-          ))}
-        </View>
-      ) : null}
-      <TextInput
-        multiline
-        value={value}
-        onChangeText={handleChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={placeholderColor}
-        className='px-4 pb-1 pt-3.5'
-        style={{
-          color: textColor,
-          fontSize: INPUT_FONT_SIZE,
-          lineHeight: INPUT_LINE_HEIGHT,
-          maxHeight: INPUT_MAX_HEIGHT,
-        }}
-      />
-      <View className='flex-row items-end gap-1.5 px-2 pb-2'>
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Add to message'
-          onPress={(): void => {
-            void haptics.buttonTap();
-            openSheet('plus');
-          }}
-          className='size-8 items-center justify-center rounded-full active:opacity-60'
-        >
-          <Plus size={20} color={iconColor} />
-        </Pressable>
-        <ComposerChips selection={selection} onSelectAgent={onSelectAgent} />
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Choose model'
-          onPress={(): void => {
-            void haptics.buttonTap();
-            openSheet('model');
-          }}
-          className='h-8 shrink-0 justify-center rounded-full px-2 active:opacity-60'
-        >
-          <Text className='text-[14px] text-conversation-input-text'>
-            {modelPillLabel(selectedModel)}
-          </Text>
-        </Pressable>
-        <SendButton
-          isStreaming={isStreaming}
-          canSend={value.trim() !== ''}
-          onPress={(): void => {
-            void haptics.buttonTap();
-            if (isStreaming) onStop();
-            else onSubmit();
-          }}
-        />
-      </View>
+    <>
       <PlusSheet
         {...bindSheet('plus')}
         selection={selection}
-        onOpenAgents={(): void => openSheet('agent')}
-        onOpenContext={(): void => openSheet('context')}
+        collectionCount={context.filter(isCollectionPick).length}
+        onOpen={openSheet}
+        onAttach={onAttach}
+      />
+      <CollectionsSheet
+        isOpen={sheet === 'collections'}
+        onClose={(): void => close('collections')}
+        selected={context}
+        onApply={onContextChange}
+      />
+      <SlashCommandSheet
+        {...bindSheet('commands')}
+        onSelect={(name): void => {
+          close('commands');
+          onCommand(name);
+        }}
       />
       <ContextPickerSheet
         isOpen={sheet === 'context'}
-        onClose={(): void => setSheet(undefined)}
+        onClose={(): void => close('context')}
         selected={context}
         onApply={onContextChange}
       />
@@ -333,7 +446,7 @@ export const XyneAIComposer = ({
         agents={selection.agents}
         selected={selection.agentSlug}
         onSelect={(slug): void => {
-          setSheet(undefined);
+          close('agent');
           onSelectAgent(slug);
         }}
       />
@@ -344,14 +457,251 @@ export const XyneAIComposer = ({
         defaultModelName={selection.defaultModelName}
         thinkingLevel={selection.thinkingLevel}
         onSelectModel={(model): void => {
-          setSheet(undefined);
+          close('model');
           selection.selectModel(model);
         }}
         onSelectThinkingLevel={(level): void => {
-          setSheet(undefined);
+          close('model');
           selection.selectThinkingLevel(level);
         }}
+      />
+    </>
+  );
+});
+
+export interface XyneAIComposerHandle {
+  setText: (text: string) => void;
+}
+
+// The composer owns what is being written, so typing re-renders only the composer.
+export const XyneAIComposer = ({
+  ref,
+  isStreaming,
+  onSubmit,
+  onStop,
+  selection,
+  onSelectAgent,
+  onSheetChange,
+  channel,
+  thread,
+  editing,
+}: {
+  ref: Ref<XyneAIComposerHandle>;
+  isStreaming: boolean;
+  onSubmit: (text: string, context: AttachedContextItem[], attachments: AttachedFile[]) => void;
+  onStop: () => void;
+  selection: XyneAISelection;
+  onSelectAgent: (slug: string | undefined) => void;
+  onSheetChange: (isOpen: boolean) => void;
+  /** The channel this chat is scoped to, removable like any other tag. */
+  channel: { label: string; onRemove: () => void } | undefined;
+  /** The message thread this chat is about, removable like any other tag. */
+  thread: { label: string; senderId: string | undefined; onRemove: () => void } | undefined;
+  /** Set while a sent message is being rewritten; removing it cancels the edit. */
+  editing: { onCancel: () => void } | undefined;
+}): ReactElement => {
+  const [text, setText] = useState('');
+  const [context, setContext] = useState<AttachedContextItem[]>([]);
+  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const [sheet, setSheet] = useState<Sheet>();
+  const { theme } = useUniwind();
+  const surfaceColor = useCSSVariable('--color-conversation-input-bg') as string;
+  const textColor = useCSSVariable('--color-conversation-input-text') as string;
+  const iconColor = useCSSVariable('--color-conversation-input-toolbar-icon') as string;
+
+  useEffect(() => onSheetChange(sheet !== undefined), [sheet, onSheetChange]);
+
+  const openSheet = useCallback((name: Sheet): void => {
+    Keyboard.dismiss();
+    setSheet(name);
+  }, []);
+  useImperativeHandle(ref, () => ({ setText }), []);
+  const onCommand = useCallback(
+    (name: string): void => setText(current => withCommand(current, name)),
+    [],
+  );
+  const attach = useCallback(
+    (pickFiles: AttachmentPicker): void => {
+      const remainingSlots = MAX_FILES - attachments.length;
+      const pick = async (): Promise<AttachedFile[]> => {
+        if (remainingSlots <= 0) throw new Error(`Maximum ${MAX_FILES} attachments allowed.`);
+        const picked = await pickFiles([], Math.min(remainingSlots, MAX_COMPOSER_ATTACHMENT_COUNT));
+        const error = fileLimitError(attachments, picked);
+        if (error) throw new Error(error);
+        return Promise.all(picked.map(toAttachedFile));
+      };
+      pick().then(
+        added => setAttachments(current => [...current, ...added]),
+        (error: unknown) =>
+          Alert.alert('Could not attach files', error instanceof Error ? error.message : undefined),
+      );
+    },
+    [attachments],
+  );
+
+  const { agent, modes } = selection;
+  const hasTags =
+    agent !== undefined ||
+    channel !== undefined ||
+    thread !== undefined ||
+    editing !== undefined ||
+    modes.webSearch.enabled ||
+    modes.deepResearch.enabled ||
+    context.length + attachments.length > 0;
+
+  const submit = (): void => {
+    if (text.trim() === '') return;
+    onSubmit(text, context, attachments);
+    setText('');
+    setContext([]);
+    setAttachments([]);
+  };
+
+  // A fresh "@", or a "/" starting the message, opens its picker instead of being typed.
+  const handleChangeText = (next: string): void => {
+    const typedAt = next.length === text.length + 1 && next.endsWith('@') && /(^|\s)$/.test(text);
+    if (typedAt) openSheet('context');
+    else if (text === '' && next === '/') openSheet('commands');
+    else setText(next);
+  };
+
+  const plusButton = (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityLabel='Add to message'
+      onPress={(): void => {
+        void haptics.buttonTap();
+        openSheet('plus');
+      }}
+      className='items-center justify-center rounded-full bg-conversation-input-pill-bg active:opacity-60'
+      style={{ width: TOOLBAR_BUTTON_SIZE, height: TOOLBAR_BUTTON_SIZE }}
+    >
+      <Plus size={22} color={iconColor} />
+    </Pressable>
+  );
+  const sendButton = (
+    <SendButton
+      isStreaming={isStreaming}
+      canSend={text.trim() !== ''}
+      onPress={(): void => {
+        void haptics.buttonTap();
+        if (isStreaming) onStop();
+        else submit();
+      }}
+    />
+  );
+
+  return (
+    <View
+      className='overflow-hidden border-border'
+      style={{ borderRadius: COMPOSER_RADIUS, borderWidth: StyleSheet.hairlineWidth }}
+    >
+      <GlassSurface
+        fallbackColor={surfaceColor}
+        colorScheme={theme === 'dark' ? 'dark' : 'light'}
+        style={[StyleSheet.absoluteFill, { borderRadius: COMPOSER_RADIUS }]}
+      />
+      {hasTags ? (
+        <ChipRow className='grow-0 px-3 pt-3'>
+          {editing ? (
+            <Chip
+              label='Editing message'
+              iconColor={iconColor}
+              leading={<Pencil size={13} color={iconColor} />}
+              onPress={editing.onCancel}
+            />
+          ) : null}
+          {channel ? (
+            <Chip
+              label={channel.label}
+              iconColor={iconColor}
+              leading={<Hash size={13} color={iconColor} />}
+              onPress={channel.onRemove}
+            />
+          ) : null}
+          {thread ? (
+            <Chip
+              label={thread.label}
+              iconColor={iconColor}
+              leading={
+                thread.senderId ? (
+                  <Avatar userIds={[thread.senderId]} size={16} />
+                ) : (
+                  <MessageCircleMore size={13} color={iconColor} />
+                )
+              }
+              onPress={thread.onRemove}
+            />
+          ) : null}
+          {agent ? (
+            <Chip
+              label={agent.name}
+              iconColor={iconColor}
+              leading={<AgentDot color={agent.color} />}
+              onPress={(): void => onSelectAgent(undefined)}
+            />
+          ) : null}
+          <ModeChip icon={Globe} label='Web search' mode={modes.webSearch} />
+          <ModeChip icon={Target} label='Deep search' mode={modes.deepResearch} />
+          {context.map(item => {
+            const Icon = ICONS[item.type];
+            return (
+              <Chip
+                key={`${item.type}:${item.id}`}
+                label={item.title}
+                iconColor={iconColor}
+                leading={Icon ? <Icon size={13} color={iconColor} /> : undefined}
+                onPress={(): void => setContext(current => current.filter(other => other !== item))}
+              />
+            );
+          })}
+          {attachments.map((file, index) => (
+            <Chip
+              key={`${index}:${file.filename}`}
+              label={file.filename}
+              iconColor={iconColor}
+              leading={<Paperclip size={13} color={iconColor} />}
+              onPress={(): void =>
+                setAttachments(current => current.filter(other => other !== file))
+              }
+            />
+          ))}
+        </ChipRow>
+      ) : null}
+      <TextInput
+        multiline
+        value={text}
+        onChangeText={handleChangeText}
+        className='px-4 pb-1 pt-3'
+        style={[styles.input, { color: textColor }]}
+      />
+      <View className='flex-row items-center gap-2 px-2 pb-2 pt-1'>
+        {plusButton}
+        <ModelPill selection={selection} onPress={(): void => openSheet('model')} />
+        <View className='flex-1' />
+        {sendButton}
+      </View>
+      <ComposerSheets
+        sheet={sheet}
+        setSheet={setSheet}
+        openSheet={openSheet}
+        selection={selection}
+        onSelectAgent={onSelectAgent}
+        context={context}
+        onContextChange={setContext}
+        onAttach={attach}
+        onCommand={onCommand}
       />
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  input: {
+    fontSize: INPUT_FONT_SIZE,
+    maxHeight: INPUT_MAX_HEIGHT,
+    textAlignVertical: 'top',
+    // On iOS a TextInput lineHeight pins the text to the bottom of each line.
+    ...(Platform.OS === 'android' && { lineHeight: INPUT_LINE_HEIGHT }),
+  },
+});

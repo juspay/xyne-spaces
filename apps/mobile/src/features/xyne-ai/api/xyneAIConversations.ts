@@ -5,13 +5,11 @@ import type { AttachedContextItem } from './xyneAIRequest';
 import type { Rating } from './xyneAIStream';
 
 export interface ConversationSummary {
-  /** Unique per list row; a chat that switched agents is one row. */
   rowId: string;
   conversationId: string;
   title: string;
   pinned?: boolean;
   lastMessageAt: string;
-  /** The agent to continue the conversation with. */
   agentSlug: string;
 }
 
@@ -20,15 +18,31 @@ export interface ConversationPage {
   nextCursor?: string | null;
 }
 
+export interface StoredAttachment {
+  id: string;
+  originalFilename: string;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export type ConversationRef = Pick<ConversationSummary, 'conversationId' | 'agentSlug'>;
+
 export interface StoredMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  /** The message this one answers or follows; absent on conversations stored before branching. */
+  parentId?: string | null;
   parts?: unknown;
   followUpSuggestions?: string[];
   durationMs?: number;
   attachedContext?: AttachedContextItem[];
+  attachments?: StoredAttachment[];
+  /** Decoded defensively: the payload is not versioned. */
+  pendingActions?: unknown[];
 }
 
 export interface StoredConversation {
@@ -39,10 +53,10 @@ export interface StoredConversation {
 
 export type ConversationPatch = { title: string } | { pinned: boolean };
 
-const conversationPath = (conversation: ConversationSummary): string =>
+const conversationPath = (conversation: ConversationRef): string =>
   `/xyne-ai/v2/conversations/${encodeURIComponent(conversation.conversationId)}`;
 
-const agentQuery = (conversation: ConversationSummary): string =>
+const agentQuery = (conversation: ConversationRef): string =>
   `agentSlug=${encodeURIComponent(conversation.agentSlug)}`;
 
 export const fetchConversations = (cursor: string | undefined): Promise<ConversationPage> =>
@@ -52,7 +66,7 @@ export const fetchConversations = (cursor: string | undefined): Promise<Conversa
 
 // scope=conversation returns every agent's turns, for a chat that switched agents.
 export const fetchConversationMessages = (
-  conversation: ConversationSummary,
+  conversation: ConversationRef,
 ): Promise<StoredConversation> =>
   apiGet(
     `${conversationPath(conversation)}/messages?${agentQuery(conversation)}&scope=conversation`,

@@ -1,5 +1,5 @@
 import { RequestAbortedError } from './request-errors';
-import { createSseParser, type SseMessage } from './sseParser';
+import { createSseParser } from './sseParser';
 
 type RequestHeaders = Record<string, string>;
 
@@ -15,21 +15,13 @@ export class EventStreamHttpError extends Error {
   }
 }
 
-export class EventStreamNetworkError extends Error {
-  /** React Native reports the native failure reason in place of the response text. */
-  constructor(reason: string) {
-    super(reason ? `Event stream network error: ${reason}` : 'Event stream network error');
-    this.name = 'EventStreamNetworkError';
-  }
-}
-
-export interface EventStreamOptions {
-  method?: 'GET' | 'POST';
+interface EventStreamOptions {
   headers?: RequestHeaders;
+  /** Sent as a POST; a request without a body is a GET. */
   body?: string;
   signal?: AbortSignal | undefined;
   prepareHeaders: (headers: RequestHeaders) => Promise<RequestHeaders>;
-  onMessage: (message: SseMessage) => void;
+  onMessage: (data: string, event: string) => void;
 }
 
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
@@ -40,7 +32,7 @@ const isSuccess = (status: number): boolean => status >= 200 && status < 300;
  * Resolves when the server closes the stream; there is no timeout.
  */
 export async function openEventStream(url: string, options: EventStreamOptions): Promise<void> {
-  const { method = 'GET', body = null, signal, prepareHeaders, onMessage } = options;
+  const { body, signal, prepareHeaders, onMessage } = options;
 
   const headers = await prepareHeaders({ ...options.headers, Accept: 'text/event-stream' });
   if (signal?.aborted) throw new RequestAbortedError();
@@ -84,11 +76,19 @@ export async function openEventStream(url: string, options: EventStreamOptions):
         isSuccess(xhr.status) ? undefined : new EventStreamHttpError(xhr.status, xhr.responseText),
       );
     };
-    xhr.onerror = (): void => settle(new EventStreamNetworkError(xhr.responseText));
+    // React Native reports the native failure reason in place of the response text.
+    xhr.onerror = (): void =>
+      settle(
+        new Error(
+          xhr.responseText
+            ? `Event stream network error: ${xhr.responseText}`
+            : 'Event stream network error',
+        ),
+      );
 
-    xhr.open(method, url);
+    xhr.open(body === undefined ? 'GET' : 'POST', url);
     Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
     signal?.addEventListener('abort', onAbort, { once: true });
-    xhr.send(body);
+    xhr.send(body ?? null);
   });
 }

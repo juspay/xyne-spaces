@@ -3,7 +3,7 @@ import { isShownText, type TextPart } from './assistantTurn';
 
 export type StepPart = Exclude<TurnPart, { type: 'text' }>;
 
-export type TurnSegment =
+type TurnSegment =
   { kind: 'text'; part: TextPart } | { kind: 'steps'; id: string; parts: StepPart[] };
 
 export function groupTurnParts(
@@ -70,7 +70,7 @@ function nameList(names: string[]): string {
     : `${first}, ${second} and ${names.length - 2} more`;
 }
 
-export interface StepSummary {
+interface StepSummary {
   label: string;
   failed: number;
 }
@@ -156,3 +156,14 @@ export function readableResult(result: string): string {
     return result;
   }
 }
+
+const DETAIL_MAX_CHARS = 4000;
+
+export function clipDetail(text: string): string {
+  return text.length > DETAIL_MAX_CHARS
+    ? `${text.slice(0, DETAIL_MAX_CHARS)}\n… ${text.length - DETAIL_MAX_CHARS} more characters`
+    : text;
+}
+
+export const formatArgs = (args: Record<string, unknown>): string =>
+  clipDetail(JSON.stringify(args, null, 2));

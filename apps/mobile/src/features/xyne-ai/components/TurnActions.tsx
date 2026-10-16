@@ -3,13 +3,13 @@ import { Pressable, Text, View } from 'react-native';
 import { BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
 import { Check, Copy, RefreshCw, ThumbsDown, ThumbsUp } from 'lucide-react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import { haptics } from '@/src/utils/haptics';
 
 import { rateXyneAIMessage, type Rating } from '../api/xyneAIStream';
+import { useSheetBottomPadding } from './PickerSheet';
 
 const MAX_COMMENT_LENGTH = 500;
 const COPIED_MS = 1500;
@@ -24,13 +24,13 @@ const RatingCommentSheet = ({
   onSubmit: (comment: string) => void;
 }): ReactElement => {
   const [comment, setComment] = useState('');
-  const insets = useSafeAreaInsets();
+  const paddingBottom = useSheetBottomPadding();
   const placeholderColor = useCSSVariable('--color-secondary-foreground') as string;
   const foreground = useCSSVariable('--color-foreground') as string;
 
   return (
     <AppBottomSheet isOpen={isOpen} onOpenChange={onOpenChange} mode='dynamic'>
-      <BottomSheetView style={{ paddingBottom: insets.bottom + 16 }}>
+      <BottomSheetView style={{ paddingBottom }}>
         <View className='gap-3 px-4 pt-1'>
           <Text className='text-[15px] font-semibold text-foreground'>What went wrong?</Text>
           <BottomSheetTextInput
