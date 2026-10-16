@@ -30,6 +30,12 @@ import { DEFAULT_CRON_TIMEZONE } from '@/workflowsV2/constants';
 
 const CONCURRENCY = config.workflows.workerConcurrency;
 
+const REPLICATION_SETTLE_MS = 300;
+
+const REPLICATION_CATCHUP_MS = [600, 1000] as const;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 const scheduler = new BullSchedulerAdapter();
 
 class WorkflowsWorker {
@@ -71,14 +77,28 @@ class WorkflowsWorker {
    * the SDK carries the tenant on the resource.
    */
   private async runExecution(executionId: string): Promise<void> {
-    const workspaceId = await workspaceForExecution(executionId);
+    await wait(REPLICATION_SETTLE_MS);
+    let workspaceId = await workspaceForExecution(executionId);
+    let waited = REPLICATION_SETTLE_MS;
+    for (const ms of REPLICATION_CATCHUP_MS) {
+      if (workspaceId) break;
+      await wait(ms);
+      waited += ms;
+      workspaceId = await workspaceForExecution(executionId);
+    }
+
     if (!workspaceId) {
-      // Not ours, or gone. Deleting an execution mid-flight is legitimate, so this is
-      // informational rather than an error — and returning drops the job cleanly.
       logger.info(
-        `[WORKFLOWS-WORKER] execution ${executionId} not found or not an SDK run — skipping`,
+        `[WORKFLOWS-WORKER] execution ${executionId} not found or not an SDK run after ` +
+          `${String(waited)}ms — skipping`,
       );
       return;
+    }
+
+    if (waited > REPLICATION_SETTLE_MS) {
+      logger.info(
+        `[WORKFLOWS-WORKER] execution ${executionId} appeared after ${String(waited)}ms — replication lag`,
+      );
     }
 
     const result = await runExecutionUnderServiceActor(executionId, workspaceId);
