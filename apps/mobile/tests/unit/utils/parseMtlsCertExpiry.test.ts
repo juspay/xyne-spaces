@@ -35,31 +35,30 @@ describe('evaluateMtlsExpiryWarning', () => {
 
   it('is none when more than 2 days remain', () => {
     const now = notAfterMs - MTLS_EXPIRY_WARN_WINDOW_MS - 60_000;
-    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now, null), { kind: 'none' });
+    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now), { kind: 'none' });
   });
 
-  it('warns once inside the 2-day window', () => {
+  it('warns inside the 2-day window', () => {
     const now = notAfterMs - 36 * 60 * 60 * 1000; // 1.5 days left
-    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now, null), {
+    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now), {
       kind: 'warn',
       notAfterIso: notAfter,
       daysLeft: 2,
-      alreadyWarned: false,
     });
   });
 
-  it('marks alreadyWarned when warnedFor matches', () => {
+  it('reports 1 day left when under 24 hours remain', () => {
     const now = notAfterMs - 12 * 60 * 60 * 1000;
-    const state = evaluateMtlsExpiryWarning(notAfter, now, notAfter);
-    assert.equal(state.kind, 'warn');
-    if (state.kind === 'warn') {
-      assert.equal(state.alreadyWarned, true);
-      assert.equal(state.daysLeft, 1);
-    }
+    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now), {
+      kind: 'warn',
+      notAfterIso: notAfter,
+      daysLeft: 1,
+    });
   });
 
   it('is none when already expired', () => {
     const now = notAfterMs + 1000;
-    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now, null), { kind: 'none' });
+    assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now), { kind: 'none' });
   });
 });
+

@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react';
 
+import { skipsDeviceEnrollmentGate } from '@/src/config';
 import { useEnrollment } from '@/src/contexts/EnrollmentContext';
 import { useMtlsExpiryWarning } from '@/src/hooks/useMtlsExpiryWarning';
 
@@ -11,17 +12,17 @@ import { MtlsExpiryWarningBottomSheet } from './MtlsExpiryWarningBottomSheet';
  */
 export function MtlsExpiryWarningGate(): ReactElement | null {
   const { isEnrolled, isEnrollmentLoading } = useEnrollment();
-  const enabled = isEnrolled === true && !isEnrollmentLoading;
-  const { visible, content, dismiss } = useMtlsExpiryWarning(enabled);
+  const enabled =
+    !skipsDeviceEnrollmentGate() && isEnrolled === true && !isEnrollmentLoading;
+  const { visible, daysLeft, notAfterIso, dismiss } = useMtlsExpiryWarning(enabled);
 
-  if (!content) return null;
+  if (daysLeft == null || notAfterIso == null) return null;
 
   return (
     <MtlsExpiryWarningBottomSheet
       open={visible}
-      title={content.title}
-      message={content.message}
-      reEnrollGuide={content.reEnrollGuide}
+      daysLeft={daysLeft}
+      notAfterIso={notAfterIso}
       onDismiss={dismiss}
     />
   );

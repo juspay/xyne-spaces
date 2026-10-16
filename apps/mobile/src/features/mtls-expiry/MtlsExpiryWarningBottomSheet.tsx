@@ -9,13 +9,25 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
+const TITLE = 'Certificate expiring soon';
+const RE_ENROLL_GUIDE = 'To re-enroll: scan the enrollment QR from Xyne Spaces on your laptop.';
+
 export type MtlsExpiryWarningBottomSheetProps = {
   open: boolean;
-  title: string;
-  message: string;
-  reEnrollGuide: string;
+  daysLeft: number;
+  notAfterIso: string;
   onDismiss: () => void;
 };
+
+function buildMessage(notAfterIso: string, daysLeft: number): string {
+  const expiresOn = new Date(notAfterIso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  const dayLabel = daysLeft === 1 ? '1 day' : `${daysLeft} days`;
+  return `Your device certificate expires in ${dayLabel} (${expiresOn}).`;
+}
 
 /**
  * Same Gorhom bottom-sheet chrome as the Airborne / app-update prompt
@@ -23,9 +35,8 @@ export type MtlsExpiryWarningBottomSheetProps = {
  */
 export function MtlsExpiryWarningBottomSheet({
   open,
-  title,
-  message,
-  reEnrollGuide,
+  daysLeft,
+  notAfterIso,
   onDismiss,
 }: MtlsExpiryWarningBottomSheetProps): ReactElement {
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -33,6 +44,7 @@ export function MtlsExpiryWarningBottomSheet({
   const insets = useSafeAreaInsets();
   const sheetBackground = useCSSVariable('--color-card') as string;
   const handleColor = useCSSVariable('--color-muted') as string;
+  const message = buildMessage(notAfterIso, daysLeft);
 
   useEffect(() => {
     if (open && !isPresentedRef.current) {
@@ -53,6 +65,10 @@ export function MtlsExpiryWarningBottomSheet({
     isPresentedRef.current = false;
     onDismiss();
   }, [onDismiss]);
+
+  const closeSheet = useCallback(() => {
+    sheetRef.current?.dismiss();
+  }, []);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -81,17 +97,17 @@ export function MtlsExpiryWarningBottomSheet({
     >
       <BottomSheetView style={{ paddingBottom: Math.max(insets.bottom, 12) + 4 }}>
         <View className='px-6 pb-1 pt-0.5'>
-          <Text className='text-xl font-semibold tracking-tight text-foreground'>{title}</Text>
+          <Text className='text-xl font-semibold tracking-tight text-foreground'>{TITLE}</Text>
 
           <Text className='mt-2.5 text-[15px] leading-6 text-secondary-foreground'>{message}</Text>
 
           <Text className='mb-7 mt-3 text-[15px] leading-6 text-foreground'>
             How to re-enroll{'\n'}
-            {reEnrollGuide}
+            {RE_ENROLL_GUIDE}
           </Text>
 
           <Pressable
-            onPress={onDismiss}
+            onPress={closeSheet}
             accessibilityRole='button'
             accessibilityLabel='Got it'
             className='w-full items-center justify-center py-3 active:opacity-60'

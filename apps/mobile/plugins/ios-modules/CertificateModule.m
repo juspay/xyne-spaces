@@ -26,9 +26,6 @@ RCT_EXTERN_METHOD(storeCertificate:(NSString *)certificatePem
 RCT_EXTERN_METHOD(getCertificate:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_METHOD(getCertificateNotAfter:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject)
-
 RCT_EXTERN_METHOD(clearCertificates:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 

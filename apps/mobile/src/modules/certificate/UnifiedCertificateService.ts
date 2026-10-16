@@ -5,7 +5,6 @@
 
 import { Platform } from 'react-native';
 import { invalidateNativeMtlsSession } from '../../services/http/native-request-registry';
-import { cacheNotAfterFromPem, clearMtlsCertExpiryCache } from '../../services/mtlsCertExpiryStore';
 import NativeCertificateModule from './NativeCertificateModule';
 import { CSRResult, DeviceInfo, EnrollmentResponse } from './types';
 
@@ -65,9 +64,6 @@ export class UnifiedCertificateService {
   ): Promise<boolean> {
     try {
       const stored = await NativeCertificateModule.storeCertificate(certificatePem, caChainPem);
-      if (stored) {
-        cacheNotAfterFromPem(certificatePem);
-      }
       await invalidateMtlsSessionSafely();
       return stored;
     } catch (error) {
@@ -85,19 +81,9 @@ export class UnifiedCertificateService {
     }
   }
 
-  static async getCertificateNotAfter(): Promise<string | null> {
-    try {
-      return await NativeCertificateModule.getCertificateNotAfter();
-    } catch (error) {
-      console.error('[UnifiedCertificateService] Failed to get certificate expiry:', error);
-      return null;
-    }
-  }
-
   static async clearCertificates(): Promise<void> {
     try {
       await NativeCertificateModule.clearCertificates();
-      clearMtlsCertExpiryCache();
       await invalidateMtlsSessionSafely();
     } catch (error) {
       console.error('[UnifiedCertificateService] Failed to clear certificates:', error);

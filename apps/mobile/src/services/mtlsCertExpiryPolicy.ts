@@ -7,15 +7,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MtlsExpiryWarningState =
   | { kind: 'none' }
-  | { kind: 'warn'; notAfterIso: string; daysLeft: number; alreadyWarned: boolean };
+  | { kind: 'warn'; notAfterIso: string; daysLeft: number };
 
 /**
- * Pure check against a known `notAfter`. Does not mark as warned.
+ * Pure check against a known `notAfter`. Caller owns the "warn once" MMKV key.
  */
 export function evaluateMtlsExpiryWarning(
   notAfterIso: string,
   nowMs: number,
-  warnedFor: string | null,
 ): MtlsExpiryWarningState {
   const notAfterMs = Date.parse(notAfterIso);
   if (Number.isNaN(notAfterMs)) return { kind: 'none' };
@@ -25,11 +24,9 @@ export function evaluateMtlsExpiryWarning(
   if (msLeft <= 0) return { kind: 'none' };
   if (msLeft > MTLS_EXPIRY_WARN_WINDOW_MS) return { kind: 'none' };
 
-  const daysLeft = Math.max(1, Math.ceil(msLeft / DAY_MS));
   return {
     kind: 'warn',
     notAfterIso,
-    daysLeft,
-    alreadyWarned: warnedFor === notAfterIso,
+    daysLeft: Math.ceil(msLeft / DAY_MS),
   };
 }

@@ -236,15 +236,6 @@ class CertificateModule(
     }
 
     @ReactMethod
-    fun getCertificateNotAfter(promise: Promise) {
-        try {
-            promise.resolve(certificateManager.getCertificateNotAfter())
-        } catch (e: Exception) {
-            promise.reject("GET_CERTIFICATE_NOT_AFTER_ERROR", e.message, e)
-        }
-    }
-
-    @ReactMethod
     fun clearCertificates(promise: Promise) {
         try {
             val success = certificateManager.clearCertificates(reactApplicationContext)

@@ -1,94 +1,86 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { skipsDeviceEnrollmentGate } from '@/src/config';
-import { useEnrollment } from '@/src/contexts/EnrollmentContext';
-import {
-  evaluateCachedMtlsExpiryWarning,
-  resolveCertNotAfter,
-  setExpiryWarnedFor,
-} from '@/src/services/mtlsCertExpiryStore';
+import NativeCertificateModule from '@/src/modules/certificate/NativeCertificateModule';
+import { getString, setString } from '@/src/services/localStorage';
+import { evaluateMtlsExpiryWarning } from '@/src/services/mtlsCertExpiryPolicy';
+import { parseMtlsCertExpiryFromPem } from '@/src/utils/parseMtlsCertExpiry';
 
-export type MtlsExpiryWarningContent = {
-  title: string;
-  message: string;
-  /** Short how-to for re-enrolling (shown with distinct highlight in the sheet). */
-  reEnrollGuide: string;
-  notAfterIso: string;
-};
+/** Persists which cert `notAfter` the user already dismissed the soft warning for. */
+const MTLS_CERT_EXPIRY_WARNED_FOR_KEY = '@lotus_mtls_cert_expiry_warned_for';
 
 export type UseMtlsExpiryWarningResult = {
   visible: boolean;
-  content: MtlsExpiryWarningContent | null;
+  /** Present once a warning has been evaluated; sheet owns title / guide copy. */
+  daysLeft: number | null;
+  notAfterIso: string | null;
   dismiss: () => void;
 };
 
-function buildWarningContent(notAfterIso: string, daysLeft: number): MtlsExpiryWarningContent {
-  const expiresOn = new Date(notAfterIso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-  const dayLabel = daysLeft === 1 ? '1 day' : `${daysLeft} days`;
-
-  return {
-    title: 'Certificate expiring soon',
-    message: `Your device certificate expires in ${dayLabel} (${expiresOn}).`,
-    reEnrollGuide: 'To re-enroll: scan the enrollment QR from Xyne Spaces on your laptop.',
-    notAfterIso,
-  };
+async function resolveCertNotAfterFromPem(): Promise<string | null> {
+  try {
+    const pem = await NativeCertificateModule.getCertificate();
+    if (!pem) return null;
+    return parseMtlsCertExpiryFromPem(pem);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Soft-warn once per certificate when mTLS client cert expires within 2 days.
- * Local date math only (MMKV / PEM / native) — no health-check network call.
+ * Reads `notAfter` from the stored PEM via `getCertificate` — no network call.
  *
- * Returns sheet state; UI is rendered by `MtlsExpiryWarningGate` (same pattern as
- * the Airborne / app-update bottom sheet).
+ * Enablement (enrollment / skip gate) is owned by the caller. Sheet copy lives in
+ * `MtlsExpiryWarningBottomSheet`.
  */
 export function useMtlsExpiryWarning(enabled: boolean = true): UseMtlsExpiryWarningResult {
-  const { isEnrolled } = useEnrollment();
-  const [content, setContent] = useState<MtlsExpiryWarningContent | null>(null);
   const [visible, setVisible] = useState(false);
+  const [daysLeft, setDaysLeft] = useState<number | null>(null);
+  const [notAfterIso, setNotAfterIso] = useState<string | null>(null);
+  const visibleRef = useRef(false);
   const checkingRef = useRef(false);
-  const shownForRef = useRef<string | null>(null);
+  const notAfterRef = useRef<string | null>(null);
 
   const dismiss = useCallback((): void => {
-    if (content?.notAfterIso) {
-      setExpiryWarnedFor(content.notAfterIso);
-      shownForRef.current = content.notAfterIso;
+    if (notAfterRef.current) {
+      setString(MTLS_CERT_EXPIRY_WARNED_FOR_KEY, notAfterRef.current);
     }
+    visibleRef.current = false;
     setVisible(false);
-  }, [content?.notAfterIso]);
+  }, []);
 
   const checkExpiry = useCallback(async (): Promise<void> => {
-    if (!enabled || skipsDeviceEnrollmentGate() || isEnrolled !== true) return;
-    if (checkingRef.current || visible) return;
+    if (!enabled || checkingRef.current || visibleRef.current) return;
 
     checkingRef.current = true;
     try {
-      const notAfter = await resolveCertNotAfter();
+      const notAfter = await resolveCertNotAfterFromPem();
       if (!notAfter) return;
+      if (getString(MTLS_CERT_EXPIRY_WARNED_FOR_KEY) === notAfter) return;
 
-      const state = evaluateCachedMtlsExpiryWarning(notAfter);
-      if (state.kind !== 'warn' || state.alreadyWarned) return;
-      if (shownForRef.current === state.notAfterIso) return;
+      const state = evaluateMtlsExpiryWarning(notAfter, Date.now());
+      if (state.kind !== 'warn') return;
+      if (visibleRef.current) return;
 
-      setContent(buildWarningContent(state.notAfterIso, state.daysLeft));
+      notAfterRef.current = state.notAfterIso;
+      setNotAfterIso(state.notAfterIso);
+      setDaysLeft(state.daysLeft);
+      visibleRef.current = true;
       setVisible(true);
     } catch (error) {
       console.warn('[useMtlsExpiryWarning] Check failed:', error);
     } finally {
       checkingRef.current = false;
     }
-  }, [enabled, isEnrolled, visible]);
+  }, [enabled]);
 
   useEffect(() => {
     void checkExpiry();
   }, [checkExpiry]);
 
   useEffect(() => {
-    if (!enabled || skipsDeviceEnrollmentGate() || isEnrolled !== true) return;
+    if (!enabled) return;
 
     const onAppStateChange = (state: AppStateStatus): void => {
       if (state === 'active') {
@@ -98,7 +90,7 @@ export function useMtlsExpiryWarning(enabled: boolean = true): UseMtlsExpiryWarn
 
     const subscription = AppState.addEventListener('change', onAppStateChange);
     return (): void => subscription.remove();
-  }, [enabled, isEnrolled, checkExpiry]);
+  }, [enabled, checkExpiry]);
 
-  return { visible, content, dismiss };
+  return { visible, daysLeft, notAfterIso, dismiss };
 }
