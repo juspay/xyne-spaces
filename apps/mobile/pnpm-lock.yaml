@@ -85,9 +85,9 @@ patchedDependencies:
   react-native-callkeep@4.3.16:
     hash: 76fe8d8b855a4584dda13e194720845db75d9afa849137dc3b5890aaf6d18832
     path: patches/react-native-callkeep+4.3.16.patch
-  react-native-enriched-markdown@0.7.4:
-    hash: 7262363fb59fc93d3b7c4f28160cd92388197c3b7a4950c9c761d443a4a7f236
-    path: patches/react-native-enriched-markdown+0.7.4.patch
+  react-native-enriched-markdown@1.1.1:
+    hash: 9c5a4d2ccfa2c44e5a5e023305d337cb95516696594638f2a6c0dd4155fdcddf
+    path: patches/react-native-enriched-markdown+1.1.1.patch
   react-native-enriched@0.8.1:
     hash: e5f03b682a459c3c6b57f082bb6187924ad0b54f4cb90fa357cd39501c723d09
     path: patches/react-native-enriched+0.8.1.patch
@@ -340,8 +340,8 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1(patch_hash=e5f03b682a459c3c6b57f082bb6187924ad0b54f4cb90fa357cd39501c723d09)(@floating-ui/dom@1.8.0)(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-enriched-markdown:
-        specifier: ^0.7.4
-        version: 0.7.4(patch_hash=7262363fb59fc93d3b7c4f28160cd92388197c3b7a4950c9c761d443a4a7f236)(@expo/config-plugins@57.0.7(typescript@6.0.3))(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+        specifier: 1.1.1
+        version: 1.1.1(patch_hash=9c5a4d2ccfa2c44e5a5e023305d337cb95516696594638f2a6c0dd4155fdcddf)(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-file-viewer:
         specifier: ^2.1.5
         version: 2.1.5(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
@@ -7728,16 +7728,13 @@ packages:
       react-native-gesture-handler: '>= 2.0.0'
       react-native-reanimated: '>= 2.0.0'
 
-  react-native-enriched-markdown@0.7.4:
-    resolution: {integrity: sha512-NXkqZL4d5vM6wOBwYwx0r1Xyw2h+E8SyobrS8nKnbpjYOyKZj6zIdOq1KJFrlenJNu/tXpbJ8jtQagaA4Wj4cg==}
+  react-native-enriched-markdown@1.1.1:
+    resolution: {integrity: sha512-JvbRIVy75MAoGCv8V6sSscu11/Ian588wfIgH+j64XFpf6gy5sNNkMyG087MH88jNCf3p7fTjgEAGxZMhEqL4A==}
     peerDependencies:
-      '@expo/config-plugins': '>=50.0.0'
       katex: '>=0.16.0'
       react: '*'
       react-native: '*'
     peerDependenciesMeta:
-      '@expo/config-plugins':
-        optional: true
       katex:
         optional: true
 
@@ -18120,12 +18117,11 @@ snapshots:
       react-native-reanimated: 4.5.3(react-native-worklets@0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       use-latest-callback: 0.2.6(react@19.2.3)
 
-  react-native-enriched-markdown@0.7.4(patch_hash=7262363fb59fc93d3b7c4f28160cd92388197c3b7a4950c9c761d443a4a7f236)(@expo/config-plugins@57.0.7(typescript@6.0.3))(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
+  react-native-enriched-markdown@1.1.1(patch_hash=9c5a4d2ccfa2c44e5a5e023305d337cb95516696594638f2a6c0dd4155fdcddf)(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
     dependencies:
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
     optionalDependencies:
-      '@expo/config-plugins': 57.0.7(typescript@6.0.3)
       katex: 0.16.47
 
   react-native-enriched@0.8.1(patch_hash=e5f03b682a459c3c6b57f082bb6187924ad0b54f4cb90fa357cd39501c723d09)(@floating-ui/dom@1.8.0)(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):

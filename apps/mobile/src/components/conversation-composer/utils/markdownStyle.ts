@@ -164,8 +164,12 @@ export const COMPOSER_INLINE_EMOJI_RENDER_SIZE = 20;
 
 /**
  * `latexMath` is off because LaTeX rendering is compiled out of the iOS build
- * (see plugins/withEnrichedMarkdownNoMath.cjs — RaTeX needs dynamic frameworks).
+ * (`enableMath: false` in package.json — RaTeX needs dynamic frameworks).
  * With the flag on, math nodes would parse but render to nothing; off, `$x^2$`
  * stays literal text, matching Android which has no native math renderer either.
  */
-export const COMPOSER_MD4C_FLAGS = { underline: true as const, latexMath: false as const };
+export const COMPOSER_MD4C_FLAGS = {
+  underline: true as const,
+  latexMath: false as const,
+  hardSoftBreaks: true as const,
+};

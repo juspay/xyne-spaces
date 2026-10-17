@@ -1,8 +1,8 @@
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt b/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
-index 8110ba5..8e097a6 100644
+index 7bb48f4..a31923c 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
 +++ b/android/src/main/java/com/swmansion/enriched/markdown/MeasurementStore.kt
-@@ -84,8 +84,14 @@ object MeasurementStore {
+@@ -101,8 +101,14 @@ object MeasurementStore {
      )
    }
  
@@ -19,8 +19,17 @@ index 8110ba5..8e097a6 100644
  
    @Volatile
    private var lastKnownFontScale: Float = 1.0f
-@@ -301,13 +307,13 @@ object MeasurementStore {
-     val spannable = tryRenderMarkdown(markdown, styleMap, context, md4cFlags, allowFontScaling, maxFontSizeMultiplier)
+@@ -393,7 +399,7 @@ object MeasurementStore {
+     val propsHash = computePropsHash(props, allowFontScaling, fontScale, maxFontSizeMultiplier)
+ 
+     // 2. Render & Measure
+-    measurePaint.textSize = fontSize
++    measurePaint.get().textSize = fontSize
+     val imageRequestHeaders = parseImageRequestHeaders(props.getArrayOrNull("imageRequestHeaders"))
+     val spannable =
+       tryRenderMarkdown(
+@@ -408,13 +414,13 @@ object MeasurementStore {
+       )
      spannable?.replaceMathSpansWithPlaceholders(context)
      val textToMeasure = spannable ?: markdown
 -    val (size, _) = measureWithLayout(width, textToMeasure, measurePaint, id)
@@ -35,23 +44,24 @@ index 8110ba5..8e097a6 100644
        } else {
          0f
        }
-@@ -473,9 +479,10 @@ object MeasurementStore {
+@@ -632,10 +638,11 @@ object MeasurementStore {
      widthPx: Int,
      viewId: Int?,
    ): StaticLayout {
 -    measurePaint.textSize = fontSize
 +    val paint = measurePaint.get()
 +    paint.textSize = fontSize
+     prepareImageSpansForMeasurement(text, widthPx)
      return StaticLayout.Builder
 -      .obtain(text, 0, text.length, measurePaint, widthPx)
 +      .obtain(text, 0, text.length, paint, widthPx)
        .setIncludePad(false)
        .setLineSpacing(0f, 1f)
        .apply {
-@@ -502,8 +509,9 @@ object MeasurementStore {
-     return try {
-       val ast = Parser.shared.parseMarkdown(markdown, md4cFlags) ?: return null
+@@ -665,8 +672,9 @@ object MeasurementStore {
+       val ast = Parser.shared.parseMarkdown(markdown, md4cFlags, isGFM) ?: return null
        val style = StyleConfig(styleMap, context, allowFontScaling, maxFontSizeMultiplier)
+       style.imageRequestHeaders = imageRequestHeaders
 -      measureRenderer.configure(style, context)
 -      measureRenderer.renderDocument(ast, null)
 +      val renderer = measureRenderer.get()
@@ -60,7 +70,7 @@ index 8110ba5..8e097a6 100644
      } catch (e: Exception) {
        Log.w(TAG, "Failed to render markdown for measurement, falling back to raw text", e)
        null
-@@ -539,10 +547,11 @@ object MeasurementStore {
+@@ -702,10 +710,11 @@ object MeasurementStore {
      paintParams: PaintParams,
      viewId: Int?,
    ): Long {
@@ -77,19 +87,19 @@ index 8110ba5..8e097a6 100644
  
    private fun measure(
 diff --git a/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt b/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
-index ead3583..adb5b3b 100644
+index f7db4e4..c097e10 100644
 --- a/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
 +++ b/android/src/main/java/com/swmansion/enriched/markdown/renderer/SpanStyleCache.kt
-@@ -3,6 +3,7 @@ package com.swmansion.enriched.markdown.renderer
- import android.graphics.Typeface
+@@ -6,6 +6,7 @@ import com.facebook.react.common.ReactConstants
+ import com.facebook.react.views.text.ReactTypefaceUtils.applyStyles
  import com.swmansion.enriched.markdown.styles.LinkVariantEntry
  import com.swmansion.enriched.markdown.styles.StyleConfig
 +import java.util.concurrent.ConcurrentHashMap
  
  /** Shared style cache for spans to avoid redundant calculations. */
  class SpanStyleCache(
-@@ -96,7 +97,14 @@ class SpanStyleCache(
-   }
+@@ -126,7 +127,14 @@ class SpanStyleCache(
+     }
  
    companion object {
 -    private val typefaceCache = mutableMapOf<String, Typeface>()
@@ -102,13 +112,13 @@ index ead3583..adb5b3b 100644
 +    // backed by putIfAbsent, so concurrent misses stay consistent.
 +    private val typefaceCache = ConcurrentHashMap<String, Typeface>()
  
-     /** Cached typeface for font family + style (BOLD, ITALIC, BOLD_ITALIC) */
-     fun getTypeface(
-diff --git a/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt b/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
-index 49811a6..89ad799 100644
---- a/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
-+++ b/android/src/main/java/com/swmansion/enriched/markdown/views/TableContainerView.kt
-@@ -17,9 +17,11 @@ import android.text.style.MetricAffectingSpan
+     /** Cached monospace typeface preserving bold/italic */
+     fun getMonospaceTypeface(currentStyle: Int): Typeface =
+diff --git a/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt b/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
+index 1100ee4..6fdbefc 100644
+--- a/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
++++ b/android/src/main/java/com/swmansion/enriched/markdown/segments/TableContainerView.kt
+@@ -18,9 +18,11 @@ import android.text.style.MetricAffectingSpan
  import android.view.Gravity
  import android.view.MotionEvent
  import android.view.View
@@ -120,8 +130,8 @@ index 49811a6..89ad799 100644
  import com.swmansion.enriched.markdown.accessibility.AccessibilityLabels
  import com.swmansion.enriched.markdown.parser.MarkdownASTNode
  import com.swmansion.enriched.markdown.parser.MarkdownASTNode.NodeType
-@@ -65,7 +67,7 @@ class TableContainerView(
-   var copyAsMarkdownLabel: String = ""
+@@ -68,7 +70,7 @@ class TableContainerView(
+   var dynamicProps: DynamicBlockProps = DynamicBlockProps()
  
    private val scrollView =
 -    HorizontalScrollView(context).apply {
@@ -129,7 +139,7 @@ index 49811a6..89ad799 100644
        isHorizontalScrollBarEnabled = true
        overScrollMode = View.OVER_SCROLL_NEVER
        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-@@ -470,6 +472,124 @@ class TableContainerView(
+@@ -544,6 +546,124 @@ class TableContainerView(
      }
    }
  
@@ -254,7 +264,7 @@ index 49811a6..89ad799 100644
    private class GridContainerView(
      context: Context,
    ) : FrameLayout(context) {
-@@ -555,10 +675,23 @@ class TableContainerView(
+@@ -629,10 +749,23 @@ class TableContainerView(
        val result = super.onTouchEvent(event)
        when (event.action) {
          MotionEvent.ACTION_DOWN -> cancelJSTouchForLinkTap(event)
@@ -279,3 +289,20 @@ index 49811a6..89ad799 100644
    }
  
    private data class TableCellData(
+diff --git a/cpp/parser/MD4CParser.cpp b/cpp/parser/MD4CParser.cpp
+index c99a52d..a76b3c9 100644
+--- a/cpp/parser/MD4CParser.cpp
++++ b/cpp/parser/MD4CParser.cpp
+@@ -817,9 +817,10 @@ std::shared_ptr<MarkdownASTNode> MD4CParser::parse(const std::string &markdown,
+   impl_->reset(estimatedDepth);
+   impl_->inputText = markdown.c_str();
+ 
+-  unsigned flags = MD_FLAG_NOHTMLSPANS | MD_FLAG_SPOILERS;
++  // Strikethrough and task lists in every flavor, and HTML kept as text, as in 0.7.x.
++  unsigned flags = MD_FLAG_NOHTML | MD_FLAG_STRIKETHROUGH | MD_FLAG_TASKLISTS | MD_FLAG_SPOILERS;
+   if (isGFM) {
+-    flags |= MD_FLAG_TABLES | MD_FLAG_STRIKETHROUGH | MD_FLAG_TASKLISTS;
++    flags |= MD_FLAG_TABLES;
+   }
+   if (md4cFlags.permissiveAutolinks) {
+     flags |= MD_FLAG_PERMISSIVEAUTOLINKS;

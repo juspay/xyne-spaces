@@ -118,7 +118,6 @@ module.exports = ({ config }) => {
       './plugins/withAppStartupTimingsIOS.cjs',
       './plugins/withSceneDelegateIOS.cjs',
       './plugins/withFirebaseModularHeaders.cjs',
-      './plugins/withEnrichedMarkdownNoMath.cjs',
       './plugins/withAndroidAppConfig.cjs',
       './plugins/withAndroidBackupProtection.cjs',
       './plugins/withAndroidReleaseSigning.cjs',

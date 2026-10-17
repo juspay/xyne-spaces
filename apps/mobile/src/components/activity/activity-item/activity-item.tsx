@@ -417,7 +417,7 @@ const ActivityItem = ({ activity }: ActivityItemProps) => {
                   markdown={truncateMarkdown(markdown, 2)}
                   markdownStyle={activityItemMarkdownStyle({ isUnread, theme: markdownTheme })}
                   containerStyle={{ maxWidth: '100%' }}
-                  md4cFlags={{ underline: true, latexMath: false }}
+                  md4cFlags={{ underline: true, latexMath: false, hardSoftBreaks: true }}
                   selectable={false}
                   onLinkPress={({ url }) => {
                     if (url.startsWith(MENTION_USER_SCHEME)) {

@@ -18,7 +18,11 @@ import {
 
 const LIST_MARKDOWN = /(?:^|\n)[ \t]{0,3}(?:\d+[.)]|[-+*])[ \t]+/;
 const NATIVE_LIST_END_GUARD = '\n\u200B';
-const MD4C_FLAGS = { underline: true as const, latexMath: false as const };
+const MD4C_FLAGS = {
+  underline: true as const,
+  latexMath: false as const,
+  hardSoftBreaks: true as const,
+};
 
 const markdownForNative = (markdown: string): string =>
   LIST_MARKDOWN.test(markdown) ? `${markdown}${NATIVE_LIST_END_GUARD}` : markdown;
@@ -42,21 +46,29 @@ const MarkdownBody = ({
   markdown,
   style,
   onOpenUrl,
+  streaming,
 }: {
   markdown: string;
   style: MarkdownStyle;
   onOpenUrl: (url: string) => void;
-}): ReactElement => (
-  <EnrichedMarkdownText
-    markdown={markdownForNative(markdown)}
-    markdownStyle={style}
-    md4cFlags={MD4C_FLAGS}
-    {...(hasMarkdownTable(markdown) ? { flavor: 'github' as const } : {})}
-    onLinkPress={({ url }: { url: string }): void => {
-      onOpenUrl(url);
-    }}
-  />
-);
+  streaming: boolean;
+}): ReactElement => {
+  const hasTable = hasMarkdownTable(markdown);
+  return (
+    <EnrichedMarkdownText
+      markdown={markdownForNative(markdown)}
+      markdownStyle={style}
+      md4cFlags={MD4C_FLAGS}
+      {...(hasTable ? { flavor: 'github' as const } : {})}
+      // A table switches the native view mid-stream, which would replay the fade from the start.
+      streamingAnimation={streaming && !hasTable}
+      enableBlockContextMenu={false}
+      onLinkPress={({ url }: { url: string }): void => {
+        onOpenUrl(url);
+      }}
+    />
+  );
+};
 
 export const BlockMarkdown = ({
   markdown,
@@ -65,6 +77,7 @@ export const BlockMarkdown = ({
   viewerId,
   collapsedLines,
   variant = 'primary',
+  streaming = false,
 }: {
   markdown: string;
   onOpenUrl: (url: string) => void;
@@ -72,6 +85,7 @@ export const BlockMarkdown = ({
   viewerId: string;
   collapsedLines?: number;
   variant?: BlockMarkdownVariant;
+  streaming?: boolean;
 }): ReactElement => {
   const tokens = useChatRenderTokens();
   const foreground =
@@ -167,11 +181,16 @@ export const BlockMarkdown = ({
         </View>
       </View>
       {planHeader.restMarkdown.trim() ? (
-        <MarkdownBody markdown={planHeader.restMarkdown} style={style} onOpenUrl={onOpenUrl} />
+        <MarkdownBody
+          markdown={planHeader.restMarkdown}
+          style={style}
+          onOpenUrl={onOpenUrl}
+          streaming={streaming}
+        />
       ) : null}
     </View>
   ) : (
-    <MarkdownBody markdown={markdown} style={style} onOpenUrl={onOpenUrl} />
+    <MarkdownBody markdown={markdown} style={style} onOpenUrl={onOpenUrl} streaming={streaming} />
   );
   return clampStyle ? <View style={clampStyle}>{body}</View> : body;
 };
