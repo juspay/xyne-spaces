@@ -25,6 +25,8 @@ import { buildInitialMessageMd,
   NotificationDeliveryMethod,
   NotificationType, MessageType, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
+import { excludeTicketOptOuts } from '@/utils/ticketActorUtils';
+import { TICKET_UPDATE_TYPES } from '@/constants/ticketUpdates';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -880,6 +882,16 @@ class NotificationService {
     let deliveredViaApp = false;
 
     try {
+      if (
+        data.relatedEntityType === 'ticket' &&
+        data.relatedEntityId &&
+        TICKET_UPDATE_TYPES.has(data.type) &&
+        (await excludeTicketOptOuts(data.relatedEntityId, [userId])).length === 0
+      ) {
+        logger.info(`[NOTIFICATION-SERVICE] SKIPPED (ticket updates opted out): User ${userId} | Type: ${data.type}`);
+        return { deliveredViaApp };
+      }
+
       data = await this.withSdlcTarget(data);
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,

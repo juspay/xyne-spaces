@@ -8,11 +8,13 @@ export interface GlobalNotificationSettings {
   globalDesktopNotificationLevel: NotificationLevel;
   globalMobileNotificationLevel: NotificationLevel;
   threadReplyNotificationsEnabled: boolean;
+  ticketUpdateNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
   update: (fields: {
     globalDesktopNotificationLevel?: NotificationLevel;
     globalMobileNotificationLevel?: NotificationLevel;
     threadReplyNotificationsEnabled?: boolean;
+    ticketUpdateNotificationsEnabled?: boolean;
     channelWideMentionsEnabled?: boolean;
   }) => void;
 }
@@ -26,12 +28,14 @@ export const useGlobalNotificationSettings = (): GlobalNotificationSettings => {
   const globalMobileNotificationLevel =
     userPreference?.globalMobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY;
   const threadReplyNotificationsEnabled = userPreference?.threadReplyNotificationsEnabled ?? true;
+  const ticketUpdateNotificationsEnabled = userPreference?.ticketUpdateNotificationsEnabled ?? true;
   const channelWideMentionsEnabled = userPreference?.channelWideMentionsEnabled ?? true;
 
   const update = (fields: {
     globalDesktopNotificationLevel?: NotificationLevel;
     globalMobileNotificationLevel?: NotificationLevel;
     threadReplyNotificationsEnabled?: boolean;
+    ticketUpdateNotificationsEnabled?: boolean;
     channelWideMentionsEnabled?: boolean;
   }): void => {
     void zero.mutate(
@@ -47,6 +51,7 @@ export const useGlobalNotificationSettings = (): GlobalNotificationSettings => {
     globalDesktopNotificationLevel,
     globalMobileNotificationLevel,
     threadReplyNotificationsEnabled,
+    ticketUpdateNotificationsEnabled,
     channelWideMentionsEnabled,
     update,
   };

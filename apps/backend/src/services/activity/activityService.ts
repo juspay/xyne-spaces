@@ -5,6 +5,8 @@ import { repositories } from '@/database/repositories';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { fillSdlcOwnerActivities, getWorkspaceActivityCountsQuery } from '@/bypassAcl/activityServices';
 import { logger } from '@/utils/logger';
+import { excludeTicketOptOuts } from '@/utils/ticketActorUtils';
+import { TICKET_UPDATE_ACTIONS } from '@/constants/ticketUpdates';
 import {
   isSdlcChannel,
   sdlcConversationOwner,
@@ -44,6 +46,32 @@ export interface CreateActivityParams {
 
 export class ActivityService {
   constructor(private prisma: PrismaClient) {}
+
+  private async isTicketOptOut(activity: CreateActivityParams): Promise<boolean> {
+    if (activity.actionSource !== 'ticket' || !activity.ticketId || !TICKET_UPDATE_ACTIONS.has(activity.actorAction)) {
+      return false;
+    }
+    try {
+      if (activity.actorAction === 'ticket_assigned') {
+        const ticket = await this.prisma.ticket.findUnique({
+          where: { id: activity.ticketId },
+          select: { assignedTo: true },
+        });
+        if (ticket?.assignedTo === activity.userId) {
+          return false;
+        }
+      }
+      return (await excludeTicketOptOuts(activity.ticketId, [activity.userId])).length === 0;
+    } catch (error) {
+      logger.error('[ActivityService] Ticket opt-out lookup failed, creating activity anyway', {
+        ticketId: activity.ticketId,
+        userId: activity.userId,
+        actorAction: activity.actorAction,
+        error,
+      });
+      return false;
+    }
+  }
 
   /**
    * Resolve the workspaceId for an activity row (denormalized tenant key).
@@ -293,6 +321,7 @@ export class ActivityService {
    * Create a single activity
    */
   async createActivity(params: CreateActivityParams): Promise<void> {
+    if (await this.isTicketOptOut(params)) return;
     const enriched = await this.enrichActivityWithConversationCutoff(params);
     const activity = { ...enriched, ...(await this.sdlcOwner(enriched)) };
     logger.info('[ActivityService] Creating activity', {
@@ -362,6 +391,8 @@ export class ActivityService {
    * Create multiple activities in batch (for multiple users)
    */
   async createActivities(activities: CreateActivityParams[]): Promise<void> {
+    const optOuts = await Promise.all(activities.map(activity => this.isTicketOptOut(activity)));
+    activities = activities.filter((_, index) => !optOuts[index]);
     if (activities.length === 0) return;
     const enrichedActivities = await Promise.all(
       (await this.enrichActivitiesWithConversationCutoff(activities)).map(async a => ({

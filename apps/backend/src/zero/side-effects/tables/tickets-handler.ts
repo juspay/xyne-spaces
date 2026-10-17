@@ -9,7 +9,7 @@ import { notificationService } from '@/services/notificationService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { websocketService } from '@/services/websocketService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
-import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { clearTicketOptOut, getFormFieldUserActors } from '@/utils/ticketActorUtils';
 import {
   dispatchEtaNotifications,
   drainEtaActivityOutbox,
@@ -167,6 +167,10 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     // Send notification to the newly assigned user (original behavior preserved)
     const assignedToChanged = args.assignedTo !== undefined && args.assignedTo !== prev.assignedTo;
     const newAssignee = args.assignedTo;
+
+    if (assignedToChanged && newAssignee) {
+      await clearTicketOptOut(ticketId, newAssignee);
+    }
 
     if (assignedToChanged && newAssignee && newAssignee !== actorId) {
       try {

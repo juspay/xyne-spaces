@@ -1,6 +1,8 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { sdlcTicketConversation } from '@/sdlc/sdlcNavTarget';
 
 /**
  * Fetch additional actor user IDs from board form fields of type USER.
@@ -82,5 +84,57 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
   } catch (error) {
     logger.error(`Failed to fetch form field users for ticket ${ticketId}`, error);
     return [];
+  }
+}
+
+export async function excludeTicketOptOuts(ticketId: string, userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) {
+    return userIds;
+  }
+
+  const conversationId = await sdlcTicketConversation(ticketId);
+
+  if (!conversationId) {
+    return userIds;
+  }
+
+  const optedOut = await withWorkspaceScope(() =>
+    db.conversationParticipant.findMany({
+      where: {
+        conversationId,
+        userId: { in: userIds },
+        ticketUpdatesUnsubscribedAt: { not: null },
+      },
+      select: { userId: true },
+    }),
+  );
+
+  const optedOutIds = new Set(optedOut.map(p => p.userId));
+  return userIds.filter(id => !optedOutIds.has(id));
+}
+
+export async function clearTicketOptOut(ticketId: string, userId: string): Promise<void> {
+  try {
+    const conversationId = await sdlcTicketConversation(ticketId);
+
+    if (!conversationId) {
+      return;
+    }
+
+    await withWorkspaceScope(() =>
+      db.conversationParticipant.updateMany({
+        where: {
+          conversationId,
+          userId,
+          ticketUpdatesUnsubscribedAt: { not: null },
+        },
+        data: { ticketUpdatesUnsubscribedAt: null },
+      }),
+    );
+  } catch (error) {
+    logger.error(
+      `Failed to clear notification opt-out for user ${userId.replace(/[\r\n]/g, '')} on ticket ${ticketId.replace(/[\r\n]/g, '')}`,
+      error,
+    );
   }
 }

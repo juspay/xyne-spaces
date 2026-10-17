@@ -2,6 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { parseNotificationKeywords, NotificationLevel, NotificationType } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { TICKET_UPDATE_TYPES } from '@/constants/ticketUpdates';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -43,6 +44,7 @@ type ChannelStatusRow = {
   desktopNotificationLevel: NotificationLevel | null;
   mobileNotificationLevel: NotificationLevel | null;
   threadReplyNotificationsEnabled: boolean | null;
+  ticketUpdateNotificationsEnabled: boolean | null;
   channelWideMentionsEnabled: boolean | null;
 };
 
@@ -50,6 +52,7 @@ type UserPreferenceRow = {
   globalDesktopNotificationLevel: NotificationLevel | null;
   globalMobileNotificationLevel: NotificationLevel | null;
   threadReplyNotificationsEnabled: boolean;
+  ticketUpdateNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
   notificationKeywords?: string[];
 };
@@ -94,6 +97,7 @@ async function prefetchFilterDataInner(
         desktopNotificationLevel: true,
         mobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
+        ticketUpdateNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
       },
     }).catch(e => {
@@ -114,6 +118,7 @@ async function prefetchFilterDataInner(
         globalDesktopNotificationLevel: true,
         globalMobileNotificationLevel: true,
         threadReplyNotificationsEnabled: true,
+        ticketUpdateNotificationsEnabled: true,
         channelWideMentionsEnabled: true,
         notificationKeywords: true,
       },
@@ -172,6 +177,7 @@ interface GlobalUserPreferences {
   globalDesktopNotificationLevel: NotificationLevel;
   globalMobileNotificationLevel: NotificationLevel;
   threadReplyNotificationsEnabled: boolean;
+  ticketUpdateNotificationsEnabled: boolean;
   channelWideMentionsEnabled: boolean;
 }
 
@@ -179,6 +185,7 @@ const DEFAULT_GLOBAL_PREFS: GlobalUserPreferences = {
   globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
   globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
   threadReplyNotificationsEnabled: true,
+  ticketUpdateNotificationsEnabled: true,
   channelWideMentionsEnabled: true,
 };
 
@@ -365,6 +372,7 @@ async function filterUsersInner(
           desktopNotificationLevel: true,
           mobileNotificationLevel: true,
           threadReplyNotificationsEnabled: true,
+          ticketUpdateNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
       }).catch(e => {
@@ -385,6 +393,7 @@ async function filterUsersInner(
           globalDesktopNotificationLevel: true,
           globalMobileNotificationLevel: true,
           threadReplyNotificationsEnabled: true,
+          ticketUpdateNotificationsEnabled: true,
           channelWideMentionsEnabled: true,
         },
       }).catch(e => {
@@ -411,6 +420,8 @@ async function filterUsersInner(
         pref?.globalMobileNotificationLevel ?? DEFAULT_GLOBAL_PREFS.globalMobileNotificationLevel,
       threadReplyNotificationsEnabled:
         pref?.threadReplyNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.threadReplyNotificationsEnabled,
+      ticketUpdateNotificationsEnabled:
+        pref?.ticketUpdateNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.ticketUpdateNotificationsEnabled,
       channelWideMentionsEnabled:
         pref?.channelWideMentionsEnabled ?? DEFAULT_GLOBAL_PREFS.channelWideMentionsEnabled,
     };
@@ -476,6 +487,19 @@ async function filterUsersInner(
         notificationType: notificationType ?? null, mentionType,
         desktop: false, mobile: false, reason: 'channel_wide_mentions_off',
         channelWideMentionsEnabled: effectiveChannelWideMentions,
+      });
+      continue;
+    }
+
+    const effectiveTicketUpdates =
+      channelStatus?.ticketUpdateNotificationsEnabled ?? globalPrefs.ticketUpdateNotificationsEnabled;
+    if (notificationType && TICKET_UPDATE_TYPES.has(notificationType) && !effectiveTicketUpdates) {
+      emitDecisionTrace(userId, {
+        channelId, context, isDMChannel, isGroupDM,
+        notificationType, mentionType: mentionType ?? null,
+        desktop: false, mobile: false, reason: 'ticket_updates_toggle_off',
+        channelTicketUpdatesEnabled: channelStatus?.ticketUpdateNotificationsEnabled ?? null,
+        globalTicketUpdatesEnabled: globalPrefs.ticketUpdateNotificationsEnabled,
       });
       continue;
     }
@@ -590,6 +614,7 @@ async function filterGlobalUsersInner(
       globalDesktopNotificationLevel: true,
       globalMobileNotificationLevel: true,
       threadReplyNotificationsEnabled: true,
+      ticketUpdateNotificationsEnabled: true,
     },
   }).catch(e => {
     logger.error('[NotificationFilter] Failed to fetch userPreference', { error: e });
@@ -624,6 +649,18 @@ async function filterGlobalUsersInner(
           channelId: null, context, notificationType,
           desktop: false, mobile: false, reason: 'thread_reply_toggle_off',
           globalThreadReplyEnabled: threadReplyEnabled,
+        });
+        continue;
+      }
+    }
+
+    if (TICKET_UPDATE_TYPES.has(notificationType)) {
+      const ticketUpdatesEnabled = pref?.ticketUpdateNotificationsEnabled ?? DEFAULT_GLOBAL_PREFS.ticketUpdateNotificationsEnabled;
+      if (!ticketUpdatesEnabled) {
+        emitDecisionTrace(userId, {
+          channelId: null, context, notificationType,
+          desktop: false, mobile: false, reason: 'ticket_updates_toggle_off',
+          globalTicketUpdatesEnabled: ticketUpdatesEnabled,
         });
         continue;
       }
