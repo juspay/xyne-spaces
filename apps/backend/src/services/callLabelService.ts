@@ -7,7 +7,7 @@ import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod } from '@xyne/shared';
 // Generic Tag framework sourceType/category for call labels. No configKey is
 // used, so tagService.createTag skips the "category must be configured" check
 // entirely (see assertManualCategoryOrOverride).
-const CALL_TAG_SOURCE_TYPE = 'CALL';
+export const CALL_TAG_SOURCE_TYPE = 'CALL';
 const CALL_LABEL_CATEGORY = 'topic';
 
 /** Cap on one generation run, so a verbose LLM reply can't flood Call.labels. */

@@ -24,6 +24,7 @@ import Tooltip from '../Tooltip/Tooltip';
 import { ShortcutHint } from '../ShortcutHint';
 import type { MentionResult } from '@xyne/shared';
 import { useUtterance } from '../../../services/VoiceInput/useUtterance';
+import { useStopWhenCovered } from '../../../hooks/usePageCoverage';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -468,6 +469,9 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
         voiceStreamInterimRangeRef.current = null;
       },
     });
+
+    // Under full-page search the mic button is out of reach: covering the composer stops it.
+    useStopWhenCovered(isVoiceRecording, stopVoiceRecording);
 
     // Notify parent whenever recording/transcribing state changes
     useEffect(() => {

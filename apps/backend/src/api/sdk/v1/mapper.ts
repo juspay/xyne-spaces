@@ -290,7 +290,6 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'conversations.getByTimestamp': { kind: 'query', name: 'getConversationByTimestamp' },
   'conversations.listForUser': { kind: 'query', name: 'userConversationsPaginatedV2' },
   'conversations.setTagTypes': { kind: 'mutator', name: 'threadTag.setTypes' },
-  'conversations.update': { kind: 'mutator', name: 'conversations.update' },
 
   // ----- dashboards -----
   'dashboards.list': { kind: 'query', name: 'getAllDashboards' },
@@ -447,7 +446,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'projects.get': { kind: 'query', name: 'projectById' },
   'projects.getMany': { kind: 'query', name: 'projectsByIds' },
   'projects.listTags': { kind: 'query', name: 'projectTagsByProjectId' },
-  'projects.listFieldDefinitions': { kind: 'query', name: 'getAllTicketEntityMappings' },
+  'projects.listFieldDefinitions': retired(
+    'ticket entity mappings are per ticket and carry no project; use tickets.listFieldValues for one ticket',
+  ),
   'projects.listCanvasFolders': { kind: 'query', name: 'projectCanvasFolders' },
   'projects.listApplications': { kind: 'query', name: 'applicationsByProjectId' },
   'projects.listReleaseTickets': { kind: 'query', name: 'releaseTicketsByProjectId' },
@@ -480,7 +481,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'supportTickets.get': { kind: 'query', name: 'supportTicketRowV3' },
   'supportTickets.getByKey': { kind: 'query', name: 'supportTicketByXyneIdV4' },
   'supportTickets.getDetail': { kind: 'query', name: 'supportTicketDetailV2' },
-  'supportTickets.listForEmailChannels': { kind: 'query', name: 'ticketsForEmailChannelsV2' },
+  'supportTickets.listForEmailChannels': { kind: 'query', name: 'supportTicketsFiltered' },
   'supportTickets.listKanban': { kind: 'query', name: 'supportKanbanTicketsPage' },
   'supportTickets.listSavedViews': { kind: 'query', name: 'savedDeskTicketConfigsByChannel' },
 

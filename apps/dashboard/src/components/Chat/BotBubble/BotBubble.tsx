@@ -57,7 +57,7 @@ const useOpenTicketCard = (
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
-  const { openTicket } = useContext(ThreadNavigationContext);
+  const { openTicket, openRelatedTicket } = useContext(ThreadNavigationContext);
 
   // In the Desk/email ticket-detail view the user is already looking at the
   // ticket whose card is being rendered in the right-panel thread — instead
@@ -72,12 +72,14 @@ const useOpenTicketCard = (
     if (!resolvedChannelId || !resolvedConversationId) return;
 
     // A host that keeps ticket links on its own surface wins over the desk default below.
-    if (openTicket) {
+    // A host that also opens related tickets in its own panel (SDLC) is handled further down.
+    if (openTicket && !openRelatedTicket) {
       openTicket(ticket.id);
       return;
     }
 
-    if (isDeskView && resolvedConversationId === fallbackConversationId) {
+    // A host that keeps tickets in its own panel (SDLC) does the same for the thread's ticket.
+    if ((isDeskView || openRelatedTicket) && resolvedConversationId === fallbackConversationId) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
       void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
@@ -90,6 +92,11 @@ const useOpenTicketCard = (
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
+      return;
+    }
+
+    if (openRelatedTicket) {
+      openRelatedTicket(ticket.id);
       return;
     }
 

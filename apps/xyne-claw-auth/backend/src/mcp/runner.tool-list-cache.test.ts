@@ -63,7 +63,7 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const { listToolsForUser, clearToolListCache } = await import("./runner.js");
+const { listToolsForUser, clearToolListCache, evictAllSessionsForUser } = await import("./runner.js");
 
 let run = 0;
 const user = (name: string) => `${name}-${run}`;
@@ -110,6 +110,34 @@ describe("listToolsForUser shared tool-list cache", () => {
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     await listToolsForUser(user("u2"), "bitbucket", "Bitbucket", {});
     expect(state.spawns).toBe(2);
+  });
+
+  it("reuses a user's own listing for servers outside the shared set", async () => {
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", { token: "a" });
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", { token: "b" });
+    expect(state.listCalls).toBe(1);
+  });
+
+  it("serves a stale per-user listing at once and refreshes it in the background", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    state.tools = [{ name: "t2", description: "", inputSchema: {} }];
+    vi.setSystemTime(new Date("2026-09-25T00:11:00Z"));
+    const stale = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(stale.tools.map((t) => t.name)).toEqual(["t1"]);
+    await vi.waitFor(() => expect(state.listCalls).toBe(2));
+    await new Promise((r) => setTimeout(r, 0));
+    const fresh = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(fresh.tools.map((t) => t.name)).toEqual(["t2"]);
+    expect(state.listCalls).toBe(2);
+  });
+
+  it("lists again after the user's sessions are evicted", async () => {
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    await evictAllSessionsForUser(user("u1"));
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(state.listCalls).toBe(2);
   });
 
   it("bypasses the cache when fresh is requested", async () => {

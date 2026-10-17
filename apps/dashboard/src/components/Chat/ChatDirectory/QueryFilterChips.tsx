@@ -13,7 +13,7 @@ export interface QueryFilterChipsProps {
 
 /**
  * Read-only filter chips rendered as the same `.filter-chip` pills the search box uses. Shared by
- * both the "Show detailed results for" row (live editor chips → pass `resolveName`) and the Recent
+ * both the "Expand to full-page search" row (live editor chips → pass `resolveName`) and the Recent
  * Searches rows (names already resolved by the hook → omit `resolveName`).
  */
 export function QueryFilterChips({

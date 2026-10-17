@@ -1,14 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  ArrowRight,
-  Check,
-  MessageSquare,
-  MoreVertical,
-  Pencil,
-  RotateCcw,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { ArrowRight, Check, MessageSquare, RotateCcw, X } from 'lucide-react';
 import { CanvasCommentThreadStatus } from '@xyne/shared';
 import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { motion } from 'framer-motion';
@@ -33,13 +24,10 @@ import Button from '../../ui/Button';
 import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
 import { Tooltip } from '../../ui/Tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import { CanvasCommentDeleteDialog } from '../CanvasCommentDeleteDialog';
+import { CanvasCommentActions } from '../CanvasCommentActions';
+import { useCanvasCommentMutations } from '../useCanvasCommentMutations';
 
 type UserLite = {
   id: string;
@@ -110,7 +98,8 @@ interface CanvasCommentComposerProps {
   fallbackMentionedUserIds?: string[] | undefined;
   minHeightClassName: string;
   actions?: React.ReactNode;
-  onSubmit: (payload: { body: string; mentionedUserIds: string[] }) => void;
+  preserveOnSubmit?: boolean;
+  onSubmit: (payload: { body: string; mentionedUserIds: string[] }) => void | Promise<boolean>;
 }
 
 interface CanvasCommentThreadSectionProps {
@@ -120,15 +109,16 @@ interface CanvasCommentThreadSectionProps {
   currentUserId?: string | undefined;
   allUsers: UserLite[];
   editingCommentId: string | null;
+  pendingCommentId: string | null;
   onSelectBlock: (blockId: string) => void;
   onSetThreadStatus: (threadId: string, status: CanvasCommentThreadStatus) => void;
   onSetEditingCommentId: (commentId: string | null) => void;
-  onDeleteComment: (commentId: string) => void;
+  onDeleteComment: (comment: CanvasComment) => void;
   onUpdateComment: (
     thread: CanvasCommentThread,
     comment: CanvasComment,
     payload: { body: string; mentionedUserIds: string[] },
-  ) => void;
+  ) => Promise<boolean>;
 }
 
 const getDisplayName = (user?: UserLite | null): string =>
@@ -219,7 +209,7 @@ const renderCommentBody = (
   return nodes.length > 0 ? nodes : [body];
 };
 
-function CanvasCommentComposer({
+export function CanvasCommentComposer({
   id,
   channelId,
   currentUserId,
@@ -229,9 +219,11 @@ function CanvasCommentComposer({
   fallbackMentionedUserIds = [],
   minHeightClassName,
   actions,
+  preserveOnSubmit = false,
   onSubmit,
 }: CanvasCommentComposerProps): React.JSX.Element {
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
+  const initialValueRef = useRef(value);
   const [fallbackMentionQuery, setFallbackMentionQuery] = useState('');
   const { results, allUsers, searchMentions } = useMentionSearch(channelId, undefined, undefined, {
     includeSpecialMentions: false,
@@ -283,7 +275,7 @@ function CanvasCommentComposer({
     }
   };
 
-  const handleSend = (content: string, html: string): void => {
+  const handleSend = async (content: string, html: string): Promise<void> => {
     const body = content.trim();
     if (!body) return;
 
@@ -298,7 +290,7 @@ function CanvasCommentComposer({
       ...retainedFallbackMentionIds,
     ]);
     selectedMentionIdsRef.current.clear();
-    onSubmit({ body, mentionedUserIds });
+    await onSubmit({ body, mentionedUserIds });
   };
 
   return (
@@ -307,11 +299,12 @@ function CanvasCommentComposer({
         id={id}
         {...(channelId && { channelId })}
         onSendMessage={handleSend}
+        clearOnSend={!preserveOnSubmit}
         mentionItems={mentionItems}
         onMentionSearch={handleMentionSearch}
         onMentionSelect={handleMentionSelect}
         placeholder={placeholder}
-        value={value}
+        value={preserveOnSubmit ? initialValueRef.current : value}
         disabled={disabled}
         className={cn(
           'canvas-comment-composer rounded-[18px] border border-input bg-background shadow-sm ring-1 ring-border/70 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10',
@@ -343,6 +336,7 @@ function CanvasCommentThreadSection({
   currentUserId,
   allUsers,
   editingCommentId,
+  pendingCommentId,
   onSelectBlock,
   onSetThreadStatus,
   onSetEditingCommentId,
@@ -410,39 +404,12 @@ function CanvasCommentThreadSection({
               </span>
               <span className='flex-1' />
               {editable && isOwnComment && !isDeleted && !isEditing && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant='ghost'
-                      size='iconSm'
-                      data-track-category='CANVAS'
-                      data-track-name='open_comment_actions_menu'
-                      className='size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100'
-                      aria-label='Comment actions'
-                    >
-                      <MoreVertical className='size-[15px]' />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end'>
-                    <DropdownMenuItem
-                      onClick={() => onSetEditingCommentId(comment.id)}
-                      data-track-category='CANVAS'
-                      data-track-name='edit_comment'
-                    >
-                      <Pencil className='size-4' />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className='text-destructive focus:text-destructive'
-                      onClick={() => onDeleteComment(comment.id)}
-                      data-track-category='CANVAS'
-                      data-track-name='delete_comment'
-                    >
-                      <Trash2 className='size-4' />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <CanvasCommentActions
+                  onEdit={() => onSetEditingCommentId(comment.id)}
+                  onDelete={() => onDeleteComment(comment)}
+                  disabled={pendingCommentId !== null}
+                  className='opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100'
+                />
               )}
               {index === 0 && (
                 <span
@@ -481,6 +448,8 @@ function CanvasCommentThreadSection({
                 currentUserId={currentUserId}
                 placeholder='Edit comment'
                 value={comment.body}
+                preserveOnSubmit
+                disabled={pendingCommentId !== null}
                 fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
                 minHeightClassName='min-h-[38px]'
                 onSubmit={payload => onUpdateComment(thread, comment, payload)}
@@ -488,6 +457,7 @@ function CanvasCommentThreadSection({
                   <Button
                     variant='ghost'
                     size='sm'
+                    disabled={pendingCommentId !== null}
                     onClick={() => onSetEditingCommentId(null)}
                     data-track-category='CANVAS'
                     data-track-name='cancel_edit_comment'
@@ -579,8 +549,10 @@ export function CanvasCommentsPanel({
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
+  const commentMutations = useCanvasCommentMutations(editable);
   const [threadStatusFilter, setThreadStatusFilter] = useState<CanvasCommentThreadFilter>('ALL');
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentToDelete, setCommentToDelete] = useState<CanvasComment | null>(null);
   const commentsConnectId = useCanvasConnectId(canvasId);
   const [threads = []] = useCachedQuery(
     queries.canvasCommentThreads({ canvasId, connectId: commentsConnectId }),
@@ -723,45 +695,22 @@ export function CanvasCommentsPanel({
     );
   };
 
-  const deleteComment = (commentId: string): void => {
-    zero.mutate(
-      mutators.canvasComment.deleteComment({
-        commentId,
-        timestamp: Date.now(),
-      }),
-    );
-  };
-
-  const updateComment = (
+  const updateComment = async (
     thread: CanvasCommentThread,
     comment: CanvasComment,
     { body, mentionedUserIds }: { body: string; mentionedUserIds: string[] },
-  ): void => {
-    const mutationResult = zero.mutate(
-      mutators.canvasComment.updateComment({
-        commentId: comment.id,
-        body,
-        mentionedUserIds,
-        timestamp: Date.now(),
-      }),
-    );
-    void mutationResult.server
-      .then(result => {
-        if (result.type !== 'error') {
-          const previousMentionedUserIds = new Set(parseMentionedUserIds(comment.mentionedUserIds));
-          const newlyMentionedUserIds = mentionedUserIds.filter(
-            mentionedUserId => !previousMentionedUserIds.has(mentionedUserId),
-          );
-          sendMentionNotifications(thread.blockId, newlyMentionedUserIds, thread.id);
-        }
-      })
-      .catch(error => {
-        logger.error(Event.API_CALL_FAILED, {
-          reason: error,
-          context: 'canvas_comment_update',
-        });
-      });
-    setEditingCommentId(null);
+  ): Promise<boolean> => {
+    const succeeded = await commentMutations.updateComment(comment, { body, mentionedUserIds });
+    if (succeeded) {
+      const previousMentionedUserIds = new Set(parseMentionedUserIds(comment.mentionedUserIds));
+      sendMentionNotifications(
+        thread.blockId,
+        mentionedUserIds.filter(id => !previousMentionedUserIds.has(id)),
+        thread.id,
+      );
+      setEditingCommentId(current => (current === comment.id ? null : current));
+    }
+    return succeeded;
   };
 
   return (
@@ -882,16 +831,25 @@ export function CanvasCommentsPanel({
                 currentUserId={user?.id}
                 allUsers={allUsers}
                 editingCommentId={editingCommentId}
+                pendingCommentId={commentMutations.pendingCommentId}
                 onSelectBlock={onSelectBlock}
                 onSetThreadStatus={setThreadStatus}
                 onSetEditingCommentId={setEditingCommentId}
-                onDeleteComment={deleteComment}
+                onDeleteComment={setCommentToDelete}
                 onUpdateComment={updateComment}
               />
             ))}
           </div>
         )}
       </motion.div>
+      <CanvasCommentDeleteDialog
+        open={commentToDelete !== null}
+        onCancel={() => setCommentToDelete(null)}
+        onConfirm={() => {
+          if (commentToDelete) void commentMutations.deleteComment(commentToDelete);
+          setCommentToDelete(null);
+        }}
+      />
     </motion.aside>
   );
 }

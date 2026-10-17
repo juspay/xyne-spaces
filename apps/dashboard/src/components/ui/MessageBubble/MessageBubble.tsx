@@ -1347,6 +1347,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <PulseTickets
                   content={message.content}
                   callId={metadata?.callId}
+                  {...(channelId && { channelId })}
                   conversationId={message.conversationId}
                   messageId={message.messageId}
                 />

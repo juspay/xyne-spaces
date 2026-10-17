@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import { advertiseRunOwner, currentOwnerPod, isFencedSession, withdrawRunOwner } from "../run-ownership.js";
 import {
   decideRunControl,
   publishRunControl,
@@ -17,6 +17,7 @@ import {
   pushDebugProgress,
   applyCopilotProxyIfNeeded,
   ProviderStallError,
+  ProviderRefusalError,
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
@@ -205,6 +206,8 @@ const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
 /** Built-in skill bundle for coverage-gated understanding runs. */
 const UNDERSTANDING_SKILL_PATH = "understanding-skills";
+export const PROVIDER_REFUSAL_REPLY =
+  "Claude declined to answer in this conversation: its safety filter stopped the reply. Asking again in this thread will be declined the same way, so please start a new thread and rephrase the request.";
 
 const router = Router();
 
@@ -787,6 +790,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     hasCallbackUrl: typeof callbackUrl === "string" && !!callbackUrl.trim(),
   };
   activeRuns.set(sessionId, activeRun);
+  const runOwnerToken = await advertiseRunOwner(sessionId);
 
   if (detached === true) {
     clog.info(`[run] detached dispatch accepted (sessionId=${sessionId}, eventType=${eventType ?? ""})`);
@@ -851,6 +855,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
     });
     return;
   }
@@ -985,6 +990,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
       // callback) and any future throw outside its try/catch around
@@ -1030,7 +1036,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId }).finally(() => withdrawRunOwner(sessionId, runOwnerToken));
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -1645,6 +1651,107 @@ export async function processTask(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
 
+    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
+    const isTwinAgent = isDigitalTwinAgent(agentSlug);
+    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
+    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
+    // (which post todo cards to the thread and instruct "write your final answer
+    // as plain text with NO trailing tool call") are both inapplicable AND
+    // actively conflict with twin_deliver — the model followed the primer and
+    // never called the delivery tool, fail-closing to silence. Exclude the twin
+    // mention flow from plan tools/primer entirely.
+    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
+    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
+    // thread mentions): the agent gets a READ-ONLY palette + the terminal
+    // propose-plan tool, proposes a plan, and STOPS for approval. The
+    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
+    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
+    // is 'auto'/undefined this is false and every branch below is the existing
+    // path, so auto-mode behavior is unchanged (INVARIANT A).
+    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
+    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
+    // the agent gets the FULL read-only palette + subagents + the terminal
+    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
+    // structured brief, and STOPS. Like plan mode, the palette + primer are
+    // server-owned here and cannot be changed from the dashboard. Excluded from the
+    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
+    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
+    // `postTodos`, which only hides the Spaces card while the agent still keeps
+    // the list: this removes the todo tools AND the primer, so no turn is spent
+    // on plan bookkeeping at all.
+    //
+    // Why an agent would turn it off: `todo-write` ends the assistant turn like
+    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
+    // of a run ("before your first tool call", and again immediately before the
+    // final answer). On a slow model that is two full round trips of pure
+    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
+    // agents that answer in one message get no value from the checklist card and
+    // pay the whole cost.
+    const planTrackingEnabled =
+      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
+    const planGateEligible =
+      planTrackingEnabled &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    const planGatePreviousReply =
+      planGateEligible && isShortFollowUp(task)
+        ? readPreviousAgentReply(
+            sessionDir(
+              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+                piSessionConversationId ??
+                conversationId ??
+                "",
+            ),
+          )
+        : undefined;
+    const planGateDecision = planGateEligible
+      ? decidePlanTracking(task, agentConfig, {}, planGatePreviousReply).catch(() => null)
+      : Promise.resolve(null);
+
+    // Key the workspace by the CONVERSATION, not the run.
+    //
+    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
+    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
+    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
+    // a brand-new cwd, so that filter never matched: the session directory was
+    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
+    // silently handed back an empty session. Every turn started from zero, and
+    // the agent would answer follow-ups with "I don't have any record of that in
+    // this conversation" (2026-08-30).
+    //
+    // Same identifier as the session store below, so cwd is stable exactly when
+    // the session is. Runs with no conversation (one-shots, automations) keep a
+    // per-run ephemeral workspace.
+    const workspaceStoreKey =
+      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+      (piSessionConversationId ?? conversationId);
+    const workspaceDir =
+      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
+    const toolPermissions =
+      (agentConfig?.["toolPermissions"] as
+        | Record<string, string>
+        | undefined) ?? {};
+    // Over-large MCP results spill to the persistent session dir (survives the
+    // ephemeral workspace teardown + resume) when a conversation is in play;
+    // the workspace is still used for binary attachments. See toolOutputBaseDir.
+    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoad = loadMcpToolsForUser(
+      sessionId,
+      sessionToken,
+      workspaceDir,
+      toolPermissions,
+      agentSlug,
+      mcpOutputDir,
+      (att) => pushAttachment(progressUrl, sessionId, att),
+      trustedSdlcBindings,
+      (serverType) => blockedConnectors.add(serverType),
+    ).then((value) => ({ value }), (error: unknown) => ({ error }));
+
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
     // in attachment-ingest.ts. derivedContextFiles ordering is significant —
@@ -1688,25 +1795,6 @@ export async function processTask(
         : []),
     ];
 
-    // Key the workspace by the CONVERSATION, not the run.
-    //
-    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
-    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
-    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
-    // a brand-new cwd, so that filter never matched: the session directory was
-    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
-    // silently handed back an empty session. Every turn started from zero, and
-    // the agent would answer follow-ups with "I don't have any record of that in
-    // this conversation" (2026-08-30).
-    //
-    // Same identifier as the session store below, so cwd is stable exactly when
-    // the session is. Runs with no conversation (one-shots, automations) keep a
-    // per-run ephemeral workspace.
-    const workspaceStoreKey =
-      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
-      (piSessionConversationId ?? conversationId);
-    const workspaceDir =
-      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1748,32 +1836,15 @@ export async function processTask(
       log(`Record-skill originals staged: ${recordingFiles.length}`);
     }
 
-    const toolPermissions =
-      (agentConfig?.["toolPermissions"] as
-        | Record<string, string>
-        | undefined) ?? {};
-    // Over-large MCP results spill to the persistent session dir (survives the
-    // ephemeral workspace teardown + resume) when a conversation is in play;
-    // the workspace is still used for binary attachments. See toolOutputBaseDir.
-    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoaded = await mcpLoad;
+    if ("error" in mcpLoaded) throw mcpLoaded.error;
     const {
       groups: mcpGroups,
       unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
-    } = await loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-    );
+    } = mcpLoaded.value;
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
     // copilot-mode respond-to-user terminations can still recover signed
@@ -2047,8 +2118,6 @@ export async function processTask(
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
-    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
-    const isTwinAgent = isDigitalTwinAgent(agentSlug);
     if (agentSlug && memoryEnabled && isTwinAgent) {
       const taxonomy = await listSubsystemTaxonomy(agentSlug, `user:${userId}`).catch(() => []);
       if (taxonomy.length > 0) activeInjections.push(buildTaxonomyInjection(taxonomy));
@@ -2204,7 +2273,7 @@ export async function processTask(
       !fastModeEnabled &&
       (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
-        ? buildUiTesterTools(meta)
+        ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
@@ -2861,62 +2930,7 @@ export async function processTask(
     // (already ctx-threaded by loadCustomTools). Mirrors the isScheduledRun /
     // isReadOnlyJob logic computed later — inlined here because tool assembly
     // runs before it.
-    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
-    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
-    // (which post todo cards to the thread and instruct "write your final answer
-    // as plain text with NO trailing tool call") are both inapplicable AND
-    // actively conflict with twin_deliver — the model followed the primer and
-    // never called the delivery tool, fail-closing to silence. Exclude the twin
-    // mention flow from plan tools/primer entirely.
-    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
-    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
-    // thread mentions): the agent gets a READ-ONLY palette + the terminal
-    // propose-plan tool, proposes a plan, and STOPS for approval. The
-    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
-    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
-    // is 'auto'/undefined this is false and every branch below is the existing
-    // path, so auto-mode behavior is unchanged (INVARIANT A).
-    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
-    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
-    // the agent gets the FULL read-only palette + subagents + the terminal
-    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
-    // structured brief, and STOPS. Like plan mode, the palette + primer are
-    // server-owned here and cannot be changed from the dashboard. Excluded from the
-    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
-    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
-    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
-    // `postTodos`, which only hides the Spaces card while the agent still keeps
-    // the list: this removes the todo tools AND the primer, so no turn is spent
-    // on plan bookkeeping at all.
-    //
-    // Why an agent would turn it off: `todo-write` ends the assistant turn like
-    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
-    // of a run ("before your first tool call", and again immediately before the
-    // final answer). On a slow model that is two full round trips of pure
-    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
-    // agents that answer in one message get no value from the checklist card and
-    // pay the whole cost.
-    const planTrackingEnabled =
-      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planGateEligible =
-      planTrackingEnabled &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isPlanMode &&
-      !isDailyBrief;
-    const planGatePreviousReply =
-      planGateEligible && isShortFollowUp(task)
-        ? readPreviousAgentReply(
-            sessionDir(
-              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
-                piSessionConversationId ??
-                conversationId ??
-                "",
-            ),
-          )
-        : undefined;
-    const planGate = planGateEligible ? await decidePlanTracking(task, agentConfig, {}, planGatePreviousReply) : null;
+    const planGate = await planGateDecision;
     const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
     if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
@@ -5212,6 +5226,19 @@ export async function processTask(
         ...(err instanceof RunCancelledError
           ? { tokenUsage: err.tokenUsage }
           : {}),
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (err instanceof ProviderRefusalError) {
+      logErr(`Session failed (provider refusal): ${err.message}`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: PROVIDER_REFUSAL_REPLY,
         provider: callbackProvider,
         model: callbackModel,
       });

@@ -18,6 +18,7 @@ import {
   type PanelSize,
 } from '../ui/Resizable/Resizable';
 import { useSidebarResizeShortcut } from '../../hooks/useSidebarResizeShortcut';
+import { usePageCoverage } from '../../hooks/usePageCoverage';
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -241,14 +242,16 @@ export function AIShell({
     if (!overlayMode && drawerOpen) setDrawerOpen(false);
   }, [overlayMode, drawerOpen]);
 
+  // Not while full-page search covers the page: its Esc is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!overlayMode || !drawerOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setDrawerOpen(false);
+      if (event.key === 'Escape' && !coverage.isCovered()) setDrawerOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [overlayMode, drawerOpen]);
+  }, [overlayMode, drawerOpen, coverage]);
 
   useEffect(() => {
     if (!workspaceControlsRef) return;

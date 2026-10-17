@@ -2,11 +2,12 @@ import type { XorAnswer, XorQuestion } from "../xor.js";
 
 export const CONFIDENT = 0.7;
 
-export const STANDARD_QUESTIONS: Record<string, Extract<XorQuestion, { type: "choice" }>> = {
+type StandardQuestion = Extract<XorQuestion, { type: "choice" }> | Extract<XorQuestion, { type: "noul" }>;
+
+export const STANDARD_QUESTIONS: Record<string, StandardQuestion> = {
   cut_off: {
-    type: "choice",
+    type: "noul",
     instructions: "Is any text, button or control cut off at the right edge of the screen?",
-    criteria: { no: "No, everything ends inside the screen", yes: "Yes, something is cut off at the right edge" },
   },
   overlap: {
     type: "choice",
@@ -46,8 +47,8 @@ export const STANDARD_QUESTIONS: Record<string, Extract<XorQuestion, { type: "ch
   },
   background: {
     type: "choice",
-    instructions: "What colour is the main page background?",
-    criteria: { light: "White or very light grey", dark: "Black or very dark grey" },
+    instructions: "Which colour theme is the page using?",
+    criteria: { light: "Light theme (light background)", dark: "Dark theme (dark background)" },
   },
 };
 
@@ -82,6 +83,9 @@ export interface VariationResult {
   theme?: string;
   screenshot?: string | null;
   video?: string | null;
+  title?: string;
+  themeApplied?: boolean | null;
+  textChecks?: Array<{ text: string; kind: "expect" | "reject"; ok: boolean }> | null;
   externalStubbed?: number;
   externalHosts?: string[];
   error?: string;
@@ -103,6 +107,7 @@ export interface Finding {
 
 export interface VariationVerdict {
   id: string;
+  title?: string;
   verdict: "pass" | "fail" | "unsure";
   findings: Finding[];
   visual: Record<string, { choice: string | null; confidence: number | null }>;
@@ -122,7 +127,14 @@ export function buildQuestions(result: VariationResult): Record<string, XorQuest
 }
 
 function pick(a: XorAnswer | undefined): { choice: string | null; confidence: number | null } {
+  if (typeof a?.noul === "number" && a.choice === undefined) {
+    return { choice: a.noul >= 0.5 ? "yes" : "no", confidence: Math.round(Math.abs(a.noul - 0.5) * 200) / 100 };
+  }
   return { choice: a?.choice ?? null, confidence: typeof a?.confidence === "number" ? Math.round(a.confidence * 100) / 100 : null };
+}
+
+function optionLabel(q: StandardQuestion, key: string): string {
+  return q.type === "choice" ? q.criteria[key] ?? key : key;
 }
 
 export function judgeVariation(result: VariationResult, answers: Record<string, XorAnswer> | null): VariationVerdict {
@@ -146,6 +158,10 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     if (expectedErrors && /status of [45]\d\d/.test(e)) continue;
     add("warn", "runtime", `console error: ${e}`);
   }
+  for (const t of result.textChecks ?? []) {
+    if (!t.ok) add("fail", "dom", t.kind === "expect" ? `expected text not on the page: "${t.text}"` : `text that must not appear is on the page: "${t.text}"`);
+  }
+  if (result.theme === "dark" && result.themeApplied === false) add("warn", "fixture", "dark theme was requested but the page rendered light — set spec.themeStorageKey to the key the app reads (the probe's \"Theme storage keys\" line lists the ones found in the source)");
   if (result.apiRequests === 0 && !result.error) add("warn", "fixture", `no API request was intercepted on ${result.finalUrl ?? result.path ?? "the page"} — check baseUrl, path and apiPattern`);
   if ((result.unmatchedRequests?.length ?? 0) > 0) add("warn", "fixture", `requests served by the fallback mock (fixture may be missing): ${result.unmatchedRequests!.slice(0, 6).join(", ")}`);
 
@@ -159,7 +175,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
       if (!v || v.choice === null) continue;
       const confident = (v.confidence ?? 0) >= CONFIDENT;
       const q = STANDARD_QUESTIONS[key];
-      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${q.criteria[bad] ?? bad} (confidence ${v.confidence})`);
+      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${optionLabel(q, bad)} (confidence ${v.confidence})`);
     }
     const blank = visual["content"];
     if (blank?.choice === "blank" && (blank.confidence ?? 0) >= CONFIDENT && result.expect?.content !== "blank") {
@@ -188,7 +204,7 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     }
   }
   const verdict = findings.some((f) => f.severity === "fail") ? "fail" : findings.some((f) => f.severity === "unsure") ? "unsure" : "pass";
-  return { id: result.id, verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}), ...(result.video ? { video: result.video } : {}) };
+  return { id: result.id, ...(result.title ? { title: result.title } : {}), verdict, findings, visual, ...(result.screenshot ? { screenshot: result.screenshot } : {}), ...(result.video ? { video: result.video } : {}) };
 }
 
 export function formatReport(verdicts: VariationVerdict[]): string {
@@ -197,7 +213,7 @@ export function formatReport(verdicts: VariationVerdict[]): string {
   const lines = [`UI variations: ${verdicts.length} checked — ${counts.fail} fail, ${counts.unsure} unsure, ${counts.pass} pass.`, ""];
   for (const v of verdicts) {
     const mark = v.verdict === "pass" ? "PASS" : v.verdict === "fail" ? "FAIL" : "UNSURE";
-    lines.push(`- ${mark} ${v.id}${v.screenshot ? ` (${v.screenshot})` : ""}${v.video ? ` video: ${v.video}` : ""}`);
+    lines.push(`- ${mark} ${v.id}${v.title && v.title !== v.id ? ` "${v.title}"` : ""}${v.screenshot ? ` (${v.screenshot})` : ""}${v.video ? ` video: ${v.video}` : ""}`);
     for (const f of v.findings.filter((x) => x.severity !== "warn" || v.verdict !== "pass").slice(0, 6)) lines.push(`    - [${f.severity}/${f.source}] ${f.message}`);
   }
   return lines.join("\n");

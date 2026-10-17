@@ -4,6 +4,7 @@ import { getStatusOption } from '../BoardStageConfigScreen/BoardStageConfigScree
 import { buildFlowRunModel } from './flowRunModel';
 import {
   isFlowStepBacklogged,
+  isFlowStepSkipped,
   isRunRoot,
   mapPlanToRunTickets,
   normalizeUserId,
@@ -91,7 +92,9 @@ export function buildFlowRunExportRows({
         subTicketStatus: stepTicket
           ? isFlowStepBacklogged(stepTicket)
             ? 'Backlog'
-            : getStatusOption(stepTicket.statusV2).label
+            : isFlowStepSkipped(stepTicket)
+              ? 'Skipped'
+              : getStatusOption(stepTicket.statusV2).label
           : getStatusOption(TicketStatusV2.TODO).label,
         lastUpdatedBy: stepTicket?.updatedBy
           ? (userNamesById.get(normalizeUserId(stepTicket.updatedBy) ?? stepTicket.updatedBy) ??

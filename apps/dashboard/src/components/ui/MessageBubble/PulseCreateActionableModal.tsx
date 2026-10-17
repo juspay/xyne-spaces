@@ -21,6 +21,7 @@ interface PulseCreateActionableModalProps {
   onClose: () => void;
   onSuccess?: () => void;
   callId: string;
+  channelId?: string;
   item: PulseItem;
   merchant: PulseMerchant | null;
   conversationId: string;
@@ -33,6 +34,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
   onClose,
   onSuccess,
   callId,
+  channelId,
   item,
   merchant,
   conversationId,
@@ -73,9 +75,13 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
 
   const fetchOrgs = async () => {
     if (orgs.length > 0) return;
+    if (!channelId) {
+      toast.error('Failed to load organisation list');
+      return;
+    }
     setLoadingOrgs(true);
     try {
-      const result = await callService.fetchPulseOrgs();
+      const result = await callService.fetchPulseOrgs(channelId);
       setOrgs(result);
     } catch {
       toast.error('Failed to load organisation list');

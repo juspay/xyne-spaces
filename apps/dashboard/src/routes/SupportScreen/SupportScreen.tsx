@@ -98,7 +98,7 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
+import { ChannelsDeskSourceChannel, ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
@@ -284,6 +284,7 @@ import {
 } from './DeskFilterTrigger';
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { afterReturn, markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
@@ -298,7 +299,7 @@ import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzone
 import { CallButton } from '../../components/xyne-desk/CallButton/CallButton';
 import {
   CloudAgentDock,
-  setCloudAgentOpenTicket,
+  showCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { getOzonetelToolbar, getPhoneFieldNames } from '../../services/clients/telephonyApi';
 import { AddThreadToCanvasDialog } from '../../components/xyne-desk/AddThreadToCanvasDialog';
@@ -2214,6 +2215,10 @@ const SupportScreen = (): ReactElement => {
     );
   }, [selectedChannelId, zero]);
 
+  // Full-page search covering the desk counts as leaving it (markWhenLeft), so what arrives while
+  // the user searches stays unread; coming back to it counts as opening it again (marked once the
+  // collapse is over).
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
     const markViewed = (): void => {
@@ -2227,8 +2232,13 @@ const SupportScreen = (): ReactElement => {
       );
     };
     markViewed();
-    return markViewed;
-  }, [selectedChannelId, isSelectedChannelJoined]);
+    const stopLeaving = markWhenLeft(pageCoverage, markViewed);
+    const stopReturning = afterReturn(pageCoverage, markViewed);
+    return (): void => {
+      stopReturning();
+      stopLeaving();
+    };
+  }, [selectedChannelId, isSelectedChannelJoined, pageCoverage]);
   const selectedChannelFull = useMemo(
     () => sortedEmailChannels.find(c => c.id === selectedChannelId),
     [sortedEmailChannels, selectedChannelId],
@@ -5904,13 +5914,35 @@ export const SupportTicketDetail = ({
 
   const openTicketId = ticket?.id;
   const channelType = channel?.type;
+  // Not the open ticket while full-page search covers it, out of sight there, as leaving the page
+  // made it not the open one; it is again, the latest one shown, once the route is back on the page
+  // — not as a collapse starts, while a ticket in full page's side panel is still the one in view.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!openTicketId || ticketPhoneNumbers.length === 0 || channelType !== ChannelType.APP) {
       return undefined;
     }
-    setCloudAgentOpenTicket({ ticketId: openTicketId, numbers: ticketPhoneNumbers });
-    return (): void => setCloudAgentOpenTicket(null);
-  }, [openTicketId, ticketPhoneNumbers, channelType]);
+    const ticket = { ticketId: openTicketId, numbers: ticketPhoneNumbers };
+    let hide: (() => void) | null = null;
+    const show = (): void => {
+      hide?.();
+      hide = showCloudAgentOpenTicket(ticket);
+    };
+    const stopShowing = (): void => {
+      hide?.();
+      hide = null;
+    };
+    if (!pageCoverage.isCovered()) show();
+    const stopWatching = pageCoverage.subscribe(covered => {
+      if (covered) stopShowing();
+    });
+    const stopWatchingReturn = pageCoverage.subscribeReturn(show);
+    return (): void => {
+      stopWatching();
+      stopWatchingReturn();
+      stopShowing();
+    };
+  }, [openTicketId, ticketPhoneNumbers, channelType, pageCoverage]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -6389,6 +6421,9 @@ export const SupportTicketDetail = ({
                       </div>
                     </div>
                   )}
+                  {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+                    <ChannelsDeskSourceChannel sourceConversationId={emails[0].externalThreadId} />
+                  )}
 
                   {/* Mailbox chip + label chips.
                       Only render the row when there is at least one visible
@@ -6701,7 +6736,15 @@ export const SupportTicketDetail = ({
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                    <SlackThread emails={emails} ticketId={ticket?.id} />
+                    <SlackThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      showRecipient={
+                        !isAppSourcedTicket &&
+                        !isSlackSourcedTicket &&
+                        channel?.type === ChannelType.SOCIAL_MEDIA
+                      }
+                    />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (

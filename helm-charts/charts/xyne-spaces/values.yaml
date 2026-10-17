@@ -11,6 +11,9 @@ xyne-dashboard:
 xyne-zero:
   enabled: true
 
+xyne-sync:
+  enabled: false
+
 xyne-ysweet:
   enabled: true
 

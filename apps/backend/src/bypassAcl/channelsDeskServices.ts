@@ -58,7 +58,6 @@ export async function insertChannelsDeskTicket(args: {
   conversationId: string;
   messageId: string;
   sourceChannelId: string;
-  sourceChannelName: string;
   deskId: string;
   projectId: string;
   boardId: string;
@@ -97,7 +96,8 @@ export async function insertChannelsDeskTicket(args: {
           conversationId: stub.conversationId,
           senderId: args.createdBy,
           workspaceId: args.workspaceId,
-          content: `Conversation in #${args.sourceChannelName}`,
+          // Empty, like the email desk's: the ticket header names the channel.
+          content: '',
           msgType: MessageType.SYSTEM,
         },
       });

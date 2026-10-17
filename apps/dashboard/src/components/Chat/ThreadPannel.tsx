@@ -99,6 +99,7 @@ import {
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useReleaseForDevTicket } from '../../hooks/useReleaseForDevTicket';
 import { useZero } from '../../hooks/useZero';
+import { markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
@@ -684,13 +685,20 @@ export const ThreadMessages = ({
     [setSkipMarkAsReadThread],
   );
 
+  // Full-page search covering the thread counts as leaving it (markWhenLeft), so replies that
+  // arrive while the user searches stay unread. The skip flags hold until unmount: a cover is not
+  // the end of the thread's skip. The Activity flag is app-wide and goes to the first thread that
+  // reads it, so this one takes it as it leaves — a thread opened meanwhile (full page's side
+  // panel) neither sees nor uses it up.
+  const coverage = usePageCoverage();
+  const activitySkipRef = useRef(false);
   useEffect(() => {
-    return () => {
-      if (skipMarkAsReadThreadRef?.current || activitySkipMarkAsReadThreadRef.current) {
-        skipMarkAsReadThreadRef.current = false;
+    const stopWatching = markWhenLeft(coverage, () => {
+      if (activitySkipMarkAsReadThreadRef.current) {
         activitySkipMarkAsReadThreadRef.current = false;
-        return;
+        activitySkipRef.current = true;
       }
+      if (skipMarkAsReadThreadRef?.current || activitySkipRef.current) return;
       if (derivedConversationId) {
         const draft = getDraft(derivedChannelId, derivedConversationId);
         void zero.mutate(
@@ -703,8 +711,13 @@ export const ThreadMessages = ({
           }),
         );
       }
+    });
+    return () => {
+      stopWatching();
+      skipMarkAsReadThreadRef.current = false;
+      activitySkipRef.current = false;
     };
-  }, [derivedConversationId]);
+  }, [derivedConversationId, coverage]);
 
   // Check if this is a ticket thread
   const isTicketThread = useMemo(() => {
@@ -1523,6 +1536,7 @@ export const ThreadMessages = ({
           isInPanelWebview ? '' : 'rounded-lg'
         }`}
         ref={dragAndDropAreaRef}
+        data-testid={previewCardMode ? 'thread-preview-card' : 'thread-panel'}
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
@@ -1918,11 +1932,7 @@ export const ThreadMessages = ({
                 value='details'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails
-                  ticketId={derivedTicketId}
-                  hideRelationships
-                  onFillRCA={() => setActiveTab('rca')}
-                />
+                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
               </Tabs.Content>
             )}
 

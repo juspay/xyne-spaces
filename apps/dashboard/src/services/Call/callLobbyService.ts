@@ -9,18 +9,27 @@ export interface CallInfo {
   status: string;
   /** Present when the user has a valid session cookie — skip the lobby form */
   hasSession?: boolean;
+  /** The name this guest joined with before; only sent alongside hasSession */
+  displayName?: string | null;
+  /** People currently in the call */
+  participantCount?: number;
 }
 
 export interface RequestToJoinResponse {
   participantId?: string;
   skipApproval?: boolean;
+  /** Set instead of the fields above once the call is over */
+  status?: 'ended';
 }
 
 export interface LobbyStatusResponse {
-  response:
+  response?:
     | InvitationResponse.REQUESTED
     | InvitationResponse.ACCEPTED
-    | InvitationResponse.DECLINED;
+    | InvitationResponse.DECLINED
+    | InvitationResponse.LEFT;
+  /** Set instead of `response` once the call is over */
+  status?: 'ended';
 }
 
 export interface LobbyParticipant {
