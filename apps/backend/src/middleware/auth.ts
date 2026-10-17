@@ -627,16 +627,19 @@ export class AuthMiddleware {
         email: session.user.email,
       });
       
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-        providerUserId: session.user.providerUserId,
-        provider: session.user.authProvider,
-      });
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId,
+          memberId: session.user.orgMemberId,
+          providerUserId: session.user.providerUserId,
+          provider: session.user.authProvider,
+        },
+        session.refreshTokenExpiry
+      );
 
       // Update session activity
       logger.info(`[AUTH] refreshTokenBySession updating session activity`, {

@@ -766,14 +766,17 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Generating new JWT token`);
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId ?? undefined,
-        memberId: session.user.orgMemberId,
-      });
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId ?? undefined,
+          memberId: session.user.orgMemberId,
+        },
+        session.refreshTokenExpiry
+      );
 
       await this.userSessionService.updateSession(session.id, {
         lastActivity: new Date(),
@@ -2071,14 +2074,17 @@ export class AuthV2Controller {
         ? sessionRefreshExpiry.getTime() - Date.now()
         : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId ?? undefined,
-        memberId: targetUser.orgMemberId,
-      });
+      const token = jwtService.generateToken(
+        {
+          sub: targetUser.id,
+          email: targetUser.email,
+          name: targetUser.name,
+          picture: targetUser.picture || undefined,
+          workspaceId: targetUser.workspaceId ?? undefined,
+          memberId: targetUser.orgMemberId,
+        },
+        sessionRefreshExpiry ?? undefined
+      );
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };

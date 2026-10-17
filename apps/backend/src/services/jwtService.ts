@@ -31,9 +31,21 @@ export class JwtService {
   }
 
   /**
-   * Generate a JWT token with the specified payload
+   * Generate a JWT token with the specified payload.
+   * @param notAfter When creating a token for an existing session, its refreshTokenExpiry — the token never outlives it.
    */
-  generateToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>): string {
+  generateToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>, notAfter?: Date): string {
+    // A JWT that outlives its session keeps the app "logged in" while pushes skip the dead session row.
+    const secondsUntilNotAfter = notAfter
+      ? Math.floor((notAfter.getTime() - Date.now()) / 1000)
+      : config.jwt.expirationSeconds;
+    // An already-expired session (e.g. workspace switch on an expired ACTIVE row) gives a negative lifetime;
+    // floor it at 1s so the token is valid but ends at once, and the next request fails refresh and re-logs in.
+    const expiresInSeconds = Math.max(
+      1,
+      Math.min(config.jwt.expirationSeconds, secondsUntilNotAfter)
+    );
+
     try {
       const token = jwt.sign(
         {
@@ -48,7 +60,7 @@ export class JwtService {
         },
         this.secret,
         {
-          expiresIn: config.jwt.expirationSeconds,
+          expiresIn: expiresInSeconds,
           issuer: this.issuer,
           audience: this.audience,
         }
