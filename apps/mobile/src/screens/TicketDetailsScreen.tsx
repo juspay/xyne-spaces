@@ -61,6 +61,7 @@ import { firstNonEmptyId, resolveEffectiveTicketId } from './ticket-details/reso
 import { runTicketMutation } from './ticket-details/run-ticket-mutation';
 import { isChatV3Enabled } from '@/src/features/chat/v3/flag';
 import { TicketThreadPane } from '@/src/features/chat/v3/screens/TicketThreadPane';
+import { TicketCustomFieldsSection } from '@/src/features/xyne-desks/detail/custom-fields';
 import { OverviewTab } from './ticket-details/tabs/OverviewTab';
 import { TicketDetailsPickers } from './ticket-details/ticket-details-pickers';
 import { mapAppliedLabels } from './ticket-details/ticket-labels';
@@ -556,6 +557,19 @@ export function TicketDetailsScreen({
               metaRows={metaRows}
               onSaveTitle={handleSaveTitle}
               onSaveDescription={handleSaveDescription}
+              customFields={
+                <TicketCustomFieldsSection
+                  ticketId={effectiveTicketId}
+                  boardId={selectedBoardId}
+                  workspaceId={
+                    (ticket as { workspaceId?: string | null } | undefined)?.workspaceId ??
+                    getActiveWorkspaceId()
+                  }
+                  isArchived={Boolean(
+                    (ticket as { isArchived?: boolean | null } | undefined)?.isArchived,
+                  )}
+                />
+              }
             />
           }
           thread={
