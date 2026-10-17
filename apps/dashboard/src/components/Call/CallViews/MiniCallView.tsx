@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
 import type { Room } from 'livekit-client';
 import { ConnectionState } from 'livekit-client';
@@ -19,6 +20,12 @@ import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
+import { LiveCaptionsOverlay } from '../components/LiveCaptionsOverlay';
+import {
+  useCaptionsPreference,
+  useLiveCaptions,
+  useLiveCaptionsAvailable,
+} from '../hooks/useLiveCaptions';
 import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
@@ -263,6 +270,18 @@ export function MiniCallView({
 
   // Show toast for incoming call chat messages
   useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
+
+  // Live captions, on calls that offer them; same per-viewer preference as the full view
+  const isTranscriptionEnabled = useSelector(
+    roomActor,
+    state => state.context.isTranscriptionEnabled,
+  );
+  const captionsAvailable = useLiveCaptionsAvailable(room);
+  const [captionsEnabled] = useCaptionsPreference();
+  const liveCaptions = useLiveCaptions(
+    room,
+    captionsAvailable && captionsEnabled && isTranscriptionEnabled,
+  );
 
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
@@ -620,7 +639,7 @@ export function MiniCallView({
 
                 {/* Video Grid */}
                 <div
-                  className='flex-1 bg-[#131314] p-3 overflow-auto'
+                  className='relative flex-1 bg-[#131314] p-3 overflow-auto'
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
                   {isWhiteboardOpen ? (
@@ -665,6 +684,7 @@ export function MiniCallView({
                       />
                     </div>
                   )}
+                  <LiveCaptionsOverlay captions={liveCaptions} compact />
                 </div>
                 <div
                   className='relative z-40 pb-4'

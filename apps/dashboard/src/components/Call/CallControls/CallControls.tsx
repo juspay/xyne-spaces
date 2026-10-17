@@ -22,6 +22,7 @@ import {
   Hand,
   NotepadText,
   Captions,
+  CaptionsOff,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -142,6 +143,11 @@ interface CallControlsProps {
   /** Full view: raise / lower hand, offered in the ⋮ menu. */
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
+  /** Full view: live captions on/off for this viewer. Omit to hide the button (call has no captions). */
+  isCaptionsOn?: boolean | undefined;
+  onToggleCaptions?: (() => void) | undefined;
+  /** Transcription is switched off for the call, so there is nothing to caption. */
+  captionsUnavailable?: boolean | undefined;
 }
 
 export function CallControls({
@@ -190,6 +196,9 @@ export function CallControls({
   infoSlot,
   isHandRaised = false,
   onToggleHandRaise,
+  isCaptionsOn = false,
+  onToggleCaptions,
+  captionsUnavailable = false,
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
@@ -616,6 +625,28 @@ export function CallControls({
       data-track-category='CALLS'
       data-track-name='TOGGLE_SCREEN_SHARE'
       data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
+    />
+  );
+
+  const captionsControl = onToggleCaptions && (
+    <ControlButton
+      sizing={sizing}
+      icon={isCaptionsOn ? Captions : CaptionsOff}
+      label={
+        captionsUnavailable
+          ? 'Captions unavailable: transcription is off'
+          : isCaptionsOn
+            ? 'Turn off captions'
+            : 'Turn on captions'
+      }
+      tone={isCaptionsOn && !captionsUnavailable ? 'active' : 'neutral'}
+      inactive={captionsUnavailable}
+      onClick={onToggleCaptions}
+      aria-pressed={isCaptionsOn}
+      data-track-event='BUTTON_CLICK'
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_LIVE_CAPTIONS'
+      data-track-metadata={JSON.stringify({ callId, enabled: !isCaptionsOn })}
     />
   );
 
@@ -1069,6 +1100,7 @@ export function CallControls({
         {micControl}
         {cameraControl}
         {screenShareControl}
+        {captionsControl}
         <div className='hidden items-center gap-2 sm:flex sm:gap-3'>
           {recordingControl}
           {reactionsControl}

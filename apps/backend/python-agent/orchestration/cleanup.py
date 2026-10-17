@@ -3,7 +3,7 @@ Cleanup manager - handles graceful shutdown when all participants leave
 """
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 
 from livekit import rtc
 from transcription import TranscriptionStorage
@@ -36,6 +36,8 @@ class CleanupManager:
         self.room = room
         self.conversation_store = conversation_store
         self.additional_storages: List[TranscriptionStorage] = additional_storages or []
+        # MultiUserTranscriber.drain: waits for speech still finalising; True if any was pending
+        self.transcriber_drain: Optional[Callable[[], Awaitable[bool]]] = None
 
         # Idempotency: cleanup can be triggered from multiple paths (empty room,
         # SIGTERM shutdown callback, entrypoint finally). Only run once; concurrent
@@ -109,14 +111,16 @@ class CleanupManager:
 
     async def _drain_and_update_stt(self):
         """Wait for pending STT tasks and upload any remaining transcripts."""
-        if not self.stt_tasks:
+        late_speech = await self._drain_transcriber()
+        if not self.stt_tasks and not late_speech:
             return
-            
-        # Grace period for in-flight STT
-        await asyncio.sleep(3)
 
-        # Wait for pending tasks to complete (don't cancel immediately)
-        pending_tasks = [t for t in self.stt_tasks.values() if not t.done()]
+        pending_tasks = []
+        if self.stt_tasks:
+            # Grace period for in-flight STT
+            await asyncio.sleep(3)
+            # Wait for pending tasks to complete (don't cancel immediately)
+            pending_tasks = [t for t in self.stt_tasks.values() if not t.done()]
         if pending_tasks:
             logger.info(f"stt_drain_started | pending_tasks={len(pending_tasks)}")
             try:
@@ -138,12 +142,21 @@ class CleanupManager:
             logger.error(f"storage_flush_failed | stage=post_stt_drain", exc_info=True)
         
         # Notify backend again if we had pending STT (transcript updated)
-        if pending_tasks:
+        if pending_tasks or late_speech:
             try:
                 await self.webhook.notify_transcript_ready(self.call_id)
                 logger.info(f"backend_webhook_retry | reason=transcript_updated")
             except Exception:
                 logger.error(f"backend_webhook_failed | stage=retry", exc_info=True)
+
+    async def _drain_transcriber(self) -> bool:
+        if self.transcriber_drain is None:
+            return False
+        try:
+            return await self.transcriber_drain()
+        except Exception:
+            logger.error("transcriber_drain_failed", exc_info=True)
+            return False
 
     async def _flush_storage(self):
         try:
