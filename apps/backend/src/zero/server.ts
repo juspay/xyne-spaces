@@ -633,6 +633,17 @@ export async function runCatalogQuery(
     throw new CatalogQueryError('unknown', `Unknown catalog query "${name}".`, error);
   }
 
+  return executeQueryDefinition(queryDef, name, args, ctx, provider);
+}
+
+/** Runs a `defineQuery` definition through the catalog path. */
+export async function executeQueryDefinition(
+  queryDef: AnyCustomQuery,
+  name: string,
+  args: unknown,
+  ctx: Context,
+  provider: typeof dbProvider,
+): Promise<unknown> {
   const { ast, format } = buildQueryInternals(queryDef, name, args, ctx);
 
   try {
@@ -645,6 +656,18 @@ export async function runCatalogQuery(
   } catch (error) {
     throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
   }
+}
+
+/** Compiles a `defineQuery` definition to SQL without running it. */
+export async function compileQueryDefinition(
+  queryDef: AnyCustomQuery,
+  name: string,
+  args: unknown,
+  ctx: Context,
+): Promise<{ text: string; values: unknown[] }> {
+  const { ast, format } = buildQueryInternals(queryDef, name, args, ctx);
+  const sqlQuery = formatPgInternalConvert(compile(await fetchServerSchema(), schema, ast, format));
+  return { text: sqlQuery.text, values: [...sqlQuery.values] };
 }
 
 export async function handleQueriesFallback(request: Request): Promise<any> {

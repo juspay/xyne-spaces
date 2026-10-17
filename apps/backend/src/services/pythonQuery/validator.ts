@@ -86,7 +86,7 @@ const WhereConditionSchema: z.ZodType<unknown> = z.lazy(() =>
   ]),
 )
 
-const WhereInputSchema = z.record(z.string(), WhereConditionSchema).optional()
+export const WhereInputSchema = z.record(z.string(), WhereConditionSchema).optional()
 
 export const QueryASTSchema = z.object({
   model: z.string(),

@@ -126,6 +126,7 @@ multipart uploads, search, and identity:
 | `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
 | `GET /api/sdk/v1/search` | Vespa search |
 | `GET /api/sdk/v1/search/schema` | Field definitions for a search index |
+| `POST /api/sdk/v1/data/query` | Rows of one table under its own read ACL (Zero ACL for Zero tables, Prisma ACL otherwise); no relations |
 | `POST /api/sdk/v1/calls/initiate` | `{ channelId, callType, invitedUserIds?, conversationId? }` → `{ token, livekitUrl, externalId, callId, roomLink, channelId, scopeType }` or `{ pending: true }` |
 | `POST /api/sdk/v1/calls/join` | `{ callId }` (the external id) → `{ token, livekitUrl, externalId, roomLink, channelId, scopeType }` or `{ pending: true }`. Workspace-scoped, as `/api/calls/join` |
 | `POST /api/sdk/v1/calls/:callId/leave` | → `{}` (legacy no-op; the media webhook records leaving) |
