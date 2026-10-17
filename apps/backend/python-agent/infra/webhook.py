@@ -1,6 +1,6 @@
 """Webhook notification with retry logic"""
 import asyncio
-from typing import List
+from typing import List, Optional
 import aiohttp
 from config.logging import get_logger
 
@@ -51,6 +51,33 @@ class WebhookNotifier:
 
         logger.error(f"[WEBHOOK] API failed for call {call_id}, has_transcript={has_transcript}")
         return False
+
+    async def fetch_neurolink_url(self, workspace_id: Optional[str]) -> Optional[str]:
+        """NeuroLink base URL for this call from the backend's feature flags, or None (then
+        NEUROLINK_STT_URL applies). Fetched over this authenticated API rather than read from
+        room metadata, which every participant can see."""
+        if not self.backend_url or not self.api_key:
+            return None
+
+        url = f"{self.backend_url}/api/transcriptionAgent/stt-config"
+        headers = {"x-api-key": self.api_key}
+        params = {"workspaceId": workspace_id} if workspace_id else {}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get("neurolinkUrl") or None
+                    logger.error(f"[STT_CONFIG] Unexpected status {response.status} fetching STT config")
+        except Exception as e:
+            logger.error(f"[STT_CONFIG] Exception fetching STT config: {e}")
+        return None
 
     async def fetch_voiceprints(self) -> List[dict]:
         """

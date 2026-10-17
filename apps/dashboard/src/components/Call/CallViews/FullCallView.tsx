@@ -27,6 +27,12 @@ import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
+import { LiveCaptionsOverlay } from '../components/LiveCaptionsOverlay';
+import {
+  useCaptionsPreference,
+  useLiveCaptions,
+  useLiveCaptionsAvailable,
+} from '../hooks/useLiveCaptions';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { useActiveRecording, type ActiveRecording } from '../hooks/useActiveRecording';
@@ -356,6 +362,14 @@ export function FullCallView({
 
   // Reactions
   const { reactions, sendReaction } = useReactions(room);
+
+  // Live captions from the transcription agent, only on calls that offer them; a per-viewer toggle
+  const captionsAvailable = useLiveCaptionsAvailable(room);
+  const [captionsEnabled, toggleCaptions] = useCaptionsPreference();
+  const liveCaptions = useLiveCaptions(
+    room,
+    captionsAvailable && captionsEnabled && isTranscriptionEnabled,
+  );
   const displayRecordingType =
     displayActiveRecording?.recordingType ?? (optimisticRecording ? optimisticRecordingType : null);
 
@@ -762,7 +776,10 @@ export function FullCallView({
 
       <CallStateTransition connectionState={connectionState} machineState={machineState}>
         <div className='flex min-h-0 flex-1'>
-          <main className='relative min-w-0 flex-1 overflow-hidden'>{renderStage()}</main>
+          <main className='relative min-w-0 flex-1 overflow-hidden'>
+            {renderStage()}
+            <LiveCaptionsOverlay captions={liveCaptions} />
+          </main>
 
           {/* Side panel — docked card beside the stage (the stage shrinks rather
               than being covered); full-screen sheet on small screens. */}
@@ -821,6 +838,9 @@ export function FullCallView({
             hidePresentationMode={!isTelepresenceEnabled}
             isHandRaised={isLocalHandRaised}
             onToggleHandRaise={onToggleHandRaise}
+            isCaptionsOn={captionsEnabled}
+            onToggleCaptions={captionsAvailable ? toggleCaptions : undefined}
+            captionsUnavailable={!isTranscriptionEnabled}
             infoSlot={
               <div className='flex min-w-0 items-center gap-3 text-base font-medium text-[#e3e3e3]'>
                 <span className='shrink-0 tabular-nums'>{clockLabel}</span>

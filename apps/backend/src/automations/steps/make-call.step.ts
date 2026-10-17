@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { resolveCallSttRouting } from '@/services/callSttRouting';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -239,12 +240,14 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     // before DB commit leaves no call row, and a crash after commit leaves a
     // valid room. The only downside is a transient orphan room if the DB
     // transaction rolls back; it auto-expires via LiveKit's emptyTimeout.
+    const sttRouting = await resolveCallSttRouting({ workspaceId });
     const roomMetadata = JSON.stringify({
       channelId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
-      sttModel: 'google',
+      ...sttRouting,
       createdBy: initiatorUserId,
+      workspaceId,
       ...(allInvitedUserIds.length > 0 && { invitedUserIds: allInvitedUserIds }),
     });
 

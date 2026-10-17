@@ -9,6 +9,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
+import { resolveNeuroLinkBaseUrl } from '@/services/callSttRouting';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
@@ -375,6 +376,18 @@ class TranscriptionAgentController {
     } catch (error) {
       logger.error('[UserNames] Failed to fetch user names:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch user names' });
+    }
+  };
+
+  // Per-call STT settings that come from feature flags but must not travel in room metadata
+  getSttConfig = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
+      const neurolinkUrl = await resolveNeuroLinkBaseUrl({ workspaceId });
+      res.json({ success: true, neurolinkUrl });
+    } catch (error) {
+      logger.error('[SttConfig] Failed to resolve STT config:', error);
+      res.status(500).json({ success: false, error: 'Failed to resolve STT config' });
     }
   };
 

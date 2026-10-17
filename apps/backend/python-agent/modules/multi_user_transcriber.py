@@ -5,6 +5,8 @@ Uses livekit-agents built-in STT with:
 - silero.VAD for voice activity detection (with pre-buffering)
 - openai.STT.with_azure() for Azure OpenAI Whisper transcription
 - google.STT() for Google Cloud Speech-to-Text transcription
+- openai.STT(use_realtime=True) for NeuroLink, which speaks the OpenAI Realtime transcription protocol
+- Optional second STT run in parallel for evaluation, never shown (modules/stt_eval.py)
 - LiveKit Turn Detector for contextually-aware end-of-turn detection
 - One AgentSession per participant for proper audio isolation
 - Retry logic for handling transient errors
@@ -19,6 +21,7 @@ import math
 import os
 import time
 from typing import Dict, List, Optional, Callable, Awaitable, Set, Any
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -39,9 +42,20 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from events import EventBus
 from config import get_logger
+from modules.stt_eval import ShadowTranscriber, SttEvalCollector, find_microphone_track
 
 logger = get_logger(__name__)
 
+# Values accepted from room metadata `sttModel` / `sttShadowModel`
+SUPPORTED_STT_MODELS = ('google', 'azure', 'deepgram', 'neurolink')
+# Parallel eval STT streams one room may run at once (each speaker costs a second STT stream)
+MAX_SHADOW_STREAMS = 10
+# A closing session waits this long for the final its STT still owes. NeuroLink closes an
+# utterance 0.7 s after audio stops and waits up to ~3 s for the corrected text.
+FINAL_WAIT_SECONDS = 5.0
+# Room cleanup (drain): closing sessions and parallel streams, then the final eval POST
+CLOSING_WAIT_SECONDS = 8.0
+EVAL_FINAL_POST_SECONDS = 4.0
 
 def _load_turn_detector_model():
     """
@@ -439,6 +453,21 @@ class MultiUserTranscriber:
         self._pending_sessions: Set[str] = set()  # Participants with session creation in progress
         self._identifier: Optional[Any] = identifier  # RealtimeIdentifier for speaker ID
         self._enabled: bool = True  # Host kill-switch; False = silenced (audio unsubscribed, no sinks)
+        # Session and parallel-STT closes still delivering their last speech; drain() waits on them
+        self._closing: Set[asyncio.Task] = set()
+        # Parallel eval STT (room metadata `sttShadowModel`), see set_stt_shadow_model
+        self._shadow_model: Optional[str] = None
+        self._shadow_stt: Optional[stt.STT] = None
+        self._shadows: Dict[str, ShadowTranscriber] = {}
+        self._eval: Optional[SttEvalCollector] = None
+        # NeuroLink; the URL may be replaced per call from backend feature flags (set_neurolink_base_url).
+        # Engine, language, dictionary and correction live in the NeuroLink profile NEUROLINK_STT_MODEL.
+        self._neurolink_url: str = (os.getenv("NEUROLINK_STT_URL") or "").strip().rstrip("/")
+        self._neurolink_token: Optional[str] = os.getenv("NEUROLINK_STT_TOKEN") or None
+        self._neurolink_model: str = os.getenv("NEUROLINK_STT_MODEL") or "neurolink-call"
+        self._neurolink_fallback_logged = False
+        # Per session: set while its STT owes no final (see _close_session)
+        self._final_settled: Dict[AgentSession, asyncio.Event] = {}
 
         # === Multi-core VAD optimization ===
         # Silero VAD hardcodes ONNX to intra_op_num_threads=1, inter_op_num_threads=1.
@@ -531,7 +560,7 @@ class MultiUserTranscriber:
             keywords=[(word, 10.0) for word in hot_words],
         )
     
-    def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:
+    def _create_stt(self, call_type: Optional[str] = None, model: Optional[str] = None) -> ResilientSTT:
         """
         Create or reuse shared resilient STT instance.
         
@@ -539,7 +568,9 @@ class MultiUserTranscriber:
         - If stt_provider == 'chutes': use direct Chutes.ai Whisper STT
         - If stt_provider == 'azure' (default): use existing Azure/Google/Deepgram flow
         
-        For HEADLESS calls, bypass cache to allow per-call STT selection.
+        For HEADLESS calls, bypass cache to allow per-call STT selection. An explicit `model`
+        (the parallel eval STT) is never cached either: it must not replace the shared
+        instance that the visible transcript uses.
         """
         if self._stt_provider == "chutes":
             if self._shared_stt is None or call_type == 'HEADLESS':
@@ -565,12 +596,32 @@ class MultiUserTranscriber:
                     self._shared_stt = resilient_stt
             return self._shared_stt
         
-        # === Default provider: Azure (existing flow with Google/Deepgram sub-models) ===
-        selected_model = self._stt_model_override or self._stt_model
-        
-        if self._shared_stt is None or call_type == 'HEADLESS':
+        # === Default provider: Azure (existing flow with Google/Deepgram/NeuroLink sub-models) ===
+        selected_model = model or self._resolve_stt_model()
+        # HEADLESS picks its STT per call; the eval STT must not overwrite the shared instance
+        uncached = call_type == 'HEADLESS' or model is not None
+
+        if self._shared_stt is None or uncached:
+            # Use NeuroLink (OpenAI Realtime transcription protocol; it finds utterance ends itself)
+            if selected_model == "neurolink":
+                logger.info(f"[STT] Using NeuroLink realtime STT | model={self._neurolink_model}")
+                base_url = self._neurolink_url
+                if base_url.startswith("ws"):
+                    base_url = "http" + base_url[len("ws"):]  # the plugin wants http(s) and switches to ws itself
+                inner_stt = openai.STT(
+                    base_url=f"{base_url}/v1",
+                    api_key=self._neurolink_token,
+                    model=self._neurolink_model,
+                    use_realtime=True,
+                    detect_language=True,  # otherwise the plugin pins the language to "en"
+                )
+                resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                if uncached:
+                    return resilient_stt
+                self._shared_stt = resilient_stt
+
             # Use Deepgram STT
-            if selected_model == "deepgram" and self._deepgram_api_key:
+            elif selected_model == "deepgram" and self._deepgram_api_key:
                 # Domain-specific hot words shared with Google STT adaptation
                 hot_words = [
                     "Xyne Calls", "Juspay Euler", "Namma Cloud", "Xyne Chats",
@@ -600,7 +651,7 @@ class MultiUserTranscriber:
                 )
                 resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
                 # For HEADLESS, return without caching. For regular calls, cache it.
-                if call_type == 'HEADLESS':
+                if uncached:
                     return resilient_stt
                 else:
                     self._shared_stt = resilient_stt
@@ -611,7 +662,7 @@ class MultiUserTranscriber:
                 inner_stt = self._create_google_stt_instance()
                 resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
                 
-                if call_type == 'HEADLESS':
+                if uncached:
                     return resilient_stt
                 else:
                     self._shared_stt = resilient_stt
@@ -625,7 +676,10 @@ class MultiUserTranscriber:
                     api_key=self._azure_api_key
                     #prompt=stt_prompt
                 )
-                self._shared_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
+                if model is not None:
+                    return resilient_stt
+                self._shared_stt = resilient_stt
         return self._shared_stt
     
     def _init_vad_pool(self):
@@ -731,6 +785,13 @@ class MultiUserTranscriber:
 
     async def _emit_transcription(self, data: dict):
         """Emit transcription event via EventBus."""
+        if self._eval is not None and self._enabled and data.get("source") != "ai":
+            self._eval.add(
+                source="primary",
+                participant_identity=data.get("participant_identity", ""),
+                participant_name=data.get("user", ""),
+                text=data.get("text", ""),
+            )
         await self.bus.emit("TRANSCRIPTION", data)
 
     async def _emit_identified_transcription(self, data: dict):
@@ -980,6 +1041,18 @@ class MultiUserTranscriber:
             identifier=self._identifier,
         )
         
+        # Track whether the STT owes a final, so closing can wait for the last sentence
+        settled = asyncio.Event()
+        settled.set()
+        self._final_settled[session] = settled
+
+        @session.on("user_input_transcribed")
+        def _on_transcribed(ev):
+            if ev.is_final:
+                settled.set()
+            elif ev.transcript.strip():
+                settled.clear()
+
         # Start session with participant-specific options
         await session.start(
             agent=agent,
@@ -1004,7 +1077,14 @@ class MultiUserTranscriber:
             session: The session to close
             participant_identity: The participant's identity (for cleanup)
         """
+        settled = self._final_settled.pop(session, None)
         try:
+            # Deliver the sentence in progress first: LiveKit's own close waits only ~2 s for it
+            if settled is not None and self._enabled and not settled.is_set():
+                try:
+                    await asyncio.wait_for(settled.wait(), FINAL_WAIT_SECONDS)
+                except asyncio.TimeoutError:
+                    logger.warning(f"stt_final_wait_timeout | participant_id={participant_identity}")
             logger.info(f"stt_drain_started")
             await session.drain()
             logger.info(f"stt_drain_completed")
@@ -1045,10 +1125,157 @@ class MultiUserTranscriber:
     
     def set_stt_model_override(self, model: str):
         """Allow runtime override of STT model (e.g. from room metadata)"""
-        if model and model.lower() in ['google', 'azure', 'deepgram']:
+        if model and model.lower() in SUPPORTED_STT_MODELS:
             self._stt_model_override = model.lower()
             if self._stt_provider != "chutes":
                 logger.info(f"[{self.__class__.__name__}] STT model override: {model}")
+
+    def set_neurolink_base_url(self, url: Optional[str]):
+        """Use this NeuroLink base URL for the call (from feature flags) instead of NEUROLINK_STT_URL.
+
+        The agent sends its NeuroLink token and the call's transcripts there, so the URL is only
+        accepted when its host is in NEUROLINK_STT_ALLOWED_HOSTS (comma-separated host names; a
+        leading "." also allows subdomains)."""
+        url = (url or "").strip().rstrip("/")
+        if not url:
+            return
+        host = (urlparse(url).hostname or "").lower()
+        allowed = [h.strip().lower() for h in os.getenv("NEUROLINK_STT_ALLOWED_HOSTS", "").split(",") if h.strip()]
+        if not host or not any(host == h or (h.startswith(".") and host.endswith(h)) for h in allowed):
+            logger.warning("neurolink_base_url_rejected | reason=host_not_in_NEUROLINK_STT_ALLOWED_HOSTS")
+            return
+        self._neurolink_url = url
+        logger.info("neurolink_base_url_from_flags | source=backend")
+
+    def set_stt_shadow_model(self, model: str):
+        """Run `model` in parallel with the visible STT on every speaker's audio, never shown,
+        and send both transcripts to the NeuroLink eval endpoint (modules/stt_eval.py)."""
+        model = (model or "").lower()
+        if not model or self._stt_provider == "chutes" or model not in SUPPORTED_STT_MODELS:
+            return
+        primary = self._resolve_stt_model()
+        if model == primary or not self._stt_model_available(model):
+            logger.info(f"stt_shadow_skipped | requested={model}, primary={primary}, reason=unavailable")
+            return
+        self._shadow_model = model
+        self._eval = SttEvalCollector(
+            base_url=self._neurolink_url,
+            token=self._neurolink_token,
+            call_id=self._call_id,
+            room_name=self.ctx.room.name,
+            primary_model=primary,
+            shadow_model=model,
+        )
+        self._eval.start()
+        logger.info(f"stt_shadow_enabled | primary={primary}, shadow={model}")
+
+    def _create_shadow_stt(self) -> stt.STT:
+        """The eval STT for one more speaker. The provider instance is shared; a non-streaming
+        provider gets its own StreamAdapter per speaker, on the next VAD of the pool."""
+        if self._shadow_stt is None:
+            self._shadow_stt = self._create_stt(call_type=self._call_type, model=self._shadow_model)
+        if self._shadow_stt.capabilities.streaming:
+            return self._shadow_stt
+        return stt.StreamAdapter(stt=self._shadow_stt, vad=self._get_next_vad())
+
+    def _start_shadow(self, participant: rtc.RemoteParticipant):
+        if self._eval is None or participant.identity in self._shadows:
+            return
+        if len(self._shadows) >= MAX_SHADOW_STREAMS:
+            logger.info(f"stt_shadow_skipped | participant_id={participant.identity}, reason=room_limit")
+            return
+        track = find_microphone_track(participant)
+        if track is None:
+            return
+        identity = participant.identity
+        name = participant.name or identity
+        collector = self._eval
+
+        def on_final(text: str, language: Optional[str], start: Optional[float], end: Optional[float]):
+            if not self._enabled:
+                return
+            collector.add(
+                source="shadow",
+                participant_identity=identity,
+                participant_name=name,
+                text=text,
+                language=language,
+                start_time=start,
+                end_time=end,
+            )
+
+        try:
+            shadow = ShadowTranscriber(
+                stt_instance=self._create_shadow_stt(),
+                track=track,
+                participant_identity=identity,
+                on_final=on_final,
+            )
+            shadow.start()
+        except Exception as e:
+            logger.warning(f"shadow_stt_start_failed | participant_id={identity}, error={e}")
+            return
+        self._shadows[identity] = shadow
+
+    def _stop_shadow(self, participant_identity: str):
+        shadow = self._shadows.pop(participant_identity, None)
+        if shadow is not None:
+            # Transcription turned off: stop at once rather than let it finish what it heard
+            timeout = FINAL_WAIT_SECONDS if self._enabled else 0.0
+            self._track_closing(asyncio.create_task(shadow.aclose(timeout=timeout)))
+
+    def _track_closing(self, task: asyncio.Task):
+        self._closing.add(task)
+        task.add_done_callback(self._closing.discard)
+
+    async def drain(self) -> bool:
+        """Room cleanup: wait up to CLOSING_WAIT_SECONDS for closing sessions (their last turns)
+        and parallel STT streams, then send the call's final eval batch.
+
+        Returns True when anything was still closing, so cleanup flushes the transcript again.
+        """
+        # Agent shutting down with speakers still connected: finish their parallel streams too
+        for identity in list(self._shadows):
+            self._stop_shadow(identity)
+        pending = [t for t in self._closing if not t.done()]
+        if pending:
+            logger.info(f"transcriber_drain_started | pending={len(pending)}")
+            _, still_pending = await asyncio.wait(pending, timeout=CLOSING_WAIT_SECONDS)
+            if still_pending:
+                logger.warning(f"transcriber_drain_timeout | pending={len(still_pending)}")
+        if self._eval is not None:
+            await self._eval.aclose(timeout=EVAL_FINAL_POST_SECONDS)
+        return bool(pending)
+
+    def _stt_model_available(self, model: str) -> bool:
+        """Whether the provider behind an STT model name has what it needs to run."""
+        if model == "neurolink":
+            return bool(self._neurolink_url and self._neurolink_token)
+        if model == "deepgram":
+            return bool(self._deepgram_api_key)
+        if model == "google":
+            return bool(os.getenv('GOOGLE_APPLICATION_CREDENTIALS'))
+        if model == "azure":
+            return bool(self._azure_endpoint and self._azure_api_key)
+        return False
+
+    def _resolve_stt_model(self) -> str:
+        """The STT model the provider chain in _create_stt actually runs for this call.
+
+        Same order as before NeuroLink: Deepgram with an API key, Google with credentials, Azure
+        otherwise. A NeuroLink request without a URL and token goes through that order from STT_MODEL.
+        """
+        model = self._stt_model_override or self._stt_model
+        if model == "neurolink":
+            if self._stt_model_available(model):
+                return model
+            model = self._stt_model if self._stt_model != "neurolink" else "azure"
+            if not self._neurolink_fallback_logged:
+                self._neurolink_fallback_logged = True
+                logger.warning(f"stt_model_unavailable | requested=neurolink, reason=not_configured, falling_back_to={model}")
+        if model in ("deepgram", "google") and self._stt_model_available(model):
+            return model
+        return "azure"
     
     def is_enabled(self) -> bool:
         """Current authoritative transcription state (True = capturing)."""
@@ -1124,6 +1351,7 @@ class MultiUserTranscriber:
         
         task = asyncio.create_task(self._start_session(participant))
         self._tasks.add(task)
+        self._start_shadow(participant)
         
         def on_task_done(t: asyncio.Task):
             self._pending_sessions.discard(participant.identity)
@@ -1164,6 +1392,7 @@ class MultiUserTranscriber:
         Also clears pending state if session creation was in progress.
         """
         self._pending_sessions.discard(participant.identity)
+        self._stop_shadow(participant.identity)
         
         session = self._sessions.pop(participant.identity, None)
         if session is None:
@@ -1175,4 +1404,5 @@ class MultiUserTranscriber:
         task = asyncio.create_task(self._close_session(session, participant.identity))
         self._tasks.add(task)
         task.add_done_callback(lambda t: self._tasks.discard(t))
-
+        # Closing commits the participant's last turn; room cleanup waits for it in drain()
+        self._track_closing(task)
