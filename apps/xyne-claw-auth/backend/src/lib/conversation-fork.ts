@@ -20,7 +20,7 @@ export interface ForkSource {
 }
 
 export interface ForkDeps {
-  post: (body: Record<string, unknown>) => Promise<{ conversationId?: string }>;
+  post: (body: Record<string, unknown>) => Promise<{ conversationId?: string; channelId?: string }>;
   clone?: typeof cloneBranchSession;
 }
 
@@ -66,7 +66,7 @@ export async function applyConversationFork(
   }
 
   const sourceLink = spacesThreadLink(source.channelId, source.conversationId);
-  let posted: { conversationId?: string };
+  let posted: { conversationId?: string; channelId?: string };
   try {
     posted = await deps.post({ ...target, markdownText: forkMessage(summary, sourceLink) });
   } catch (err) {
@@ -87,8 +87,10 @@ export async function applyConversationFork(
     if (clone.success) memory = clone.targetExisted ? "kept" : "copied";
   }
 
-  const link = "channelId" in target ? spacesThreadLink(target.channelId, targetConversationId) : null;
-  const where = link ? `[the new thread](${link})` : "the target thread";
+  const targetChannelId = "channelId" in target ? target.channelId : str(posted.channelId);
+  const link = spacesThreadLink(targetChannelId || undefined, targetConversationId);
+  const label = "channelId" in target ? "the new thread" : "the thread";
+  const where = link ? `[${label}](${link})` : "the target thread";
   const detail = {
     copied: "and copied my memory of this thread",
     kept: "I already had a conversation there, so I kept that memory and the summary adds this thread's context",
