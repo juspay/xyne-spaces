@@ -1,7 +1,7 @@
 import { useMemo, type ReactElement } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, View } from 'react-native';
 
+import { SpacesHeader } from '@/src/components/spaces-header';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { haptics } from '@/src/utils/haptics';
 import { useRouter } from 'expo-router';
@@ -9,20 +9,15 @@ import Avatar from '@/src/components/ui/avatar';
 import { PresenceDot } from '@/src/components/ui/presence-dot';
 
 export function DmsHeader(): ReactElement {
-  const insets = useSafeAreaInsets();
-
   return (
-    <View
-      style={{
-        paddingTop: insets.top,
-      }}
-      className='flex-row items-center justify-between px-4 py-3 bg-spaces-background'
-    >
-      <Text className='text-[28px] font-semibold text-spaces-foreground'>DMs</Text>
-      <View className='flex-row items-center gap-3'>
-        <UserProfile />
-      </View>
-    </View>
+    <SpacesHeader
+      title='DMs'
+      trailing={
+        <View className='flex-row items-center gap-3'>
+          <UserProfile />
+        </View>
+      }
+    />
   );
 }
 

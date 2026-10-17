@@ -7,7 +7,7 @@ import { useSharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
-
+import { useSpacesHeaderHeight } from '@/src/components/spaces-header';
 import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
@@ -27,6 +27,9 @@ import { dmFilter$ } from '../state/filter-store';
 import { dmRowOrder$ } from '../state/rows-store';
 import { DmRow } from './dm-row';
 import { DmsFilterBar } from './dms-filter-bar';
+
+/** Space between the header and the first row. */
+const LIST_TOP_GAP = 12;
 
 /** Half a viewport of lead time before `onEndReached`. */
 const END_REACHED_THRESHOLD = 0.5;
@@ -80,6 +83,8 @@ e
 
   const { theme } = useUniwind();
   const bottomInset = useFabClearance();
+  // The header floats over the list, so the first row starts below it.
+  const headerHeight = useSpacesHeaderHeight();
 
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
@@ -182,10 +187,10 @@ e
         showsVerticalScrollIndicator={false}
         style={{ flex: 1 }}
         contentContainerStyle={{
-          paddingBottom: bottomInset,
+          paddingTop: headerHeight + LIST_TOP_GAP,
+        paddingBottom: bottomInset,
           flexGrow: order.length === 0 ? 1 : undefined,
-          paddingBlock: 12,
-        }}
+          }}
         className='bg-spaces-background'
       />
       <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
