@@ -1029,9 +1029,19 @@ export class CallController {
         const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
         // Prepare room metadata
+        // The transcription agent picks its STT engine from room metadata (`sttModel`)
+        // and falls back to its own STT_MODEL env default (azure) when the key is
+        // missing. Rooms recreated here (scheduled calls, rooms that hit emptyTimeout)
+        // must carry the same keys as rooms created in initiateCall, otherwise the
+        // agent silently transcribes with Azure Whisper instead of Google.
+        const persistedSttModel = (activeCall.metadata as Record<string, unknown> | null)?.sttModel;
+        const roomSttModel = typeof persistedSttModel === 'string' && persistedSttModel ? persistedSttModel : 'google';
+
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           createdBy: activeCall.createdByUserId,
+          sttModel: roomSttModel,
+          ...(activeCall.callType && { callType: activeCall.callType }),
           ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
           ...(joinAgentName && { agentName: joinAgentName }),
         });
