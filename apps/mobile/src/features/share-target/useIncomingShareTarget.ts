@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Alert, AppState, Platform } from 'react-native';
+import { getInitialLinkingURL } from '@/src/utils/initialLinkingUrl';
 import { isValidShareId, ShareTargetNative } from './nativeShareTarget';
 
 function parseShareId(url: string): string | null {
@@ -69,7 +70,7 @@ export function useIncomingShareTarget(): void {
       showTooManyFilesAlert(error.message);
     });
 
-    void Linking.getInitialURL().then(url => {
+    void getInitialLinkingURL().then(url => {
       if (cancelled || !url) return;
       const id = parseShareId(url);
       if (id) openOnce(id);

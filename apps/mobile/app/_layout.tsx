@@ -36,6 +36,7 @@ import {
 } from '@/src/services/EnrollmentStatusService';
 import { logger, initializeLogger } from '@/src/utils/logger';
 import { crashReporter } from '@/src/utils/crashReporter';
+import { getInitialLinkingURL } from '@/src/utils/initialLinkingUrl';
 import { CrashErrorBoundary } from '@/src/components/CrashErrorBoundary';
 import type { EventType } from '@xyne/shared/logger';
 import { verifyMtlsHealthWithRetry } from '@/src/services/MtlsApiService';
@@ -739,7 +740,7 @@ function RootLayoutNav(): ReactElement {
     const handleInitialURL = async (): Promise<void> => {
       if (didReadInitialDeepLinkRef.current) return;
       didReadInitialDeepLinkRef.current = true;
-      const initialUrl = await Linking.getInitialURL();
+      const initialUrl = await getInitialLinkingURL();
       if (initialUrl && !hasReceivedRuntimeDeepLinkRef.current) {
         if (isHandledDeepLinkUrl(initialUrl)) {
           enqueueDeepLinkRef.current(initialUrl);
