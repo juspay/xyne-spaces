@@ -10,6 +10,10 @@ export const ClassifiableTicketTypes = Object.values(BaseTicketType).filter(
 
 export type ClassifiableTicketType = typeof ClassifiableTicketTypes[number];
 
+export const TICKET_FIELD_SUGGESTION_MIN_WORDS = 7;
+
+export const countTicketWords = (text: string): number => text.split(/\s+/).filter(Boolean).length;
+
 export const isReleaseTicket = (ticketType?: BaseTicketType | null): boolean => {
     if (!ticketType) return false;
 
