@@ -11,6 +11,8 @@ import { initScheduledJobsWorker, closeWorker } from "../queue/scheduled-jobs-wo
 import { closeQueue } from "../queue/scheduled-jobs-queue.js";
 import { initDailyBriefWorker, closeDailyBriefWorker } from "../queue/daily-brief-worker.js";
 import { closeDailyBriefQueue } from "../queue/daily-brief-queue.js";
+import { initDailyBriefDeliveryWorker, closeDailyBriefDeliveryWorker } from "../queue/daily-brief-delivery-worker.js";
+import { closeDailyBriefDeliveryQueue } from "../queue/daily-brief-delivery-queue.js";
 import { initDailyBriefCron } from "../services/dailyBriefCron.js";
 import { initRunRecoveryWorker, closeRunRecoveryWorker } from "../queue/run-recovery-worker.js";
 import { initAgentRunQueue, closeAgentRunQueue } from "../lib/agent-run-queue.js";
@@ -87,6 +89,10 @@ const WORKERS: WorkerEntry[] = [
   { name: "daily-brief-worker", init: initDailyBriefWorker, close: closeDailyBriefWorker },
   { name: "daily-brief-queue", close: closeDailyBriefQueue },
   { name: "daily-brief-cron", init: initDailyBriefCron },
+  // Scheduled brief → WhatsApp: a separate queue so send retries never re-run
+  // generation (services/dailyBriefWhatsapp.ts).
+  { name: "daily-brief-delivery-worker", init: initDailyBriefDeliveryWorker, close: closeDailyBriefDeliveryWorker },
+  { name: "daily-brief-delivery-queue", close: closeDailyBriefDeliveryQueue },
   { name: "failure-curator-worker", init: initFailureCuratorWorker, closeSync: closeFailureCuratorWorker },
   // Usage patterns: weekly leader-locked cron enqueues one job per ACTIVE
   // agent, bounded worker drains them. Same two-stage shape as Daily Brief,
@@ -109,6 +115,8 @@ const WORKERS: WorkerEntry[] = [
 
 const SHUTDOWN_SEQUENCE: string[] = [
   "local-harness-bridge",
+  // Before the messaging accounts: an in-flight brief send needs them.
+  "daily-brief-delivery-worker",
   "messaging-account-manager",
   "bitbucket-stats",
   "scheduled-jobs-worker",
@@ -134,6 +142,7 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "scheduled-jobs-queue",
   "daily-brief-worker",
   "daily-brief-queue",
+  "daily-brief-delivery-queue",
   "digital-twin-backfill-queue",
   "agent-backfill-worker",
   "agent-backfill-queue",

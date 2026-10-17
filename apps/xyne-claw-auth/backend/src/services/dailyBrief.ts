@@ -114,6 +114,8 @@ export interface GenerateBriefResult {
   brief: DailyBriefPayload;
   content: string;
   sessionId: string | undefined;
+  /** The day this brief was stored under (IST bucket). */
+  dateBucket: string;
 }
 
 /**
@@ -311,7 +313,7 @@ export async function generateDailyBrief(
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
     recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt, attempt);
     if (trigger === "scheduled") recordScheduledDeliveryDelay(dateBucket, generatedAt);
-    return { brief, content, sessionId };
+    return { brief, content, sessionId, dateBucket };
   } catch (err) {
     log.error(`[daily-brief] generation failed for ${userId}:`, errMsg(err));
     await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket).catch(() => {});

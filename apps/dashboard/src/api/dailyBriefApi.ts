@@ -85,6 +85,10 @@ export interface DailyBriefConfig {
   /** Whether the stored instructions are applied to a run. */
   instructionsEnabled: boolean;
   updatedAt?: string | null;
+  /** Also send the scheduled brief to the user's linked WhatsApp (opt-out, default on). */
+  whatsappEnabled: boolean;
+  /** Whether a WhatsApp number is linked; when false nothing is sent regardless. */
+  whatsappLinked: boolean;
 }
 
 /** Server-side cap on the instructions field (claw-auth MAX_INSTRUCTIONS). */
@@ -99,6 +103,8 @@ export const dailyBriefApi = {
       instructions: res.data?.instructions ?? '',
       instructionsEnabled: res.data?.instructionsEnabled !== false,
       updatedAt: res.data?.updatedAt ?? null,
+      whatsappEnabled: res.data?.whatsappEnabled !== false,
+      whatsappLinked: res.data?.whatsappLinked === true,
     };
   },
 
@@ -107,6 +113,7 @@ export const dailyBriefApi = {
     enabled?: boolean;
     instructions?: string;
     instructionsEnabled?: boolean;
+    whatsappEnabled?: boolean;
   }): Promise<DailyBriefConfig> => {
     const res = await apiInstance.put<DailyBriefConfig>('/daily-brief/config', payload);
     return {
@@ -114,6 +121,8 @@ export const dailyBriefApi = {
       instructions: res.data?.instructions ?? '',
       instructionsEnabled: res.data?.instructionsEnabled !== false,
       updatedAt: res.data?.updatedAt ?? null,
+      whatsappEnabled: res.data?.whatsappEnabled !== false,
+      whatsappLinked: res.data?.whatsappLinked === true,
     };
   },
 
