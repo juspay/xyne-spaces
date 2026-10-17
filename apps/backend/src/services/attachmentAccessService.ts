@@ -49,9 +49,10 @@ async function resolveTicketIdForAttachmentEntity(
  *  3. CANVAS — gated by canvas view access.
  *  4. SDLC_HUB — gated by hub-channel visibility / participation.
  *  5. RECORDING — gated by the call's recording-view access.
- *  6. Conversation-backed (chat/DM/transcript) attachments — the caller must be a
+ *  6. CANVAS_COMMENT — gated by the owning canvas's view access.
+ *  7. Conversation-backed (chat/DM/transcript) attachments — the caller must be a
  *     participant of the owning channel.
- *  7. IMPACT / FORM_ENTITY_VALUE — resolve the owning ticket's channel and require
+ *  8. IMPACT / FORM_ENTITY_VALUE — resolve the owning ticket's channel and require
  *     the same access the ticket needs (public: any workspace member; private:
  *     participants only).
  * Non-chat types without a conversation and not ticket-scoped are bounded by the
@@ -168,7 +169,36 @@ export async function assertAttachmentAccess(
     return { ok: true };
   }
 
-  // 6) Conversation-backed (chat/DM/transcript) attachments — must participate.
+  // 6) Comment attachments inherit access from their owning canvas. Deleted comments
+  //    no longer expose their files even if the attachment row has not synced its delete yet.
+  if (attachment.entityType === AttachmentEntityType.CANVAS_COMMENT) {
+    const comment = await db.canvasComment.findUnique({
+      where: { id: attachment.entityId },
+      select: { canvasId: true, deletedAt: true },
+    });
+    if (!comment || comment.deletedAt) {
+      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+    }
+
+    try {
+      await canvasAuthService.requireViewAccess(comment.canvasId, userId);
+      return { ok: true };
+    } catch (error) {
+      logger.warn('Unauthorized canvas comment attachment access', {
+        userId,
+        attachmentId: attachment.id,
+        commentId: attachment.entityId,
+        error: error instanceof Error ? error.message : 'denied',
+      });
+      return {
+        ok: false,
+        status: 403,
+        body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+      };
+    }
+  }
+
+  // 7) Conversation-backed (chat/DM/transcript) attachments — must participate.
   if (attachment.conversationId) {
     const conversation = await repositories.conversations.findById(attachment.conversationId);
     if (!conversation) {
@@ -198,7 +228,7 @@ export async function assertAttachmentAccess(
     }
   }
 
-  // 7) Impact / stage-form DOC attachments (conversationId is null) — resolve the
+  // 8) Impact / stage-form DOC attachments (conversationId is null) — resolve the
   //    owning ticket's channel and require the same access the ticket needs.
   if (
     attachment.entityType === AttachmentEntityType.IMPACT ||

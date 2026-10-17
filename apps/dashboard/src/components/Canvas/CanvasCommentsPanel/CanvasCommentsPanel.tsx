@@ -18,6 +18,7 @@ import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { MessageCardAttachmentThumbnails } from '../../Chat/MessageCard/MessageCardAttachmentThumbnails';
 import { MentionRenderer } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
@@ -28,6 +29,12 @@ import { formatRelativeCommentTime } from '../canvasCommentTime';
 import { CanvasCommentDeleteDialog } from '../CanvasCommentDeleteDialog';
 import { CanvasCommentActions } from '../CanvasCommentActions';
 import { useCanvasCommentMutations } from '../useCanvasCommentMutations';
+import {
+  type CanvasCommentAttachment,
+  type CanvasCommentSubmitPayload,
+  toPanelAttachments,
+  uploadCanvasCommentAttachments,
+} from '../canvasCommentAttachments';
 
 type UserLite = {
   id: string;
@@ -48,6 +55,7 @@ type CanvasComment = {
   deletedAt?: number | null;
   createdAt: number;
   createdByUser?: UserLite | null;
+  attachments?: readonly CanvasCommentAttachment[];
 };
 
 type CanvasCommentThread = {
@@ -99,7 +107,8 @@ interface CanvasCommentComposerProps {
   minHeightClassName: string;
   actions?: React.ReactNode;
   preserveOnSubmit?: boolean;
-  onSubmit: (payload: { body: string; mentionedUserIds: string[] }) => void | Promise<boolean>;
+  enableAttachments?: boolean;
+  onSubmit: (payload: CanvasCommentSubmitPayload) => void | Promise<boolean>;
 }
 
 interface CanvasCommentThreadSectionProps {
@@ -117,7 +126,7 @@ interface CanvasCommentThreadSectionProps {
   onUpdateComment: (
     thread: CanvasCommentThread,
     comment: CanvasComment,
-    payload: { body: string; mentionedUserIds: string[] },
+    payload: CanvasCommentSubmitPayload,
   ) => Promise<boolean>;
 }
 
@@ -220,6 +229,7 @@ export function CanvasCommentComposer({
   minHeightClassName,
   actions,
   preserveOnSubmit = false,
+  enableAttachments = true,
   onSubmit,
 }: CanvasCommentComposerProps): React.JSX.Element {
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
@@ -275,9 +285,9 @@ export function CanvasCommentComposer({
     }
   };
 
-  const handleSend = async (content: string, html: string): Promise<void> => {
+  const handleSend = async (content: string, html: string, files: File[]): Promise<void> => {
     const body = content.trim();
-    if (!body) return;
+    if (!body && files.length === 0) return;
 
     const retainedFallbackMentionIds = fallbackMentionedUserIds.filter(userId => {
       const mention = allUsers.find(
@@ -290,7 +300,7 @@ export function CanvasCommentComposer({
       ...retainedFallbackMentionIds,
     ]);
     selectedMentionIdsRef.current.clear();
-    await onSubmit({ body, mentionedUserIds });
+    await onSubmit({ body, mentionedUserIds, files });
   };
 
   return (
@@ -314,13 +324,15 @@ export function CanvasCommentComposer({
           richText: true,
           commands: false,
           mentions: true,
-          fileAttachments: false,
+          fileAttachments: enableAttachments,
           emojiPicker: false,
         }}
         blockedExtensions={['heading', 'bulletList', 'orderedList', 'codeBlock', 'blockquote']}
-        maxFiles={0}
+        maxFiles={enableAttachments ? 5 : 0}
         disableDraftUpload
         hideComposerTools
+        showAttachButtonWhenToolsHidden={enableAttachments}
+        attachmentMenuMode='filesOnly'
         hideVoiceInput
         compact
       />
@@ -452,6 +464,7 @@ function CanvasCommentThreadSection({
                 disabled={pendingCommentId !== null}
                 fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
                 minHeightClassName='min-h-[38px]'
+                enableAttachments={false}
                 onSubmit={payload => onUpdateComment(thread, comment, payload)}
                 actions={
                   <Button
@@ -484,6 +497,13 @@ function CanvasCommentThreadSection({
                       allUsers,
                     )}
               </p>
+            )}
+            {!isDeleted && (
+              <MessageCardAttachmentThumbnails
+                attachments={toPanelAttachments(comment.attachments)}
+                className={cn(isReply ? 'pl-7' : undefined)}
+                trackCategory='CANVAS_COMMENT'
+              />
             )}
           </div>
         );
@@ -631,19 +651,14 @@ export function CanvasCommentsPanel({
   const selectedTextAnchor =
     activeAnchor?.blockId === activeBlockId && activeAnchor.anchorText ? activeAnchor : null;
 
-  const createThread = ({
-    body,
-    mentionedUserIds,
-  }: {
-    body: string;
-    mentionedUserIds: string[];
-  }): void => {
+  const createThread = ({ body, mentionedUserIds, files }: CanvasCommentSubmitPayload): void => {
     if (!activeBlockId) {
       toast.error('Place the cursor in a canvas block first');
       return;
     }
 
     const threadId = uuidv4();
+    const commentId = uuidv4();
 
     if (!selectedTextAnchor) {
       toast.error('Select text to add a comment');
@@ -658,7 +673,7 @@ export function CanvasCommentsPanel({
     const mutationResult = zero.mutate(
       mutators.canvasComment.createThread({
         threadId,
-        commentId: uuidv4(),
+        commentId,
         canvasId,
         blockId: activeBlockId,
         anchorText: selectedTextAnchor.anchorText,
@@ -668,8 +683,17 @@ export function CanvasCommentsPanel({
       }),
     );
     void mutationResult.server
-      .then(result => {
+      .then(async result => {
         if (result.type !== 'error') {
+          try {
+            await uploadCanvasCommentAttachments({ canvasId, commentId, files });
+          } catch (error) {
+            toast.error('Failed to upload comment attachments');
+            logger.error(Event.API_CALL_FAILED, {
+              reason: error,
+              context: 'canvas_comment_attachment_upload',
+            });
+          }
           sendMentionNotifications(activeBlockId, mentionedUserIds, threadId);
           onCreateThreadCreated?.();
         } else {
@@ -678,6 +702,9 @@ export function CanvasCommentsPanel({
       })
       .catch(error => {
         onCreateThreadFailed?.(selectedTextAnchor);
+        if (files.length > 0) {
+          toast.error('Failed to upload comment attachments');
+        }
         logger.error(Event.API_CALL_FAILED, {
           reason: error,
           context: 'canvas_comment_create',
@@ -698,7 +725,7 @@ export function CanvasCommentsPanel({
   const updateComment = async (
     thread: CanvasCommentThread,
     comment: CanvasComment,
-    { body, mentionedUserIds }: { body: string; mentionedUserIds: string[] },
+    { body, mentionedUserIds }: CanvasCommentSubmitPayload,
   ): Promise<boolean> => {
     const succeeded = await commentMutations.updateComment(comment, { body, mentionedUserIds });
     if (succeeded) {
