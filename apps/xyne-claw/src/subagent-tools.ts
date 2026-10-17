@@ -1795,6 +1795,7 @@ export function buildSubagentTools(
   // accessible inside the subagent palette, so delegating still works. Empty
   // / undefined = legacy behavior (everything stays inside the wrapper).
   directPickSuffixes?: string[],
+  subagentOnlyTools?: ToolDefinition[],
 ): {
   subagentTools: ToolDefinition[];
   directTools: ToolDefinition[];
@@ -1921,7 +1922,7 @@ export function buildSubagentTools(
         log.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
         continue;
       }
-      const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
+      const palette = resolveCustomSubagentTools(spec.tools, groups, [...(customTools ?? []), ...(subagentOnlyTools ?? [])]);
       if (palette.length === 0) {
         const referenced = (spec.tools.direct?.length ?? 0) + (spec.tools.custom?.length ?? 0);
         if (referenced > 0) {
@@ -1953,6 +1954,7 @@ export function buildSubagentTools(
         // distinct from any real serverType so the "find by serverType"
         // loops above don't accidentally re-process this entry.
         serverType: `custom-defined:${spec.name}`,
+        ...(palette.some((t) => (subagentOnlyTools ?? []).includes(t)) ? { delegationPreferred: true } : {}),
       };
       const bonus = bonusToolsBySubagent?.[spec.name] ?? [];
       subagentTools.push(
