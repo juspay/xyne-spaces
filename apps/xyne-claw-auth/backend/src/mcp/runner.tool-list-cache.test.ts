@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   spawns: 0,
   listCalls: 0,
   tools: [{ name: "t1", description: "d", inputSchema: { type: "object" } }] as Array<Record<string, unknown>>,
+  callError: "",
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
@@ -15,6 +16,9 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
     async listTools() {
       state.listCalls += 1;
       return { tools: state.tools };
+    }
+    async callTool() {
+      throw new Error(state.callError);
     }
     async close() {}
   },
@@ -63,7 +67,7 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const { listToolsForUser, clearToolListCache, evictAllSessionsForUser } = await import("./runner.js");
+const { listToolsForUser, clearToolListCache, evictAllSessionsForUser, callTool } = await import("./runner.js");
 
 let run = 0;
 const user = (name: string) => `${name}-${run}`;
@@ -74,6 +78,7 @@ describe("listToolsForUser shared tool-list cache", () => {
     clearToolListCache();
     state.spawns = 0;
     state.listCalls = 0;
+    state.callError = "";
     state.tools = [{ name: "t1", description: "d", inputSchema: { type: "object" } }];
   });
 
@@ -156,15 +161,49 @@ describe("listToolsForUser shared tool-list cache", () => {
     expect(state.listCalls).toBe(2);
   });
 
-  it("refreshes the listing after the TTL", async () => {
+  it("serves a stale shared listing at once and refreshes it in the background", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
     await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
     vi.setSystemTime(new Date("2026-09-25T00:09:00Z"));
     await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
     expect(state.listCalls).toBe(1);
+    state.tools = [{ name: "t2", description: "", inputSchema: {} }];
     vi.setSystemTime(new Date("2026-09-25T00:11:00Z"));
+    const stale = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    expect(stale.tools.map((t) => t.name)).toEqual(["t1"]);
+    await vi.waitFor(() => expect(state.listCalls).toBe(2));
+    await new Promise((r) => setTimeout(r, 0));
+    const fresh = await listToolsForUser(user("u3"), "heisenberg", "Heisenberg", {});
+    expect(fresh.tools.map((t) => t.name)).toEqual(["t2"]);
+  });
+
+  it("waits for a live listing once the shared copy passes the max age", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
     await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
-    expect(state.listCalls).toBe(2);
+    state.tools = [{ name: "t2", description: "", inputSchema: {} }];
+    vi.setSystemTime(new Date("2026-09-25T07:00:00Z"));
+    const result = await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    expect(result.tools.map((t) => t.name)).toEqual(["t2"]);
+  });
+
+  it("drops cached listings when a call names a tool the server no longer has", async () => {
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    state.callError = "MCP error -32602: Tool old_tool not found";
+    await expect(callTool(user("u1"), "bitbucket", {}, "old_tool", {})).rejects.toThrow(/not found/);
+    await expect(callTool(user("u1"), "heisenberg", {}, "old_tool", {})).rejects.toThrow(/not found/);
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    expect(state.listCalls).toBe(4);
+  });
+
+  it("keeps cached listings when a call fails for another reason", async () => {
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    state.callError = "upstream 502";
+    await expect(callTool(user("u1"), "bitbucket", {}, "t1", {})).rejects.toThrow(/502/);
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(state.listCalls).toBe(1);
   });
 });

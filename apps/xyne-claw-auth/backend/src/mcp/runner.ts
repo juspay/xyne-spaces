@@ -485,47 +485,69 @@ function dropUserToolLists(matches: (key: string) => boolean): void {
   for (const key of [...userToolListInflight.keys()]) if (matches(key)) userToolListInflight.delete(key);
 }
 
-function refreshUserToolList(key: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  const inflight = userToolListInflight.get(key);
+type ToolListCache = Map<string, { tools: McpToolInfo[]; at: number }>;
+
+function refreshToolList(
+  cache: ToolListCache,
+  inflightMap: Map<string, Promise<McpToolInfo[]>>,
+  key: string,
+  fetchTools: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const inflight = inflightMap.get(key);
   if (inflight) return inflight;
   const started = fetchTools()
     .then((tools) => {
-      if (tools.length > 0 && userToolListInflight.get(key) === started) userToolListCache.set(key, { tools, at: Date.now() });
+      if (tools.length > 0 && inflightMap.get(key) === started) cache.set(key, { tools, at: Date.now() });
       return tools;
     })
     .finally(() => {
-      if (userToolListInflight.get(key) === started) userToolListInflight.delete(key);
+      if (inflightMap.get(key) === started) inflightMap.delete(key);
     });
-  userToolListInflight.set(key, started);
+  inflightMap.set(key, started);
   return started;
 }
 
-async function userToolList(key: string, serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  const cached = userToolListCache.get(key);
+function staleWhileRefresh(
+  cache: ToolListCache,
+  inflightMap: Map<string, Promise<McpToolInfo[]>>,
+  key: string,
+  serverType: string,
+  freshMs: number,
+  fetchTools: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const cached = cache.get(key);
   const age = cached ? Date.now() - cached.at : Infinity;
-  if (cached && age < USER_TOOL_LIST_FRESH_MS) return cached.tools;
+  if (cached && age < freshMs) return Promise.resolve(cached.tools);
   if (cached && age < USER_TOOL_LIST_MAX_AGE_MS) {
-    refreshUserToolList(key, fetchTools).catch((err) => {
+    refreshToolList(cache, inflightMap, key, fetchTools).catch((err) => {
       log.warn(`[mcp/runner] background tool-list refresh failed for ${serverType}: ${err instanceof Error ? err.message : String(err)}`);
     });
-    return cached.tools;
+    return Promise.resolve(cached.tools);
   }
-  return refreshUserToolList(key, fetchTools);
+  return refreshToolList(cache, inflightMap, key, fetchTools);
 }
 
-async function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  const cached = toolListCache.get(serverType);
-  if (cached && Date.now() - cached.at < TOOL_LIST_CACHE_TTL_MS) return cached.tools;
-  const inflight = toolListInflight.get(serverType);
-  if (inflight) return inflight;
-  const started = fetchTools()
-    .then((tools) => {
-      if (tools.length > 0) toolListCache.set(serverType, { tools, at: Date.now() });
-      return tools;
-    })
-    .finally(() => toolListInflight.delete(serverType));
-  toolListInflight.set(serverType, started);
-  return started;
+function userToolList(key: string, serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  return staleWhileRefresh(userToolListCache, userToolListInflight, key, serverType, USER_TOOL_LIST_FRESH_MS, fetchTools);
+}
+
+function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  return staleWhileRefresh(toolListCache, toolListInflight, serverType, serverType, TOOL_LIST_CACHE_TTL_MS, fetchTools);
+}
+
+const MISSING_TOOL_ERROR = /unknown tool|tool\b.*\bnot found|no such tool/i;
+
+function forgetToolList(
+  userId: string,
+  serverType: string,
+  agentSlug: string | undefined,
+  credentials: Record<string, unknown>,
+  lane: SessionLane | undefined,
+): void {
+  toolListCache.delete(serverType);
+  toolListInflight.delete(serverType);
+  const prefix = `${sessionKey(userId, serverType, agentSlug, credentials, lane)}#`;
+  dropUserToolLists((key) => key.startsWith(prefix));
 }
 
 export async function listToolsForUser(
@@ -694,10 +716,17 @@ export async function callTool(
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
-  const result = await client.callTool({ name: tool, arguments: params }, undefined, {
-    timeout: MCP_REQUEST_TIMEOUT_MS,
-    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-  });
+  const result = await client
+    .callTool({ name: tool, arguments: params }, undefined, {
+      timeout: MCP_REQUEST_TIMEOUT_MS,
+      signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
+    })
+    .catch((err: unknown) => {
+      if (MISSING_TOOL_ERROR.test(err instanceof Error ? err.message : String(err))) {
+        forgetToolList(userId, serverType, agentSlug, credentials, lane);
+      }
+      throw err;
+    });
 
   if ("content" in result && Array.isArray(result.content)) {
     const items = result.content as Array<Record<string, unknown>>;
@@ -715,6 +744,7 @@ export async function callTool(
       .join("\n");
 
     if ("isError" in result && result.isError === true) {
+      if (MISSING_TOOL_ERROR.test(text)) forgetToolList(userId, serverType, agentSlug, credentials, lane);
       const error = new Error(text || "MCP tool returned an error") as Error & { httpStatus?: number };
       // Tools may report the upstream HTTP status in `_meta.httpStatus`
       // (see withToolErrors in xyne-spaces-tools.ts); carry it so callers
