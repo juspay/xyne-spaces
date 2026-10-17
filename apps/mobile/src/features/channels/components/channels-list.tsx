@@ -2,6 +2,7 @@ import { useObserve, useValue } from '@legendapp/state/react';
 import { useRef, type ReactElement } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
+import { useSpacesHeaderHeight } from '@/src/components/spaces-header';
 import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
@@ -36,6 +37,8 @@ export function ChannelsList(): ReactElement {
   const { isEmpty, isFiltering } = useChannelRows();
   const groups = useValue(channelGroups$);
   const bottomInset = useFabClearance();
+  // The header floats over the list, so the first row starts below it.
+  const headerHeight = useSpacesHeaderHeight();
 
   const scrollRef = useRef<ScrollView>(null);
 
@@ -56,7 +59,7 @@ export function ChannelsList(): ReactElement {
       keyboardShouldPersistTaps='handled'
       showsVerticalScrollIndicator={false}
       className='flex-1 bg-spaces-background'
-      contentContainerStyle={{ paddingBottom: bottomInset }}
+      contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: bottomInset }}
     >
       <ChannelsFilterBar />
       {groups.map(group => (
