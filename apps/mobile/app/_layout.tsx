@@ -59,6 +59,7 @@ import {
 import { useAppActivityTracking } from '@/src/hooks/useAppActivityTracking';
 import { useScreenDwellTracker } from '@/src/hooks/useScreenDwellTracker';
 import { ensureForegroundListSyncProbeListener } from '@/src/hooks/useForegroundListSyncProbe';
+import { MtlsExpiryWarningGate } from '@/src/features/mtls-expiry';
 import { startupTimings } from '@/src/utils/startupTimings';
 import { markTelemetryReady } from '@/src/services/metrics/metricsQueue';
 import { StartupPhaseProvider, useStartupPhase } from '@/src/providers/StartupPhaseProvider';
@@ -806,6 +807,8 @@ function RootLayoutNav(): ReactElement {
         <WorkspaceSwitchOverlay workspaceName={switchingToWorkspaceName} />
       ) : null}
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+      {/* Soft mTLS expiry warning — same bottom-sheet pattern as app-update / Airborne */}
+      <MtlsExpiryWarningGate />
     </>
   );
 }
