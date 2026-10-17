@@ -91,7 +91,7 @@ interface AuthContext {
   workspaces: Workspace[];
   pendingUserData: { email: string; name: string; picture?: string } | null;
   selectedWorkspaceId: string | null;
-  orgData: { orgName: string; workspaceName: string } | null;
+  orgData: { orgName: string; workspaceName: string; couponCode?: string } | null;
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
   landingChannelId: string | null;
@@ -114,7 +114,7 @@ type AuthEvent =
   | { type: 'JOIN_COMMUNITY_WORKSPACE'; workspaceId: string }
   | { type: 'START_ENTERPRISE_LOGIN' }
   | { type: 'CREATE_ORG' }
-  | { type: 'SUBMIT_CREATE_ORG'; orgName: string; workspaceName: string };
+  | { type: 'SUBMIT_CREATE_ORG'; orgName: string; workspaceName: string; couponCode?: string };
 
 export type AuthState =
   | 'checkingSession'
@@ -674,6 +674,7 @@ export const authMachine = createMachine(
                 type: 'SUBMIT_CREATE_ORG';
                 orgName: string;
                 workspaceName: string;
+                couponCode?: string;
               },
             })),
           },
@@ -689,6 +690,7 @@ export const authMachine = createMachine(
           input: ({ context }) => ({
             orgName: context.orgData!.orgName,
             workspaceName: context.orgData!.workspaceName,
+            couponCode: context.orgData!.couponCode,
           }),
           onDone: {
             target: 'authenticated',
@@ -1660,7 +1662,11 @@ export const authMachine = createMachine(
         }
       }),
       createOrg: fromPromise(
-        async ({ input }: { input: { orgName: string; workspaceName: string } }) => {
+        async ({
+          input,
+        }: {
+          input: { orgName: string; workspaceName: string; couponCode?: string | undefined };
+        }) => {
           try {
             const headers: Record<string, string> = {
               'Content-Type': 'application/json',
@@ -1679,7 +1685,11 @@ export const authMachine = createMachine(
 
             const response = await axios.post(
               `${API_BASE_URL}/auth/create-org`,
-              { orgName: input.orgName, workspaceName: input.workspaceName },
+              {
+                orgName: input.orgName,
+                workspaceName: input.workspaceName,
+                ...(input.couponCode ? { couponCode: input.couponCode } : {}),
+              },
               {
                 withCredentials: true,
                 headers,

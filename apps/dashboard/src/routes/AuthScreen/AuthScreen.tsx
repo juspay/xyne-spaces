@@ -4,6 +4,7 @@ import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
+import CreateOrgForm from './CreateOrgForm';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
 import GoogleLogo from '../../assets/icons/GoogleLogo';
@@ -69,13 +70,12 @@ const AuthScreen = (): ReactElement | null => {
     resendVerificationCode,
     communityJoinRequest,
     enterpriseJoinTarget,
+    pendingUserData,
   } = useAuth();
   const navigate = useNavigate();
   const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
   const [isEnrollmentFlow, setIsEnrollmentFlow] = useState(false);
-  const [orgName, setOrgName] = useState('');
-  const [workspaceName, setWorkspaceName] = useState('');
   const [showCreateOrgForm, setShowCreateOrgForm] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -293,13 +293,6 @@ const AuthScreen = (): ReactElement | null => {
   const handleTryDifferentAccount = (): void => {
     logout();
     window.location.reload();
-  };
-
-  const handleCreateOrg = (e: React.FormEvent): void => {
-    e.preventDefault();
-    if (orgName.trim() && workspaceName.trim()) {
-      createOrg(orgName.trim(), workspaceName.trim());
-    }
   };
 
   const handleRequestEnterpriseJoin = async (
@@ -589,6 +582,16 @@ const AuthScreen = (): ReactElement | null => {
     );
   }
 
+  // New domains create their organization on the dedicated /redeem page.
+  if (
+    isCreatingOrg &&
+    !userExistsButRemoved &&
+    !isOrganizationDomainConflictError &&
+    !isPublicEmailDomainError
+  ) {
+    return <Navigate to='/redeem' replace={true} />;
+  }
+
   // When the machine enters selectingWorkspace with workspaces, redirect to the
   // dedicated /workspaces screen. Return early so the old inline list never flashes.
   if (isSelectingWorkspace && workspaces.length > 0) {
@@ -612,6 +615,13 @@ const AuthScreen = (): ReactElement | null => {
       <ShineBorder shineColor={['hsl(var(--action-primary))']} />
     </div>
   );
+
+  const isCreateOrgVisible =
+    (isCreatingOrg &&
+      !userExistsButRemoved &&
+      !isOrganizationDomainConflictError &&
+      !isPublicEmailDomainError) ||
+    showCreateOrgForm;
 
   return (
     <ThemeProvider>
@@ -639,9 +649,11 @@ const AuthScreen = (): ReactElement | null => {
                   <p className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
                     {isLoading ? 'Signing you in...' : 'Collaboration platform for Humans and AI'}
                   </p>
-                  <h2 className='text-base md:text-lg text-muted-foreground'>
-                    Log in to Xyne Spaces
-                  </h2>
+                  {!isCreateOrgVisible && (
+                    <h2 className='text-base md:text-lg text-muted-foreground'>
+                      Log in to Xyne Spaces
+                    </h2>
+                  )}
                   {pendingCommunityWorkspaceName ? (
                     <div className='mt-2 max-w-full rounded-lg border border-blue-100 bg-blue-50 px-4 py-2'>
                       <p className='max-w-[420px] whitespace-normal break-words text-sm font-semibold leading-snug text-blue-950'>
@@ -860,106 +872,19 @@ const AuthScreen = (): ReactElement | null => {
               )}
 
               {/* Create Organization Form - only for new users */}
-              {((isCreatingOrg &&
-                !userExistsButRemoved &&
-                !isOrganizationDomainConflictError &&
-                !isPublicEmailDomainError) ||
-                showCreateOrgForm) && (
-                <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
-                  <div className='text-center'>
-                    <h3 className='text-lg font-semibold text-foreground'>Create Organization</h3>
-                    <p className='text-sm text-muted-foreground mt-1'>Set up your new workspace</p>
-                  </div>
-
-                  {/* Duplicate Name Error Alert */}
-                  {isOrganizationNameTakenError && (
-                    <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
-                      <p className='text-sm text-amber-700'>
-                        <span className='font-medium'>Organization name taken.</span> Please choose
-                        a different name.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className='flex flex-col gap-3'>
-                    <div>
-                      <label
-                        htmlFor='orgName'
-                        className='text-sm font-medium text-foreground mb-1 block'
-                      >
-                        Organization Name
-                      </label>
-                      <input
-                        id='orgName'
-                        type='text'
-                        value={orgName}
-                        ref={orgNameInputRef}
-                        onChange={e => {
-                          setOrgName(e.target.value);
-                          if (isOrganizationNameTakenError) {
-                            clearError();
-                          }
-                        }}
-                        placeholder='Juspay Inc'
-                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
-                          isOrganizationNameTakenError
-                            ? 'border-amber-400 focus:ring-amber-500'
-                            : 'border-border focus:ring-blue-500'
-                        }`}
-                        required
-                        data-track-category='Auth'
-                        data-track-name='OrgNameInput'
-                      />
-                      {isOrganizationNameTakenError && (
-                        <p className='text-xs text-amber-600 mt-1'>
-                          Try adding your team name or a unique identifier
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor='workspaceName'
-                        className='text-sm font-medium text-foreground mb-1 block'
-                      >
-                        Workspace Name
-                      </label>
-                      <input
-                        id='workspaceName'
-                        type='text'
-                        value={workspaceName}
-                        onChange={e => setWorkspaceName(e.target.value)}
-                        placeholder='Engineering'
-                        className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
-                        required
-                        data-track-category='Auth'
-                        data-track-name='WorkspaceNameInput'
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type='submit'
-                    disabled={isLoading || !orgName.trim() || !workspaceName.trim()}
-                    className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
-                    data-track-category='Auth'
-                    data-track-name='CreateOrganization'
-                  >
-                    {isLoading ? 'Creating...' : 'Create Organization'}
-                  </button>
-
-                  {workspaces.length > 0 && (
-                    <button
-                      type='button'
-                      onClick={() => setShowCreateOrgForm(false)}
-                      className='text-sm text-muted-foreground hover:text-foreground'
-                      data-track-category='Auth'
-                      data-track-name='BackToWorkspaceSelection'
-                    >
-                      Back to workspace selection
-                    </button>
-                  )}
-                </form>
+              {isCreateOrgVisible && (
+                <CreateOrgForm
+                  isLoading={isLoading}
+                  isOrganizationNameTaken={!!isOrganizationNameTakenError}
+                  signedInEmail={pendingUserData?.email}
+                  orgNameInputRef={orgNameInputRef}
+                  onClearError={clearError}
+                  onSubmit={createOrg}
+                  onUseDifferentAccount={handleTryDifferentAccount}
+                  onBackToWorkspaces={
+                    workspaces.length > 0 ? (): void => setShowCreateOrgForm(false) : undefined
+                  }
+                />
               )}
 
               {/* Login Section */}

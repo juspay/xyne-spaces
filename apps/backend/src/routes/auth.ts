@@ -76,6 +76,7 @@ router.get('/roles', authV2Middleware.authenticate, userManagementController.get
 
 router.post('/login-workspace', authV2Controller.loginWorkspace);
 router.post('/create-org', authV2Controller.createOrg);
+router.post('/org-coupon/validate', authV2Controller.validateOrgCoupon);
 
 router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
 router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
