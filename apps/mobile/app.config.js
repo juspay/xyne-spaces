@@ -117,7 +117,6 @@ module.exports = ({ config }) => {
       '@react-native-community/datetimepicker',
       './plugins/withAppStartupTimingsIOS.cjs',
       './plugins/withFirebaseModularHeaders.cjs',
-      './plugins/withEnrichedMarkdownNoMath.cjs',
       './plugins/withAndroidAppConfig.cjs',
       './plugins/withAndroidBackupProtection.cjs',
       './plugins/withAndroidReleaseSigning.cjs',

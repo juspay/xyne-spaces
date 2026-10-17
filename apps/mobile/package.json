@@ -136,7 +136,7 @@
     "react-native-device-info": "^15.0.2",
     "react-native-drawer-layout": "4.2.10",
     "react-native-enriched": "^0.8.1",
-    "react-native-enriched-markdown": "^0.7.4",
+    "react-native-enriched-markdown": "1.1.1",
     "react-native-file-viewer": "^2.1.5",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-get-random-values": "~1.11.0",
@@ -196,6 +196,11 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
     "xml2js": "0.6.0"
+  },
+  "enriched-markdown": {
+    "enableMath": false,
+    "enableCodeHighlight": false,
+    "enableVideo": false
   },
   "private": true
 }

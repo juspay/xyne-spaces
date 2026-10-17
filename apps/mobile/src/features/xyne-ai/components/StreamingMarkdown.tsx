@@ -103,6 +103,7 @@ export const StreamingMarkdown = ({
     () => splitCodeBlocks(isStreaming ? completeStreamingMarkdown(markdown) : markdown),
     [markdown, isStreaming],
   );
+  const lastIndex = segments.length - 1;
   return (
     <View className='gap-3'>
       {segments.map((segment, index) =>
@@ -115,6 +116,7 @@ export const StreamingMarkdown = ({
             mine={false}
             viewerId={viewerId}
             onOpenUrl={onOpenUrl}
+            streaming={isStreaming && index === lastIndex}
           />
         ),
       )}
