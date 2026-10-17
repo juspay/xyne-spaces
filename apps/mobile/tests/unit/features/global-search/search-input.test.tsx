@@ -60,6 +60,7 @@ function setup(options: { chips?: SearchFilterChip[]; scope?: SearchScope | null
       scope={options.scope ?? null}
       dispatch={action => dispatched.push(action)}
       onRequestClose={onRequestClose}
+      {...(options.scope ? {} : { onFilterPress: jest.fn() })}
     />,
   );
 
@@ -313,6 +314,20 @@ describe('SearchInput', () => {
       const { field } = setup({ scope: { channelId: 'c1', label: 'engineering' } });
 
       expect(field().placeholder).toBe('Search in engineering');
+    });
+  });
+
+  describe('filter button', () => {
+    it('shows a Filters control next to the search pill', () => {
+      setup();
+
+      expect(screen.getByLabelText('Filters')).toBeTruthy();
+    });
+
+    it('hides the Filters control when search is locked to a conversation', () => {
+      setup({ scope: { channelId: 'c1', label: 'engineering' } });
+
+      expect(screen.queryByLabelText('Filters')).toBeNull();
     });
   });
 });

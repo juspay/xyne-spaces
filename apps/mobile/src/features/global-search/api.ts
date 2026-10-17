@@ -1,16 +1,17 @@
 import { apiGet } from '@/src/services/apiClient';
-import type { DisplaySearchResult, VespaSearchResponse } from '@/src/types/search';
+import type { VespaSearchResponse, VespaSearchResultsPage } from '@/src/types/search';
 import { normalizeVespaSearchResponseData } from '@/src/utils/search';
 import { toSearchParams, type SearchRequest } from './utils/search-request';
 
 const SEARCH_TIMEOUT_MS = 15_000;
 
-/** The signal reaches the native socket, so an abort really stops the request. */
-export async function fetchSearchResults(
+/** One page of Vespa hits. The signal reaches the native socket on abort. */
+export async function fetchSearchResultsPage(
   request: SearchRequest,
+  offset: number,
   signal: AbortSignal,
-): Promise<DisplaySearchResult[]> {
-  const queryString = new URLSearchParams(toSearchParams(request)).toString();
+): Promise<VespaSearchResultsPage> {
+  const queryString = new URLSearchParams(toSearchParams(request, { offset })).toString();
 
   const response = await apiGet<VespaSearchResponse>(`/vespaSearch?${queryString}`, {
     signal,
@@ -21,7 +22,16 @@ export async function fetchSearchResults(
     throw new Error(response.error || 'Search request failed');
   }
 
-  return normalizeVespaSearchResponseData(response.data).results;
+  return normalizeVespaSearchResponseData(response.data);
+}
+
+/** Convenience for single-page callers / tests. */
+export async function fetchSearchResults(
+  request: SearchRequest,
+  signal: AbortSignal,
+): Promise<VespaSearchResultsPage['results']> {
+  const page = await fetchSearchResultsPage(request, 0, signal);
+  return page.results;
 }
 
 export type SearchErrorKind =

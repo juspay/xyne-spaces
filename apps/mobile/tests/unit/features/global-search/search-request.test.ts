@@ -3,6 +3,10 @@ import { describe, it } from 'node:test';
 
 import type { SearchFilterChip, SearchScope } from '@/src/features/global-search/types';
 import {
+  DEFAULT_STRUCTURED_FILTERS,
+  resolveDateKeyword,
+} from '@/src/features/global-search/utils/filter-model';
+import {
   buildSearchRequest,
   toSearchParams,
   type SearchRequest,
@@ -25,7 +29,10 @@ function input(overrides: Partial<SearchRequestInput> = {}): SearchRequestInput 
     tab: 'messages',
     query: '',
     chips: [],
+    structured: { ...DEFAULT_STRUCTURED_FILTERS },
     onlyMyChannels: false,
+    includeBotMessages: false,
+    exactMatch: false,
     scope: null,
     ...overrides,
   };
@@ -53,6 +60,18 @@ describe('global search request', () => {
 
     it('does not let the toggle alone start a scoped search', () => {
       assert.equal(buildSearchRequest(input({ scope, onlyMyChannels: true })), null);
+    });
+
+    it('does not let structured filters alone start a scoped search', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            scope,
+            structured: { ...DEFAULT_STRUCTURED_FILTERS, priority: 'HIGH' },
+          }),
+        ),
+        null,
+      );
     });
 
     it('searches the locked conversation once there is text', () => {
@@ -130,6 +149,53 @@ describe('global search request', () => {
       assert.equal(buildSearchRequest(input()), null);
     });
 
+    it('searches when only a modal filter is set', () => {
+      const sent = params({
+        tab: 'tickets',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          assignees: [{ id: 'u9', label: 'Ada' }],
+        },
+      });
+
+      assert.equal(sent['assignee'], 'u9');
+      assert.equal(sent['filterOnly'], 'true');
+    });
+
+    it('expands date presets to after/before and maps showArchived on tickets', () => {
+      const sent = params({
+        tab: 'tickets',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          dateRange: 'last 7 days',
+          showArchived: true,
+        },
+      });
+
+      const bounds = resolveDateKeyword('last 7 days');
+      assert.ok(bounds);
+      assert.equal(sent['after'], bounds.after);
+      assert.equal(sent['before'], bounds.before);
+      assert.equal(sent['range'], undefined);
+      assert.equal(sent['excludeArchived'], 'false');
+    });
+
+    it('maps a one-day preset to on (not equal after/before)', () => {
+      const sent = params({
+        tab: 'messages',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          dateRange: 'yesterday',
+        },
+      });
+
+      const bounds = resolveDateKeyword('yesterday');
+      assert.ok(bounds);
+      assert.equal(sent['on'], bounds.after);
+      assert.equal(sent['after'], undefined);
+      assert.equal(sent['before'], undefined);
+    });
+
     it('does not treat the toggle alone as a query', () => {
       assert.equal(buildSearchRequest(input({ onlyMyChannels: true })), null);
     });
@@ -204,6 +270,37 @@ describe('global search request', () => {
       assert.equal(sent['q'], 'deploy');
     });
 
+    it('wraps q in quotes when exact match is on', () => {
+      const sent = params({ query: 'payment failed', exactMatch: true });
+
+      assert.equal(sent['q'], '"payment failed"');
+    });
+
+    it('passes user-typed quotes through when exact match is off', () => {
+      const sent = params({ query: '"payment failed"', exactMatch: false });
+
+      assert.equal(sent['q'], '"payment failed"');
+    });
+
+    it('sends includeBotMessages on message searches', () => {
+      const off = params({ query: 'deploy', includeBotMessages: false });
+      const on = params({ query: 'deploy', includeBotMessages: true });
+
+      assert.equal(off['includeBotMessages'], 'false');
+      assert.equal(on['includeBotMessages'], 'true');
+    });
+
+    it('omits includeBotMessages on non-message tabs', () => {
+      const sent = params({ tab: 'tickets', query: 'deploy', includeBotMessages: true });
+
+      assert.equal(sent['includeBotMessages'], undefined);
+    });
+
+    it('does not treat bot or exact toggles alone as a query', () => {
+      assert.equal(buildSearchRequest(input({ includeBotMessages: true })), null);
+      assert.equal(buildSearchRequest(input({ exactMatch: true })), null);
+    });
+
     it('gives equal requests equal params, so they share one cache entry', () => {
       const first = buildSearchRequest(input({ query: 'deploy', chips: [from('u1')] }));
       const second = buildSearchRequest(input({ query: 'deploy ', chips: [from('u1')] }));
@@ -212,6 +309,82 @@ describe('global search request', () => {
         toSearchParams(first as SearchRequest),
         toSearchParams(second as SearchRequest),
       );
+    });
+
+    it('sends orderBy for Newest/Oldest and omits it for Relevance', () => {
+      assert.equal(params({ query: 'deploy', sortBy: 'newest' })['orderBy'], 'newest');
+      assert.equal(params({ query: 'deploy', sortBy: 'oldest' })['orderBy'], 'oldest');
+      assert.equal(params({ query: 'deploy', sortBy: 'relevance' })['orderBy'], undefined);
+    });
+
+    it('omits rankProfile when unset so the backend keeps its default', () => {
+      assert.equal(params({ query: 'deploy' })['rankProfile'], undefined);
+      assert.equal(
+        params({ query: 'deploy', rankProfile: 'personalized' })['rankProfile'],
+        'personalized',
+      );
+    });
+
+    it('does not start a search for showArchived alone', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            tab: 'tickets',
+            structured: { ...DEFAULT_STRUCTURED_FILTERS, showArchived: true },
+          }),
+        ),
+        null,
+      );
+    });
+
+    it('does not send ticket-only filters on the messages tab', () => {
+      const sent = params({
+        tab: 'messages',
+        query: 'deploy',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          priority: 'HIGH',
+          assignees: [{ id: 'u9', label: 'Ada' }],
+        },
+      });
+
+      assert.equal(sent['priority'], undefined);
+      assert.equal(sent['assignee'], undefined);
+    });
+
+    it('does not search files for a With filter (field does not apply)', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            tab: 'files',
+            structured: {
+              ...DEFAULT_STRUCTURED_FILTERS,
+              withUsers: [{ id: 'u1', label: 'Ada' }],
+            },
+          }),
+        ),
+        null,
+      );
+    });
+
+    it('does not treat sort or rank alone as a query', () => {
+      assert.equal(buildSearchRequest(input({ sortBy: 'newest' })), null);
+      assert.equal(buildSearchRequest(input({ rankProfile: 'personalized' })), null);
+    });
+
+    it('changes cache identity when sort or rank changes', () => {
+      const base = toSearchParams(buildSearchRequest(input({ query: 'deploy' })) as SearchRequest);
+      const sorted = toSearchParams(
+        buildSearchRequest(input({ query: 'deploy', sortBy: 'newest' })) as SearchRequest,
+      );
+      const ranked = toSearchParams(
+        buildSearchRequest(
+          input({ query: 'deploy', rankProfile: 'personalized' }),
+        ) as SearchRequest,
+      );
+
+      assert.notDeepEqual(base, sorted);
+      assert.notDeepEqual(base, ranked);
     });
   });
 });

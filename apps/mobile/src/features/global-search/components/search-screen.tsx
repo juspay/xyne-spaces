@@ -5,10 +5,11 @@ import {
   useCallback,
   useMemo,
   useRef,
+  useState,
   type ReactElement,
   type RefObject,
 } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -19,9 +20,17 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
+import { FiltersSheet } from '../components/filters/filters-sheet';
 import { GlobalSearchFilterBar } from '../components/filters/global-search-filter-bar';
 import { SearchCategoryTags } from './search-category-tags';
 import { useSearchState, type SearchDispatch } from '../hooks/use-search-state';
+import {
+  canOpenFiltersSheet,
+  countActiveFilters,
+  toSearchResultsFilters,
+} from '../utils/filter-registry';
+import type { StructuredSearchFilters } from '../utils/filter-model';
+import type { SortBy } from '../utils/rank-sort';
 import {
   initialTabForSurface,
   SEARCH_TABS,
@@ -124,8 +133,13 @@ export function GlobalSearchScreen({
   /** Results scroll offset, written on the UI thread by whichever list is mounted. */
   const scrollOffset = useSharedValue(0);
 
+  /** Mode pills (@Ch / Bot / Exact) — only on remote Vespa tabs, not DMs / Channels. */
+  const showModeFilterRow = !scope && canOpenFiltersSheet(state.tab);
+
   /** The block the filter row occupies — the only part of the toolbar that collapses. */
-  const filterRowBlock = scope ? 0 : SEARCH_FILTER_ROW_TOP_GAP + SEARCH_FILTER_ROW_HEIGHT;
+  const filterRowBlock = showModeFilterRow
+    ? SEARCH_FILTER_ROW_TOP_GAP + SEARCH_FILTER_ROW_HEIGHT
+    : 0;
 
   const toolbarHeight =
     insets.top +
@@ -173,7 +187,12 @@ export function GlobalSearchScreen({
       <SearchToolbar
         tab={state.tab}
         chips={state.chips}
+        structured={state.structured}
         onlyMyChannels={state.onlyMyChannels}
+        includeBotMessages={state.includeBotMessages}
+        exactMatch={state.exactMatch}
+        sortBy={state.sortBy}
+        rankProfile={state.rankProfile}
         dispatch={dispatch}
         inputRef={inputRef}
         topInset={insets.top}
@@ -194,7 +213,12 @@ export function GlobalSearchScreen({
 const SearchToolbar = memo(function SearchToolbar({
   tab,
   chips,
+  structured,
   onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
+  sortBy,
+  rankProfile,
   dispatch,
   inputRef,
   topInset,
@@ -206,8 +230,13 @@ const SearchToolbar = memo(function SearchToolbar({
 }: {
   tab: GlobalSearchTab;
   chips: readonly SearchFilterChip[];
+  structured: StructuredSearchFilters;
   onlyMyChannels: boolean;
   fieldHostedElsewhere: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
+  sortBy: SortBy;
+  rankProfile: string;
   dispatch: SearchDispatch;
   inputRef: RefObject<SearchInputHandle | null>;
   topInset: number;
@@ -218,6 +247,7 @@ const SearchToolbar = memo(function SearchToolbar({
   scope: SearchScope | null;
 }): ReactElement {
   const router = useRouter();
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // The screen's own background, so results scrolling under the toolbar are hidden
   // rather than showing through, and the band has no visible edge against the page.
@@ -237,6 +267,55 @@ const SearchToolbar = memo(function SearchToolbar({
 
   const onTabChange = useCallback(
     (next: GlobalSearchTab) => dispatch({ type: 'tabChanged', tab: next }),
+    [dispatch],
+  );
+
+  const appliedFilters = useMemo(
+    () =>
+      toSearchResultsFilters({
+        tab,
+        chips,
+        structured,
+        onlyMyChannels,
+        includeBotMessages,
+        exactMatch,
+        sortBy,
+        rankProfile,
+      }),
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, rankProfile, sortBy, structured, tab],
+  );
+
+  const filtersAvailable = canOpenFiltersSheet(tab);
+  const filterBadgeCount = filtersAvailable ? countActiveFilters(appliedFilters) : 0;
+
+  // Local tabs have no Filters sheet — drop any leftover open state when switching away.
+  useEffect(() => {
+    if (!filtersAvailable) setFiltersOpen(false);
+  }, [filtersAvailable]);
+
+  const openFilters = useCallback(() => {
+    if (!canOpenFiltersSheet(tab)) return;
+    Keyboard.dismiss();
+    setFiltersOpen(true);
+  }, [tab]);
+
+  const applyFilters = useCallback(
+    (next: {
+      structured: StructuredSearchFilters;
+      chips: readonly SearchFilterChip[];
+      onlyMyChannels: boolean;
+      sortBy: SortBy;
+      rankProfile: string;
+    }) => {
+      dispatch({
+        type: 'structuredApplied',
+        structured: next.structured,
+        chips: next.chips,
+        onlyMyChannels: next.onlyMyChannels,
+        sortBy: next.sortBy,
+        rankProfile: next.rankProfile,
+      });
+    },
     [dispatch],
   );
 
@@ -292,32 +371,54 @@ const SearchToolbar = memo(function SearchToolbar({
   );
 
   return (
-    <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
-      <View pointerEvents='box-none' style={innerStyle}>
-        {fieldHostedElsewhere ? null : (
-          <SearchInput
-            ref={inputRef}
-            tab={tab}
-            chips={chips}
-            scope={scope}
-            dispatch={dispatch}
-            onRequestClose={onRequestClose}
-          />
-        )}
-        {scope ? null : (
-          <>
-            <SearchCategoryTags tab={tab} onTabChange={onTabChange} />
-            <Animated.View style={filterRowStyle}>
-              <GlobalSearchFilterBar
+    <>
+      <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
+        <View pointerEvents='box-none' style={innerStyle}>
+          {fieldHostedElsewhere ? null : (
+            <SearchInput
+              ref={inputRef}
+              tab={tab}
+              chips={chips}
+              scope={scope}
+              dispatch={dispatch}
+              onRequestClose={onRequestClose}
+              filterBadgeCount={filterBadgeCount}
+              {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
+            />
+          )}
+          {scope ? null : (
+            <>
+              <SearchCategoryTags
                 tab={tab}
-                chips={chips}
-                onlyMyChannels={onlyMyChannels}
-                dispatch={dispatch}
+                onTabChange={onTabChange}
+                {...(fieldHostedElsewhere && filtersAvailable
+                  ? { onFilterPress: openFilters, filterBadgeCount }
+                  : {})}
               />
-            </Animated.View>
-          </>
-        )}
-      </View>
-    </Animated.View>
+              {filtersAvailable ? (
+                <Animated.View style={filterRowStyle}>
+                  <GlobalSearchFilterBar
+                    tab={tab}
+                    onlyMyChannels={onlyMyChannels}
+                    includeBotMessages={includeBotMessages}
+                    exactMatch={exactMatch}
+                    dispatch={dispatch}
+                  />
+                </Animated.View>
+              ) : null}
+            </>
+          )}
+        </View>
+      </Animated.View>
+      {scope || !filtersAvailable ? null : (
+        <FiltersSheet
+          isOpen={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          tab={tab}
+          applied={appliedFilters}
+          onApply={applyFilters}
+        />
+      )}
+    </>
   );
 });

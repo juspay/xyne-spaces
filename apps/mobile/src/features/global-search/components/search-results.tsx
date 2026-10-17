@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactElement } from 'react';
 
 import type { SearchState } from '../hooks/use-search-state';
+import { hasStructuredFilterInput } from '../utils/filter-model';
 import { buildSearchRequest, categoryForTab } from '../utils/search-request';
 import type { SearchFilterChip, SearchScope } from '../types';
 import { ChannelResults, ChatResults } from './results/local-results';
@@ -28,7 +29,18 @@ export function SearchResults({
   onLeave,
   ...chrome
 }: SearchResultsProps): ReactElement {
-  const { tab, query, chips, onlyMyChannels, trigger } = state;
+  const {
+    tab,
+    query,
+    chips,
+    structured,
+    onlyMyChannels,
+    includeBotMessages,
+    exactMatch,
+    sortBy,
+    rankProfile,
+    trigger,
+  } = state;
   const { scrollOffset } = chrome;
   const showsSuggestions = trigger !== null;
 
@@ -39,8 +51,31 @@ export function SearchResults({
   }, [query, scrollOffset, showsSuggestions, tab]);
 
   const request = useMemo(
-    () => buildSearchRequest({ tab, query, chips, onlyMyChannels, scope }),
-    [chips, onlyMyChannels, query, scope, tab],
+    () =>
+      buildSearchRequest({
+        tab,
+        query,
+        chips,
+        structured,
+        onlyMyChannels,
+        includeBotMessages,
+        exactMatch,
+        sortBy,
+        rankProfile,
+        scope,
+      }),
+    [
+      chips,
+      exactMatch,
+      includeBotMessages,
+      onlyMyChannels,
+      query,
+      rankProfile,
+      scope,
+      sortBy,
+      structured,
+      tab,
+    ],
   );
 
   if (trigger) {
@@ -52,11 +87,14 @@ export function SearchResults({
   }
 
   const category = scope ? 'messages' : categoryForTab(tab);
-  // A locked scope narrows the request but is not something the user asked for.
-  const hasQuery = query.length > 0 || chips.length > 0;
+  // Local tabs: any typed/structured input. Remote: only when a request is built
+  // (category-applicable filters), so Calls + Tags alone does not show empty-state.
+  const hasLocalQuery =
+    query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
+  const hasRemoteQuery = request !== null;
 
   if (category === 'calls') {
-    return <CallResults request={request} query={query} hasQuery={hasQuery} {...chrome} />;
+    return <CallResults request={request} query={query} hasQuery={hasRemoteQuery} {...chrome} />;
   }
 
   if (category) {
@@ -67,7 +105,7 @@ export function SearchResults({
         category={category}
         request={request}
         query={query}
-        hasQuery={hasQuery}
+        hasQuery={hasRemoteQuery}
         scope={scope}
         onLeave={onLeave}
         {...chrome}
@@ -83,11 +121,17 @@ export function SearchResults({
     <ChannelResults
       query={query}
       browse={browse}
-      hasQuery={hasQuery}
+      hasQuery={hasLocalQuery}
       onLeave={onLeave}
       {...chrome}
     />
   ) : (
-    <ChatResults query={query} browse={browse} hasQuery={hasQuery} onLeave={onLeave} {...chrome} />
+    <ChatResults
+      query={query}
+      browse={browse}
+      hasQuery={hasLocalQuery}
+      onLeave={onLeave}
+      {...chrome}
+    />
   );
 }

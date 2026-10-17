@@ -26,6 +26,7 @@ import { useCSSVariable, useUniwind } from 'uniwind';
 import { haptics } from '@/src/utils/haptics';
 import { withAlpha } from '@/src/utils/color';
 import { SearchFilterChipView } from './search-filter-chip';
+import { SearchFiltersButton } from './search-filters-button';
 import {
   createDebouncedCommitter,
   SEARCH_COMMIT_MAX_WAIT_MS,
@@ -50,6 +51,8 @@ import {
 import { filterChipTitle, placeholderForTab, type GlobalSearchTab } from '../utils/search-tabs';
 import type { SearchFilterChip, SearchScope } from '../types';
 
+const FILTER_BUTTON_GAP = 8;
+
 /**
  * Android sends no backspace key event to an empty TextInput, so with only chips left
  * there is nothing to hang "backspace removes the last chip" off. One zero-width space
@@ -66,7 +69,13 @@ const EMPTY_CARET = '​';
 const ANDROID_AUTOFOCUS_DELAY_MS = 300;
 
 const styles = StyleSheet.create({
-  wrapper: { paddingHorizontal: SEARCH_SIDE_MARGIN },
+  wrapper: {
+    paddingHorizontal: SEARCH_SIDE_MARGIN,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: FILTER_BUTTON_GAP,
+  },
+  pill: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: { alignItems: 'center', flexGrow: 1 },
 });
@@ -85,6 +94,13 @@ export type SearchInputProps = {
   scope: SearchScope | null;
   dispatch: SearchDispatch;
   onRequestClose: () => void;
+  /**
+   * Filter control to the right of the search pill. Hidden when search is locked
+   * to a conversation (`scope`), matching the filter row below.
+   */
+  onFilterPress?: (() => void) | undefined;
+  /** Active modal filters for the badge (excludes From/In and mode pills). */
+  filterBadgeCount?: number;
 };
 
 /**
@@ -104,6 +120,8 @@ export const SearchInput = memo(function SearchInput({
   scope,
   dispatch,
   onRequestClose,
+  onFilterPress,
+  filterBadgeCount = 0,
 }: SearchInputProps): ReactElement {
   const inputRef = useRef<TextInput>(null);
 
@@ -239,14 +257,16 @@ export const SearchInput = memo(function SearchInput({
     return scope ? scopedPlaceholder(scope) : placeholderForTab(tab);
   }, [hasChips, scope, tab]);
 
+  const borderColor = withAlpha(foregroundColor, theme === 'dark' ? 0.08 : 0.06);
+
   const pillStyle = useMemo(
     () => ({
       height: SEARCH_BAR_HEIGHT,
       backgroundColor: inputColor,
-      borderColor: withAlpha(foregroundColor, theme === 'dark' ? 0.08 : 0.06),
+      borderColor,
       borderWidth: StyleSheet.hairlineWidth,
     }),
-    [foregroundColor, inputColor, theme],
+    [borderColor, inputColor],
   );
 
   const textStyle = useMemo(
@@ -273,7 +293,7 @@ export const SearchInput = memo(function SearchInput({
     <View style={styles.wrapper}>
       <View
         className='flex-row items-center gap-2 overflow-hidden rounded-full px-3'
-        style={pillStyle}
+        style={[styles.pill, pillStyle]}
       >
         <Search size={SEARCH_BAR_ICON_SIZE} color={mutedColor} />
 
@@ -327,6 +347,10 @@ export const SearchInput = memo(function SearchInput({
           <X size={20} color={mutedColor} />
         </Pressable>
       </View>
+
+      {scope || !onFilterPress ? null : (
+        <SearchFiltersButton onPress={onFilterPress} badgeCount={filterBadgeCount} />
+      )}
     </View>
   );
 });

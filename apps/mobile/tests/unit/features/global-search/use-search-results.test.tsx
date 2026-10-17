@@ -20,7 +20,7 @@ jest.mock('@/src/services/apiClient', () => ({ apiGet: jest.fn() }));
 type Call = {
   path: string;
   signal: AbortSignal;
-  respond: (titles: string[]) => void;
+  respond: (titles: string[], meta?: { totalCount?: number; offset?: number }) => void;
   fail: (error: unknown) => void;
 };
 
@@ -28,7 +28,15 @@ const mockedApiGet = apiGet as jest.MockedFunction<typeof apiGet>;
 let calls: Call[] = [];
 
 function requestFor(query: string, tab: GlobalSearchTab = 'messages'): SearchRequest {
-  const request = buildSearchRequest({ tab, query, chips: [], onlyMyChannels: false, scope: null });
+  const request = buildSearchRequest({
+    tab,
+    query,
+    chips: [],
+    onlyMyChannels: false,
+    includeBotMessages: false,
+    exactMatch: false,
+    scope: null,
+  });
   if (!request) throw new Error('expected a request');
   return request;
 }
@@ -63,13 +71,13 @@ beforeEach(() => {
       calls.push({
         path,
         signal: options?.signal as AbortSignal,
-        respond: rows =>
+        respond: (rows, meta) =>
           resolve({
             success: true,
             data: {
               results: rows.map(title => ({ id: title, title })),
-              totalCount: rows.length,
-              offset: 0,
+              totalCount: meta?.totalCount ?? rows.length,
+              offset: meta?.offset ?? 0,
               limit: 25,
             },
           }),
@@ -198,6 +206,31 @@ describe('useSearchResults', () => {
 
       expect(result.current.status).toBe('idle');
       expect(calls).toHaveLength(0);
+    });
+  });
+
+  describe('load more', () => {
+    it('appends the next offset page when loadMore is called', async () => {
+      const page1 = Array.from({ length: 25 }, (_, i) => `m${i}`);
+      const { result } = renderSearch(requestFor('alpha'));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      await act(async () => {
+        callFor('alpha').respond(page1, { totalCount: 40, offset: 0 });
+      });
+      await waitFor(() => expect(result.current.status).toBe('success'));
+      expect(result.current.hasMore).toBe(true);
+      expect(titles(result)).toHaveLength(25);
+
+      act(() => result.current.loadMore());
+      await waitFor(() => expect(calls).toHaveLength(2));
+      expect(calls[1]?.path).toContain('offset=25');
+
+      await act(async () => {
+        calls[1]?.respond(['m25', 'm26'], { totalCount: 40, offset: 25 });
+      });
+
+      await waitFor(() => expect(titles(result)).toHaveLength(27));
+      expect(result.current.hasMore).toBe(false);
     });
   });
 

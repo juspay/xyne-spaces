@@ -1,0 +1,368 @@
+/**
+ * Mobile port of dashboard `filterRegistry` — modal fields, visibility, badge count.
+ * Mode pills (`@Ch`, Bot, Exact) stay on the filter bar; Sort / Rank live in the sheet
+ * until bar chips exist (page-level, not in the by-type field matrix).
+ */
+
+import type { SearchFilterChip } from '../types';
+import {
+  DEFAULT_RANK_PROFILE,
+  DEFAULT_SORT_BY,
+  isRankActive,
+  isSortActive,
+  type SortBy,
+} from './rank-sort';
+import type { GlobalSearchTab } from './search-tabs';
+import {
+  DATE_RANGE_OPTIONS,
+  DEFAULT_STRUCTURED_FILTERS,
+  PRIORITY_OPTIONS,
+  type FilterEntity,
+  type SearchDocType,
+  type SearchResultsFilters,
+  type StructuredSearchFilters,
+} from './filter-model';
+
+export { DATE_RANGE_OPTIONS, PRIORITY_OPTIONS };
+
+export type FilterControl =
+  | { kind: 'people'; placeholder: string; field: 'fromUsers' | 'withUsers' | 'assignees' }
+  | { kind: 'channels'; placeholder: string; field: 'inChannels'; excludeDMs?: boolean }
+  | { kind: 'mentions'; placeholder: string }
+  | { kind: 'boards'; placeholder: string }
+  | {
+      kind: 'enumSingle';
+      options: ReadonlyArray<{ value: string; label: string }>;
+      anyLabel: string;
+      field: 'priority';
+    }
+  | { kind: 'text'; placeholder: string; field: 'tags' | 'entities' }
+  | { kind: 'date' }
+  | { kind: 'checkbox'; field: 'showArchived' }
+  | { kind: 'sort' }
+  | { kind: 'rank' };
+
+export type ModalFilterEntry = {
+  id: string;
+  label: string;
+  /** When false, excluded from the Filters badge (From / In already have bar chips). */
+  hidden?: boolean;
+  appliesTo: (docType: SearchDocType) => boolean;
+  isActive: (f: SearchResultsFilters) => boolean;
+  control?: FilterControl;
+  /** No control — shown under “From your search” when active. */
+  carried?: boolean;
+};
+
+const isTicketType = (d: SearchDocType): boolean => d === 'tickets' || d === 'all';
+const isMessageType = (d: SearchDocType): boolean => d === 'messages' || d === 'all';
+const isCallsType = (d: SearchDocType): boolean => d === 'calls';
+/** With applies to messages and calls (`with` / participant filter). */
+const isWithType = (d: SearchDocType): boolean => isMessageType(d) || isCallsType(d);
+const isTicketOrMessageType = (d: SearchDocType): boolean => isTicketType(d) || isMessageType(d);
+const isLocalType = (d: SearchDocType): boolean => d === 'channels' || d === 'people';
+const notLocal = (d: SearchDocType): boolean => !isLocalType(d);
+
+/**
+ * Map mobile tabs onto dashboard docType for appliesTo / request shaping.
+ * Calls is its own type so Mentions / Tags / Entity do not appear (the wire
+ * only sends from→with, with, in, and dates for calls).
+ */
+export function docTypeForTab(tab: GlobalSearchTab): SearchDocType {
+  switch (tab) {
+    case 'messages':
+      return 'messages';
+    case 'tickets':
+      return 'tickets';
+    case 'files':
+      return 'files';
+    case 'calls':
+      return 'calls';
+    case 'chats':
+      return 'people';
+    case 'channels':
+      return 'channels';
+  }
+}
+
+/**
+ * DocType used to pick Filters-sheet rows. Same as `docTypeForTab` — local tabs
+ * (Chats / Channels) have no Vespa modal fields; hide the Filters entry instead
+ * of falling back to messages (GLOBAL_SEARCH_FILTERS_BY_TYPE).
+ */
+export function modalDocTypeForTab(tab: GlobalSearchTab): SearchDocType {
+  return docTypeForTab(tab);
+}
+
+/** Filters sheet is for remote Vespa categories only — not local Zero browse. */
+export function canOpenFiltersSheet(tab: GlobalSearchTab): boolean {
+  return notLocal(modalDocTypeForTab(tab));
+}
+
+export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
+  {
+    id: 'sort',
+    label: 'Sort',
+    appliesTo: notLocal,
+    isActive: f => isSortActive(f.sortBy),
+    control: { kind: 'sort' },
+  },
+  {
+    id: 'rank',
+    label: 'Rank',
+    // Experiment profiles — keep off production builds until CAC / internal gating exists.
+    appliesTo: d => notLocal(d) && typeof __DEV__ !== 'undefined' && __DEV__,
+    isActive: f => isRankActive(f.rankProfile),
+    control: { kind: 'rank' },
+  },
+  {
+    id: 'from',
+    label: 'From',
+    // Bar / chip surface already shows From — do not inflate the Filters badge.
+    hidden: false,
+    appliesTo: notLocal,
+    isActive: f => f.fromUsers.length > 0,
+    control: {
+      kind: 'people',
+      placeholder: 'e.g. Emily Anderson',
+      field: 'fromUsers',
+    },
+  },
+  {
+    id: 'fromEmail',
+    label: 'From (email)',
+    appliesTo: notLocal,
+    carried: true,
+    isActive: f => f.fromEmails.length > 0,
+  },
+  {
+    id: 'toEmail',
+    label: 'To',
+    appliesTo: notLocal,
+    carried: true,
+    isActive: f => f.toEmails.length > 0,
+  },
+  {
+    id: 'in',
+    label: 'In',
+    hidden: false,
+    appliesTo: notLocal,
+    isActive: f => f.inChannels.length > 0,
+    control: {
+      kind: 'channels',
+      placeholder: 'e.g. #project-unicorn',
+      field: 'inChannels',
+    },
+  },
+  {
+    id: 'with',
+    label: 'With',
+    appliesTo: isWithType,
+    isActive: f => f.withUsers.length > 0,
+    control: {
+      kind: 'people',
+      placeholder: 'e.g. Paul Leung',
+      field: 'withUsers',
+    },
+  },
+  {
+    id: 'mentions',
+    label: 'Mentions',
+    appliesTo: isMessageType,
+    isActive: f =>
+      f.mentionUsers.length > 0 || f.mentionChannels.length > 0 || f.mentionGroups.length > 0,
+    control: {
+      kind: 'mentions',
+      placeholder: 'e.g. Emily Anderson, general or Frontend Team',
+    },
+  },
+  {
+    id: 'date',
+    label: 'Date',
+    appliesTo: notLocal,
+    isActive: f => Boolean(f.dateRange || f.after || f.before),
+    control: { kind: 'date' },
+  },
+  {
+    id: 'assignee',
+    label: 'Assignee',
+    appliesTo: isTicketType,
+    isActive: f => f.assignees.length > 0,
+    control: {
+      kind: 'people',
+      placeholder: 'e.g. Paul Leung',
+      field: 'assignees',
+    },
+  },
+  {
+    id: 'priority',
+    label: 'Priority',
+    appliesTo: isTicketType,
+    isActive: f => f.priority !== '',
+    control: {
+      kind: 'enumSingle',
+      options: PRIORITY_OPTIONS,
+      anyLabel: 'Any priority',
+      field: 'priority',
+    },
+  },
+  {
+    id: 'status',
+    label: 'Status',
+    appliesTo: isTicketType,
+    carried: true,
+    isActive: f => f.statuses.length > 0,
+  },
+  {
+    id: 'board',
+    label: 'Board',
+    appliesTo: isTicketType,
+    isActive: f => f.boards.length > 0,
+    control: {
+      kind: 'boards',
+      placeholder: 'e.g. Platform',
+    },
+  },
+  {
+    id: 'tags',
+    label: 'Tags',
+    appliesTo: isTicketOrMessageType,
+    isActive: f => f.tags.length > 0,
+    control: {
+      kind: 'text',
+      placeholder: 'e.g. billing, urgent',
+      field: 'tags',
+    },
+  },
+  {
+    id: 'entity',
+    label: 'Entity',
+    appliesTo: isTicketOrMessageType,
+    isActive: f => f.entities.length > 0,
+    control: {
+      kind: 'text',
+      placeholder: 'e.g. Big Basket, Swiggy',
+      field: 'entities',
+    },
+  },
+  {
+    id: 'showArchived',
+    label: 'Show archived',
+    appliesTo: d => d === 'desk' || d === 'tickets',
+    // Counted in badge (modal-only checkbox).
+    hidden: true,
+    isActive: f => f.showArchived,
+    control: { kind: 'checkbox', field: 'showArchived' },
+  },
+];
+
+export function entriesFor(docType: SearchDocType): ModalFilterEntry[] {
+  return FILTER_MODAL_ENTRIES.filter(entry => entry.appliesTo(docType));
+}
+
+export function modalFieldEntries(docType: SearchDocType): ModalFilterEntry[] {
+  return entriesFor(docType).filter(
+    entry => entry.control && entry.control.kind !== undefined && !entry.carried,
+  );
+}
+
+/**
+ * Badge = active modal filters. From / In (`hidden: false`) and bar toggles are
+ * not counted — same as dashboard `countActiveFilters`.
+ */
+export function countActiveFilters(filters: SearchResultsFilters): number {
+  return entriesFor(filters.docType).filter(
+    entry => entry.hidden !== false && entry.isActive(filters),
+  ).length;
+}
+
+export function chipsToEntities(
+  chips: readonly SearchFilterChip[],
+  prefix: 'from:' | 'in:',
+): FilterEntity[] {
+  return chips
+    .filter(chip => chip.prefix === prefix)
+    .map(chip => ({ id: chip.id, label: chip.label }));
+}
+
+export function entitiesToFromChips(entities: readonly FilterEntity[]): SearchFilterChip[] {
+  return entities.map(entity => ({
+    id: entity.id,
+    label: entity.label,
+    prefix: 'from:',
+    entityType: 'user',
+  }));
+}
+
+export function entitiesToInChips(entities: readonly FilterEntity[]): SearchFilterChip[] {
+  return entities.map(entity => ({
+    id: entity.id,
+    label: entity.label,
+    prefix: 'in:',
+    entityType: 'channel',
+  }));
+}
+
+export function toSearchResultsFilters(input: {
+  tab: GlobalSearchTab;
+  chips: readonly SearchFilterChip[];
+  structured: StructuredSearchFilters;
+  onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
+  sortBy?: SortBy;
+  rankProfile?: string;
+}): SearchResultsFilters {
+  return {
+    docType: modalDocTypeForTab(input.tab),
+    fromUsers: chipsToEntities(input.chips, 'from:'),
+    inChannels: chipsToEntities(input.chips, 'in:'),
+    onlyMyChannels: input.onlyMyChannels,
+    includeBotMessages: input.includeBotMessages,
+    exactMatch: input.exactMatch,
+    sortBy: input.sortBy ?? DEFAULT_SORT_BY,
+    rankProfile: input.rankProfile ?? DEFAULT_RANK_PROFILE,
+    ...input.structured,
+  };
+}
+
+/** Drop structured fields that do not apply to the active tab. */
+export function clearInapplicableStructured(
+  tab: GlobalSearchTab,
+  structured: StructuredSearchFilters,
+  chips: readonly SearchFilterChip[],
+): { structured: StructuredSearchFilters; chips: readonly SearchFilterChip[] } {
+  const docType = docTypeForTab(tab);
+  const visible = new Set(entriesFor(docType).map(entry => entry.id));
+  let nextChips = chips;
+  let next = { ...structured };
+
+  if (!visible.has('from')) {
+    nextChips = nextChips.filter(chip => chip.prefix !== 'from:');
+  }
+  if (!visible.has('in')) {
+    nextChips = nextChips.filter(chip => chip.prefix !== 'in:');
+  }
+  if (!visible.has('with')) next = { ...next, withUsers: [] };
+  if (!visible.has('mentions')) {
+    next = { ...next, mentionUsers: [], mentionChannels: [], mentionGroups: [] };
+  }
+  if (!visible.has('date')) {
+    next = { ...next, dateRange: '', after: '', before: '' };
+  }
+  if (!visible.has('assignee')) next = { ...next, assignees: [] };
+  if (!visible.has('priority')) next = { ...next, priority: '' };
+  if (!visible.has('status')) next = { ...next, statuses: [] };
+  if (!visible.has('board')) next = { ...next, boards: [] };
+  if (!visible.has('tags')) next = { ...next, tags: [] };
+  if (!visible.has('entity')) next = { ...next, entities: [] };
+  if (!visible.has('showArchived')) next = { ...next, showArchived: false };
+  if (!visible.has('fromEmail')) next = { ...next, fromEmails: [] };
+  if (!visible.has('toEmail')) next = { ...next, toEmails: [] };
+
+  return { structured: next, chips: nextChips };
+}
+
+export function emptyStructuredFilters(): StructuredSearchFilters {
+  return { ...DEFAULT_STRUCTURED_FILTERS };
+}

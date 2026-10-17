@@ -77,6 +77,11 @@ type SearchResultsShimmerProps = {
   /** Optional section label above the shimmer rows (e.g. Messages). */
   sectionTitle?: string;
   variant?: 'default' | 'call';
+  /**
+   * When false, size to content (load-more footer). Default true fills the list
+   * empty state.
+   */
+  fill?: boolean;
 };
 
 export const SearchResultsShimmer = memo(function SearchResultsShimmer({
@@ -85,6 +90,7 @@ export const SearchResultsShimmer = memo(function SearchResultsShimmer({
   rowCount = DEFAULT_ROW_COUNT,
   sectionTitle,
   variant = 'default',
+  fill = true,
 }: SearchResultsShimmerProps): ReactElement {
   const pulse = useSharedValue(1);
 
@@ -104,7 +110,11 @@ export const SearchResultsShimmer = memo(function SearchResultsShimmer({
   return (
     <Animated.View
       style={[
-        { flex: 1, paddingTop: listContentTop, paddingBottom: bottomContentInset },
+        {
+          ...(fill ? { flex: 1 } : null),
+          paddingTop: listContentTop,
+          paddingBottom: bottomContentInset,
+        },
         animatedStyle,
       ]}
       accessibilityLabel='Loading search results'
