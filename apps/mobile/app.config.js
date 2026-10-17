@@ -116,6 +116,7 @@ module.exports = ({ config }) => {
       'expo-speech-recognition',
       '@react-native-community/datetimepicker',
       './plugins/withAppStartupTimingsIOS.cjs',
+      './plugins/withSceneDelegateIOS.cjs',
       './plugins/withFirebaseModularHeaders.cjs',
       './plugins/withEnrichedMarkdownNoMath.cjs',
       './plugins/withAndroidAppConfig.cjs',

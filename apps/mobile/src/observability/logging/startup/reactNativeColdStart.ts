@@ -1,6 +1,7 @@
 import { NativeModules } from 'react-native';
 import * as Linking from 'expo-linking';
 import { parseCallDeepLink } from '@/src/utils/callDeepLink';
+import { getInitialLinkingURL } from '@/src/utils/initialLinkingUrl';
 import { parseMessageDeepLink } from '@/src/utils/messageDeepLink';
 import { parseTicketDeepLink } from '@/src/utils/ticketDeepLink';
 import { ShareTargetNative } from '@/src/features/share-target';
@@ -192,7 +193,7 @@ export class ReactNativeLaunchSignals implements LaunchSignals {
   async collect(): Promise<CollectedLaunchSignals> {
     const [, initialUrl, initialShare, hasNotificationIntentExtras] = await Promise.all([
       initializeColdStartDetection(),
-      Linking.getInitialURL().catch(() => null),
+      getInitialLinkingURL().catch(() => null),
       ShareTargetNative.getInitialShare(null).catch(() => null),
       readNotificationLaunchExtras(),
     ]);

@@ -8,7 +8,7 @@ const { readFileIfExists } = require('./utils/fs.cjs');
 const path = require('path');
 
 const PLUGIN_NAME = 'with-app-startup-timings-ios';
-const PLUGIN_VERSION = '1.1.1';
+const PLUGIN_VERSION = '1.2.0';
 
 function resolveProjectName(config) {
   const fromModRequest = config?.modRequest?.projectName;
@@ -48,6 +48,15 @@ class AppStartupTimes: NSObject {
     }
     if launchOptions[.userActivityDictionary] != nil { return "deeplink" }
     return "direct"
+  }
+
+  static func resolveLaunchCause(_ connectionOptions: UIScene.ConnectionOptions) -> String {
+    if connectionOptions.notificationResponse != nil { return "notification" }
+    if let url = connectionOptions.urlContexts.first?.url {
+      return resolveLaunchCause([.url: url])
+    }
+    if !connectionOptions.userActivities.isEmpty { return "deeplink" }
+    return launchCause
   }
 
   @objc static func setupActivationObserver() {
@@ -251,6 +260,19 @@ function ensureActivationObserverInAppDelegate(contents) {
   return lines.join('\n');
 }
 
+function ensureLaunchCauseInSceneDelegate(contents) {
+  if (contents.includes('AppStartupTimes.resolveLaunchCause(connectionOptions)')) return contents;
+
+  const marker = '    open(connectionOptions.urlContexts)';
+  if (!contents.includes(marker)) {
+    throw new Error('[with-app-startup-timings-ios] Could not find the launch-cause marker in SceneDelegate.swift.');
+  }
+  return contents.replace(
+    marker,
+    () => `    AppStartupTimes.launchCause = AppStartupTimes.resolveLaunchCause(connectionOptions)\n${marker}`,
+  );
+}
+
 function withAppStartupTimingsIOS(config) {
   config = withDangerousMod(config, [
     'ios',
@@ -276,6 +298,16 @@ function withAppStartupTimingsIOS(config) {
         next = ensureActivationObserverInAppDelegate(next);
         if (next !== prev) fs.writeFileSync(appDelegatePath, next);
       }
+
+      const sceneDelegatePath = path.join(targetDir, 'SceneDelegate.swift');
+      const prevScene = readFileIfExists(sceneDelegatePath);
+      if (prevScene === null) {
+        throw new Error(
+          '[with-app-startup-timings-ios] SceneDelegate.swift is missing; register withSceneDelegateIOS after this plugin.',
+        );
+      }
+      const nextScene = ensureLaunchCauseInSceneDelegate(prevScene);
+      if (nextScene !== prevScene) fs.writeFileSync(sceneDelegatePath, nextScene);
 
       return config;
     },
