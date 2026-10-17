@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import {
   ChevronDown,
+  Check,
   ChevronRight,
   FileText,
   Folder,
   FolderOpen,
   Plus,
   Search,
+  Tag,
   Trash2,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
@@ -17,6 +19,18 @@ import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 import { useCanvasesWithRestLabels } from '../useCanvasLabels';
+import {
+  getAvailableLabelCounts,
+  getCanvasLabelDotClassName,
+  getCanvasLabelKey,
+  getCanvasLabels,
+} from '../canvasLabelUtils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import {
   ChannelCanvasDropTarget,
@@ -85,6 +99,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [locallyDeletedCanvasIds, setLocallyDeletedCanvasIds] = useState<Set<string>>(new Set());
+  const [selectedLabelKeys, setSelectedLabelKeys] = useState<Set<string>>(new Set());
 
   const canvasesWithLabels = useCanvasesWithRestLabels(canvases);
   const canvasesWithStarState = useMemo(
@@ -92,11 +107,36 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     [canvasesWithLabels],
   );
 
+  // Every channel canvas is already loaded, so labels are counted and filtered client-side.
+  const availableLabels = useMemo(
+    () =>
+      getAvailableLabelCounts(
+        canvasesWithStarState
+          .filter(canvas => !locallyDeletedCanvasIds.has(canvas.id))
+          .flatMap(getCanvasLabels),
+      ),
+    [canvasesWithStarState, locallyDeletedCanvasIds],
+  );
+  const hasLabelFilter = selectedLabelKeys.size > 0;
+  const toggleLabel = (key: string): void =>
+    setSelectedLabelKeys(previous => {
+      const next = new Set(previous);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
   const displayedCanvases = useMemo(
     () =>
       filterStarredCanvases(
         getDisplayedCanvases({
-          canvases: canvasesWithStarState.filter(canvas => !locallyDeletedCanvasIds.has(canvas.id)),
+          canvases: canvasesWithStarState.filter(
+            canvas =>
+              !locallyDeletedCanvasIds.has(canvas.id) &&
+              (!hasLabelFilter ||
+                getCanvasLabels(canvas).some(label =>
+                  selectedLabelKeys.has(getCanvasLabelKey(label.name) ?? ''),
+                )),
+          ),
           activeFilter,
           currentUserId,
           searchQuery,
@@ -109,6 +149,8 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
       currentUserId,
       locallyDeletedCanvasIds,
       searchQuery,
+      hasLabelFilter,
+      selectedLabelKeys,
       showStarredOnly,
     ],
   );
@@ -120,7 +162,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
 
   const { folderGroups, rootCanvases } = useMemo(() => {
     const groups = new Map<string, FolderGroup>();
-    const hasContentFilter = activeFilter !== 'all' || showStarredOnly;
+    const hasContentFilter = activeFilter !== 'all' || showStarredOnly || hasLabelFilter;
 
     for (const folder of displayedFolders) {
       groups.set(folder.id, { folder, canvases: [] });
@@ -144,7 +186,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
         .filter(group => !hasContentFilter || group.canvases.length > 0),
       rootCanvases: sortByName(root, canvas => canvas.title || 'Untitled'),
     };
-  }, [activeFilter, displayedCanvases, displayedFolders, showStarredOnly]);
+  }, [activeFilter, displayedCanvases, displayedFolders, hasLabelFilter, showStarredOnly]);
 
   const isEmpty = folderGroups.length === 0 && rootCanvases.length === 0;
 
@@ -236,6 +278,67 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 >
                   Shared
                 </button>
+                {(availableLabels.length > 0 || hasLabelFilter) && (
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type='button'
+                        className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+                          hasLabelFilter
+                            ? 'bg-muted text-foreground'
+                            : 'text-muted-foreground hover:bg-accent'
+                        }`}
+                        data-testid='canvas-filter-label'
+                        data-track-category='CANVAS'
+                        data-track-name='Filter_Channel_Canvases_Label'
+                      >
+                        <Tag className='size-3.5' />
+                        <span className='max-w-[120px] truncate'>
+                          {selectedLabelKeys.size > 1
+                            ? `${selectedLabelKeys.size} labels`
+                            : (availableLabels.find(({ label }) =>
+                                selectedLabelKeys.has(getCanvasLabelKey(label.name) ?? ''),
+                              )?.label.name ?? 'Label')}
+                        </span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align='start'
+                      className='max-h-72 min-w-[200px] overflow-auto'
+                    >
+                      {availableLabels.map(({ label, count }) => {
+                        const key = getCanvasLabelKey(label.name) ?? label.name;
+                        return (
+                          <DropdownMenuItem
+                            key={key}
+                            // Multi-select: keep the menu open while toggling.
+                            onSelect={event => {
+                              event.preventDefault();
+                              toggleLabel(key);
+                            }}
+                          >
+                            <span
+                              className={`size-2 shrink-0 rounded-full ${getCanvasLabelDotClassName(label.name)}`}
+                            />
+                            <span className='min-w-0 flex-1 truncate'>{label.name}</span>
+                            <span className='text-xs text-muted-foreground'>{count}</span>
+                            <Check
+                              className={cn(
+                                'size-3.5 shrink-0',
+                                !selectedLabelKeys.has(key) && 'invisible',
+                              )}
+                            />
+                          </DropdownMenuItem>
+                        );
+                      })}
+                      {hasLabelFilter && (
+                        <DropdownMenuItem onSelect={() => setSelectedLabelKeys(new Set())}>
+                          Clear labels
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
 
               <div className='relative w-full sm:w-auto'>
@@ -260,11 +363,11 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
               <div className='flex flex-col items-center justify-center h-full text-center py-16'>
                 <FileText className='w-16 h-16 text-muted-foreground mb-4' />
                 <h3 className='text-lg font-medium text-foreground mb-2'>
-                  {searchQuery ? 'No canvases found' : 'No canvases yet'}
+                  {searchQuery || hasLabelFilter ? 'No canvases found' : 'No canvases yet'}
                 </h3>
                 <p className='text-muted-foreground text-sm'>
-                  {searchQuery
-                    ? 'Try a different search'
+                  {searchQuery || hasLabelFilter
+                    ? 'Try a different search or label'
                     : 'Create your first canvas to get started'}
                 </p>
               </div>

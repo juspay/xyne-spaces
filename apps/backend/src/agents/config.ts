@@ -48,6 +48,7 @@ const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
+const DEFAULT_DESK_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
 const DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT = envConfig.dataSource.ingestTableLimit;
 const DEFAULT_EMAIL_QUICK_REWRITE_MODEL = 'glm-flash-experimental';
@@ -101,6 +102,7 @@ const CAC_KEYS = {
   releaseAiModel: 'release_ai_model_name',
   summariserModel: 'summariser_model_name',
   attachmentSummariserModel: 'attachment_summariser_model_name',
+  deskSummariserModel: 'desk_summariser_model_name',
   nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
   nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
   nudgeRelatedMessageModel: 'nudge_related_message_model_name',
@@ -158,6 +160,8 @@ export class AgentsConfig {
   public readonly priorityClassificationXorEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
+  /** Desk email-thread summary (Support screen); separate from the chat summariser. */
+  public readonly deskSummariserModelName: string;
 
   // Nudge agents config
   public readonly nudgeCreateTicketModelName: string;
@@ -217,6 +221,7 @@ export class AgentsConfig {
     tagGenerationJevEnabled: boolean,
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
+    deskSummariserModelName: string,
     summaryTemplateSelectionXorEnabled: boolean,
     classificationXorEnabled: boolean,
     priorityClassificationXorEnabled: boolean,
@@ -252,6 +257,7 @@ export class AgentsConfig {
     this.tagGenerationJevEnabled = tagGenerationJevEnabled;
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
+    this.deskSummariserModelName = deskSummariserModelName;
     this.summaryTemplateSelectionXorEnabled = summaryTemplateSelectionXorEnabled;
     this.classificationXorEnabled = classificationXorEnabled;
     this.priorityClassificationXorEnabled = priorityClassificationXorEnabled;
@@ -312,6 +318,7 @@ export class AgentsConfig {
       const priorityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.priorityClassificationXorEnabled, DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
+      const deskSummariserModelName = getValue<string>(CAC_KEYS.deskSummariserModel, DEFAULT_DESK_SUMMARISER_MODEL);
 
       // Extract nudge agents values
       const nudgeCreateTicketModelName = getValue<string>(CAC_KEYS.nudgeCreateTicketModel, DEFAULT_NUDGE_CREATE_TICKET_MODEL);
@@ -581,6 +588,7 @@ export class AgentsConfig {
         tagGenerationJevEnabled,
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
+        deskSummariserModelName,
         summaryTemplateSelectionXorEnabled,
         classificationXorEnabled,
         priorityClassificationXorEnabled,
@@ -620,6 +628,7 @@ export class AgentsConfig {
         DEFAULT_TAG_GENERATION_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+        DEFAULT_DESK_SUMMARISER_MODEL,
         DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
         DEFAULT_CLASSIFICATION_XOR_ENABLED,
         DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
@@ -660,6 +669,7 @@ export class AgentsConfig {
       DEFAULT_TAG_GENERATION_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+      DEFAULT_DESK_SUMMARISER_MODEL,
       DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED,
       DEFAULT_CLASSIFICATION_XOR_ENABLED,
       DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
