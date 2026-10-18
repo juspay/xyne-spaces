@@ -166,16 +166,12 @@ export const BACKEND_GROUP_KEYS = [
 
 /**
  * Backend-result group key -> palette TabType, for the groups that show a loading skeleton
- * on the ALL tab while a search is pending (Messages and Tickets) — derived from the registry.
+ * on the ALL tab while a search is pending (Messages and Tickets).
  */
-export const ALL_TAB_SKELETON_GROUPS = Object.fromEntries(
-  (['messages', 'tickets'] as const).flatMap(docType =>
-    DOC_TYPE_REGISTRY[docType].groupKeys.map(groupKey => [
-      groupKey,
-      DOC_TYPE_REGISTRY[docType].tab,
-    ]),
-  ),
-) as Partial<Record<string, TabType>>;
+export const ALL_TAB_SKELETON_GROUPS: Partial<Record<string, TabType>> = {
+  conversation: TabType.MESSAGES,
+  ticket: TabType.TICKETS,
+};
 
 export const VespaApps = {
   CHAT: 'chat',
