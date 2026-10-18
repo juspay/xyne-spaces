@@ -43,6 +43,7 @@ import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue'
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
@@ -207,6 +208,11 @@ class WorkerService {
         logger.info('Starting message classification worker service...')
         await messageClassificationQueue.initialize()
         messageClassificationQueue.startProcessing()
+      }
+      // Runs the comparisons decisions queue with the other engines.
+      if (appConfig.decisionEval.enabled) {
+        logger.info('Starting decision evaluation worker...');
+        await decisionEvaluationWorker.start();
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -507,6 +513,9 @@ class WorkerService {
       }
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
+      }
+      if (appConfig.decisionEval.enabled) {
+        await decisionEvaluationWorker.shutdown();
       }
 
       if (workflowsEnabled) {

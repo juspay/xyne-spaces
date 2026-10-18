@@ -1,6 +1,8 @@
 import type { JsonValue } from '@openfeature/server-sdk';
 import { superpositionClient } from '@/services/superpositionClient';
-import { askJevNoul, isJevConfigured, type JevNoulQuestion } from './jevClient';
+import { askDecisionNouls } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
+import type { JevNoulQuestion } from './jevClient';
 
 /** How the cmd+K palette should treat a query. */
 export type QueryMode = 'lexical' | 'ai';
@@ -95,11 +97,12 @@ export const classifyQueryIntent = async (
   query: string,
   ctx: QueryIntentContext
 ): Promise<QueryIntent | null> => {
-  if (!isJevConfigured() || isClearlyLexical(query)) return null;
+  if (!isDecisionEngineConfigured() || isClearlyLexical(query)) return null;
   const config = await getIntentConfig(ctx);
   if (!config.enabled) return null;
 
-  const pAI = await askJevNoul(query.trim(), config.question, TIMEOUT_MS);
-  if (pAI === null) return null;
+  const answers = await askDecisionNouls('search_intent', query.trim(), { pAI: config.question }, TIMEOUT_MS);
+  if (!answers) return null;
+  const { pAI } = answers;
   return { mode: pAI > config.threshold ? 'ai' : 'lexical', pAI };
 };

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
-import { askJev, type JevAnswer, type JevQuestion } from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import type { JevAnswer, JevQuestion } from '@/services/queryIntent/jevClient';
 import { logger } from '@/utils/logger';
 
 const JEV_TIMEOUT_MS = 10_000;
@@ -178,7 +179,7 @@ function toOutput(
     };
   }
 
-  // askJev only returns a choice that is one of our keys, so the index is valid.
+  // askDecision only returns a choice that is one of our keys, so the index is valid.
   const option = options[Number(answer.choice.slice(1))]!;
   return {
     ...UNANSWERED,
@@ -212,7 +213,7 @@ export class AskJevStep extends BaseActionStep<typeof AskJevConfigSchema, AskJev
     const answers =
       text
         ? // Independent questions: an unusable answer to one must not discard the others.
-          await askJev(text, asked, JEV_TIMEOUT_MS, undefined, { partial: true })
+          await askDecision('automation_step', text, asked, JEV_TIMEOUT_MS, undefined, { partial: true })
         : null;
 
     const output: AskJevOutput = {};
