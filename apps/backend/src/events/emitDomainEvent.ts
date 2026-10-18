@@ -5,19 +5,19 @@ export async function emitDomainEvent(
   event: AutomationEvent,
   workspaceId: string,
 ): Promise<void> {
-  const [{ eventRouter }, { workflowRuntime }] = await Promise.all([
+  const [{ eventRouter }] = await Promise.all([
     import('@/automations/engine/event-router'),
-    import('@/workflowsV2/runtime'),
+    // import('@/workflowsV2/runtime'),
   ]);
 
-  const [automations, workflows] = await Promise.allSettled([
+  const [automations] = await Promise.allSettled([
     eventRouter.emitToAutomations(event, workspaceId),
-    workflowRuntime.dispatchEvent({
-      type: event.type,
-      payload: event.payload as unknown as Record<string, unknown>,
-      // `findActiveWorkflows` reads `workspaceId` from here to scope candidates.
-      metadata: { workspaceId },
-    }),
+    // workflowRuntime.dispatchEvent({
+    //   type: event.type,
+    //   payload: event.payload as unknown as Record<string, unknown>,
+    //   // `findActiveWorkflows` reads `workspaceId` from here to scope candidates.
+    //   metadata: { workspaceId },
+    // }),
   ]);
 
   if (automations.status === 'rejected') {
@@ -26,10 +26,10 @@ export async function emitDomainEvent(
       automations.reason,
     );
   }
-  if (workflows.status === 'rejected') {
-    logger.error(
-      `[events] workflows failed for ${event.type} in workspace ${workspaceId}:`,
-      workflows.reason,
-    );
-  }
+  // if (workflows.status === 'rejected') {
+  //   logger.error(
+  //     `[events] workflows failed for ${event.type} in workspace ${workspaceId}:`,
+  //     workflows.reason,
+  //   );
+  // }
 }
