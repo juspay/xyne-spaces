@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { config as envConfig } from '@/config/env';
 import type {
   AskFailure,
+  ClassifierEngine,
   ClassifierTarget,
   DecisionAnswer,
   DecisionQuestion,
@@ -20,16 +21,11 @@ import type {
  * one must be re-tuned for another.
  */
 
-export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
-
-export const isPrivateJevConfigured = (): boolean =>
-  isJevConfigured() && Boolean(process.env.JEV_URL?.trim());
-
 const ERROR_BODY_LIMIT = 2048;
 const ERROR_TYPE = /^[a-z0-9_.-]{1,64}$/i;
 
-/** Hostname of the Jev endpoint for logs, or undefined when the URL doesn't parse. */
-const jevHost = (url: string): string | undefined => {
+/** Hostname of the endpoint for logs, or undefined when the URL doesn't parse. */
+const hostOf = (url: string): string | undefined => {
   try {
     return new URL(url).hostname;
   } catch {
@@ -167,8 +163,8 @@ export const readNouls = (answers: Record<string, DecisionAnswer> | null): Recor
  * unusable answer is left out instead, for a batch of independent questions where
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
- * `target` sends it to another service with the same wire format, e.g. XOR.
- * Never throws.
+ * `target` sends it to another service with the same wire format, e.g. XOR; `engine` names
+ * it in logs. Never throws.
  */
 export const requestClassifierAnswers = async (
   state: string | Record<string, unknown>,
@@ -179,11 +175,17 @@ export const requestClassifierAnswers = async (
     partial = false,
     onFailure,
     target = envConfig.jev,
-  }: { partial?: boolean; onFailure?: (failure: AskFailure) => void; target?: ClassifierTarget } = {}
+    engine = 'jev',
+  }: {
+    partial?: boolean;
+    onFailure?: (failure: AskFailure) => void;
+    target?: ClassifierTarget;
+    engine?: ClassifierEngine;
+  } = {}
 ): Promise<Record<string, DecisionAnswer> | null> => {
   const { apiKey, url, model } = target;
   if (!apiKey) return null;
-  const logContext = { model, host: jevHost(url) };
+  const logContext = { engine, model, host: hostOf(url) };
 
   try {
     const response = await fetch(url, {
@@ -198,7 +200,7 @@ export const requestClassifierAnswers = async (
       const errorType = await readErrorType(response);
       // Cancelled by the caller while the body was read: not a failure, as in the catch below.
       if (signal?.aborted) return null;
-      logger.warn('Jev request failed', { status: response.status, errorType, ...logContext });
+      logger.warn('Classifier request failed', { status: response.status, errorType, ...logContext });
       onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
@@ -215,7 +217,7 @@ export const requestClassifierAnswers = async (
       }
     }
     if (unusable.length > 0) {
-      logger.warn('Jev answered with no usable probability', {
+      logger.warn('Classifier answered with no usable probability', {
         questions: unusable.slice(0, 5),
         unusable: unusable.length,
         of: Object.keys(questions).length,
@@ -233,7 +235,7 @@ export const requestClassifierAnswers = async (
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     // The error's name only: a reply that isn't JSON fails with a message quoting it,
     // and it can echo the request.
-    logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
+    logger.warn(`Classifier request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
       ...logContext,
     });

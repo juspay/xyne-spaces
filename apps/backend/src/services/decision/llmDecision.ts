@@ -1,7 +1,6 @@
 import { LLMClient, createUserMessage } from '@framework';
 import { config as envConfig } from '@/config/env';
-import type { DecisionAnswer, DecisionQuestion } from './types';
-import type { LlmReply } from './types';
+import type { DecisionAnswer, DecisionQuestion, LlmReply } from './types';
 
 /** The classification agents' default model, so the classifiers are measured against what they replace. */
 export const LLM_DECISION_MODEL = 'glm-flash-experimental';

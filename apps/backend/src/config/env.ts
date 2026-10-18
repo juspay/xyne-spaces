@@ -1043,6 +1043,8 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+    // Set by the deployer, not the public default: required before customer content goes to it.
+    urlIsExplicit: Boolean(process.env.JEV_URL?.trim()),
   },
   xor: {
     apiKey: envVars.XOR_API_KEY,

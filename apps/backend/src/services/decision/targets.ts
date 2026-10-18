@@ -1,8 +1,6 @@
 import { config as envConfig } from '@/config/env';
-import { isJevConfigured, isPrivateJevConfigured } from './classifierClient';
-import type { ClassifierTarget } from './types';
 import { isLlmDecisionConfigured } from './llmDecision';
-import type { ClassifierEngine, DecisionEngine } from './types';
+import type { ClassifierEngine, ClassifierTarget, DecisionEngine } from './types';
 
 /** The engine that answers typed decision questions live: DECISION_ENGINE. */
 export const configuredEngine = (): ClassifierEngine => envConfig.decisionEngine;
@@ -23,9 +21,8 @@ export const isEngineConfigured = (
   { customerContent = false }: { customerContent?: boolean } = {}
 ): boolean => {
   if (engine === 'llm') return isLlmDecisionConfigured();
-  if (engine === 'jev') return customerContent ? isPrivateJevConfigured() : isJevConfigured();
-  if (envConfig.xor.url) return Boolean(envConfig.xor.apiKey);
-  return customerContent ? isPrivateJevConfigured() : isJevConfigured();
+  if (engine === 'xor' && envConfig.xor.url) return Boolean(envConfig.xor.apiKey);
+  return Boolean(envConfig.jev.apiKey) && (!customerContent || envConfig.jev.urlIsExplicit);
 };
 
 export const isDecisionEngineConfigured = (): boolean => isEngineConfigured(configuredEngine());

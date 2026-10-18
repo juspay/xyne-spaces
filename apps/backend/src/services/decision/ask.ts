@@ -1,10 +1,9 @@
 import { recordRun, type RunRole } from '@/services/otel/decisionMetrics';
 import { asNoulQuestions, readNouls } from './classifierClient';
-import type { DecisionAnswer, YesNoQuestion, DecisionQuestion } from './types';
 import { askEngine, type AskOptions } from './engines';
 import { compareInBackground } from './evaluation';
 import { configuredEngine, isEngineConfigured } from './targets';
-import type { QuestionFeature } from './types';
+import type { DecisionAnswer, DecisionQuestion, QuestionFeature, YesNoQuestion } from './types';
 
 export interface AskDecisionOptions extends AskOptions {
   /** shadow: asked alongside a live LLM, so the answer is not the one users get. */

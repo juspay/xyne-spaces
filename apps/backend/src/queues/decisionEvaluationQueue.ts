@@ -1,8 +1,15 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import type { DecisionAnswer, DecisionQuestion } from '@/services/decision/types';
-import type { ComparedAnswer, DecisionEngine, QuestionFeature, TaskFeature, TaskInput } from '@/services/decision/types';
+import type {
+  ComparedAnswer,
+  DecisionAnswer,
+  DecisionEngine,
+  DecisionQuestion,
+  QuestionFeature,
+  TaskFeature,
+  TaskInput,
+} from '@/services/decision/types';
 
 export const COMPARE_JOB = 'compare-xor';
 export const EVALUATE_JOB = 'evaluate-task';

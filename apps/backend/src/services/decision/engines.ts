@@ -1,9 +1,19 @@
 import { logger } from '@/utils/logger';
 import { requestClassifierAnswers } from './classifierClient';
-import type { DecisionAnswer, AskFailure, DecisionQuestion } from './types';
 import { isLlmDecisionConfigured, requestLlmAnswers } from './llmDecision';
 import { classifierTarget, isEngineConfigured } from './targets';
-import type { ClassifierEngine, DecisionEngine, DecisionFeature, DecisionTask, EngineRun, LlmReply, RunOutcome } from './types';
+import type {
+  AskFailure,
+  ClassifierEngine,
+  DecisionAnswer,
+  DecisionEngine,
+  DecisionFeature,
+  DecisionQuestion,
+  DecisionTask,
+  EngineRun,
+  LlmReply,
+  RunOutcome,
+} from './types';
 
 const CLASSIFIER_TIMEOUT_MS = 10_000;
 
@@ -49,6 +59,7 @@ async function runClassifier<T>(engine: ClassifierEngine, task: DecisionTask<T>)
   let failure: AskFailure | undefined;
   const answers = await requestClassifierAnswers(task.question.state, task.question.questions, CLASSIFIER_TIMEOUT_MS, undefined, {
     target,
+    engine,
     onFailure: (f) => {
       failure = f;
     },
@@ -123,6 +134,7 @@ const askClassifier =
     const answer = await requestClassifierAnswers(state, questions, timeoutMs, signal, {
       partial,
       target,
+      engine,
       onFailure: (f) => {
         failure = f;
         onFailure?.(f);
