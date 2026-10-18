@@ -12,8 +12,8 @@
  * "always" skips this entirely.
  */
 
-import type { ClassifierExchange } from "xyne-claw-shared";
-import { DIGITAL_TWIN_BANK_ID, getMemoryProvider } from "xyne-claw-shared";
+import type { ClassifierExchange, RespondGateDecision } from "xyne-claw-shared";
+import { DIGITAL_TWIN_BANK_ID, getMemoryProvider, isRespondGateSource } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -21,6 +21,7 @@ import { interact } from "../mcp/servers/xyne-spaces-client.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import { recordGateEvent } from "./digitalTwinPipelineEvents.js";
+import { postToClaw } from "./clawS2sClient.js";
 import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("twin-respond-gate-client", createTraceId());
@@ -35,12 +36,8 @@ const memory = getMemoryProvider();
 // /should-respond fetch, not the memory/stats recalls that precede it.
 const GATE_TIMEOUT_MS = Number(process.env["TWIN_RESPOND_GATE_CLIENT_TIMEOUT_MS"] ?? 270_000);
 
-export interface TwinRespondDecision {
-  respond: boolean;
-  confidence: number;
-  reason: string;
-  source: string;
-}
+/** Kept as an alias so existing imports keep working; the contract lives in xyne-claw-shared. */
+export type TwinRespondDecision = RespondGateDecision;
 
 /** Fail-CLOSED default: when the gate can't reach a decision (missing S2S key,
  *  recall/LLM error, HTTP failure, unusable response) DON'T post. respond:false
@@ -291,10 +288,9 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     // Corrections (wrong-silence cases) are the highest-priority guidance.
     const allPatterns = [...corrections, ...patterns];
 
-    const res = await fetch(`${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/should-respond`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
-      body: JSON.stringify({
+    const result = await postToClaw(
+      "/internal/user-memory/should-respond",
+      {
         incoming: args.incoming,
         ...(args.channelName ? { channelName: args.channelName } : {}),
         ...(args.senderName ? { senderName: args.senderName } : {}),
@@ -304,14 +300,20 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
         isDirectMessage: false, // kept for claw's contract; the webhook only gates @mentions
         isThreadParticipant: activeInThread,
         includeTrace: true,
-      }),
-      signal: AbortSignal.timeout(GATE_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      recordFailure(`gate LLM HTTP ${res.status}`);
+      },
+      { timeoutMs: GATE_TIMEOUT_MS },
+    );
+    if (!result.ok) {
+      if (result.kind === "http") {
+        recordFailure(`gate LLM HTTP ${result.status}`);
+      } else {
+        logger.warn("[twin-respond-gate] client failed — fail-closed (stay silent)", { userId, err: result.error });
+        recordFailure(`gate client error: ${result.error}`);
+      }
       return FAIL_CLOSED;
     }
-    const d = (await res.json()) as Partial<TwinRespondDecision> & {
+    const d = (result.data ?? {}) as Partial<Omit<TwinRespondDecision, "source">> & {
+      source?: unknown;
       trace?: GateLlmTrace;
       classifier?: ClassifierExchange[];
     };
@@ -323,7 +325,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
       respond: d.respond,
       confidence: typeof d.confidence === "number" ? d.confidence : 0.5,
       reason: typeof d.reason === "string" ? d.reason : "",
-      source: typeof d.source === "string" ? d.source : "llm",
+      source: isRespondGateSource(d.source) ? d.source : "llm",
     };
     // Record the gate decision + LLM exchange for the pipeline UI (best-effort).
     void recordGateEvent({

@@ -36,7 +36,7 @@ vi.mock("../logger.js", () => ({
   createTraceId: () => "trace",
 }));
 
-import { FAIL_CLOSED, recordTwinSilence, shouldTwinRespond } from "./twinRespondGate.js";
+import { FAIL_CLOSED, recordTwinSilence, shouldTwinRespond, type TwinRespondDecision } from "./twinRespondGate.js";
 
 const BANK_ID = "xyne-digital-twin";
 const TRIAGE_QUERY =
@@ -496,6 +496,12 @@ describe("shouldTwinRespond: gate events", () => {
     });
   });
 
+  it("normalises an unknown source from claw to \"llm\" (shared RespondGateSource contract)", async () => {
+    clawReplies({ respond: true, confidence: 0.8, reason: "r", source: "some-future-source" });
+    const d = await shouldTwinRespond("u1", { incoming: "hi" });
+    expect(d).toEqual({ respond: true, confidence: 0.8, reason: "r", source: "llm" });
+  });
+
   it("normalises a sparse decision (defaults) and records null llm/classifier", async () => {
     clawReplies({ respond: true, classifier: "not-an-array" });
     const d = await shouldTwinRespond("u1", { incoming: "hi" });
@@ -573,7 +579,7 @@ describe("shouldTwinRespond: gate events", () => {
 });
 
 describe("recordTwinSilence", () => {
-  const decision = { respond: false, confidence: 0.3, reason: "r".repeat(400), source: "llm" };
+  const decision: TwinRespondDecision = { respond: false, confidence: 0.3, reason: "r".repeat(400), source: "llm" };
 
   it("does nothing without a sourceMessageId", async () => {
     await recordTwinSilence("u1", { channelId: "ch1" }, decision);
