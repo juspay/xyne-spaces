@@ -343,6 +343,16 @@ const envSchema = Joi.object({
   JEV_API_KEY: Joi.string().allow('').default(''),
   JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
   JEV_MODEL: Joi.string().default('jev-1.13.0'),
+  // XOR — same wire format as Jev, on LiteLLM's /v1/decisions. Unset XOR_URL => XOR is
+  // whatever JEV_URL points at when set explicitly, as before these existed.
+  XOR_URL: Joi.string().uri().allow('').default(''),
+  XOR_API_KEY: Joi.string().allow('').default(''),
+  XOR_MODEL: Joi.string().default('xor-latest'),
+  // The engine that answers typed decision questions (services/decision): xor, jev, or llm
+  // (the LLM on LITELLM_* answering the same questions).
+  DECISION_ENGINE: Joi.string().valid('xor', 'jev', 'llm').default('xor'),
+  // Decision evaluation: every decision is also queued for the other engines, to compare them.
+  DECISION_EVAL_ENABLED: Joi.boolean().default(false),
   ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
   ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
   ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
@@ -1028,6 +1038,15 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+  },
+  xor: {
+    apiKey: envVars.XOR_API_KEY,
+    url: envVars.XOR_URL,
+    model: envVars.XOR_MODEL,
+  },
+  decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev' | 'llm',
+  decisionEval: {
+    enabled: envVars.DECISION_EVAL_ENABLED,
   },
   elevenLabs: {
     apiKey: envVars.ELEVENLABS_API_KEY as string,

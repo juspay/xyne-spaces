@@ -9,14 +9,12 @@ import { AgentsConfig } from '../config.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
-import { config as envConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
-import {
-  askJev,
-  isPrivateJevConfigured,
-  type JevQuestion,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isPrivateDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
+import type { RunRole } from '@/services/otel/decisionMetrics';
+import type { JevQuestion } from '@/services/queryIntent/jevClient';
 
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
@@ -259,7 +257,7 @@ const tierOf = (
  * Only to a Jev that was pointed at explicitly: desk tickets carry customer email, so
  * they never go to the public default endpoint.
  */
-const isJevAvailable = (): boolean => isPrivateJevConfigured();
+const isJevAvailable = (): boolean => isPrivateDecisionEngineConfigured();
 
 export const isJevScoringEnabled = async (agentsConfig?: AgentsConfig): Promise<boolean> =>
   isJevAvailable() && (agentsConfig ?? (await AgentsConfig.fetch())).ticketDuplicateJevEnabled;
@@ -273,6 +271,7 @@ async function scoreWithJev(
   input: TicketDuplicateInput,
   thresholds: { likely: number; similar: number },
   allowPartial: boolean,
+  role: RunRole = 'live',
 ): Promise<TicketDuplicateOutput | null> {
   const candidates = input.candidates.slice(0, JEV_MAX_CANDIDATES);
   const state = {
@@ -296,7 +295,7 @@ async function scoreWithJev(
     };
   });
 
-  const answers = await askJev(state, questions, JEV_TIMEOUT_MS, undefined, { partial: allowPartial });
+  const answers = await askDecision('ticket_duplicate', state, questions, JEV_TIMEOUT_MS, undefined, { partial: allowPartial, role });
   if (!answers) return null;
 
   const scored = candidates.flatMap((candidate, i) => {
@@ -372,7 +371,7 @@ export async function analyzeTicketDuplicates(
     if (jevResult) {
       logger.info(`[${AGENT_NAME}] Verdict`, {
         source: 'jev',
-        model: envConfig.jev.model,
+        model: decisionEngineModel(),
         ticketId: context.ticketId,
         thresholds,
         isDuplicate: jevResult.isDuplicate,
@@ -467,10 +466,10 @@ export async function analyzeTicketDuplicates(
       pick: parsed.duplicateTicketId,
     });
     if (jevConfig.shadow && !cacConfig.ticketDuplicateJevEnabled && isJevAvailable()) {
-      void scoreWithJev(input, thresholds, false).then(shadow => {
+      void scoreWithJev(input, thresholds, false, 'shadow').then(shadow => {
         logger.info(`[${AGENT_NAME}] Shadow`, {
           ticketId: context.ticketId,
-          model: envConfig.jev.model,
+          model: decisionEngineModel(),
           thresholds,
           llmPick: isDuplicate ? parsed.duplicateTicketId : null,
           jevPick: shadow?.isDuplicate ? shadow.duplicateTicketId : null,

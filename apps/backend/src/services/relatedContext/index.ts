@@ -1,12 +1,11 @@
 import type { JsonValue } from '@openfeature/server-sdk';
 import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
-import { config as envConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import type { TransformedSearchResult } from '@/services/vespaSearch/resultTransform';
+import { askDecision } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
 import {
-  askJev,
-  isJevConfigured,
   type JevAnswer,
   type JevFailure,
   type JevNoulQuestion,
@@ -239,7 +238,7 @@ async function classify(
   signal: AbortSignal | undefined
 ): Promise<RelatedItem[] | null> {
   const started = Date.now();
-  const answers = await askJev({ draft }, verdictQuestions(candidates), config.timeoutMs, signal, {
+  const answers = await askDecision('related_context_verdict', { draft }, verdictQuestions(candidates), config.timeoutMs, signal, {
     partial: true,
   });
   const ms = Date.now() - started;
@@ -307,7 +306,7 @@ export async function findRelatedContext(
   req: RelatedContextRequest,
   signal?: AbortSignal
 ): Promise<RelatedContext | null> {
-  if (!isJevConfigured() || !envConfig.jev.url || !envConfig.jev.model) return null;
+  if (!isDecisionEngineConfigured()) return null;
   let config: RelatedContextConfig;
   try {
     config = await getConfig(req);
@@ -333,7 +332,7 @@ export async function findRelatedContext(
       return failed;
     }
 
-    const gate = await askJev({ draft }, { is_complete: IS_COMPLETE }, config.timeoutMs, signal, {
+    const gate = await askDecision('related_context_gate', { draft }, { is_complete: IS_COMPLETE }, config.timeoutMs, signal, {
       onFailure: (failure) => {
         if (isOutage(failure)) jevDownUntil = Date.now() + JEV_COOLDOWN_MS;
       },

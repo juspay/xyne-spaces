@@ -122,6 +122,7 @@ export class EmailClassificationWorker {
       if (runClassification || runPriority) {
         classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
           emailMetadata: buildEmailMetadata(emailRecord),
+          evaluate: true,
         });
       }
     } catch (error) {

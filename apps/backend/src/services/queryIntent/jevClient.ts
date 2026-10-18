@@ -56,6 +56,13 @@ export type JevAnswer =
       confidence?: number;
     };
 
+/** Where a request goes; JEV_URL / JEV_API_KEY / JEV_MODEL unless a caller says otherwise. */
+export interface JevTarget {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+
 /** Why a Jev call came back empty; a caller cancelling it is not a failure. */
 export type JevFailure =
   | { kind: 'timeout' }
@@ -178,38 +185,21 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
 };
 
 /**
- * P(yes) for one question about `state`, or null when Jev can't answer: no key, timeout,
- * non-2xx, or a malformed reply. Never throws, so callers need no try/catch.
+ * `questions` asked as yes/no whatever `type` says: they can come from remote config, where
+ * it may be missing.
  */
-export const askJevNoul = async (
-  state: string,
-  question: JevNoulQuestion,
-  timeoutMs: number
-): Promise<number | null> => {
-  const answers = await askJevNouls(state, { q: question }, timeoutMs);
-  return answers?.q ?? null;
-};
-
-/**
- * P(yes) for several questions about one `state`, in a single request — Jev answers a
- * batch in about the time it takes to answer one. Keyed like `questions`. Null when
- * Jev can't answer, or when any answer is unusable: a partial batch would read as
- * "every missing question is a no". Never throws.
- */
-export const askJevNouls = async (
-  state: string,
-  questions: Record<string, JevNoulQuestion>,
-  timeoutMs: number
-): Promise<Record<string, number> | null> => {
-  // Asked as yes/no whatever `type` says: questions can come from remote config,
-  // where it may be missing.
-  const asNoul = Object.fromEntries(
+export const asNoulQuestions = (
+  questions: Record<string, JevNoulQuestion>
+): Record<string, JevNoulQuestion> =>
+  Object.fromEntries(
     Object.entries(questions).map(([key, question]): [string, JevNoulQuestion] => [
       key,
       { ...question, type: 'noul' },
     ])
   );
-  const answers = await askJev(state, asNoul, timeoutMs);
+
+/** P(yes) per question; null when there are no answers or any is not a yes/no. */
+export const readNouls = (answers: Record<string, JevAnswer> | null): Record<string, number> | null => {
   if (!answers) return null;
   const probabilities: Record<string, number> = {};
   for (const [key, answer] of Object.entries(answers)) {
@@ -223,13 +213,14 @@ export const askJevNouls = async (
  * Answers to any mix of questions about one `state`, in a single request. `state` is
  * a string or a JSON object; questions can point into an object with backticked paths
  * like `candidate.text`. Keyed like `questions`, and null when Jev can't answer or any
- * answer is unusable — same all-or-nothing rule as askJevNouls. With `partial`, an
+ * answer is unusable — same all-or-nothing rule as readNouls. With `partial`, an
  * unusable answer is left out instead, for a batch of independent questions where
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
+ * `target` sends it to another service with the same wire format, e.g. XOR.
  * Never throws.
  */
-export const askJev = async (
+export const requestJevAnswers = async (
   state: string | Record<string, unknown>,
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
@@ -237,11 +228,12 @@ export const askJev = async (
   {
     partial = false,
     onFailure,
-  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void } = {}
+    target = envConfig.jev,
+  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void; target?: JevTarget } = {}
 ): Promise<Record<string, JevAnswer> | null> => {
-  const { apiKey, url, model } = envConfig.jev;
+  const { apiKey, url, model } = target;
   if (!apiKey) return null;
-  const target = { model, host: jevHost(url) };
+  const logContext = { model, host: jevHost(url) };
 
   try {
     const response = await fetch(url, {
@@ -256,7 +248,7 @@ export const askJev = async (
       const errorType = await readErrorType(response);
       // Cancelled by the caller while the body was read: not a failure, as in the catch below.
       if (signal?.aborted) return null;
-      logger.warn('Jev request failed', { status: response.status, errorType, ...target });
+      logger.warn('Jev request failed', { status: response.status, errorType, ...logContext });
       onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
@@ -277,7 +269,7 @@ export const askJev = async (
         questions: unusable.slice(0, 5),
         unusable: unusable.length,
         of: Object.keys(questions).length,
-        ...target,
+        ...logContext,
       });
       if (!partial || unusable.length === Object.keys(questions).length) {
         onFailure?.({ kind: 'unusable' });
@@ -293,7 +285,7 @@ export const askJev = async (
     // and it can echo the request.
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
-      ...target,
+      ...logContext,
     });
     onFailure?.({ kind: timedOut ? 'timeout' : 'network' });
     return null;

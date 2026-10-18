@@ -2,9 +2,9 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
+import { askDecision } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
 import {
-  askJev,
-  isJevConfigured,
   type JevChoiceQuestion,
   type JevFailure,
 } from '@/services/queryIntent/jevClient';
@@ -191,7 +191,7 @@ export const routeAssistantMessage = async (
     return { route: 'unavailable' };
   };
 
-  if (!isJevConfigured()) return unavailable('classifier_not_configured');
+  if (!isDecisionEngineConfigured()) return unavailable('classifier_not_configured');
   const config = await getConfig(ctx);
   if (!config) return unavailable('config_unavailable');
   if (!config.enabled) return unavailable('disabled');
@@ -209,7 +209,7 @@ export const routeAssistantMessage = async (
   };
 
   let failure: JevFailure | undefined;
-  const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
+  const answers = await askDecision('assistant_route', { text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
     onFailure: (f) => {
       failure = f;
     },
