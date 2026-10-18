@@ -10,6 +10,7 @@ import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
+import { DISABLED_ROUTES } from './disabledRoutes';
 import type { XyneCtx } from './types';
 
 /**
@@ -352,6 +353,7 @@ const mount = (
   for (const route of routes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
+    if (DISABLED_ROUTES.has(key)) continue;
     const findWorkflow = appAuth?.get(key);
 
     if (!findWorkflow && needsSession(route.access) !== authenticated) continue;
