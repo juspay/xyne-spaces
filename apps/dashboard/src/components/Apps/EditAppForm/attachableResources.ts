@@ -1,4 +1,4 @@
-import { apiInstance } from '../../../services/clients/apiClient';
+// import { apiInstance } from '../../../services/clients/apiClient';
 import type { AttachedResource } from '../../../services/Apps/appsService';
 
 /**
@@ -14,36 +14,36 @@ export interface AttachableResourceConfig {
   loadOptions: () => Promise<AttachedResource[]>;
 }
 
-/** Workflow names live in the SDK's `metadata` JSON, mirroring the backend's reader. */
-const readWorkflowName = (metadata: string | null, fallback: string): string => {
-  if (!metadata) return fallback;
-  try {
-    const parsed = JSON.parse(metadata) as { name?: unknown };
-    return typeof parsed.name === 'string' && parsed.name ? parsed.name : fallback;
-  } catch {
-    return fallback;
-  }
-};
+// /** Workflow names live in the SDK's `metadata` JSON, mirroring the backend's reader. */
+// const readWorkflowName = (metadata: string | null, fallback: string): string => {
+//   if (!metadata) return fallback;
+//   try {
+//     const parsed = JSON.parse(metadata) as { name?: unknown };
+//     return typeof parsed.name === 'string' && parsed.name ? parsed.name : fallback;
+//   } catch {
+//     return fallback;
+//   }
+// };
 
-interface SdkWorkflow {
-  id: string;
-  metadata: string | null;
-}
+// interface SdkWorkflow {
+//   id: string;
+//   metadata: string | null;
+// }
 
 export const ATTACHABLE_RESOURCES: AttachableResourceConfig[] = [
-  {
-    resourceType: 'workflows',
-    noun: 'workflows',
-    requiredPermission: 'workflows:start',
-    async loadOptions(): Promise<AttachedResource[]> {
-      const response = await apiInstance.get<{ workflows: SdkWorkflow[] }>(
-        '/workflows-v2/workflows',
-        { params: { limit: 500 } },
-      );
-      return response.data.workflows.map(workflow => ({
-        id: workflow.id,
-        name: readWorkflowName(workflow.metadata, workflow.id),
-      }));
-    },
-  },
+//   {
+//     resourceType: 'workflows',
+//     noun: 'workflows',
+//     requiredPermission: 'workflows:start',
+//     async loadOptions(): Promise<AttachedResource[]> {
+//       const response = await apiInstance.get<{ workflows: SdkWorkflow[] }>(
+//         '/workflows-v2/workflows',
+//         { params: { limit: 500 } },
+//       );
+//       return response.data.workflows.map(workflow => ({
+//         id: workflow.id,
+//         name: readWorkflowName(workflow.metadata, workflow.id),
+//       }));
+//     },
+//   },
 ];

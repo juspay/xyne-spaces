@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
+// import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -143,7 +143,7 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
-import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
+// import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -1079,8 +1079,8 @@ export class App {
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
 
-    const { initWorkflows } = await import('@/workflowsV2/runtime');
-    await initWorkflows();
+    // const { initWorkflows } = await import('@/workflowsV2/runtime');
+    // await initWorkflows();
 
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();
@@ -1194,8 +1194,8 @@ export class App {
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
 
-      const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
-      await shutdownWorkflows();
+      // const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
+      // await shutdownWorkflows();
 
       // Shutdown notification service
       await notificationService.shutdown();
