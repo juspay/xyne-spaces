@@ -356,7 +356,7 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
-    this.app.use('/api/workflows-v2', workflowsPublicRouter);
+    // this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
@@ -499,8 +499,8 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
-    this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
-    this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
+    // this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
+    // this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',
@@ -625,11 +625,11 @@ export class App {
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
     // resolves the gate from it.
-    this.app.post(
-      '/api/internal/workflows-v2/claw-callback/:executionId',
-      validateS2SKey,
-      handleWorkflowClawCallback,
-    );
+    // this.app.post(
+    //   '/api/internal/workflows-v2/claw-callback/:executionId',
+    //   validateS2SKey,
+    //   handleWorkflowClawCallback,
+    // );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);

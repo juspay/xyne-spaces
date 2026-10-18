@@ -215,7 +215,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
-import { WorkflowScreen } from './WorkflowScreen';
+// import { WorkflowScreen } from './WorkflowScreen';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
@@ -1076,8 +1076,8 @@ const SdlcTicketRouteElement = (): ReactElement =>
   isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
 
 /** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
-const WorkflowsRouteElement = (): ReactElement =>
-  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
+// const WorkflowsRouteElement = (): ReactElement =>
+//   isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1469,16 +1469,16 @@ export const router = createBrowserRouter(
                   path: 'search-results',
                   element: <SearchResults />,
                 },
-                {
-                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
-                  // routes between them itself, handing the sub-path back via onNavigate.
-                  path: 'workflows/*',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowsRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
+                // {
+                //   // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                //   // routes between them itself, handing the sub-path back via onNavigate.
+                //   path: 'workflows/*',
+                //   element: (
+                //     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                //       <WorkflowsRouteElement />
+                //     </ResourceProtectedRoute>
+                //   ),
+                // },
                 {
                   path: 'product-insights',
                   element: (
