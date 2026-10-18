@@ -21,7 +21,7 @@ import {
   LightningThunderElectricOn,
   Atom,
   RocketShip,
-  GitBranch,
+  // GitBranch,
   LayoutGridTwoVertical,
   type PikaIconProps,
   Tag,
@@ -192,7 +192,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
-  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
+  // { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   // Administration (the /organisations module) holds Workspace Management,
   // Members (formerly User Management), User Groups, Roles and Organisations.
   { path: '/organisations', label: 'Administration', icon: BuildingApartmentTwo, popout: true },
