@@ -5,10 +5,10 @@ export const DECISION_ENGINES = ['xor', 'jev', 'llm'] as const;
 export type DecisionEngine = (typeof DECISION_ENGINES)[number];
 export type ClassifierEngine = Exclude<DecisionEngine, 'llm'>;
 
-/** Decided through `decide()`, with an LLM prompt of their own and a ground truth to settle against. */
+/** Decided through `decide()`: the feature's own LLM prompt, or the configured engine when its CAC switch is on. */
 export type TaskFeature = 'email_category' | 'email_priority';
 
-/** Typed questions answered by the configured engine through `askDecision()`; evaluated by agreement only. */
+/** Typed questions answered by the configured engine through `askDecision()`. */
 export type QuestionFeature =
   | 'search_intent'
   | 'related_context_gate'
@@ -53,6 +53,7 @@ export interface ComparedAnswer {
   /** Null when the engine gave no answer. */
   label: string | null;
   confidence?: number;
+  model?: string;
 }
 
 /** What XOR and Jev are asked: the same content the LLM gets, as typed questions. */
@@ -75,7 +76,7 @@ export interface DecisionTask<T> {
   feature: TaskFeature;
   input: TaskInput;
   question: DecisionQuestion | null;
-  readAnswers(answers: Record<string, JevAnswer>, engine: ClassifierEngine): T | null;
+  readAnswers(answers: Record<string, JevAnswer>, engine: DecisionEngine): T | null;
   askLlm(): Promise<LlmReply<T>>;
   toLabel(answer: T): string;
 }
