@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { requestJevAnswers, type JevAnswer, type JevFailure, type JevQuestion } from '@/services/queryIntent/jevClient';
-import { requestLlmAnswers } from './llmDecision';
+import { isLlmDecisionConfigured, requestLlmAnswers } from './llmDecision';
 import { classifierTarget, isEngineConfigured } from './targets';
 import type { ClassifierEngine, DecisionEngine, DecisionFeature, DecisionTask, EngineRun, LlmReply, RunOutcome } from './types';
 
@@ -57,6 +57,21 @@ async function runClassifier<T>(engine: ClassifierEngine, task: DecisionTask<T>)
   const outcome = classifierOutcome(answer !== null, failure);
   const confidence = answers && answer !== null ? leastConfidence(answers) : undefined;
   return { engine, outcome, answer, latencyMs, model: target.model, confidence };
+}
+
+/**
+ * The LLM asked the task's typed question on LITELLM_*, as the question features' LLM is: an
+ * evaluation must not run on, and bill, the org's own credentials that `askLlm` uses.
+ */
+export async function runSharedLlm<T>(task: DecisionTask<T>, timeoutMs: number): Promise<EngineRun<T>> {
+  const { question } = task;
+  if (!question || !isLlmDecisionConfigured()) {
+    return { engine: 'llm', outcome: 'unavailable', answer: null, latencyMs: 0 };
+  }
+  return runLlm(task.feature, async () => {
+    const reply = await requestLlmAnswers(question.state, question.questions, timeoutMs);
+    return { ...reply, answer: reply.answer ? task.readAnswers(reply.answer, 'llm') : null };
+  });
 }
 
 /** The LLM's answer through `askLlm`. Never throws: a failure is the run's outcome. */

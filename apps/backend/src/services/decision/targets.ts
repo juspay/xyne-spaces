@@ -1,10 +1,10 @@
 import { config as envConfig } from '@/config/env';
 import { isJevConfigured, isPrivateJevConfigured, type JevTarget } from '@/services/queryIntent/jevClient';
-import { LLM_DECISION_MODEL, isLlmDecisionConfigured } from './llmDecision';
+import { isLlmDecisionConfigured } from './llmDecision';
 import type { ClassifierEngine, DecisionEngine } from './types';
 
 /** The engine that answers typed decision questions live: DECISION_ENGINE. */
-export const configuredEngine = (): DecisionEngine => envConfig.decisionEngine;
+export const configuredEngine = (): ClassifierEngine => envConfig.decisionEngine;
 
 /** XOR_* when XOR_URL is set; otherwise JEV_*, which is where XOR lived before XOR_* existed. */
 const xorTarget = (): JevTarget => (envConfig.xor.url ? envConfig.xor : envConfig.jev);
@@ -34,10 +34,7 @@ export const isPrivateDecisionEngineConfigured = (): boolean =>
   isEngineConfigured(configuredEngine(), { customerContent: true });
 
 /** The model behind the configured engine, for logs. */
-export const decisionEngineModel = (): string => {
-  const engine = configuredEngine();
-  return engine === 'llm' ? LLM_DECISION_MODEL : classifierTarget(engine).model;
-};
+export const decisionEngineModel = (): string => classifierTarget(configuredEngine()).model;
 
 /** Two classifier engines on one endpoint and model, as JEV_* is while it stands in for XOR. */
 export const isSameClassifier = (a: DecisionEngine, b: DecisionEngine): boolean => {

@@ -346,11 +346,16 @@ const envSchema = Joi.object({
   // XOR — same wire format as Jev, on LiteLLM's /v1/decisions. Unset XOR_URL => XOR is
   // whatever JEV_URL points at when set explicitly, as before these existed.
   XOR_URL: Joi.string().uri().allow('').default(''),
-  XOR_API_KEY: Joi.string().allow('').default(''),
+  // Required with XOR_URL: without it every XOR feature would switch off silently.
+  XOR_API_KEY: Joi.when('XOR_URL', {
+    is: Joi.string().min(1),
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
   XOR_MODEL: Joi.string().default('xor-latest'),
-  // The engine that answers typed decision questions (services/decision): xor, jev, or llm
-  // (the LLM on LITELLM_* answering the same questions).
-  DECISION_ENGINE: Joi.string().valid('xor', 'jev', 'llm').default('xor'),
+  // The engine that answers typed decision questions live (services/decision): xor or jev. The
+  // LLM is only ever asked to compare: the features gate on probabilities it does not give.
+  DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
   // Decision evaluation: every decision is also queued for the other engines, to compare them.
   DECISION_EVAL_ENABLED: Joi.boolean().default(false),
   ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
@@ -1044,7 +1049,7 @@ export const config = {
     url: envVars.XOR_URL,
     model: envVars.XOR_MODEL,
   },
-  decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev' | 'llm',
+  decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
   decisionEval: {
     enabled: envVars.DECISION_EVAL_ENABLED,
   },

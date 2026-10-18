@@ -18,8 +18,8 @@ export interface AskDecisionOptions extends AskOptions {
 
 /**
  * Typed questions about `state`, answered by the configured engine (DECISION_ENGINE) and
- * measured as `feature`: every call counts toward that engine's latency and outcome, and is
- * queued to be put to the other engines as well. Every engine answers in the same shapes, under
+ * measured as `feature`: every call counts toward that engine's latency and outcome, and a live
+ * one is queued to be put to the other engines as well. Every engine answers in the same shapes, under
  * the same rules as requestJevAnswers. Never throws.
  */
 export async function askDecision(
@@ -38,7 +38,8 @@ export async function askDecision(
   if (signal?.aborted) return run.answer;
 
   recordRun(feature, run, role);
-  compareInBackground(feature, engine, state, questions, run.answer);
+  // A shadow answer was never shown to anyone, so it can't stand in for the live one.
+  if (role === 'live') compareInBackground(feature, engine, state, questions, run.answer);
   return run.answer;
 }
 

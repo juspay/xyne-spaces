@@ -7,7 +7,7 @@ import {
   type CompareJob,
   type EvaluateJob,
 } from '@/queues/decisionEvaluationQueue';
-import { answerConfidence, askEngine, runEngine } from './engines';
+import { answerConfidence, askEngine, runEngine, runSharedLlm } from './engines';
 import { isComparisonEngineAvailable, isEngineConfigured, isSameClassifier } from './targets';
 import {
   DECISION_ENGINES,
@@ -42,15 +42,17 @@ export function compareInBackground(
 /** Asks every other configured engine the task and records how often they agree with each other. */
 export async function evaluate<T>(task: DecisionTask<T>, { liveAnswers }: EvaluateJob): Promise<void> {
   const asked: DecisionEngine[] = liveAnswers.map(({ engine }) => engine);
-  // The task's own LLM uses the org's credentials, so it is always there; a classifier only
-  // when it is the deployer's own and not an endpoint already asked under another name.
+  // Only the deployer's own engines, and not an endpoint already asked under another name.
   for (const engine of DECISION_ENGINES) {
     const available =
-      engine === 'llm' ||
-      (isEngineConfigured(engine, { customerContent: true }) && !asked.some((other) => isSameClassifier(engine, other)));
-    if (!asked.includes(engine) && available) asked.push(engine);
+      isEngineConfigured(engine, { customerContent: true }) && !asked.some((other) => isSameClassifier(engine, other));
+    if (available) asked.push(engine);
   }
-  const shadowRuns = await Promise.all(asked.slice(liveAnswers.length).map((engine) => runEngine(engine, task)));
+  const shadowRuns = await Promise.all(
+    asked
+      .slice(liveAnswers.length)
+      .map((engine) => (engine === 'llm' ? runSharedLlm(task, SHADOW_TIMEOUT_MS) : runEngine(engine, task)))
+  );
   for (const run of shadowRuns) recordRun(task.feature, run, 'shadow');
   const answers = [
     ...liveAnswers,
@@ -68,16 +70,17 @@ export async function compare({ feature, liveEngine, state, questions, liveAnswe
   const shadowRuns = await Promise.all(
     others.map((engine) => askEngine(engine, feature, state, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true }))
   );
-  const answers = new Map<DecisionEngine, Record<string, JevAnswer>>();
-  if (liveAnswers) answers.set(liveEngine, liveAnswers);
+  const runs: Pick<EngineRun<Record<string, JevAnswer>>, 'engine' | 'answer' | 'model'>[] = [
+    { engine: liveEngine, answer: liveAnswers },
+  ];
   for (const run of shadowRuns) {
     recordRun(feature, run, 'shadow');
-    if (run.answer) answers.set(run.engine, run.answer);
+    runs.push(run);
   }
   for (const id of Object.keys(questions)) {
-    const rows = [...answers].flatMap(([engine, byQuestion]): ComparedAnswer[] => {
-      const answer = byQuestion[id];
-      return answer ? [{ engine, label: answerLabel(answer), confidence: answerConfidence(answer) }] : [];
+    const rows = runs.flatMap(({ engine, answer: byQuestion, model }): ComparedAnswer[] => {
+      const answer = byQuestion?.[id];
+      return answer ? [{ engine, label: answerLabel(answer), confidence: answerConfidence(answer), model }] : [];
     });
     recordAgreements(feature, rows, liveEngine);
   }
@@ -91,11 +94,13 @@ const comparedAnswer = <T>(task: DecisionTask<T>, run: EngineRun<T>): ComparedAn
   engine: run.engine,
   label: run.answer !== null ? task.toLabel(run.answer) : null,
   confidence: run.confidence,
+  model: run.model,
 });
 
 /**
  * One count per pair of engines that both answered, named in engine order: xor_jev, xor_llm,
- * jev_llm. Pairs with the live engine carry how sure it was.
+ * jev_llm. Pairs with the live engine carry how sure it was; pairs with the LLM, which model it
+ * was, since a desk's own LLM and the shared one both count as llm.
  */
 function recordAgreements(
   feature: DecisionFeature,
@@ -105,12 +110,17 @@ function recordAgreements(
   const answered = new Map(answers.filter((a) => a.label !== null).map((a) => [a.engine, a]));
   const live = liveEngine ? answered.get(liveEngine) : undefined;
   const liveConfidence = live ? confidenceBucket(live.confidence) : undefined;
+  const llmModel = answered.get('llm')?.model;
   DECISION_ENGINES.forEach((first, i) => {
     for (const second of DECISION_ENGINES.slice(i + 1)) {
       const a = answered.get(first);
       const b = answered.get(second);
+      if (!a || !b) continue;
       const withLive = first === liveEngine || second === liveEngine;
-      if (a && b) recordAgreement(feature, `${first}_${second}`, a.label === b.label, withLive ? liveConfidence : undefined);
+      recordAgreement(feature, `${first}_${second}`, a.label === b.label, {
+        liveConfidence: withLive ? liveConfidence : undefined,
+        llmModel: second === 'llm' ? llmModel : undefined,
+      });
     }
   });
 }

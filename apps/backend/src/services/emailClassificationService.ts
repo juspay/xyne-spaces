@@ -22,7 +22,7 @@ import type {
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { decide } from '@/services/decision/decide';
-import type { DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
+import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
@@ -33,6 +33,7 @@ const OTHER_CATEGORY = 'other';
 /** Lowest first, as a score question wants. */
 const PRIORITY_LEVELS = [TicketPriority.LOW, TicketPriority.MEDIUM, TicketPriority.HIGH, TicketPriority.CRITICAL];
 const PRIORITY_USER_MESSAGE = 'Analyze email and determine priority.';
+const ENGINE_NAMES: Record<DecisionEngine, string> = { xor: 'XOR', jev: 'Jev', llm: 'LLM' };
 
 type ClassificationConfig = NonNullable<Awaited<ReturnType<EmailClassificationRepository['findConfigByChannelId']>>>;
 type CategoryMapping = Pick<ClassificationConfig['mappings'][number], 'id' | 'category' | 'subCategory'>;
@@ -633,7 +634,7 @@ export class EmailClassificationService {
           ? {
               priority: PRIORITY_LEVELS[priority.level],
               confidence: priority.confidence ?? 0.5,
-              reasoning: `Scored by ${engine === 'xor' ? 'XOR' : 'Jev'}`,
+              reasoning: `Scored by ${ENGINE_NAMES[engine]}`,
             }
           : null,
       askLlm: async () => {

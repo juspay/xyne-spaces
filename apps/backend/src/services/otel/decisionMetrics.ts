@@ -63,6 +63,17 @@ export const confidenceBucket = (confidence: number | undefined): string => {
 };
 
 /** `liveConfidence` only for pairs with the live engine, so agreement can be read by how sure it was. */
-export function recordAgreement(feature: DecisionFeature, pair: string, agree: boolean, liveConfidence?: string): void {
-  agreementTotal().add(1, { feature, pair, agree: String(agree), ...(liveConfidence && { live_confidence: liveConfidence }) });
+export function recordAgreement(
+  feature: DecisionFeature,
+  pair: string,
+  agree: boolean,
+  { liveConfidence, llmModel }: { liveConfidence?: string; llmModel?: string } = {}
+): void {
+  agreementTotal().add(1, {
+    feature,
+    pair,
+    agree: String(agree),
+    ...(liveConfidence && { live_confidence: liveConfidence }),
+    ...(llmModel && { llm_model: llmModel }),
+  });
 }
