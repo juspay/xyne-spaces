@@ -17,6 +17,8 @@ export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContex
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { ClassifierExchange } from "./types/classifier-exchange.js";
+export type { GoalJudgeAttachmentMeta, GoalJudgeRequest, GoalJudgeDecision, RespondGateSource, RespondGateDecision } from "./types/decisions.js";
+export { GOAL_JUDGE_UNAVAILABLE_REASON, RESPOND_GATE_SOURCES, isRespondGateSource } from "./types/decisions.js";
 export type { TwinDelivery, TwinDeliveryAction, TwinDeliveryCheck, TwinReplyDestination } from "./types/twin-delivery.js";
 export { TWIN_DELIVERY_ACTIONS, isTwinDelivery, isTwinDeliveryAction, twinDeliveryParts } from "./types/twin-delivery.js";
 export type {

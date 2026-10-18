@@ -13,7 +13,7 @@
  * run on every mention.
  */
 
-import type { ClassifierExchange } from "xyne-claw-shared";
+import type { ClassifierExchange, RespondGateDecision } from "xyne-claw-shared";
 import type { XorAnswer, XorQuestion } from "./xor.js";
 import { collectJudgeExchanges, storableExchange } from "./judge-trace.js";
 import { answerProb, band, runJudgeSite } from "./judge-site.js";
@@ -75,12 +75,7 @@ export interface RespondGateTrace {
   finishReason?: string;
 }
 
-export interface RespondGateResult {
-  respond: boolean;
-  confidence: number; // 0-1
-  reason: string;
-  /** How the decision was reached — for observability. */
-  source: "jev" | "llm" | "fail-closed" | "no-patterns";
+export interface RespondGateResult extends RespondGateDecision {
   /** Present only when the request set includeTrace and the LLM actually ran. */
   trace?: RespondGateTrace;
   /** Every classifier call the gate made (includeTrace only), whichever path decided. */

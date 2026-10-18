@@ -11,7 +11,10 @@
  * — the relooper combines this with max-turn/cost guards so a judge outage
  * never strands a goal in an infinite loop.
  */
+import type { GoalJudgeDecision, GoalJudgeRequest } from "xyne-claw-shared";
 import type { XorAnswer, XorQuestion } from "./xor.js";
+
+export type { GoalJudgeAttachmentMeta, GoalJudgeDecision } from "xyne-claw-shared";
 import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
@@ -25,34 +28,9 @@ const log = createLogger("goal-judge");
 // LiteLLM than to blind the judge. Override per-env with GOAL_JUDGE_TIMEOUT_MS.
 const JUDGE_TIMEOUT_MS = Number(process.env["GOAL_JUDGE_TIMEOUT_MS"] ?? 1_800_000);
 
-export interface GoalJudgeAttachmentMeta {
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
 
-export interface GoalJudgeInput {
-  /** Verbatim user-supplied goal condition (e.g. "all unit tests pass"). */
-  condition: string;
-  /** Output of the most recently completed turn (kept separate for recency). */
-  lastTurnOutput: string;
-  /** 1-based turn count after this turn. */
-  turnCount: number;
-  /** Hard cap from the goal record. Boss may STOP earlier on overrun signals. */
-  maxTurns: number;
-  /** Optional: bounded trace of prior turns plus the latest turn. */
-  recentTurnsDigest?: string;
-  /** Files the worker attached to its reply this turn — metadata only (no
-   *  bytes). Surfaces non-text artefacts (HTML reports, CSV, PDFs, …) to the
-   *  judge so goals like "produce an HTML dashboard" aren't falsely failed
-   *  because the judge can only see the text body otherwise. */
-  attachmentsThisTurn?: GoalJudgeAttachmentMeta[];
-}
+export type GoalJudgeInput = GoalJudgeRequest;
 
-export interface GoalJudgeDecision {
-  done: boolean;
-  reason: string;
-}
 
 const SYSTEM_PROMPT = `You are the BOSS of an autonomous agent loop.
 
