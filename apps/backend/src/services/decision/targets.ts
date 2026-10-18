@@ -1,5 +1,6 @@
 import { config as envConfig } from '@/config/env';
-import { isJevConfigured, isPrivateJevConfigured, type JevTarget } from '@/services/queryIntent/jevClient';
+import { isJevConfigured, isPrivateJevConfigured } from './classifierClient';
+import type { ClassifierTarget } from './types';
 import { isLlmDecisionConfigured } from './llmDecision';
 import type { ClassifierEngine, DecisionEngine } from './types';
 
@@ -7,10 +8,10 @@ import type { ClassifierEngine, DecisionEngine } from './types';
 export const configuredEngine = (): ClassifierEngine => envConfig.decisionEngine;
 
 /** XOR_* when XOR_URL is set; otherwise JEV_*, which is where XOR lived before XOR_* existed. */
-const xorTarget = (): JevTarget => (envConfig.xor.url ? envConfig.xor : envConfig.jev);
+const xorTarget = (): ClassifierTarget => (envConfig.xor.url ? envConfig.xor : envConfig.jev);
 
 /** Where a classifier engine is called. */
-export const classifierTarget = (engine: ClassifierEngine): JevTarget =>
+export const classifierTarget = (engine: ClassifierEngine): ClassifierTarget =>
   engine === 'xor' ? xorTarget() : envConfig.jev;
 
 /**

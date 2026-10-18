@@ -1,11 +1,6 @@
 import { recordRun, type RunRole } from '@/services/otel/decisionMetrics';
-import {
-  asNoulQuestions,
-  readNouls,
-  type JevAnswer,
-  type JevNoulQuestion,
-  type JevQuestion,
-} from '@/services/queryIntent/jevClient';
+import { asNoulQuestions, readNouls } from './classifierClient';
+import type { DecisionAnswer, YesNoQuestion, DecisionQuestion } from './types';
 import { askEngine, type AskOptions } from './engines';
 import { compareInBackground } from './evaluation';
 import { configuredEngine, isEngineConfigured } from './targets';
@@ -20,16 +15,16 @@ export interface AskDecisionOptions extends AskOptions {
  * Typed questions about `state`, answered by the configured engine (DECISION_ENGINE) and
  * measured as `feature`: every call counts toward that engine's latency and outcome, and a live
  * one is queued to be put to the other engines as well. Every engine answers in the same shapes, under
- * the same rules as requestJevAnswers. Never throws.
+ * the same rules as requestClassifierAnswers. Never throws.
  */
 export async function askDecision(
   feature: QuestionFeature,
   state: string | Record<string, unknown>,
-  questions: Record<string, JevQuestion>,
+  questions: Record<string, DecisionQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
   { role = 'live', ...options }: AskDecisionOptions = {}
-): Promise<Record<string, JevAnswer> | null> {
+): Promise<Record<string, DecisionAnswer> | null> {
   const engine = configuredEngine();
   if (!isEngineConfigured(engine)) return null;
 
@@ -47,7 +42,7 @@ export async function askDecision(
 export const askDecisionNouls = async (
   feature: QuestionFeature,
   state: string,
-  questions: Record<string, JevNoulQuestion>,
+  questions: Record<string, YesNoQuestion>,
   timeoutMs: number
 ): Promise<Record<string, number> | null> =>
   readNouls(await askDecision(feature, state, asNoulQuestions(questions), timeoutMs));

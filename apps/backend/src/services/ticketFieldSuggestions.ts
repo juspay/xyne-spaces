@@ -8,7 +8,7 @@ import { BOARD_TASK_INSTRUCTION, buildPrompt } from '@/agents/ticket-board';
 import { TICKET_TYPE_DESCRIPTIONS } from '@/services/agents/prompts';
 import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
 import { askDecision } from '@/services/decision/ask';
-import type { JevAnswer, JevQuestion } from '@/services/queryIntent/jevClient';
+import type { DecisionAnswer, DecisionQuestion } from '@/services/decision/types';
 
 const XOR_TIMEOUT_MS = 10_000;
 const XOR_MAX_OPTIONS = 255;
@@ -27,7 +27,7 @@ interface TicketFieldSuggestions {
 }
 
 function confidentChoice(
-  answer: JevAnswer | undefined,
+  answer: DecisionAnswer | undefined,
   minConfidence: number,
 ): { choice: string; confidence: number } | undefined {
   if (answer?.type !== 'choice' || answer.confidence === undefined) return undefined;
@@ -42,7 +42,7 @@ export async function suggestTicketFields(
     return {};
   }
 
-  const questions: Record<string, JevQuestion> = {
+  const questions: Record<string, DecisionQuestion> = {
     ticketType: {
       type: 'choice',
       instructions: 'Classify the ticket type.',

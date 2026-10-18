@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
-import { requestJevAnswers, type JevAnswer, type JevFailure, type JevQuestion } from '@/services/queryIntent/jevClient';
+import { requestClassifierAnswers } from './classifierClient';
+import type { DecisionAnswer, AskFailure, DecisionQuestion } from './types';
 import { isLlmDecisionConfigured, requestLlmAnswers } from './llmDecision';
 import { classifierTarget, isEngineConfigured } from './targets';
 import type { ClassifierEngine, DecisionEngine, DecisionFeature, DecisionTask, EngineRun, LlmReply, RunOutcome } from './types';
@@ -16,14 +17,14 @@ export const elapsedSince = (startedAt: number): number => Math.round(performanc
  * How sure the classifier was of `answer`, from 0.5 (a coin flip) to 1: the probability of a
  * choice or level, or a yes/no's distance from even. Undefined when it gave no probability.
  */
-export const answerConfidence = (answer: JevAnswer): number | undefined => {
+export const answerConfidence = (answer: DecisionAnswer): number | undefined => {
   if (answer.type === 'noul') return Math.max(answer.noul, 1 - answer.noul);
   if (answer.type === 'choice') return answer.confidence ?? answer.probabilities[answer.choice];
   return answer.confidence;
 };
 
 /** A task asks one question; with several, the least sure answer speaks for them all. */
-const leastConfidence = (answers: Record<string, JevAnswer>): number | undefined => {
+const leastConfidence = (answers: Record<string, DecisionAnswer>): number | undefined => {
   const confidences = Object.values(answers).map(answerConfidence);
   return confidences.length > 0 && confidences.every((c) => c !== undefined)
     ? Math.min(...(confidences as number[]))
@@ -31,7 +32,7 @@ const leastConfidence = (answers: Record<string, JevAnswer>): number | undefined
 };
 
 /** A reply without a usable answer is an abstention; no reply at all is a failure. */
-export const classifierOutcome = (answered: boolean, failure: JevFailure | undefined): RunOutcome =>
+export const classifierOutcome = (answered: boolean, failure: AskFailure | undefined): RunOutcome =>
   answered ? 'answered' : failure && failure.kind !== 'unusable' ? 'failed' : 'abstained';
 
 /** One engine's answer to `task`. Never throws: a failure is the run's outcome. */
@@ -45,8 +46,8 @@ async function runClassifier<T>(engine: ClassifierEngine, task: DecisionTask<T>)
   }
 
   const startedAt = performance.now();
-  let failure: JevFailure | undefined;
-  const answers = await requestJevAnswers(task.question.state, task.question.questions, CLASSIFIER_TIMEOUT_MS, undefined, {
+  let failure: AskFailure | undefined;
+  const answers = await requestClassifierAnswers(task.question.state, task.question.questions, CLASSIFIER_TIMEOUT_MS, undefined, {
     target,
     onFailure: (f) => {
       failure = f;
@@ -98,19 +99,19 @@ export async function runLlm<T>(feature: DecisionFeature, askLlm: () => Promise<
 }
 
 export interface AskOptions {
-  /** Leave out an unusable answer instead of failing the whole batch; see requestJevAnswers. */
+  /** Leave out an unusable answer instead of failing the whole batch; see requestClassifierAnswers. */
   partial?: boolean;
-  onFailure?: (failure: JevFailure) => void;
+  onFailure?: (failure: AskFailure) => void;
 }
 
 type Ask = (
   feature: DecisionFeature,
   state: string | Record<string, unknown>,
-  questions: Record<string, JevQuestion>,
+  questions: Record<string, DecisionQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
   options?: AskOptions
-) => Promise<EngineRun<Record<string, JevAnswer>>>;
+) => Promise<EngineRun<Record<string, DecisionAnswer>>>;
 
 /** A classifier over the Jev wire format, at `engine`'s endpoint. */
 const askClassifier =
@@ -118,8 +119,8 @@ const askClassifier =
   async (_feature, state, questions, timeoutMs, signal, { partial = false, onFailure } = {}) => {
     const target = classifierTarget(engine);
     const startedAt = performance.now();
-    let failure: JevFailure | undefined;
-    const answer = await requestJevAnswers(state, questions, timeoutMs, signal, {
+    let failure: AskFailure | undefined;
+    const answer = await requestClassifierAnswers(state, questions, timeoutMs, signal, {
       partial,
       target,
       onFailure: (f) => {

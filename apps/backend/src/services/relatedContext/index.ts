@@ -5,12 +5,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import type { TransformedSearchResult } from '@/services/vespaSearch/resultTransform';
 import { askDecision } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
-import {
-  type JevAnswer,
-  type JevFailure,
-  type JevNoulQuestion,
-  type JevQuestion,
-} from '@/services/queryIntent/jevClient';
+import type { DecisionAnswer, AskFailure, YesNoQuestion, DecisionQuestion } from '@/services/decision/types';
 import {
   retrieveCandidates,
   type Candidate,
@@ -107,7 +102,7 @@ const getConfig = async (req: RelatedContextRequest): Promise<RelatedContextConf
  * fails is the unfinished and the empty — the pause mid-sentence, the "sounds good".
  * Plain wording with an example per side, as the cmd+K intent question learned.
  */
-const IS_COMPLETE: JevNoulQuestion = {
+const IS_COMPLETE: YesNoQuestion = {
   type: 'noul',
   instructions:
     'Is `draft` a finished thought with a clear subject that earlier conversations, ' +
@@ -170,9 +165,9 @@ const quoteCandidate = (candidate: Candidate): string => {
  * the reader's own permission-filtered search, so the worst it can do is show up where
  * it doesn't belong.
  */
-const verdictQuestions = (candidates: Candidate[]): Record<string, JevQuestion> =>
+const verdictQuestions = (candidates: Candidate[]): Record<string, DecisionQuestion> =>
   Object.fromEntries(
-    candidates.flatMap((candidate, i): Array<[string, JevQuestion]> => {
+    candidates.flatMap((candidate, i): Array<[string, DecisionQuestion]> => {
       const quoted = quoteCandidate(candidate);
       return [
         [
@@ -201,7 +196,7 @@ const verdictQuestions = (candidates: Candidate[]): Record<string, JevQuestion> 
  * milder claim. When Jev left any of the three unscored, its own choice, and failing
  * that the mildest claim.
  */
-const labelOf = (relation: Extract<JevAnswer, { type: 'choice' }>): RelatedLabel => {
+const labelOf = (relation: Extract<DecisionAnswer, { type: 'choice' }>): RelatedLabel => {
   const { probabilities, choice } = relation;
   if (LABELS.every((label) => probabilities[label] !== undefined)) {
     // LABELS runs from the strongest claim to the mildest, so `>=` hands ties onward.
@@ -220,7 +215,7 @@ const labelOf = (relation: Extract<JevAnswer, { type: 'choice' }>): RelatedLabel
  */
 const JEV_COOLDOWN_MS = 30_000;
 let jevDownUntil = 0;
-const isOutage = (failure: JevFailure): boolean =>
+const isOutage = (failure: AskFailure): boolean =>
   failure.kind === 'timeout' ||
   failure.kind === 'network' ||
   (failure.kind === 'status' && failure.status >= 500);
@@ -248,7 +243,7 @@ async function classify(
     ms,
   });
   if (!answers) {
-    // The status or timeout is in jevClient's warning just before this.
+    // The status or timeout is in the classifier client's warning just before this.
     if (!signal?.aborted) {
       logger.error('[RelatedContext] jev verdict call failed', {
         candidates: candidates.length,

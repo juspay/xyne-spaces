@@ -2,7 +2,7 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { superpositionClient } from '@/services/superpositionClient';
 import { askDecisionNouls } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
-import type { JevNoulQuestion } from './jevClient';
+import type { YesNoQuestion } from '@/services/decision/types';
 
 /** How the cmd+K palette should treat a query. */
 export type QueryMode = 'lexical' | 'ai';
@@ -37,7 +37,7 @@ const TIMEOUT_MS = 5000;
 // Plain wording beats search jargon: "meaning search vs lexical search" caught 0-5 of 12
 // questions, while "carries a meaning" with one example per side caught 11-12. Naming
 // "asking for some information" lifted lookups like "what is pragati link" from 0.77 to 0.93.
-const NEEDS_AI: JevNoulQuestion = {
+const NEEDS_AI: YesNoQuestion = {
   type: 'noul',
   instructions:
     'Does this search query carry a meaning to understand (a question, a request, or asking ' +
@@ -69,7 +69,7 @@ const isClearlyLexical = (query: string): boolean => {
 interface IntentConfig {
   /** Turns classification (and so the cmd+K AI overview) on or off. */
   enabled: boolean;
-  question: JevNoulQuestion;
+  question: YesNoQuestion;
   threshold: number;
 }
 
