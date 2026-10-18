@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement } from 'react';
 import { Text, View } from 'react-native';
 import { EnrichedMarkdownText, type MarkdownStyle } from 'react-native-enriched-markdown';
+import { StreamdownText } from 'react-native-streamdown';
 
 import {
   extractFlowPlanMarkdownHeader,
@@ -42,30 +43,41 @@ const getPlanStatusPillPalette = (
   }
 };
 
+/** Text arriving as a stream: still coming in ('live') or finished ('done'). It keeps
+ * rendering through StreamdownText once finished, so the view is not remounted. */
+export type MarkdownStream = 'live' | 'done';
+
 const MarkdownBody = ({
   markdown,
   style,
   onOpenUrl,
-  streaming,
+  stream,
 }: {
   markdown: string;
   style: MarkdownStyle;
   onOpenUrl: (url: string) => void;
-  streaming: boolean;
+  stream?: MarkdownStream | undefined;
 }): ReactElement => {
   const hasTable = hasMarkdownTable(markdown);
+  const nativeProps = {
+    markdownStyle: style,
+    md4cFlags: MD4C_FLAGS,
+    ...(hasTable ? { flavor: 'github' as const } : {}),
+    enableBlockContextMenu: false,
+    onLinkPress: ({ url }: { url: string }): void => {
+      onOpenUrl(url);
+    },
+  };
+  if (!stream) {
+    return <EnrichedMarkdownText markdown={markdownForNative(markdown)} {...nativeProps} />;
+  }
+  // Mid-stream the list guard waits: remend would close an open `**` after it, not before.
+  // A table switches the native view mid-stream, which would replay the fade from the start.
   return (
-    <EnrichedMarkdownText
-      markdown={markdownForNative(markdown)}
-      markdownStyle={style}
-      md4cFlags={MD4C_FLAGS}
-      {...(hasTable ? { flavor: 'github' as const } : {})}
-      // A table switches the native view mid-stream, which would replay the fade from the start.
-      streamingAnimation={streaming && !hasTable}
-      enableBlockContextMenu={false}
-      onLinkPress={({ url }: { url: string }): void => {
-        onOpenUrl(url);
-      }}
+    <StreamdownText
+      markdown={stream === 'live' ? markdown : markdownForNative(markdown)}
+      streamingAnimation={stream === 'live' && !hasTable}
+      {...nativeProps}
     />
   );
 };
@@ -77,7 +89,7 @@ export const BlockMarkdown = ({
   viewerId,
   collapsedLines,
   variant = 'primary',
-  streaming = false,
+  stream,
 }: {
   markdown: string;
   onOpenUrl: (url: string) => void;
@@ -85,7 +97,7 @@ export const BlockMarkdown = ({
   viewerId: string;
   collapsedLines?: number;
   variant?: BlockMarkdownVariant;
-  streaming?: boolean;
+  stream?: MarkdownStream | undefined;
 }): ReactElement => {
   const tokens = useChatRenderTokens();
   const foreground =
@@ -185,12 +197,12 @@ export const BlockMarkdown = ({
           markdown={planHeader.restMarkdown}
           style={style}
           onOpenUrl={onOpenUrl}
-          streaming={streaming}
+          stream={stream}
         />
       ) : null}
     </View>
   ) : (
-    <MarkdownBody markdown={markdown} style={style} onOpenUrl={onOpenUrl} streaming={streaming} />
+    <MarkdownBody markdown={markdown} style={style} onOpenUrl={onOpenUrl} stream={stream} />
   );
   return clampStyle ? <View style={clampStyle}>{body}</View> : body;
 };

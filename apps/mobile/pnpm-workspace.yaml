@@ -80,6 +80,9 @@ overrides:
 patchedDependencies:
   '@react-native-cookies/cookies@6.2.1': 'patches/@react-native-cookies+cookies+6.2.1.patch'
   'expo-modules-jsi@57.0.4': 'patches/expo-modules-jsi+57.0.4.patch'
+  'metro-runtime@0.84.6': 'patches/metro-runtime+0.84.6.patch'
+  'metro@0.84.5': 'patches/metro+0.84.5.patch'
+  'metro@0.84.6': 'patches/metro+0.84.6.patch'
   'react-native-callkeep@4.3.16': 'patches/react-native-callkeep+4.3.16.patch'
   'react-native-enriched-markdown@1.1.1': 'patches/react-native-enriched-markdown+1.1.1.patch'
   'react-native-enriched@0.8.1': 'patches/react-native-enriched+0.8.1.patch'

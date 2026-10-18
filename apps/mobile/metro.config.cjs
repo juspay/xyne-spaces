@@ -6,6 +6,7 @@ require("./config/loadLotusEnv.cjs").loadLotusEnv();
 
 const { getDefaultConfig } = require("expo/metro-config");
 const { withUniwindConfig } = require("uniwind/metro");
+const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
 
 const projectRoot = __dirname;
 const repoRoot = path.resolve(projectRoot, "..", "..");
@@ -13,8 +14,12 @@ const repoRoot = path.resolve(projectRoot, "..", "..");
 const config = getDefaultConfig(projectRoot);
 
 // Watch the whole monorepo so the linked package @xyne/shared (packages/shared)
-// and its dependencies are resolvable.
-config.watchFolders = [repoRoot];
+// and its dependencies are resolvable, and the worklet modules Bundle Mode generates.
+const workletsGeneratedDir = path.join(
+  path.dirname(require.resolve("react-native-worklets/package.json")),
+  ".worklets",
+);
+config.watchFolders = [repoRoot, workletsGeneratedDir];
 config.resolver ??= {};
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, "node_modules"),
@@ -78,7 +83,26 @@ config.resolver.blockList = [
   /packages[\\/]shared[\\/]node_modules[\\/](@rocicorp|react|@tanstack|xstate|@xstate)/,
 ];
 
-module.exports = withUniwindConfig(config, {
+const uniwindConfig = withUniwindConfig(config, {
   cssEntryFile: './global.css',
   dtsFile: './uniwind-types.d.ts',
 });
+
+// Bundle Mode sends `react-native` to a shim that Uniwind remaps back to itself, a require
+// cycle (software-mansion/react-native-reanimated#9817), so Uniwind gets the real package.
+const bundleModeConfig = getBundleModeMetroConfig(uniwindConfig);
+const uniwindDir = path.dirname(require.resolve("uniwind/package.json")) + path.sep;
+const reactNativeEntry = require.resolve("react-native", { paths: [lotusModules] });
+const bundleModeResolveRequest = bundleModeConfig.resolver.resolveRequest;
+bundleModeConfig.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (
+    platform !== "web" &&
+    moduleName === "react-native" &&
+    context.originModulePath.startsWith(uniwindDir)
+  ) {
+    return { filePath: reactNativeEntry, type: "sourceFile" };
+  }
+  return bundleModeResolveRequest(context, moduleName, platform);
+};
+
+module.exports = bundleModeConfig;

@@ -82,6 +82,15 @@ patchedDependencies:
   expo-modules-jsi@57.0.4:
     hash: fa97750fc488cd74a33bc0a9e35f8ac3d1b3f80258123ffd3f9f1c135d084ee1
     path: patches/expo-modules-jsi+57.0.4.patch
+  metro-runtime@0.84.6:
+    hash: ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f
+    path: patches/metro-runtime+0.84.6.patch
+  metro@0.84.5:
+    hash: e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1
+    path: patches/metro+0.84.5.patch
+  metro@0.84.6:
+    hash: e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1
+    path: patches/metro+0.84.6.patch
   react-native-callkeep@4.3.16:
     hash: 76fe8d8b855a4584dda13e194720845db75d9afa849137dc3b5890aaf6d18832
     path: patches/react-native-callkeep+4.3.16.patch
@@ -381,6 +390,9 @@ importers:
       react-native-screens:
         specifier: ~4.26.0
         version: 4.26.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      react-native-streamdown:
+        specifier: 0.3.0
+        version: 0.3.0(aed1025ee6433e0b3c2e0d9c9620d4a2)
       react-native-svg:
         specifier: 15.15.4
         version: 15.15.4(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
@@ -403,8 +415,8 @@ importers:
         specifier: 0.11.1
         version: 0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       remend:
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.3.0
+        version: 1.3.0
       socket.io-client:
         specifier: ^4.8.3
         version: 4.8.3
@@ -422,7 +434,7 @@ importers:
         version: 0.9.0
       uniwind:
         specifier: 1.10.1
-        version: 1.10.1(@expo/metro-config@57.0.13(expo@57.0.11)(typescript@6.0.3))(metro-cache@0.84.6)(metro-transform-worker@0.84.6)(metro@0.84.6)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(tailwindcss@4.3.3)
+        version: 1.10.1(@expo/metro-config@57.0.13(expo@57.0.11)(typescript@6.0.3))(metro-cache@0.84.6)(metro-transform-worker@0.84.6)(metro@0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(tailwindcss@4.3.3)
       uuid:
         specifier: 14.0.2
         version: 14.0.2
@@ -2018,11 +2030,6 @@ packages:
     peerDependenciesMeta:
       '@sqlite.org/sqlite-wasm':
         optional: true
-  "@opentelemetry/api-logs@0.218.0":
-    resolution:
-      integrity: sha512-fmEWp5kXlGEc3i/lR698Hz41DfGyN4Tbe4g7L1AxSc7fF8Xeh/FQ9Quqpa9dVA413Q1Ad43QOLzU4JoXgbFPWw==
-    engines:
-      node: ">=8.0.0"
   "@opentelemetry/api-logs@0.211.0":
     resolution:
       integrity: sha512-swFdZq8MCdmdR22jTVGQDhwqDzcI4M10nhjXkLr1EsIzXgZBqm4ZlmmcWsg3TSNf+3mzgOiqveXmBLZuDi2Lgg==
@@ -2036,6 +2043,11 @@ packages:
   "@opentelemetry/api-logs@0.217.0":
     resolution:
       integrity: sha512-Cdq0jW2lknrNfrAm92MyEAvpe2cRsKjdnQLHUL6xRA4IVUnsWx6P65E7NcUO0Y+L4w1Aee5iV8FvjSwd+lrs9A==
+    engines:
+      node: ">=8.0.0"
+  "@opentelemetry/api-logs@0.218.0":
+    resolution:
+      integrity: sha512-fmEWp5kXlGEc3i/lR698Hz41DfGyN4Tbe4g7L1AxSc7fF8Xeh/FQ9Quqpa9dVA413Q1Ad43QOLzU4JoXgbFPWw==
     engines:
       node: ">=8.0.0"
   "@opentelemetry/api-logs@0.220.0":
@@ -2104,14 +2116,6 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       "@opentelemetry/api": ^1.3.0
-  "@opentelemetry/exporter-metrics-otlp-http@0.218.0":
-    resolution:
-      integrity: sha512-bV7d2OuMpZu2+gAaxUAhzfZ0h3WVZk8ETQUEE3DNSntbTaMpuITjtm8I0rNyHFdm7Ax57K6ty7SgFXlBmOLIvQ==
-    engines:
-      node: ^18.19.0 || >=20.6.0
-    peerDependencies:
-      '@opentelemetry/api': ^1.3.0
-
   '@opentelemetry/exporter-metrics-otlp-http@0.211.0':
     resolution: {integrity: sha512-lfHXElPAoDSPpPO59DJdN5FLUnwi1wxluLTWQDayqrSPfWRnluzxRhD+g7rF8wbj1qCz0sdqABl//ug1IZyWvA==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -2121,6 +2125,14 @@ packages:
   '@opentelemetry/exporter-metrics-otlp-http@0.217.0':
     resolution: {integrity: sha512-1zkMzzhiNJdVmLxuwkltqWGw4fOOam47bqRxmuQNjyKJe/9NmY5cIrZ4kiQV7sVGxoOgT0ZvGUfLcjvtpC/b9Q==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  "@opentelemetry/exporter-metrics-otlp-http@0.218.0":
+    resolution:
+      integrity: sha512-bV7d2OuMpZu2+gAaxUAhzfZ0h3WVZk8ETQUEE3DNSntbTaMpuITjtm8I0rNyHFdm7Ax57K6ty7SgFXlBmOLIvQ==
+    engines:
+      node: ^18.19.0 || >=20.6.0
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
@@ -2423,14 +2435,6 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       "@opentelemetry/api": ^1.3.0
-  "@opentelemetry/otlp-exporter-base@0.218.0":
-    resolution:
-      integrity: sha512-ZwqpkNL5W7RyGJPDZ9g06DvKp8KFTWPJPN12anpMQYSKpTSU0z3EIZuPq9vPGpS8siFyOqDYDAuCwlNO9FqgbA==
-    engines:
-      node: ^18.19.0 || >=20.6.0
-    peerDependencies:
-      '@opentelemetry/api': ^1.3.0
-
   '@opentelemetry/otlp-exporter-base@0.211.0':
     resolution: {integrity: sha512-bp1+63V8WPV+bRI9EQG6E9YID1LIHYSZVbp7f+44g9tRzCq+rtw/o4fpL5PC31adcUsFiz/oN0MdLISSrZDdrg==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -2449,19 +2453,19 @@ packages:
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
-  '@opentelemetry/otlp-grpc-exporter-base@0.217.0':
-    resolution: {integrity: sha512-7RTAdZuOsCDnsyqTCG4+bDzrfnsWdzkRs7z0AVi/V3tEQx0oKeyc+OuRWYxnRsmaJXgxcmB8vb/lfxn58Dj6Ag==}
-    engines: {node: ^18.19.0 || >=20.6.0}
-    peerDependencies:
-      "@opentelemetry/api": ^1.3.0
-  "@opentelemetry/otlp-transformer@0.218.0":
+  "@opentelemetry/otlp-exporter-base@0.218.0":
     resolution:
-      integrity: sha512-CFaKH87WAzjuJ4awowTTLzUvMfaRfiOFG5+qm5S5ncyalRtN4ecQ+YmuANJSCrVPuvZFEkUgKhBPBndxi3rHsQ==
+      integrity: sha512-ZwqpkNL5W7RyGJPDZ9g06DvKp8KFTWPJPN12anpMQYSKpTSU0z3EIZuPq9vPGpS8siFyOqDYDAuCwlNO9FqgbA==
     engines:
       node: ^18.19.0 || >=20.6.0
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
+  '@opentelemetry/otlp-grpc-exporter-base@0.217.0':
+    resolution: {integrity: sha512-7RTAdZuOsCDnsyqTCG4+bDzrfnsWdzkRs7z0AVi/V3tEQx0oKeyc+OuRWYxnRsmaJXgxcmB8vb/lfxn58Dj6Ag==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      "@opentelemetry/api": ^1.3.0
   '@opentelemetry/otlp-transformer@0.211.0':
     resolution: {integrity: sha512-julhCJ9dXwkOg9svuuYqqjXLhVaUgyUvO2hWbTxwjvLXX2rG3VtAaB0SzxMnGTuoCZizBT7Xqqm2V7+ggrfCXA==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -2477,6 +2481,14 @@ packages:
   '@opentelemetry/otlp-transformer@0.217.0':
     resolution: {integrity: sha512-MKK8UHKFUOGAvbZRWh90MhwHG+Fxm6OROBdjKPCF+HQobjuJ/Kuf8Chs8CR45X1aqotxrMj7OxTdsXe8sXuGVA==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  "@opentelemetry/otlp-transformer@0.218.0":
+    resolution:
+      integrity: sha512-CFaKH87WAzjuJ4awowTTLzUvMfaRfiOFG5+qm5S5ncyalRtN4ecQ+YmuANJSCrVPuvZFEkUgKhBPBndxi3rHsQ==
+    engines:
+      node: ^18.19.0 || >=20.6.0
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
@@ -2556,14 +2568,6 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       "@opentelemetry/api": ">=1.3.0 <1.10.0"
-  "@opentelemetry/sdk-logs@0.218.0":
-    resolution:
-      integrity: sha512-QvnNdugatFTVCJXH0Mcu7GOOJSylA9j127kIezOE4YwTI4YbowRons2K4WZTv5FMS8T4q9P0NdaRHdkSmeAIag==
-    engines:
-      node: ^18.19.0 || >=20.6.0
-    peerDependencies:
-      '@opentelemetry/api': '>=1.4.0 <1.10.0'
-
   '@opentelemetry/sdk-logs@0.211.0':
     resolution: {integrity: sha512-O5nPwzgg2JHzo59kpQTPUOTzFi0Nv5LxryG27QoXBciX3zWM3z83g+SNOHhiQVYRWFSxoWn1JM2TGD5iNjOwdA==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -2581,6 +2585,14 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       "@opentelemetry/api": ">=1.4.0 <1.10.0"
+  "@opentelemetry/sdk-logs@0.218.0":
+    resolution:
+      integrity: sha512-QvnNdugatFTVCJXH0Mcu7GOOJSylA9j127kIezOE4YwTI4YbowRons2K4WZTv5FMS8T4q9P0NdaRHdkSmeAIag==
+    engines:
+      node: ^18.19.0 || >=20.6.0
+    peerDependencies:
+      '@opentelemetry/api': '>=1.4.0 <1.10.0'
+
   "@opentelemetry/sdk-metrics@2.10.0":
     resolution:
       integrity: sha512-t6r1VSvXNtSDnPXU1FbZeetJb7yyovHmgu0wRSoftxtE0g2rSNhQZQUy69sRUCL+iioJpX8SN/S6wq6ZtvLySQ==
@@ -7831,6 +7843,15 @@ packages:
       react: '*'
       react-native: '*'
 
+  react-native-streamdown@0.3.0:
+    resolution: {integrity: sha512-ouH6DeHw0LR2kvAza2Hqz3F9455MS8OGsYPdXBDSpfycT30rBCUcD5SOfJ2JvuTPEIWW92VbnhfEiEWw85Wu9g==}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
+      react-native-enriched-markdown: '>=1.0.0'
+      react-native-worklets: '>=0.10.0'
+      remend: 1.3.0
+
   react-native-svg@15.15.4:
     resolution: {integrity: sha512-boT/vIRgj6zZKBpfTPJJiYWMbZE9duBMOwPK6kCSTgxsS947IFMOq9OgIFkpWZTB7t229H24pDRkh3W9ZK/J1A==}
     peerDependencies:
@@ -7995,9 +8016,9 @@ packages:
   regjsparser@0.13.4:
     resolution: {integrity: sha512-EWV80YgFaVgFrjGCAsV7oybp4GOxbls5RzBg8OB0nKEVXsBJR1JlV8Di1JhCROg3MzTfe1RI8yitIm1eOs68iA==}
     hasBin: true
-  remend@1.4.0:
-    resolution:
-      integrity: sha512-mHiYhhwphs1IgIZmkToKLwJn0U99IjPXuutkA2acrNcG0vlEq2G4TGnd2eT0saIHwh2KjaCpvleHcsd5SAz96A==
+  remend@1.3.0:
+    resolution: {integrity: sha512-iIhggPkhW3hFImKtB10w0dz4EZbs28mV/dmbcYVonWEJ6UGHHpP+bFZnTh6GNWJONg5m+U56JrL+8IxZRdgWjw==}
+
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
     engines: {node: '>=0.10.0'}
@@ -10214,7 +10235,7 @@ snapshots:
 
   '@expo/metro@56.0.2':
     dependencies:
-      metro: 0.84.5
+      metro: 0.84.5(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-babel-transformer: 0.84.5
       metro-cache: 0.84.5
       metro-cache-key: 0.84.5
@@ -11108,10 +11129,6 @@ snapshots:
     dependencies:
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
-  "@opentelemetry/api-logs@0.218.0":
-    dependencies:
-      '@opentelemetry/api': 1.9.1
-
   '@opentelemetry/api-logs@0.211.0':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11121,6 +11138,10 @@ snapshots:
       '@opentelemetry/api': 1.9.1
 
   '@opentelemetry/api-logs@0.217.0':
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+
+  "@opentelemetry/api-logs@0.218.0":
     dependencies:
       '@opentelemetry/api': 1.9.1
 
@@ -11246,14 +11267,6 @@ snapshots:
       "@opentelemetry/otlp-transformer": 0.217.0(@opentelemetry/api@1.9.1)
       "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
       "@opentelemetry/sdk-metrics": 2.7.1(@opentelemetry/api@1.9.1)
-  "@opentelemetry/exporter-metrics-otlp-http@0.218.0(@opentelemetry/api@1.9.1)":
-    dependencies:
-      "@opentelemetry/api": 1.9.1
-      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/otlp-exporter-base": 0.218.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/otlp-transformer": 0.218.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
-      "@opentelemetry/sdk-metrics": 2.7.1(@opentelemetry/api@1.9.1)
   "@opentelemetry/exporter-metrics-otlp-http@0.211.0(@opentelemetry/api@1.9.1)":
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11272,6 +11285,14 @@ snapshots:
       '@opentelemetry/resources': 2.7.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-metrics': 2.7.1(@opentelemetry/api@1.9.1)
 
+  "@opentelemetry/exporter-metrics-otlp-http@0.218.0(@opentelemetry/api@1.9.1)":
+    dependencies:
+      "@opentelemetry/api": 1.9.1
+      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/otlp-exporter-base": 0.218.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/otlp-transformer": 0.218.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
+      "@opentelemetry/sdk-metrics": 2.7.1(@opentelemetry/api@1.9.1)
   '@opentelemetry/exporter-metrics-otlp-proto@0.217.0(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11706,11 +11727,6 @@ snapshots:
       require-in-the-middle: 8.0.1
     transitivePeerDependencies:
       - supports-color
-  "@opentelemetry/otlp-exporter-base@0.218.0(@opentelemetry/api@1.9.1)":
-    dependencies:
-      "@opentelemetry/api": 1.9.1
-      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/otlp-transformer": 0.218.0(@opentelemetry/api@1.9.1)
   "@opentelemetry/otlp-exporter-base@0.211.0(@opentelemetry/api@1.9.1)":
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11729,6 +11745,11 @@ snapshots:
       '@opentelemetry/core': 2.8.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/otlp-transformer': 0.217.0(@opentelemetry/api@1.9.1)
 
+  "@opentelemetry/otlp-exporter-base@0.218.0(@opentelemetry/api@1.9.1)":
+    dependencies:
+      "@opentelemetry/api": 1.9.1
+      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/otlp-transformer": 0.218.0(@opentelemetry/api@1.9.1)
   '@opentelemetry/otlp-grpc-exporter-base@0.217.0(@opentelemetry/api@1.9.1)':
     dependencies:
       "@grpc/grpc-js": 1.14.4
@@ -11736,15 +11757,6 @@ snapshots:
       "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
       "@opentelemetry/otlp-exporter-base": 0.217.0(@opentelemetry/api@1.9.1)
       "@opentelemetry/otlp-transformer": 0.217.0(@opentelemetry/api@1.9.1)
-  "@opentelemetry/otlp-transformer@0.218.0(@opentelemetry/api@1.9.1)":
-    dependencies:
-      "@opentelemetry/api": 1.9.1
-      "@opentelemetry/api-logs": 0.218.0
-      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
-      "@opentelemetry/sdk-logs": 0.218.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/sdk-metrics": 2.7.1(@opentelemetry/api@1.9.1)
-      "@opentelemetry/sdk-trace-base": 2.7.1(@opentelemetry/api@1.9.1)
   "@opentelemetry/otlp-transformer@0.211.0(@opentelemetry/api@1.9.1)":
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11778,6 +11790,15 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.7.1(@opentelemetry/api@1.9.1)
       protobufjs: 8.7.1
 
+  "@opentelemetry/otlp-transformer@0.218.0(@opentelemetry/api@1.9.1)":
+    dependencies:
+      "@opentelemetry/api": 1.9.1
+      "@opentelemetry/api-logs": 0.218.0
+      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
+      "@opentelemetry/sdk-logs": 0.218.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/sdk-metrics": 2.7.1(@opentelemetry/api@1.9.1)
+      "@opentelemetry/sdk-trace-base": 2.7.1(@opentelemetry/api@1.9.1)
   '@opentelemetry/propagator-aws-xray@2.2.0(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11851,13 +11872,6 @@ snapshots:
       "@opentelemetry/api": 1.9.1
       "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
       "@opentelemetry/semantic-conventions": 1.43.0
-  "@opentelemetry/sdk-logs@0.218.0(@opentelemetry/api@1.9.1)":
-    dependencies:
-      "@opentelemetry/api": 1.9.1
-      "@opentelemetry/api-logs": 0.218.0
-      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
-      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
-      "@opentelemetry/semantic-conventions": 1.43.0
   "@opentelemetry/sdk-logs@0.211.0(@opentelemetry/api@1.9.1)":
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -11877,6 +11891,13 @@ snapshots:
     dependencies:
       "@opentelemetry/api": 1.9.1
       "@opentelemetry/api-logs": 0.217.0
+      "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
+      "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
+      "@opentelemetry/semantic-conventions": 1.43.0
+  "@opentelemetry/sdk-logs@0.218.0(@opentelemetry/api@1.9.1)":
+    dependencies:
+      "@opentelemetry/api": 1.9.1
+      "@opentelemetry/api-logs": 0.218.0
       "@opentelemetry/core": 2.8.0(@opentelemetry/api@1.9.1)
       "@opentelemetry/resources": 2.7.1(@opentelemetry/api@1.9.1)
       "@opentelemetry/semantic-conventions": 1.43.0
@@ -12666,7 +12687,7 @@ snapshots:
       '@react-native/dev-middleware': 0.86.0
       debug: 4.4.3
       invariant: 2.2.4
-      metro: 0.84.6
+      metro: 0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-config: 0.84.6
       metro-core: 0.84.6
       semver: 7.8.5
@@ -12766,7 +12787,7 @@ snapshots:
       '@react-native/js-polyfills': 0.86.0
       '@react-native/metro-babel-transformer': 0.86.0(@babel/core@7.29.7)
       metro-config: 0.84.6
-      metro-runtime: 0.84.6
+      metro-runtime: 0.84.6(patch_hash=ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f)
     transitivePeerDependencies:
       - '@babel/core'
       - bufferutil
@@ -17134,7 +17155,7 @@ snapshots:
       connect: 3.7.0
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
-      metro: 0.84.5
+      metro: 0.84.5(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-cache: 0.84.5
       metro-core: 0.84.5
       metro-runtime: 0.84.5
@@ -17149,10 +17170,10 @@ snapshots:
       connect: 3.7.0
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
-      metro: 0.84.6
+      metro: 0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-cache: 0.84.6
       metro-core: 0.84.6
-      metro-runtime: 0.84.6
+      metro-runtime: 0.84.6(patch_hash=ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f)
       yaml: 2.9.0
     transitivePeerDependencies:
       - bufferutil
@@ -17222,7 +17243,7 @@ snapshots:
       '@babel/runtime': 7.29.7
       flow-enums-runtime: 0.0.6
 
-  metro-runtime@0.84.6:
+  metro-runtime@0.84.6(patch_hash=ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f):
     dependencies:
       '@babel/runtime': 7.29.7
       flow-enums-runtime: 0.0.6
@@ -17306,7 +17327,7 @@ snapshots:
       '@babel/parser': 7.29.7
       '@babel/types': 7.29.7
       flow-enums-runtime: 0.0.6
-      metro: 0.84.5
+      metro: 0.84.5(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-babel-transformer: 0.84.5
       metro-cache: 0.84.5
       metro-cache-key: 0.84.5
@@ -17326,7 +17347,7 @@ snapshots:
       '@babel/parser': 7.29.7
       '@babel/types': 7.29.7
       flow-enums-runtime: 0.0.6
-      metro: 0.84.6
+      metro: 0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-babel-transformer: 0.84.6
       metro-cache: 0.84.6
       metro-cache-key: 0.84.6
@@ -17339,7 +17360,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  metro@0.84.5:
+  metro@0.84.5(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7
@@ -17384,7 +17405,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  metro@0.84.6:
+  metro@0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7
@@ -17412,7 +17433,7 @@ snapshots:
       metro-core: 0.84.6
       metro-file-map: 0.84.6
       metro-resolver: 0.84.6
-      metro-runtime: 0.84.6
+      metro-runtime: 0.84.6(patch_hash=ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f)
       metro-source-map: 0.84.6
       metro-symbolicate: 0.84.6
       metro-transform-plugins: 0.84.6
@@ -18237,6 +18258,14 @@ snapshots:
       react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
       warn-once: 0.1.1
 
+  react-native-streamdown@0.3.0(aed1025ee6433e0b3c2e0d9c9620d4a2):
+    dependencies:
+      react: 19.2.3
+      react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
+      react-native-enriched-markdown: 1.1.1(patch_hash=9c5a4d2ccfa2c44e5a5e023305d337cb95516696594638f2a6c0dd4155fdcddf)(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      react-native-worklets: 0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      remend: 1.3.0
+
   react-native-svg@15.15.4(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
     dependencies:
       css-select: 5.2.2
@@ -18331,7 +18360,7 @@ snapshots:
       hermes-compiler: 250829098.0.14
       invariant: 2.2.4
       memoize-one: 5.2.1
-      metro-runtime: 0.84.6
+      metro-runtime: 0.84.6(patch_hash=ec8f2ed66ed67a0497164ae9dbab2badcb6004c2a7494828d17821d4d9ecf45f)
       metro-source-map: 0.84.6
       nullthrows: 1.1.1
       pretty-format: 29.7.0
@@ -18454,7 +18483,8 @@ snapshots:
   regjsparser@0.13.4:
     dependencies:
       jsesc: 3.1.0
-  remend@1.4.0: {}
+  remend@1.3.0: {}
+
   require-directory@2.1.1: {}
 
   require-from-string@2.0.2: {}
@@ -19146,13 +19176,13 @@ snapshots:
 
   universalify@0.2.0: {}
 
-  uniwind@1.10.1(@expo/metro-config@57.0.13(expo@57.0.11)(typescript@6.0.3))(metro-cache@0.84.6)(metro-transform-worker@0.84.6)(metro@0.84.6)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(tailwindcss@4.3.3):
+  uniwind@1.10.1(@expo/metro-config@57.0.13(expo@57.0.11)(typescript@6.0.3))(metro-cache@0.84.6)(metro-transform-worker@0.84.6)(metro@0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(tailwindcss@4.3.3):
     dependencies:
       '@tailwindcss/node': 4.3.2
       '@tailwindcss/oxide': 4.3.2
       culori: 4.0.2
       lightningcss: 1.30.1
-      metro: 0.84.6
+      metro: 0.84.6(patch_hash=e3bfb4305ce88ec8dce7316153e47477ca3b3d252fbc4066edb76d482aa261c1)
       metro-cache: 0.84.6
       react: 19.2.3
       react-native: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)

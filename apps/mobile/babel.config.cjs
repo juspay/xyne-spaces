@@ -30,10 +30,18 @@ const dynamicImportToRequire = ({ types: t }) => ({
   },
 });
 
+// Bundle Mode lets react-native-streamdown run remend on a worklet runtime.
+const workletsPluginOptions = {
+  bundleMode: true,
+  importForwarding: { moduleNames: ['remend'] },
+};
+
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: ['babel-preset-expo'],
+    // The preset adds the worklets plugin without options, so it is registered here instead.
+    presets: [['babel-preset-expo', { worklets: false, reanimated: false }]],
+    plugins: [['react-native-worklets/plugin', workletsPluginOptions]],
     env: {
       test: {
         plugins: [dynamicImportToRequire],
