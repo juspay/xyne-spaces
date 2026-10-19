@@ -105,6 +105,9 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
         className: 'docx',
         inWrapper: false,
         breakPages: true,
+        // altChunk embeds arbitrary HTML from the file in an unsandboxed
+        // iframe (same-origin srcdoc) => stored XSS. Never render it.
+        renderAltChunks: false,
       });
 
       // After rendering, remove any inline width constraints and make it responsive

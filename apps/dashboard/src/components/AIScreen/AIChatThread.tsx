@@ -78,6 +78,7 @@ import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAI
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
+import { safeMarkdownUrlTransform } from '../../utils/safeUrl';
 import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
 import {
   stripCitationMarks,
@@ -563,7 +564,7 @@ const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
 // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
 // non-http(s) schemes, which would erase the href before the `a` override can
 // intercept it.
-const preserveUrlTransform = (url: string): string => url;
+const preserveUrlTransform = safeMarkdownUrlTransform;
 
 const PLAN_STATUS_CLASSES: Record<PlanTodo['status'], string> = {
   pending: 'text-muted-foreground',
