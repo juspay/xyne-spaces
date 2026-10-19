@@ -1,3 +1,18 @@
+## [1.499.0-release-20261014.1](https://github.com/juspay/xyne-spaces/compare/v1.498.0...v1.499.0-release-20261014.1) (2026-10-19)
+
+
+### Features
+
+* raise LiveKit room max participants to 500 ([#3117](https://github.com/juspay/xyne-spaces/issues/3117)) ([#3130](https://github.com/juspay/xyne-spaces/issues/3130)) ([50b28e6](https://github.com/juspay/xyne-spaces/commit/50b28e658d8a796fbaf020f9bf1cf6cb6a2c4cbb))
+* Syncing sdlc release [feature/sdlc-release-20261014 -> release-20261014] ([#3052](https://github.com/juspay/xyne-spaces/issues/3052)) ([e3f531c](https://github.com/juspay/xyne-spaces/commit/e3f531ca18f3a67873143fed2aae366622646a8b)), closes [#3047](https://github.com/juspay/xyne-spaces/issues/3047)
+
+
+### Bug Fixes
+
+* agent builder draft approval fills the setup form ins… ([#3057](https://github.com/juspay/xyne-spaces/issues/3057)) ([#3153](https://github.com/juspay/xyne-spaces/issues/3153)) ([a1a7c7b](https://github.com/juspay/xyne-spaces/commit/a1a7c7b3222f3e97480699ed716a8877ea1683a3))
+* external dashboard :) ([#3148](https://github.com/juspay/xyne-spaces/issues/3148)) ([9ac8098](https://github.com/juspay/xyne-spaces/commit/9ac809891882aec023799d979f1dd36bcb7d3bc6))
+* restrict Azure NSG ingress to fix Trivy AZU-0047 CI failures (release-20261014) ([#3180](https://github.com/juspay/xyne-spaces/issues/3180)) ([25accad](https://github.com/juspay/xyne-spaces/commit/25accadc7874f3af414a6371d08d4c199df01927)), closes [#3066](https://github.com/juspay/xyne-spaces/issues/3066) [#3074](https://github.com/juspay/xyne-spaces/issues/3074)
+
 ## [1.498.0](https://github.com/juspay/xyne-spaces/compare/v1.497.0...v1.498.0) (2026-10-14)
 
 
