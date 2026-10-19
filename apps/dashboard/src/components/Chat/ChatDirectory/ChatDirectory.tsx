@@ -580,44 +580,65 @@ const ChatDirectory = ({
     );
   }, []);
 
+  const statusesRef = useRef(allChannelsUserStatus);
+  useEffect(() => {
+    statusesRef.current = allChannelsUserStatus;
+  }, [allChannelsUserStatus]);
+
   const revertOrganize = useCallback(
     async (record: OrganizeRecord) => {
       const timestamp = Date.now();
-      let reverted = 0;
+      const remaining: OrganizeRecord['sections'] = [];
       setUndoingOrganize(true);
+
+      const sectionIdByChannelId = new Map(
+        (statusesRef.current ?? []).map(status => [status.channelId, status.sectionId]),
+      );
 
       for (const section of record.sections) {
         if (section.isNew) {
           const removed = await settleMutation(
             zero.mutate(mutators.channelSection.remove({ id: section.id, timestamp })),
           );
-          if (removed) reverted += 1;
+          if (!removed) remaining.push(section);
           continue;
         }
 
-        for (let i = 0; i < section.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
-          const items = section.channelIds
-            .slice(i, i + CREATE_SECTION_CHUNK_SIZE)
-            .map(channelId => ({ channelId, position: '' }));
+        const stillInSection = section.channelIds.filter(
+          channelId => sectionIdByChannelId.get(channelId) === section.id,
+        );
+        const failedChannelIds: string[] = [];
+
+        for (let i = 0; i < stillInSection.length; i += CREATE_SECTION_CHUNK_SIZE) {
+          const chunk = stillInSection.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const items = chunk.map(channelId => ({ channelId, position: '' }));
           if (items.length === 0) continue;
           const detached = await settleMutation(
             zero.mutate(mutators.channel.moveManyToSection({ sectionId: null, items, timestamp })),
           );
-          if (detached && i === 0) reverted += 1;
+          if (!detached) failedChannelIds.push(...chunk);
+        }
+
+        if (failedChannelIds.length > 0) {
+          remaining.push({ ...section, channelIds: failedChannelIds });
         }
       }
 
-      writeOrganizeRecord(null);
-      setOrganizeRecord(null);
+      const next = remaining.length > 0 ? { ...record, sections: remaining } : null;
+      writeOrganizeRecord(next);
+      setOrganizeRecord(next);
       setConfirmUndoOrganize(false);
       setUndoingOrganize(false);
 
-      toast(
-        reverted === record.sections.length
-          ? 'Your sidebar is back to how it was.'
-          : `Undid ${reverted} of ${record.sections.length} sections. Some may have changed since.`,
-        { duration: 5000 },
-      );
+      if (next) {
+        toast.error(
+          `Couldn't undo ${remaining.length} of ${record.sections.length} section${record.sections.length === 1 ? '' : 's'}. Try again from the channel menu.`,
+          { duration: 8000 },
+        );
+        return;
+      }
+
+      toast('Your sidebar is back to how it was.', { duration: 5000 });
     },
     [zero],
   );
@@ -690,7 +711,14 @@ const ChatDirectory = ({
         }
 
         const movedChannelIds: string[] = [];
-        let prevChannelKey: string | null = null;
+        let prevChannelKey: string | null = group.mergeIntoSectionId
+          ? ((statusesRef.current ?? [])
+              .filter(status => status.sectionId === group.mergeIntoSectionId)
+              .map(status => status.sectionPosition ?? '')
+              .filter(position => position !== '')
+              .sort()
+              .pop() ?? null)
+          : null;
         let groupFailed = false;
         for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
           const chunk = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
