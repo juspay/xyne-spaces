@@ -119,7 +119,7 @@ function ReadMode(props: {
   }, [id, always]);
   if (!onChange) {
     return (
-      <Tooltip content='Only hub admins change this' delayDuration={TOOLTIP_DELAY_MS}>
+      <Tooltip content='Only hub admins can change this' delayDuration={TOOLTIP_DELAY_MS}>
         <span
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- its tooltip must open from the keyboard
           tabIndex={0}
@@ -922,7 +922,7 @@ export function SdlcKnowledgeSection(props: {
           {!isHubAdmin && (
             <p className='flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground'>
               <Lock size={13} className='shrink-0' />
-              Only hub admins add knowledge files and skills, and set their read mode.
+              Only hub admins can add knowledge files and skills.
             </p>
           )}
           {failed && (
@@ -973,7 +973,7 @@ export function SdlcKnowledgeSection(props: {
           description={
             isHubAdmin
               ? 'Ask AI writes it and shows you a card to approve before anything is saved.'
-              : 'Ask AI writes a skill and shows you a card to approve. Only hub admins add knowledge files.'
+              : 'Ask AI writes a skill and shows you a card to approve. Only hub admins can add knowledge files.'
           }
           onSubmit={() => {
             if (!aiDraft) return;
@@ -1090,7 +1090,7 @@ export function SdlcKnowledgeSection(props: {
           description={
             isHubAdmin
               ? 'Choose what to write.'
-              : 'Write a skill. Only hub admins add knowledge files.'
+              : 'Write a skill. Only hub admins can add knowledge files.'
           }
           onSubmit={() => {
             setWriteOpen(false);
