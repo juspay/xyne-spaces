@@ -10,6 +10,7 @@ import {
   X,
   ChevronDown,
   Maximize2,
+  AudioLines,
 } from 'lucide-react';
 import {
   ChatDefault,
@@ -20,7 +21,6 @@ import {
   FolderDefault,
   File02Text,
   Phone,
-  MicOn,
   EnvelopeDefault,
   ArrowLeft,
   ArrowRight,
@@ -3117,7 +3117,7 @@ const ChannelCommandMenuContent = ({
     {
       id: TabType.RECORDING,
       label: TAB_LABELS[TabType.RECORDING],
-      icon: <MicOn size={iconSize} />,
+      icon: <AudioLines size={iconSize} />,
     },
     {
       id: TabType.DESK,
