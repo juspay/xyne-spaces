@@ -21,7 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import { CallStatus, TagMethod, WorkspaceRole } from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';

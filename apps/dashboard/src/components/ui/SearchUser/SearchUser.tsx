@@ -3,6 +3,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { User, WorkspaceRole } from '@xyne/shared';
 import Avatar from '../Avatar/Avatar';
+import { GuestLabel } from '../GuestLabel';
 import Input from '../Input/Input';
 import { Badge } from '../Badge';
 import { cn } from '../../../utils/classNames';
@@ -321,6 +322,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                             </span>
                           )}
                         </span>
+                        <GuestLabel role={user.role} />
                         {isUserDeactivated(user) && (
                           <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
                             Deactivated
