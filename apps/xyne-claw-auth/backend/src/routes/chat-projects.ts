@@ -177,10 +177,14 @@ chatProjectsRouter.post("/chat/projects", async (req: Request, res: Response): P
       return;
     }
 
-    const created = await chatProjectRepository.create(caller.primaryUserId, caller.orgId, {
-      ...parsed.value,
-      name: parsed.value.name as string,
-    });
+    // Aliases go in so the sort-order lookup spans projects stored under the
+    // caller's other verified id; the row itself is still written under one.
+    const created = await chatProjectRepository.create(
+      caller.primaryUserId,
+      caller.orgId,
+      { ...parsed.value, name: parsed.value.name as string },
+      caller.aliases,
+    );
 
     res.status(201).json({ success: true, data: { ...created, chatCount: 0 } });
   } catch (err) {

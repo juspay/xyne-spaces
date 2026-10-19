@@ -1,4 +1,4 @@
-import { type ChatProject } from "@prisma/client";
+import { type ChatProject, type ChatProjectItem } from "@prisma/client";
 import { prisma } from "../db.js";
 import { ownerUserIdFilter, userIdFilter } from "./userIdFilter.js";
 
@@ -21,7 +21,16 @@ export interface ChatProjectInput {
   icon?: string | null | undefined;
   instructions?: string | undefined;
   instructionsEnabled?: boolean | undefined;
+  /**
+   * Stored as given. NOTE the schema comment calls this "validated on write" —
+   * it is not; nothing here checks that the caller can see the Spaces project,
+   * so a user can link one they have no access to. Whatever pulls that
+   * project's tickets or channels into a run MUST re-check access against the
+   * caller every time (XYNE-66811). Never treat a stored id as proof of access.
+   */
   spacesProjectId?: string | null | undefined;
+  /** Not validated here; check the agent exists and the caller may invoke it
+   *  at the point the default is APPLIED. */
   defaultAgentSlug?: string | null | undefined;
 }
 
@@ -60,10 +69,14 @@ export const chatProjectRepository = {
     ownerUserId: string,
     orgId: string,
     input: ChatProjectInput,
+    aliases: string | string[] = ownerUserId,
   ): Promise<ChatProject> => {
-    // New projects land at the end of the owner's existing order.
+    // New projects land at the end of the owner's existing order. The lookup
+    // spans EVERY alias: projects stored under the caller's other verified id
+    // are still theirs, and missing them restarts numbering at 0, which puts
+    // the new project at the top of the list instead of the bottom.
     const last = await prisma.chatProject.findFirst({
-      where: { ownerUserId, orgId },
+      where: { ...ownerUserIdFilter(aliases), orgId },
       orderBy: { sortOrder: "desc" },
       select: { sortOrder: true },
     });
@@ -206,21 +219,42 @@ export const chatProjectRepository = {
   },
 
   /**
-   * Move one chat into a project. `userId` is a single id, not the alias set:
-   * the caller resolves which id the conversation's own rows use and persists
-   * under exactly that one, so the membership is found again on read.
+   * Move one chat into a project.
+   *
+   * `membership.userId` is the single id the row is WRITTEN under — the one the
+   * conversation's own chat rows already use. `aliases` is every id the caller
+   * is verified under, and any membership row for this chat held under a
+   * DIFFERENT alias is removed in the same transaction first.
+   *
+   * Without that sweep the table's [conversationId, userId] key lets one chat
+   * moved once under the Spaces id and again under the canonical id end up with
+   * two rows — i.e. in two projects at once — and
+   * projectIdsForConversations would return whichever row it read last.
    */
-  moveConversation: (membership: ChatProjectMembership) =>
-    prisma.chatProjectItem.upsert({
-      where: {
-        conversationId_userId: {
-          conversationId: membership.conversationId,
-          userId: membership.userId,
+  moveConversation: async (
+    membership: ChatProjectMembership,
+    aliases: string | string[] = membership.userId,
+  ): Promise<ChatProjectItem> => {
+    const stale = (Array.isArray(aliases) ? aliases : [aliases]).filter(
+      (id) => id !== membership.userId,
+    );
+    const [, row] = await prisma.$transaction([
+      prisma.chatProjectItem.deleteMany({
+        where: { conversationId: membership.conversationId, userId: { in: stale } },
+      }),
+      prisma.chatProjectItem.upsert({
+        where: {
+          conversationId_userId: {
+            conversationId: membership.conversationId,
+            userId: membership.userId,
+          },
         },
-      },
-      create: membership,
-      update: { projectId: membership.projectId, orgId: membership.orgId },
-    }),
+        create: membership,
+        update: { projectId: membership.projectId, orgId: membership.orgId },
+      }),
+    ]);
+    return row;
+  },
 
   /** Back to the main list. Never deletes the conversation itself. */
   removeConversation: async (

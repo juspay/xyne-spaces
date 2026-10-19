@@ -136,9 +136,13 @@ detect that.
 4. **Membership is keyed `[conversationId, userId]`, with no agent.** A chat
    answered by several agents sits in exactly one project. Do not add
    `agentSlug` to any project call.
-5. **`spacesProjectId` has no foreign key.** It points into the Spaces database,
-   which claw-auth reads through a read-only grant. It can dangle if the Spaces
-   project is deleted; render defensively.
+5. **`spacesProjectId` has no foreign key and is not access-checked on write.**
+   It points into the Spaces database, which claw-auth reads through a
+   read-only grant, so it can dangle if the Spaces project is deleted — render
+   defensively. A user can also link a project they cannot see: whatever pulls
+   that project's tickets or channels into a run must re-check the caller's
+   access **every time** (XYNE-66811). Do not treat a stored id as proof of
+   access.
 
 ## Not in XYNE-66808
 

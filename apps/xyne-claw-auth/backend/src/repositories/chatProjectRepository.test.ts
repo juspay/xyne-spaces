@@ -268,6 +268,33 @@ describe("chatProjectRepository", () => {
       expect(state.messages.filter((m) => m["conversationId"] === "conv-1")).toHaveLength(2);
     });
 
+    it("sweeps a row held under another alias instead of leaving two", async () => {
+      // conv-alias already sits in proj-mine, keyed under the Spaces id.
+      await chatProjectRepository.moveConversation(
+        { conversationId: "conv-alias", userId: CANONICAL, projectId: "proj-alias", orgId: ORG },
+        ALIASES,
+      );
+
+      const rows = state.items.filter((i) => i["conversationId"] === "conv-alias");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: CANONICAL, projectId: "proj-alias" });
+    });
+
+    it("leaves another user's row for the same chat untouched", async () => {
+      state.items.push({
+        conversationId: "conv-shared", userId: "user-other", projectId: "proj-theirs", orgId: ORG,
+      });
+
+      await chatProjectRepository.moveConversation(
+        { conversationId: "conv-shared", userId: CANONICAL, projectId: "proj-mine", orgId: ORG },
+        ALIASES,
+      );
+
+      const rows = state.items.filter((i) => i["conversationId"] === "conv-shared");
+      expect(rows).toHaveLength(2);
+      expect(rows.some((r) => r["userId"] === "user-other" && r["projectId"] === "proj-theirs")).toBe(true);
+    });
+
     it("stores no agentSlug on the membership row", async () => {
       await chatProjectRepository.moveConversation({
         conversationId: "conv-new",
@@ -282,8 +309,17 @@ describe("chatProjectRepository", () => {
   });
 
   describe("create", () => {
-    it("appends after the owner's existing projects", async () => {
-      const created = await chatProjectRepository.create(CANONICAL, ORG, { name: "Third" });
+    it("appends after every project the owner holds under either id", async () => {
+      // proj-alias sits at sortOrder 1 under the Spaces id. Numbering that
+      // ignored it would hand the new project slot 1 and float it to the top.
+      const created = await chatProjectRepository.create(CANONICAL, ORG, { name: "Last" }, ALIASES);
+      expect(created.sortOrder).toBe(2);
+    });
+
+    it("collides with an alias-owned project when no aliases are passed", async () => {
+      const created = await chatProjectRepository.create(CANONICAL, ORG, { name: "Naive" });
+      // Same slot as proj-alias — documented here because it is exactly why
+      // the route threads caller.aliases through.
       expect(created.sortOrder).toBe(1);
     });
 
