@@ -492,6 +492,10 @@ const BoardEditScreen = ({
   const customFieldsFormId = activeFormMapping?.formId ?? boardMetadata.customFieldsFormId;
   // Duplicating cannot reuse source form membership ids; those rows belong to another form.
   const isDuplicating = mode === 'create' && !!sourceBoardId;
+  const cloneFieldIdMapRef = useRef<{ formId: string | undefined; map: Map<string, string> }>({
+    formId: undefined,
+    map: new Map(),
+  });
 
   const activeResolvedCustomFields = useMemo(() => {
     if (!customFieldsFormId) {
@@ -506,14 +510,37 @@ const BoardEditScreen = ({
 
   useEffect(() => {
     if (activeResolvedCustomFields.length > 0) {
-      const idMap = new Map<string, string>();
+      // Clone remap ids must be STABLE across effect re-runs: regenerating uuids
+      // per run breaks the dedupe below and appends the whole set again (2x bug).
+      const newlyClonedSourceIds = new Set<string>();
+      // Copies made from a previous source form, removed if the source form changes.
+      let staleCloneIds = new Set<string>();
       if (isDuplicating) {
-        for (const field of activeResolvedCustomFields) {
-          idMap.set(field.id, uuidv4());
+        // Keyed on the form the fields are read from (mapping, else board metadata), so the
+        // mapping arriving after the metadata does not reset the map and re-append the fields.
+        const sourceFormId = customFieldsFormId;
+        if (cloneFieldIdMapRef.current.formId !== sourceFormId) {
+          staleCloneIds = new Set(cloneFieldIdMapRef.current.map.values());
+          cloneFieldIdMapRef.current = { formId: sourceFormId, map: new Map() };
         }
+        for (const field of activeResolvedCustomFields) {
+          if (!cloneFieldIdMapRef.current.map.has(field.id)) {
+            cloneFieldIdMapRef.current.map.set(field.id, uuidv4());
+            newlyClonedSourceIds.add(field.id);
+          }
+        }
+        // Every source field is already seeded; nothing to add.
+        if (newlyClonedSourceIds.size === 0) return;
       }
+      const idMap = cloneFieldIdMapRef.current.map;
 
-      const customFields: TicketField[] = activeResolvedCustomFields.map(field => {
+      // Cloned fields are seeded once: re-merging source values on later runs would
+      // revert the user's edits and re-append clones they removed.
+      const fieldsToApply = isDuplicating
+        ? activeResolvedCustomFields.filter(field => newlyClonedSourceIds.has(field.id))
+        : activeResolvedCustomFields;
+
+      const customFields: TicketField[] = fieldsToApply.map(field => {
         const ticketField: TicketField = {
           id: isDuplicating ? (idMap.get(field.id) ?? field.id) : field.id,
           ...(!isDuplicating && field.membershipId ? { membershipId: field.membershipId } : {}),
@@ -541,31 +568,33 @@ const BoardEditScreen = ({
       setFields(prev => {
         const customFieldsById = new Map(customFields.map(field => [field.id, field]));
 
-        const updatedFields = prev.map(field => {
-          const updatedCustomField = customFieldsById.get(field.id);
-          if (!updatedCustomField) return field;
+        const updatedFields = prev
+          .filter(field => !staleCloneIds.has(field.id))
+          .map(field => {
+            const updatedCustomField = customFieldsById.get(field.id);
+            if (!updatedCustomField) return field;
 
-          const mergedField: TicketField = {
-            ...field,
-            ...updatedCustomField,
-            order: field.order,
-            visibleInCreate: field.visibleInCreate,
-          };
+            const mergedField: TicketField = {
+              ...field,
+              ...updatedCustomField,
+              order: field.order,
+              visibleInCreate: field.visibleInCreate,
+            };
 
-          if (updatedCustomField.options) {
-            return mergedField;
-          }
+            if (updatedCustomField.options) {
+              return mergedField;
+            }
 
-          const { options: _removed, ...fieldWithoutOptions } = mergedField;
-          return fieldWithoutOptions;
-        });
+            const { options: _removed, ...fieldWithoutOptions } = mergedField;
+            return fieldWithoutOptions;
+          });
 
         const existingIds = new Set(updatedFields.map(field => field.id));
         const newFields = customFields.filter(field => !existingIds.has(field.id));
         return [...updatedFields, ...newFields];
       });
     }
-  }, [activeResolvedCustomFields, isDuplicating]);
+  }, [activeResolvedCustomFields, customFieldsFormId, isDuplicating]);
 
   // Apply field order and required from metadata when board loads
   useEffect(() => {
