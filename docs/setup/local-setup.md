@@ -120,7 +120,8 @@ Continue at [Clone and run](#clone-and-run).
 
 ## Windows (WSL2)
 
-Use WSL2 with the [Nix setup](nix.md).
+Windows is supported through WSL2, a real Linux environment inside Windows, using
+either the [Nix setup](nix.md) or Docker.
 
 ### 1. Install WSL2 + Ubuntu
 
@@ -132,11 +133,19 @@ wsl --install -d Ubuntu
 
 Reboot when asked, then open the "Ubuntu" app and create your Linux user.
 
-### 2. Follow the Nix setup
+### 2. Pick a setup
 
-Inside Ubuntu, follow [Local development with Nix](nix.md). Keep the repo inside
-the Linux filesystem (for example `~/code/xyne-spaces`), rather than `/mnt/c/`,
-for reliable file watching and faster installs.
+**Nix:** inside Ubuntu, follow [Local development with Nix](nix.md).
+
+**Docker:** install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/),
+then in *Settings → Resources → WSL integration* enable your Ubuntu distro. Give it
+at least **8 GB memory** under *Resources*. `docker` now works inside Ubuntu. Inside
+the Ubuntu terminal, do the [Linux section](#linux-debian--ubuntu) — skip its Docker
+step (Docker Desktop already provides it).
+
+Either way, **keep the repo inside the Linux filesystem** (e.g. `~/code/xyne-spaces`),
+never under `/mnt/c/...` — file watching and installs are an order of magnitude
+slower on the Windows mount.
 
 ---
 

@@ -75,7 +75,7 @@ sudo apt-get install -y python3 make g++ libcairo2-dev libpango1.0-dev \
                         libjpeg-dev libgif-dev librsvg2-dev libssl-dev
 ```
 
-**Windows** — use WSL2 and the [Nix setup](nix.md).
+**Windows** — use WSL2, then either the Linux steps above or the [Nix setup](nix.md).
 
 ## Next
 
