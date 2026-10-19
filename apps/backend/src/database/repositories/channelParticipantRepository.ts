@@ -7,6 +7,7 @@ import { createTx } from '@/bypassAcl/transactions/channelParticipantRepository'
 import { addParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
 import { removeParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
 import { addParticipantsBatchTx } from '@/bypassAcl/transactions/channelParticipantRepository';
+import { applyParticipantChangesTx, type ParticipantRoleChange } from '@/bypassAcl/transactions/channelParticipantRepository';
 
 export interface CreateChannelParticipantInput {
   channelId: string;
@@ -328,6 +329,11 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     }
 
     return await addParticipantsBatchTx(this, overrideCutoffAt, channelId, userIds, role, isClosed);
+  }
+
+  /** Adds with a role each and sets roles of existing participants, all in one transaction; returns what it really did. */
+  async applyParticipantChanges(channelId: string, adds: ParticipantRoleChange[], updates: ParticipantRoleChange[]) {
+    return await applyParticipantChangesTx(this, channelId, adds, updates);
   }
 
   async getParticipantRole(channelId: string, userId: string): Promise<string | null> {

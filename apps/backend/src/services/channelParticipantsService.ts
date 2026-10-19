@@ -16,6 +16,7 @@ export interface AddChannelParticipantsParams {
   actorWorkspaceRole?: string;
   workspaceId: string;
   targets: ChannelParticipantTarget[];
+  updateRoles?: boolean;
 }
 
 export interface AddedChannelParticipant {
@@ -26,25 +27,29 @@ export interface AddedChannelParticipant {
 
 export interface AddChannelParticipantsResult {
   added: AddedChannelParticipant[];
-  updated: ChannelParticipantTarget[];
+  updated: Array<{ userId: string; userName: string; oldRole: string; role: ChannelRole }>;
   alreadyMembers: string[];
 }
 
 /**
- * Adds users to an existing channel on behalf of `actorId` with the role given for each, and sets the
- * role of any who are already in it.
+ * Adds users to an existing channel on behalf of `actorId` with the role given for each. People already
+ * in it keep their role, unless `updateRoles` is set, which sets their role to the one given.
  * Every target must be an active, non-guest user of the channel's own workspace, so no
  * cross-workspace participant can ever be created through this path.
- * All checks run before the first write, so a refused call changes nothing.
+ * Every validation runs before the first write, and the writes commit in one transaction, so a refused
+ * or failed call changes nothing. Announcements are the caller's job and run after the commit.
  */
 export async function addChannelParticipants(
   params: AddChannelParticipantsParams
 ): Promise<AddChannelParticipantsResult> {
-  const { channelId, actorId, actorWorkspaceRole, workspaceId } = params;
+  const { channelId, actorId, actorWorkspaceRole, workspaceId, updateRoles = false } = params;
   const roleOf = new Map<string, ChannelRole>();
   for (const { userId, role } of params.targets) {
-    // A user named twice keeps the higher role.
-    if (roleOf.get(userId) !== ChannelRole.ADMIN) roleOf.set(userId, role);
+    // A user can have a single role; the same user with two different ones is a bad request, not a guess.
+    if (roleOf.has(userId) && roleOf.get(userId) !== role) {
+      throw new AppError(`A user can have a single role, but ${userId} was given both ADMIN and MEMBER`, 400);
+    }
+    roleOf.set(userId, role);
   }
   const userIds = [...roleOf.keys()];
 
@@ -117,8 +122,10 @@ export async function addChannelParticipants(
   });
   const existingRole = new Map(existing.map((participant) => [participant.userId, participant.role]));
   const toAdd = userIds.filter((id) => !existingRole.has(id));
-  const toUpdate = userIds.filter((id) => existingRole.has(id) && existingRole.get(id) !== roleOf.get(id));
-  const unchanged = userIds.filter((id) => existingRole.has(id) && existingRole.get(id) === roleOf.get(id));
+  // People already in the channel keep their role unless the caller asked for roles to be updated.
+  const toUpdate = updateRoles
+    ? userIds.filter((id) => existingRole.has(id) && existingRole.get(id) !== roleOf.get(id))
+    : [];
 
   // Same rules as the in-app role change: admins or the creator only, never your own role or the creator's.
   if (toUpdate.length > 0) {
@@ -133,32 +140,25 @@ export async function addChannelParticipants(
     }
   }
 
-  const added: AddedChannelParticipant[] = [];
-  for (const role of [ChannelRole.ADMIN, ChannelRole.MEMBER]) {
-    const ids = toAdd.filter((id) => roleOf.get(id) === role);
-    if (ids.length === 0) continue;
-    await channelParticipantRepository.addParticipantsBatch(channelId, ids, role);
-    const created = await db.channelParticipant.findMany({
-      where: { channelId, userId: { in: ids } },
-      select: { id: true, userId: true },
-    });
-    for (const participant of created) {
-      const user = byId.get(participant.userId)!;
-      added.push({
-        userId: participant.userId,
-        userName: user.displayName || user.name,
-        participantId: participant.id,
-      });
-    }
-  }
+  // One transaction for every insert and role change. What comes back is what it really did: a user a
+  // concurrent call got in first, or whose role was already changed, is not reported (or announced) twice.
+  const changes = await channelParticipantRepository.applyParticipantChanges(
+    channelId,
+    toAdd.map((userId) => ({ userId, role: roleOf.get(userId)! })),
+    toUpdate.map((userId) => ({ userId, role: roleOf.get(userId)! })),
+  );
 
-  for (const userId of toUpdate) {
-    await channelParticipantRepository.updateParticipantRole(channelId, userId, roleOf.get(userId)!);
-  }
-
-  return {
-    added,
-    updated: toUpdate.map((userId) => ({ userId, role: roleOf.get(userId)! })),
-    alreadyMembers: unchanged,
+  const nameOf = (userId: string): string => {
+    const user = byId.get(userId)!;
+    return user.displayName || user.name;
   };
+  const added = changes.inserted.map((participant) => ({
+    userId: participant.userId,
+    userName: nameOf(participant.userId),
+    participantId: participant.id,
+  }));
+  const updated = changes.updated.map((change) => ({ ...change, userName: nameOf(change.userId) }));
+  const touched = new Set([...added.map((a) => a.userId), ...updated.map((u) => u.userId)]);
+
+  return { added, updated, alreadyMembers: userIds.filter((id) => !touched.has(id)) };
 }

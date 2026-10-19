@@ -250,6 +250,68 @@ export class ChannelController {
     }
   }
 
+  // System message for a role change, with the content and metadata of the in-app updateParticipantRole mutator
+  async sendRoleUpdatedSystemMessage(
+    channelId: string,
+    actor: { id: string; name: string },
+    target: { userId: string; userName: string },
+    oldRole: string,
+    newRole: string
+  ): Promise<void> {
+    try {
+      // Names are user-supplied and the content is rendered as markup, so escape them.
+      const esc = (value: string): string =>
+        value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+      const conversation = await this.conversationRepository.create({
+        channelId,
+        createdBy: actor.id,
+        initialMessageId: 'temp', // Will be updated after message creation
+      });
+      const createdMessage = await this.messageRepository.create({
+        conversationId: conversation.conversationId,
+        senderId: actor.id,
+        content: `changed ${esc(target.userName)}'s role to ${newRole}`,
+        msgType: MessageType.SYSTEM,
+        hasAttachment: false,
+        metadata: {
+          operationType: 'role_updated',
+          targetUserId: target.userId,
+          targetUserName: target.userName,
+          oldRole,
+          newRole,
+          updatedBy: actor.id,
+          updatedByName: actor.name,
+        },
+      });
+      await this.conversationRepository.update(conversation.conversationId, {
+        initialMessageId: createdMessage.messageId,
+      });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+      await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
+
+      const senderInfo = await this.getUserInfo(actor.id);
+      const conversationMessage = {
+        conversationId: conversation.conversationId,
+        channelId,
+        messageId: createdMessage.messageId,
+        senderId: createdMessage.senderId,
+        senderName: senderInfo.name,
+        senderPicture: senderInfo.picture,
+        content: createdMessage.content,
+        msgType: createdMessage.msgType,
+        hasAttachment: createdMessage.hasAttachment,
+        attachments: [],
+        createdAt: createdMessage.createdAt,
+      };
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+    } catch (error) {
+      logger.error('Error sending role-updated system message:', error);
+      throw error;
+    }
+  }
+
   // Helper method to send initial message to a channel
   private async sendInitialMessage(
     channelId: string,

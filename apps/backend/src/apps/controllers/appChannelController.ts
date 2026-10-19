@@ -47,10 +47,21 @@ const AddParticipantsBodySchema = z
     channelId: z.string().trim().min(1),
     adminEmails: z.array(email).max(100).default([]),
     memberEmails: z.array(email).max(100).default([]),
+    /** Also set the role of people already in the channel (promote from adminEmails, demote from memberEmails). */
+    updateRoles: z.boolean().default(false),
   })
   .strict()
   .refine((body) => body.adminEmails.length + body.memberEmails.length > 0, {
     message: 'Give at least one email in adminEmails or memberEmails',
+  })
+  .superRefine((body, ctx) => {
+    const both = body.adminEmails.filter((email) => body.memberEmails.includes(email));
+    if (both.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `A user can have a single role, but ${[...new Set(both)].join(', ')} is in both adminEmails and memberEmails`,
+      });
+    }
   });
 
 const ListParticipantsQuerySchema = z
@@ -151,7 +162,7 @@ export class AppChannelController {
   };
 
   /**
-   * Add workspace members to a channel the app's bot is in, or set the role of those already in it
+   * Add workspace members to a channel the app's bot is in; with updateRoles, also set the role of those already in it
    * POST /api/apps/channel/participants
    */
   addParticipants = async (req: Request, res: Response): Promise<void> => {
@@ -178,30 +189,36 @@ export class AppChannelController {
         return;
       }
       const adminEmails = [...new Set(bodyResult.data.adminEmails)];
-      const memberEmails = [...new Set(bodyResult.data.memberEmails)].filter((e) => !adminEmails.includes(e));
+      const memberEmails = [...new Set(bodyResult.data.memberEmails)];
       // Same-workspace, active, non-guest members only; anything else fails the whole call before any add.
       const adminIds = await findMembers(app, adminEmails);
       const memberIds = await findMembers(app, memberEmails);
 
-      // New people get the role of the list they are in; people already in the channel have their role set to it.
+      // New people get the role of the list they are in. People already in the channel keep their role,
+      // unless updateRoles is set, so re-sending a member list can never take admin rights away.
       const { added, updated, alreadyMembers } = await addChannelParticipants({
         channelId,
         actorId: app.botUserId,
         actorWorkspaceRole: req.user!.role,
         workspaceId: app.workspaceId,
+        updateRoles: bodyResult.data.updateRoles,
         targets: [
           ...adminIds.map((userId) => ({ userId, role: ChannelRole.ADMIN })),
           ...memberIds.map((userId) => ({ userId, role: ChannelRole.MEMBER })),
         ],
       });
 
+      // Announcements run after the writes committed; a failure in them is logged and never turns the call into an error.
       if (added.length > 0) {
         await this.announceAdded(req, channelId, added);
+      }
+      for (const change of updated) {
+        await this.announceRoleChange(req, channelId, change);
       }
       res.status(added.length > 0 ? 201 : 200).json({
         channelId,
         added: added.map(({ userId }) => userId),
-        updated,
+        updated: updated.map(({ userId, role }) => ({ userId, role })),
         alreadyMembers,
       });
     } catch (error) {
@@ -263,6 +280,28 @@ export class AppChannelController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /** The "changed X's role to Y" channel message, as the in-app role change posts it. */
+  private async announceRoleChange(
+    req: Request,
+    channelId: string,
+    change: { userId: string; userName: string; oldRole: string; role: string },
+  ): Promise<void> {
+    const bot = req.user!;
+    try {
+      await channelController.sendRoleUpdatedSystemMessage(
+        channelId,
+        { id: bot.id, name: bot.name },
+        { userId: change.userId, userName: change.userName },
+        change.oldRole,
+        change.role,
+      );
+    } catch (error) {
+      logger.error('[APP-CHANNEL] Failed to post role-change system message', {
+        error: (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' '),
+      });
+    }
+  }
 
   /** The "X was added by Y" channel message, then the participants side effects (sync, notifications). */
   private async announceAdded(req: Request, channelId: string, added: AddedChannelParticipant[]): Promise<void> {
