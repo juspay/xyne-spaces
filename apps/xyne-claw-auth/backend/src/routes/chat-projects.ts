@@ -1,0 +1,319 @@
+/**
+ * Chat projects: folders that group a user's Xyne AI chats and carry shared
+ * instructions.
+ *
+ * Mounted INTO `agentChatRouter` (see agent-chat.ts) rather than onto the app,
+ * so every path here is served under `/agent-chat` exactly as if it were
+ * declared in that file. It lives in its own module only because agent-chat.ts
+ * cannot be imported without its whole dependency graph, which makes the
+ * handlers untestable in isolation.
+ *
+ * The mount happens AHEAD of agent-chat's `/:slug/...` routes. None of those
+ * can match a `/chat/projects*` path — they all require the literal "chat" in
+ * their second segment, where these have "projects" — but ordering it first
+ * removes the question for whoever adds the next `/:slug` route.
+ *
+ * Access is owner-only through `chatProjectRepository.findOwned`, which returns
+ * null for "not yours" and "does not exist" alike so a caller can never tell
+ * the two apart. That is why every miss below is 404 and never 403.
+ */
+
+import { Router, type Request, type Response } from "express";
+import { prisma } from "../db.js";
+import { chatProjectRepository } from "../repositories/index.js";
+import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
+
+import { createLogger } from "../logger.js";
+const log = createLogger("chat-projects");
+
+export const chatProjectsRouter: Router = Router();
+
+const MAX_PROJECT_NAME_CHARS = 120;
+const MAX_PROJECT_ICON_CHARS = 64;
+const MAX_PROJECT_INSTRUCTIONS_CHARS = 10_000;
+const MAX_PROJECT_REF_CHARS = 128;
+const MAX_REORDER_IDS = 500;
+
+interface ProjectCaller {
+  /** Every id this caller is verified under; reads match any of them. */
+  aliases: string[];
+  /** The single id new rows are written under. */
+  primaryUserId: string;
+  orgId: string;
+}
+
+/**
+ * Projects are not conversation-scoped, so orgId cannot be taken from an owning
+ * chat row the way title/pin do it. Use the header, falling back to the
+ * caller's own org — the same order resolveCallbackOrgId uses.
+ * Writes the error response itself and returns null when it cannot resolve.
+ */
+async function requireProjectCaller(req: Request, res: Response): Promise<ProjectCaller | null> {
+  const aliases = getRequesterAliases(req);
+  if (aliases.length === 0) {
+    res.status(401).json({ success: false, error: "Authentication required" });
+    return null;
+  }
+  const headerOrgId = getOrgId(req);
+  const orgId = headerOrgId
+    ?? (await prisma.user
+      .findFirst({ where: { id: { in: aliases } }, select: { orgId: true } })
+      .catch(() => null))?.orgId;
+  if (!orgId) {
+    res.status(400).json({ success: false, error: "Organization context is required" });
+    return null;
+  }
+  return { aliases, primaryUserId: getRequesterId(req) ?? aliases[0]!, orgId };
+}
+
+interface ProjectFields {
+  name?: string | undefined;
+  icon?: string | null | undefined;
+  instructions?: string | undefined;
+  instructionsEnabled?: boolean | undefined;
+  spacesProjectId?: string | null | undefined;
+  defaultAgentSlug?: string | null | undefined;
+}
+
+/** Absent fields stay absent so a PATCH writes only what was sent; an empty
+ *  string on a nullable field clears it. */
+function parseProjectBody(
+  raw: unknown,
+  requireName: boolean,
+): { error: string } | { value: ProjectFields } {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const value: ProjectFields = {};
+
+  if (body["name"] !== undefined) {
+    const name = body["name"];
+    if (typeof name !== "string" || !name.trim()) {
+      return { error: "name must be a non-empty string" };
+    }
+    if (name.trim().length > MAX_PROJECT_NAME_CHARS) {
+      return { error: `name must be at most ${MAX_PROJECT_NAME_CHARS} characters` };
+    }
+    value.name = name.trim();
+  } else if (requireName) {
+    return { error: "name is required" };
+  }
+
+  if (body["icon"] !== undefined) {
+    const icon = body["icon"];
+    if (icon !== null && typeof icon !== "string") {
+      return { error: "icon must be a string or null" };
+    }
+    const trimmed = typeof icon === "string" ? icon.trim() : "";
+    if (trimmed.length > MAX_PROJECT_ICON_CHARS) {
+      return { error: `icon must be at most ${MAX_PROJECT_ICON_CHARS} characters` };
+    }
+    value.icon = trimmed || null;
+  }
+
+  if (body["instructions"] !== undefined) {
+    const instructions = body["instructions"];
+    if (typeof instructions !== "string") {
+      return { error: "instructions must be a string" };
+    }
+    if (instructions.length > MAX_PROJECT_INSTRUCTIONS_CHARS) {
+      return { error: `instructions must be at most ${MAX_PROJECT_INSTRUCTIONS_CHARS} characters` };
+    }
+    value.instructions = instructions;
+  }
+
+  if (body["instructionsEnabled"] !== undefined) {
+    if (typeof body["instructionsEnabled"] !== "boolean") {
+      return { error: "instructionsEnabled must be a boolean" };
+    }
+    value.instructionsEnabled = body["instructionsEnabled"];
+  }
+
+  for (const key of ["spacesProjectId", "defaultAgentSlug"] as const) {
+    const supplied = body[key];
+    if (supplied === undefined) continue;
+    if (supplied !== null && typeof supplied !== "string") {
+      return { error: `${key} must be a string or null` };
+    }
+    const trimmed = typeof supplied === "string" ? supplied.trim() : "";
+    if (trimmed.length > MAX_PROJECT_REF_CHARS) {
+      return { error: `${key} must be at most ${MAX_PROJECT_REF_CHARS} characters` };
+    }
+    value[key] = trimmed || null;
+  }
+
+  return { value };
+}
+
+// GET /agent-chat/chat/projects — the caller's projects, with chat counts
+chatProjectsRouter.get("/chat/projects", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const caller = await requireProjectCaller(req, res);
+    if (!caller) return;
+
+    const [projects, counts] = await Promise.all([
+      chatProjectRepository.listForOwner(caller.aliases, caller.orgId),
+      chatProjectRepository.countsByProject(caller.aliases, caller.orgId),
+    ]);
+
+    res.json({
+      success: true,
+      data: projects.map((project) => ({ ...project, chatCount: counts.get(project.id) ?? 0 })),
+    });
+  } catch (err) {
+    log.error("[chat-projects] list error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// POST /agent-chat/chat/projects — create
+chatProjectsRouter.post("/chat/projects", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const caller = await requireProjectCaller(req, res);
+    if (!caller) return;
+
+    const parsed = parseProjectBody(req.body, true);
+    if ("error" in parsed) {
+      res.status(400).json({ success: false, error: parsed.error });
+      return;
+    }
+
+    const created = await chatProjectRepository.create(caller.primaryUserId, caller.orgId, {
+      ...parsed.value,
+      name: parsed.value.name as string,
+    });
+
+    res.status(201).json({ success: true, data: { ...created, chatCount: 0 } });
+  } catch (err) {
+    log.error("[chat-projects] create error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// PUT /agent-chat/chat/projects/reorder
+// Declared before `/chat/projects/:projectId` so "reorder" is never read as an id.
+chatProjectsRouter.put("/chat/projects/reorder", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const caller = await requireProjectCaller(req, res);
+    if (!caller) return;
+
+    const projectIds = (req.body as { projectIds?: unknown } | undefined)?.projectIds;
+    if (!Array.isArray(projectIds) || projectIds.some((id) => typeof id !== "string" || !id.trim())) {
+      res.status(400).json({ success: false, error: "projectIds must be an array of non-empty strings" });
+      return;
+    }
+    if (projectIds.length > MAX_REORDER_IDS) {
+      res.status(400).json({ success: false, error: `projectIds must hold at most ${MAX_REORDER_IDS} ids` });
+      return;
+    }
+
+    // Ids the caller does not own match nothing and are skipped, so a stale
+    // client list renumbers what it legitimately can instead of failing whole.
+    const reordered = await chatProjectRepository.reorder(
+      caller.aliases,
+      caller.orgId,
+      projectIds as string[],
+    );
+
+    res.json({ success: true, data: { reordered } });
+  } catch (err) {
+    log.error("[chat-projects] reorder error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// GET /agent-chat/chat/projects/:projectId — owner-only
+chatProjectsRouter.get(
+  "/chat/projects/:projectId",
+  async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const project = await chatProjectRepository.findOwned(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+      );
+      if (!project) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      const conversationIds = await chatProjectRepository.conversationIdsInProject(
+        project.id,
+        caller.aliases,
+      );
+      res.json({
+        success: true,
+        data: { ...project, conversationIds, chatCount: conversationIds.length },
+      });
+    } catch (err) {
+      log.error("[chat-projects] get error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// PATCH /agent-chat/chat/projects/:projectId — owner-only field updates
+chatProjectsRouter.patch(
+  "/chat/projects/:projectId",
+  async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const parsed = parseProjectBody(req.body, false);
+      if ("error" in parsed) {
+        res.status(400).json({ success: false, error: parsed.error });
+        return;
+      }
+      if (Object.keys(parsed.value).length === 0) {
+        res.status(400).json({ success: false, error: "No updatable fields supplied" });
+        return;
+      }
+
+      const updated = await chatProjectRepository.update(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+        parsed.value,
+      );
+      if (!updated) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      log.error("[chat-projects] update error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// DELETE /agent-chat/chat/projects/:projectId — owner-only.
+// Cascades its membership rows; the chats themselves return to the main list.
+chatProjectsRouter.delete(
+  "/chat/projects/:projectId",
+  async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const removed = await chatProjectRepository.remove(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+      );
+      if (!removed) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      res.json({ success: true, data: { id: req.params.projectId, deleted: true } });
+    } catch (err) {
+      log.error("[chat-projects] delete error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
