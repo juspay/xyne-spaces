@@ -1825,6 +1825,12 @@ enum AgentAuditEvent {
   MCP_SERVER_CREATED
   SUBAGENT_MCP_UPDATED
   SUBAGENT_MCP_DELETED
+  // Org-level design systems. Added by migration
+  // 20261019120100_design_system_audit_events (ALTER TYPE ADD VALUE) — kept
+  // here so a fresh `prisma generate` accepts them.
+  DESIGN_SYSTEM_CREATED
+  DESIGN_SYSTEM_UPDATED
+  DESIGN_SYSTEM_DELETED
 }
 
 model AgentAuditLog {
@@ -3394,4 +3400,57 @@ model ChatProjectItem {
   @@index([userId])
   @@index([orgId])
   @@map("chat_project_items")
+}
+
+/// An org's brand as its own record. Supersedes the free-text
+/// `agent.config.designSystem`, which is still read as a fallback until every
+/// org is migrated — resolution order lives in designSystemRepository.
+model DesignSystem {
+  id        String @id @default(cuid())
+  orgId     String
+  name      String
+  designMd  String @default("") @db.Text
+  tokensCss String @default("") @db.Text
+
+  /// Descriptors only — { logo: { storagePath, mimeType, width, height }, fonts: [...] }.
+  /// Bytes ride GCS. Deliberately not a ChatAttachment reference: those
+  /// cascade-delete with their chat message and carry no org scope.
+  assets Json?
+
+  /// "manual" | "url" | "screenshot" | "repo" | "file" | "library". Plain string
+  /// rather than a Postgres enum, following the Canvas.visibility convention.
+  source       String  @default("manual")
+  sourceUrl    String?
+  sourceRepo   String?
+  sourceCommit String?
+
+  version   Int      @default(1)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversationPins ChatConversationDesignSystem[]
+
+  @@index([orgId])
+  @@index([orgId, name])
+  @@map("design_systems")
+}
+
+/// A single chat pinned to a design system, overriding its agent's default.
+/// Keyed by conversation alone — not by [conversationId, userId, agentSlug]
+/// like ChatConversationMeta — because a chat can switch agents mid-conversation
+/// and the brand its artifacts are built against must not change when it does.
+model ChatConversationDesignSystem {
+  conversationId String   @id
+  designSystemId String
+  orgId          String
+  setByUserId    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  designSystem DesignSystem @relation(fields: [designSystemId], references: [id], onDelete: Cascade)
+
+  @@index([designSystemId])
+  @@index([orgId])
+  @@map("chat_conversation_design_systems")
 }

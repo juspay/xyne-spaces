@@ -12,7 +12,7 @@ import {
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
+import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository, designSystemRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
 import { draftSpecFromCreateAgentParams, createAgentQueueError, createAgentNotGranted } from "../lib/agent-draft-card.js";
@@ -801,13 +801,32 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     throw forbidden("Only the agent owner, contributors, or admins can edit its design system");
   }
 
-  const supplied = (req.body as { designSystem?: unknown }).designSystem;
-  if (supplied !== null && typeof supplied !== "string") {
+  // Two shapes share this route: `designSystem` is the pre-migration free text,
+  // `designSystemId` points at a DesignSystem row. A body carrying only the
+  // former behaves exactly as it did before.
+  const body = (req.body ?? {}) as { designSystem?: unknown; designSystemId?: unknown };
+  const hasText = "designSystem" in body;
+  const hasId = "designSystemId" in body;
+  if (!hasText && !hasId) {
+    throw badRequest("designSystem or designSystemId is required");
+  }
+
+  const supplied = body.designSystem;
+  if (hasText && supplied !== null && typeof supplied !== "string") {
     throw badRequest("designSystem must be a string or null");
   }
   const designSystem = typeof supplied === "string" ? supplied.trim() : "";
   if (designSystem.length > 32_000) {
     throw badRequest("designSystem must be at most 32,000 characters");
+  }
+
+  const suppliedId = body.designSystemId;
+  if (hasId && suppliedId !== null && typeof suppliedId !== "string") {
+    throw badRequest("designSystemId must be a string or null");
+  }
+  const designSystemId = typeof suppliedId === "string" ? suppliedId.trim() : "";
+  if (designSystemId && !(await designSystemRepository.findById(designSystemId, existing.orgId))) {
+    throw notFound("Design system not found");
   }
 
   // Optimistic retry prevents this narrow edit from replacing a concurrent
@@ -819,8 +838,14 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
       throw notFound("Agent not found");
     }
     const nextConfig = { ...(asRecord(fresh.config) ?? {}) };
-    if (designSystem) nextConfig["designSystem"] = designSystem;
-    else delete nextConfig["designSystem"];
+    if (hasText) {
+      if (designSystem) nextConfig["designSystem"] = designSystem;
+      else delete nextConfig["designSystem"];
+    }
+    if (hasId) {
+      if (designSystemId) nextConfig["designSystemId"] = designSystemId;
+      else delete nextConfig["designSystemId"];
+    }
 
     const configCheck = validateAgentModelConfig(nextConfig);
     if (!configCheck.ok) {
@@ -845,7 +870,10 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     eventType: "AGENT_UPDATED",
     targetId: existing.id,
     description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
-    metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    metadata: {
+      changed: [...(hasText ? ["designSystem"] : []), ...(hasId ? ["designSystemId"] : [])],
+      orgId: existing.orgId,
+    },
   });
   ok(res, sanitizeAgent(updated as unknown as Record<string, unknown>));
 }));
