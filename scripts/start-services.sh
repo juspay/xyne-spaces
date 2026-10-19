@@ -25,6 +25,29 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+COMPOSE_FILE="docker-compose.dev.yml"
+
+# `--stop` backs `pnpm run services:stop` for both stacks. A running Compose stack
+# is taken down; otherwise the Nix services are stopped by port. Killing by port
+# while containers hold those ports would kill the container runtime's forwarder.
+if [ "${1:-}" = "--stop" ]; then
+    VESPA_COMPOSE="vespa-core/deployment/docker-compose.dev.yml"
+    VESPA_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
+    stopped=0
+    for compose in "docker compose" "docker-compose" "podman compose" "podman-compose"; do
+        # shellcheck disable=SC2086 — each entry is a deliberately word-split command
+        if $compose version >/dev/null 2>&1 &&
+            [ -n "$($compose -f "$COMPOSE_FILE" ps -q 2>/dev/null)" ]; then
+            echo "Stopping Compose services ($compose)..."
+            $compose -f "$COMPOSE_FILE" down
+            $compose -p "$VESPA_PROJECT" -f "$VESPA_COMPOSE" down 2>/dev/null || true
+            stopped=1
+        fi
+    done
+    [ "$stopped" = 1 ] && exit 0
+    exec "$REPO_ROOT/nix/scripts/cleanup-ports.sh"
+fi
+
 echo "🚀 Starting Xyne Spaces Infrastructure Services..."
 echo ""
 
@@ -35,8 +58,6 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
-
-COMPOSE_FILE="docker-compose.dev.yml"
 
 # Ask whether the developer wants a login of their own in addition to the seeded
 # default. Sets DEV_LOGIN_EMAIL / DEV_LOGIN_PASSWORD when they do and leaves both
