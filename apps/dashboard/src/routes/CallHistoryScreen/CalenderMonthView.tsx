@@ -32,16 +32,25 @@ function formatMonthTimeRange(
   return start && end ? `${start} - ${end}` : start;
 }
 
+/** Popover key for another user's slot; the `other-` prefix keeps it apart from own call ids. */
+const otherSlotPopoverId = (slot: OtherUserBusySlot): string =>
+  `other-${slot.userId}-${slot.id ?? slot.startsAt}`;
+
 function MonthOtherUserEventRow({
   color,
   slot,
   userName,
   variant = 'cell',
+  open,
+  onOpenChange,
 }: {
   color: string;
   slot: OtherUserBusySlot;
   userName: string;
   variant?: 'cell' | 'overflow';
+  // Controlled by the view, so its open-popover guard stops the closing click creating a call.
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }): ReactElement {
   const { title, startsAt, endsAt } = slot;
   // A public calendar's slot carries a title and opens its details; a busy slot doesn't.
@@ -109,6 +118,8 @@ function MonthOtherUserEventRow({
       align='start'
       sideOffset={8}
       collisionPadding={8}
+      open={open}
+      onOpenChange={onOpenChange}
     >
       <OtherUserCallDetails details={slot} />
     </Popover>
@@ -301,6 +312,10 @@ const CalendarMonthView = ({
                                 color={event.color}
                                 slot={event.slot}
                                 userName={event.userName}
+                                open={openCallId === otherSlotPopoverId(event.slot)}
+                                onOpenChange={open =>
+                                  setOpenCallId(open ? otherSlotPopoverId(event.slot) : null)
+                                }
                               />
                             );
                           }
@@ -514,6 +529,14 @@ const CalendarMonthView = ({
                                           slot={event.slot}
                                           userName={event.userName}
                                           variant='overflow'
+                                          open={
+                                            openOverflowCallId === otherSlotPopoverId(event.slot)
+                                          }
+                                          onOpenChange={open =>
+                                            setOpenOverflowCallId(
+                                              open ? otherSlotPopoverId(event.slot) : null,
+                                            )
+                                          }
                                         />
                                       );
                                     }

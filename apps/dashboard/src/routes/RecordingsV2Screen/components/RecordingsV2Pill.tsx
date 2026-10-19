@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react';
 import type { User } from '@xyne/shared/machines';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE, TagMethod } from '@xyne/shared';
+import { TagMethod } from '@xyne/shared';
 import {
   Ai01,
   ChevronRight,
@@ -29,6 +29,7 @@ import {
 import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
 import { useSpeakerIdentificationEnabled } from '../../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
+  NoTranscriptError,
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
@@ -44,6 +45,7 @@ import {
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
+import { copyFetchedTextToClipboard } from '../../../utils/clipboardUtils';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
@@ -254,33 +256,22 @@ const RecordingsV2Pill = ({
       setIsDownloadingTranscript(false);
     }
   };
-  // Copies what the detail page's transcript panel shows on "Original": the
-  // speaker-identified transcript when there is one, else the stored transcript.
   const handleCopyTranscript = async (): Promise<void> => {
     if (!canDownloadTranscript || isCopyingTranscript) return;
     setIsCopyingTranscript(true);
     try {
-      const detail =
-        menuDetail ?? (await recordingService.getRecordingDetail(recording.externalId));
-      const identifiedTranscript =
-        speakerIdentificationEnabled && detail.hasIdentifiedTranscript
-          ? detail.identifiedTranscript
-          : null;
-      const text =
-        identifiedTranscript ??
-        (
-          await recordingService.translateTranscript(
-            recording.externalId,
-            ORIGINAL_TRANSCRIPT_LANGUAGE,
-          )
-        ).text;
-      if (!text) {
+      await copyFetchedTextToClipboard(() =>
+        recordingService.getCopyableTranscript(recording.externalId, {
+          preferIdentified: speakerIdentificationEnabled,
+          detail: menuDetail,
+        }),
+      );
+      toast.success('Transcript copied');
+    } catch (err) {
+      if (err instanceof NoTranscriptError) {
         toast.error("Transcript isn't available right now");
         return;
       }
-      await navigator.clipboard.writeText(text);
-      toast.success('Transcript copied');
-    } catch (err) {
       logRecordingError('RecordingsV2Pill.copyTranscript', err);
       toast.error('Could not copy the transcript');
     } finally {

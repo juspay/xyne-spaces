@@ -692,6 +692,8 @@ const CalendarWeekView = ({
                               startsAt={startsAt}
                               endsAt={endsAt}
                               details={details}
+                              open={openCallId === event.id}
+                              onOpenChange={open => setOpenCallId(open ? event.id : null)}
                               gutterPx={1}
                               zClass='z-[3]'
                               interactive

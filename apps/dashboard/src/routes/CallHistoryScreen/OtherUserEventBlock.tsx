@@ -18,6 +18,12 @@ interface OtherUserEventBlockProps {
    * participants and opens a details popover on click; a busy slot stays read-only.
    */
   details?: OtherUserBusySlot | undefined;
+  /**
+   * Controls the details popover. The day/week views drive it from their `openCallId`
+   * so their slot cells know a popover is open and the closing click doesn't start a call.
+   */
+  open?: boolean | undefined;
+  onOpenChange?: ((open: boolean) => void) | undefined;
   /** Inline offset around the 2px gutter (default 2px, use 1px for week view) */
   gutterPx?: number;
   /** z-index class (default 'z-[3]') */
@@ -47,6 +53,8 @@ export function OtherUserEventBlock({
   startsAt,
   endsAt,
   details,
+  open,
+  onOpenChange,
   gutterPx = 2,
   zClass = 'z-[3]',
   interactive = false,
@@ -83,12 +91,19 @@ export function OtherUserEventBlock({
         onClick?.(e);
       }}
       onKeyDown={
-        interactive && onClick && !showsDetails
+        showsDetails
           ? e => {
-              if (e.key === 'Enter' || e.key === ' ')
-                onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.click();
             }
-          : undefined
+          : interactive && onClick
+            ? e => {
+                if (e.key === 'Enter' || e.key === ' ')
+                  onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+              }
+            : undefined
       }
       onPointerDown={e => {
         if (showsDetails) e.stopPropagation();
@@ -114,7 +129,15 @@ export function OtherUserEventBlock({
   if (!details || !showsDetails) return block;
 
   return (
-    <Popover trigger={block} side='left' align='start' sideOffset={8} collisionPadding={8}>
+    <Popover
+      trigger={block}
+      side='left'
+      align='start'
+      sideOffset={8}
+      collisionPadding={8}
+      {...(open !== undefined && { open })}
+      {...(onOpenChange && { onOpenChange })}
+    >
       <OtherUserCallDetails details={details} />
     </Popover>
   );

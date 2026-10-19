@@ -706,7 +706,7 @@ export class CallRepository {
         participants: { some: { userId } },
         status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
         startsAt: { lt: to },
-        endsAt: { gt: from },
+        OR: [{ endsAt: { gt: from } }, { endsAt: null, startsAt: { gte: from } }],
       },
       orderBy: { startsAt: 'asc' },
     });

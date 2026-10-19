@@ -5,13 +5,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
-import {
-  CallType,
-  CallStatus,
-  ChannelScopeType,
-  MeetingStatus,
-  ORIGINAL_TRANSCRIPT_LANGUAGE,
-} from '@xyne/shared';
+import { CallType, CallStatus, ChannelScopeType, MeetingStatus } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -31,7 +25,8 @@ import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
-import { recordingService } from '../../services/Recording/recordingService';
+import { NoTranscriptError, recordingService } from '../../services/Recording/recordingService';
+import { copyFetchedTextToClipboard } from '../../utils/clipboardUtils';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
@@ -790,18 +785,17 @@ export function useCallHistory(
   const handleCopyTranscript = (call: Call): void => {
     void (async () => {
       try {
-        // Same source as the transcript panel's copy button; 'original' is never pending.
-        const { text } = await recordingService.translateTranscript(
-          call.externalId,
-          ORIGINAL_TRANSCRIPT_LANGUAGE,
+        // Matches the call detail transcript panel: this list has no recordings, and only
+        // recordings have a speaker-identified transcript.
+        await copyFetchedTextToClipboard(() =>
+          recordingService.getCopyableTranscript(call.externalId, { preferIdentified: false }),
         );
-        if (!text) {
+        toast.success('Transcript copied', { id: 'copy-transcript' });
+      } catch (error) {
+        if (error instanceof NoTranscriptError) {
           toast.error('No transcript to copy', { id: 'copy-transcript' });
           return;
         }
-        await navigator.clipboard.writeText(text);
-        toast.success('Transcript copied', { id: 'copy-transcript' });
-      } catch (error) {
         logger.error(Logger.API_CALL_FAILED, {
           message: 'Failed to copy transcript',
           error: error instanceof Error ? error.message : 'Unknown error',
