@@ -82,7 +82,7 @@ interface CanvasCommentsPanelProps {
   activeAnchor?: CanvasCommentAnchor | null | undefined;
   editable: boolean;
   onClose: () => void;
-  onSelectBlock: (blockId: string) => void;
+  onSelectBlock: (blockId: string, threadId?: string) => void;
   onBeforeCreateThread?: ((threadId: string, anchor: CanvasCommentAnchor) => boolean) | undefined;
   onCreateThreadCreated?: (() => void) | undefined;
   onCreateThreadFailed?: ((anchor: CanvasCommentAnchor) => void) | undefined;
@@ -110,7 +110,7 @@ interface CanvasCommentThreadSectionProps {
   allUsers: UserLite[];
   editingCommentId: string | null;
   pendingCommentId: string | null;
-  onSelectBlock: (blockId: string) => void;
+  onSelectBlock: (blockId: string, threadId?: string) => void;
   onSetThreadStatus: (threadId: string, status: CanvasCommentThreadStatus) => void;
   onSetEditingCommentId: (commentId: string | null) => void;
   onDeleteComment: (comment: CanvasComment) => void;
@@ -493,7 +493,7 @@ function CanvasCommentThreadSection({
         <Button
           variant='outline'
           size='sm'
-          onClick={() => onSelectBlock(thread.blockId)}
+          onClick={() => onSelectBlock(thread.blockId, thread.id)}
           data-track-category='CANVAS'
           data-track-name='go_to_comment_anchor'
           className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium'
