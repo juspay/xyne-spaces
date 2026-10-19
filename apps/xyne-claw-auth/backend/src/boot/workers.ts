@@ -39,6 +39,7 @@ import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDailyCron.js";
+import { startMcpRestartListener } from "../lib/mcp-restart-signal.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -170,6 +171,8 @@ export function bootWorkers(): void {
   for (const worker of WORKERS) {
     worker.init?.();
   }
+
+  startMcpRestartListener();
 
   void ensureTickScheduler().catch((err) =>
     log.error("[boot] awakening tick scheduler registration failed:", err),
