@@ -6447,6 +6447,10 @@ export interface RouteRow {
   tokensPerSec: number | null;
   failed: number;
   errorRate: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
 export interface RoutesResponse {

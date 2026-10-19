@@ -58,6 +58,7 @@ import {
 } from "../../lib/api";
 import type { AgentLight } from "../../lib/types";
 import { cn } from "../../lib/utils";
+import { priceRow, computeCostSavings } from "../lib/modelPricing";
 import { Skeleton } from "./ui/Skeleton";
 import { Tabs, type TabItem } from "./ui/Tabs";
 import { useAdminStatus } from "../hooks/useAdminStatus";
@@ -505,6 +506,9 @@ function OverviewTab({ scope, onAgent }: { scope: MetricsScopeParams; onAgent: (
             <AgentsLeaderboardCard scope={scope} onAgent={onAgent} />
           </LazyCard>
         )}
+        <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Cost saved by using open models" skeleton={<RowsSkeleton rows={3} />} />}>
+          <CostSavingsCard scope={scope} />
+        </LazyCard>
         <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Model time by route and model" skeleton={<TableSkeleton rows={4} cols={8} />} />}>
           <RoutesCard scope={scope} />
         </LazyCard>
@@ -1254,6 +1258,119 @@ function AvgCell({ ms, n }: { ms: number | null; n: number }): ReactElement {
     <StatusValue status={thin ? "thin" : "ok"} n={n} noun="runs" floor={SAMPLE_FLOORS.avg}>
       {fmtMs(ms)}
     </StatusValue>
+  );
+}
+
+function fmtUsd(n: number | null): string {
+  if (n == null) return "—";
+  if (n >= 100) return `$${n.toFixed(0)}`;
+  return `$${n.toFixed(2)}`;
+}
+
+function CostSavingsCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const routes = useRoutes(scope);
+  const rows = routes.data?.rows ?? [];
+  const priced = rows.map((r) =>
+    priceRow(r.model, r.runs, { tokensIn: r.tokensIn, tokensOut: r.tokensOut, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }),
+  );
+  const savings = computeCostSavings(priced);
+  const multiple = savings.openActual > 0 ? savings.baselineCounterfactual / savings.openActual : null;
+  const pricedRows = [...priced].filter((r) => r.cost != null).sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0));
+  const pricedTotal = pricedRows.reduce((a, r) => a + (r.cost ?? 0), 0);
+
+  const items: Kpi[] = [
+    {
+      key: "saved",
+      label: "Saved by open models",
+      icon: Coins,
+      value: fmtUsd(savings.saved),
+      line: (
+        <span>
+          {multiple != null && <span className="font-semibold text-xyne-success-fg">≈ {multiple.toFixed(0)}× </span>}
+          cheaper than {savings.baselineModel}
+        </span>
+      ),
+    },
+    {
+      key: "open",
+      label: "Open-model spend",
+      icon: Coins,
+      value: fmtUsd(savings.openActual),
+      line: <span>Actual, across {fmtInt(savings.openRuns)} runs</span>,
+    },
+    {
+      key: "baseline",
+      label: "Baseline (modeled)",
+      icon: Coins,
+      value: fmtUsd(savings.baselineCounterfactual),
+      line: <span>Same work on {savings.baselineModel}</span>,
+    },
+  ];
+
+  const pill = "inline-flex items-center rounded-full border px-2 py-[1px] text-[10.5px] font-semibold";
+
+  return (
+    <MetricsCard
+      title="Cost saved by using open models"
+      subtitle="Priced at the verified v2 list card. The saving is what open-model work would have cost on the proprietary baseline, minus what it actually cost."
+      loading={!routes.data && !routes.error}
+      busy={routes.isPlaceholder}
+      footnote={
+        <>
+          The open-model spend is measured from recorded tokens; the baseline is modeled — open workload re-priced at {savings.baselineModel} rates, split cache-write {Math.round(savings.cacheWriteShare * 100)}% (the baseline's own ratio this window). Models without a rate are shown as tokens only.
+        </>
+      }
+    >
+      {routes.error ? (
+        <PanelError error={routes.error} onRetry={routes.refetch} />
+      ) : (
+        <>
+          <KpiStrip items={items} cols="grid-cols-1 @min-[420px]:grid-cols-3" />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wider text-xyne-fg-tertiary">
+                  <th className="py-2 pr-3 text-left font-medium">Model</th>
+                  <th className="py-2 pr-3 text-left font-medium" />
+                  <th className="py-2 pr-3 text-right font-medium">Runs</th>
+                  <th className="py-2 pr-3 text-right font-medium">Prompt tok</th>
+                  <th className="py-2 pr-3 text-right font-medium">Output tok</th>
+                  <th className="py-2 pr-3 text-right font-medium">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {priced.map((r) => (
+                  <tr key={`${r.model ?? "null"}`} className="border-t border-xyne-border-subtle">
+                    <td className="py-2 pr-3 font-mono text-[11.5px] font-semibold">{r.model ?? "unknown model"}</td>
+                    <td className="py-2 pr-3">
+                      {r.cost == null ? (
+                        <span className={`${pill} border-xyne-border text-xyne-fg-muted`}>rate unset</span>
+                      ) : r.open ? (
+                        <span className={`${pill} border-xyne-success-border bg-xyne-success-bg text-xyne-success-fg`}>open</span>
+                      ) : (
+                        <span className={`${pill} border-xyne-info-border bg-xyne-info-bg text-xyne-info-fg`}>closed</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.runs)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-xyne-fg-muted">{fmtTokens(r.tokensIn + r.cacheRead + r.cacheWrite)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-xyne-fg-muted">{fmtTokens(r.tokensOut)}</td>
+                    <td className="py-2 pr-3 text-right font-semibold tabular-nums">{fmtUsd(r.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-xyne-border">
+                  <td className="py-2 pr-3 font-semibold text-xyne-fg-muted" colSpan={5}>
+                    Priced total ({pricedRows.length} of {priced.length} models)
+                  </td>
+                  <td className="py-2 pr-3 text-right font-semibold tabular-nums">{fmtUsd(pricedTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
+      )}
+    </MetricsCard>
   );
 }
 
