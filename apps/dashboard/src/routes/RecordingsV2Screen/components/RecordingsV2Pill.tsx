@@ -1,9 +1,10 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react';
 import type { User } from '@xyne/shared/machines';
-import { TagMethod } from '@xyne/shared';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, TagMethod } from '@xyne/shared';
 import {
   Ai01,
   ChevronRight,
+  CopyDefault,
   DeleteDustbin02,
   DownloadBarDown,
   MusicQuaverNote,
@@ -26,6 +27,7 @@ import {
   type OatsRecordingEntry,
 } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
+import { useSpeakerIdentificationEnabled } from '../../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   recordingService,
   type RecordingDetail,
@@ -222,6 +224,8 @@ const RecordingsV2Pill = ({
   const canDownloadTranscript = Boolean(recording.transcript);
   const canDownloadRecording = Boolean(menuDetail?.hasRecording);
   const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
+  const [isCopyingTranscript, setIsCopyingTranscript] = useState(false);
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const [isDownloadingRecording, setIsDownloadingRecording] = useState(false);
 
   const handleDownloadTranscript = async (): Promise<void> => {
@@ -248,6 +252,39 @@ const RecordingsV2Pill = ({
       toast.error('Failed to download transcript');
     } finally {
       setIsDownloadingTranscript(false);
+    }
+  };
+  // Copies what the detail page's transcript panel shows on "Original": the
+  // speaker-identified transcript when there is one, else the stored transcript.
+  const handleCopyTranscript = async (): Promise<void> => {
+    if (!canDownloadTranscript || isCopyingTranscript) return;
+    setIsCopyingTranscript(true);
+    try {
+      const detail =
+        menuDetail ?? (await recordingService.getRecordingDetail(recording.externalId));
+      const identifiedTranscript =
+        speakerIdentificationEnabled && detail.hasIdentifiedTranscript
+          ? detail.identifiedTranscript
+          : null;
+      const text =
+        identifiedTranscript ??
+        (
+          await recordingService.translateTranscript(
+            recording.externalId,
+            ORIGINAL_TRANSCRIPT_LANGUAGE,
+          )
+        ).text;
+      if (!text) {
+        toast.error("Transcript isn't available right now");
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      toast.success('Transcript copied');
+    } catch (err) {
+      logRecordingError('RecordingsV2Pill.copyTranscript', err);
+      toast.error('Could not copy the transcript');
+    } finally {
+      setIsCopyingTranscript(false);
     }
   };
   const handleDownloadRecording = async (): Promise<void> => {
@@ -416,6 +453,16 @@ const RecordingsV2Pill = ({
                 >
                   <DownloadBarDown size={16} className='shrink-0' />
                   <span className='flex-1'>Download transcript</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className='gap-2 rounded-lg'
+                  disabled={!canDownloadTranscript || isCopyingTranscript}
+                  onClick={() => void handleCopyTranscript()}
+                  data-track-category='RecordingsV2'
+                  data-track-name='copy_transcript'
+                >
+                  <CopyDefault size={16} className='shrink-0' />
+                  <span className='flex-1'>Copy transcript</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className='gap-2 rounded-lg'

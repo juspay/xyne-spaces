@@ -11,6 +11,7 @@ import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
+import { CALENDAR_CALL_ORIGINS } from '@/utils/callTypeUtils';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
@@ -145,12 +146,15 @@ export interface UpdateCallInput {
   summaryTemplateId?: string | null;
 }
 
+export type CallKind = 'call' | 'recording';
+
 export interface CallAdminListFilters {
   workspaceId: string;
   /** SELF tier: only calls this user created or participates in. */
   participantUserId?: string;
   statuses?: CallStatus[];
-  callType?: CallType;
+  /** `recording` is HEADLESS, `call` is every other callType. */
+  callType?: CallKind;
   /** Case-insensitive title match, or an exact externalId. */
   search?: string;
   /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
@@ -549,7 +553,11 @@ export class CallRepository {
     filters: CallAdminListFilters,
     options: { limit: number; cursor?: { startedAt: Date; id: string } },
   ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
-    const conditions: Prisma.CallWhereInput[] = [{ workspaceId: filters.workspaceId }];
+    const conditions: Prisma.CallWhereInput[] = [
+      { workspaceId: filters.workspaceId },
+      // Calendar-imported calls belong to that calendar, not Xyne, so there is nothing here to repair.
+      { callOrigin: { notIn: [...CALENDAR_CALL_ORIGINS] } },
+    ];
 
     if (filters.participantUserId) {
       conditions.push({
@@ -560,7 +568,11 @@ export class CallRepository {
       });
     }
     if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
-    if (filters.callType) conditions.push({ callType: filters.callType });
+    if (filters.callType) {
+      conditions.push({
+        callType: filters.callType === 'recording' ? CallType.HEADLESS : { not: CallType.HEADLESS },
+      });
+    }
     if (filters.search) {
       // Support pastes a call id as often as a title, so match either.
       conditions.push({
@@ -688,21 +700,31 @@ export class CallRepository {
     queueCallVespaDelete(id, { source: 'CallRepository.delete' });
   }
 
-  async getScheduledCallsForUser(userId: string, from: Date, to: Date) {
+  async getCalendarCallsForUser(userId: string, from: Date, to: Date) {
     return DatabaseClient.getInstance().call.findMany({
       where: {
         participants: { some: { userId } },
-        status: CallStatus.SCHEDULED,
-        startsAt: { gte: from, lte: to },
-      },
-      include: {
-        participants: {
-          where: { isExternal: false },
-          select: { userId: true, meetingStatus: true },
-        },
+        status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
+        startsAt: { lt: to },
+        endsAt: { gt: from },
       },
       orderBy: { startsAt: 'asc' },
     });
+  }
+
+  /** Internal participants of one call on `userId`'s calendar; null if it is not on it. */
+  async getCalendarCallParticipantIds(callId: string, userId: string): Promise<string[] | null> {
+    const call = await DatabaseClient.getInstance().call.findFirst({
+      where: {
+        id: callId,
+        participants: { some: { userId } },
+        status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
+      },
+      select: {
+        participants: { where: { isExternal: false }, select: { userId: true } },
+      },
+    });
+    return call ? call.participants.map(p => p.userId) : null;
   }
 
   async findParticipant(callId: string, userId: string): Promise<CallParticipant | null> {

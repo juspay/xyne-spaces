@@ -7,6 +7,8 @@ import { apiInstance } from '../clients/apiClient';
 // ============================================================================
 
 export type CallAdminListScope = 'mine' | 'all';
+/** `recording` is a HEADLESS call; `call` is every other type. */
+export type CallAdminCallKind = 'call' | 'recording';
 export type CallAdminAction =
   | 'cancel'
   | 'forceEnd'
@@ -60,7 +62,7 @@ export interface CallAdminCallFilters {
   scope: CallAdminListScope;
   /** Comma-separated CallStatus values. */
   status?: string;
-  type?: string;
+  type?: CallAdminCallKind;
   search?: string;
   /** Comma-separated pending | ready | failed. */
   summaryStatus?: string;

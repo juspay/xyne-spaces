@@ -33,6 +33,7 @@ import {
   unlinkAdminTranscript,
   type CallAdminAction,
   type CallAdminCallFilters,
+  type CallAdminCallKind,
   type CallAdminCallRow,
   type CallAdminListScope,
 } from '@/services/Call/callAdminService';
@@ -75,11 +76,10 @@ const STATUS_OPTIONS = [
   ...Object.values(CallStatus).map(status => ({ value: status, label: titleCase(status) })),
 ];
 
-const TYPE_OPTIONS = [
+const TYPE_OPTIONS: { value: '' | CallAdminCallKind; label: string }[] = [
   { value: '', label: 'All types' },
-  { value: CallType.VIDEO, label: 'Video' },
-  { value: CallType.AUDIO, label: 'Audio' },
-  { value: CallType.HEADLESS, label: 'Recording' },
+  { value: 'call', label: 'Call' },
+  { value: 'recording', label: 'Recording' },
 ];
 
 type DirectAction = Exclude<CallAdminAction, 'changeOwner'>;
@@ -150,14 +150,13 @@ function runDirectAction(action: DirectAction, externalId: string): Promise<void
   }
 }
 
-const typeLabel = (type: CallType): string =>
-  type === CallType.HEADLESS ? 'Recording' : titleCase(type);
+const typeLabel = (type: CallType): string => (type === CallType.HEADLESS ? 'Recording' : 'Call');
 
 export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
-  const [type, setType] = useState('');
+  const [type, setType] = useState<'' | CallAdminCallKind>('');
   const [quickFilter, setQuickFilter] = useState<QuickFilterId | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{
     action: DirectAction;
@@ -234,7 +233,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
           ariaLabel='Call type filter'
           icon={<VideoCallDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
           value={type}
-          onChange={setType}
+          onChange={value => setType(value as '' | CallAdminCallKind)}
           options={TYPE_OPTIONS}
         />
         <FilterSelect

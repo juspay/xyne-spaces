@@ -590,6 +590,7 @@ const CalendarDayView = ({
                           title={otherMeta.title}
                           startsAt={otherMeta.startsAt}
                           endsAt={otherMeta.endsAt}
+                          details={otherMeta.details}
                         />
                       );
                     }
@@ -725,6 +726,7 @@ const CalendarDayView = ({
                             title={slot.title}
                             startsAt={slot.startsAt}
                             endsAt={slot.endsAt}
+                            details={slot}
                             zClass='z-[5]'
                           />
                         );

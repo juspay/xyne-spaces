@@ -5,7 +5,13 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
-import { CallType, CallStatus, ChannelScopeType, MeetingStatus } from '@xyne/shared';
+import {
+  CallType,
+  CallStatus,
+  ChannelScopeType,
+  MeetingStatus,
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
+} from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -25,6 +31,7 @@ import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
+import { recordingService } from '../../services/Recording/recordingService';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
@@ -58,6 +65,7 @@ interface UseCallHistoryReturn {
   handleGotoTranscript: (call: Call) => void;
   getGotoTranscriptHandler: (call: Call) => (() => void) | undefined;
   handleDownloadTranscript: (call: Call) => void;
+  handleCopyTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
     title: string;
@@ -779,6 +787,30 @@ export function useCallHistory(
     })();
   };
 
+  const handleCopyTranscript = (call: Call): void => {
+    void (async () => {
+      try {
+        // Same source as the transcript panel's copy button; 'original' is never pending.
+        const { text } = await recordingService.translateTranscript(
+          call.externalId,
+          ORIGINAL_TRANSCRIPT_LANGUAGE,
+        );
+        if (!text) {
+          toast.error('No transcript to copy', { id: 'copy-transcript' });
+          return;
+        }
+        await navigator.clipboard.writeText(text);
+        toast.success('Transcript copied', { id: 'copy-transcript' });
+      } catch (error) {
+        logger.error(Logger.API_CALL_FAILED, {
+          message: 'Failed to copy transcript',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        toast.error('Could not copy the transcript', { id: 'copy-transcript' });
+      }
+    })();
+  };
+
   return {
     calls: recentCalls,
     scheduledCalls,
@@ -798,6 +830,7 @@ export function useCallHistory(
     handleGotoTranscript,
     getGotoTranscriptHandler,
     handleDownloadTranscript,
+    handleCopyTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,

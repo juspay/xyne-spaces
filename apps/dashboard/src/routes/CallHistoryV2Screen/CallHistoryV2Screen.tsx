@@ -114,6 +114,7 @@ const CallHistoryV2Screen = (): ReactElement => {
     closeParticipantsModal,
     getGotoTranscriptHandler,
     handleDownloadTranscript,
+    handleCopyTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,
@@ -766,6 +767,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                           onParticipantsClick={() => handleParticipantsClick(row.item)}
                           handleGotoTranscript={getGotoTranscriptHandler(row.item)}
                           handleDownloadTranscript={() => handleDownloadTranscript(row.item)}
+                          handleCopyTranscript={() => handleCopyTranscript(row.item)}
                           onViewExternalChat={
                             hasExternalChatAccess(row.item)
                               ? () => setExternalChatCallId(row.item.externalId)
