@@ -212,8 +212,8 @@ export class AppChannelController {
       if (added.length > 0) {
         await this.announceAdded(req, channelId, added);
       }
-      for (const change of updated) {
-        await this.announceRoleChange(req, channelId, change);
+      if (updated.length > 0) {
+        await this.announceRoleChanges(req, channelId, updated);
       }
       res.status(added.length > 0 ? 201 : 200).json({
         channelId,
@@ -281,20 +281,18 @@ export class AppChannelController {
     }
   };
 
-  /** The "changed X's role to Y" channel message, as the in-app role change posts it. */
-  private async announceRoleChange(
+  /** One "changed the roles of ..." channel message for the whole call, not one per person. */
+  private async announceRoleChanges(
     req: Request,
     channelId: string,
-    change: { userId: string; userName: string; oldRole: string; role: string },
+    changes: Array<{ userId: string; userName: string; oldRole: string; role: string }>,
   ): Promise<void> {
     const bot = req.user!;
     try {
       await channelController.sendRoleUpdatedSystemMessage(
         channelId,
         { id: bot.id, name: bot.name },
-        { userId: change.userId, userName: change.userName },
-        change.oldRole,
-        change.role,
+        changes.map(({ userId, userName, oldRole, role }) => ({ userId, userName, oldRole, newRole: role })),
       );
     } catch (error) {
       logger.error('[APP-CHANNEL] Failed to post role-change system message', {
@@ -325,13 +323,8 @@ export class AppChannelController {
       orgRole: bot.orgRole,
       memberId: bot.memberId,
     });
-    await Promise.all(
-      added.map((participant) =>
-        handler
-          .onInsert({ entityId: participant.participantId, entityType: 'channel_participants', operation: 'insert' })
-          .catch((err) => logger.error('Side-effect handler error: channel_participants onInsert', err)),
-      ),
-    );
+    // Once for the whole call: the canvas and recording refresh is channel-wide, so per-person calls would repeat it.
+    await handler.onBatchInsert(channelId, added.map(({ userId }) => userId));
   }
 
   /**

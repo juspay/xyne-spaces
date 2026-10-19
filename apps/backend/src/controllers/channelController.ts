@@ -250,18 +250,38 @@ export class ChannelController {
     }
   }
 
-  // System message for a role change, with the content and metadata of the in-app updateParticipantRole mutator
+  // One system message for a batch of role changes, so a big batch is one message, one reopen and one broadcast.
+  // A single change reads and carries metadata like the in-app updateParticipantRole mutator's message.
   async sendRoleUpdatedSystemMessage(
     channelId: string,
     actor: { id: string; name: string },
-    target: { userId: string; userName: string },
-    oldRole: string,
-    newRole: string
+    changes: Array<{ userId: string; userName: string; oldRole: string; newRole: string }>
   ): Promise<void> {
+    if (changes.length === 0) return;
     try {
       // Names are user-supplied and the content is rendered as markup, so escape them.
       const esc = (value: string): string =>
         value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const MAX_NAMES = 10;
+      const list = (names: string[]): string => {
+        const shown = names.slice(0, MAX_NAMES).map(esc);
+        if (names.length > MAX_NAMES) shown.push(`${names.length - MAX_NAMES} others`);
+        return shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+      };
+
+      let content: string;
+      if (changes.length === 1) {
+        content = `changed ${esc(changes[0].userName)}'s role to ${changes[0].newRole}`;
+      } else {
+        const byRole = new Map<string, string[]>();
+        for (const change of changes) {
+          byRole.set(change.newRole, [...(byRole.get(change.newRole) ?? []), change.userName]);
+        }
+        const parts = [...byRole].map(([role, names]) => `${list(names)} to ${role}`);
+        content = `changed the roles of ${
+          parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+        }`;
+      }
 
       const conversation = await this.conversationRepository.create({
         channelId,
@@ -271,15 +291,18 @@ export class ChannelController {
       const createdMessage = await this.messageRepository.create({
         conversationId: conversation.conversationId,
         senderId: actor.id,
-        content: `changed ${esc(target.userName)}'s role to ${newRole}`,
+        content,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
         metadata: {
           operationType: 'role_updated',
-          targetUserId: target.userId,
-          targetUserName: target.userName,
-          oldRole,
-          newRole,
+          ...(changes.length === 1 && {
+            targetUserId: changes[0].userId,
+            targetUserName: changes[0].userName,
+            oldRole: changes[0].oldRole,
+            newRole: changes[0].newRole,
+          }),
+          changes,
           updatedBy: actor.id,
           updatedByName: actor.name,
         },
