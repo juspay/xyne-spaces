@@ -78,6 +78,10 @@ export class BackgroundEffectTransformer {
 
     // Create the context ourselves first; MediaPipe's getContext('webgl2') on the same
     // canvas then returns this one, which is what lets the two share textures.
+    // The cast is needed because getContext on the OffscreenCanvas | HTMLCanvasElement union
+    // resolves to the generic RenderingContext overload, not the 'webgl2' one. ESLint's
+    // type-aware run doesn't see that, so it flags the cast as unnecessary.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const gl = outputCanvas.getContext('webgl2', {
       alpha: false,
       antialias: false,
@@ -87,7 +91,7 @@ export class BackgroundEffectTransformer {
       // preserveDrawingBuffer left at its default (false): the output VideoFrame is captured
       // in the same task as render(), before the buffer is presented and cleared, so the
       // per-frame buffer copy it would force isn't needed.
-    });
+    }) as WebGL2RenderingContext | null;
     if (!gl) throw new Error('WebGL2 is not available');
     // ProcessorWrapper.restart (e.g. camera off/on) hands over a fresh canvas and abandons
     // the old one, so release the old context here or it lingers until GC.
