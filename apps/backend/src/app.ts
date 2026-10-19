@@ -181,6 +181,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -1211,6 +1212,11 @@ export class App {
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
+
+    if (config.decisionEval.enabled) {
+      logger.info('Initializing decision evaluation queue (producer)...');
+      await decisionEvaluationQueue.initialize();
+    }
 
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');

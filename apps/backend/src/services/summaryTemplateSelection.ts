@@ -1,7 +1,8 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
 import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
-import { askJev, isPrivateJevConfigured } from './queryIntent/jevClient';
+import { isPrivateDecisionEngineConfigured } from './decision/targets';
+import { askDecision } from './decision/ask';
 
 const MAX_STRUCTURE_CHARS = 2_000;
 const MAX_SYSTEM_PROMPT_CHARS = 1_000;
@@ -145,12 +146,13 @@ export async function pickSummaryTemplateWithXor(
   templates: SummaryTemplateCandidate[],
   meetingTitle?: string | null
 ): Promise<string | null> {
-  if (!isPrivateJevConfigured() || templates.length < 2 || templates.length > XOR_MAX_OPTIONS) {
+  if (!isPrivateDecisionEngineConfigured() || templates.length < 2 || templates.length > XOR_MAX_OPTIONS) {
     return null;
   }
 
   const prompt = buildSummaryTemplateSelectionPrompt(transcript, templates, meetingTitle);
-  const answers = await askJev(
+  const answers = await askDecision(
+    'summary_template',
     prompt,
     {
       template: {

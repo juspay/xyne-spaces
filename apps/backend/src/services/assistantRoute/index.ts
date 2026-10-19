@@ -2,12 +2,9 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
-import {
-  askJev,
-  isJevConfigured,
-  type JevChoiceQuestion,
-  type JevFailure,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
+import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 
 export interface AssistantRouteAction {
   id: string;
@@ -137,7 +134,7 @@ const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConf
 };
 
 const failureReason = (
-  failure: JevFailure | undefined,
+  failure: AskFailure | undefined,
   signal?: AbortSignal
 ): UnavailableReason => {
   switch (failure?.kind) {
@@ -191,7 +188,7 @@ export const routeAssistantMessage = async (
     return { route: 'unavailable' };
   };
 
-  if (!isJevConfigured()) return unavailable('classifier_not_configured');
+  if (!isDecisionEngineConfigured()) return unavailable('classifier_not_configured');
   const config = await getConfig(ctx);
   if (!config) return unavailable('config_unavailable');
   if (!config.enabled) return unavailable('disabled');
@@ -202,14 +199,14 @@ export const routeAssistantMessage = async (
     ...prompt.order(actions).map((action) => [action.id, action.description]),
     [NONE_ID, prompt.none],
   ]);
-  const question: JevChoiceQuestion = {
+  const question: ChoiceQuestion = {
     type: 'choice',
     instructions: prompt.instructions,
     criteria,
   };
 
-  let failure: JevFailure | undefined;
-  const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
+  let failure: AskFailure | undefined;
+  const answers = await askDecision('assistant_route', { text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
     onFailure: (f) => {
       failure = f;
     },
