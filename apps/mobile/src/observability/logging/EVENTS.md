@@ -464,6 +464,59 @@ completed.
 
 ---
 
+### `video_playback_ready`
+
+**Purpose:** A video source reached `readyToPlay` in a native player. Pair with
+`video_playback_failed` to get a per-device / per-format playback success rate.
+
+**Fields:**
+
+| Field           | Meaning                                                       |
+| --------------- | ------------------------------------------------------------- |
+| `surface`       | `chat_viewer` · `attachments_viewer` · `call_recording`       |
+| `attachmentId`  | Attachment id (`null` for call recordings)                    |
+| `mimetype`      | Stored mimetype (e.g. `video/quicktime`)                      |
+| `fileExtension` | Lower-cased extension from the filename (never the full name) |
+| `sizeBytes`     | Stored size, when known                                       |
+| `timeToReadyMs` | Viewer opened → player `readyToPlay`                          |
+| `durationMs`    | Media duration from `sourceLoad`, when known                  |
+
+**When:** First `statusChange → readyToPlay` per opened source.
+
+**Typical level:** `info`
+
+---
+
+### `video_playback_failed`
+
+**Purpose:** A video could not be played. Before this event the app only showed
+"Failed to load video" and sent nothing, so decoder/codec failures (e.g. an
+Android MediaTek device failing on an iPhone Dolby Vision `.mov`) could not be
+told apart from network or server failures.
+
+**Fields:** Same subject fields as `video_playback_ready`, plus:
+
+| Field           | Meaning                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `stage`         | `stream_url` (mTLS proxy URL failed) · `source_replace` (`replaceAsync` rejected) · `player_status` (native player error) |
+| `errorCategory` | `decoder_unsupported` · `container_parse` · `http` · `network` · `stream_setup` · `unknown`                               |
+| `errorCode`     | ExoPlayer `ERROR_CODE_*` or `NSError` `Domain:code` parsed from the message, when present                                 |
+| `decoderName`   | Native decoder named in the error (e.g. `c2.mtk.hevc.decoder`), when present                                              |
+| `errorMessage`  | Player error message (truncated to 500 chars)                                                                             |
+| `msSinceOpen`   | Viewer opened → failure                                                                                                   |
+| `reachedReady`  | `true` when the failure happened mid-playback after `readyToPlay`                                                         |
+
+**When:** First failure per opened source (duplicate `statusChange` /
+`replaceAsync` rejections for the same failure are dropped). Remote logs are
+flushed immediately.
+
+**Typical level:** `error`
+
+**Grafana:**
+`container:"xyne-logging-bridge" AND platformName:"native" AND event:"video_playback_failed" | stats by (osName, model, errorCategory, decoderName, mimetype) count()`
+
+---
+
 Zero query / mutation / run names are imported from `@xyne/shared/logger`
 (`Event.ZERO_QUERY_COMPLETE`, etc.) so they match the web dashboard.
 

@@ -8,6 +8,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 
 import { useMtlsThumbnail } from '@/src/hooks/useMtlsThumbnail';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
+import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
 import type { AttachmentsViewerItem } from '@/src/machines/attachmentsMachine';
 import { safePlay } from '@/src/utils/safeVideoPlayer';
 
@@ -28,6 +29,17 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
     isLoading: isStreamLoading,
     error: streamError,
   } = useMtlsVideoStream(attachment.id, { enabled: isActive });
+  const { reportReady, reportFailure } = useVideoPlaybackTelemetry({
+    surface: 'attachments_viewer',
+    subject: {
+      attachmentId: attachment.id,
+      mimetype: attachment.mimetype,
+      originalFilename: attachment.originalFilename,
+      sizeBytes: attachment.size,
+    },
+    sourceKey: attachment.id,
+    active: isActive,
+  });
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
@@ -72,15 +84,23 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
     setLoadError(null);
   }, [streamUrl, attachment.id]);
 
+  useEffect(() => {
+    if (streamError) {
+      reportFailure('stream_url', streamError);
+    }
+  }, [reportFailure, streamError]);
+
   useEventListener(player, 'statusChange', payload => {
     if (payload.status === 'readyToPlay') {
       setHasLoaded(true);
+      reportReady(Math.round(playerRef.current.duration * 1000));
       if (isActiveRef.current) {
         safePlay(playerRef.current);
       }
     }
     if (payload.status === 'error') {
       setLoadError(payload.error?.message ?? 'Failed to load video');
+      reportFailure('player_status', payload.error ?? 'Failed to load video');
     }
   });
 

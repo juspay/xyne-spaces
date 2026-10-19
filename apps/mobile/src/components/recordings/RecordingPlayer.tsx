@@ -14,6 +14,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { AlertTriangle, Maximize, Pause, Play, Video, VideoOff } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
+import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { formatElapsedTime } from '@/src/utils/recordingUtils';
 import type { RecordingType } from '@/src/types/recordings';
@@ -80,6 +81,13 @@ function VideoBackedPlayer({ uri }: { uri: string }): ReactElement {
   const [durationMs, setDurationMs] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [hasError, setHasError] = useState(false);
+  // Never log the recording URI: it can carry signed/capability tokens.
+  const { reportReady, reportFailure } = useVideoPlaybackTelemetry({
+    surface: 'call_recording',
+    subject: { attachmentId: null, mimetype: null },
+    sourceKey: uri,
+    active: true,
+  });
 
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime } = useEvent(player, 'timeUpdate', {
@@ -97,9 +105,11 @@ function VideoBackedPlayer({ uri }: { uri: string }): ReactElement {
     if (payload.status === 'readyToPlay') {
       setIsReady(true);
       setHasError(false);
+      reportReady(Math.round(player.duration * 1000));
     }
     if (payload.status === 'error') {
       setHasError(true);
+      reportFailure('player_status', payload.error ?? 'Failed to load recording');
     }
   });
 
