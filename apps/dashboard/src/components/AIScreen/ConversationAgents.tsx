@@ -6,6 +6,7 @@ import {
   agentIdentity,
   agentNamesLabel,
   conversationAgents,
+  isAutoReplyConversation,
   type AgentIdentity,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
@@ -139,8 +140,19 @@ export function ConversationRowContent({
           {title}
           {trailing}
         </span>
-        <span className='truncate text-xs font-normal leading-4 text-muted-foreground'>
-          {names ? `${names} · ${when}` : when}
+        <span className='flex min-w-0 items-center gap-1.5'>
+          {isAutoReplyConversation(conversation) && (
+            <span
+              className='shrink-0 rounded border border-border px-1 text-[10px] font-semibold uppercase leading-[14px] tracking-[0.04em] text-muted-foreground'
+              title='An agent replied for you automatically'
+              data-testid='auto-reply-badge'
+            >
+              Auto
+            </span>
+          )}
+          <span className='truncate text-xs font-normal leading-4 text-muted-foreground'>
+            {names ? `${names} · ${when}` : when}
+          </span>
         </span>
       </span>
     </span>
