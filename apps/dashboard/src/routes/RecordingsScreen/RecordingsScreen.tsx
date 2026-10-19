@@ -18,7 +18,15 @@ import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
-import { AudioLines, Clock, FileText, Loader2, AlertCircle, ChevronDown, Layers } from 'lucide-react';
+import {
+  AudioLines,
+  Clock,
+  FileText,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  Layers,
+} from 'lucide-react';
 import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
 import {

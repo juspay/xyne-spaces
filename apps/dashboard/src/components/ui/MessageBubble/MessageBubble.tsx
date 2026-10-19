@@ -42,7 +42,15 @@ import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { AlertCircle, AudioLines, Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  AudioLines,
+  Bookmark,
+  ChevronDown,
+  ChevronRight,
+  Hash,
+  Trash2,
+} from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
