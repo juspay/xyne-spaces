@@ -25,6 +25,13 @@ import {
   BehaviourSelect,
   BehaviourToggle,
 } from './BehaviourRows';
+import {
+  applyAgentBuildingTool,
+  CREATE_AGENT_TOOL,
+  readAgentBuilding,
+  UPDATE_AGENT_TOOL,
+  type AgentBuildingTool,
+} from './agentBuildingConfig';
 import { BehaviourTextDialog } from './BehaviourTextDialog';
 import { StructuredOutputDialog } from './StructuredOutputDialog';
 import {
@@ -55,6 +62,7 @@ export function AgentBehaviourTabV2({
 
   const behaviour = readBehaviourDraft(agent.config);
   const sandbox = readSandboxDraft(agent.config);
+  const agentBuilding = readAgentBuilding(agent.config, agent.delegationTier);
 
   const [reminders, setReminders] = useState(behaviour.promptInjection);
   const remindersDirty = reminders.trim() !== behaviour.promptInjection.trim();
@@ -88,6 +96,10 @@ export function AgentBehaviourTabV2({
 
   const setSandbox = (patch: Partial<SandboxDraft>, message: string): void => {
     void persist(applySandbox(agent.config, { ...sandbox, ...patch }), message);
+  };
+
+  const setAgentBuildingTool = (tool: AgentBuildingTool, enabled: boolean): void => {
+    void persist(applyAgentBuildingTool(agent.config, tool, enabled), 'Agent building updated');
   };
 
   const lockNote = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
@@ -304,6 +316,50 @@ export function AgentBehaviourTabV2({
               label='Always goal'
               trackName='Agent detail v2: toggle always goal'
               onChange={next => setBehaviour({ autoGoal: next }, 'Autonomy updated')}
+            />
+          </BehaviourRow>
+        </DetailCard>
+      </DetailSection>
+
+      <DetailSection
+        label='Agent building'
+        info='Whether this agent can draft and change agents'
+        {...badge}
+      >
+        <DetailCard>
+          {lockNote}
+          {agentBuilding.allTools && (
+            <p className='border-b border-border px-4 py-3 text-xs leading-4 text-muted-foreground'>
+              This orchestrator has no tools selected, so it can already use every tool. Select
+              tools in the Tools tab to control these one by one.
+            </p>
+          )}
+          <BehaviourRow
+            title='Create agents'
+            hint='Let this agent draft new agents. Each draft is posted as a card, and nothing is created until someone approves it.'
+          >
+            <BehaviourToggle
+              checked={agentBuilding.create}
+              editable={editable}
+              disabled={busy || agentBuilding.allTools}
+              label='Create agents'
+              trackName='Agent detail v2: toggle create agents'
+              onChange={next => setAgentBuildingTool(CREATE_AGENT_TOOL, next)}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Update agents'
+            hint='Let this agent propose changes to existing agents. Each change is posted as a card, and nothing changes until someone approves it.'
+            last
+          >
+            <BehaviourToggle
+              checked={agentBuilding.update}
+              editable={editable}
+              disabled={busy || agentBuilding.allTools}
+              label='Update agents'
+              trackName='Agent detail v2: toggle update agents'
+              onChange={next => setAgentBuildingTool(UPDATE_AGENT_TOOL, next)}
             />
           </BehaviourRow>
         </DetailCard>

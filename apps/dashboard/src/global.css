@@ -594,6 +594,11 @@
 }
 
 @layer components {
+  /* Element the summary-template tour is currently pointing at. */
+  [data-tour-active] {
+    @apply rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
   .text-desk-label {
     font-size: 14px;
     font-weight: 500;
@@ -950,6 +955,45 @@
   }
   [data-theme="midnight"] .cmdk-active-row {
     background-color: hsl(var(--accent)); /* gray */
+  }
+  /* The Cmd+K return banner shows selection with its orange border, so it keeps its card
+     background instead of the selected-row gray. */
+  [cmdk-root] [cmdk-item][data-return-banner="true"][aria-selected="true"],
+  [data-theme="midnight"] [cmdk-root] [cmdk-item][data-return-banner="true"][aria-selected="true"] {
+    background-color: hsl(var(--card)) !important;
+  }
+  /* The selected result on the full-page results screen: the palette's selected-row gray, so the
+     selection reads the same on both sides of the expand, on every card type. */
+  [data-cmdk-full-page] [data-selected-result="true"] > [class] {
+    background-color: hsl(var(--accent));
+  }
+  /* A ticket card paints its own background over that wrapper, on the card and on its description
+     footer, so it takes the gray itself. */
+  [data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"],
+  [data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"] .rounded-b-xl {
+    background-color: hsl(var(--accent));
+  }
+  /* The page under full-page search: kept live, but not drawn while full page opens — its style,
+     layout and paint are skipped (their state kept) until it is drawn again under the settled
+     page. See FullPageKeepAliveOutlet. */
+  [data-cmdk-kept-page][inert]:not([data-cmdk-drawn]) > * {
+    content-visibility: hidden;
+  }
+  /* Its windows fixed to the viewport (a Desk compose strip) are not drawn at all while covered:
+     they would sit on top of full page, where they can't be used or closed. */
+  [data-cmdk-kept-page][inert] .fixed {
+    visibility: hidden;
+  }
+  /* Nor is anything else of it drawn over full page: its own layers (a sticky header, a floating
+     control) stack inside the page while covered, under full page's layer whatever their z-index. */
+  [data-cmdk-kept-page][inert] > * {
+    isolation: isolate;
+    z-index: 0;
+  }
+  /* A palette growing into full page: just the surface, no content, including any rows that
+     render meanwhile. */
+  [cmdk-root][data-cmdk-surface-only] > *:not([data-cmdk-skeleton]) {
+    opacity: 0; /* not visibility: descendants that set visibility themselves would show through */
   }
 
   /* Paragraph Adjacent Sibling */
@@ -5027,6 +5071,58 @@ img.inline-emoji,
   }
 }
 
+[data-message-id] .message-html-root > p.discussion-title:not([data-message-preview="true"] p) {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+[data-message-id] .message-html-root > p.discussion-title + * {
+  margin-top: 2px;
+}
+
+[data-titled-thread] [data-first-in-thread] .message-html-root > p.discussion-title {
+  display: none;
+}
+
+[data-titled-thread] [data-first-in-thread] .message-html-root > p.discussion-title + * {
+  margin-top: 0;
+}
+
+[data-theme="midnight"] .xyne-title-offer[data-offered="true"] {
+  background-color: #2a1d14;
+  color: #ffb27a;
+}
+
+@keyframes xyne-title-offer-sweep {
+  to {
+    background-position: 0 0;
+  }
+}
+
+.xyne-title-offer[data-offered="true"] .xyne-title-offer-label {
+  background: linear-gradient(
+    100deg,
+    currentColor 0 38%,
+    #ff4f00 46%,
+    #ff8904 52%,
+    currentColor 62% 100%
+  );
+  background-size: 260% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: xyne-title-offer-sweep 1.25s cubic-bezier(0.2, 0, 0, 1) 160ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyne-title-offer[data-offered="true"] .xyne-title-offer-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
 @keyframes xyne-duplicate-sweep {
   from {
     transform: translateX(-100%);
@@ -5658,4 +5754,136 @@ img.inline-emoji,
 .agent-builder-pane .xyne-user-bubble {
   border-radius: 24px;
   padding: 10px 16px;
+}
+
+/* Voice mode orb; `--voice-level` (0-1, mic loudness) swells it. */
+.voice-orb {
+  --orb-pink: #ff6b9d;
+  --orb-peach: #ffa06b;
+  --orb-coral: hsl(var(--primary));
+  --orb-deep: color-mix(in srgb, #ff6b9d 62%, var(--claw-ai-fg, #7c3aed));
+  position: relative;
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 9999px;
+  background:
+    radial-gradient(
+      circle at 30% 28%,
+      color-mix(in srgb, var(--orb-peach) 70%, white) 0 6%,
+      transparent 42%
+    ),
+    radial-gradient(circle at 74% 76%, var(--orb-deep) 0 18%, transparent 62%),
+    radial-gradient(
+      circle at 50% 50%,
+      var(--orb-pink) 0%,
+      var(--orb-coral) 62%,
+      var(--orb-peach) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 0 18px
+      color-mix(in srgb, var(--orb-pink) calc(35% + var(--voice-level, 0) * 30%), transparent);
+  scale: calc(1 + var(--voice-level, 0) * 0.14);
+  transition: scale 90ms linear;
+  animation: voice-orb-breathe 7s ease-in-out infinite;
+  will-change: transform;
+}
+
+.voice-orb::before {
+  position: absolute;
+  inset: -35%;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 20deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--orb-peach) 85%, transparent) 70deg,
+    color-mix(in srgb, var(--orb-pink) 80%, transparent) 150deg,
+    color-mix(in srgb, var(--orb-deep) 70%, transparent) 235deg,
+    transparent 330deg
+  );
+  content: "";
+  filter: blur(8px);
+  opacity: 0.9;
+  animation: voice-orb-flow 7.5s linear infinite;
+  will-change: transform;
+}
+
+.voice-orb::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 32% 24%, rgb(255 255 255 / 0.62), transparent 34%),
+    radial-gradient(circle at 50% 110%, rgb(0 0 0 / 0.14), transparent 55%);
+  content: "";
+}
+
+.voice-orb[data-phase="transcribing"] {
+  animation-duration: 2.8s;
+}
+.voice-orb[data-phase="transcribing"]::before {
+  animation-duration: 3.2s;
+}
+
+.voice-orb[data-phase="listening"] {
+  animation-duration: 1.8s;
+}
+.voice-orb[data-phase="listening"]::before {
+  animation-duration: 2.3s;
+}
+
+.voice-orb[data-phase="understanding"],
+.voice-orb[data-phase="asking"] {
+  animation-duration: 2.6s;
+}
+.voice-orb[data-phase="understanding"]::before,
+.voice-orb[data-phase="asking"]::before {
+  animation-duration: 1.6s;
+}
+
+.voice-orb[data-phase="speaking"] {
+  animation-duration: 1.55s;
+}
+.voice-orb[data-phase="speaking"]::before {
+  animation-duration: 1.9s;
+}
+
+.voice-orb--stage {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 0 44px
+      color-mix(in srgb, var(--orb-pink) calc(35% + var(--voice-level, 0) * 30%), transparent);
+}
+
+@keyframes voice-orb-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes voice-orb-flow {
+  0% {
+    transform: rotate(0deg) scale(0.92);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(360deg) scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb,
+  .voice-orb::before {
+    animation: none;
+    transition: none;
+    will-change: auto;
+  }
 }

@@ -107,6 +107,7 @@ export function SearchCompareDialog({
                 data-track-category='SEARCH_COMPARE'
                 data-track-name='CLOSE_COMPARE_DIALOG'
                 title='Close'
+                aria-label='Close'
                 className='ml-auto shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted active:scale-[0.96] transition'
               >
                 <X size={16} />
@@ -171,6 +172,9 @@ export function SearchCompareDialog({
                             title={
                               isRelevant ? 'Unmark relevant' : 'Mark as a correct / relevant result'
                             }
+                            aria-label={
+                              isRelevant ? 'Unmark relevant' : 'Mark as a correct / relevant result'
+                            }
                             className='shrink-0 p-1 rounded hover:bg-muted active:scale-[0.96] transition'
                           >
                             <Star
@@ -187,6 +191,7 @@ export function SearchCompareDialog({
                             data-track-category='SEARCH_COMPARE'
                             data-track-name='REMOVE_FROM_COMPARISON'
                             title='Remove from comparison'
+                            aria-label='Remove from comparison'
                             className='ml-auto shrink-0 p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96] transition'
                           >
                             <X size={13} />

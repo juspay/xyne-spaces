@@ -19,6 +19,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PendingAgentCard } from "./propose-agent.js";
+import { AGENT_TOOL_DEFS } from "xyne-claw-shared";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("describe-agent");
@@ -37,26 +38,28 @@ export function buildDescribeAgentTool(ref: DescribeAgentRef): ToolDefinition {
     name: DESCRIBE_AGENT_TOOL_NAME,
     label: "Describe Agent",
     description: [
-      "Show a capability card for an agent — use this whenever someone asks what you",
-      "are, what you can do, what tools or integrations you have, or to introduce",
-      "yourself. Call it INSTEAD of listing your tools in prose: the card is built from",
-      "your actual configuration, so it is always accurate, while a written list drifts.",
+      "Shows the USER a capability card for an agent. Use it ONLY when the user wants to",
+      "SEE an agent:",
+      '  • "what can you do?", "introduce yourself", "what tools do you have?" → omit `slug`',
+      '    to describe yourself.',
+      '  • "tell me about ticket-triage" → pass that agent\'s `slug`.',
+      '  • "which agents can review PRs?" → pass `slugs`, best match first (find them with',
+      "    list_agents).",
+      '  • "list all my agents", "what agents do we have?" → pass `summary: true`. The SERVER',
+      "    counts them, so do not state a number or list the agents in text.",
       "",
-      "Omit `slug` to describe YOURSELF (the usual case). Pass a slug only when the user",
-      "asked about a DIFFERENT agent by name.",
+      "Do NOT call it when:",
+      "  • the user asks what MODEL or provider you run on — answer from your run context;",
+      "    the card does not show it.",
+      "  • you need information for YOURSELF — finding an agent, reading its tools or prompt",
+      "    before update-agent, create-agent or delegating. This tool returns NOTHING to you;",
+      "    it only puts a card in front of the user. Use list_agents / get_agent_config for that.",
+      "  • the user asked to create, change or fix an agent — the approval card for that",
+      "    change is the answer; a profile or roster card next to it is noise.",
+      "  • an agent is merely mentioned in passing.",
       "",
-      "When the user asks WHICH agents can help with something (\"list agents that review PRs\"),",
-      "pass `slugs` with the matching agents, best match first — they render as a stack of the",
-      "same cards. Use list_agents first to find them. Prefer this over naming them in prose.",
-      "",
-      "When the user asks to see ALL their agents (\"list all my agents\", \"what agents do we",
-      "have?\"), pass `summary: true` instead. That posts a count with a link to the agent",
-      "library — the right answer when the roster is long. The SERVER counts them, so do not",
-      "state a number yourself and do not list the agents in text.",
-      "",
-      "This does not end your turn — if the user asked something else as well, answer it",
-      "normally in the same reply. Do not also describe your tools in text; the card",
-      "covers that. Call it at most once per reply.",
+      "The card is built from the agent's real configuration, so when you do call it, do not",
+      "also describe the tools in prose. This does not end your turn; call it at most once per reply.",
     ].join("\n"),
     parameters: Type.Unsafe({
       type: "object",
@@ -146,4 +149,24 @@ export function buildDescribeAgentTool(ref: DescribeAgentRef): ToolDefinition {
       };
     },
   };
+}
+
+const AGENT_AUTHORING_TOOLS = new Set(AGENT_TOOL_DEFS.map((t) => t.slug));
+
+export function describeAgentCardForReply(
+  card: DescribeAgentRef["value"],
+  pendingActions: ReadonlyArray<unknown>,
+): DescribeAgentRef["value"] {
+  if (!card) return undefined;
+  const authoring = pendingActions.some(
+    (action) =>
+      !!action &&
+      typeof action === "object" &&
+      AGENT_AUTHORING_TOOLS.has(String((action as Record<string, unknown>)["tool"] ?? "")),
+  );
+  if (authoring) {
+    log.info(`[describe-agent] dropped ${card.variant} card — the turn queued an agent-authoring action`);
+    return undefined;
+  }
+  return card;
 }

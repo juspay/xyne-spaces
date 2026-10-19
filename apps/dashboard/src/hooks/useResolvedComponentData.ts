@@ -13,6 +13,7 @@ import {
   type DashboardRuntimeContext,
   type ComponentRuntimeConfig,
 } from '../services/DynamicDashboard/planResolver';
+import { usePollWhenShown } from './usePageCoverage';
 
 export function useResolvedComponentData(args: {
   componentId: string;
@@ -35,16 +36,20 @@ export function useResolvedComponentData(args: {
     enabled = true,
   } = args;
 
+  const queryKey = [
+    'dashboardComponentResolved',
+    componentId,
+    visualType,
+    updatedAt,
+    stableStringify(storedPlan),
+    stableStringify(componentConfig ?? {}),
+    stableStringify(runtimeContext ?? {}),
+  ];
+  // Nor, under full-page search, refetched on reconnect: fetched on return if stale by then.
+  const shown = usePollWhenShown(queryKey);
+
   return useQuery<PreviewResponse, ComponentDataError>({
-    queryKey: [
-      'dashboardComponentResolved',
-      componentId,
-      visualType,
-      updatedAt,
-      stableStringify(storedPlan),
-      stableStringify(componentConfig ?? {}),
-      stableStringify(runtimeContext ?? {}),
-    ],
+    queryKey,
     queryFn: ({ signal }) => {
       const { plan: resolvedPlan } = resolvePlan(storedPlan, runtimeContext, componentConfig);
       return previewQueryPlan(
@@ -58,7 +63,10 @@ export function useResolvedComponentData(args: {
     },
     enabled,
     staleTime: autoRefreshMs ? 0 : 60 * 1000,
-    refetchInterval: autoRefreshMs ?? false,
+    refetchInterval: autoRefreshMs
+      ? (): number | false => (shown() ? autoRefreshMs : false)
+      : false,
+    refetchOnReconnect: (): boolean => shown(),
     retry: retryOnServerError,
   });
 }

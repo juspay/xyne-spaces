@@ -21,6 +21,7 @@ import {
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import { NOTE_TEXT_MAX_CHARS, NOTE_TURNS_MAX, noteParentId, noteTurnsOf, replyRunning } from "../lib/chat-notes.js";
 import {
   agentFacets,
   buildAgentHandoff,
@@ -1885,7 +1886,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
           : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
         try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
         } catch (err) {
           log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
         }
@@ -2941,6 +2942,70 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
       ...(turn.parts ? { parts: turn.parts } : {}),
     });
+  }
+});
+
+// POST /agents/:slug/chat/:convId/notes — append turns the dashboard answered
+// itself (Buddy acting on screen) as finished messages, so they show in the
+// history like any other turn. No run: the agent's session never sees them, and
+// the rows are chained after the reply the user is on (`parentId`, else the
+// latest), so the next turn continues that path and resumes the same session.
+router.post("/:slug/chat/:convId/notes", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    // Direct chats only: a Spaces thread id is shared with other users' turns.
+    if (!isDirectChatConversation(convId)) {
+      res.status(400).json({ success: false, error: "Only direct chats take notes" });
+      return;
+    }
+    const turns = noteTurnsOf(req.body);
+    if (!turns) {
+      res.status(400).json({
+        success: false,
+        error: `turns must be 1-${NOTE_TURNS_MAX} non-empty request/reply pairs of up to ${NOTE_TEXT_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const existing = await chatMessageRepository.findByConversation(convId);
+    const aliases = new Set(getRequesterAliases(req));
+    if (existing.length > 0 && !existing.some((m) => aliases.has(m.userId))) {
+      res.status(404).json({ success: false, error: "Conversation not found" });
+      return;
+    }
+    if (replyRunning(existing)) {
+      res.status(409).json({ success: false, error: "A reply is still running" });
+      return;
+    }
+
+    // The caller's own rows only: someone else's reply in the thread is no parent for these.
+    const parentId = noteParentId(
+      existing.filter((m) => aliases.has(m.userId)),
+      (req.body as { parentId?: unknown }).parentId,
+    );
+    const ids = await chatMessageRepository.appendTurns({
+      conversationId: convId,
+      agentSlug: slug,
+      userId,
+      orgId: agent.orgId,
+      parentId,
+      turns,
+    });
+    log.info(`[agent-chat/notes] conv=${convId} slug=${slug} rows=${ids.length}`);
+    res.json({ success: true, conversationId: convId, parentId, messageIds: ids });
+  } catch (err) {
+    log.error(`[agent-chat/notes] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to save notes" });
   }
 });
 

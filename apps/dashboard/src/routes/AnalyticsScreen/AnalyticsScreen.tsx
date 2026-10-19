@@ -1,6 +1,7 @@
 import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../hooks/useAuth';
+import { useCurrentWorkspace } from '../../hooks/useCurrentWorkspace';
 import { analyticsService } from '../../services/Analytics/analyticsService';
 import { getDateRange, formatDateRangeForDisplay } from '../../utils/dateRangeUtils';
 import {
@@ -31,6 +32,7 @@ import {
   getPieChartConfig,
   processDurationMetric,
 } from './AnalyticsScreen.utils';
+import { usePollWhenShown } from '../../hooks/usePageCoverage';
 
 type Theme = 'classic' | 'midnight' | 'summer_breeze';
 
@@ -47,6 +49,9 @@ const AnalyticsScreen = (): ReactElement => {
   });
 
   const { user } = useAuth();
+
+  // Live workspace record so the subtitle reflects the current (and renamed) workspace name.
+  const workspaceName = useCurrentWorkspace()?.name?.trim();
 
   // Listen for theme changes via data-theme attribute (Settings updates this)
   useEffect(() => {
@@ -76,8 +81,15 @@ const AnalyticsScreen = (): ReactElement => {
     return { ...params, groupBy: 'hour' as const };
   }, [dateRange]);
 
-  // Query configuration using utility function (refetchInterval handles live updates)
-  const queryConfig = createQueryConfig(user);
+  // Query configuration using utility function (refetchInterval handles live updates, while the
+  // page is shown)
+  const shown = usePollWhenShown(['analytics']);
+  const baseQueryConfig = createQueryConfig(user);
+  const queryConfig = {
+    ...baseQueryConfig,
+    refetchInterval: (): number | false => (shown() ? baseQueryConfig.refetchInterval : false),
+    refetchOnReconnect: (): boolean => shown(),
+  };
 
   // Individual useQuery calls with stable query keys
   const {
@@ -275,8 +287,8 @@ const AnalyticsScreen = (): ReactElement => {
           {/* Title and Subtext */}
           <div id='analytics-title-section' className='flex flex-col gap-1'>
             <h1 className='text-xl font-semibold text-foreground'>Analytics</h1>
-            <p className='text-sm text-muted-foreground'>
-              Track and analyze your workspace performance metrics
+            <p className='text-sm text-muted-foreground' data-testid='analytics-subtitle'>
+              Track and analyze {workspaceName || 'your'} workspace performance metrics
             </p>
           </div>
 

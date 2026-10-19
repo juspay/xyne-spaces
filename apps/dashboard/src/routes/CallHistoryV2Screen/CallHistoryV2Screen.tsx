@@ -641,12 +641,12 @@ const CallHistoryV2Screen = (): ReactElement => {
         </div>
         {/* Page body */}
         <div className='max-w-[884px] w-full flex flex-col gap-6 px-4 pb-20'>
-          {/* UPCOMING section */}
+          {/* UPCOMING & ACTIVE section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>
               <div className='flex items-center justify-between shrink-0'>
                 <span className='text-xs font-medium tracking-wide text-muted-foreground/70 uppercase'>
-                  Upcoming
+                  Upcoming &amp; Active
                 </span>
                 <span className='text-xs text-muted-foreground/70'>
                   {format(new Date(now), 'EEE, MMMM d')}
@@ -717,6 +717,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                   id='channel-calls-toggle'
                   checked={showChannelCalls}
                   onCheckedChange={setShowChannelCalls}
+                  aria-label='Show channel calls'
                 />
               </div>
             </div>
@@ -860,6 +861,7 @@ const CallHistoryV2Screen = (): ReactElement => {
         isOpen={deleteModalOpen}
         onClose={closeDeleteModal}
         onConfirm={handleDeleteConfirm}
+        participantCount={deleteModalCall?.participantCount ?? 0}
         callLabel={
           deleteModalCall
             ? `${deleteModalCall.title ?? 'Scheduled Call'}${
@@ -950,6 +952,7 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
           <Button
             variant='ghost'
             size='inline'
+            aria-haspopup='dialog'
             data-testid='start-instant-call-option'
             data-track-category='CALLS'
             data-track-name='start-instant-call'

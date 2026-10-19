@@ -36,6 +36,14 @@ export class NotSignedInError extends Error {
  * misconfigured `XYNE_SPACES_BASE_URL` is the usual cause.
  */
 export function describeError(err: unknown, baseUrl: string): string {
+	const text = describe(err, baseUrl);
+	// The server's id for a failed request, kept by @xyne/spaces-sdk from 0.1.3.
+	// Read loosely so an older SDK, which has no such field, just omits it.
+	const requestId = (err as { requestId?: unknown } | null)?.requestId;
+	return typeof requestId === "string" && requestId ? `${text} [request id: ${requestId}]` : text;
+}
+
+function describe(err: unknown, baseUrl: string): string {
 	if (err instanceof NotSignedInError) return err.message;
 
 	if (err instanceof AuthError) {

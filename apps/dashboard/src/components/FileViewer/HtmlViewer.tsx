@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
 import { inlineAuthenticatedImages } from '../../utils/inlineAuthenticatedImages';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
 // Decode to a string (for srcDoc), honouring a declared charset so non-UTF-8 files render right.
 const readHtml = async (file: Blob): Promise<string> => {
@@ -87,16 +88,19 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   if (page === null) return null;
 
   // srcDoc, not a blob: URL: an opaque origin with no standalone address to open
-  // outside the sandbox (XYNE-66491).
+  // outside the sandbox (XYNE-66491). Its scripts stop under full-page search,
+  // as leaving the page stopped them.
   return (
-    <iframe
-      srcDoc={page}
-      sandbox='allow-scripts'
-      referrerPolicy='no-referrer'
-      title='HTML Document'
-      className='w-full h-full border-0 bg-white'
-      style={{ minHeight: '100%' }}
-    />
+    <UnmountWhenCovered fallback={<div className='w-full h-full bg-white' />}>
+      <iframe
+        srcDoc={page}
+        sandbox='allow-scripts'
+        referrerPolicy='no-referrer'
+        title='HTML Document'
+        className='w-full h-full border-0 bg-white'
+        style={{ minHeight: '100%' }}
+      />
+    </UnmountWhenCovered>
   );
 });
 

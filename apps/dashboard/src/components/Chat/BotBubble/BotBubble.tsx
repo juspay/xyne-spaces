@@ -12,6 +12,7 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
 import { ThreadNavigationContext } from '../ThreadNavigationContext';
+import { discussionTitleOfBody } from '../ChatInput/ChatInput.utils';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
@@ -57,7 +58,7 @@ const useOpenTicketCard = (
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
-  const { openTicket } = useContext(ThreadNavigationContext);
+  const { openTicket, openRelatedTicket } = useContext(ThreadNavigationContext);
 
   // In the Desk/email ticket-detail view the user is already looking at the
   // ticket whose card is being rendered in the right-panel thread — instead
@@ -71,7 +72,15 @@ const useOpenTicketCard = (
     const resolvedConversationId = ticket.conversationId || fallbackConversationId;
     if (!resolvedChannelId || !resolvedConversationId) return;
 
-    if (isDeskView && resolvedConversationId === fallbackConversationId) {
+    // A host that keeps ticket links on its own surface wins over the desk default below.
+    // A host that also opens related tickets in its own panel (SDLC) is handled further down.
+    if (openTicket && !openRelatedTicket) {
+      openTicket(ticket.id);
+      return;
+    }
+
+    // A host that keeps tickets in its own panel (SDLC) does the same for the thread's ticket.
+    if ((isDeskView || openRelatedTicket) && resolvedConversationId === fallbackConversationId) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
       void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
@@ -87,8 +96,8 @@ const useOpenTicketCard = (
       return;
     }
 
-    if (openTicket) {
-      openTicket(ticket.id);
+    if (openRelatedTicket) {
+      openRelatedTicket(ticket.id);
       return;
     }
 
@@ -240,6 +249,12 @@ const TicketCreateModeWithChannel: React.FC<{
 }) => {
   const channel = useChannel(channelId);
   const projectId = channel?.projectId || '';
+  const opening = useMemo(() => {
+    const body = new DOMParser().parseFromString(messageContent, 'text/html').body;
+    const title = discussionTitleOfBody(body);
+    if (title) body.firstElementChild?.remove();
+    return { title, description: stripHtml(body.innerHTML) };
+  }, [messageContent]);
 
   if (!channel) return null;
 
@@ -266,8 +281,8 @@ const TicketCreateModeWithChannel: React.FC<{
       channelId={channelId}
       projectId={projectId}
       trackSource={trackSource}
-      initialTitle=''
-      initialDescription={stripHtml(messageContent)}
+      initialTitle={opening.title}
+      initialDescription={opening.description}
       sourceMessageId={messageId}
       sourceConversation={conversation ?? undefined}
       {...(onTicketCreated && { onTicketCreated: handleTicketCreated })}

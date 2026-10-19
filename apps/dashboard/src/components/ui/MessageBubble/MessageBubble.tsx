@@ -262,6 +262,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </span>
             <button
               type='button'
+              aria-label={isExpanded ? 'Collapse attachment list' : 'Expand attachment list'}
+              aria-expanded={isExpanded}
               onClick={() => setIsExpanded(!isExpanded)}
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_ATTACHMENT_LIST'
@@ -1345,6 +1347,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <PulseTickets
                   content={message.content}
                   callId={metadata?.callId}
+                  {...(channelId && { channelId })}
                   conversationId={message.conversationId}
                   messageId={message.messageId}
                 />

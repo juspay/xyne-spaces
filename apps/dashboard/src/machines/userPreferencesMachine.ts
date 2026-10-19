@@ -56,6 +56,12 @@ export interface UserPreferences {
   /** How long after the last keystroke to look them up, in ms. Never below 1000. */
   relatedContextDebounceMs: number;
   aiWorkspaceAutoOpen: boolean;
+  /**
+   * Auto in Xyne AI also opens pages and presses buttons on screen for a typed or spoken
+   * request. Beta: off until turned on in Preferences → Developer.
+   * TODO: on by default, and then the switch removed, once tried with prod users.
+   */
+  screenActionsEnabled: boolean;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -76,6 +82,7 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   relatedContextEnabled: false,
   relatedContextDebounceMs: 1000,
   aiWorkspaceAutoOpen: true,
+  screenActionsEnabled: false,
 };
 
 export interface UserPreferencesContext {

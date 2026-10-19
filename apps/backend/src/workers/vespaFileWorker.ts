@@ -276,7 +276,9 @@ export class VespaFileWorker {
 					if (!rawData) {
 						throw new Error(`Data not found for ${schema}/${docId}`);
 					}
-					const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
+					// nameOnly: map metadata only (no content download/parse) — the requested
+					// fields don't need it, e.g. a transcript's title/ACL/labels refresh.
+					const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId, job.data.nameOnly);
 					mappedData = Object.fromEntries(
 						fields
 							.filter((field) => field in fullDoc)

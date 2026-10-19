@@ -7,9 +7,13 @@ interface TableNodeProps {
   children?: React.ReactNode;
 }
 
-/** Render a table cell string through TextNode's inline mrkdwn parser. */
+/**
+ * Render a table cell string through TextNode's inline mrkdwn parser.
+ * `inline` keeps cell text literal — without it "8. Amazon" was parsed as a
+ * one-item ordered list and every row rendered as "1.".
+ */
 const CellContent: React.FC<{ content: string }> = ({ content }) => (
-  <TextNode node={{ id: '', type: 'text', props: { content } }} />
+  <TextNode node={{ id: '', type: 'text', props: { content } }} inline />
 );
 
 export const TableNode: React.FC<TableNodeProps> = ({ node }) => {

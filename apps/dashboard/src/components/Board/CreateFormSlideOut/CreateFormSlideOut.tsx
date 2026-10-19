@@ -279,6 +279,8 @@ const FieldEditor = ({
               <span className='text-[14px] text-foreground'>Required</span>
               <button
                 type='button'
+                aria-label='Required'
+                aria-pressed={!field.isOptional}
                 onClick={() => onUpdate(field.id, { isOptional: !field.isOptional })}
                 className={`w-[36px] h-[20px] rounded-full relative transition-colors ${
                   !field.isOptional ? 'bg-[#6276be]' : 'bg-muted'
@@ -297,6 +299,7 @@ const FieldEditor = ({
           {/* Delete Button - Only in expanded state */}
           {isExpanded && (
             <Button
+              aria-label='Delete field'
               onClick={() => onDelete(field.id)}
               variant='ghost'
               size='iconSm'
@@ -310,6 +313,7 @@ const FieldEditor = ({
           {/* Chevron - Only in expanded state */}
           {isExpanded && (
             <Button
+              aria-label='Collapse field'
               onClick={() => onToggleExpand(field.id)}
               variant='ghost'
               size='iconSm'
@@ -450,6 +454,7 @@ const FieldEditor = ({
                               </button>
                             )}
                             <Button
+                              aria-label={`Remove ${option.value || 'option'}`}
                               onClick={() => removeOption(optionIndex)}
                               variant='ghost'
                               size='iconSm'
@@ -919,6 +924,7 @@ export const CreateFormSlideOut = ({
           <h2 className='text-[14px] font-medium text-foreground'>{title}</h2>
           <Button
             type='button'
+            aria-label='Close form editor'
             onClick={onClose}
             variant='ghost'
             size='iconSm'

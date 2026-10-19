@@ -77,6 +77,7 @@ function MediaToggleButton({
           : 'bg-foreground/15 text-foreground hover:bg-foreground/25',
       )}
       title={isOn ? onLabel : offLabel}
+      aria-label={isOn ? onLabel : offLabel}
       aria-pressed={isOn}
       data-track-category='RecordingControlBar'
       data-track-name={`${trackName}_${isOn ? 'off' : 'on'}`}
@@ -164,6 +165,7 @@ export function RecordingControlBar({
               disabled={isStarting}
               className='flex items-center justify-center w-10 h-10 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors disabled:opacity-50'
               title={isPaused ? 'Resume recording' : 'Pause recording'}
+              aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
               data-track-category='RecordingControlBar'
               data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
               data-track-metadata={JSON.stringify({

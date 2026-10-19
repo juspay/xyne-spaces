@@ -19,7 +19,11 @@ import {
   LocalVideoTrack,
   VideoPresets,
 } from 'livekit-client';
-import { BackgroundBlur } from '@livekit/track-processors';
+import {
+  BackgroundEffectProcessor,
+  backgroundEffectsRenderer,
+  supportsBackgroundEffects,
+} from '../utils/backgroundEffects';
 import type { Zero } from '@rocicorp/zero';
 import { DEFAULT_HOST_CONTROLS, type Call, type HostControls } from '@xyne/shared';
 import {
@@ -36,6 +40,13 @@ import { CallType } from '@xyne/shared';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
+import {
+  type BackgroundEffect,
+  NO_BACKGROUND_EFFECT,
+  loadBackgroundEffect,
+  saveBackgroundEffect,
+  toEffectOptions,
+} from '../utils/callBackground';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
   CALL_MEDIA_QUALITY_CONFIG,
@@ -55,6 +66,19 @@ import {
 import { logger, Event } from '../utils/logger';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 import {
+  cancelPreparedCallWindow,
+  focusCallWindow,
+  openCallWindow,
+  prepareCallWindow,
+  sendCallWindowCommand,
+  shouldUseCallWindow,
+  onCallWindowStatus,
+  waitForCallWindowPhase,
+  CallWindowClosedError,
+  type CallWindowHandoff,
+  type CallWindowStatus,
+} from '../utils/callWindow';
+import {
   isHostControlTurnedOffForLocal,
   isHostControlTurnedOffForLocalWithControls,
   parseHostControlsFromMetadata,
@@ -65,6 +89,13 @@ setLogLevel('warn');
 
 // Auto-mute threshold: mute the joining user when more than this many remote participants are already in the call
 const DEFAULT_MUTE_THRESHOLD = 5;
+
+// The window is opened (or already kept warm) at click, so its boot overlaps
+// the token request. What is left is the window's own connect retries — the
+// same 5 attempts with 8s signal timeouts the overlay makes, ~45s at worst —
+// plus headroom for a cold boot that has not finished by then.
+const CALL_WINDOW_CONNECT_TIMEOUT_MS = 60_000;
+const CALL_WINDOW_DISCONNECT_TIMEOUT_MS = 5_000;
 
 const logRoomMachineEvent = (
   callId: string | null | undefined,
@@ -119,49 +150,61 @@ export interface ChatMessage {
 // Permission error type
 export type PermissionErrorType = 'microphone' | 'camera' | 'screen' | null;
 
-// Context for Room state management
-// Background blur strength (px). Fixed — no user config (YAGNI).
-const BACKGROUND_BLUR_RADIUS = 10;
-
-// Reconcile the camera processor to the latest desired state, one op at a time.
+// Reconcile the camera processor to the latest desired effect, one op at a time.
 // `setProcessor` is async (awaits WASM/model init) and not registered until it
-// resolves; serializing through this chain — and re-reading `desiredBlur` when
-// each op actually runs — prevents a rapid toggle from desyncing the flag from
+// resolves; serializing through this chain — and re-reading `desiredEffect` when
+// each op actually runs — prevents rapid changes from desyncing the context from
 // the real processor state.
-let blurReconcileChain: Promise<void> = Promise.resolve();
-let desiredBlur = false;
+let effectReconcileChain: Promise<void> = Promise.resolve();
+let desiredEffect: BackgroundEffect = NO_BACKGROUND_EFFECT;
 
 /**
- * Drive the background-blur processor on the local camera track toward `enabled`.
+ * Drive the background processor on the local camera track toward `effect`.
  * Idempotent and serialized, so it can be called on every LOCAL_TRACK_PUBLISHED
- * (join, camera re-enable, device switch) and on rapid toggles without races.
+ * (join, camera re-enable, device switch) and on rapid changes without races.
+ * One processor is attached while any effect is on and switched in place between
+ * blur/image, which avoids the flicker of tearing it down; it is removed entirely
+ * for "none" so an unused effect costs nothing.
  * Web only: native mode bridges the camera and has no web track to process.
- * `onEnableError` fires if turning blur ON fails, so the caller can revert state.
+ * `onError` fires if applying a non-"none" effect fails, so the caller can revert.
  */
-function syncBackgroundBlur(
+function syncBackgroundEffect(
   room: Room | null,
-  enabled: boolean,
-  onEnableError?: () => void,
+  effect: BackgroundEffect,
+  onError?: () => void,
 ): Promise<void> {
-  desiredBlur = enabled;
-  blurReconcileChain = blurReconcileChain.then(async () => {
+  desiredEffect = effect;
+  effectReconcileChain = effectReconcileChain.then(async () => {
     const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as
       | LocalVideoTrack
       | undefined;
     if (!track) return;
-    const hasProcessor = !!track.getProcessor();
+    const target = desiredEffect;
+    const current = track.getProcessor();
     try {
-      if (desiredBlur && !hasProcessor) {
-        await track.setProcessor(BackgroundBlur(BACKGROUND_BLUR_RADIUS));
-      } else if (!desiredBlur && hasProcessor) {
-        await track.stopProcessor();
+      if (target.mode === 'none') {
+        if (current) await track.stopProcessor();
+        return;
       }
-    } catch {
-      // Only an enable failure leaves a lying "on" state to correct.
-      if (desiredBlur) onEnableError?.();
+      if (!supportsBackgroundEffects()) throw new Error('Background effects unsupported');
+      if (current instanceof BackgroundEffectProcessor) {
+        await current.setEffect(toEffectOptions(target));
+      } else {
+        if (current) await track.stopProcessor();
+        await track.setProcessor(new BackgroundEffectProcessor(toEffectOptions(target)));
+      }
+    } catch (error) {
+      logger.error(Event.LIVEKIT_ROOM_EVENT, {
+        eventName: 'background_effect_failed',
+        effect: target.mode,
+        renderer: backgroundEffectsRenderer(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Only a failed "on" leaves a lying state to correct.
+      if (desiredEffect.mode !== 'none') onError?.();
     }
   });
-  return blurReconcileChain;
+  return effectReconcileChain;
 }
 
 export interface RoomContext {
@@ -224,8 +267,9 @@ export interface RoomContext {
   isCallChatOpen: boolean;
   unreadCallChatCount: number;
   hostControls: HostControls;
-  // Background blur on the local camera feed (web only). Off by default.
-  isBackgroundBlurEnabled: boolean;
+  // Background effect (blur / virtual image) on the local camera feed (web only).
+  // Persisted per browser, so it is restored on the next call.
+  backgroundEffect: BackgroundEffect;
   // What a call URL asked for, when the join was driven by one rather than by a
   // person clicking Join (see utils/callUrlOverrides). `null` is the normal case
   // and means "no request": enableLocalTracks falls back to the user's saved join
@@ -241,11 +285,28 @@ export interface RoomContext {
   callUrlOverrides: CallUrlOverrides | null;
   // Mic/camera picked on the incoming-call card before accepting.
   joinMediaOverrides: JoinMediaOverrides | null;
+  // The call runs in the desktop call window (see utils/callWindow): this
+  // machine fetched the token and mirrors the window's state, and has no Room.
+  // Decided once per join, so flipping the preference mid-call changes nothing.
+  isCallWindowMode: boolean;
+  // Which handoff the call window is running; its status reports echo it.
+  callWindowHandoffId: number | null;
+  // Call window only, from the handoff. The main window already ran the CAC
+  // check on callUrlOverrides; this window has not loaded that config.
+  callUrlOverridesApproved: boolean;
+  // Call window only, from the handoff: who the main window saw as the call's
+  // host. The window shows the call before Zero has synced the call row, and
+  // this stands in for it until then.
+  callHostUserIdHint: string | null;
 }
 
 export interface JoinMediaOverrides {
   mic?: boolean;
   camera?: boolean;
+  // Devices picked before joining (the external lobby's preview). Unset means
+  // the system default, which is what every other entry point gets.
+  audioDeviceId?: string;
+  videoDeviceId?: string;
 }
 
 // Events for Room operations
@@ -257,6 +318,11 @@ export type RoomMachineEvent =
       callType: CallType;
       externalId: string;
       zero: Zero | null;
+      // Set when the call window takes over a call the main window joined:
+      // the rest of the context that join produced.
+      handoff?: CallWindowHandoff;
+      // What the user chose on a pre-join screen (the external lobby).
+      joinMediaOverrides?: JoinMediaOverrides;
     }
   | {
       type: 'INITIATE_CALL';
@@ -289,8 +355,7 @@ export type RoomMachineEvent =
   | { type: 'PUSH_TO_TALK_START' }
   | { type: 'PUSH_TO_TALK_END' }
   | { type: 'TOGGLE_CAMERA' }
-  | { type: 'TOGGLE_BACKGROUND_BLUR' }
-  | { type: 'SET_BACKGROUND_BLUR'; enabled: boolean }
+  | { type: 'SET_BACKGROUND_EFFECT'; effect: BackgroundEffect }
   | { type: 'TOGGLE_SCREEN_SHARE' }
   | { type: 'SCREEN_SHARE_FAILED' }
   | { type: 'TOGGLE_VIEW' }
@@ -373,7 +438,35 @@ export type RoomMachineEvent =
       durationMs: number;
       initiatedBy: 'user' | 'callkit' | 'error';
     }
-  | { type: 'NATIVE_DISCONNECTED' };
+  | { type: 'NATIVE_DISCONNECTED' }
+  // Call window events (main window side, see utils/callWindow)
+  | { type: 'CALL_WINDOW_STATUS'; status: CallWindowStatus }
+  | { type: 'ATTACH_CALL_WINDOW'; status: CallWindowStatus };
+
+/** What the call window needs to take over a call this machine joined. */
+const buildCallWindowHandoff = (context: RoomContext): CallWindowHandoff => ({
+  token: context.token ?? '',
+  serverUrl: context.serverUrl ?? '',
+  callType: context.callType,
+  externalId: context.externalId ?? '',
+  callId: context.callId,
+  channelId: context.channelId,
+  roomLink: context.roomLink,
+  scopeType: context.scopeType,
+  conversationId: context.conversationId,
+  artifactMessageId: context.artifactMessageId,
+  sdlcLink: context.sdlcLink,
+  targetUserIds: context.targetUserIds,
+  callDisplayName: context.callDisplayName,
+  isInitiator: context.isInitiator,
+  callUrlOverrides: context.callUrlOverrides,
+  callUrlOverridesApproved: !!context.callUrlOverrides && isCallUrlApiAllowed(),
+  joinMediaOverrides: context.joinMediaOverrides,
+  callHostUserIdHint: context.isInitiator
+    ? null
+    : (context.activeCalls.find(call => call.externalId === context.externalId)?.createdByUserId ??
+      null),
+});
 
 export const roomMachine = setup({
   types: {
@@ -908,8 +1001,18 @@ export const roomMachine = setup({
           conversationId?: string | null;
           callDisplayName?: string | null;
           scopeType?: string | null; // Channel scope type for CallKit filtering
+          callWindowHandoff: CallWindowHandoff | null;
         };
-      }) => {
+      }): Promise<{ callWindowHandoffId: number } | void> => {
+        // Call window mode: hand the token to the call window and wait for it
+        // to report the room connected. Its own connect retries run there.
+        if (input.callWindowHandoff) {
+          const handoffId = await openCallWindow(input.callWindowHandoff);
+          logRoomMachineEvent(input.externalId, 'call_window_handoff_sent', { handoffId });
+          await waitForCallWindowPhase(handoffId, 'connected', CALL_WINDOW_CONNECT_TIMEOUT_MS);
+          return { callWindowHandoffId: handoffId };
+        }
+
         const {
           room,
           token,
@@ -1054,9 +1157,23 @@ export const roomMachine = setup({
           zero: Zero | null;
           isNativeMode: boolean;
           endForAll: boolean;
+          isCallWindowMode: boolean;
+          callWindowHandoffId: number | null;
         };
       }) => {
         const { room, externalId, isNativeMode, endForAll } = input;
+
+        // The call window owns the room, including ending it for everyone.
+        if (input.isCallWindowMode) {
+          logRoomMachineEvent(externalId, 'call_window_disconnect_sent', { endForAll });
+          sendCallWindowCommand({ type: 'DISCONNECT', endForAll });
+          await waitForCallWindowPhase(
+            input.callWindowHandoffId,
+            'ended',
+            CALL_WINDOW_DISCONNECT_TIMEOUT_MS,
+          );
+          return;
+        }
 
         logRoomMachineEvent(externalId, 'disconnect_cleanup_started', {
           hasRoom: !!room,
@@ -1174,12 +1291,31 @@ export const roomMachine = setup({
         };
       },
     ),
+
+    // Call window status listener - mirrors the call window into this machine
+    callWindowEventListener: fromCallback(
+      ({
+        sendBack,
+        input,
+      }: {
+        sendBack: (event: RoomMachineEvent) => void;
+        input: { handoffId: number | null };
+      }) =>
+        onCallWindowStatus(status => {
+          if (input.handoffId !== null && status.handoffId !== input.handoffId) return;
+          sendBack({ type: 'CALL_WINDOW_STATUS', status });
+        }),
+    ),
   },
   actions: {
     createRoom: assign({
-      room: () => {
+      room: ({ context }) => {
         // Check dynamically - context.isNativeMode is stale from module init
         if (isNativeCallSupported()) {
+          return null;
+        }
+        // The call window creates its own.
+        if (context.isCallWindowMode) {
           return null;
         }
 
@@ -1222,6 +1358,8 @@ export const roomMachine = setup({
 
     updateParticipants: assign({
       participants: ({ context }) => {
+        // Mirrored from the call window instead (CALL_WINDOW_STATUS).
+        if (context.isCallWindowMode) return context.participants;
         const room = context.room;
         if (!room) return [];
 
@@ -1342,7 +1480,65 @@ export const roomMachine = setup({
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       externalId: ({ event }) => (event.type === 'CONNECT' ? event.externalId : null),
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
+      joinMediaOverrides: ({ event, context }) =>
+        event.type === 'CONNECT'
+          ? (event.joinMediaOverrides ?? context.joinMediaOverrides)
+          : context.joinMediaOverrides,
     }),
+
+    // The call window's CONNECT carries what the main window's join produced.
+    storeCallWindowHandoff: assign(({ event, context }) => {
+      if (event.type !== 'CONNECT' || !event.handoff) return {};
+      const { handoff } = event;
+      return {
+        callId: handoff.callId,
+        channelId: handoff.channelId,
+        roomLink: handoff.roomLink,
+        scopeType: handoff.scopeType,
+        conversationId: handoff.conversationId,
+        artifactMessageId: handoff.artifactMessageId,
+        sdlcLink: handoff.sdlcLink,
+        targetUserIds: handoff.targetUserIds,
+        callDisplayName: handoff.callDisplayName,
+        isInitiator: handoff.isInitiator,
+        callUrlOverrides: handoff.callUrlOverrides,
+        callUrlOverridesApproved: handoff.callUrlOverridesApproved,
+        joinMediaOverrides: handoff.joinMediaOverrides,
+        callHostUserIdHint: handoff.callHostUserIdHint,
+        viewMode: 'full' as const,
+        externalLobbyUrl: context.externalLobbyUrl,
+      };
+    }),
+
+    mirrorCallWindowStatus: assign(({ event, context }) => {
+      if (event.type !== 'CALL_WINDOW_STATUS' && event.type !== 'ATTACH_CALL_WINDOW') return {};
+      const { status } = event;
+      return {
+        isCallWindowMode: true,
+        callWindowHandoffId: status.handoffId,
+        externalId: status.externalId ?? context.externalId,
+        callId: status.callId ?? context.callId,
+        channelId: status.channelId ?? context.channelId,
+        callType: status.callType ?? context.callType,
+        roomLink: status.roomLink ?? context.roomLink,
+        scopeType: status.scopeType ?? context.scopeType,
+        conversationId: status.conversationId ?? context.conversationId,
+        callStartTime: status.callStartTime ?? context.callStartTime,
+        connectionState:
+          (status.connectionState as ConnectionState | null) ?? context.connectionState,
+        participants: status.participants.map(p => ({ ...p })),
+      };
+    }),
+
+    showCallWindowErrorToast: ({ context, event }) => {
+      if (!context.isCallWindowMode) return;
+      const error = (event as { error?: unknown }).error;
+      if (error instanceof CallWindowClosedError) return;
+      toast.error('Could not open the call window', {
+        description: error instanceof Error ? error.message : 'Please try joining again.',
+        duration: 5000,
+      });
+    },
 
     cleanupRoom: ({ context }) => {
       if (context.room) {
@@ -1394,10 +1590,14 @@ export const roomMachine = setup({
       permissionError: () => ({ type: null as PermissionErrorType, dismissed: false }),
       isCallChatOpen: () => false,
       unreadCallChatCount: () => 0,
-      isBackgroundBlurEnabled: () => false,
+      backgroundEffect: () => loadBackgroundEffect(),
       hostControls: () => DEFAULT_HOST_CONTROLS,
       callUrlOverrides: () => null,
       joinMediaOverrides: () => null,
+      isCallWindowMode: () => false,
+      callWindowHandoffId: () => null,
+      callUrlOverridesApproved: () => false,
+      callHostUserIdHint: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1431,7 +1631,11 @@ export const roomMachine = setup({
             // that reads the URL gates entry, and this gates effect. A caller that
             // sets callUrlOverrides without the flag gets the saved preferences,
             // exactly as if it had asked for nothing.
-            const urlOverrides = isCallUrlApiAllowed() ? context.callUrlOverrides : null;
+            // In the call window the main window ran this check before the handoff.
+            const urlOverrides =
+              context.callUrlOverridesApproved || isCallUrlApiAllowed()
+                ? context.callUrlOverrides
+                : null;
 
             // Precedence, strongest first:
             //   1. host controls — never overridable by anyone but the host
@@ -1452,13 +1656,25 @@ export const roomMachine = setup({
               !cameraTurnedOffByHost &&
               (urlOverrides?.camera ?? mediaOverrides?.camera ?? !joinWithoutVideo);
 
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            const audioDeviceId = mediaOverrides?.audioDeviceId;
+            const videoDeviceId = mediaOverrides?.videoDeviceId;
 
-            await context.room!.localParticipant.setCameraEnabled(enableCamera);
+            await context.room!.localParticipant.setMicrophoneEnabled(
+              enableMic,
+              audioDeviceId ? { deviceId: audioDeviceId } : undefined,
+            );
 
-            // Always select default audio devices regardless of mute state
-            await context.room!.switchActiveDevice('audioinput', 'default');
+            await context.room!.localParticipant.setCameraEnabled(
+              enableCamera,
+              videoDeviceId ? { deviceId: videoDeviceId } : undefined,
+            );
+
+            // Select the pre-join pick, else the default, regardless of mute state
+            await context.room!.switchActiveDevice('audioinput', audioDeviceId ?? 'default');
             await context.room!.switchActiveDevice('audiooutput', 'default');
+            if (videoDeviceId) {
+              await context.room!.switchActiveDevice('videoinput', videoDeviceId);
+            }
           } catch {
             // Fail silently - error will be handled by MediaDevicesError event listener
           }
@@ -1496,15 +1712,18 @@ export const roomMachine = setup({
         duration: 4000,
       });
     },
-    // Sync the background-blur processor with context flag (web only).
-    // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
-    // doesn't lie, and tell the user.
-    applyBackgroundBlur: ({ context, self }) => {
+    // Sync the background processor with the context effect (web only).
+    // If applying fails (e.g. WASM/model load, unsupported browser), revert to
+    // no effect so the picker doesn't lie, and tell the user.
+    applyBackgroundEffect: ({ context, self }) => {
       if (context.isNativeMode) return;
-      void syncBackgroundBlur(context.room, context.isBackgroundBlurEnabled, () => {
-        self.send({ type: 'SET_BACKGROUND_BLUR', enabled: false });
-        toast.error('Could not enable background blur');
+      void syncBackgroundEffect(context.room, context.backgroundEffect, () => {
+        self.send({ type: 'SET_BACKGROUND_EFFECT', effect: NO_BACKGROUND_EFFECT });
+        toast.error('Could not apply background effect');
       });
+    },
+    persistBackgroundEffect: ({ context }) => {
+      saveBackgroundEffect(context.backgroundEffect);
     },
     enforceHostControls: ({ context }) => {
       const audioTurnedOffByHost = isHostControlTurnedOffForLocal(context, 'turnOffAudio');
@@ -1538,6 +1757,15 @@ export const roomMachine = setup({
       if (screenShareTurnedOffByHost && localParticipant?.isScreenShareEnabled) {
         reactNativeBridge.livekitToggleScreenShare(false);
       }
+    },
+    // Open the call window as the join starts, so it boots alongside the token
+    // request rather than after it.
+    prepareCallWindowIfNeeded: ({ context }) => {
+      if (context.isCallWindowMode) prepareCallWindow();
+    },
+    // The join ended before anything was handed over (lobby, error).
+    cancelPreparedCallWindowIfNeeded: ({ context }) => {
+      if (context.isCallWindowMode) cancelPreparedCallWindow();
     },
     showRequestingAdmissionToast: () => {
       toast.info('Requesting to join', {
@@ -1605,10 +1833,14 @@ export const roomMachine = setup({
     pushToTalkState: 'idle',
     isCallChatOpen: false,
     unreadCallChatCount: 0,
-    isBackgroundBlurEnabled: false,
+    backgroundEffect: loadBackgroundEffect(),
     hostControls: DEFAULT_HOST_CONTROLS,
     callUrlOverrides: null,
     joinMediaOverrides: null,
+    isCallWindowMode: false,
+    callWindowHandoffId: null,
+    callUrlOverridesApproved: false,
+    callHostUserIdHint: null,
   },
   id: 'roomMachine',
   on: {
@@ -1641,7 +1873,19 @@ export const roomMachine = setup({
       on: {
         CONNECT: {
           target: 'connecting',
-          actions: ['createRoom', 'storeConnectionParams', 'clearError'],
+          actions: ['storeConnectionParams', 'storeCallWindowHandoff', 'createRoom', 'clearError'],
+        },
+        // The main window (re)loaded while a call runs in the call window.
+        ATTACH_CALL_WINDOW: {
+          target: 'connected',
+          actions: [
+            ({ event }): void => {
+              logRoomMachineEvent(event.status.externalId, 'call_window_attached', {
+                handoffId: event.status.handoffId,
+              });
+            },
+            'mirrorCallWindowStatus',
+          ],
         },
         INITIATE_CALL: {
           target: 'initiating',
@@ -1668,6 +1912,8 @@ export const roomMachine = setup({
             callUrlOverrides: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
             isInitiator: () => true,
+            isCallWindowMode: () => shouldUseCallWindow(),
+            callWindowHandoffId: () => null,
           }),
         },
         JOIN_CALL: {
@@ -1689,6 +1935,8 @@ export const roomMachine = setup({
               joinMediaOverrides: ({ event }) =>
                 event.type === 'JOIN_CALL' ? (event.joinMediaOverrides ?? null) : null,
               isInitiator: () => false,
+              isCallWindowMode: () => shouldUseCallWindow(),
+              callWindowHandoffId: () => null,
             }),
           ],
         },
@@ -1696,6 +1944,7 @@ export const roomMachine = setup({
     },
     initiating: {
       entry: [
+        'prepareCallWindowIfNeeded',
         // Send CALL_INITIATING to native app before API call (only if native calls are enabled)
         ({ context }): void => {
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
@@ -1771,7 +2020,7 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: ['cancelPreparedCallWindowIfNeeded', 'showRequestingAdmissionToast'],
           },
           {
             target: 'connecting',
@@ -1802,6 +2051,7 @@ export const roomMachine = setup({
     },
     joining: {
       entry: [
+        'prepareCallWindowIfNeeded',
         // Send CALL_INITIATING to native app for incoming call overlay (only if native calls are enabled)
         ({ context }): void => {
           logRoomMachineEvent(context.externalId ?? context.callId, 'joining_state_entered', {
@@ -1829,7 +2079,7 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: ['cancelPreparedCallWindowIfNeeded', 'showRequestingAdmissionToast'],
           },
           {
             target: 'connecting',
@@ -1905,13 +2155,32 @@ export const roomMachine = setup({
           conversationId: context.conversationId,
           callDisplayName: context.callDisplayName,
           scopeType: context.scopeType,
+          callWindowHandoff: context.isCallWindowMode ? buildCallWindowHandoff(context) : null,
         }),
         onDone: {
           target: 'connected',
+          actions: assign({
+            callWindowHandoffId: ({ event, context }) =>
+              (event.output as { callWindowHandoffId?: number } | undefined)?.callWindowHandoffId ??
+              context.callWindowHandoffId,
+          }),
         },
         onError: {
           target: 'idle',
           actions: [
+            ({ context, event }): void => {
+              if (!context.isCallWindowMode) return;
+              logger.error(Event.LIVEKIT_ROOM_EVENT, {
+                callId: context.externalId,
+                eventName: 'call_window_connect_failed',
+                error: event.error instanceof Error ? event.error.message : String(event.error),
+              });
+              // Gave up waiting (e.g. the timeout): the call window may still
+              // connect later, so tell it to leave rather than leave a call
+              // running there that this window no longer shows.
+              sendCallWindowCommand({ type: 'DISCONNECT' });
+            },
+            'showCallWindowErrorToast',
             'cleanupRoom',
             'clearContext',
             assign({
@@ -1932,6 +2201,10 @@ export const roomMachine = setup({
       states: {
         determineMode: {
           always: [
+            {
+              guard: ({ context }): boolean => context.isCallWindowMode,
+              target: 'windowMode',
+            },
             {
               guard: ({ context }): boolean => context.isNativeMode,
               target: 'nativeMode',
@@ -1955,6 +2228,64 @@ export const roomMachine = setup({
             }),
           },
         },
+        // The call runs in the call window. Media controls are forwarded to it;
+        // anything that needs the call UI brings the window forward instead.
+        windowMode: {
+          entry: [
+            ({ context }): void => {
+              logRoomMachineEvent(
+                context.externalId ?? context.callId,
+                'connected_call_window_mode_entered',
+                { handoffId: context.callWindowHandoffId },
+              );
+            },
+            // The full call view is the call window. Here the call is never
+            // "full", so nothing in this window hides itself to make room.
+            assign({ viewMode: 'mini' as const }),
+          ],
+          invoke: {
+            src: 'callWindowEventListener',
+            input: ({ context }) => ({ handoffId: context.callWindowHandoffId }),
+          },
+          on: {
+            CALL_WINDOW_STATUS: [
+              {
+                guard: ({ event }): boolean => event.status.phase === 'ended',
+                target: '#roomMachine.idle',
+                actions: [
+                  ({ context }): void => {
+                    logRoomMachineEvent(
+                      context.externalId ?? context.callId,
+                      'call_window_ended_transition_to_idle',
+                    );
+                  },
+                  // The call window may be hidden by now (it is parked when its
+                  // call ends), so a failure it hit is shown here.
+                  ({ event }): void => {
+                    if (event.status.error) toast.error(event.status.error, { duration: 5000 });
+                  },
+                  'clearContext',
+                ],
+              },
+              { actions: 'mirrorCallWindowStatus' },
+            ],
+            TOGGLE_MIC: { actions: () => sendCallWindowCommand({ type: 'TOGGLE_MIC' }) },
+            TOGGLE_CAMERA: { actions: () => sendCallWindowCommand({ type: 'TOGGLE_CAMERA' }) },
+            TOGGLE_CALL_CHAT: {
+              actions: (): void => {
+                sendCallWindowCommand({ type: 'TOGGLE_CALL_CHAT' });
+                focusCallWindow();
+              },
+            },
+            // Screen capture needs a gesture in the window that asks for it.
+            TOGGLE_SCREEN_SHARE: { actions: () => focusCallWindow() },
+            TOGGLE_VIEW: { actions: () => focusCallWindow() },
+            TOGGLE_CHAT: { actions: () => focusCallWindow() },
+            // Held keys do not survive a hop between windows.
+            PUSH_TO_TALK_START: {},
+            PUSH_TO_TALK_END: {},
+          },
+        },
         webMode: {
           invoke: {
             src: 'roomEventListener',
@@ -1969,10 +2300,12 @@ export const roomMachine = setup({
         'enableLocalTracks',
         'updateParticipants',
         assign({
-          callStartTime: () => Date.now(),
+          callStartTime: ({ context }) =>
+            context.isCallWindowMode && context.callStartTime ? context.callStartTime : Date.now(),
         }),
-        // Play sound when successfully joined the call
-        (): void => {
+        // Play sound when successfully joined the call (the call window plays its own)
+        ({ context }): void => {
+          if (context.isCallWindowMode) return;
           playAudio(AUDIO_PATHS.CALL_JOIN);
         },
       ],
@@ -2061,21 +2394,15 @@ export const roomMachine = setup({
             }
           },
         },
-        TOGGLE_BACKGROUND_BLUR: {
-          // Flip flag first, then apply — assign runs before the action sees context.
-          actions: [
-            assign({ isBackgroundBlurEnabled: ({ context }) => !context.isBackgroundBlurEnabled }),
-            'applyBackgroundBlur',
-          ],
-        },
-        SET_BACKGROUND_BLUR: {
-          // Explicit set (used to revert the flag when enabling fails).
+        SET_BACKGROUND_EFFECT: {
+          // Update context first, then persist/apply — assign runs before the actions see context.
           actions: [
             assign({
-              isBackgroundBlurEnabled: ({ event }) =>
-                event.type === 'SET_BACKGROUND_BLUR' ? event.enabled : false,
+              backgroundEffect: ({ event }) =>
+                event.type === 'SET_BACKGROUND_EFFECT' ? event.effect : NO_BACKGROUND_EFFECT,
             }),
-            'applyBackgroundBlur',
+            'persistBackgroundEffect',
+            'applyBackgroundEffect',
           ],
         },
         TOGGLE_SCREEN_SHARE: {
@@ -2466,9 +2793,9 @@ export const roomMachine = setup({
           actions: 'updateParticipants',
         },
         LOCAL_TRACK_PUBLISHED: {
-          // Re-apply blur when the camera track (re)publishes: join, re-enable,
-          // or device switch (which republishes a fresh track, dropping the processor).
-          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundBlur'],
+          // Re-apply the background effect when the camera track (re)publishes: join,
+          // re-enable, or device switch (which republishes a fresh track, dropping the processor).
+          actions: ['updateParticipants', 'enforceHostControls', 'applyBackgroundEffect'],
         },
         LOCAL_TRACK_UNPUBLISHED: {
           actions: 'updateParticipants',
@@ -2554,8 +2881,9 @@ export const roomMachine = setup({
         ({ context }): void => {
           logRoomMachineEvent(context.externalId ?? context.callId, 'disconnecting_state_entered');
         },
-        // Play sound when exiting the call
-        (): void => {
+        // Play sound when exiting the call (the call window plays its own)
+        ({ context }): void => {
+          if (context.isCallWindowMode) return;
           playAudio(AUDIO_PATHS.CALL_EXIT);
         },
       ],
@@ -2567,6 +2895,8 @@ export const roomMachine = setup({
           zero: context.zero,
           isNativeMode: isNativeCallSupported(), // Check dynamically - context.isNativeMode is stale from module init
           endForAll: event.type === 'DISCONNECT' ? (event.endForAll ?? false) : false,
+          isCallWindowMode: context.isCallWindowMode,
+          callWindowHandoffId: context.callWindowHandoffId,
         }),
         onDone: {
           target: 'idle',
@@ -2600,6 +2930,8 @@ export const roomMachine = setup({
     },
     failed: {
       entry: [
+        // Runs before `always` clears the context, so the mode is still known.
+        'cancelPreparedCallWindowIfNeeded',
         // Notify native app of failure so it can show error and reset UI
         ({ context }): void => {
           if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {
@@ -2619,6 +2951,17 @@ export const roomMachine = setup({
 
 // Create the global Room actor instance
 export const roomActor = createActor(roomMachine).start();
+
+/**
+ * The call has been handed to the desktop call window, which now owns it and
+ * keeps it through this window reloading. Before the handoff (initiating,
+ * joining) the call, and the call window opened early for it, still belong here.
+ */
+export const isCallHandedToCallWindow = (
+  snapshot: ReturnType<typeof roomActor.getSnapshot>,
+): boolean =>
+  snapshot.context.isCallWindowMode &&
+  (snapshot.matches('connecting') || snapshot.matches('connected'));
 
 /**
  * Join a call from outside the React tree, leaving any call already running.

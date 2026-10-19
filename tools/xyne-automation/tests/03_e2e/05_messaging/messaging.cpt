@@ -56,3 +56,7 @@
 * waiting for zero sync to settle fast
 * verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is visible in "[data-testid='virtuoso-item-list']"
 
+
+# Opening more actions for stored message <messageAlias> in dm <dmAlias> for user <userAlias>
+* clicking hover action "[data-testid='hover-action-more']" on stored user <userAlias> dm <dmAlias> message <messageAlias> in "[data-testid='chat-message-list']"
+* waiting for "[data-testid='hover-action-copy-message']" to appear

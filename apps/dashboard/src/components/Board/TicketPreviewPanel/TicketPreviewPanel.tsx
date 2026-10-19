@@ -20,6 +20,7 @@ export const TicketPreviewPanel = ({
       <div className='flex items-center justify-between px-[16px] py-[12px]'>
         <h2 className='text-[14px] font-medium text-foreground'>Ticket Preview</h2>
         <Button
+          aria-label='Close preview'
           onClick={onClose}
           variant='ghost'
           size='iconSm'

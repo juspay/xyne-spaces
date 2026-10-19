@@ -1,5 +1,6 @@
 import { buildTicketProposalFlow, buildWriteApprovalFlow, type FlowDefinition } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
+import { buildAgentUpdateCardFlow } from "./agent-update-card.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard, type XyneAiCardTarget } from "./flow-card-delivery.js";
 import { mentionShorthandToText } from "./mention-transform.js";
@@ -307,16 +308,24 @@ export function buildTicketProposalCardFlow(action: WriteCardAction): FlowDefini
   );
 }
 
-/** `usedTicketCard` tells the Spaces caller whether a flow-schema rejection can
+/** `usedRichCard` tells the Spaces caller whether a flow-schema rejection can
  *  be retried with generic components. */
-export function buildWriteApprovalCardFlow(
+export async function buildWriteApprovalCardFlow(
   action: WriteCardAction,
   actionDesc: string,
-): { flow: FlowDefinition; usedTicketCard: boolean } {
+  orgId: string | null | undefined,
+): Promise<{ flow: FlowDefinition; usedRichCard: boolean }> {
+  const agentUpdate = orgId
+    ? await buildAgentUpdateCardFlow(action, orgId).catch((err: unknown) => {
+        log.warn(`[write-card] agent update card not built, using the generic card: ${errMsg(err)}`);
+        return null;
+      })
+    : null;
+  if (agentUpdate) return { flow: agentUpdate, usedRichCard: true };
   const ticket = buildTicketProposalCardFlow(action);
   return ticket
-    ? { flow: ticket, usedTicketCard: true }
-    : { flow: buildWriteApprovalFlow(actionDesc, action), usedTicketCard: false };
+    ? { flow: ticket, usedRichCard: true }
+    : { flow: buildWriteApprovalFlow(actionDesc, action), usedRichCard: false };
 }
 
 /** Null is the fail-safe: no card, so the client suppresses nothing and the
@@ -339,9 +348,10 @@ export async function renderXyneAiWriteApprovalCard(args: {
     return null;
   }
 
-  const { flow } = buildWriteApprovalCardFlow(
+  const { flow } = await buildWriteApprovalCardFlow(
     cardAction,
     formatActionDescription(cardAction.tool, cardAction.params),
+    target.orgId,
   );
   const posted = await postFlowCard(
     { ...flow, data: { ...(flow.data ?? {}), pendingSignature: cardAction.pendingSignature } },

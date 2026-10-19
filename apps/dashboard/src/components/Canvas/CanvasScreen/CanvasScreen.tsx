@@ -141,6 +141,8 @@ interface CanvasScreenProps {
   /** The host's own way back from the not-found screen, in place of the canvas list. */
   notFoundBackLabel?: string;
   onNotFoundBack?: () => void;
+  /** The host's own way out of the canvas (mobile back arrow, canvas deleted), in place of the canvas route. */
+  onBack?: () => void;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -185,6 +187,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   notFoundNoun,
   notFoundBackLabel,
   onNotFoundBack,
+  onBack,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const askAIAvailable = useAskAIAvailable();
@@ -525,6 +528,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       !singleCanvas
     ) {
       setLastCanvasId(null);
+      if (onBack) {
+        onBack();
+        return;
+      }
       const canvasRoute = isOnChatCanvasPage ? '/chat/canvas' : `${baseRoute}/canvas`;
       void navigate(canvasRoute, { replace: true });
     }
@@ -534,6 +541,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     isOnChatCanvasPage,
     lastCanvasId,
     navigate,
+    onBack,
     setLastCanvasId,
     singleCanvas,
     singleCanvasDetails.type,
@@ -683,6 +691,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const handleBack = useCallback((): void => {
+    if (onBack) {
+      onBack();
+      return;
+    }
     if (isMobile && !isEditingMessage && !isCreatingMessage) {
       const canvasRoute = isOnChatCanvasPage ? '/chat/canvas' : `${baseRoute}/canvas`;
       void navigate(canvasRoute);
@@ -690,7 +702,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }
 
     void navigate(-1);
-  }, [baseRoute, isCreatingMessage, isEditingMessage, isMobile, isOnChatCanvasPage, navigate]);
+  }, [
+    baseRoute,
+    isCreatingMessage,
+    isEditingMessage,
+    isMobile,
+    isOnChatCanvasPage,
+    navigate,
+    onBack,
+  ]);
 
   const handleConfirmSend = (): void => {
     if (!selectedCanvas || !state?.channelId) return;

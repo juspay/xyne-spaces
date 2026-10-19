@@ -284,6 +284,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
                         </div>
                       </div>
                       <Button
+                        aria-label={`Revoke access for ${guest.name}`}
                         variant='ghost'
                         size='sm'
                         onClick={() => setRevokeTarget({ guest, access })}

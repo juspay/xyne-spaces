@@ -125,6 +125,7 @@ export default class ProjectSteps {
       channels: previous?.channels ?? {},
       dms: previous?.dms ?? {},
       tickets: previous?.tickets ?? {},
+      userGroups: previous?.userGroups ?? {},
     };
 
     testContext.storedUsers.set(userAlias, storedUser);

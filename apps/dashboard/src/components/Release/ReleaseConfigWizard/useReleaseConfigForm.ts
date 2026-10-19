@@ -1,8 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useChannelsByProjectId } from '@xyne/shared/hooks';
-import { useZero } from '../../../hooks/useZero';
-import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ReleaseTrackingMode,
@@ -12,7 +10,7 @@ import {
   type ReleaseTrackingModeValue,
   type WizardStep,
 } from './ReleaseConfigWizard.types';
-import { buildApplicationReleaseBoardName, buildMainReleaseBoardName } from './releaseBoardNames';
+import { buildMainReleaseBoardName } from './releaseBoardNames';
 
 const EMPTY_APP: ApplicationConfig = {
   id: '',
@@ -25,13 +23,6 @@ const EMPTY_APP: ApplicationConfig = {
   envPaths: '',
   migrationPaths: '',
 };
-
-function csvToArray(csv: string): string[] {
-  return csv
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
 
 function initApplications(config: ExistingReleaseConfig | undefined): ApplicationConfig[] {
   if (config && config.applications.length > 0) return config.applications;
@@ -53,10 +44,8 @@ interface UseReleaseConfigFormOptions {
 export function useReleaseConfigForm({
   projectId,
   existingConfig,
-  onSave,
   addServiceMode = false,
 }: UseReleaseConfigFormOptions) {
-  const zero = useZero();
   const isEditing = !!existingConfig;
 
   // The blank service seeded for add mode; its id lets the form filter to that
@@ -69,7 +58,6 @@ export function useReleaseConfigForm({
   const [releaseTrackingMode, setReleaseTrackingMode] = useState<ReleaseTrackingModeValue>(
     existingConfig?.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE,
   );
-  const [mainBoardId] = useState(existingConfig?.mainBoardId ?? uuidv4());
   const [mainBoardName, setMainBoardName] = useState(existingConfig?.mainBoardName ?? '');
 
   // One main release board represents one repository, shared by its applications.
@@ -82,7 +70,7 @@ export function useReleaseConfigForm({
     return addedService ? [...base, { ...EMPTY_APP, ...addedService }] : base;
   });
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const isSaving = false;
 
   // Once the user edits the form we stop overriding state from Zero re-deliveries.
   // Add mode starts "touched" so the seeded blank row survives re-deliveries.
@@ -204,99 +192,14 @@ export function useReleaseConfigForm({
 
   // ─── Save ───────────────────────────────────────────────────────────────────
 
-  const handleSave = useCallback(async () => {
-    const hasNamelessContent = applications.some(
-      app =>
-        !app.name.trim() &&
-        (app.regex.trim() ||
-          app.ownerTeam.trim() ||
-          app.envPaths.trim() ||
-          app.migrationPaths.trim()),
+  // Release configs belong to an SDLC hub now and are saved from its Releases tab;
+  // this project-level wizard can no longer create or edit one.
+  const handleSave = useCallback((): Promise<void> => {
+    toast.error(
+      "Release configuration has moved to SDLC hubs. Set this repository up from its hub's Releases tab.",
     );
-    if (hasNamelessContent) {
-      toast.error('Every service needs a name');
-      return;
-    }
-
-    const validApps = applications.filter(app => app.name.trim());
-
-    if (validApps.length === 0) {
-      toast.error('Please configure at least one service');
-      return;
-    }
-    if (!sharedRepoUrl.trim()) {
-      toast.error('Repository URL is required');
-      return;
-    }
-    if (!mainBoardName.trim()) {
-      toast.error('Repository name must produce a valid repository name');
-      return;
-    }
-    if (validApps.some(app => !app.regex.trim())) {
-      toast.error('All services must have a Service Regex');
-      return;
-    }
-    // Fall back to the group's stored channel: edit-application mode hides the
-    // channel picker, and a deleted/unsynced channel must not dead-end Save.
-    const channelIdToSave = selectedChannel?.id ?? existingConfig?.channelId ?? null;
-    if (!channelIdToSave) {
-      toast.error('Please select a release channel');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const applicationsData = validApps.map(app => ({
-        id: app.id,
-        boardId: app.boardId,
-        boardName:
-          app.boardName.trim() || buildApplicationReleaseBoardName(sharedRepoUrl, app.name),
-        name: app.name,
-        regex: app.regex,
-        repoUrl: sharedRepoUrl,
-        ownerTeam: app.ownerTeam,
-        envPaths: csvToArray(app.envPaths),
-        migrationPaths: csvToArray(app.migrationPaths),
-      }));
-      if (applicationsData.some(app => !app.boardName.trim())) {
-        throw new Error('Repository and service names must produce valid repository names');
-      }
-
-      const result = zero.mutate(
-        mutators.project.saveReleaseBoardConfig({
-          projectId,
-          mainBoardId,
-          mainBoardName: mainBoardName.trim(),
-          releaseTrackingMode: releaseTrackingMode as ReleaseTrackingMode,
-          channelId: channelIdToSave,
-          applications: applicationsData,
-        }),
-      );
-
-      const res = await result.server;
-      if (res.type === 'error') {
-        throw new Error(res.error.message || 'Failed to save configuration');
-      }
-
-      toast.success('Release configuration saved');
-      onSave({ id: mainBoardId, name: mainBoardName.trim() });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save configuration');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [
-    applications,
-    existingConfig,
-    selectedChannel,
-    projectId,
-    mainBoardId,
-    mainBoardName,
-    releaseTrackingMode,
-    sharedRepoUrl,
-    onSave,
-    zero,
-  ]);
+    return Promise.resolve();
+  }, []);
 
   return {
     // Meta

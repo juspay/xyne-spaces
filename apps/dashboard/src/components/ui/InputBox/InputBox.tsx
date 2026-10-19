@@ -76,6 +76,7 @@ import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
@@ -128,8 +129,6 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
-import { extractCallLinkFromInviteText } from '../../../utils/callControls';
-import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -244,6 +243,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelId,
       conversationId,
       onSendMessage,
+      clearOnSend = true,
       onContentChange,
       onCancel,
       mentionItems = [],
@@ -468,17 +468,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
 
+    // Not while full-page search covers the composer: its Esc is full page's.
+    const coverage = usePageCoverage();
     useEffect(() => {
       if (!isVoiceRecording) return;
       const onKeyDown = (e: KeyboardEvent): void => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !coverage.isCovered()) {
           e.stopPropagation();
           voiceInputRef.current?.toggle();
         }
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [isVoiceRecording]);
+    }, [isVoiceRecording, coverage]);
 
     const artifactComposerDefinition = getSlashCommandArtifactDefinition(
       slashCommandArtifactCommand,
@@ -487,14 +489,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     useEffect(() => {
       if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
       const onKeyDown = (event: KeyboardEvent): void => {
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || coverage.isCovered()) return;
         event.preventDefault();
         event.stopPropagation();
         onCancelSlashCommandArtifact();
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact, coverage]);
 
     const handleTyping = onTyping;
 
@@ -1049,21 +1051,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
-          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
-          // calendars. In chat, keep only its link: the message then renders as the call card.
-          const inviteCallLink = extractCallLinkFromInviteText(
-            clipboard?.getData('text/plain') ?? '',
-          );
-          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
-            event.preventDefault();
-            editor?.commands.insertContent({
-              type: 'text',
-              text: inviteCallLink,
-              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
-            });
-            return true;
-          }
-
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1232,20 +1219,24 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     // What the editor starts with, read once it exists. It is made during the first
     // render, so onCreate would set this state before the component had mounted.
+    // Effects here can re-run on an editor TipTap has already destroyed (React
+    // re-runs effects when it re-shows a tree it hid, e.g. under Suspense, and
+    // useEditor destroys on cleanup), so each one skips a destroyed editor.
     useEffect(() => {
-      if (!editor) return;
+      if (!editor || editor.isDestroyed) return;
       setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
       updateEmojiSizeClass(editor);
     }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
-      editor?.setEditable(!disabled && !isSending, false);
+      if (!editor || editor.isDestroyed) return;
+      editor.setEditable(!disabled && !isSending, false);
     }, [editor, disabled, isSending]);
 
     // Keep mounted, non-focused editors in sync when another InputBox updates
     // the shared draft value for this lookup id. Skip focused editors where change is happening.
     useEffect(() => {
-      if (!editor || editor.isFocused || value === undefined) return;
+      if (!editor || editor.isDestroyed || editor.isFocused || value === undefined) return;
 
       const nextValue = value;
       if (lastAppliedValueRef.current === nextValue) return;
@@ -1420,6 +1411,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+          if (!clearOnSend) return;
+
           // Tracked here, not on the Send button: Enter, the button, the mobile
           // editor and shortcuts all land in this function, and only a send that
           // succeeded should count.
@@ -1451,6 +1444,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor,
         allAttachments,
         onSendMessage,
+        clearOnSend,
         isSending,
         attachedCanvas,
         hasSendableContent,
@@ -2284,6 +2278,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             <DropdownMenuTrigger asChild>
                               <button
                                 type='button'
+                                aria-label='Send options'
                                 disabled={disabled || sendDisabled || isSending}
                                 className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                   hasSendableContent && !sendDisabled
@@ -2377,6 +2372,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type='button'
+                                  aria-label='Schedule for later'
                                   disabled={disabled || isSending || !hasSendableContent}
                                   className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                     hasSendableContent
