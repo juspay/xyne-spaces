@@ -9,7 +9,11 @@ import { ChannelController } from '@/controllers/channelController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { AppError } from '@/middleware/errorHandler';
-import { addChannelParticipants, type AddedChannelParticipant } from '@/services/channelParticipantsService';
+import {
+  addChannelParticipants,
+  MAX_PARTICIPANTS_PER_CALL,
+  type AddedChannelParticipant,
+} from '@/services/channelParticipantsService';
 import { ChannelFieldError, prepareChannelFields, writeChannelFields } from '@/services/channelFieldService';
 import { ChannelParticipantsSideEffectHandler } from '@/zero/side-effects/tables/channel-participants-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -47,14 +51,17 @@ const UpdateChannelBodySchema = z
 const AddParticipantsBodySchema = z
   .object({
     channelId: z.string().trim().min(1),
-    adminEmails: z.array(email).max(100).default([]),
-    memberEmails: z.array(email).max(100).default([]),
+    adminEmails: z.array(email).max(MAX_PARTICIPANTS_PER_CALL).default([]),
+    memberEmails: z.array(email).max(MAX_PARTICIPANTS_PER_CALL).default([]),
     /** Also set the role of people already in the channel (promote from adminEmails, demote from memberEmails). */
     updateRoles: z.boolean().default(false),
   })
   .strict()
   .refine((body) => body.adminEmails.length + body.memberEmails.length > 0, {
     message: 'Give at least one email in adminEmails or memberEmails',
+  })
+  .refine((body) => body.adminEmails.length + body.memberEmails.length <= MAX_PARTICIPANTS_PER_CALL, {
+    message: `At most ${MAX_PARTICIPANTS_PER_CALL} users in total can be added or updated per call (adminEmails and memberEmails together)`,
   })
   .superRefine((body, ctx) => {
     const both = body.adminEmails.filter((email) => body.memberEmails.includes(email));

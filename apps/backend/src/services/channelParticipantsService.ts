@@ -5,6 +5,9 @@ import { AppError } from '@/middleware/errorHandler';
 
 const channelParticipantRepository = new ChannelParticipantRepository();
 
+/** Most people one call may add or change. The ACL checks every new row, so the cap keeps a call's database work small. */
+export const MAX_PARTICIPANTS_PER_CALL = 10;
+
 export interface ChannelParticipantTarget {
   userId: string;
   role: ChannelRole;
@@ -54,6 +57,9 @@ export async function addChannelParticipants(
     roleOf.set(userId, role);
   }
   const userIds = [...roleOf.keys()];
+  if (userIds.length > MAX_PARTICIPANTS_PER_CALL) {
+    throw new AppError(`At most ${MAX_PARTICIPANTS_PER_CALL} users can be added or updated per call`, 400);
+  }
 
   if (actorWorkspaceRole === 'GUEST') {
     throw new AppError('Guests cannot add participants', 403);
@@ -161,22 +167,35 @@ export async function addChannelParticipants(
           select: { id: true, userId: true },
         });
 
-  // 2. Status rows for everyone targeted, not just the new ones: all of them are participants now, and
-  //    createMany skips the rows that exist. If an earlier call died between steps 1 and 2, this repairs it.
+  // 2. Status rows for the targeted users who lack one. All targets are participants now; reading what exists
+  //    first means the insert (and the ACL's per-row create check on it) only covers the missing rows, which
+  //    is normally just the new people. If an earlier call died between steps 1 and 2, this repairs it.
   const now = new Date();
-  const conversationSeenCutoffAt = await channelParticipantRepository.getConversationSeenCutoffAt(db, channelId, now);
-  const { count: statusRowsCreated } = await db.channelUserStatus.createMany({
-    data: userIds.map((userId) => ({
-      channelId,
-      workspaceId: channel.workspaceId,
-      userId,
-      isClosed: false,
-      isStarred: false,
-      lastViewedAt: now,
-      conversationSeenCutoffAt,
-    })),
-    skipDuplicates: true,
-  });
+  const haveStatus = new Set(
+    (
+      await db.channelUserStatus.findMany({
+        where: { channelId, userId: { in: userIds } },
+        select: { userId: true },
+      })
+    ).map((row) => row.userId)
+  );
+  const missingStatus = userIds.filter((userId) => !haveStatus.has(userId));
+  let statusRowsCreated = 0;
+  if (missingStatus.length > 0) {
+    const conversationSeenCutoffAt = await channelParticipantRepository.getConversationSeenCutoffAt(db, channelId, now);
+    ({ count: statusRowsCreated } = await db.channelUserStatus.createMany({
+      data: missingStatus.map((userId) => ({
+        channelId,
+        workspaceId: channel.workspaceId,
+        userId,
+        isClosed: false,
+        isStarred: false,
+        lastViewedAt: now,
+        conversationSeenCutoffAt,
+      })),
+      skipDuplicates: true,
+    }));
+  }
 
   // 3. The participant count is set from the rows, not incremented, so a repeat cannot count anyone twice
   //    and a missed update heals itself. Only touched when something was created: a pure repeat writes nothing.
