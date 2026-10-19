@@ -5,8 +5,8 @@ import { matchesAllTokens } from './tokenMatch.js';
 /**
  * People search ranking shared by the dashboard (Cmd+K, pickers) and the mobile app's global
  * search. Moved verbatim from the dashboard (`utils/rankingUtils.ts`, `utils/userDisplayName.ts`,
- * the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`). MFU affinity comes from the shared
- * `affinityService`, which fetches with the app's registered HTTP client (`registerHttpClient`).
+ * the Cmd+K DM-contact map in `ChannelCommandMenu.tsx`). MFU affinity comes from the app's
+ * registered `AffinityService` (`registerAffinityService`).
  */
 
 /**

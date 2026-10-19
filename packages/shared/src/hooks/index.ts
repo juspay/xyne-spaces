@@ -12,11 +12,7 @@ export {
   useAffinityService,
   AffinityServiceProvider,
 } from "./useAffinityService.js";
-export {
-  AffinityService,
-  affinityService,
-  registerHttpClient,
-} from "../services/affinityService.js";
+export { AffinityService, registerAffinityService } from "../services/affinityService.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
 export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";

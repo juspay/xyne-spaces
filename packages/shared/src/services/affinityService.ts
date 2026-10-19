@@ -60,31 +60,22 @@ export class AffinityService {
   }
 }
 
-// Only the app knows how to reach the API (base URL, auth, transport), so each app registers
-// its HttpClient once at startup, before anything renders. The shared affinityService below
-// fetches through it.
-let appHttpClient: HttpClient | null = null;
+// The app's one AffinityService. It needs the app's HttpClient, so each app creates it and
+// registers it at startup; shared rankers (rankUsers, rankChannelsByAffinity, …) then read the
+// same weights the app's hooks load, and callers never pass affinity in.
+let registeredAffinityService: AffinityService | null = null;
 
-export function registerHttpClient(client: HttpClient): void {
-  appHttpClient = client;
-}
-
-function registeredHttpClient(): HttpClient {
-  if (!appHttpClient) throw new Error('registerHttpClient() has not been called');
-  return appHttpClient;
+export function registerAffinityService(service: AffinityService): void {
+  registeredAffinityService = service;
 }
 
 /**
- * The app's one AffinityService: its hooks get it through AffinityServiceProvider, and the shared
- * rankers (rankUsers, rankChannelsByAffinity, …) read it directly, so both use the same weights.
- * Until the app registers its client, a fetch fails and the weights stay empty.
+ * The registered app service, as the rankers read it. Weights are 0 until an app registers one,
+ * the same as an AffinityService whose weights have not loaded yet.
  */
-export const affinityService = new AffinityService({
-  get: <T>(path: string, options?: { signal?: AbortSignal; timeout?: number }): Promise<T> =>
-    registeredHttpClient().get<T>(path, options),
-  post: <T>(
-    path: string,
-    body?: unknown,
-    options?: { signal?: AbortSignal; timeout?: number },
-  ): Promise<T> => registeredHttpClient().post<T>(path, body, options),
-});
+export const affinityService = {
+  getUserWeight: (userId: string): number =>
+    registeredAffinityService?.getUserWeight(userId) ?? 0,
+  getChannelWeight: (channelId: string): number =>
+    registeredAffinityService?.getChannelWeight(channelId) ?? 0,
+};
