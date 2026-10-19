@@ -112,11 +112,8 @@ export class MicrosoftAuthController {
     return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
   }
 
-  private getRedirectUrl(req: Request, platform: string, params: Record<string, string>): string {
+  private getRedirectUrl(req: Request, params: Record<string, string>): string {
     const query = new URLSearchParams(params).toString();
-    if (platform === 'mobile') {
-      return `xyne-spaces://auth/microsoft/callback?${query}`;
-    }
     const frontendUrl = getFrontendUrl(req);
     return `${frontendUrl}?${query}`;
   }
@@ -177,12 +174,16 @@ export class MicrosoftAuthController {
         logger.info(`${tag()} Microsoft OAuth login initiated`);
 
         const platformQuery = req.query.platform;
-        const platform: 'mobile' | 'electron' | 'web' =
-          platformQuery === 'mobile'
-            ? 'mobile'
-            : platformQuery === 'electron'
-              ? 'electron'
-              : 'web';
+        if (platformQuery === 'mobile') {
+          logger.warn(`${tag()} Rejected unsupported Microsoft login platform=mobile`);
+          res.status(400).json({
+            success: false,
+            error: 'unsupported_flow',
+            message: 'Mobile sign-in must use the on-device flow',
+          });
+          return;
+        }
+        const platform: 'electron' | 'web' = platformQuery === 'electron' ? 'electron' : 'web';
         logger.info(`${tag()} Platform detected: ${platform}`);
 
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
@@ -307,11 +308,23 @@ export class MicrosoftAuthController {
         }
         logger.info(`${tag()} Microsoft OAuth state validated (platform=${resolvedPlatform}, stateFound=${!!peekedState}, invitationId=${peekedState?.invitationId || 'none'})`);
 
+        if (resolvedPlatform === 'mobile') {
+          logger.warn(`${tag()} Rejected stored platform=mobile state on Microsoft callback`);
+          await oauthStateServiceV2.deleteState(state as string);
+          res.redirect(
+            this.getRedirectUrl(req, {
+              error: 'unsupported_flow',
+              message: 'This sign-in flow is no longer supported. Please try again.',
+            })
+          );
+          return;
+        }
+
         if (error) {
           logger.error(`${tag()} Microsoft OAuth provider returned error: ${error}`);
           if (state) await oauthStateServiceV2.deleteState(state as string);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(req, {
               error: 'oauth_error',
               message: error as string,
             })
@@ -322,7 +335,7 @@ export class MicrosoftAuthController {
         if (!code || !state) {
           logger.error(`${tag()} Missing code or state`);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(req, {
               error: 'missing_params',
               message: 'Missing authorization code or state',
             })
@@ -352,24 +365,20 @@ export class MicrosoftAuthController {
           return;
         }
 
-        // The state must match the oauth_state cookie. Only the browser-driven path is
-        // checked: electron returned above, and the mobile app posts code+state directly
-        // rather than being redirected here. `resolvedPlatform` comes from the stored state
-        // record.
-        if (resolvedPlatform !== 'mobile') {
-          const boundState = req.cookies?.oauth_state as string | undefined;
-          res.clearCookie('oauth_state', { path: '/' });
-          if (!boundState || boundState !== state) {
-            logger.error(`${tag()} OAuth state cookie missing or mismatched — rejecting`);
-            await oauthStateServiceV2.deleteState(state as string);
-            res.redirect(
-              this.getRedirectUrl(req, resolvedPlatform, {
-                error: 'invalid_state',
-                message: 'Login session expired or invalid. Please try signing in again.',
-              })
-            );
-            return;
-          }
+        // The state must match the oauth_state cookie. Electron returned above; the mobile
+        // app posts code+state directly to exchange-mobile and never reaches this callback.
+        const boundState = req.cookies?.oauth_state as string | undefined;
+        res.clearCookie('oauth_state', { path: '/' });
+        if (!boundState || boundState !== state) {
+          logger.error(`${tag()} OAuth state cookie missing or mismatched — rejecting`);
+          await oauthStateServiceV2.deleteState(state as string);
+          res.redirect(
+            this.getRedirectUrl(req, {
+              error: 'invalid_state',
+              message: 'Login session expired or invalid. Please try signing in again.',
+            })
+          );
+          return;
         }
 
         // Now consume the state (delete it)
@@ -380,7 +389,7 @@ export class MicrosoftAuthController {
         if (!codeVerifier) {
           logger.error(`${tag()} PKCE verifier not found`);
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(req, {
               error: 'pkce_error',
               message: 'PKCE verification failed',
             })
@@ -468,7 +477,7 @@ export class MicrosoftAuthController {
             `${tag()} Provider mismatch for ${microsoftUserData.email}: account registered with ${existingIdentity.authProvider}, attempted login with MICROSOFT`,
           );
           res.redirect(
-            this.getRedirectUrl(req, resolvedPlatform, {
+            this.getRedirectUrl(req, {
               error: 'provider_mismatch',
               message: 'This account uses a different login method. Please continue with your original sign-in method.',
               existingProvider: existingIdentity.authProvider,
@@ -491,7 +500,7 @@ export class MicrosoftAuthController {
         // plus only the short-lived Redis lookup key.
         const cookieInvitationId = req.cookies?.pending_invitation_id as string | undefined;
         const pendingInvitationId = cookieInvitationId || peekedState?.invitationId;
-        if (resolvedPlatform !== 'mobile' && pendingInvitationId) {
+        if (pendingInvitationId) {
           const tokenKey = await this.storePendingOAuthTokens(
             refreshToken,
             accessToken,
@@ -527,7 +536,7 @@ export class MicrosoftAuthController {
           return;
         }
 
-        if (resolvedPlatform !== 'mobile' && workspaces.length === 0) {
+        if (workspaces.length === 0) {
           const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(
             microsoftUserData.email,
           );
@@ -639,23 +648,6 @@ export class MicrosoftAuthController {
           memberId: user.orgMemberId ?? undefined,
         });
 
-        // Handle mobile platform: relay to app deep link with the token (no server session needed).
-        if (resolvedPlatform === 'mobile') {
-          const mobileParams = new URLSearchParams({
-            success: 'true',
-            token: customToken,
-            user_id: user.id,
-            email: user.email,
-            name: user.name,
-          });
-
-          const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
-          logger.info(`${tag()} Microsoft OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length}) — redirecting to mobile app`);
-          res.redirect(mobileRedirectUrl);
-          return;
-        }
-
-
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
@@ -746,7 +738,7 @@ export class MicrosoftAuthController {
       } else {
         logger.error(`${tag()} Microsoft OAuth not configured`);
         res.redirect(
-          this.getRedirectUrl(req, resolvedPlatform, {
+          this.getRedirectUrl(req, {
             error: 'microsoft_not_configured',
             message: 'Microsoft SSO is not configured',
           })
@@ -756,7 +748,7 @@ export class MicrosoftAuthController {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`${tag()} Microsoft OAuth login failed (platform=${resolvedPlatform}): ${errorMessage}`);
 
-      if (resolvedPlatform !== 'mobile' && peekedState?.redirectTo) {
+      if (peekedState?.redirectTo) {
         const params = new URLSearchParams({
           error: 'auth_failed',
           message: errorMessage,
@@ -766,7 +758,7 @@ export class MicrosoftAuthController {
       }
 
       res.redirect(
-        this.getRedirectUrl(req, resolvedPlatform, {
+        this.getRedirectUrl(req, {
           error: 'auth_failed',
           message: errorMessage,
         })

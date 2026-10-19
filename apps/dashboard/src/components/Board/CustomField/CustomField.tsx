@@ -9,6 +9,7 @@ import type { FieldEnumOption } from '@xyne/shared';
 import {
   GlobalFieldNameAutocomplete,
   type GlobalFieldSuggestion,
+  GLOBAL_FIELD_SUGGESTIONS_ATTR,
 } from '../GlobalFieldNameAutocomplete';
 import {
   MAX_FIELD_OPTIONS,
@@ -256,6 +257,9 @@ export const CustomField = ({
   // Click outside to save
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
+      // The name autocomplete's suggestion panel is portaled; clicking it is not "outside".
+      const target = event.target as Element;
+      if (target.closest?.(`[${GLOBAL_FIELD_SUGGESTIONS_ATTR}]`)) return;
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         if (supportsBranching) {
           outsideSaveTimeoutRef.current = window.setTimeout(() => {

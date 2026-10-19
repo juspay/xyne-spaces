@@ -12,6 +12,7 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
 import { ThreadNavigationContext } from '../ThreadNavigationContext';
+import { discussionTitleOfBody } from '../ChatInput/ChatInput.utils';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
@@ -248,6 +249,12 @@ const TicketCreateModeWithChannel: React.FC<{
 }) => {
   const channel = useChannel(channelId);
   const projectId = channel?.projectId || '';
+  const opening = useMemo(() => {
+    const body = new DOMParser().parseFromString(messageContent, 'text/html').body;
+    const title = discussionTitleOfBody(body);
+    if (title) body.firstElementChild?.remove();
+    return { title, description: stripHtml(body.innerHTML) };
+  }, [messageContent]);
 
   if (!channel) return null;
 
@@ -274,8 +281,8 @@ const TicketCreateModeWithChannel: React.FC<{
       channelId={channelId}
       projectId={projectId}
       trackSource={trackSource}
-      initialTitle=''
-      initialDescription={stripHtml(messageContent)}
+      initialTitle={opening.title}
+      initialDescription={opening.description}
       sourceMessageId={messageId}
       sourceConversation={conversation ?? undefined}
       {...(onTicketCreated && { onTicketCreated: handleTicketCreated })}

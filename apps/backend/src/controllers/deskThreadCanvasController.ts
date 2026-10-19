@@ -1,0 +1,82 @@
+import { Request, Response } from 'express';
+import { z } from 'zod';
+import { DatabaseClient } from '@/database/client';
+import { logger } from '@/utils/logger';
+import { deskThreadCanvasService } from '@/services/deskThreadCanvasService';
+import { ClawAgentNotAvailableError } from '@/services/clawAgentService';
+import { assertChannelMembership } from '@/utils/channelMembership';
+
+const prisma = DatabaseClient.getInstance();
+
+const CreateDeskThreadCanvasSchema = z.object({
+  scope: z.enum(['chat', 'email', 'both']),
+  includeMerged: z.boolean().default(false),
+});
+
+export class DeskThreadCanvasController {
+  /** Dispatches the agent and returns immediately with the new
+   *  canvas; it fills in when the agent's callback lands. */
+  createCanvasFromThread = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { ticketId } = req.params;
+      const user = req.user;
+      if (!user?.id || !user.workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { id: userId, workspaceId } = user;
+
+      const parsed = CreateDeskThreadCanvasSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid request body', details: parsed.error.issues });
+        return;
+      }
+
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: ticketId, workspaceId, isArchived: false },
+      });
+      if (!ticket) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      // The app-level ACL is route-scoped: without this, any workspace member
+      // could synthesize a private desk channel's thread into a canvas they own.
+      const access = await assertChannelMembership(req, ticket.channelId);
+      if (!access.ok) {
+        res.status(access.status).json({ error: access.error });
+        return;
+      }
+
+      const { scope, includeMerged } = parsed.data;
+      const result = await deskThreadCanvasService.dispatch({
+        ticket,
+        user: {
+          id: userId,
+          name: user.name ?? user.displayName ?? null,
+          email: user.email,
+          workspaceId,
+        },
+        scope,
+        includeMerged,
+        cookie: req.headers.cookie,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ClawAgentNotAvailableError) {
+        res
+          .status(409)
+          .json({ error: `Canvas generation agent isn't available in this workspace` });
+        return;
+      }
+      logger.error('[DeskThreadCanvas] dispatch failed:', error);
+      // Usually claw being unreachable — say so instead of making the user
+      // read the server log.
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? `Couldn't start canvas generation: ${error.message}`
+            : 'Failed to create canvas from thread',
+      });
+    }
+  };
+}

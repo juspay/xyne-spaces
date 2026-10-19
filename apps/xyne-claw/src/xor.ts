@@ -8,7 +8,8 @@ const log = createLogger("xor");
 export type XorQuestion =
   | { type: "noul"; instructions: string }
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
-  | { type: "score"; instructions: string; criteria: string[] };
+  | { type: "score"; instructions: string; criteria: string[] }
+  | { type: "value"; instructions: string; dtype: "string" | "int" | "float"; pattern?: string };
 
 export interface XorAnswer {
   type: string;
@@ -16,6 +17,7 @@ export interface XorAnswer {
   choice?: string;
   probabilities?: Record<string, number>;
   score?: number;
+  value?: string | number | null;
   confidence?: number;
 }
 
@@ -52,12 +54,23 @@ export function xorConfig(): { backend: "xor" | "llm"; url: string; key: string;
     return { backend: "llm", url: llm.url, key: llm.key, model: llm.model, timeoutMs: Math.min(XOR_TIMEOUT_MS, llm.timeoutMs) };
   }
   const litellm = env("LITELLM_URL").replace(/\/$/, "").replace(/\/v1$/, "");
+  const url = (env("XOR_URL", "OUR_NORMAL_JEV_URL", "OUR_JEV_URL") || (litellm ? `${litellm}/v1/decisions` : "")).replace(/\/v1\/systemone\/?$/, "/v1/decisions");
+  const model = env("XOR_MODEL", "OUR_NORMAL_JEV_MODEL") || "xor-latest";
   return {
     backend: "xor",
-    url: env("XOR_URL", "OUR_NORMAL_JEV_URL", "OUR_JEV_URL") || (litellm ? `${litellm}/v1/systemone` : ""),
+    url,
     key: env("XOR_API_KEY", "OUR_NORMAL_JEV_API_KEY", "OUR_JEV_API_KEY", "LITELLM_API_KEY"),
-    model: env("XOR_MODEL", "OUR_NORMAL_JEV_MODEL") || "jev-latest",
+    model: url.endsWith("/v1/decisions") && model === "jev-latest" ? "xor-latest" : model,
     timeoutMs: XOR_TIMEOUT_MS,
+  };
+}
+
+export function xorVisionConfig(): { url: string; model: string } {
+  const base = xorConfig().url;
+  const derived = base ? base.replace(/\/v1\/systemone(-custom)?\/?$/, "/v1/decisions") : "";
+  return {
+    url: env("XOR_VISION_URL") || (derived.endsWith("/v1/decisions") ? derived : ""),
+    model: env("XOR_VISION_MODEL") || "xor-omni",
   };
 }
 
@@ -107,11 +120,13 @@ async function post(
     if (images.length > 0) throw new Error("llm backend cannot read images");
     return llmJudgePost(state, questions, signal);
   }
-  const res = await fetch(cfg.url, {
+  const vision = images.length > 0 ? xorVisionConfig() : null;
+  if (vision && !vision.url) throw new Error("no image-capable xor endpoint (set XOR_VISION_URL)");
+  const res = await fetch(vision ? vision.url : cfg.url, {
     method: "POST",
     signal,
     headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ state, model: cfg.model, questions, ...(images.length > 0 ? { images } : {}) }),
+    body: JSON.stringify({ state, model: vision ? vision.model : cfg.model, questions, ...(images.length > 0 ? { images } : {}) }),
   });
   if (!res.ok) throw new Error(`xor ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, XorAnswer> };

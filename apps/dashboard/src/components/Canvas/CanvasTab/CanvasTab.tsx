@@ -80,6 +80,8 @@ import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface CanvasTabProps {
   channelId: string;
+  /** The host's own route for a canvas, in place of the chat channel's `?tab=canvas` one. */
+  getCanvasRoute?: (canvasId: string) => string;
 }
 
 function isCanvasArray(value: unknown): value is Canvas[] {
@@ -124,7 +126,7 @@ const getStrongestCanvasRole = (
       : strongestRole;
   }, undefined);
 
-const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
+const CanvasTab: React.FC<CanvasTabProps> = ({ channelId, getCanvasRoute }): ReactElement => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -387,8 +389,12 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const getCanvasPath = useCallback(
     (id: string): string =>
-      isMobile ? `/chat/canvas/${id}` : `${baseRoute}/${channelId}?tab=canvas&canvasId=${id}`,
-    [baseRoute, channelId, isMobile],
+      getCanvasRoute
+        ? getCanvasRoute(id)
+        : isMobile
+          ? `/chat/canvas/${id}`
+          : `${baseRoute}/${channelId}?tab=canvas&canvasId=${id}`,
+    [baseRoute, channelId, getCanvasRoute, isMobile],
   );
 
   const showArchivedChannelCreateError = useCallback((entity: 'canvas' | 'folder'): void => {

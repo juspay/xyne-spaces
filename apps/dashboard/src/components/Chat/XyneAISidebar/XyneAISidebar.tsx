@@ -33,6 +33,7 @@ import type {
   ConversationHistory as ConversationHistoryType,
   PendingAction,
 } from './utils/XyneAITypes';
+import { flowPhaseKey } from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import {
   useCachedV2ConversationTitle,
@@ -2846,7 +2847,9 @@ const XyneAISidebar = ({
                                 !message.isStreaming &&
                                 !!message.followUpSuggestions?.length;
                               return (
-                                <Fragment key={message.stableKey ?? message.id}>
+                                <Fragment
+                                  key={`${message.stableKey ?? message.id}${flowPhaseKey(message.uiFlows)}`}
+                                >
                                   <MessageItem
                                     // Stable key so the bubble doesn't remount when
                                     // the id swaps temp→server at completion (which

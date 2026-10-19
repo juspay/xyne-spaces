@@ -1,12 +1,10 @@
-import React, { useContext, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
 import { Spinner } from '@xyne/icons';
 import type { AgentChange, AgentUpdateProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
 import { cn } from '../../../../utils/classNames';
 import { computeLineDiff, lineDiffStats } from '../../../../utils/lineDiff';
 import { CardShell, StatusChip } from '../cardPrimitives';
-import { InsideAgentPreviewContext } from './AgentPreview';
 
 const PromptDiff: React.FC<{ before: string; after: string }> = ({ before, after }) => {
   const rows = useMemo(() => computeLineDiff(before, after), [before, after]);
@@ -93,7 +91,6 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
 }) => {
   const { state, executeAction } = useFlow();
   const [pending, setPending] = useState<'approve' | 'decline' | null>(null);
-  const insidePreview = useContext(InsideAgentPreviewContext);
   const locked = state.submitting || pending !== null;
 
   const submit = async (actionId: 'approve-write' | 'decline-write'): Promise<void> => {
@@ -129,16 +126,6 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
             </span>
             <StatusChip label='Update' tone='muted' />
           </div>
-          {!insidePreview && (
-            <Link
-              to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
-              className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
-              data-track-category='AGENT_ARTIFACT'
-              data-track-name='VIEW_AGENT_FROM_UPDATE_CARD'
-            >
-              View
-            </Link>
-          )}
         </div>
 
         <div className='flex flex-col gap-3'>

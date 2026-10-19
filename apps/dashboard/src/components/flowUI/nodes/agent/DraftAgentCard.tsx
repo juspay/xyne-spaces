@@ -1,8 +1,10 @@
 import React, { useContext, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
-import { useFlow } from '../../FlowContext';
+import { CLAW_AUTH_AGENTS_KEY } from '../../../../hooks/useClawAuthAgents';
+import { useFlow, useFlowDraftScope } from '../../FlowContext';
 import { cn } from '../../../../utils/classNames';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
@@ -43,6 +45,8 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // A copy of this card lives inside its own AgentPreview thread panel; hide the
   // expand control there so it can't open a nested preview.
   const insidePreview = useContext(InsideAgentPreviewContext);
+  const queryClient = useQueryClient();
+  const inBuilder = useFlowDraftScope() !== null;
 
   const capabilities = props.agent.capabilities ?? [];
   const decided = props.phase !== 'pending';
@@ -71,7 +75,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       // Only on a decision that landed. A rejected create (a taken identifier,
       // say) leaves the card live and the reason in a toast, so the preview has
       // to stay open — that is where the fields it names are edited.
-      if (await executeAction({ type: 'submit', actionId })) setExpanded(false);
+      if (!(await executeAction({ type: 'submit', actionId }))) return;
+      setExpanded(false);
+      if (actionId === 'agent-draft-approve') {
+        void queryClient.invalidateQueries({ queryKey: [CLAW_AUTH_AGENTS_KEY] });
+      }
     } finally {
       setPending(null);
     }
@@ -82,6 +90,8 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <StatusChip label='Created' />
     ) : props.phase === 'rejected' ? (
       <StatusChip label='Declined' tone='rejected' />
+    ) : props.phase === 'superseded' ? (
+      <StatusChip label='Superseded' tone='muted' />
     ) : (
       <StatusChip label='Draft' tone='muted' />
     );
@@ -89,24 +99,27 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // Built as nodes, not a string, so the actor renders as a mention. No decision
   // time — the chin names who decided, not when; the message's own timestamp in
   // the thread already places it.
-  const auditNode = (
-    <div className='flex min-w-0 items-center gap-1.5'>
-      {/* Same avatar treatment as the reply tray — the decider is a person, so
+  const auditNode =
+    props.phase === 'superseded' ? (
+      <AuditLine>Replaced by a newer draft</AuditLine>
+    ) : (
+      <div className='flex min-w-0 items-center gap-1.5'>
+        {/* Same avatar treatment as the reply tray — the decider is a person, so
           they read as one rather than as a name in prose. */}
-      {props.decidedById && (
-        <Avatar userId={props.decidedById} size='xs' rounded showActiveStatus={false} />
-      )}
-      <AuditLine>
-        {props.phase === 'created' ? 'Created' : 'Declined'}
-        {props.decidedBy && (
-          <>
-            {' by '}
-            <Mention handle={props.decidedBy} />
-          </>
+        {props.decidedById && (
+          <Avatar userId={props.decidedById} size='xs' rounded showActiveStatus={false} />
         )}
-      </AuditLine>
-    </div>
-  );
+        <AuditLine>
+          {props.phase === 'created' ? 'Created' : 'Declined'}
+          {props.decidedBy && (
+            <>
+              {' by '}
+              <Mention handle={props.decidedBy} />
+            </>
+          )}
+        </AuditLine>
+      </div>
+    );
 
   const decidedFooter = (
     <div className='flex w-full items-center justify-between gap-3'>
@@ -183,7 +196,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
             {statePill}
           </div>
           {!insidePreview &&
-            (props.phase === 'created' ? (
+            (props.phase === 'created' && !inBuilder ? (
               // The agent exists now, so its detail page shows everything the
               // preview dialog only summarises. While still a draft there is no
               // page to open, so the dialog stays the way to see the spec.

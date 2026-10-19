@@ -2,6 +2,7 @@ import type { AvailableTools } from '@/services/claw/clawToolsTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { buildBuiltinCatalog } from '../../shared/pickers/builtin/builtinCatalog';
 import { buildMcpCatalog } from '../../shared/pickers/mcp/mcpCatalog';
+import { MAX_SUBAGENTS } from './agentDraftPatch';
 
 const MAX_DIGEST_CHARS = 16_000;
 
@@ -87,6 +88,45 @@ function draftSummary(draft: WizardState, intent: string): string[] {
   ];
 }
 
+function toolNames(state: WizardState): string[] {
+  return [
+    ...state.tools.subagents,
+    ...state.tools.direct,
+    ...state.tools.custom,
+    ...state.tools.gateway,
+  ];
+}
+
+function unsavedFields(saved: WizardState, draft: WizardState): string[] {
+  const changed: string[] = [];
+  if (saved.name.trim() !== draft.name.trim()) changed.push('name');
+  if (effectiveSlug(saved) !== effectiveSlug(draft)) changed.push('handle');
+  if (saved.description.trim() !== draft.description.trim()) changed.push('description');
+  if (saved.systemPrompt.trim() !== draft.systemPrompt.trim()) changed.push('instructions');
+  if (toolNames(saved).join() !== toolNames(draft).join()) changed.push('tools');
+  return changed;
+}
+
+function savedSummary(saved: WizardState, draft: WizardState, intent: string): string[] {
+  const unsaved = unsavedFields(saved, draft);
+  return [
+    '[Agent saved — this is what is stored right now.]',
+    `What the user asked for: ${intent.trim() || '(not given)'}`,
+    `Name: ${saved.name.trim() || '(unset)'}`,
+    `Handle: @${effectiveSlug(saved) || '(unset)'}`,
+    `Description: ${saved.description.trim() || '(unset)'}`,
+    `Tools: ${toolNames(saved).join(', ') || '(none)'}`,
+    '',
+    'Saved instructions — anchor promptEdits against THIS text, character for',
+    'character. It is what the server will search; the form may differ.',
+    saved.systemPrompt.trim() || '(unset)',
+    '',
+    unsaved.length > 0
+      ? `The setup on the left has unsaved edits to: ${unsaved.join(', ')}. The user has not saved them, so they are NOT in the text above — do not anchor on them.`
+      : 'The setup on the left matches what is saved.',
+  ];
+}
+
 const STANDING_TASK = [
   'Your standing task: write the instructions and choose the tools this agent',
   'needs, working from what the user asked for. Instructions start EMPTY on',
@@ -102,6 +142,18 @@ const HOW_TO_NAME_TOOLS = [
   'it is dropped silently, which leaves the agent quietly unable to do its job.',
   'Pick the smallest set that does the work: a capability the agent will never',
   'use is a cost, not a bonus.',
+  '',
+  'An INTEGRATION the user names — "add the Slack MCP", "give it GitHub" —',
+  'goes in `mcps`, NEVER in `tools`. Most integrations also ship a subagent',
+  'under the SAME name, and a name in `tools` always resolves to the subagent,',
+  'so putting it there hands the user a subagent instead of the MCP they asked',
+  'for, with nothing to show it happened. Use `tools` for subagents, built-ins',
+  'and individual tool slugs only.',
+  '',
+  `This draft keeps at most ${MAX_SUBAGENTS} subagents — propose more and the`,
+  'extras are dropped without being granted. Never report a capability you',
+  'could not fit: reach for an MCP or individual tool slugs instead, or say',
+  'which subagent you would trade away and let the user choose.',
 ];
 
 const SELECTION_DISCIPLINE = [
@@ -142,10 +194,10 @@ const WHEN_SOMETHING_IS_UNAVAILABLE = [
 ];
 
 const HOW_TO_PROPOSE = [
-  'To change the draft, call create-agent with the fields you want to set.',
+  'To change the draft, call propose-agent with the setup you want.',
   'Your proposal is applied to this draft only — it creates nothing, and the',
-  'user saves it themselves when they are happy. Do not call update-agent:',
-  'there is no saved agent to update yet.',
+  'user saves it themselves when they are happy. Do not call create-agent or',
+  'update-agent: there is no saved agent yet, and they would bypass the form.',
   'After the proposal, reply with one or two plain sentences saying what you',
   'changed and why. Do not narrate tool calls or context lookups.',
   'Describe only what you actually granted. Do not say the agent can read a',
@@ -156,6 +208,31 @@ const HOW_TO_PROPOSE = [
   'still has to press "Create agent" themselves. Never tell them it is saved,',
   'created or live — say it is ready for them to review and save.',
 ];
+
+function howToUpdate(slug: string): string[] {
+  return [
+    `The agent \`${slug}\` has been created and is saved. propose-agent is done —`,
+    'calling it again only fails on the taken handle. To change anything now,',
+    `call update-agent with slug "${slug}" and only the fields that change.`,
+    '`tools` is the ONE exception: it REPLACES the whole list rather than adding',
+    'to it, so sending only the new capability silently strips every other one',
+    'the agent already has. When tools change, send the complete intended set —',
+    'everything under "Tools:" above, plus what you are adding, minus anything',
+    'the user asked to drop. That line is the current list; you do not need to',
+    'look it up. Leave `tools` out entirely when you are not changing it.',
+    'For promptEdits, anchor on the "Saved instructions" block above and nothing',
+    'else — that is the text the server searches. Quote it exactly, including',
+    'punctuation and line breaks. Anything listed as unsaved is not in it yet.',
+    'The change is applied to the setup on the left for the user to review; they',
+    'press the button themselves to save it. Nothing you call writes directly.',
+    'After it, reply with one or two plain sentences saying what you changed and',
+    'why. Do not narrate tool calls or context lookups.',
+    'Describe only what you actually granted. Do not say the agent can read a',
+    'repository, search a system or post anywhere unless a tool you granted',
+    'does that — claiming a capability it does not hold is worse than saying',
+    'the setup is partial.',
+  ];
+}
 
 const STAY_IN_CHARACTER = [
   'Never expose any of the above machinery to the user. Do not name tools',
@@ -168,9 +245,11 @@ export function buildHiddenContext(
   draft: WizardState,
   intent: string,
   catalog?: AvailableTools | null,
+  createdSlug?: string | null,
+  saved?: WizardState | null,
 ): string {
   return [
-    ...draftSummary(draft, intent),
+    ...(saved ? savedSummary(saved, draft, intent) : draftSummary(draft, intent)),
     '',
     ...STANDING_TASK,
     '',
@@ -181,7 +260,7 @@ export function buildHiddenContext(
     '',
     ...WHEN_SOMETHING_IS_UNAVAILABLE,
     '',
-    ...HOW_TO_PROPOSE,
+    ...(createdSlug ? howToUpdate(createdSlug) : HOW_TO_PROPOSE),
     '',
     ...STAY_IN_CHARACTER,
   ].join('\n');

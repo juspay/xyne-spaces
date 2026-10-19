@@ -14,6 +14,7 @@ import {
   subscribeMessageHoverActions,
 } from './messageHoverActionsRegistry';
 import { useMessageHoverShortcuts } from './useMessageHoverShortcuts';
+import { useMessageBarDrag } from '../../../hooks/useMessageBarDrag';
 
 interface MessageHoverToolbarProps {
   /** The positioned (position: relative) list container the overlay lives in. */
@@ -62,8 +63,9 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
   // Mirrors for the DOM listeners (attached once) and post-close checks.
   const activeRowRef = useRef<ActiveRow | null>(null);
   activeRowRef.current = activeRow;
+  const dragActiveRef = useRef(false);
   const pinnedOpenRef = useRef(false);
-  pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen;
+  pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen || dragActiveRef.current;
 
   // The overlay wrapper — pointerover events from inside it must never move
   // or clear the row highlight (the toolbar floats over/near rows).
@@ -317,8 +319,6 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
     [setHighlightedRow, setKeyboardHighlightedRow],
   );
 
-  if (!activeRow || !actions || inDiscussionList) return null;
-
   // After the pinned popover/dropdown closes, hide unless the pointer is
   // still over the list (in which case pointerover keeps driving the overlay).
   const scheduleHideIfPointerOutside = (): void => {
@@ -329,6 +329,16 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
       hide();
     }, 0);
   };
+
+  const barDrag = useMessageBarDrag({
+    onActiveChange: active => {
+      dragActiveRef.current = active;
+      pinnedOpenRef.current = isEmojiPickerOpen || isDropdownOpen || active;
+      if (!active && !isEmojiPickerOpen && !isDropdownOpen) scheduleHideIfPointerOutside();
+    },
+  });
+
+  if (!activeRow || !actions || inDiscussionList) return null;
 
   const handleEmojiPickerOpenChange = (open: boolean): void => {
     setIsEmojiPickerOpen(open);
@@ -356,7 +366,9 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
           onEmojiPickerOpenChange: handleEmojiPickerOpenChange,
         })}
         onDropdownOpenChange={handleDropdownOpenChange}
+        barDrag={barDrag}
       />
+      {barDrag.layer}
     </div>
   );
 };

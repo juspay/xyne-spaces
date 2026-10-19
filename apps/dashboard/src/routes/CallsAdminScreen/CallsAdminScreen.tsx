@@ -12,16 +12,19 @@ import {
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { useHasResourceAccess } from '@/hooks/usePermissions';
 import type { CallAdminListScope } from '@/services/Call/callAdminService';
+import { BackgroundsTab } from './BackgroundsTab';
 import { CallsTab } from './CallsTab';
 import { SeriesTab } from './SeriesTab';
 import { CALLS_ADMIN_TRACK } from './CallsAdminScreen.utils';
 
-type TabKey = 'calls' | 'series';
+type TabKey = 'calls' | 'series' | 'backgrounds';
 
 const TABS: readonly TabItem[] = [
   { id: 'calls', label: 'Calls' },
   { id: 'series', label: 'Recurring series' },
 ];
+// Workspace-wide settings, so only shown to SCRIBE admins.
+const ADMIN_TABS: readonly TabItem[] = [...TABS, { id: 'backgrounds', label: 'Backgrounds' }];
 
 const SCOPE_LABELS: Record<CallAdminListScope, string> = {
   mine: 'My calls',
@@ -40,7 +43,13 @@ export default function CallsAdminScreen(): ReactElement {
   const isScribeAdmin = useHasResourceAccess('SCRIBE');
   const [scopeChoice, setScopeChoice] = useState<CallAdminListScope>('all');
 
-  const tab: TabKey = searchParams.get('tab') === 'series' ? 'series' : 'calls';
+  const requestedTab = searchParams.get('tab');
+  const tab: TabKey =
+    requestedTab === 'series'
+      ? 'series'
+      : requestedTab === 'backgrounds' && isScribeAdmin
+        ? 'backgrounds'
+        : 'calls';
   // Only SCRIBE admins may list the whole workspace; everyone else sees their own.
   const scope: CallAdminListScope = isScribeAdmin ? scopeChoice : 'mine';
 
@@ -75,7 +84,7 @@ export default function CallsAdminScreen(): ReactElement {
                 {isScribeAdmin ? ' across the workspace' : ' for your calls'}
               </p>
             </div>
-            {isScribeAdmin && (
+            {isScribeAdmin && tab !== 'backgrounds' && (
               <Select
                 value={scopeChoice}
                 onValueChange={value => setScopeChoice(value as CallAdminListScope)}
@@ -99,7 +108,7 @@ export default function CallsAdminScreen(): ReactElement {
             )}
           </div>
           <Tabs
-            items={TABS}
+            items={isScribeAdmin ? ADMIN_TABS : TABS}
             activeId={tab}
             onSelect={setTab}
             trackCategory={CALLS_ADMIN_TRACK}
@@ -108,7 +117,9 @@ export default function CallsAdminScreen(): ReactElement {
         </div>
 
         {/* Keyed on scope so switching it starts again from the first page. */}
-        {tab === 'calls' ? (
+        {tab === 'backgrounds' ? (
+          <BackgroundsTab />
+        ) : tab === 'calls' ? (
           <CallsTab key={scope} scope={scope} />
         ) : (
           <SeriesTab key={scope} scope={scope} />

@@ -180,6 +180,14 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const draftScope = useFlowDraftScope();
   const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
 
+  const claimedScreenId = draftClaimsFlow ? (validatedFlow?.screenId ?? null) : null;
+  const seenFlowRef = useRef<FlowDefinition | null>(null);
+  seenFlowRef.current = validatedFlow;
+  useEffect(() => {
+    if (!claimedScreenId || !seenFlowRef.current) return;
+    draftScope?.onCardSeen?.(seenFlowRef.current);
+  }, [claimedScreenId, draftScope]);
+
   // Lets an error toast's Retry button re-run the same action without making
   // executeAction depend on itself.
   const executeActionRef = useRef<((action: FlowAction) => Promise<boolean>) | null>(null);
@@ -283,10 +291,17 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         context: [stateRef.current.values],
       });
       try {
+        const draftValues =
+          action.type === 'submit' && draftClaimsFlow
+            ? draftScope?.valuesForSubmit?.(validatedFlow, action.actionId)
+            : null;
+
         const response = await flowActionService.execute({
           actionId: action.actionId,
           type: action.type,
-          values: stateRef.current.values,
+          values: draftValues
+            ? { ...stateRef.current.values, ...draftValues }
+            : stateRef.current.values,
           flowJSON: validatedFlow,
           messageId,
           conversationId,

@@ -1644,6 +1644,16 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 @layer utilities {
+  /* Search skeleton bars (cmd+K and full-screen results): a still gradient across the bar,
+     strong on the left fading right. No pulse, no sweep — nothing moves. */
+  .search-skeleton-bar {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground) / 0.38) 0%,
+      hsl(var(--muted-foreground) / 0.18) 100%
+    );
+  }
+
   @keyframes skeleton-shimmer {
     0% {
       background-position: 200% 0;
@@ -5068,6 +5078,58 @@ img.inline-emoji,
 @media (prefers-reduced-motion: reduce) {
   .xyne-related-scan::after {
     animation: none;
+  }
+}
+
+[data-message-id] .message-html-root > p.discussion-title:not([data-message-preview="true"] p) {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+[data-message-id] .message-html-root > p.discussion-title + * {
+  margin-top: 2px;
+}
+
+[data-titled-thread] [data-first-in-thread] .message-html-root > p.discussion-title {
+  display: none;
+}
+
+[data-titled-thread] [data-first-in-thread] .message-html-root > p.discussion-title + * {
+  margin-top: 0;
+}
+
+[data-theme="midnight"] .xyne-title-offer[data-offered="true"] {
+  background-color: #2a1d14;
+  color: #ffb27a;
+}
+
+@keyframes xyne-title-offer-sweep {
+  to {
+    background-position: 0 0;
+  }
+}
+
+.xyne-title-offer[data-offered="true"] .xyne-title-offer-label {
+  background: linear-gradient(
+    100deg,
+    currentColor 0 38%,
+    #ff4f00 46%,
+    #ff8904 52%,
+    currentColor 62% 100%
+  );
+  background-size: 260% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: xyne-title-offer-sweep 1.25s cubic-bezier(0.2, 0, 0, 1) 160ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyne-title-offer[data-offered="true"] .xyne-title-offer-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
   }
 }
 
