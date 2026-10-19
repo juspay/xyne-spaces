@@ -39,6 +39,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Menu, MenuItem } from "./ui/Menu";
 import { useSnackbar } from "./ui/Snackbar";
 import { SandboxReposTab } from "./SandboxReposTab";
+import { privateAdminTabs } from "./privateAdminTabs";
 
 import {
   listAdminRoles,
@@ -111,7 +112,8 @@ type TabKey =
   | "usage"
   | "scheduled"
   | "globalmcp"
-  | "sandboxrepos";
+  | "sandboxrepos"
+  | `private:${string}`;
 
 interface Props {
   userId: string;
@@ -1214,6 +1216,7 @@ export function AdminPageV3({ userId }: Props) {
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
       { id: "sandboxrepos", label: "Sandbox Repos" },
+      ...privateAdminTabs.map((privateTab): TabItem<TabKey> => ({ id: `private:${privateTab.id}`, label: privateTab.label })),
     ],
     [requests.length, mcpRequests.length, mcpEditRequests.length, gatewayRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
@@ -1509,6 +1512,9 @@ export function AdminPageV3({ userId }: Props) {
                 )}
 
                 {tab === "sandboxrepos" && <SandboxReposTab userId={userId} />}
+                {privateAdminTabs.map((privateTab) =>
+                  tab === `private:${privateTab.id}` ? <privateTab.Component key={privateTab.id} userId={userId} /> : null,
+                )}
 
                 {tab === "globalmcp" && (
                   <GlobalMcpTab

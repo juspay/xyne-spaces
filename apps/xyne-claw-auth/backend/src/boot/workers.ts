@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { privateExtension } from "../http/private-extension.js";
 import { initEvalSweeper, closeEvalSweeper } from "../queue/eval-sweeper.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { runner as errorPipelineRunner } from "../error-pipeline/runner/runner.js";
@@ -187,6 +188,7 @@ export function bootWorkers(): void {
   // Warm the Bitbucket-author stats cache (PR/commit counts for xyne-doctor)
   // so the admin dashboard's stat cards never serve a cold fetch.
   startBitbucketStatsBackgroundRefresh();
+  privateExtension?.start?.();
 }
 
 export async function shutdownWorkers(): Promise<void> {
@@ -195,6 +197,7 @@ export async function shutdownWorkers(): Promise<void> {
     return;
   }
 
+  await privateExtension?.stop?.().catch(() => {});
   // API pod: drain the background fleet (none of it ran on the runner pod).
   for (const name of SHUTDOWN_SEQUENCE) {
     const worker = WORKERS.find((entry) => entry.name === name);
