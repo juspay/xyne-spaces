@@ -3345,7 +3345,12 @@ model ChatProject {
 
   /// Optional link to a Spaces `Project`, read-only. No foreign key: Spaces
   /// lives in another database that claw-auth reads through a read-only
-  /// Postgres grant, so this id is validated on write and tolerated dangling.
+  /// Postgres grant, so a dangling id is tolerated.
+  ///
+  /// Stored as given — access is NOT checked on write, so a user can link a
+  /// project they cannot see. Access is checked when the project's context is
+  /// used (XYNE-66811); anything pulling its tickets or channels into a run
+  /// must re-check against the caller every time.
   spacesProjectId  String?
   defaultAgentSlug String?
   sortOrder        Int     @default(0)

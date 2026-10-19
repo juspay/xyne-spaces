@@ -22,11 +22,10 @@ export interface ChatProjectInput {
   instructions?: string | undefined;
   instructionsEnabled?: boolean | undefined;
   /**
-   * Stored as given. NOTE the schema comment calls this "validated on write" —
-   * it is not; nothing here checks that the caller can see the Spaces project,
-   * so a user can link one they have no access to. Whatever pulls that
-   * project's tickets or channels into a run MUST re-check access against the
-   * caller every time (XYNE-66811). Never treat a stored id as proof of access.
+   * Stored as given: nothing here checks that the caller can see the Spaces
+   * project, so a user can link one they have no access to. Whatever pulls
+   * that project's tickets or channels into a run MUST re-check access against
+   * the caller every time (XYNE-66811) — a stored id is not proof of access.
    */
   spacesProjectId?: string | null | undefined;
   /** Not validated here; check the agent exists and the caller may invoke it
