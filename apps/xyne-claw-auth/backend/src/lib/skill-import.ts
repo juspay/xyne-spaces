@@ -16,6 +16,7 @@ const FETCH_CONCURRENCY = 5;
 const GITHUB_HEADERS = { Accept: "application/vnd.github+json", "User-Agent": "xyne-spaces" };
 const MAX_DEPTH = 5;
 const MAX_LINK_SEGMENTS = 20;
+const MAX_LINK_LENGTH = 2048;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "__pycache__"]);
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -56,7 +57,12 @@ export function isValidSkillSlug(slug: string): boolean {
 
 /** Accepts `owner/repo`, `https://github.com/owner/repo[.git]` and `.../tree/<branch>/<path>`. */
 export function parseSkillSourceUrl(input: string): SkillSourceRef {
-  const bare = input.trim().replace(/\/+$/, "");
+  if (input.length > MAX_LINK_LENGTH) throw badRequest("Link is too long.");
+  // A loop, not /\/+$/: that regex is polynomial on user input (CodeQL js/polynomial-redos).
+  let bare = input.trim();
+  let end = bare.length;
+  while (end > 0 && bare[end - 1] === "/") end--;
+  bare = bare.slice(0, end);
   const trimmed = /^(www\.)?(github\.com|skills\.sh)\//i.test(bare) ? `https://${bare}` : bare;
   let skill: string | undefined;
   const path = /^https?:\/\//i.test(trimmed)

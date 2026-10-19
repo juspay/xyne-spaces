@@ -146,6 +146,8 @@ describe("skill import", () => {
     expect(() => parseSkillSourceUrl("https://gitlab.com/a/b")).toThrow("Paste a github.com repo or a skills.sh link.");
     expect(() => parseSkillSourceUrl("https://github.com/a/b/blob/main/x")).toThrow();
     expect(() => parseSkillSourceUrl(`https://github.com/a/b/tree/main/${"x/".repeat(18)}`)).toThrow("Link is too long.");
+    expect(() => parseSkillSourceUrl(`github.com/o/r${"/".repeat(10_000)}`)).toThrow("Link is too long.");
+    expect(parseSkillSourceUrl("github.com/o/r///")).toEqual({ owner: "o", repo: "r", treeSegments: [] });
     expect(renameSkillContent(skillMd("grilling") + "\nname: keep\n", "grilling-mp")).toBe(
       skillMd("grilling").replace("name: grilling", "name: grilling-mp") + "\nname: keep\n",
     );
