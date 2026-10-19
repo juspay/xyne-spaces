@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { useValue } from '@legendapp/state/react';
+import { useUniwind } from 'uniwind';
 import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { LegendListRef } from '@legendapp/list/react-native';
 import {
@@ -32,6 +33,8 @@ import { getActivityEmptyContent } from '@/src/features/activity/presentation/ac
 import { getActorFilterKey } from '@/src/features/activity/domain/activityActorFilter';
 import { actorFilterFrom } from '@/src/features/activity/model/preferences';
 import { appliedActivityPreferences$ } from '@/src/features/activity/state/preferences-store';
+import { mentionedYouColors } from '@/src/features/activity/model/mentioned-you-colors';
+import { MentionPaletteOverrideContext } from '@/src/components/conversation-composer/rich-inline-text';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop';
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
@@ -138,6 +141,8 @@ const ActivityScreen = (): ReactElement => {
   const [scrollOffsetY, setScrollOffsetY] = useState(0);
   const headerTitleScrollY = useTabHeaderScrollY();
   const listRef = useRef<LegendListRef>(null);
+  const { theme } = useUniwind();
+  const mentionPalette = useMemo(() => mentionedYouColors(theme), [theme]);
   const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollOffsetYRef = useRef(0);
   const scrollListToTop = useCallback((animated = false) => {
@@ -410,42 +415,45 @@ const ActivityScreen = (): ReactElement => {
 
   return (
     <View className='flex-1 bg-tabs-screen' onLayout={handleLayout}>
-      <View className='flex-1 overflow-hidden bg-tabs-screen'>
-        <AnimatedLegendList
-          ref={listRef}
-          data={activities}
-          keyExtractor={keyExtractor}
-          estimatedItemSize={ACTIVITY_DEFAULT_ESTIMATED_ROW_SIZE}
-          getItemType={getActivityItemType}
-          estimatedListSize={ACTIVITY_ESTIMATED_LIST_SIZE}
-          drawDistance={ACTIVITY_DRAW_DISTANCE}
-          recycleItems
-          ListHeaderComponent={activityToolbar}
-          ListEmptyComponent={listEmptyComponent}
-          ListFooterComponent={listFooterComponent}
-          contentContainerStyle={{
-            paddingTop: listPaddingTop,
-            // The tuned inset clears the floating filters button over real rows;
-            // with none, fall back to the shared reserve so the empty state sits
-            // at the same height as the other tabs.
-            paddingBottom: activities.length === 0 ? EMPTY_STATE_BOTTOM_INSET : listPaddingBottom,
-            flexGrow: 1,
-          }}
-          style={{ flex: 1, minHeight: 0 }}
-          onScroll={handleScroll}
-          sharedValues={{ scrollOffset: headerTitleScrollY }}
-          onContentSizeChange={(_, height) => setContentHeight(height)}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-          onEndReached={loadMore}
-          onEndReachedThreshold={ACTIVITY_END_REACHED_THRESHOLD}
-          onMomentumScrollBegin={handleMomentumScrollBegin}
-          onMomentumScrollEnd={handleMomentumScrollEnd}
-          onScrollBeginDrag={handleScrollBeginDrag}
-          onScrollEndDrag={handleScrollEndDrag}
-          renderItem={renderItem}
-        />
-      </View>
+      {/* A mention of you takes the default chat bubble's colours, as on the new screen. */}
+      <MentionPaletteOverrideContext.Provider value={mentionPalette}>
+        <View className='flex-1 overflow-hidden bg-tabs-screen'>
+          <AnimatedLegendList
+            ref={listRef}
+            data={activities}
+            keyExtractor={keyExtractor}
+            estimatedItemSize={ACTIVITY_DEFAULT_ESTIMATED_ROW_SIZE}
+            getItemType={getActivityItemType}
+            estimatedListSize={ACTIVITY_ESTIMATED_LIST_SIZE}
+            drawDistance={ACTIVITY_DRAW_DISTANCE}
+            recycleItems
+            ListHeaderComponent={activityToolbar}
+            ListEmptyComponent={listEmptyComponent}
+            ListFooterComponent={listFooterComponent}
+            contentContainerStyle={{
+              paddingTop: listPaddingTop,
+              // The tuned inset clears the floating filters button over real rows;
+              // with none, fall back to the shared reserve so the empty state sits
+              // at the same height as the other tabs.
+              paddingBottom: activities.length === 0 ? EMPTY_STATE_BOTTOM_INSET : listPaddingBottom,
+              flexGrow: 1,
+            }}
+            style={{ flex: 1, minHeight: 0 }}
+            onScroll={handleScroll}
+            sharedValues={{ scrollOffset: headerTitleScrollY }}
+            onContentSizeChange={(_, height) => setContentHeight(height)}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            onEndReached={loadMore}
+            onEndReachedThreshold={ACTIVITY_END_REACHED_THRESHOLD}
+            onMomentumScrollBegin={handleMomentumScrollBegin}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            onScrollEndDrag={handleScrollEndDrag}
+            renderItem={renderItem}
+          />
+        </View>
+      </MentionPaletteOverrideContext.Provider>
 
       <ActivityFiltersFloatingButton onPress={openFilters} />
       <ActivityFiltersSheet
