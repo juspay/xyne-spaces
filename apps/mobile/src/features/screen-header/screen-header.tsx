@@ -5,6 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
+import { AppHeader } from '@/src/components/app-header';
 import Avatar from '@/src/components/ui/avatar';
 import { PresenceDot } from '@/src/components/ui/presence-dot';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -23,8 +24,10 @@ type ScreenHeaderProps = {
 };
 
 /**
- * The top of a redesigned tab screen: its title, then live sync, search and
- * the profile avatar on the right. Shared by DMs, Channels and Activity so the three match.
+ * The top of a redesigned tab screen: the workspace switcher and its title on
+ * the left, then live sync, search and the profile avatar on the right. The
+ * switcher opens the same workspace drawer the classic header does. Shared by
+ * DMs, Channels and Activity so the three match.
  */
 export function ScreenHeader({ title, searchTab }: ScreenHeaderProps): ReactElement {
   const insets = useSafeAreaInsets();
@@ -34,7 +37,12 @@ export function ScreenHeader({ title, searchTab }: ScreenHeaderProps): ReactElem
       style={{ paddingTop: insets.top }}
       className='flex-row items-center justify-between bg-spaces-background px-4 py-3'
     >
-      <Text className='text-[28px] font-semibold text-spaces-foreground'>{title}</Text>
+      <View className='flex-1 flex-row items-center gap-3'>
+        <AppHeader.WorkspaceSwitcher />
+        <Text numberOfLines={1} className='shrink text-[28px] font-semibold text-spaces-foreground'>
+          {title}
+        </Text>
+      </View>
       <View className='flex-row items-center gap-4'>
         <LiveSyncStatus />
         <SearchButton tab={searchTab} />
