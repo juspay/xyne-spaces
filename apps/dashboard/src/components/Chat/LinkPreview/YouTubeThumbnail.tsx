@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useStopWhenCovered } from '../../../hooks/usePageCoverage';
 import { ExternalLink, Play, X, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { SiYoutube } from 'react-icons/si';
@@ -24,6 +25,8 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
   isMobile,
 }) => {
   const [showPlayer, setShowPlayer] = useState(false);
+  // A video playing under full-page search, out of reach there, goes back to its thumbnail.
+  useStopWhenCovered(showPlayer, () => setShowPlayer(false));
   const displayTitle =
     title && title.length > 70 ? title.slice(0, 70) + '...' : title || 'YouTube video';
 

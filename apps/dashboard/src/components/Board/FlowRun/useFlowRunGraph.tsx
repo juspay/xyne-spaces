@@ -1,7 +1,8 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
-import { Archive, CircleMinus } from 'lucide-react';
+import { Archive, CircleMinus, SkipForward } from 'lucide-react';
 import { MarkerType, type Edge, type Node } from 'reactflow';
 import {
+  FLOW_STAGE_NAMES,
   FlowPlanModel,
   TicketStatusV2,
   type FlowDecisionOutcome,
@@ -13,6 +14,7 @@ import {
   flowRuntimeStatusOf,
   getFlowMeta,
   isFlowStepBacklogged,
+  isFlowStepSkipped,
   mapPlanToRunTickets,
   type FlowRunTicket,
 } from './flowRun.utils';
@@ -36,6 +38,8 @@ export interface FlowRunGraph {
 /** React Flow node id for a group's cover — consumers must not re-derive the prefix. */
 export const flowGroupCoverId = (groupId: string): string => `flow-group:${groupId}`;
 
+export type FlowGroupAction = 'backlog' | 'skip';
+
 interface UseFlowRunGraphArgs {
   isFlowBoard: boolean;
   selectedFlowRunModel: FlowPlanModel | null;
@@ -45,8 +49,8 @@ interface UseFlowRunGraphArgs {
   setCollapsedFlowGroups: Dispatch<SetStateAction<Set<string>>>;
   flowSelection: FlowNodeSelection | null;
   setFlowSelection: Dispatch<SetStateAction<FlowNodeSelection | null>>;
-  flowGroupBacklogPendingId: string | null;
-  handleFlowGroupBacklog: (groupId: string) => Promise<void>;
+  flowGroupPending: { groupId: string; action: FlowGroupAction } | null;
+  handleFlowGroupAction: (groupId: string, action: FlowGroupAction) => Promise<void>;
 }
 
 export function useFlowRunGraph({
@@ -58,8 +62,8 @@ export function useFlowRunGraph({
   setCollapsedFlowGroups,
   flowSelection,
   setFlowSelection,
-  flowGroupBacklogPendingId,
-  handleFlowGroupBacklog,
+  flowGroupPending,
+  handleFlowGroupAction,
 }: UseFlowRunGraphArgs): FlowRunGraph {
   return useMemo((): FlowRunGraph => {
     const empty = { nodes: [], edges: [], locked: new Set<string>() };
@@ -77,7 +81,7 @@ export function useFlowRunGraph({
     const statusByPlanNodeId = new Map(
       [...ticketsByPlanNodeId].map(([planNodeId, ticket]) => [
         planNodeId,
-        flowRuntimeStatusOf(ticket),
+        isFlowStepSkipped(ticket) ? FLOW_STAGE_NAMES.SKIPPED : flowRuntimeStatusOf(ticket),
       ]),
     );
     const decisionOutcomeById = new Map<string, FlowDecisionOutcome>();
@@ -105,12 +109,22 @@ export function useFlowRunGraph({
     // Groups carry outer edges; member tickets remain inside the cover.
     const activeGroups = runModel.activeGroups;
     const activeGroupIds = runModel.activeGroupIds;
+    // "Dead" group: deriveGroupStatus reports it skipped because members can
+    // never run (a parent was cancelled / a decision path was not taken). A
+    // group whose members were ALL manually skipped is settled, not dead —
+    // edges out of it continue in the teal skipped color.
+    const allMembersSkipped = (groupId: string): boolean => {
+      const members = runModel.descendantMembersOf(groupId);
+      return (
+        members.length > 0 &&
+        members.every(member => isFlowStepSkipped(ticketsByPlanNodeId.get(member.id)))
+      );
+    };
+    const isDeadGroup = (groupId: string): boolean =>
+      runModel.deriveGroupStatus(groupId, statusByPlanNodeId, skipped) === 'SKIPPED' &&
+      !allMembersSkipped(groupId);
     const skippedGroupIds = new Set(
-      activeGroups
-        .filter(
-          group => runModel.deriveGroupStatus(group.id, statusByPlanNodeId, skipped) === 'SKIPPED',
-        )
-        .map(group => group.id),
+      activeGroups.filter(group => isDeadGroup(group.id)).map(group => group.id),
     );
     const coverId = flowGroupCoverId;
     const displayId = (planId: string): string =>
@@ -260,6 +274,13 @@ export function useFlowRunGraph({
           </span>
         );
       }
+      if (isFlowStepSkipped(ticket)) {
+        return (
+          <span className='flex shrink-0 items-center text-teal-600' title='Skipped'>
+            <SkipForward size={12} />
+          </span>
+        );
+      }
       const statusOption = ticket ? getStatusOption(flowRuntimeStatusOf(ticket)) : null;
       if (statusOption) {
         return (
@@ -270,7 +291,7 @@ export function useFlowRunGraph({
       }
       if (skipped.has(member.id)) {
         return (
-          <span className='shrink-0 text-[10px] text-muted-foreground' title='Skipped'>
+          <span className='shrink-0 text-[10px] text-muted-foreground' title='Not reached'>
             —
           </span>
         );
@@ -288,6 +309,7 @@ export function useFlowRunGraph({
         const allBacklogged =
           members.length > 0 &&
           members.every(member => isFlowStepBacklogged(ticketsByPlanNodeId.get(member.id)));
+        const allManuallySkipped = allMembersSkipped(group.id);
         const groupStatus = runModel.deriveGroupStatus(group.id, statusByPlanNodeId, skipped);
         const allSettled = members.every(
           member =>
@@ -313,25 +335,37 @@ export function useFlowRunGraph({
             decision.routes.some(route => targetEntityIds.has(route.targetId))
           );
         });
-        const backlogDisabledReason = rootPaused
-          ? 'Resume the Flow run first.'
-          : rootTicket.statusV2 !== TicketStatusV2.STARTED
-            ? 'Only an active Flow run can move a group to backlog.'
-            : flowGroupBacklogPendingId && flowGroupBacklogPendingId !== group.id
-              ? 'Another group is being moved to backlog.'
-              : unresolvedDecision
-                ? `Resolve conditional step "${runModel.getNode(unresolvedDecision.parentNodeId)?.title ?? 'Condition'}" first.`
-                : members.every(member => {
-                      const ticket = ticketsByPlanNodeId.get(member.id);
-                      return (
-                        skipped.has(member.id) ||
-                        isFlowStepBacklogged(ticket) ||
-                        ticket?.statusV2 === TicketStatusV2.COMPLETED ||
-                        ticket?.statusV2 === TicketStatusV2.CANCELLED
-                      );
-                    })
-                  ? 'All group steps are already settled.'
-                  : undefined;
+        const disabledReason = (
+          action: FlowGroupAction,
+          label: string,
+          isSettledBy: (ticket: FlowRunTicket | null | undefined) => boolean,
+        ): string | undefined =>
+          rootPaused
+            ? 'Resume the Flow run first.'
+            : rootTicket.statusV2 !== TicketStatusV2.STARTED
+              ? `Only an active Flow run can ${label}.`
+              : flowGroupPending &&
+                  !(flowGroupPending.groupId === group.id && flowGroupPending.action === action)
+                ? 'Another group action is in progress.'
+                : unresolvedDecision
+                  ? `Resolve conditional step "${runModel.getNode(unresolvedDecision.parentNodeId)?.title ?? 'Condition'}" first.`
+                  : members.every(member => {
+                        const ticket = ticketsByPlanNodeId.get(member.id);
+                        return (
+                          skipped.has(member.id) ||
+                          isSettledBy(ticket) ||
+                          ticket?.statusV2 === TicketStatusV2.COMPLETED ||
+                          ticket?.statusV2 === TicketStatusV2.CANCELLED
+                        );
+                      })
+                    ? 'All group steps are already settled.'
+                    : undefined;
+        const backlogDisabledReason = disabledReason(
+          'backlog',
+          'move a group to backlog',
+          isFlowStepBacklogged,
+        );
+        const skipDisabledReason = disabledReason('skip', 'skip a group', isFlowStepSkipped);
         const statusChip = allBacklogged ? (
           <span
             className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-amber-600'
@@ -340,13 +374,21 @@ export function useFlowRunGraph({
             <Archive size={isCollapsed ? 14 : 12} />
             {!isCollapsed && 'Backlog'}
           </span>
+        ) : allManuallySkipped ? (
+          <span
+            className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-teal-600'
+            title='Skipped'
+          >
+            <SkipForward size={isCollapsed ? 14 : 12} />
+            {!isCollapsed && 'Skipped'}
+          </span>
         ) : groupStatus === 'SKIPPED' ? (
           <span
             className='flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground'
-            title='Skipped'
+            title='Not reached'
           >
             {isCollapsed ? <CircleMinus size={14} /> : <span aria-hidden='true'>—</span>}
-            {!isCollapsed && 'Skipped'}
+            {!isCollapsed && 'Not reached'}
           </span>
         ) : statusOption ? (
           <span
@@ -359,13 +401,13 @@ export function useFlowRunGraph({
         ) : isCollapsed ? (
           <span
             className='flex shrink-0 items-center text-muted-foreground'
-            title={allSettled ? 'Skipped' : 'To Do'}
+            title={allSettled ? 'Not reached' : 'To Do'}
           >
             {allSettled ? <CircleMinus size={14} /> : getStatusOption(TicketStatusV2.TODO)?.icon}
           </span>
         ) : (
           <span className='shrink-0 text-[9px] font-medium uppercase tracking-[0.5px] text-muted-foreground'>
-            {allSettled ? 'Skipped' : 'To Do'}
+            {allSettled ? 'Not reached' : 'To Do'}
           </span>
         );
         const size = coverSizeOf(group.id);
@@ -382,7 +424,7 @@ export function useFlowRunGraph({
             color: flowGroupColor(group.id),
             collapsed: isCollapsed,
             status: statusChip,
-            skipped: groupStatus === 'SKIPPED',
+            skipped: isDeadGroup(group.id),
             notStarted: groupStatus === null && !allSettled,
             ...(isCollapsed && {
               members: runModel.directEntityIdsInLevelOrder(group.id).map(id => {
@@ -401,6 +443,7 @@ export function useFlowRunGraph({
                   childMembers.every(member =>
                     isFlowStepBacklogged(ticketsByPlanNodeId.get(member.id)),
                   );
+                const childAllSkipped = allMembersSkipped(child.id);
                 const childStatus = runModel.deriveGroupStatus(
                   child.id,
                   statusByPlanNodeId,
@@ -414,11 +457,15 @@ export function useFlowRunGraph({
                     <span className='flex shrink-0 items-center text-amber-600' title='Backlog'>
                       <Archive size={12} />
                     </span>
+                  ) : childAllSkipped ? (
+                    <span className='flex shrink-0 items-center text-teal-600' title='Skipped'>
+                      <SkipForward size={13} />
+                    </span>
                   ) : childStatus === 'SKIPPED' ? (
                     <span
                       className='flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground'
-                      title='Skipped'
-                      aria-label='Skipped'
+                      title='Not reached'
+                      aria-label='Not reached'
                     >
                       <CircleMinus size={13} />
                     </span>
@@ -431,9 +478,14 @@ export function useFlowRunGraph({
               }),
             }),
             onToggleCollapse: () => toggleGroup(group.id),
-            onMoveToBacklog: () => void handleFlowGroupBacklog(group.id),
+            onMoveToBacklog: () => void handleFlowGroupAction(group.id, 'backlog'),
             ...(backlogDisabledReason && { backlogDisabledReason }),
-            backlogPending: flowGroupBacklogPendingId === group.id,
+            backlogPending:
+              flowGroupPending?.groupId === group.id && flowGroupPending.action === 'backlog',
+            onSkipGroup: () => void handleFlowGroupAction(group.id, 'skip'),
+            ...(skipDisabledReason && { skipDisabledReason }),
+            skipPending:
+              flowGroupPending?.groupId === group.id && flowGroupPending.action === 'skip',
           },
         };
       });
@@ -522,11 +574,13 @@ export function useFlowRunGraph({
         ? '#d4d4d8'
         : isFlowStepBacklogged(targetTicket)
           ? '#d97706'
-          : targetStatus === TicketStatusV2.COMPLETED
-            ? '#22c55e'
-            : targetTicket?.statusV2 === TicketStatusV2.CANCELLED
-              ? '#ef4444'
-              : '#6276be';
+          : isFlowStepSkipped(targetTicket)
+            ? '#0d9488'
+            : targetStatus === TicketStatusV2.COMPLETED
+              ? '#22c55e'
+              : targetTicket?.statusV2 === TicketStatusV2.CANCELLED
+                ? '#ef4444'
+                : '#6276be';
       return { waiting, dimmed, color };
     };
     const edgePropsFromSource = (sourceId: string, targetProps: EdgeProps): EdgeProps =>
@@ -614,6 +668,7 @@ export function useFlowRunGraph({
       if (cached) return cached;
       const members = runModel.descendantMembersOf(groupId);
       const groupStatus = runModel.deriveGroupStatus(groupId, statusByPlanNodeId, skipped);
+      const allManuallySkipped = allMembersSkipped(groupId);
       const waiting =
         !rootPaused &&
         members.some(member => {
@@ -626,7 +681,7 @@ export function useFlowRunGraph({
           );
         });
       const dimmed =
-        groupStatus === 'SKIPPED' ||
+        isDeadGroup(groupId) ||
         (groupStatus === null &&
           members.every(
             member =>
@@ -634,13 +689,15 @@ export function useFlowRunGraph({
               ticketsByPlanNodeId.get(member.id)?.statusV2 === TicketStatusV2.CANCELLED,
           ));
       // Same palette as step edges — the cover itself carries the group color
-      const color = dimmed
-        ? '#d4d4d8'
-        : groupStatus === 'COMPLETED'
-          ? '#22c55e'
-          : groupStatus === 'CANCELLED'
-            ? '#ef4444'
-            : '#6276be';
+      const color = allManuallySkipped
+        ? '#0d9488'
+        : dimmed
+          ? '#d4d4d8'
+          : groupStatus === 'COMPLETED'
+            ? '#22c55e'
+            : groupStatus === 'CANCELLED'
+              ? '#ef4444'
+              : '#6276be';
       const props = { waiting, dimmed, color, ...(dimmed && { dashed: true }) };
       groupEdgePropsById.set(groupId, props);
       return props;
@@ -706,7 +763,7 @@ export function useFlowRunGraph({
           ? routeLabels
           : selectedRoute
             ? `${selectedRoute.label} · Chosen`
-            : `${routeLabels} · Skipped`;
+            : `${routeLabels} · Not reached`;
         pushEdge(
           decision.parentNodeId,
           displayId(targetId),
@@ -730,7 +787,7 @@ export function useFlowRunGraph({
     graphTickets,
     collapsedFlowGroups,
     flowSelection,
-    flowGroupBacklogPendingId,
-    handleFlowGroupBacklog,
+    flowGroupPending,
+    handleFlowGroupAction,
   ]);
 }

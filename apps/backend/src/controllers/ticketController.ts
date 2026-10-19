@@ -64,6 +64,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
+import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
+import { AgentsConfig } from '@/agents/config';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
   FormContextType,
@@ -83,7 +85,7 @@ import { BaseTicketType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
-import { backlogFlowGroup } from '@/services/flowCascadeService';
+import { backlogFlowGroup, skipFlowGroup } from '@/services/flowCascadeService';
 import { AppError } from '@/middleware/errorHandler';
 
 import { z } from 'zod';
@@ -1369,6 +1371,42 @@ export class TicketController {
   };
 
   /**
+   * Skip every non-terminal descendant of a Flow run group.
+   * POST /api/tickets/:ticketId/flow-groups/:groupId/skip
+   */
+  skipFlowGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      next(new AppError('User not authenticated', 401));
+      return;
+    }
+
+    const rootTicketId = req.params.ticketId;
+    const groupId = req.params.groupId;
+    if (!rootTicketId || !groupId) {
+      next(new AppError('ticketId and groupId are required', 400));
+      return;
+    }
+
+    try {
+      const result = await skipFlowGroup({
+        rootTicketId,
+        groupId,
+        actorUserId: userId,
+        workspaceId,
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
      * Update a ticket
      * PATCH /api/tickets/:ticketId
      *
@@ -1951,13 +1989,33 @@ export class TicketController {
     }
   };
 
+  suggestFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!(await AgentsConfig.fetch()).ticketFieldSuggestionsXorEnabled) {
+        res.json({ success: true, data: {} });
+        return;
+      }
+      const { title, description = '', boards } = req.body as TicketFieldSuggestionInput;
+      // Stop the XOR call when the dashboard drops the request.
+      const controller = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      const data = await suggestTicketFields({ title, description, boards }, controller.signal);
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error suggesting ticket fields:', error);
+      res.status(500).json({ error: 'Failed to suggest ticket fields' });
+    }
+  };
+
   private async getBoardCandidates(projectId: string): Promise<TicketBoardCandidate[]> {
     const boards = await this.boardRepository.findBoardsByProject(projectId);
 
     return boards.map(board => ({
       id: board.id,
       name: board.name,
-      description: undefined, // Board model doesn't have description field
+      description: board.description || undefined,
       boardType: board.boardType || undefined,
       stageCount: undefined, // Can be populated if needed by fetching stages count
     }));

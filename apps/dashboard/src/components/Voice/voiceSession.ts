@@ -11,6 +11,7 @@ import { voiceLevel } from './voiceLevel';
 import { voiceDebug, type VoiceDebugStage } from '../../services/VoiceInput/voiceDebug';
 import { getVoiceSettings, subscribeVoiceSettings } from './voiceSettings';
 import { createSpeechQueue } from './speechQueue';
+import { useStopWhenCovered } from '../../hooks/usePageCoverage';
 
 // 'understanding' is Auto routing; 'asking' is the request with Ask AI until its answer is spoken.
 export type VoicePhase =
@@ -441,6 +442,19 @@ function stop(): void {
   setPhase('idle');
 }
 
+// Out of reach under full-page search: covering the page ends the turn, so nothing more is recorded
+// or read out there. An Ask AI reply already streaming carries on in the chat, only unspoken.
+function stopWhenCovered(): void {
+  if (state.phase === 'idle' && !utterance) return;
+  log('session', 'Stopped by full-page search');
+  clearTimeout(micWatchdog);
+  utterance?.cancel();
+  utterance = null;
+  host?.cancelAnswer?.();
+  interrupt();
+  setPhase('idle');
+}
+
 function reset(): void {
   session++;
   clearTimeout(micWatchdog);
@@ -516,9 +530,14 @@ export function useVoiceHost(enabled: boolean, surface: VoiceHost): void {
   // Read at call time, so the session keeps its claim as the surface re-renders.
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
+  const claimedRef = useRef<VoiceHost | null>(null);
+  // Only the session this surface holds: another, still on screen, may have claimed it since.
+  useStopWhenCovered(enabled, () => {
+    if (host && host === claimedRef.current) stopWhenCovered();
+  });
   useEffect(() => {
     if (!enabled) return undefined;
-    return claim({
+    const mine: VoiceHost = {
       submit: text => surfaceRef.current.submit(text),
       ownsStream: stream => surfaceRef.current.ownsStream(stream),
       answer: async text => (await surfaceRef.current.answer?.(text)) ?? null,
@@ -526,6 +545,8 @@ export function useVoiceHost(enabled: boolean, surface: VoiceHost): void {
       cancelAnswer: () => surfaceRef.current.cancelAnswer?.(),
       onExit: () => surfaceRef.current.onExit(),
       onEnd: () => surfaceRef.current.onEnd?.(),
-    });
+    };
+    claimedRef.current = mine;
+    return claim(mine);
   }, [enabled]);
 }

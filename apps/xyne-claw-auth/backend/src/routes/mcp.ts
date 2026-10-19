@@ -1254,6 +1254,7 @@ async function buildMcpResolutionEntries(args: {
 
 router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, res: Response) => {
   try {
+    const listingStartedAt = Date.now();
     const userId = req.session!.userId;
     const agentSlug = req.session?.agentSlug;
     const spacesAppId = req.session?.spacesAppId;
@@ -1300,17 +1301,17 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // Skipped under the automation app-mode swap — that path must NOT re-list the
     // user xyne-spaces server (with app creds) that the swap just removed.
     const hasSpacesConnection = entries.some((e) => e.serverType === "xyne-spaces" && e.type !== "user");
-    let appTokenToolsResult: Awaited<ReturnType<typeof listToolsForUser>> | null = null;
-    if (!hasSpacesConnection && !automationAppSwap) {
-      const appCreds = await getAppTokenCredentials(userId);
-      if (appCreds) {
-        try {
-          appTokenToolsResult = await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
-        } catch (err) {
-          log.error("[mcp/tools] App token fallback failed:", err);
-        }
-      }
-    }
+    const appTokenToolsPromise: Promise<Awaited<ReturnType<typeof listToolsForUser>> | null> =
+      !hasSpacesConnection && !automationAppSwap
+        ? (async () => {
+            const appCreds = await getAppTokenCredentials(userId);
+            if (!appCreds) return null;
+            return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
+          })().catch((err) => {
+            log.error("[mcp/tools] App token fallback failed:", err);
+            return null;
+          })
+        : Promise.resolve(null);
 
     const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
     const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
@@ -1321,29 +1322,55 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       );
     }
 
-    const results = await Promise.allSettled(
-      listingEntries.map(async (entry) => {
+    const listingPhaseStartedAt = Date.now();
+    const serverMs: Array<[string, number]> = [];
+    const subagentResultsPromise = Promise.allSettled(
+      subagentListingEntries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
-        const effective = entry.serverType === "slack"
-          ? await loadEffectiveCredentialsWithSpacesFallback(
-              userId,
-              entry.serverType,
-              agentSlug,
-              sessionAgentOrgId,
-              req.params.sessionId,
-            )
-          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
-        if (!effective) return null;
         const serverTools = await listToolsForUser(
           userId,
           entry.serverType,
           entry.serverName,
-          effective.credentials,
+          entry.credentials,
           agentSlug,
         );
-        return { entry, serverTools };
+        return {
+          ...serverTools,
+          sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
+        } satisfies McpServerTools;
       }),
     );
+    const results = await Promise.allSettled(
+      listingEntries.map(async (entry) => {
+        const entryStartedAt = Date.now();
+        try {
+          return await listEntryTools(entry);
+        } finally {
+          serverMs.push([entry.serverType, Date.now() - entryStartedAt]);
+        }
+      }),
+    );
+    async function listEntryTools(entry: ListEntry) {
+      if (!(await hasConnectorDefinition(entry.serverType))) return null;
+      const effective = entry.serverType === "slack"
+        ? await loadEffectiveCredentialsWithSpacesFallback(
+            userId,
+            entry.serverType,
+            agentSlug,
+            sessionAgentOrgId,
+            req.params.sessionId,
+          )
+        : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
+      if (!effective) return null;
+      const serverTools = await listToolsForUser(
+        userId,
+        entry.serverType,
+        entry.serverName,
+        effective.credentials,
+        agentSlug,
+      );
+      return { entry, serverTools };
+    }
 
     const data = results
       .filter(
@@ -1369,28 +1396,19 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       log.error("[mcp/tools] Some servers failed to list tools:", errors);
     }
 
-    // Add app token fallback result if available
+    const [appTokenToolsResult, subagentResults] = await Promise.all([appTokenToolsPromise, subagentResultsPromise]);
+    const slowest = serverMs.reduce<[string, number] | null>((max, cur) => (!max || cur[1] > max[1] ? cur : max), null);
+    log.info(
+      `[mcp/tools] timing agent=${agentSlug ?? "-"} setupMs=${listingPhaseStartedAt - listingStartedAt} ` +
+      `listMs=${Date.now() - listingPhaseStartedAt} servers=${listingEntries.length} subagentServers=${subagentListingEntries.length}` +
+      (slowest ? ` slowest=${slowest[0]}:${slowest[1]}ms` : ""),
+    );
+
     if (appTokenToolsResult) {
       data.push(appTokenToolsResult);
     }
 
     if (subagentListingEntries.length > 0) {
-      const subagentResults = await Promise.allSettled(
-        subagentListingEntries.map(async (entry) => {
-          if (!(await hasConnectorDefinition(entry.serverType))) return null;
-          const serverTools = await listToolsForUser(
-            userId,
-            entry.serverType,
-            entry.serverName,
-            entry.credentials,
-            agentSlug,
-          );
-          return {
-            ...serverTools,
-            sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
-          } satisfies McpServerTools;
-        }),
-      );
       for (const result of subagentResults) {
         if (result.status === "rejected") {
           log.error("[mcp/tools] subagent-sourced server failed to list tools:", result.reason);

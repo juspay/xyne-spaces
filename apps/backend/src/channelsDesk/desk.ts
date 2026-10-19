@@ -9,6 +9,7 @@ import type { TicketLike } from '@/automations/triggers/ticket-context';
 import { insertChannelsDeskTicket, readChannelsDeskTicketsForThreads, type ChannelsDeskThreadTicket } from '@/bypassAcl/channelsDeskServices';
 import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
@@ -143,7 +144,25 @@ export async function createChannelsDeskTicket(conversationId: string): Promise<
     .syncInitialMessageMd(ticket.conversationId)
     .catch((err: unknown) => logger.error('[channels-desk] Stub md sync failed', { ticketId: ticket.id, err }));
   await afterCreate(ticket, sourceChannelId);
+  await enqueueClassification(ticket, sourceChannelId);
   return ticket;
+}
+
+/** The AI classification and priority job other desks run on each new ticket, on the email row written above. */
+async function enqueueClassification(ticket: Ticket, sourceChannelId: string): Promise<void> {
+  try {
+    const email = await db.email.findFirst({ where: { conversationId: ticket.conversationId }, select: { id: true } });
+    if (!email) return;
+    await emailClassificationQueue.getQueue().add('classify', {
+      ticketId: ticket.id,
+      channelId: ticket.channelId,
+      emailId: email.id,
+      groupId: ticket.userGroupId ?? null,
+      sourceChannelId,
+    });
+  } catch (err) {
+    logger.error('[channels-desk] Classification enqueue failed', { ticketId: ticket.id, err });
+  }
 }
 
 async function afterCreate(ticket: Ticket, sourceChannelId: string): Promise<void> {

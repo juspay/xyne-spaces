@@ -40,6 +40,10 @@ dependencies:
     version: 0.1.0-app.1.501.2
     repository: file://../xyne-zero
     condition: xyne-zero-replication.enabled
+  - name: xyne-sync
+    version: 0.1.0
+    repository: file://../xyne-sync
+    condition: xyne-sync.enabled
   - name: xyne-ysweet
     version: 0.1.0-app.1.501.2
     repository: file://../xyne-ysweet

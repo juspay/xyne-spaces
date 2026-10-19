@@ -20,6 +20,8 @@ export interface Config {
   parallel: number;
   // Record a .webm per browser session into <run artifact dir>/videos.
   recordVideo: boolean;
+  // Milliseconds to pause after each Gauge step, to follow a headed run step by step.
+  stepDelay: number;
   testProgressFile?: string;
 }
 
@@ -148,6 +150,15 @@ function getRecordVideo(): boolean {
   return process.env.RECORD_VIDEO === 'true';
 }
 
+function getStepDelay(): number {
+  if (!process.env.STEP_DELAY) {
+    return 0;
+  }
+
+  const parsed = parseInt(process.env.STEP_DELAY, 10);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+}
+
 function getConfigForEnv(env: Environment): Config {
   return {
     backend: {
@@ -163,6 +174,7 @@ function getConfigForEnv(env: Environment): Config {
     enableBrowserConsoleLogs: getEnableBrowserConsoleLogs(env),
     parallel: getParallel(env),
     recordVideo: getRecordVideo(),
+    stepDelay: getStepDelay(),
     testProgressFile: process.env.XYNE_TEST_PROGRESS_FILE || undefined,
   };
 }

@@ -76,6 +76,7 @@ import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
@@ -128,8 +129,6 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
-import { extractCallLinkFromInviteText } from '../../../utils/callControls';
-import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -244,6 +243,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelId,
       conversationId,
       onSendMessage,
+      clearOnSend = true,
       onContentChange,
       onCancel,
       mentionItems = [],
@@ -468,17 +468,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
 
+    // Not while full-page search covers the composer: its Esc is full page's.
+    const coverage = usePageCoverage();
     useEffect(() => {
       if (!isVoiceRecording) return;
       const onKeyDown = (e: KeyboardEvent): void => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !coverage.isCovered()) {
           e.stopPropagation();
           voiceInputRef.current?.toggle();
         }
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [isVoiceRecording]);
+    }, [isVoiceRecording, coverage]);
 
     const artifactComposerDefinition = getSlashCommandArtifactDefinition(
       slashCommandArtifactCommand,
@@ -487,14 +489,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     useEffect(() => {
       if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
       const onKeyDown = (event: KeyboardEvent): void => {
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || coverage.isCovered()) return;
         event.preventDefault();
         event.stopPropagation();
         onCancelSlashCommandArtifact();
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact, coverage]);
 
     const handleTyping = onTyping;
 
@@ -1049,21 +1051,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
-          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
-          // calendars. In chat, keep only its link: the message then renders as the call card.
-          const inviteCallLink = extractCallLinkFromInviteText(
-            clipboard?.getData('text/plain') ?? '',
-          );
-          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
-            event.preventDefault();
-            editor?.commands.insertContent({
-              type: 'text',
-              text: inviteCallLink,
-              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
-            });
-            return true;
-          }
-
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1424,6 +1411,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+          if (!clearOnSend) return;
+
           // Tracked here, not on the Send button: Enter, the button, the mobile
           // editor and shortcuts all land in this function, and only a send that
           // succeeded should count.
@@ -1455,6 +1444,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor,
         allAttachments,
         onSendMessage,
+        clearOnSend,
         isSending,
         attachedCanvas,
         hasSendableContent,

@@ -281,7 +281,7 @@ export class SummarizeController {
         conversationId,
         channelId: conversation.channelId,
         summarizationType: 'emailThread',
-        modelName: allJAFAttachments.length > 0 ? agentsConfig.attachmentSummariserModelName : agentsConfig.summariserModelName,
+        modelName: allJAFAttachments.length > 0 ? agentsConfig.attachmentSummariserModelName : agentsConfig.deskSummariserModelName,
       };
 
       const messageIdMappingObj: { [index: number]: string } = {};
