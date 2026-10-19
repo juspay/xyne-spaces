@@ -120,8 +120,9 @@ Continue at [Clone and run](#clone-and-run).
 
 ## Windows (WSL2)
 
-Windows is supported through WSL2, a real Linux environment inside Windows, using
-either the [Nix setup](nix.md) or Docker.
+Native Windows is possible (`pnpm run services:win`) but far less exercised. The
+supported path is WSL2 — a real Linux environment inside Windows — using either the
+[Nix setup](nix.md) or Docker.
 
 ### 1. Install WSL2 + Ubuntu
 

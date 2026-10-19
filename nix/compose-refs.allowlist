@@ -40,6 +40,7 @@ scripts/reset-local.sh
 scripts/run-cucumber-local.sh
 scripts/sandbox.sh
 scripts/select-services.mjs
+scripts/start-services-win.sh
 scripts/start-services.sh
 scripts/watch-transcription-agent.sh
 tools/xyne-automation-old/scripts/download-visual-regression-assets.sh

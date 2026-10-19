@@ -34,7 +34,7 @@ reference, and the list may only shrink.[^gate]
 - Zero runs from the workspace and reads its secret at runtime[^zero]
 - Node 22, pnpm 10.15.0, Postgres 17 pinned; the shell has every tool CI needs[^toolchain]
 - `nix flake check` guards paths, tests, Compose references and lockfiles[^checks]
-- Dead Compose and Windows paths deleted[^phase0-deletes]
+- Dead Compose paths deleted[^phase0-deletes]
 
 ## Phase 1: move the dev services
 
@@ -153,8 +153,8 @@ don't change.[^phase7]
 
 [^phase0-deletes]: `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`,
     `docker/dev-infra/`, `docker/Dockerfile.call-services`, `docker/entrypoint.sh`,
-    `scripts/start-services-win.sh`, `services:win`, `setup.sh`, `clone-and-setup.sh`,
-    `just setup`. Windows docs point to WSL2 + Nix. `services:stop` now runs
+    `setup.sh`, `clone-and-setup.sh`, `just setup`. Windows docs offer WSL2 with
+    either Nix or Docker; native `services:win` stays until Phase 1. `services:stop` now runs
     `start-services.sh --stop`: Compose `down` if that stack is running, otherwise Nix
     port cleanup.
 
@@ -178,7 +178,8 @@ don't change.[^phase7]
 [^observability]: otel-collector, victoriametrics, victorialogs, fluent-bit and grafana are
     all in nixpkgs. Grafana provisioning comes from `docker/`.
 
-[^phase1-end]: Deleted: `docker-compose.dev.yml`, `start-services.sh`, `select-services.mjs`,
+[^phase1-end]: Deleted: `docker-compose.dev.yml`, `start-services.sh`,
+    `start-services-win.sh` and `services:win`, `select-services.mjs`,
     the Compose branches in `reset-local.sh`, unused `docker/` files, the Vespa dev
     compose file and `deploy-dev.sh`, and doc references (`docs/setup/services.md`,
     `troubleshooting.md`, `apps/backend/docs/METRICS.md`, …).

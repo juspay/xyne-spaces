@@ -15,6 +15,7 @@
     "services": "node scripts/xyne-doctor.mjs services",
     "services:raw": "node scripts/select-services.mjs",
     "services:sh": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
+    "services:win": "bash scripts/start-services-win.sh",
     "secrets": "node scripts/generate-local-secrets.mjs",
     "env:setup": "node scripts/setup-env-files.mjs",
     "services:stop": "bash scripts/start-services.sh --stop",

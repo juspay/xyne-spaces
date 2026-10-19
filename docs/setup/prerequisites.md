@@ -76,6 +76,8 @@ sudo apt-get install -y python3 make g++ libcairo2-dev libpango1.0-dev \
 ```
 
 **Windows** — use WSL2, then either the Linux steps above or the [Nix setup](nix.md).
+`pnpm run services:win` exists for the Windows-native path but is less exercised
+than the macOS and Linux flows.
 
 ## Next
 
