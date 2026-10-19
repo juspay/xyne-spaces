@@ -72,6 +72,7 @@ export type QuestionFeature =
   | 'search_intent'
   | 'related_context_gate'
   | 'related_context_verdict'
+  | 'discussion_title'
   | 'assistant_route'
   | 'ticket_duplicate'
   | 'desk_tags'
