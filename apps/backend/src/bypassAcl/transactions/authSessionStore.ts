@@ -1,5 +1,6 @@
 import { transaction } from '../base';
 import { db } from '@/database/client';
+import type { AuthSessionStatus } from '@/services/authSessionService';
 
 export interface ReplaceActiveAuthSessionInput {
   orgMemberId: string;
@@ -7,8 +8,8 @@ export interface ReplaceActiveAuthSessionInput {
   deviceKey: string;
   /** sha256 of the raw xs cookie value. */
   refreshToken: string;
-  status: string;
-  revokedStatus: string;
+  status: AuthSessionStatus;
+  revokedStatus: AuthSessionStatus;
   /** Why the device's previous active session is being revoked. */
   revokeReason: string;
   platform: string;
@@ -61,7 +62,7 @@ export function replaceActiveAuthSessionTx(input: ReplaceActiveAuthSessionInput)
 }
 
 /** Record that an auth session entered a workspace. Idempotent; never reactivates a revoked row. */
-export function recordWorkspaceAccessTx(authSessionId: string, workspaceId: string, status: string) {
+export function recordWorkspaceAccessTx(authSessionId: string, workspaceId: string, status: AuthSessionStatus) {
   return transaction(
     ['AuthSessionWorkspaceAccess'],
     'login/switch: stamping the workspace an org-scoped auth session entered; table is unscoped and write-only',
@@ -80,8 +81,8 @@ export interface RevokeActiveAuthSessionsInput {
   refreshToken?: string;
   orgMemberId?: string;
   deviceKey?: string;
-  activeStatus: string;
-  revokedStatus: string;
+  activeStatus: AuthSessionStatus;
+  revokedStatus: AuthSessionStatus;
   revokeReason: string;
 }
 

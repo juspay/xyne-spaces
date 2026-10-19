@@ -915,7 +915,7 @@ model UserSession {
 // refreshToken stores the sha256 of the refresh token held by the client in the `xs` cookie
 // (never the raw token).
 // A partial unique index `auth_sessions_active_device_key ON auth_sessions ("orgMemberId",
-// "deviceKey") WHERE status = 'active'` is added via raw SQL in the migration (Prisma can't
+// "deviceKey") WHERE status = 'ACTIVE'` is added via raw SQL in the migration (Prisma can't
 // express it) — it enforces one ACTIVE session per device.
 model AuthSession {
   id          String    @id @default(cuid())
@@ -923,7 +923,7 @@ model AuthSession {
   orgId       String
   refreshToken String   @unique // sha256 of the raw xs cookie value
   deviceKey   String    // persistent client device key (localStorage `xd` on web, native stores elsewhere)
-  status      String    @default("active") // active | revoked
+  status      String    @default("ACTIVE") // AuthSessionStatus: ACTIVE | REVOKED (enforced in code)
   platform    String    // web | electron | android | ios
   refreshTokenExpiry DateTime // absolute session expiry; never extended on rotation
   deviceInfo  String?   // JSON: { appVersion, userAgent, acceptLanguage }
@@ -948,7 +948,7 @@ model AuthSessionWorkspaceAccess {
   id            String   @id @default(cuid())
   authSessionId String
   workspaceId   String
-  status        String   @default("active") // active | revoked
+  status        String   @default("ACTIVE") // AuthSessionStatus: ACTIVE | REVOKED (enforced in code)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

@@ -13,10 +13,11 @@ export const DEVICE_KEY_HEADER = 'x-device-id';
 /** Org-scoped refresh token cookie. */
 export const AUTH_SESSION_COOKIE = 'xs';
 
-export const AuthSessionStatus = {
-  ACTIVE: 'active',
-  REVOKED: 'revoked',
-} as const;
+/** Stored as plain strings in auth_sessions / auth_session_workspace_access (values are load-bearing: the partial unique index filters on 'ACTIVE'). */
+export enum AuthSessionStatus {
+  ACTIVE = 'ACTIVE',
+  REVOKED = 'REVOKED',
+}
 
 export const AuthSessionRevokeReason = {
   /** A newer login (or refresh recovery after expiry) replaced the device's session. */

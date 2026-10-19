@@ -5,7 +5,7 @@ CREATE TABLE "non_zero"."auth_sessions" (
     "orgId" TEXT NOT NULL,
     "refreshToken" TEXT NOT NULL,
     "deviceKey" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'active',
+    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "platform" TEXT NOT NULL,
     "refreshTokenExpiry" TIMESTAMP(3) NOT NULL,
     "deviceInfo" TEXT,
@@ -24,7 +24,7 @@ CREATE TABLE "non_zero"."auth_session_workspace_access" (
     "id" TEXT NOT NULL,
     "authSessionId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'active',
+    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -36,8 +36,8 @@ CREATE UNIQUE INDEX "auth_sessions_refreshToken_key" ON "non_zero"."auth_session
 
 -- Hand-written (Prisma cannot express partial indexes): at most one ACTIVE session per
 -- (org member, device). Login revokes-then-inserts and refresh rotates in place, so the code
--- relies on it. Also serves every lookup, since they all filter status = 'active'.
-CREATE UNIQUE INDEX "auth_sessions_active_device_key" ON "non_zero"."auth_sessions"("orgMemberId", "deviceKey") WHERE "status" = 'active';
+-- relies on it. Also serves every lookup, since they all filter status = 'ACTIVE'.
+CREATE UNIQUE INDEX "auth_sessions_active_device_key" ON "non_zero"."auth_sessions"("orgMemberId", "deviceKey") WHERE "status" = 'ACTIVE';
 
 -- CreateIndex
 CREATE INDEX "auth_sessions_deviceKey_idx" ON "non_zero"."auth_sessions"("deviceKey");
