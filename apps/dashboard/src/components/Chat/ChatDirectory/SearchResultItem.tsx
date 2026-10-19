@@ -19,6 +19,7 @@ import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRen
 import { useUser } from '../../../hooks/useUsers';
 import { isUserDeactivated, getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { TicketPriority } from '@xyne/shared';
 
 interface SearchResultItemProps {
@@ -349,6 +350,7 @@ const UserSearchResultItem = ({
             size='sm'
           />
         )}
+        <GuestLabel role={user?.role} />
         {isDeactivated && (
           <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
             Deactivated

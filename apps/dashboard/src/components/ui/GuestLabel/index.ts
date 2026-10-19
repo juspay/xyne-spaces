@@ -1,0 +1,1 @@
+export { GuestLabel } from './GuestLabel';

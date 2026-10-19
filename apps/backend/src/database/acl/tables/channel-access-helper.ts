@@ -236,20 +236,36 @@ export async function getGuestVisibleUserIds(
   workspaceId: string,
   userId: string
 ): Promise<string[]> {
-  const accessibleChannelIds = await getGuestAccessibleChannelIds(prisma, workspaceId, userId)
-  if (!accessibleChannelIds.length) {
-    return [userId]
-  }
+  const [accessibleChannelIds, accessibleCanvasIds] = await Promise.all([
+    getGuestAccessibleChannelIds(prisma, workspaceId, userId),
+    getGuestAccessibleCanvasIds(prisma, workspaceId, userId),
+  ])
 
-  const participants = await prisma.channelParticipant.findMany({
-    where: {
-      channelId: { in: accessibleChannelIds },
-      channel: { workspaceId },
-    },
-    select: { userId: true },
-  })
+  // People the guest shares a channel or a canvas with (mirrors the Zero-side
+  // guestVisibleUserWhere).
+  const [channelParticipants, canvasParticipants] = await Promise.all([
+    accessibleChannelIds.length
+      ? prisma.channelParticipant.findMany({
+          where: {
+            channelId: { in: accessibleChannelIds },
+            channel: { workspaceId },
+          },
+          select: { userId: true },
+        })
+      : [],
+    accessibleCanvasIds.length
+      ? prisma.canvasParticipant.findMany({
+          where: { canvasId: { in: accessibleCanvasIds }, workspaceId, userId: { not: null } },
+          select: { userId: true },
+        })
+      : [],
+  ])
 
-  return unique([userId, ...participants.map((entry) => entry.userId)])
+  return unique([
+    userId,
+    ...channelParticipants.map((entry) => entry.userId),
+    ...canvasParticipants.flatMap((entry) => (entry.userId ? [entry.userId] : [])),
+  ])
 }
 
 export async function getGuestAccessibleCanvasIds(

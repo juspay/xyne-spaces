@@ -15,13 +15,26 @@ export class CallParticipantsACL extends BaseQueryACL<
     if (isGuestContext(ctx)) {
       const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
 
+      // Not only calls in the guest's channels: also their own participant rows and the
+      // participants of calls they started or joined, which may have no channel.
       return {
-        call: {
-          channel: {
-            workspaceId: this.ctx.workspaceId ?? '',
-            id: { in: channelIds },
+        AND: [
+          {
+            OR: [
+              { userId: this.ctx.userId },
+              {
+                call: {
+                  OR: [
+                    { createdByUserId: this.ctx.userId },
+                    { participants: { some: { userId: this.ctx.userId } } },
+                    { channel: { id: { in: channelIds } } },
+                  ],
+                },
+              },
+            ],
           },
-        },
+          { call: { workspaceId: this.ctx.workspaceId ?? '' } },
+        ],
       }
     }
 
