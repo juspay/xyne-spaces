@@ -666,6 +666,8 @@ export function EnvironmentsView({
     queryFn: async () =>
       (await apiInstance.get<{ environments: SdlcEnvironmentRow[] }>('/sdlc/environments')).data
         .environments,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const visibleChannels = useAllVisibleChannels();
   const { data: profileList } = useSandboxProfiles(hubRepoIds?.join(','));
@@ -719,7 +721,13 @@ export function EnvironmentsView({
     <ResizableGroup orientation='horizontal' className='flex h-full w-full bg-background'>
       <Panel id='environments-list' minSize='35%'>
         <div className='h-full overflow-y-auto [scrollbar-gutter:stable]'>
-          <div className='max-w-ai-content mx-auto flex min-h-full flex-col px-8 pb-8 pt-8'>
+          {/* Inside an SDLC hub it takes the hub pages' width; the AI screen keeps its own. */}
+          <div
+            className={cn(
+              'mx-auto flex min-h-full flex-col px-8 pb-8 pt-8',
+              channelId ? 'w-full max-w-6xl' : 'max-w-ai-content',
+            )}
+          >
             <h1 className='text-2xl font-semibold tracking-tight'>Environments</h1>
             <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
               The sandboxes each repository&apos;s agents can boot into: source, boot steps and

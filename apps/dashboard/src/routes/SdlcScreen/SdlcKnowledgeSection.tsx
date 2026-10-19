@@ -1,15 +1,21 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen,
-  Check,
-  ChevronDown,
   Ellipsis,
-  HelpCircle,
   Link2,
+  Info,
   Lock,
-  Pin,
+  PenLine,
   Plus,
   Search,
   Sparkles,
@@ -20,35 +26,28 @@ import type { SdlcHubKnowledgeLinks, SdlcHubPin } from '@xyne/shared';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
-import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { Tooltip } from '../../components/ui/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/Select';
 import { SegmentedToggle } from '../../components/ui/SegmentedToggle/SegmentedToggle';
 import Textarea from '../../components/ui/Textarea';
-import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
 import { useClawSkills } from '../../hooks/useClawSkills';
 import { ClawApiError } from '../../services/claw/clawRequest';
 import { submitSkillRequest } from '../../services/claw/clawSkillsService';
-import type { Skill } from '../../services/claw/clawSkillsTypes';
 import { apiInstance } from '../../services/clients/apiClient';
 import { cn } from '../../utils/classNames';
 import ClawSkillCreateV2 from '../AIScreen/library/skills/create/ClawSkillCreateV2';
+import { LibraryFilterMenu } from '../AIScreen/library/shared/components/LibraryFilterMenu';
 import ClawSkillDetailV2 from '../AIScreen/library/skills/detail/ClawSkillDetailV2';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { AddSkillList, SkeletonRows } from './AddSkillList';
 import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 
 export interface KnowledgeFile {
@@ -65,81 +64,251 @@ function ArchivedPill(): ReactElement {
   );
 }
 
-// One quiet style: the group a row sits in says whether it is pinned.
-const pinClass =
-  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-// Fixed slots, so the pin and the menu line up down the list whatever a row has.
-const pinSlot = 'flex w-[5.5rem] shrink-0 justify-end';
-const menuSlot = 'flex w-7 shrink-0 justify-end';
+// One column set for the header and every row in both groups, so they line up. Narrow, Type
+// moves under the name and the controls share the last column.
+const rowCols =
+  'grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-5 md:grid-cols-[minmax(0,1fr)_8rem_12rem_2rem]';
+const menuSlot = 'flex w-8 shrink-0 justify-end';
+// The read mode and the menu: one cell each from md up, one group a fixed gap apart below it.
+const trailing = 'flex items-center justify-end gap-2 md:contents';
+const cellText = 'hidden truncate text-xs text-muted-foreground md:block';
+const iconButton =
+  'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-function PinButton(props: { pinned: boolean; label: string; onToggle: () => void }): ReactElement {
+/** A click on a row's read mode control, which must not also open the row. */
+const onReadMode = (event: MouseEvent): boolean =>
+  event.target instanceof Element &&
+  event.target.closest('[data-slot="segmented-toggle"]') !== null;
+
+const applyPin = (links: SdlcHubKnowledgeLinks, pin: SdlcHubPin): SdlcHubKnowledgeLinks =>
+  pin.targetType === 'CANVAS'
+    ? {
+        ...links,
+        pinnedCanvasIds: [
+          ...links.pinnedCanvasIds.filter(id => id !== pin.targetId),
+          ...(pin.pinned ? [pin.targetId] : []),
+        ],
+      }
+    : {
+        ...links,
+        skills: links.skills.map(link =>
+          link.skillId === pin.targetId ? { ...link, pinnedForHub: pin.pinned } : link,
+        ),
+      };
+
+// As SdlcFileList's: the app's tooltip, never the browser's title.
+const TOOLTIP_DELAY_MS = 600;
+
+const chipClass =
+  'shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground';
+
+/** A knowledge file's or skill's read mode; `onChange` unset shows it read-only. */
+// Each item's last shown read mode. A flip moves the row to the other group, which remounts its
+// control, so the new one slides from here instead of appearing in place.
+const lastReadMode = new Map<string, boolean>();
+
+function ReadMode(props: {
+  id: string;
+  always: boolean;
+  onChange?: (always: boolean) => void;
+}): ReactElement {
+  const { id, always, onChange } = props;
+  const [before] = useState(() => lastReadMode.get(id));
+  useEffect(() => {
+    lastReadMode.set(id, always);
+  }, [id, always]);
+  if (!onChange) {
+    return (
+      <Tooltip content='Only hub admins change this' delayDuration={TOOLTIP_DELAY_MS}>
+        <span
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- its tooltip must open from the keyboard
+          tabIndex={0}
+          className='rounded px-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        >
+          {props.always ? 'Always read' : 'When relevant'}
+        </span>
+      </Tooltip>
+    );
+  }
   return (
-    <button
-      type='button'
-      aria-pressed={props.pinned}
-      aria-label={`${props.pinned ? 'Unpin' : 'Pin'} ${props.label}`}
-      onClick={event => {
-        event.stopPropagation();
-        props.onToggle();
+    <SegmentedToggle<'always' | 'relevant'>
+      // As tall as the row's menu button, so the trailing controls share one line.
+      className='h-8 [&>button]:text-xs'
+      options={[
+        { value: 'always', label: 'Always read' },
+        { value: 'relevant', label: 'When relevant' },
+      ]}
+      value={props.always ? 'always' : 'relevant'}
+      {...(before !== undefined &&
+        before !== always && { animateFrom: before ? 'always' : 'relevant' })}
+      onChange={value => {
+        if ((value === 'always') !== props.always) onChange(value === 'always');
       }}
-      data-track-category='SdlcHub'
-      data-track-name={props.pinned ? 'HubKnowledgeUnpinned' : 'HubKnowledgePinned'}
-      className={pinClass}
-    >
-      <Pin size={13} />
-      {props.pinned ? 'Unpin' : 'Pin'}
-    </button>
+      tone='primary'
+      trackCategory='SdlcHub'
+      trackPrefix='HubKnowledgeReadMode'
+    />
   );
 }
 
-function Help({ about, children }: { about: string; children: ReactNode }): ReactElement {
+/** Cmd/Ctrl+Enter in a textarea submits its form; plain Enter stays a new line. */
+function submitOnModEnter(event: KeyboardEvent<HTMLTextAreaElement>): void {
+  if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+  event.preventDefault();
+  event.currentTarget.form?.requestSubmit();
+}
+
+/** The one shell for this page's dialogs: one title and line, the body, then Cancel and the primary. */
+function HubDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  /** Makes the dialog a form: Enter in a field submits it. */
+  onSubmit?: () => void;
+  /** Stays put above the scrolling body, e.g. tabs. */
+  fixed?: ReactNode;
+  footer?: ReactNode;
+  className?: string;
+  /** Wider for a list whose rows carry a description. */
+  wide?: boolean;
+  children?: ReactNode;
+}): ReactElement {
+  const body = (
+    <>
+      <div className='flex items-start gap-3 px-6 pb-4 pt-6'>
+        <div className='min-w-0 flex-1'>
+          <h2 className='text-lg font-semibold'>{props.title}</h2>
+          <p className='mt-1 text-sm text-muted-foreground'>{props.description}</p>
+        </div>
+        <Tooltip content='Close' delayDuration={TOOLTIP_DELAY_MS}>
+          <button
+            type='button'
+            aria-label='Close'
+            onClick={() => props.onOpenChange(false)}
+            data-track-category='SdlcHub'
+            data-track-name='HubKnowledgeDialogClosed'
+            className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          >
+            <X size={15} />
+          </button>
+        </Tooltip>
+      </div>
+      {props.fixed && <div className='px-6 pb-4'>{props.fixed}</div>}
+      {props.children && (
+        <div className='flex min-h-0 flex-1 flex-col overflow-auto px-6 pb-6'>{props.children}</div>
+      )}
+      {props.footer && <div className='flex justify-end gap-2 px-6 pb-6'>{props.footer}</div>}
+    </>
+  );
+  const shell = cn('flex max-h-[85vh] flex-col', props.className);
+  const { onSubmit } = props;
   return (
-    <Tooltip side='right' className='max-w-xs p-3 text-xs font-normal' content={children}>
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={props.title}
+      description={props.description}
+      className={props.wide ? 'max-w-2xl' : 'max-w-xl'}
+    >
+      {onSubmit ? (
+        <form
+          noValidate
+          className={shell}
+          onSubmit={event => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          {body}
+        </form>
+      ) : (
+        <div className={shell}>{body}</div>
+      )}
+    </Dialog>
+  );
+}
+
+/** Radio options with their one line showing, for a choice that needs explaining. */
+function ChoiceList<T extends string>(props: {
+  name: string;
+  options: { value: T; label: string; hint: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  autoFocus?: boolean;
+}): ReactElement {
+  return (
+    <div role='radiogroup' className='flex flex-col gap-2'>
+      {props.options.map(option => (
+        <label
+          key={option.value}
+          htmlFor={`${props.name}-${option.value}`}
+          aria-label={option.label}
+          className={cn(
+            'flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition-colors hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring',
+            props.value === option.value && 'border-primary bg-primary/5',
+          )}
+        >
+          <input
+            id={`${props.name}-${option.value}`}
+            type='radio'
+            name={props.name}
+            value={option.value}
+            checked={props.value === option.value}
+            autoFocus={props.autoFocus && props.value === option.value}
+            onChange={() => props.onChange(option.value)}
+            className='mt-1 accent-primary'
+            data-track-category='SdlcHub'
+            data-track-name={`${props.name}: ${option.label}`}
+          />
+          <span>
+            <span className='block text-sm font-medium'>{option.label}</span>
+            <span className='block text-sm text-muted-foreground'>{option.hint}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+const TYPE_HINT = {
+  file: "Knowledge file: Facts and knowledge about this hub's repositories (like an AGENTS.md or CLAUDE.md file).",
+  skill: 'Skill: Steps that work in any hub.',
+};
+const MODE_HINT = {
+  always: 'Always read: every run in this hub starts with it in full.',
+  relevant: 'When relevant: agents see its name and open it when a request needs it.',
+};
+
+/** A visible ⓘ whose app tooltip lists `lines`; a button, so it opens from the keyboard too. */
+function InfoHint({ about, lines }: { about: string; lines: string[] }): ReactElement {
+  return (
+    <Tooltip
+      delayDuration={TOOLTIP_DELAY_MS}
+      className='max-w-xs text-xs'
+      content={
+        <div className='flex flex-col gap-1'>
+          {lines.map(line => (
+            <span key={line}>{line}</span>
+          ))}
+        </div>
+      }
+    >
       <button
         type='button'
         aria-label={`About ${about}`}
-        className='grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='inline-grid size-4 place-items-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
       >
-        <HelpCircle className='size-3.5' aria-hidden />
+        <Info className='size-3.5' aria-hidden />
       </button>
     </Tooltip>
-  );
-}
-
-function Section(props: {
-  title: string;
-  count: number;
-  /** What agents do with the items in this group. */
-  caption: string;
-  /** Not known yet: an empty list would read as "none". */
-  loading?: boolean;
-  empty: string;
-  /** The first action, offered in the empty state itself. */
-  emptyAction?: ReactNode;
-  children: ReactNode;
-}): ReactElement {
-  return (
-    <div className='rounded-xl border bg-background'>
-      <h3 className='flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b px-5 py-3 text-sm font-semibold'>
-        {props.title}
-        <span className='ml-auto text-xs font-normal text-muted-foreground'>{props.caption}</span>
-      </h3>
-      {props.count === 0 ? (
-        <div className='flex flex-col items-center gap-3 px-5 py-8 text-center text-sm text-muted-foreground'>
-          {props.loading ? 'Loading…' : props.empty}
-          {!props.loading && props.emptyAction}
-        </div>
-      ) : (
-        <div className='divide-y'>{props.children}</div>
-      )}
-    </div>
   );
 }
 
 export interface HubKnowledgeAiDraft {
   name: string;
   description: string;
-  /** `auto` leaves the choice between a Knowledge File and a skill to the agent. */
+  /** `auto` leaves the choice between a knowledge file and a skill to the agent. */
   kind: 'auto' | 'file' | 'skill';
 }
 
@@ -148,7 +317,7 @@ const NEW_SKILL = 'NEW';
 
 const EMPTY_AI_DRAFT: HubKnowledgeAiDraft = { name: '', description: '', kind: 'auto' };
 
-/** Hub Knowledge: the hub's Knowledge Files and Linked Skills, and which of them are pinned. */
+/** Skills page: the hub's knowledge files and linked skills, and which of them every run reads in full. */
 export function SdlcKnowledgeSection(props: {
   channelId: string;
   files: KnowledgeFile[];
@@ -156,23 +325,23 @@ export function SdlcKnowledgeSection(props: {
   filesLoaded: boolean;
   isHubAdmin: boolean;
   showArchived: boolean;
-  emptyFilesText: string;
   onShowArchivedChange: (show: boolean) => void;
   onOpenFile: (canvasId: string) => void;
   onArchiveFile: (canvasId: string, archived: boolean) => void;
   onNewFile: () => void;
   onCreateWithAi: (draft: HubKnowledgeAiDraft) => void;
-  /** The page header, with the page-wide Add menu placed in it. */
-  renderHeader: (actions: ReactNode) => ReactNode;
-  /** Status and start button of the workflow that generates Knowledge Files. */
+  /** Status and start button of the workflow that generates knowledge files. */
   generateControl: ReactNode;
+  /** The hub's name, for the count under the list. */
+  channelName: string;
 }): ReactElement {
   const { channelId, isHubAdmin } = props;
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id;
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerQuery, setPickerQuery] = useState('');
+  const [writeOpen, setWriteOpen] = useState(false);
+  const [writeKind, setWriteKind] = useState<'doc' | 'skill'>('doc');
   // Kept when the dialog is dismissed by Escape or a click outside, so typed text is not lost.
   const [aiDraft, setAiDraft] = useState<HubKnowledgeAiDraft | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
@@ -182,7 +351,17 @@ export function SdlcKnowledgeSection(props: {
     setAiDraft(null);
     setAiTried(false);
   };
-  const [shareSkill, setShareSkill] = useState<Skill | null>(null);
+  // One confirmation for every request to make a skill global: from the row menu or on add.
+  const [approval, setApproval] = useState<{
+    name: string;
+    send: () => Promise<void>;
+    cancel?: () => void;
+  } | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const closeApproval = (): void => {
+    approval?.cancel?.();
+    setApproval(null);
+  };
   // Which skill screen stands in for this page: in the URL, so the browser's Back returns to the list.
   const [searchParams, setSearchParams] = useSearchParams();
   const skillParam = searchParams.get('skill');
@@ -201,6 +380,8 @@ export function SdlcKnowledgeSection(props: {
   const links = useQuery({
     queryKey: linksKey,
     queryFn: async () => (await apiInstance.get<SdlcHubKnowledgeLinks>(base)).data,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const skills = useClawSkills();
   const skillCatalog = skills.data;
@@ -211,7 +392,7 @@ export function SdlcKnowledgeSection(props: {
   const change = async (
     request: () => Promise<unknown>,
     failure: string | ((error: unknown) => string),
-    done?: { message: string; description?: string; undo: () => void },
+    done?: { message: string; description?: string; undo?: () => void },
   ): Promise<void> => {
     try {
       await request();
@@ -219,7 +400,7 @@ export function SdlcKnowledgeSection(props: {
         toast.success(done.message, {
           className: 'hub-inline-action',
           ...(done.description && { description: done.description }),
-          action: { label: 'Undo', onClick: done.undo },
+          ...(done.undo && { action: { label: 'Undo', onClick: done.undo } }),
         });
       }
     } catch (error) {
@@ -231,17 +412,30 @@ export function SdlcKnowledgeSection(props: {
       queryClient.invalidateQueries({ queryKey: ['claw-skills'] }),
     ]);
   };
-  const setPin = (pin: SdlcHubPin, name: string): void => {
-    const whom = pin.scope === 'hub' ? 'everyone' : 'me';
-    void change(() => apiInstance.put(`${base}/pins`, pin), 'Could not change the pin.', {
-      message: !pin.pinned
-        ? `"${name}" unpinned for ${whom}`
-        : pin.scope === 'hub'
-          ? `"${name}" pinned for everyone. Every member's runs now read it in full.`
-          : `"${name}" pinned for me`,
-      undo: () => setPin({ ...pin, pinned: !pin.pinned }, name),
-    });
-  };
+  const orderAtLoad = useRef<{ channelId: string; seen: Set<string>; pinned: Set<string> } | null>(
+    null,
+  );
+  // One queue per hub, so the last click is the last PUT. The links are refetched only once the
+  // queue drains, so no earlier answer overwrites a later click; a failure reverts through it.
+  const pinKey = ['sdlc-hub-pin', channelId];
+  const pinMutation = useMutation({
+    mutationKey: pinKey,
+    scope: { id: pinKey.join(':') },
+    mutationFn: (pin: SdlcHubPin) => apiInstance.put(`${base}/pins`, pin),
+    onMutate: async pin => {
+      await queryClient.cancelQueries({ queryKey: linksKey });
+      queryClient.setQueryData<SdlcHubKnowledgeLinks>(linksKey, old => old && applyPin(old, pin));
+    },
+    onError: () =>
+      toast.error('Could not change the read mode. It is back to what it was; try again.', {
+        id: 'hub-read-mode-failed',
+      }),
+    onSettled: () =>
+      queryClient.isMutating({ mutationKey: pinKey }) === 1
+        ? queryClient.invalidateQueries({ queryKey: linksKey })
+        : undefined,
+  });
+  const setPin = (pin: SdlcHubPin): void => pinMutation.mutate(pin);
 
   const linked = links.data?.skills ?? [];
   const pinnedCanvasIds = new Set(links.data?.pinnedCanvasIds ?? []);
@@ -252,23 +446,18 @@ export function SdlcKnowledgeSection(props: {
       const skill = skillById.get(link.skillId);
       // Someone else's personal skill, or one deleted since: only its linker has a row to clean up.
       if (!skill && link.linkedBy !== userId) return [];
-      return [{ ...link, skill, forEveryone: skill?.scope === 'global' }];
+      // A skill awaiting a claw admin's approval reaches no run; only hub admins see it listed.
+      if (!isHubAdmin && skill?.scope !== 'global') return [];
+      return [
+        {
+          ...link,
+          skill,
+          pending: skill?.scope === 'personal',
+        },
+      ];
     })
-    // Everyone's skills first, then the ones only this user gets. The sort is stable.
-    .sort((a, b) => Number(b.forEveryone) - Number(a.forEveryone));
-  const pickerNeedle = pickerQuery.trim().toLowerCase();
-  // Linked ones stay in the list, marked: a search for one must not read as "no such skill".
-  const pickable = (skillCatalog ?? []).filter(
-    skill =>
-      skill.enabled &&
-      // Linking a global skill gives it to every member, so that is the admin's call.
-      // The catalog holds global skills and the viewer's own, so a personal one is theirs.
-      (isHubAdmin || skill.scope === 'personal') &&
-      `${skill.name} ${skill.slug} ${skill.description}`.toLowerCase().includes(pickerNeedle),
-  );
-  // The ones that can still be linked come first. The sort is stable.
-  pickable.sort((a, b) => Number(linkedIds.has(a.id)) - Number(linkedIds.has(b.id)));
-
+    // Usable skills first, then the ones awaiting approval. The sort is stable.
+    .sort((a, b) => Number(a.pending) - Number(b.pending));
   const needle = query.trim().toLowerCase();
   const shows = (type: 'file' | 'skill', text: string): boolean =>
     (kind === 'all' || kind === type) && text.toLowerCase().includes(needle);
@@ -279,70 +468,76 @@ export function SdlcKnowledgeSection(props: {
   // An archived file's pin is not in effect.
   const filePinned = (file: KnowledgeFile): boolean =>
     file.status === 'ready' && pinnedCanvasIds.has(file.id);
-  const skillPinned = (row: (typeof skillRows)[number]): boolean =>
-    row.pinnedForHub || row.pinnedForMe;
+  const skillPinned = (row: (typeof skillRows)[number]): boolean => row.pinnedForHub;
   const loading = !props.filesLoaded || (!ready && !failed);
+  // A failed load says nothing about "none": no empty state, no count.
+  const empty = !loading && !failed && props.files.length + skillRows.length === 0;
+  // A fast load shows nothing until the final state; only a slow one gets placeholders.
+  const showSkeleton = useDebouncedValue(loading, 300) && loading;
 
-  /** The viewer's two pins on a skill, kept so undoing an unlink can put them back. */
-  interface SkillPins {
-    hub: boolean;
-    me: boolean;
-  }
-  const linkSkill = (skillId: string, name: string, pins?: SkillPins): void => {
-    setPickerOpen(false);
-    setPickerQuery('');
+  /** `alwaysRead` is the skill's read mode, kept so undoing an unlink can put it back. */
+  const linkSkill = (skillId: string, name: string, alwaysRead?: boolean): void => {
     void change(
       async () => {
         await apiInstance.post(`${base}/skills`, { skillId });
-        // Unlinking deleted the pins with the link.
-        for (const scope of ['hub', 'me'] as const) {
-          if (!pins?.[scope]) continue;
-          const pin: SdlcHubPin = { targetType: 'SKILL', targetId: skillId, scope, pinned: true };
+        // Unlinking deleted the pin with the link.
+        if (alwaysRead) {
+          const pin: SdlcHubPin = {
+            targetType: 'SKILL',
+            targetId: skillId,
+            scope: 'hub',
+            pinned: true,
+          };
           await apiInstance.put(`${base}/pins`, pin);
         }
       },
-      'Could not link the skill.',
+      'Could not link the skill. Try again.',
       {
         message: `"${name}" linked to this hub`,
-        undo: () => unlinkSkill(skillId, name, pins),
+        undo: () => unlinkSkill(skillId, name, alwaysRead),
       },
     );
   };
-  const unlinkSkill = (skillId: string, name: string, pins?: SkillPins): void =>
+  const unlinkSkill = (skillId: string, name: string, alwaysRead?: boolean): void =>
     void change(
       () => apiInstance.delete(`${base}/skills/${encodeURIComponent(skillId)}`),
       error =>
         isAxiosError(error) && error.response?.status === 403
           ? 'Only the member who linked it or a hub admin can unlink.'
-          : 'Could not unlink the skill.',
+          : 'Could not unlink the skill. Try again.',
       {
         message: `"${name}" unlinked from this hub`,
-        // The server drops every member's pin with the link, and only the viewer's can be put back.
-        description: "Undo links it again with your pins. Other members' own pins on it are gone.",
-        undo: () => linkSkill(skillId, name, pins),
+        // Only a hub admin can link it again.
+        ...(isHubAdmin && { undo: () => linkSkill(skillId, name, alwaysRead) }),
       },
     );
-  const requestGlobal = async (skill: Skill): Promise<void> => {
+  /** Never throws: every answer is said in a toast. */
+  const requestGlobal = async (slug: string): Promise<void> => {
     if (!userId) return;
     try {
-      await submitSkillRequest(skill.slug, userId);
+      await submitSkillRequest(slug, userId);
       toast.success('Sent to an admin for approval.');
     } catch (error) {
       const status = error instanceof ClawApiError ? error.status : 0;
       if (status === 400) toast.info('This skill is already available to everyone.');
       else if (status === 409) toast.info('A request is already waiting for an admin.');
-      else toast.error('Could not send the request.');
+      else toast.error('Could not send the request. Try again.');
       // Either answer means the cached skill list is behind.
       await queryClient.invalidateQueries({ queryKey: ['claw-skills'] });
     }
   };
 
+  const openCreateWithAi = (): void => {
+    setAiDraft(draft => draft ?? { ...EMPTY_AI_DRAFT, kind: isHubAdmin ? 'auto' : 'skill' });
+    setAiOpen(true);
+  };
+  const openPicker = (): void => setPickerOpen(true);
   const addMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           type='button'
-          size='sm'
+          className='h-10'
           data-track-category='SdlcHub'
           data-track-name='HubKnowledgeAddOpened'
         >
@@ -352,58 +547,42 @@ export function SdlcKnowledgeSection(props: {
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-64 rounded-xl p-1.5 shadow-sm'>
         <DropdownMenuItem
-          onClick={() => {
-            setAiDraft(
-              draft => draft ?? { ...EMPTY_AI_DRAFT, kind: isHubAdmin ? 'auto' : 'skill' },
-            );
-            setAiOpen(true);
-          }}
+          onClick={openCreateWithAi}
           data-track-category='SdlcHub'
           data-track-name='HubKnowledgeCreateWithAi'
         >
           <Sparkles size={15} />
           Create with AI
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {isHubAdmin && (
-          <DropdownMenuItem
-            onClick={props.onNewFile}
-            data-track-category='SdlcHub'
-            data-track-name='HubKnowledgeDocCreateOpened'
-          >
-            <BookOpen size={15} />
-            New Knowledge File
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem
-          onClick={() => showSkill(NEW_SKILL)}
+          onClick={() => {
+            setWriteKind(isHubAdmin ? 'doc' : 'skill');
+            setWriteOpen(true);
+          }}
           data-track-category='SdlcHub'
-          data-track-name='HubKnowledgeSkillCreateOpened'
+          data-track-name='HubKnowledgeWriteOpened'
         >
-          <Wrench size={15} />
-          New skill
+          <PenLine size={15} />
+          Write it yourself
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => setPickerOpen(true)}
+          onClick={openPicker}
           data-track-category='SdlcHub'
           data-track-name='HubKnowledgeSkillPickerOpened'
         >
           <Link2 size={15} />
-          Link existing skill
+          Add existing skill
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 
-  const rowClass =
-    'flex cursor-pointer items-center gap-3 px-5 py-2.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
-  const onlyMine = (
-    <span
-      className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-      title='Only your runs in this hub get it.'
-    >
-      Only my runs
-    </span>
+  const rowClass = cn(
+    'grid cursor-pointer py-2.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+    rowCols,
+  );
+  const meta = (type: string): ReactElement => (
+    <p className='truncate text-xs text-muted-foreground md:hidden'>{type}</p>
   );
 
   const fileRow = (file: KnowledgeFile): ReactElement => (
@@ -411,7 +590,9 @@ export function SdlcKnowledgeSection(props: {
       key={file.id}
       role='button'
       tabIndex={0}
-      onClick={() => props.onOpenFile(file.id)}
+      onClick={event => {
+        if (!onReadMode(event)) props.onOpenFile(file.id);
+      }}
       onKeyDown={event => {
         // The pin and the archive menu live inside this row.
         if (event.target !== event.currentTarget) return;
@@ -425,44 +606,47 @@ export function SdlcKnowledgeSection(props: {
       data-track-metadata={JSON.stringify({ canvasId: file.id })}
       className={cn(rowClass, file.status !== 'ready' && 'opacity-60')}
     >
-      <div className='grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary'>
-        <BookOpen size={16} />
+      <div className='flex min-w-0 items-center gap-3'>
+        <BookOpen size={16} className='shrink-0 text-muted-foreground' aria-hidden />
+        <div className='min-w-0'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <span className='truncate font-medium' title={file.title}>
+              {file.title}
+            </span>
+            {file.status === 'archived' && <ArchivedPill />}
+            {file.status === 'archived' && pinnedCanvasIds.has(file.id) && (
+              <span className='truncate text-xs text-muted-foreground'>
+                Always read again on restore
+              </span>
+            )}
+          </div>
+          {meta('Knowledge file')}
+        </div>
       </div>
-      <div className='flex min-w-0 flex-1 items-center gap-2'>
-        <span className='truncate font-semibold' title={file.title}>
-          {file.title}
-        </span>
-        {file.status === 'archived' && <ArchivedPill />}
-        {file.status === 'archived' && pinnedCanvasIds.has(file.id) && (
-          <span className='truncate text-xs text-muted-foreground'>
-            Pinned for everyone again on restore
-          </span>
-        )}
-      </div>
+      <Tooltip content={TYPE_HINT.file} delayDuration={TOOLTIP_DELAY_MS}>
+        <span className={cellText}>Knowledge file</span>
+      </Tooltip>
       {file.status === 'generating' ? (
         // The run owns the file until it is written, so the row says so in place of its controls.
-        <span className='shrink-0 text-xs text-muted-foreground'>
-          Being written. Pin and archive come after.
+        <span className='text-xs text-muted-foreground md:col-span-2'>
+          Being written. Read mode and archive come after.
         </span>
       ) : (
-        <>
-          {/* Only a ready file can be pinned, and only by a hub admin: everyone else reads it from the group. */}
-          <span className={pinSlot}>
-            {links.data && file.status === 'ready' && isHubAdmin && (
-              <PinButton
-                pinned={pinnedCanvasIds.has(file.id)}
-                label={file.title}
-                onToggle={() =>
-                  setPin(
-                    {
+        <span className={trailing}>
+          <span className='flex'>
+            {links.data && file.status === 'ready' && (
+              <ReadMode
+                id={`CANVAS:${file.id}`}
+                always={pinnedCanvasIds.has(file.id)}
+                {...(isHubAdmin && {
+                  onChange: (always: boolean) =>
+                    setPin({
                       targetType: 'CANVAS',
                       targetId: file.id,
                       scope: 'hub',
-                      pinned: !pinnedCanvasIds.has(file.id),
-                    },
-                    file.title,
-                  )
-                }
+                      pinned: always,
+                    }),
+                })}
               />
             )}
           </span>
@@ -476,26 +660,24 @@ export function SdlcKnowledgeSection(props: {
               />
             )}
           </span>
-        </>
+        </span>
       )}
     </div>
   );
 
   const skillRow = (row: (typeof skillRows)[number]): ReactElement => {
-    const { skillId, linkedBy, pinnedForHub, pinnedForMe, skill } = row;
-    const personal = skill?.scope === 'personal';
+    const { skillId, linkedBy, pinnedForHub, skill, pending } = row;
     const canUnlink = isHubAdmin || linkedBy === userId;
-    const pinned = pinnedForHub || pinnedForMe;
     const skillName = skill?.name || skill?.slug || 'Removed skill';
-    const pinSkill = (scope: SdlcHubPin['scope'], next: boolean): void =>
-      setPin({ targetType: 'SKILL', targetId: skillId, scope, pinned: next }, skillName);
     const open = skill ? (): void => showSkill(skill.slug) : undefined;
     return (
       <div
         key={skillId}
         role={open && 'button'}
         tabIndex={open && 0}
-        onClick={open}
+        onClick={event => {
+          if (open && !onReadMode(event)) open();
+        }}
         onKeyDown={event => {
           // The pin and the menu live inside this row.
           if (!open || event.target !== event.currentTarget) return;
@@ -506,549 +688,529 @@ export function SdlcKnowledgeSection(props: {
         }}
         data-track-category='SdlcHub'
         data-track-name='HubKnowledgeSkillOpened'
-        className={open ? rowClass : 'flex items-center gap-3 px-5 py-2.5 opacity-60'}
+        className={open ? rowClass : cn('grid py-2.5 opacity-60', rowCols)}
       >
-        <div className='grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-foreground'>
-          <Wrench size={16} />
+        <div className='flex min-w-0 items-center gap-3'>
+          <Wrench size={16} className='shrink-0 text-muted-foreground' aria-hidden />
+          <div className='min-w-0'>
+            <div className='flex min-w-0 items-center gap-2'>
+              {skill ? (
+                <>
+                  <span className='truncate font-medium' title={skill.description || skillName}>
+                    {skillName}
+                  </span>
+                  {pending && (
+                    <Tooltip
+                      content='A claw admin must approve it before agents in this hub can use it.'
+                      delayDuration={TOOLTIP_DELAY_MS}
+                    >
+                      <span
+                        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- its tooltip must open from the keyboard
+                        tabIndex={0}
+                        className={cn(
+                          chipClass,
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        )}
+                      >
+                        Pending approval
+                      </span>
+                    </Tooltip>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className={chipClass}>Skill removed</span>
+                  <span className='truncate text-xs text-muted-foreground'>
+                    Deleted from the library. Agents no longer receive it.
+                  </span>
+                </>
+              )}
+            </div>
+            {meta('Skill')}
+          </div>
         </div>
-        <div className='flex min-w-0 flex-1 items-baseline gap-2'>
-          {skill ? (
-            <>
-              <span className='truncate font-semibold' title={skill.description || skillName}>
-                {skillName}
-              </span>
-              {/* A personal skill, or a pin for me, reaches only the viewer's runs. */}
-              {(personal || (pinnedForMe && !pinnedForHub)) && onlyMine}
-            </>
-          ) : (
-            <>
-              <span className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                Skill removed
-              </span>
-              <span className='truncate text-xs text-muted-foreground'>
-                Deleted from the library. Agents no longer receive it.
-              </span>
-            </>
-          )}
-        </div>
-        <span className={pinSlot}>
-          {skill &&
-            // Only a hub admin on a global skill has both pins to choose from.
-            (isHubAdmin && !personal ? (
+        <Tooltip content={TYPE_HINT.skill} delayDuration={TOOLTIP_DELAY_MS}>
+          <span className={cellText}>Skill</span>
+        </Tooltip>
+        <span className={trailing}>
+          <span className='flex'>
+            {skill && (
+              <ReadMode
+                id={`SKILL:${skillId}`}
+                always={pinnedForHub}
+                {...(isHubAdmin && {
+                  onChange: (always: boolean) =>
+                    setPin({
+                      targetType: 'SKILL',
+                      targetId: skillId,
+                      scope: 'hub',
+                      pinned: always,
+                    }),
+                })}
+              />
+            )}
+          </span>
+          <span className={menuSlot}>
+            {/* No menu when nothing in it applies to the viewer. */}
+            {((skill && pending && isHubAdmin) || canUnlink) && (
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  aria-label={`Pin options for ${skillName}`}
-                  onClick={event => event.stopPropagation()}
-                  data-track-category='SdlcHub'
-                  data-track-name='HubKnowledgePinMenuOpened'
-                  className={pinClass}
-                >
-                  <Pin size={13} />
-                  {pinned ? 'Unpin' : 'Pin'}
-                  <ChevronDown size={12} aria-hidden />
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    aria-label={`More for ${skill?.name || skill?.slug || 'removed skill'}`}
+                    onClick={event => event.stopPropagation()}
+                    data-track-category='SdlcHub'
+                    data-track-name='HubKnowledgeSkillMenuOpened'
+                    className={iconButton}
+                  >
+                    <Ellipsis size={16} />
+                  </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align='end'
-                  className='w-48 rounded-xl p-1.5 shadow-sm'
+                  sideOffset={6}
                   onClick={event => event.stopPropagation()}
                 >
-                  {/* Already given to everyone: a pin for me on top would change nothing. */}
-                  {(pinnedForMe || !pinnedForHub) && (
+                  {skill && pending && isHubAdmin && (
+                    // Sent on add; this sends it again, e.g. after a rejection.
                     <DropdownMenuItem
-                      onClick={() => pinSkill('me', !pinnedForMe)}
+                      onClick={() =>
+                        setApproval({ name: skillName, send: () => requestGlobal(skill.slug) })
+                      }
                       data-track-category='SdlcHub'
-                      data-track-name='HubKnowledgePinForMeToggled'
+                      data-track-name='HubKnowledgeSkillShareOpened'
                     >
-                      {pinnedForMe ? 'Unpin for me' : 'Pin for me'}
+                      Send for approval
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem
-                    onClick={() => pinSkill('hub', !pinnedForHub)}
-                    data-track-category='SdlcHub'
-                    data-track-name='HubKnowledgePinForEveryoneToggled'
-                  >
-                    {pinnedForHub ? 'Unpin for everyone' : 'Pin for everyone'}
-                  </DropdownMenuItem>
+                  {canUnlink && (
+                    <DropdownMenuItem
+                      onClick={() => unlinkSkill(skillId, skillName, pinnedForHub)}
+                      data-track-category='SdlcHub'
+                      data-track-name='HubKnowledgeSkillUnlinked'
+                    >
+                      Unlink
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : (
-              // A member cannot undo a pin a hub admin made for everyone.
-              !(pinnedForHub && !isHubAdmin) && (
-                <PinButton
-                  pinned={pinned}
-                  label={skillName}
-                  onToggle={() =>
-                    pinnedForHub ? pinSkill('hub', false) : pinSkill('me', !pinnedForMe)
-                  }
-                />
-              )
-            ))}
-        </span>
-        <span className={menuSlot}>
-          {/* No menu when nothing in it applies to the viewer. */}
-          {((skill && personal) || canUnlink) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type='button'
-                  aria-label={`More for ${skill?.name || skill?.slug || 'removed skill'}`}
-                  onClick={event => event.stopPropagation()}
-                  data-track-category='SdlcHub'
-                  data-track-name='HubKnowledgeSkillMenuOpened'
-                  className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                >
-                  <Ellipsis size={16} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align='end'
-                className='w-48 rounded-xl p-1.5 shadow-sm'
-                onClick={event => event.stopPropagation()}
-              >
-                {skill && personal && (
-                  <DropdownMenuItem
-                    onClick={() => setShareSkill(skill)}
-                    data-track-category='SdlcHub'
-                    data-track-name='HubKnowledgeSkillShareOpened'
-                  >
-                    Share with everyone
-                  </DropdownMenuItem>
-                )}
-                {canUnlink && (
-                  <DropdownMenuItem
-                    onClick={() =>
-                      unlinkSkill(skillId, skillName, { hub: pinnedForHub, me: pinnedForMe })
-                    }
-                    data-track-category='SdlcHub'
-                    data-track-name='HubKnowledgeSkillUnlinked'
-                  >
-                    Unlink
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+            )}
+          </span>
         </span>
       </div>
     );
   };
 
-  // One list, grouped by what agents do with each item. Files first in each group.
+  // One list: Always read first, files first within each.
+  const columns = (
+    <div key='columns' className={cn('hidden py-2 text-xs text-muted-foreground md:grid', rowCols)}>
+      <span>Name</span>
+      <span className='flex items-center gap-1'>
+        Type
+        <InfoHint about='Type' lines={[TYPE_HINT.file, TYPE_HINT.skill]} />
+      </span>
+      <span className='flex items-center gap-1'>
+        Read mode
+        <InfoHint about='Read mode' lines={[MODE_HINT.always, MODE_HINT.relevant]} />
+      </span>
+      <span />
+    </div>
+  );
+  // Grouped by the read modes this visit loaded with, so a toggle leaves its row in place; the
+  // next visit regroups. The section stays mounted across a hub switch, so a new hub starts over.
+  if (orderAtLoad.current?.channelId !== channelId) orderAtLoad.current = null;
+  if (!orderAtLoad.current && !loading && links.data) {
+    orderAtLoad.current = {
+      channelId,
+      seen: new Set([
+        ...props.files.map(file => `CANVAS:${file.id}`),
+        ...links.data.skills.map(link => `SKILL:${link.skillId}`),
+      ]),
+      pinned: new Set([
+        ...links.data.pinnedCanvasIds.map(id => `CANVAS:${id}`),
+        ...links.data.skills.filter(link => link.pinnedForHub).map(link => `SKILL:${link.skillId}`),
+      ]),
+    };
+  }
+  // Added since the load: placed by its live read mode.
+  const placedPinned = (key: string, live: boolean): boolean =>
+    orderAtLoad.current?.seen.has(key) ? orderAtLoad.current.pinned.has(key) : live;
   const group = (pinned: boolean): ReactElement[] => [
-    ...files.filter(file => filePinned(file) === pinned).map(fileRow),
-    ...shownSkills.filter(row => skillPinned(row) === pinned).map(skillRow),
+    ...files
+      .filter(
+        file =>
+          (file.status === 'ready' && placedPinned(`CANVAS:${file.id}`, filePinned(file))) ===
+          pinned,
+      )
+      .map(fileRow),
+    ...shownSkills
+      .filter(row => placedPinned(`SKILL:${row.skillId}`, skillPinned(row)) === pinned)
+      .map(skillRow),
   ];
   const pinnedRows = group(true);
   const otherRows = group(false);
-  const filtered = Boolean(needle) || kind !== 'all';
 
   // A skill's form or page takes this page's place, inside the hub, and hands it back when closed.
   if (skillParam === NEW_SKILL) {
-    return <ClawSkillCreateV2 hub={{ channelId, onClose: () => showSkill(null) }} />;
+    return (
+      <ClawSkillCreateV2 hub={{ channelId, backLabel: 'Skills', onClose: () => showSkill(null) }} />
+    );
   }
   if (skillParam) {
     return <ClawSkillDetailV2 hub={{ slug: skillParam, onClose: () => showSkill(null) }} />;
   }
 
+  const plural = (count: number, one: string): string => `${count} ${one}${count === 1 ? '' : 's'}`;
+
+  // Laid out as Environments is: heading, sticky toolbar, then the list. All three hold their place
+  // while loading, empty or full.
   return (
     <>
-      {props.renderHeader(
-        // The run's status and button are one group, with a wider gap before Add.
-        <div className='flex shrink-0 flex-wrap items-center justify-end gap-x-5 gap-y-2'>
-          {props.generateControl}
-          {addMenu}
-        </div>,
-      )}
-      <div className='flex flex-col gap-5'>
-        <div className='flex flex-wrap items-center gap-3'>
-          <div className='relative min-w-48 flex-1'>
-            <Search
-              size={14}
-              className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'
-            />
+      <div className='flex min-h-full flex-col'>
+        {/* The page's actions sit with its heading; narrow, they wrap under it, right-aligned. */}
+        <div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6'>
+          <div className='min-w-0 flex-1'>
+            <h1 className='text-2xl font-semibold tracking-tight'>Skills</h1>
+            <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
+              What agents in this hub read.
+            </p>
+          </div>
+          <div className='flex shrink-0 items-center justify-end gap-3'>
+            {props.generateControl}
+            {isHubAdmin && addMenu}
+          </div>
+        </div>
+
+        <div className='sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-3 bg-background px-1 pb-4 pt-5'>
+          <div className='relative min-w-64 flex-1'>
+            <Search className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
             <Input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              className='h-9 pl-9'
-              placeholder='Search knowledge'
-              aria-label='Search knowledge'
+              placeholder='Search knowledge files and skills'
+              aria-label='Search knowledge files and skills'
+              className='h-10 pl-9'
               data-track-category='SdlcHub'
               data-track-name='HubKnowledgeSearched'
             />
           </div>
-          <Select value={kind} onValueChange={value => setKind(value as typeof kind)}>
-            <SelectTrigger className='h-9 w-44' aria-label='Show'>
-              <SelectValue />
-            </SelectTrigger>
-            {/* Opts out of the dark theme's hardcoded blue for the chosen option (see global.css). */}
-            <SelectContent data-theme-tokens>
-              <SelectItem value='all' data-theme-tokens>
-                All items
-              </SelectItem>
-              <SelectItem value='file' data-theme-tokens>
-                Knowledge Files
-              </SelectItem>
-              <SelectItem value='skill' data-theme-tokens>
-                Linked Skills
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Checkbox
-            labelClassName='text-xs font-normal text-muted-foreground'
-            label='Show archived'
-            checked={props.showArchived}
-            onChange={props.onShowArchivedChange}
-            data-track-category='SdlcHub'
-            data-track-name='HubKnowledgeArchivedToggled'
+          <LibraryFilterMenu
+            title='Type'
+            options={[
+              { id: 'all', label: 'All items' },
+              { id: 'file', label: 'Knowledge files' },
+              { id: 'skill', label: 'Skills' },
+            ]}
+            activeId={kind === 'all' ? null : kind}
+            onSelect={id => setKind(id === 'file' || id === 'skill' ? id : 'all')}
+            trackName='Filter agent context by type'
+            extraGroups={[
+              {
+                title: 'Status',
+                options: [
+                  { id: 'all', label: 'Active' },
+                  { id: 'archived', label: 'Include archived' },
+                ],
+                activeId: props.showArchived ? 'archived' : null,
+                onSelect: id => props.onShowArchivedChange(id === 'archived'),
+              },
+            ]}
           />
         </div>
-        {!isHubAdmin && (
-          <p className='flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground'>
-            <Lock size={13} className='shrink-0' />
-            View only for Knowledge Files. You can link and pin your own skills.
-          </p>
-        )}
-        {failed && (
-          <p className='text-sm text-destructive'>
-            Could not load pins and linked skills. Reload to try again.
-          </p>
-        )}
-        {/* Without the links nothing is known about pins: no group may say "nothing is pinned". */}
-        {(links.data || !failed) && (
-          <>
-            <Section
-              title='Always read in full'
-              caption='Every run starts with these. Keep the list short.'
-              loading={loading}
-              count={loading ? 0 : pinnedRows.length}
-              empty={
-                filtered
-                  ? 'No pinned items match.'
-                  : 'Nothing is pinned. Agents choose what to open from the names alone.'
-              }
-            >
-              {pinnedRows}
-            </Section>
-            <Section
-              title='Opened when needed'
-              caption='Agents see only the name, and open the item when a request needs it.'
-              loading={loading}
-              count={loading ? 0 : otherRows.length}
-              empty={
-                filtered
-                  ? 'No items match.'
-                  : props.files.length === 0
-                    ? props.emptyFilesText
-                    : 'Everything here is pinned.'
-              }
-              emptyAction={
-                !filtered &&
-                props.files.length === 0 &&
-                (isHubAdmin ? (
-                  <Button
-                    type='button'
-                    size='sm'
-                    variant='outline'
-                    onClick={props.onNewFile}
-                    data-track-category='SdlcHub'
-                    data-track-name='HubKnowledgeDocCreateOpened'
-                  >
-                    <BookOpen size={15} />
-                    New Knowledge File
-                  </Button>
-                ) : (
-                  <Button
-                    type='button'
-                    size='sm'
-                    variant='outline'
-                    onClick={() => setPickerOpen(true)}
-                    data-track-category='SdlcHub'
-                    data-track-name='HubKnowledgeSkillPickerOpened'
-                  >
-                    <Link2 size={15} />
-                    Link existing skill
-                  </Button>
-                ))
-              }
-            >
-              {otherRows}
-            </Section>
-          </>
-        )}
 
-        <Dialog open={aiOpen} onOpenChange={setAiOpen} title='Create with AI' className='max-w-lg'>
-          {aiDraft && (
-            <form
-              className='p-6'
-              onSubmit={event => {
-                event.preventDefault();
-                // The button stays enabled: a press says what is missing.
-                if (!aiDraft.name.trim() || !aiDraft.description.trim()) {
-                  setAiTried(true);
-                  return;
-                }
-                props.onCreateWithAi({
-                  ...aiDraft,
-                  name: aiDraft.name.trim(),
-                  description: aiDraft.description.trim(),
-                });
-                closeAiDialog();
-              }}
-            >
-              <h2 className='text-lg font-semibold'>Create with AI</h2>
-              <p className='mt-1 text-sm text-muted-foreground'>
-                {isHubAdmin
-                  ? 'Ask AI writes it and shows you a card to approve before anything is saved.'
-                  : 'Ask AI writes a skill and shows you a card to approve. Only hub admins add Knowledge Files.'}
-              </p>
-              <label htmlFor='hub-knowledge-ai-name' className='mt-5 block text-sm font-medium'>
-                Name
-              </label>
-              <Input
-                id='hub-knowledge-ai-name'
-                autoFocus
-                value={aiDraft.name}
-                onChange={event => setAiDraft({ ...aiDraft, name: event.target.value })}
-                className='mt-2 h-10'
-                placeholder='e.g. Deploy runbook, Migration review checklist'
-                aria-invalid={aiTried && !aiDraft.name.trim()}
-              />
-              {aiTried && !aiDraft.name.trim() && (
-                <span role='alert' className='mt-1 block text-xs text-destructive'>
-                  Add a name.
-                </span>
-              )}
-              <label
-                htmlFor='hub-knowledge-ai-description'
-                className='mt-4 block text-sm font-medium'
-              >
-                What should it cover
-              </label>
-              <Textarea
-                id='hub-knowledge-ai-description'
-                value={aiDraft.description}
-                onChange={event => setAiDraft({ ...aiDraft, description: event.target.value })}
-                className='mt-2 h-24 min-h-0 resize-none'
-                placeholder='A few lines are enough. Ask AI fills in the rest.'
-                data-track-category='SdlcHub'
-                data-track-name='HubKnowledgeAiDescriptionChanged'
-                aria-invalid={aiTried && !aiDraft.description.trim()}
-              />
-              {aiTried && !aiDraft.description.trim() && (
-                <span role='alert' className='mt-1 block text-xs text-destructive'>
-                  Say what it should cover.
-                </span>
-              )}
-              {isHubAdmin && (
-                <>
-                  <p className='mt-4 flex items-center gap-1 text-sm font-medium'>
-                    Save as
-                    <Help about='Save as'>
-                      <ul className='flex flex-col gap-2'>
-                        <li>
-                          <b>Let AI decide:</b> a Knowledge File when it is about this hub, a skill
-                          when it is a generic procedure.
-                        </li>
-                        <li>
-                          <b>Knowledge File:</b> a document that belongs to this hub, for facts
-                          about its repositories, systems and environments.
-                        </li>
-                        <li>
-                          <b>Skill:</b> a procedure that works in any hub. It is yours alone until
-                          an admin makes it global.
-                        </li>
-                      </ul>
-                    </Help>
-                  </p>
-                  <SegmentedToggle<HubKnowledgeAiDraft['kind']>
-                    className='mt-2 flex w-full [&>button]:flex-1'
-                    options={[
-                      { value: 'auto', label: 'Let AI decide' },
-                      { value: 'file', label: 'Knowledge File' },
-                      { value: 'skill', label: 'Skill' },
-                    ]}
-                    value={aiDraft.kind}
-                    onChange={kind => setAiDraft({ ...aiDraft, kind })}
-                    tone='primary'
-                    trackCategory='SdlcHub'
-                    trackPrefix='HubKnowledgeAiKind'
-                  />
-                </>
-              )}
-              <div className='mt-6 flex justify-end gap-2'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={closeAiDialog}
-                  data-track-category='SdlcHub'
-                  data-track-name='HubKnowledgeCreateWithAiCancelled'
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type='submit'
-                  data-track-category='SdlcHub'
-                  data-track-name='HubKnowledgeCreateWithAi'
-                >
-                  <Sparkles />
-                  Create
-                </Button>
-              </div>
-            </form>
-          )}
-        </Dialog>
-
-        <Dialog
-          open={shareSkill !== null}
-          onOpenChange={open => {
-            if (!open) setShareSkill(null);
-          }}
-          title='Share with everyone'
-          className='max-w-md'
-        >
-          <div className='p-6'>
-            <h2 className='text-lg font-semibold'>Share {shareSkill?.name || shareSkill?.slug}?</h2>
-            <p className='mt-2 text-sm text-muted-foreground'>
-              Once an admin approves, this skill is available to everyone, and every member&apos;s
-              runs in this hub will get it.
+        <div className='flex flex-1 flex-col gap-5'>
+          {!isHubAdmin && (
+            <p className='flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground'>
+              <Lock size={13} className='shrink-0' />
+              Only hub admins add knowledge files and skills, and set their read mode.
             </p>
-            <div className='mt-6 flex justify-end gap-2'>
+          )}
+          {failed && (
+            <p className='text-sm text-destructive'>
+              Could not load read modes and skills. Reload to try again.
+            </p>
+          )}
+          {/* Without the links nothing is known about read modes: no group may say "none". */}
+          {(links.data || !failed) &&
+            (loading ? (
+              showSkeleton && <SkeletonRows />
+            ) : empty ? (
+              <div className='rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground'>
+                No knowledge files or skills yet.
+                <p className='mt-1 text-xs'>
+                  {isHubAdmin
+                    ? "Generate knowledge files from this hub's repositories, or add a skill."
+                    : 'A hub admin can generate knowledge files or add skills.'}
+                </p>
+              </div>
+            ) : pinnedRows.length + otherRows.length === 0 ? (
+              !failed && (
+                <div className='rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground'>
+                  No knowledge files or skills match.
+                </div>
+              )
+            ) : (
+              <div className='rounded-xl border bg-background'>
+                <div className='divide-y'>
+                  {columns}
+                  {pinnedRows}
+                  {otherRows}
+                </div>
+              </div>
+            ))}
+          {!loading && !failed && (
+            <p className='pt-1 text-xs text-muted-foreground'>
+              {plural(files.length, 'knowledge file')} and {plural(shownSkills.length, 'skill')} in{' '}
+              {props.channelName}
+            </p>
+          )}
+        </div>
+
+        <HubDialog
+          open={aiOpen}
+          onOpenChange={setAiOpen}
+          title='Create with AI'
+          description={
+            isHubAdmin
+              ? 'Ask AI writes it and shows you a card to approve before anything is saved.'
+              : 'Ask AI writes a skill and shows you a card to approve. Only hub admins add knowledge files.'
+          }
+          onSubmit={() => {
+            if (!aiDraft) return;
+            if (!aiDraft.name.trim() || !aiDraft.description.trim()) {
+              setAiTried(true);
+              return;
+            }
+            props.onCreateWithAi({
+              ...aiDraft,
+              name: aiDraft.name.trim(),
+              description: aiDraft.description.trim(),
+            });
+            closeAiDialog();
+          }}
+          footer={
+            <>
               <Button
                 type='button'
                 variant='outline'
-                onClick={() => setShareSkill(null)}
+                onClick={closeAiDialog}
+                data-track-category='SdlcHub'
+                data-track-name='HubKnowledgeCreateWithAiCancelled'
+              >
+                Cancel
+              </Button>
+              <Button
+                type='submit'
+                data-track-category='SdlcHub'
+                data-track-name='HubKnowledgeCreateWithAi'
+              >
+                <Sparkles />
+                Create
+              </Button>
+            </>
+          }
+        >
+          {aiDraft && (
+            <div className='flex flex-col gap-4'>
+              <div className='flex flex-col gap-1.5'>
+                <label htmlFor='hub-knowledge-ai-name' className='text-sm font-medium'>
+                  Name
+                </label>
+                <Input
+                  id='hub-knowledge-ai-name'
+                  autoFocus
+                  value={aiDraft.name}
+                  onChange={event => setAiDraft({ ...aiDraft, name: event.target.value })}
+                  className='h-9'
+                  placeholder='e.g. Deploy runbook, Migration review checklist'
+                  aria-invalid={aiTried && !aiDraft.name.trim()}
+                />
+                {aiTried && !aiDraft.name.trim() && (
+                  <span role='alert' className='text-xs text-destructive'>
+                    Add a name.
+                  </span>
+                )}
+              </div>
+              <div className='flex flex-col gap-1.5'>
+                <label htmlFor='hub-knowledge-ai-description' className='text-sm font-medium'>
+                  What should it cover
+                </label>
+                <Textarea
+                  id='hub-knowledge-ai-description'
+                  value={aiDraft.description}
+                  onChange={event => setAiDraft({ ...aiDraft, description: event.target.value })}
+                  onKeyDown={submitOnModEnter}
+                  className='h-24 min-h-0 resize-none'
+                  placeholder='A few lines are enough. Ask AI fills in the rest.'
+                  data-track-category='SdlcHub'
+                  data-track-name='HubKnowledgeAiDescriptionChanged'
+                  aria-invalid={aiTried && !aiDraft.description.trim()}
+                />
+                {aiTried && !aiDraft.description.trim() && (
+                  <span role='alert' className='text-xs text-destructive'>
+                    Say what it should cover.
+                  </span>
+                )}
+              </div>
+              {isHubAdmin && (
+                <div className='flex flex-col gap-1.5'>
+                  <span className='text-sm font-medium'>Save as</span>
+                  <ChoiceList<HubKnowledgeAiDraft['kind']>
+                    name='HubKnowledgeAiKind'
+                    options={[
+                      {
+                        value: 'auto',
+                        label: 'Let AI decide',
+                        hint: 'A knowledge file when it is about this hub, a skill when it is a generic procedure.',
+                      },
+                      {
+                        value: 'file',
+                        label: 'Knowledge file',
+                        hint: "Facts and knowledge about this hub's repositories (like an AGENTS.md or CLAUDE.md file).",
+                      },
+                      {
+                        value: 'skill',
+                        label: 'Skill',
+                        hint: 'Steps that work in any hub. Agents here use it once a claw admin approves it.',
+                      },
+                    ]}
+                    value={aiDraft.kind}
+                    onChange={kind => setAiDraft({ ...aiDraft, kind })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </HubDialog>
+
+        <HubDialog
+          open={writeOpen}
+          onOpenChange={setWriteOpen}
+          title='Write it yourself'
+          description={
+            isHubAdmin
+              ? 'Choose what to write.'
+              : 'Write a skill. Only hub admins add knowledge files.'
+          }
+          onSubmit={() => {
+            setWriteOpen(false);
+            if (writeKind === 'doc' && isHubAdmin) props.onNewFile();
+            else showSkill(NEW_SKILL);
+          }}
+          footer={
+            <>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => setWriteOpen(false)}
+                data-track-category='SdlcHub'
+                data-track-name='HubKnowledgeWriteCancelled'
+              >
+                Cancel
+              </Button>
+              <Button
+                type='submit'
+                data-track-category='SdlcHub'
+                data-track-name={
+                  writeKind === 'doc'
+                    ? 'HubKnowledgeDocCreateOpened'
+                    : 'HubKnowledgeSkillCreateOpened'
+                }
+              >
+                Continue
+              </Button>
+            </>
+          }
+        >
+          <ChoiceList<'doc' | 'skill'>
+            name='HubKnowledgeWriteKind'
+            autoFocus
+            options={[
+              ...(isHubAdmin
+                ? [
+                    {
+                      value: 'doc' as const,
+                      label: 'Knowledge file',
+                      hint: "Facts and knowledge about this hub's repositories (like an AGENTS.md or CLAUDE.md file).",
+                    },
+                  ]
+                : []),
+              {
+                value: 'skill',
+                label: 'Skill',
+                hint: 'Steps that work in any hub. Agents here use it once a claw admin approves it.',
+              },
+            ]}
+            value={writeKind}
+            onChange={setWriteKind}
+          />
+        </HubDialog>
+
+        <HubDialog
+          open={approval !== null}
+          onOpenChange={open => {
+            if (!open) closeApproval();
+          }}
+          title={`Send ${approval?.name ?? 'this skill'} for approval?`}
+          description='A claw admin must approve it before agents in this hub can use it. Once approved it becomes a global skill.'
+          onSubmit={() => {
+            if (!approval) return;
+            setSharing(true);
+            void approval.send().finally(() => {
+              setSharing(false);
+              setApproval(null);
+            });
+          }}
+          footer={
+            <>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={closeApproval}
                 data-track-category='SdlcHub'
                 data-track-name='HubKnowledgeSkillShareCancelled'
               >
                 Cancel
               </Button>
               <Button
-                type='button'
-                onClick={() => {
-                  if (shareSkill) void requestGlobal(shareSkill);
-                  setShareSkill(null);
-                }}
+                type='submit'
+                autoFocus
+                loading={sharing}
                 data-track-category='SdlcHub'
                 data-track-name='HubKnowledgeSkillGlobalRequested'
               >
-                Send request
+                Send for approval
               </Button>
-            </div>
-          </div>
-        </Dialog>
+            </>
+          }
+        />
 
-        <Dialog
+        <HubDialog
           open={pickerOpen}
           onOpenChange={setPickerOpen}
-          title='Link existing skill'
-          description={
-            isHubAdmin
-              ? 'A global skill reaches every member. A personal one reaches only you.'
-              : 'Your personal skills. Only a hub admin can link a global skill.'
-          }
-          className='max-w-2xl'
+          title='Add existing skill'
+          description='Add one of your skills, or one from skills.sh or a GitHub repo.'
+          // A fixed height, so loading, results and empty lists do not resize it.
+          className='h-[min(560px,80vh)]'
+          wide
         >
-          <div className='flex max-h-[75vh] flex-col gap-5 p-8'>
-            <div className='flex items-start gap-3'>
-              <div className='min-w-0 flex-1'>
-                <h2 className='text-lg font-semibold'>Link existing skill</h2>
-                <p className='mt-1 text-sm text-muted-foreground'>
-                  {isHubAdmin
-                    ? "A linked skill goes to every member's runs in this hub. One of your own skills goes only to your runs."
-                    : 'Your own skills. Only a hub admin can link a skill for everyone.'}
-                </p>
-              </div>
-              <button
-                type='button'
-                aria-label='Close'
-                title='Close'
-                onClick={() => setPickerOpen(false)}
-                data-track-category='SdlcHub'
-                data-track-name='HubKnowledgeSkillPickerClosed'
-                className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <div className='relative'>
-              <Search
-                size={14}
-                className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'
-              />
-              <Input
-                id='hub-knowledge-skill-search'
-                autoFocus
-                className='h-9 pl-9'
-                placeholder='Search skills'
-                aria-label='Search skills'
-                value={pickerQuery}
-                onChange={event => setPickerQuery(event.target.value)}
-              />
-            </div>
-            {/* Right padding keeps the Link buttons clear of the scrollbar. */}
-            <div className='-ml-2 -mr-4 min-h-0 flex-1 overflow-auto pr-4'>
-              {pickable.map(skill => {
-                const name = skill.name || skill.slug;
-                const isLinked = linkedIds.has(skill.id);
-                return (
-                  <div
-                    key={skill.id}
-                    className='flex items-center gap-4 rounded-lg px-2 py-3 hover:bg-muted/40'
-                  >
-                    <div className='grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-foreground'>
-                      <Wrench size={16} />
-                    </div>
-                    <div className='min-w-0 flex-1'>
-                      <div className='flex items-center gap-2'>
-                        <span className='truncate text-sm font-semibold'>{name}</span>
-                        {skill.scope === 'personal' && onlyMine}
-                      </div>
-                      {skill.description && (
-                        <p
-                          className='mt-0.5 truncate text-xs text-muted-foreground'
-                          title={skill.description}
-                        >
-                          {skill.description}
-                        </p>
-                      )}
-                    </div>
-                    {isLinked ? (
-                      <span className='flex shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground'>
-                        <Check size={13} />
-                        Linked
-                      </span>
-                    ) : (
-                      <Button
-                        type='button'
-                        size='sm'
-                        variant='outline'
-                        aria-label={`Link ${name}`}
-                        onClick={() => linkSkill(skill.id, name)}
-                        data-track-category='SdlcHub'
-                        data-track-name='HubKnowledgeSkillLinked'
-                      >
-                        Link
-                      </Button>
-                    )}
-                  </div>
-                );
-              })}
-              {pickable.length === 0 && (
-                <p className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                  {!skillCatalog
-                    ? skills.isError
-                      ? 'Could not load the skill library. Reload to try again.'
-                      : 'Loading…'
-                    : pickerNeedle
-                      ? `No skill matches "${pickerQuery.trim()}".`
-                      : isHubAdmin
-                        ? 'The skill library has no skills yet. Create one with New skill.'
-                        : 'You have no personal skills yet. Create one with New skill, or ask a hub admin to link a global one.'}
-                </p>
-              )}
-            </div>
-          </div>
-        </Dialog>
+          <AddSkillList
+            channelId={channelId}
+            catalog={skillCatalog}
+            catalogFailed={skills.isError}
+            linkedIds={linkedIds}
+            confirmApproval={name =>
+              new Promise(resolve =>
+                setApproval({
+                  name,
+                  send: () => Promise.resolve(resolve(true)),
+                  cancel: () => resolve(false),
+                }),
+              )
+            }
+            requestApproval={requestGlobal}
+          />
+        </HubDialog>
       </div>
     </>
   );

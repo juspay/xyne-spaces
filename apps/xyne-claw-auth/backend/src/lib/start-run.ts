@@ -1088,7 +1088,7 @@ export async function prepareRun(
         const hubWorkspaceId =
           typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
         const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
-        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, resolved.userId, agent.orgId);
+        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, agent.orgId);
         hubSkills = hub.skills.map(toRunSkill);
         if (hub.text) mergedContext = mergedContext ? `${hub.text}\n\n${mergedContext}` : hub.text;
       } catch (err) {
