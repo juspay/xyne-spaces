@@ -84,7 +84,7 @@ import { BaseTicketType,
   AccessType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
-import { isReleaseTicket } from '@xyne/shared';
+import { getTicketSourceKey, isReleaseTicket } from '@xyne/shared';
 import { backlogFlowGroup, skipFlowGroup } from '@/services/flowCascadeService';
 import { AppError } from '@/middleware/errorHandler';
 
@@ -2180,6 +2180,7 @@ export class TicketController {
       if (!target) { res.status(404).json({ error: 'Target ticket not found' }); return; }
       if (source.workspaceId !== target.workspaceId) { res.status(403).json({ error: 'Cannot merge tickets across workspaces' }); return; }
       if (source.isArchived || target.isArchived) { res.status(400).json({ error: 'Cannot merge archived tickets' }); return; }
+      if (getTicketSourceKey(source) !== getTicketSourceKey(target)) { res.status(400).json({ error: 'Cannot merge tickets from different sources' }); return; }
 
       const existingMapping = await prisma.ticketReferenceMapping.findFirst({
         where: { sourceTicketId: ticketId, relationType: TicketReferenceRelation.MERGED_INTO },

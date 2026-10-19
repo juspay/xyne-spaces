@@ -13,7 +13,12 @@ import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { htmlToPlainText } from '../../../utils/sanitizer';
-import type { TicketPriority } from '@xyne/shared';
+import { getTicketSourceKey, type TicketPriority } from '@xyne/shared';
+import { useChannel } from '../../../hooks/useChannels';
+import {
+  resolveTicketSource,
+  TicketSourceIcon,
+} from '../../xyne-desk/TicketSourceBanner/TicketSourceBanner';
 
 interface MergeTicket {
   id: string;
@@ -88,6 +93,21 @@ const MergeTicketAssignee: React.FC<{
   );
 };
 
+const MergeTicketSource: React.FC<{ ticket?: { channelId: string; metadata?: unknown } }> = ({
+  ticket,
+}) => {
+  const channel = useChannel(ticket?.channelId ?? '');
+  if (!ticket) return null;
+  const source = resolveTicketSource(channel?.type, ticket.metadata);
+  return (
+    <Tooltip content={source.label}>
+      <span className='flex'>
+        <TicketSourceIcon source={source} />
+      </span>
+    </Tooltip>
+  );
+};
+
 export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
   open,
   onOpenChange,
@@ -127,6 +147,10 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
         : [],
     [sortedTickets, archivedIds, removedIds, archivedStateLoaded],
   );
+  const hasMixedSources =
+    new Set(
+      liveTickets?.filter(t => visibleTickets.some(v => v.id === t.id)).map(getTicketSourceKey),
+    ).size > 1;
 
   useEffect(() => {
     if (!open) {
@@ -235,6 +259,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                     </button>
 
                     <div className='flex items-center gap-2 min-w-0'>
+                      <MergeTicketSource ticket={liveTickets?.find(t => t.id === ticket.id)} />
                       <span className='font-mono text-xs text-muted-foreground shrink-0'>
                         {ticket.xyneId || ticket.id.slice(0, 8)}
                       </span>
@@ -295,6 +320,10 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
           </p>
         )}
 
+        {hasMixedSources && (
+          <p className='text-xs text-destructive'>Tickets from different sources can't be merged.</p>
+        )}
+
         <div className='flex justify-end gap-3 pt-2'>
           <Button
             variant='secondary'
@@ -310,7 +339,8 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
               isMerging ||
               !archivedStateLoaded ||
               !selectedParentTicketId ||
-              visibleTickets.length < 2
+              visibleTickets.length < 2 ||
+              hasMixedSources
             }
             data-track-category='Support'
             data-track-name='ConfirmMergeTickets'
