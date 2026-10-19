@@ -88,8 +88,7 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
     if (!ctx.workspaceId) {
       logger.warn('zero_query_missing_workspace', { query: queryName, table });
     }
-    const scoped = scopable.where('workspaceId', ctx.workspaceId);
-    return (table === 'users' ? scopeUsersForGuests(scoped, ctx) : scoped) as unknown as T;
+    return scopable.where('workspaceId', ctx.workspaceId) as unknown as T;
   }
   const customRule = CUSTOM_SCOPES[table];
   if (customRule) {

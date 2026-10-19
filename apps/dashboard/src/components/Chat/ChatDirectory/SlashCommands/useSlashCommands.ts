@@ -558,6 +558,8 @@ export function useSlashCommands({
   // fires instantly; a live channel call is joined; a new channel-wide call asks for confirmation.
   const dispatchCall = useCallback(
     (target: CommandTarget): void => {
+      // Single gate for `/call` and the ⌥↵ Actions-menu Call: a guest can't start calls.
+      if (!availableCommandKinds.includes('call')) return;
       if (target.type === 'user') {
         // A 1:1 call fires instantly, matching the rest of the app.
         startCall(target.user.id, getUserDisplayName(target.user));
@@ -582,6 +584,7 @@ export function useSlashCommands({
       onOpenChange(false);
     },
     [
+      availableCommandKinds,
       startCall,
       startChannelCall,
       hasActiveChannelCall,
