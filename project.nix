@@ -12,6 +12,54 @@ let
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
     PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
   };
+
+  # What the stack needs to run. The dev shell adds developer-only tools on top
+  # (below); the dev image (nix/image.nix) ships this set only.
+  runtimePackages = [
+    pkgs.nodejs_22
+    pkgs.pnpm
+    pkgs.just
+    pkgs.openssl
+    postgres
+    pkgs.process-compose
+    pkgs.bash
+    pkgs.coreutils
+    pkgs.git
+    pkgs.cacert
+    transcriptionEnv
+    y-sweet
+    pkgs.livekit
+  ];
+  devExtraPackages = with pkgs; [
+    playwright-driver.browsers
+    trivy
+    kubernetes-helm
+    gauge
+    ffmpeg
+    gitleaks
+  ];
+
+  # The image runs this bundle: the services below with backend and dashboard
+  # enabled. Defined once; see process-compose."xyne-space-services".
+  servicesPreHook = ''
+    # Cleanup ports before starting services
+    echo "🧹 Cleaning up development services..."
+
+    # Kill all process-compose instances
+    ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
+
+    # Kill processes on specific ports
+    PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
+    for port in "''${PORTS[@]}"; do
+      ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+    done
+
+    sleep 1
+    echo "✓ All development ports are free"
+
+    # Create necessary directories
+    mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
+  '';
 in
 {
   imports = [
@@ -25,20 +73,7 @@ in
   devShell = {
     name = "xyne-spaces-dev";
 
-    packages = with pkgs; [
-      nodejs_22
-      pnpm
-      just
-      openssl
-      ffmpeg
-      gitleaks
-      trivy
-      postgres
-      process-compose
-      kubernetes-helm
-      gauge
-      playwright-driver.browsers
-    ];
+    packages = runtimePackages ++ devExtraPackages;
 
     environment = prismaEnvironment // {
       PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
