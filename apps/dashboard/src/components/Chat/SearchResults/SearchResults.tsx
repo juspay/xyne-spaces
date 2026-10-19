@@ -114,6 +114,7 @@ import {
   RECENTS_STARRED_CAP,
   MERGED_DISPLAY_LIMIT,
   MERGED_CANDIDATE_LIMIT,
+  RESULT_GROUP_LABELS,
 } from '../ChatDirectory/ChannelCommandMenu.types';
 import {
   saveCurrentSearchQuery,
@@ -425,6 +426,25 @@ const SearchResults = (): ReactElement => {
   // up). It lands a render later, by when the user may have typed on: its arrival is not an
   // outside change, so it must not reset the box or the search to it.
   const ownQueryWriteRef = useRef<string | null>(null);
+  // The URL follows the results: the hook hands back the query these were fetched for, so the
+  // address bar is shareable without anyone pressing Enter. Stable (it only reads refs): the hook
+  // lists it as a search-effect dep, and a new function each render looped an empty search.
+  const handleSearchComplete = useCallback(
+    (_results: DisplaySearchResult[], searchedQuery: string): void => {
+      // Only while still on this page: a search that lands after the user has left (a collapse
+      // mid-typing) would otherwise write its query onto whatever page they are on now.
+      if (!isFullPageSearchPath(window.location.pathname)) return;
+      // Nor a search the box has already moved on from — one whose debounce fired just as the
+      // query changed (two quick toggles of exact match) — or it writes the old query back. The
+      // hook reports the query with typed filters (status:, from:…) taken out, so the box is
+      // compared the same way, but the URL gets what the box holds, filters and all.
+      const boxText = searchTextRef.current.trim();
+      if (searchedQuery.trim() !== parseSearchFilters(boxText).searchText.trim()) return;
+      ownQueryWriteRef.current = boxText;
+      handleQuerySubmitRef.current(boxText);
+    },
+    [],
+  );
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchSessionId,
@@ -470,21 +490,7 @@ const SearchResults = (): ReactElement => {
       filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
     buildMentionHighlights,
-    // The URL follows the results: the hook hands back the query these were fetched for,
-    // so the address bar is shareable without anyone pressing Enter.
-    onSearchComplete: (_results, searchedQuery) => {
-      // Only while still on this page: a search that lands after the user has left (a collapse
-      // mid-typing) would otherwise write its query onto whatever page they are on now.
-      if (!isFullPageSearchPath(window.location.pathname)) return;
-      // Nor a search the box has already moved on from — one whose debounce fired just as the
-      // query changed (two quick toggles of exact match) — or it writes the old query back. The
-      // hook reports the query with typed filters (status:, from:…) taken out, so the box is
-      // compared the same way, but the URL gets what the box holds, filters and all.
-      const boxText = searchTextRef.current.trim();
-      if (searchedQuery.trim() !== parseSearchFilters(boxText).searchText.trim()) return;
-      ownQueryWriteRef.current = boxText;
-      handleQuerySubmitRef.current(boxText);
-    },
+    onSearchComplete: handleSearchComplete,
   });
   searchTextRef.current = searchedText;
 
@@ -1746,19 +1752,6 @@ const DOC_TYPE_SKELETON_VARIANTS: Partial<Record<string, SkeletonVariant>> = {
   desk: 'page-desk',
 };
 
-// Labels mirror cmdK's getGroupLabel exactly
-const GROUP_LABELS: Record<string, string> = {
-  conversation: 'Messages',
-  ticket: 'Tickets',
-  attachment: 'Attachments',
-  canvas: 'Canvas',
-  transcript: 'Calls',
-  recording: 'Recordings',
-  desk: 'Desk',
-  // The flat list is every backend type in one score-ordered list, not a leftovers bucket.
-  others: 'Results',
-};
-
 const CATEGORY_LABELS: Record<string, string> = {
   [ChannelCategory.STARRED]: 'Starred',
   [ChannelCategory.CHANNELS]: 'Channels',
@@ -2418,7 +2411,7 @@ function ResultsBody({
             SKELETON_GROUP_KEYS.map(gk => (
               <div key={gk} className='mb-6'>
                 <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                  {GROUP_LABELS[gk]}
+                  {RESULT_GROUP_LABELS[gk]}
                 </p>
                 <SearchSectionSkeleton variant={FULLPAGE_SKELETON_VARIANTS[gk]} />
               </div>
@@ -2427,7 +2420,7 @@ function ResultsBody({
             <div className='mb-6'>
               {/* Same heading as the flat results, so rows don't shift. */}
               <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                {GROUP_LABELS['others']}
+                {RESULT_GROUP_LABELS['others']}
               </p>
               <SearchSectionSkeleton rows={4} variant='page-message' />
             </div>
@@ -2438,7 +2431,7 @@ function ResultsBody({
               ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
                   <div key={gk} className='mb-6'>
                     <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                      {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
+                      {RESULT_GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
                     </p>
                     <div className='space-y-2'>
                       {grouped.get(gk)!.map((result, i) => renderCard(result, i))}
@@ -2448,7 +2441,7 @@ function ResultsBody({
               : backendOnly.length > 0 && (
                   <div className='mb-6'>
                     <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                      {GROUP_LABELS['others']} ({backendOnly.length})
+                      {RESULT_GROUP_LABELS['others']} ({backendOnly.length})
                     </p>
                     <div className='space-y-2'>
                       {backendOnly.map((result, i) => renderCard(result, i))}

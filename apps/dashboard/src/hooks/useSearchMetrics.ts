@@ -536,12 +536,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
-  // Read at dispatch rather than listed as an effect dep: callers pass an inline callback, so
-  // its identity changes every render. As a dep, a query with nothing to search (`from:`,
-  // an empty box) re-rendered via resetSearchState, re-ran the effect, and looped every
-  // debounce — leaving the loading state stuck on.
-  const onSearchCompleteRef = useRef(options.onSearchComplete);
-  onSearchCompleteRef.current = options.onSearchComplete;
   // The in-flight vespaSearch, cancelled as soon as the search inputs change. Null once it settles.
   const searchAbortRef = useRef<AbortController | null>(null);
 
@@ -1049,8 +1043,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     lastClassifiedQueryRef.current = '';
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
-    lastSearchedParamsRef.current.text = '';
-    lastSearchedParamsRef.current.mentionsKey = '';
+    if (lastSearchedParamsRef.current) {
+      lastSearchedParamsRef.current.text = '';
+      lastSearchedParamsRef.current.mentionsKey = '';
+    }
     // Re-arm the loader latch: after a clear/close, re-entering a query must show the
     // spinner again rather than a stale "No results".
     setIsSearchPending(false);
@@ -1603,7 +1599,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     includeDebugInfo: boolean;
     structuredFiltersKey: string;
     ticketViewKey: string;
-  }>({
+  } | null>({
     text: '',
     activeTab: TabType.ALL,
     mentionsKey: '',
@@ -1643,19 +1639,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
     const currentMentionsKey = JSON.stringify(selectedMentions);
+    const last = lastSearchedParamsRef.current;
     if (
-      normalizedText === lastSearchedParamsRef.current.text &&
-      activeTab === lastSearchedParamsRef.current.activeTab &&
-      includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
-      onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
-      excludeArchived === lastSearchedParamsRef.current.excludeArchived &&
-      currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
-      rankProfile === lastSearchedParamsRef.current.rankProfile &&
-      allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
-      flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
-      includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
-      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
-      ticketViewKey === lastSearchedParamsRef.current.ticketViewKey
+      last &&
+      normalizedText === last.text &&
+      activeTab === last.activeTab &&
+      includeBotMessages === last.includeBotMessages &&
+      onlyMyChannels === last.onlyMyChannels &&
+      excludeArchived === last.excludeArchived &&
+      currentMentionsKey === last.mentionsKey &&
+      rankProfile === last.rankProfile &&
+      allDefaultRankProfile === last.allDefaultRankProfile &&
+      flatAllRankProfilesKey === last.flatAllRankProfilesKey &&
+      includeDebugInfo === last.includeDebugInfo &&
+      structuredFiltersKey === last.structuredFiltersKey &&
+      ticketViewKey === last.ticketViewKey
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
       // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
@@ -1672,9 +1670,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (searchAbortRef.current) {
       searchAbortRef.current.abort();
       searchAbortRef.current = null;
-      // The cancelled query never produced results, so returning to it (e.g. type then
-      // backspace inside the debounce) must not be skipped by the dedup check above.
-      lastSearchedParamsRef.current.text = '';
+      // The cancelled query never produced results, so nothing it recorded may count as searched:
+      // returning to it (e.g. type then backspace inside the debounce) must not be skipped by the
+      // dedup check above.
+      lastSearchedParamsRef.current = null;
     }
 
     // Arm the loader now (before the 300ms debounce) so we never flash "No results"
@@ -1715,7 +1714,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
-        onSearchCompleteRef.current,
+        options.onSearchComplete,
       ).finally(() => {
         // Runs on every exit path of performSearch (returns, errors, aborts). Only the
         // newest dispatch may clear the flag — a superseded run settling (aborted
@@ -1737,6 +1736,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     filteredLocalUsers,
     filteredLocalChannels.length,
     isLocalSearchPending,
+    options.onSearchComplete,
     options.mentionSearchType,
     performSearch,
     includeBotMessages,

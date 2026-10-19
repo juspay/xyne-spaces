@@ -164,6 +164,21 @@ export const BACKEND_GROUP_KEYS = [
   'desk',
 ] as const;
 
+/** Section heading per result group — shared by the cmd+K palette and the full-page results. */
+export const RESULT_GROUP_LABELS: Record<string, string> = {
+  user: 'Users',
+  channel: 'Channels',
+  conversation: 'Messages',
+  ticket: 'Tickets',
+  attachment: 'Attachments',
+  canvas: 'Canvas',
+  transcript: 'Calls',
+  recording: 'Recordings',
+  desk: 'Desk',
+  // The flat ALL list is every backend type in one score-ordered list, not a leftovers bucket.
+  others: 'Results',
+};
+
 /**
  * Backend-result group key -> palette TabType, for the groups that show a loading skeleton
  * on the ALL tab while a search is pending (Messages and Tickets).

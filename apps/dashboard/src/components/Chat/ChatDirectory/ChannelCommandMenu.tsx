@@ -68,6 +68,7 @@ import {
   GROUP_KEY_TO_DOC_TYPE,
   BACKEND_GROUP_KEYS,
   ALL_TAB_SKELETON_GROUPS,
+  RESULT_GROUP_LABELS,
   getRelevantTabs,
 } from './ChannelCommandMenu.types';
 
@@ -3193,33 +3194,7 @@ const ChannelCommandMenuContent = ({
     }
   };
 
-  const getGroupLabel = (type: string): string => {
-    switch (type) {
-      case 'user':
-        return 'Users';
-      case 'channel':
-        return 'Channels';
-      case 'conversation':
-        return 'Messages';
-      case 'ticket':
-        return 'Tickets';
-      case 'attachment':
-        return 'Attachments';
-      case 'canvas':
-        return 'Canvas';
-      case 'transcript':
-        return 'Calls';
-      case 'recording':
-        return 'Recordings';
-      case 'desk':
-        return 'Desk';
-      // The flat ALL list is every backend type in one score-ordered list, not a leftovers bucket.
-      case 'others':
-        return 'Results';
-      default:
-        return '';
-    }
-  };
+  const getGroupLabel = (type: string): string => RESULT_GROUP_LABELS[type] ?? '';
 
   const hasResults =
     ((activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
