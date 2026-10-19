@@ -39,6 +39,19 @@ libraries, generates local secrets, and generates both Prisma clients. Backend a
 dashboard recipes also run preparation before launching. After changing the Nix
 environment, exit and re-enter `nix develop` so commands inherit the new variables.
 
+## Without Nix
+
+If you cannot install Nix, run the same stack from a container. Mount your
+checkout and publish the dashboard and backend ports:
+
+```bash
+docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
+  ghcr.io/juspay/xyne-spaces-dev
+```
+
+It runs `just prepare`, then the services, backend and dashboard. Open
+http://localhost:3000.
+
 ## Automatic shell loading with direnv
 
 The repository already tracks an [`.envrc`](../../.envrc). With direnv,
