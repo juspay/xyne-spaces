@@ -229,8 +229,9 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
       <div className='space-y-1'>
         <p className='text-sm font-semibold text-foreground'>Include history from the beginning?</p>
         <p className='text-sm text-muted-foreground'>
-          This lets everyone see past messages and files once they&apos;re added to the
-          conversation.
+          {channel?.scopeType === ChannelScopeType.GROUP_DM
+            ? 'They’ll join this conversation and can see all past messages and files. No new group is created.'
+            : 'This lets everyone see past messages and files once they’re added to the conversation.'}
         </p>
       </div>
       <div className='flex justify-end gap-3'>

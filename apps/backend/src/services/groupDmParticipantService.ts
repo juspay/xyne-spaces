@@ -110,6 +110,17 @@ export class GroupDmParticipantService {
 
     const newUsers = await this.loadActiveUsers(newUserIds, workspaceId);
 
+    // Adding people to an existing GROUP_DM with full history keeps the same conversation: the
+    // new people join this channel and its member key (`name`) is updated. Nothing is moved, so
+    // threads, links, search and tickets all stay where they are. Narrower history scopes still
+    // fork a new group, because one channel cannot hide older threads from only some members.
+    if (channel.scopeType === ChannelScopeType.GROUP_DM && historyScope.mode === 'beginning') {
+      const inPlace = await this.addInPlace(channelId, currentUserIds, newUsers);
+      if (inPlace) {
+        return inPlace;
+      }
+    }
+
     // Existing members are carried into the destination group, so they must be
     // ACTIVE too. Deactivation does not remove channel participant rows, so the
     // source DM can still list a deactivated user.
@@ -231,6 +242,85 @@ export class GroupDmParticipantService {
     });
 
     return { conversations, total };
+  }
+
+  /**
+   * Adds `newUsers` to the existing GROUP_DM `channelId` and rewrites its member key.
+   * Returns null when the in-place add is not possible (another GROUP_DM already has the
+   * resulting member set), so the caller falls back to opening / merging into that group.
+   */
+  private async addInPlace(
+    channelId: string,
+    currentUserIds: string[],
+    newUsers: User[],
+  ): Promise<AddGroupDmParticipantsResult | null> {
+    const newUserIds = newUsers.map(user => user.id);
+    const memberIds = [...new Set([...currentUserIds, ...newUserIds])].sort();
+
+    if (memberIds.length > MAX_DM_PARTICIPANTS) {
+      throw new AppError(
+        `Maximum ${MAX_DM_PARTICIPANTS} participants allowed in a group DM`,
+        400,
+      );
+    }
+
+    const conflicting = await this.channelRepository.getGroupChannelByMembers([...memberIds]);
+    if (conflicting && conflicting.id !== channelId) {
+      return null;
+    }
+
+    const added: string[] = [];
+    try {
+      for (const userId of newUserIds) {
+        const existing = await this.channelParticipantRepository.findParticipant(channelId, userId);
+        await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
+        if (!existing) added.push(userId);
+      }
+      await this.syncMemberKey(channelId);
+    } catch (error) {
+      for (const userId of added) {
+        await this.channelParticipantRepository
+          .removeParticipant(channelId, userId)
+          .catch(cleanupError =>
+            logger.error('[GroupDmParticipantService] Failed to roll back in-place add', {
+              channelId,
+              userId,
+              error: cleanupError,
+            }),
+          );
+      }
+      await this.syncMemberKey(channelId).catch(() => undefined);
+      throw error;
+    }
+
+    logger.info('group_dm_participants_added_in_place', {
+      channelId,
+      added: added.length,
+      memberCount: memberIds.length,
+    });
+
+    const addedUsers = newUsers.filter(user => added.includes(user.id));
+    return {
+      channelId,
+      sourceChannelId: channelId,
+      isExisting: false,
+      participantsAdded: addedUsers.length,
+      addedParticipants: await this.describeAddedParticipants(channelId, addedUsers),
+      conversationsMoved: 0,
+      movedEverything: false,
+      destinationMembers: [],
+      message: 'People added to this conversation',
+    };
+  }
+
+  /**
+   * Re-derives a GROUP_DM's `name` (sorted, comma-joined participant ids) from the participant
+   * rows actually in the DB, so concurrent adds converge on the real member set.
+   */
+  private async syncMemberKey(channelId: string): Promise<void> {
+    const participants = await this.channelParticipantRepository.getChannelParticipants(channelId);
+    const name = participants.map(p => p.userId).sort().join(',');
+    await this.channelRepository.update(channelId, { name });
   }
 
   private async discardCreatedChannel(
