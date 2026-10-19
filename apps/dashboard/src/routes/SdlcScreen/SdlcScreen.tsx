@@ -4372,6 +4372,7 @@ export default function SdlcScreen(): ReactElement {
                     {section === 'knowledge' && (
                       <section className='mx-auto max-w-6xl'>
                         <SdlcKnowledgeSection
+                          workflowRunning={knowledgeRunning}
                           renderHeader={actions =>
                             renderWorkflowHeader({
                               icon: Zap,

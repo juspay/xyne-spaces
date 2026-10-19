@@ -9,13 +9,21 @@ import { useIsClawAdmin } from './useIsClawAdmin';
  * backend, mirroring what the claw-auth frontend's Skills page shows. Gated on
  * the user id the same way as useClawAuthAgents / useClawMcp.
  */
-export const useClawSkills = (): UseQueryResult<Skill[], Error> => {
+export const useClawSkills = (
+  options: {
+    /** Poll while the page expects skills to appear, e.g. while an agent is writing one. */
+    refetchInterval?: number | false;
+    /** `always` refetches on tab focus even while the cached list is fresh. */
+    refetchOnWindowFocus?: boolean | 'always';
+  } = {},
+): UseQueryResult<Skill[], Error> => {
   const { user } = useAuth();
   return useQuery({
     queryKey: ['claw-skills', user?.id],
     queryFn: () => listSkills(user!.id),
     enabled: !!user?.id,
     staleTime: 5 * 60 * 1000,
+    ...options,
   });
 };
 

@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -146,6 +146,11 @@ export interface HubKnowledgeAiDraft {
 // No skill has this slug: slugs are lower case with dashes.
 const NEW_SKILL = 'NEW';
 
+/** How often the page looks for new skills while an agent may be writing one. */
+export const SKILL_WATCH_INTERVAL_MS = 5_000;
+/** How long after "Create with AI" the page keeps looking: the agent writes the skill in its own run. */
+export const SKILL_WATCH_WINDOW_MS = 3 * 60_000;
+
 const EMPTY_AI_DRAFT: HubKnowledgeAiDraft = { name: '', description: '', kind: 'auto' };
 
 /** Hub Knowledge: the hub's Knowledge Files and Linked Skills, and which of them are pinned. */
@@ -166,9 +171,24 @@ export function SdlcKnowledgeSection(props: {
   renderHeader: (actions: ReactNode) => ReactNode;
   /** Status and start button of the workflow that generates Knowledge Files. */
   generateControl: ReactNode;
+  /** True while the hub's Skills workflow runs. It writes skills the page would not hear of. */
+  workflowRunning?: boolean;
 }): ReactElement {
-  const { channelId, isHubAdmin } = props;
+  const { channelId, isHubAdmin, workflowRunning = false } = props;
   const queryClient = useQueryClient();
+  // Skills written by an agent run (the workflow, or "Create with AI") are made in Claw,
+  // which tells this page nothing. So the page looks for them while such a run may be going.
+  // Counts drafts sent, so a second draft restarts the window instead of riding the first one's.
+  const [draftsSent, setDraftsSent] = useState(0);
+  const [watchingDraft, setWatchingDraft] = useState(false);
+  useEffect(() => {
+    if (draftsSent === 0) return;
+    setWatchingDraft(true);
+    const timer = setTimeout(() => setWatchingDraft(false), SKILL_WATCH_WINDOW_MS);
+    return (): void => clearTimeout(timer);
+  }, [draftsSent]);
+  const watching = watchingDraft || workflowRunning;
+  const refetchInterval = watching ? SKILL_WATCH_INTERVAL_MS : false;
   const { user } = useAuth();
   const userId = user?.id;
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -201,8 +221,20 @@ export function SdlcKnowledgeSection(props: {
   const links = useQuery({
     queryKey: linksKey,
     queryFn: async () => (await apiInstance.get<SdlcHubKnowledgeLinks>(base)).data,
+    refetchInterval,
+    // Another member may have linked or unlinked a skill while this tab was away.
+    refetchOnWindowFocus: 'always',
   });
-  const skills = useClawSkills();
+  const skills = useClawSkills({ refetchInterval, refetchOnWindowFocus: 'always' });
+  // The run's last skills can land after the last poll, so look once more when it ends.
+  const wasRunning = useRef(workflowRunning);
+  useEffect(() => {
+    if (wasRunning.current && !workflowRunning) {
+      void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-knowledge', channelId] });
+      void queryClient.invalidateQueries({ queryKey: ['claw-skills'] });
+    }
+    wasRunning.current = workflowRunning;
+  }, [channelId, queryClient, workflowRunning]);
   const skillCatalog = skills.data;
   // Until both load, an empty list would read as "nothing linked, nothing pinned".
   const ready = Boolean(links.data && skillCatalog);
@@ -792,6 +824,7 @@ export function SdlcKnowledgeSection(props: {
                   name: aiDraft.name.trim(),
                   description: aiDraft.description.trim(),
                 });
+                if (aiDraft.kind !== 'file') setDraftsSent(count => count + 1);
                 closeAiDialog();
               }}
             >
