@@ -78,7 +78,7 @@ export class BackgroundEffectTransformer {
 
     // Create the context ourselves first; MediaPipe's getContext('webgl2') on the same
     // canvas then returns this one, which is what lets the two share textures.
-    const gl = outputCanvas.getContext('webgl2', {
+    const gl = getWebGL2Context(outputCanvas, {
       alpha: false,
       antialias: false,
       depth: false,
@@ -211,4 +211,22 @@ export class BackgroundEffectTransformer {
       controller.enqueue(frame);
     }
   }
+}
+
+/**
+ * `getContext('webgl2')` on the `OffscreenCanvas | HTMLCanvasElement` union resolves to the
+ * generic `RenderingContext`: TS can't pick one overload across a union of overloaded
+ * methods. Narrowing to one canvas type first selects that type's own `'webgl2'` overload,
+ * which returns `WebGL2RenderingContext | null`, so no cast is needed (#3210).
+ *
+ * At runtime both branches make the same call; the check only exists for the type
+ * narrowing. `convertToBlob` is OffscreenCanvas-only, and an `in` check avoids touching
+ * the `OffscreenCanvas` / `HTMLCanvasElement` globals.
+ */
+function getWebGL2Context(
+  canvas: OffscreenCanvas | HTMLCanvasElement,
+  attributes: WebGLContextAttributes,
+): WebGL2RenderingContext | null {
+  if ('convertToBlob' in canvas) return canvas.getContext('webgl2', attributes);
+  return canvas.getContext('webgl2', attributes);
 }
