@@ -6,8 +6,9 @@ const router = Router();
 const organizationController = new OrganizationController();
 
 // Organization Management Routes
-// Platform-provisioning: mints an org OWNER and claims a domain from the body, so admin-only.
-router.post('/', authMiddleware.requireAdmin, organizationController.createOrganization);
+// Creating an org mints an OWNER and claims a domain from the body, so restrict it to
+// org admins/owners (req.user.orgRole from org_members), not any authenticated member.
+router.post('/', authMiddleware.requireAdminOrOwner, organizationController.createOrganization);
 router.get('/', organizationController.getUserOrganizations);
 router.get('/:orgId', organizationController.getOrganizationDetails);
 
