@@ -12,6 +12,8 @@ import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 import { CreateAppDialog } from '@/routes/AppsMarketplaceScreen/CreateAppDialog';
 import { CreateAgentDialog } from './agents/create/CreateAgentDialog';
+import { AddHubAgentDialog } from './agents/AddHubAgentDialog';
+import { useSdlcHubAgents } from './agents/useSdlcHubAgents';
 
 interface LibraryTab {
   id: string;
@@ -94,6 +96,13 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
   const TabContent = activeTab.content;
 
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
+  // In a hub, adding or creating an agent follows the hub's Add members rule (server-evaluated).
+  const hubAgents = useSdlcHubAgents(channelId ?? null);
+  const hubBlocksAdd = Boolean(channelId) && hubAgents.data?.canAddAgents !== true;
+  const hubBlockedReason = hubAgents.data
+    ? 'Only hub admins can add members to this hub'
+    : undefined;
   const query = searchParams.get('q') ?? '';
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
 
@@ -135,10 +144,26 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
               View and manage agents, subagent, skills and MCP.
             </p>
           </div>
+          {channelId && (
+            <Button
+              type='button'
+              variant='outline'
+              className='shrink-0'
+              disabled={hubBlocksAdd}
+              title={hubBlocksAdd ? hubBlockedReason : undefined}
+              onClick={() => setAddAgentOpen(true)}
+              data-track-category='SdlcHub'
+              data-track-name='Open add existing agent'
+            >
+              Add agent
+            </Button>
+          )}
           {activeTab.create && (
             <Button
               type='button'
               className='shrink-0'
+              disabled={activeTab.id === 'agents' && hubBlocksAdd}
+              title={activeTab.id === 'agents' && hubBlocksAdd ? hubBlockedReason : undefined}
               onClick={() => {
                 const { create } = activeTab;
                 if (!create) return;
@@ -232,7 +257,18 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
       </LibraryToolbarSlotProvider>
 
       <CreateAppDialog open={createAppOpen} onOpenChange={setCreateAppOpen} />
-      <CreateAgentDialog open={createAgentOpen} onOpenChange={setCreateAgentOpen} />
+      <CreateAgentDialog
+        open={createAgentOpen}
+        onOpenChange={setCreateAgentOpen}
+        search={
+          channelId
+            ? `?${new URLSearchParams({ sdlcChannelId: channelId, returnTo: pathname })}`
+            : ''
+        }
+      />
+      {channelId && (
+        <AddHubAgentDialog open={addAgentOpen} onOpenChange={setAddAgentOpen} hubId={channelId} />
+      )}
     </div>
   );
 };

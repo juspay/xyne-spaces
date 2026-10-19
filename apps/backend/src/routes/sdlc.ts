@@ -27,7 +27,7 @@ import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { listEnvironments } from '@/sdlc/sdlcEnvironment';
-import { listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
+import { addExistingHubAgent, listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
 import {
   linkHubSkill,
   listHubKnowledgeLinks,
@@ -169,6 +169,20 @@ router.get(
   route(async (req, res) => {
     const agents = await listHubAgents(prisma, actorFromRequest(req), req.params.channelId);
     res.status(200).json({ success: true, ...agents });
+  })
+);
+
+router.post(
+  '/channels/:channelId/agents',
+  route(async (req, res) => {
+    const { agentId } = z.object({ agentId: z.string().min(1) }).parse(req.body);
+    const agent = await addExistingHubAgent(
+      prisma,
+      actorFromRequest(req),
+      req.params.channelId,
+      agentId
+    );
+    res.status(200).json({ success: true, ...agent });
   })
 );
 

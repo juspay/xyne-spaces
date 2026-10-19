@@ -8,6 +8,7 @@ import { createAgent, updateAgent } from '../services/claw/clawAgentWizardServic
 import type { Agent } from '../services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '../services/claw/clawKnowledgeBaseTypes';
 import type { ToolboxSelection } from '../services/claw/clawToolsTypes';
+import type { SdlcHubAgents } from '../routes/AIScreen/library/agents/useSdlcHubAgents';
 
 export interface WizardSubmission {
   slug: string;
@@ -101,9 +102,8 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
               agentId: agent.id,
             },
           );
-          queryClient.setQueryData<{ memberSlugs: string[]; pendingSlugs: string[] }>(
-            ['sdlc-hub-agents', sdlcChannelId],
-            old => (old ? { ...old, pendingSlugs: [...old.pendingSlugs, agent.slug] } : old),
+          queryClient.setQueryData<SdlcHubAgents>(['sdlc-hub-agents', sdlcChannelId], old =>
+            old ? { ...old, pendingSlugs: [...old.pendingSlugs, agent.slug] } : old,
           );
         } catch {
           toast.error('Agent created, but it could not be linked to the hub.');

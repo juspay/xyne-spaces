@@ -26,9 +26,15 @@ function freshDraft(): WizardState {
 interface CreateAgentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Query string for the wizard, e.g. an SDLC hub's `?sdlcChannelId=&returnTo=` so the agent is linked there. */
+  search?: string | undefined;
 }
 
-export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps): ReactElement {
+export function CreateAgentDialog({
+  open,
+  onOpenChange,
+  search = '',
+}: CreateAgentDialogProps): ReactElement {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [state, setState] = useState<WizardState>(freshDraft);
@@ -73,7 +79,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
   const submit = (): void => {
     const seed: AgentDraftSeed = { name, intent, color };
     close(false);
-    void navigate(`${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/create`, {
+    void navigate(`${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/create${search}`, {
       state: { draftSeed: seed },
     });
   };

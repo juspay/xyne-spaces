@@ -5,6 +5,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { AppError } from '@/middleware/errorHandler';
 import { listScopedClawAgents } from '@/services/clawAgentService';
 import { ensureLink } from './entityLinkService';
+import { canAddHubMembers } from './sdlcHubAgentPolicy';
 import type { SdlcActor } from './types';
 
 const participants = new ChannelParticipantRepository();
@@ -29,6 +30,38 @@ export async function promoteRegisteredAgent(
   return links.length;
 }
 
+/** The actor's role in the hub and its Add members policy; null role means not a member. */
+async function hubAddAccess(
+  db: PrismaClient,
+  actor: SdlcActor,
+  channelId: string
+): Promise<{ role: string | null; canAdd: boolean }> {
+  const [member, stats] = await Promise.all([
+    db.channelParticipant.findFirst({
+      where: {
+        channelId,
+        userId: actor.userId,
+        channel: { workspaceId: actor.workspaceId, type: 'SDLC' },
+      },
+      select: { role: true },
+    }),
+    db.channelStats.findUnique({ where: { channelId }, select: { addUserPolicy: true } }),
+  ]);
+  const role = member?.role ?? null;
+  return { role, canAdd: canAddHubMembers(role, stats?.addUserPolicy) };
+}
+
+/** Agents join a hub under the same Add members rule as people. */
+async function assertCanAddHubMember(
+  db: PrismaClient,
+  actor: SdlcActor,
+  channelId: string
+): Promise<void> {
+  const { role, canAdd } = await hubAddAccess(db, actor, channelId);
+  if (!role) throw new AppError('SDLC hub membership is required', 403);
+  if (!canAdd) throw new AppError('Only hub admins can add members to this hub', 403);
+}
+
 /**
  * Slugs of the hub's agents: its channel's bot members, plus agents created here that
  * are still waiting for approval. A pending agent that got registered joins the channel on this read.
@@ -37,7 +70,7 @@ export async function listHubAgents(
   db: PrismaClient,
   actor: SdlcActor,
   channelId: string
-): Promise<{ memberSlugs: string[]; pendingSlugs: string[] }> {
+): Promise<{ memberSlugs: string[]; pendingSlugs: string[]; canAddAgents: boolean }> {
   // Any channel the actor is in, or a public SDLC hub; agents are channel members either way.
   const channel = await db.channel.findFirst({
     where: {
@@ -83,7 +116,9 @@ export async function listHubAgents(
       })
     ).map((participant) => participant.userId)
   );
+  const { canAdd } = await hubAddAccess(db, actor, channelId);
   return {
+    canAddAgents: canAdd,
     memberSlugs: agents.flatMap((agent) =>
       agent.spacesAppUserId && botIds.has(agent.spacesAppUserId) ? [agent.slug] : []
     ),
@@ -97,15 +132,8 @@ export async function markHubAgentPending(
   channelId: string,
   agentId: string
 ): Promise<void> {
-  const member = await db.channelParticipant.findFirst({
-    where: {
-      channelId,
-      userId: actor.userId,
-      channel: { workspaceId: actor.workspaceId, type: 'SDLC' },
-    },
-    select: { id: true },
-  });
-  if (!member) throw new AppError('SDLC hub membership is required', 403);
+  // Checked now, not at promotion: claw-auth's registration notice carries no actor.
+  await assertCanAddHubMember(db, actor, channelId);
   // Only the creator's own unregistered agent; anything else would skip the normal add-bot flow.
   const agent = (
     await listScopedClawAgents({ userId: actor.userId, workspaceId: actor.workspaceId })
@@ -125,4 +153,26 @@ export async function markHubAgentPending(
     },
     actor
   );
+}
+
+/**
+ * Add an agent that already has its Spaces bot user to the hub. Only agents the actor
+ * can reach are accepted, so a hub admin cannot pull someone else's personal agent in.
+ */
+export async function addExistingHubAgent(
+  db: PrismaClient,
+  actor: SdlcActor,
+  channelId: string,
+  agentId: string
+): Promise<{ slug: string }> {
+  await assertCanAddHubMember(db, actor, channelId);
+  const agent = (
+    await listScopedClawAgents({ userId: actor.userId, workspaceId: actor.workspaceId })
+  ).find((candidate) => candidate.id === agentId);
+  if (!agent) throw new AppError('Agent not found', 404);
+  if (!agent.spacesAppUserId) {
+    throw new AppError('This agent is awaiting approval and cannot join a hub yet', 409);
+  }
+  await participants.addParticipant(channelId, agent.spacesAppUserId, ChannelRole.MEMBER);
+  return { slug: agent.slug };
 }

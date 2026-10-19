@@ -1,8 +1,6 @@
 import { ReactElement, useMemo } from 'react';
 import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { apiInstance } from '@/services/clients/apiClient';
 import { useCachedQuery } from '@/hooks/useCachedQuery';
 import { queries } from '@/zero/queries';
 import { useAuth } from '@/hooks/useAuth';
@@ -10,6 +8,7 @@ import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
 import { isSpacesRegistered } from './detail/agentRegistration';
+import { useSdlcHubAgents } from './useSdlcHubAgents';
 import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { channelIcon } from '../shared/components/channelIcon';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
@@ -59,16 +58,7 @@ const AgentsV2 = ({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [channelStatuses],
   );
-  const hub = useQuery({
-    queryKey: ['sdlc-hub-agents', hubId],
-    queryFn: async () =>
-      (
-        await apiInstance.get<{ memberSlugs: string[]; pendingSlugs: string[] }>(
-          `/sdlc/channels/${encodeURIComponent(hubId ?? '')}/agents`,
-        )
-      ).data,
-    enabled: Boolean(hubId),
-  });
+  const hub = useSdlcHubAgents(hubId);
   const agents = useMemo(() => {
     if (!hubId) return data ?? [];
     const inHub = new Set([...(hub.data?.memberSlugs ?? []), ...(hub.data?.pendingSlugs ?? [])]);
