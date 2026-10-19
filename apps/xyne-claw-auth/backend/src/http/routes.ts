@@ -29,6 +29,7 @@ import subagentsRouter from "../routes/subagents.js";
 import sandboxRouter from "../routes/sandbox.js";
 import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
+import { extension } from "./extension.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
 import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
@@ -203,6 +204,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
   app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
+  extension?.mount(app, { base: BASE, requireAuth, requireNoAccessToken });
   // TEMPORARY — delete this mount + the import above + the file after backfill.
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
