@@ -1,3 +1,10 @@
+## [1.510.0](https://github.com/juspay/xyne-spaces/compare/v1.509.0...v1.510.0) (2026-10-19)
+
+
+### Features
+
+* chat project data model and API (claw-auth) ([#3201](https://github.com/juspay/xyne-spaces/issues/3201)) ([b4a6116](https://github.com/juspay/xyne-spaces/commit/b4a6116df7297e299ba72b894966d7a1fe79030c))
+
 ## [1.509.0](https://github.com/juspay/xyne-spaces/compare/v1.508.0...v1.509.0) (2026-10-19)
 
 
