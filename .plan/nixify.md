@@ -16,7 +16,7 @@ waits on runners that can install Nix, so it shouldn't hold up the main track.
 | Phase | What changes | Status |
 | --- | --- | --- |
 | **0** | Nix stack becomes reproducible; Compose leftovers removed | ✅ [#2597] |
-| **1** | One `docker run` for contributors without Nix | Next |
+| **1** | One `docker run` for contributors without Nix | ✅ [#3220] |
 | **2** | Dev services move to Nix; dev Compose deleted | |
 | **3** | Docs and agents default to Nix | |
 | **4** | Multi-sandbox runs on Nix; sandbox Compose deleted | |
@@ -135,6 +135,7 @@ The plan ends when Compose is gone. Two follow-ups could come after, decided the
 - The root `AGENTS.md` and `.mcp.json` work on a fresh checkout
 
 [#2597]: https://github.com/juspay/xyne-spaces/pull/2597
+[#3220]: https://github.com/juspay/xyne-spaces/pull/3220
 
 [^drift]: Examples: Postgres is 16 in Compose and 17 in Nix. `services:stop` used to
     stop `docker-compose.local.yml` while `pnpm run services` started
@@ -177,10 +178,12 @@ The plan ends when Compose is gone. Two follow-ups could come after, decided the
 
 [^image]: Usage: `docker run -v "$PWD":/src -p 3000:3000 -p 3001:3001
     ghcr.io/juspay/xyne-spaces-dev`. Built with `dockerTools` from the same definitions.
-    It runs backend and dashboard too, since these users have no Node on the host.
-    Needs: services bind `0.0.0.0` (today they bind 127.0.0.1), a `full` bundle, x86_64
-    and arm64 images published to GHCR. Search, call recording and feature flags stay
-    out (they're containers themselves).
+    It runs backend and dashboard too, since these users have no Node on the host. The
+    services stay on loopback and the dashboard uses the Vite dev proxy, so the host
+    browser needs only the dashboard port — no `0.0.0.0` change. It runs as a non-root
+    `dev` user (uid 1000); `node_modules` live inside the mount. amd64 now, arm64
+    later. Calls (LiveKit UDP) are out of scope, as are search, call recording and
+    feature flags (they're containers themselves).
 
 [^slice]: Each slice also adds the service to the smoke test, removes the feature from
     `select-services.mjs`, and shrinks the allowlist. Along the way: one source of truth
