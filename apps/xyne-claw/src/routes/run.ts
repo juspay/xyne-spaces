@@ -1797,6 +1797,8 @@ export async function processTask(
       (att) => pushAttachment(progressUrl, sessionId, att),
       trustedSdlcBindings,
       (serverType) => blockedConnectors.add(serverType),
+      undefined,
+      userId,
     ).then((value) => ({ value }), (error: unknown) => ({ error }));
 
     // All per-type attachment ingestion (filter → decode → convert to a
@@ -2494,6 +2496,8 @@ export async function processTask(
         // A delegated agent's 401/403 is the same signal as the parent's: the
         // user's own connection is the fix, so it feeds the same connector card.
         (serverType) => blockedConnectors.add(serverType),
+        undefined,
+        userId,
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -3485,7 +3489,7 @@ export async function processTask(
           ...(sessionId && sessionToken
             ? {
                 searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
-                  searchDeploymentTools(sessionId, sessionToken, params),
+                  searchDeploymentTools(sessionId, sessionToken, params, userId),
               }
             : {}),
           openPalette: openPaletteEnabled,
