@@ -10,6 +10,7 @@ import { findUserByAnyId } from "../lib/users-jit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
+import { broadcastMcpRestart } from "../lib/mcp-restart-signal.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
@@ -288,6 +289,17 @@ router.get("/scheduled-jobs", requireClawAdmin, asyncHandler(async (req: Request
 }));
 
 // ── Global MCP credentials (admin-only fallback creds) ──────────────────────
+
+router.post("/mcp-servers/restart", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const raw = (req.body as { serverType?: unknown } | undefined)?.serverType;
+  if (raw !== undefined && (typeof raw !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(raw))) {
+    throw badRequest("serverType must be a server type such as xyne-spaces");
+  }
+  const serverType = typeof raw === "string" ? raw : undefined;
+  const podsNotified = await broadcastMcpRestart(serverType);
+  log.info(`[admin] MCP restart (${serverType ?? "all servers"}) requested by ${getRequesterId(req)}; ${podsNotified} pod(s) notified`);
+  ok(res, { serverType: serverType ?? null, podsNotified });
+}));
 
 router.get("/mcp-servers", requireClawAdmin, asyncHandler(async (_req: Request, res: Response) => {
   // Platform-global by design: the Global MCP tab manages shared fallback registry/credentials.
