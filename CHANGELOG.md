@@ -1,3 +1,16 @@
+## [1.509.0](https://github.com/juspay/xyne-spaces/compare/v1.508.0...v1.509.0) (2026-10-19)
+
+
+### Features
+
+* cost saved by open models metric on the Claw usage dashboard ([#3205](https://github.com/juspay/xyne-spaces/issues/3205)) ([99ac359](https://github.com/juspay/xyne-spaces/commit/99ac35910ed39d001ed880aa54cc56ca0e3af1f0))
+
+
+### Bug Fixes
+
+* hide DMs and group DMs from admins/owners unless they participate ([#3203](https://github.com/juspay/xyne-spaces/issues/3203)) ([a3f50c2](https://github.com/juspay/xyne-spaces/commit/a3f50c224c1d1196a239bd15c9f8e323d2317c3c))
+* make recordings icon consistent across the app ([#3195](https://github.com/juspay/xyne-spaces/issues/3195)) ([35ce163](https://github.com/juspay/xyne-spaces/commit/35ce1637c3cac9ea4c27aa21032ca9578967edf2))
+
 ## [1.508.0](https://github.com/juspay/xyne-spaces/compare/v1.507.0...v1.508.0) (2026-10-19)
 
 
