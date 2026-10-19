@@ -26,9 +26,18 @@ function freshDraft(): WizardState {
 interface CreateAgentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Inside an SDLC hub, carries `?sdlcChannelId=&returnTo=` so the agent joins the hub once approved. */
+  createPath?: string;
+  /** Says what happens to the agent in the hub it is created from. */
+  note?: string | undefined;
 }
 
-export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps): ReactElement {
+export function CreateAgentDialog({
+  open,
+  onOpenChange,
+  createPath = '/ai/library/agent/create',
+  note,
+}: CreateAgentDialogProps): ReactElement {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [state, setState] = useState<WizardState>(freshDraft);
@@ -73,7 +82,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
   const submit = (): void => {
     const seed: AgentDraftSeed = { name, intent, color };
     close(false);
-    void navigate(`${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/create`, {
+    void navigate(`${workspaceId ? `/${workspaceId}` : ''}${createPath}`, {
       state: { draftSeed: seed },
     });
   };
@@ -153,6 +162,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
           />
         </div>
       </div>
+      {note && <p className='text-xs leading-4 text-muted-foreground'>{note}</p>}
     </V2Dialog>
   );
 }
