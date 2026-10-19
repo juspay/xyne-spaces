@@ -12,6 +12,7 @@ const log = createLogger("agent-warm");
 
 const MCP_WARM_INTERVAL_SECONDS = Number(process.env["MCP_WARM_INTERVAL_SECONDS"] ?? 300);
 export const CLAW_USER_HEADER = "x-claw-user";
+const AGENT_SLUG = /^[\w-]{1,128}$/;
 
 const router = Router();
 const internalRouter = Router();
@@ -47,15 +48,16 @@ router.post("/:slug", async (req: Request<{ slug: string }>, res: Response): Pro
 
 internalRouter.post("/mcp", async (req: Request, res: Response): Promise<void> => {
   const { userId, agentSlug } = (req.body ?? {}) as { userId?: unknown; agentSlug?: unknown };
-  if (typeof userId !== "string" || !userId || typeof agentSlug !== "string" || !agentSlug) {
+  if (typeof userId !== "string" || !userId || typeof agentSlug !== "string" || !AGENT_SLUG.test(agentSlug)) {
     res.status(400).json({ success: false, error: "userId and agentSlug are required" });
     return;
   }
   res.status(202).json({ success: true });
+  const slug = agentSlug.replace(/[^\w-]/g, "");
   const startedAt = Date.now();
   await warmMcpToolLists(userId, agentSlug)
-    .then((servers) => log.info(`[agent-warm] warmed ${servers} MCP server(s) slug=${agentSlug} in ${Date.now() - startedAt}ms`))
-    .catch((err) => log.warn(`[agent-warm] warm failed slug=${agentSlug}: ${errMsg(err)}`));
+    .then((servers) => log.info(`[agent-warm] warmed ${servers} MCP server(s) slug=${slug} in ${Date.now() - startedAt}ms`))
+    .catch((err) => log.warn(`[agent-warm] warm failed slug=${slug}: ${errMsg(err)}`));
 });
 
 export { router as agentWarmRouter, internalRouter as agentWarmInternalRouter };

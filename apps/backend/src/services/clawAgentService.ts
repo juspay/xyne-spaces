@@ -1122,7 +1122,7 @@ export async function warmClawAgent(
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok && response.status !== 404) {
-    logger.warn(`[ClawAgentService] warm-up for ${agentSlug} returned ${response.status}`);
+    logger.warn(`[ClawAgentService] agent warm-up returned ${response.status}`);
   }
 }
 

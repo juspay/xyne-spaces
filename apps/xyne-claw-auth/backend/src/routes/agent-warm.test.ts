@@ -56,7 +56,7 @@ beforeAll(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("http://claw-auth.internal")) {
+      if (new URL(url).host === "claw-auth.internal") {
         state.internalCalls.push({
           headers: init?.headers as Record<string, string>,
           body: JSON.parse(String(init?.body)),
@@ -134,5 +134,11 @@ describe("agent warm-up", () => {
       body: JSON.stringify({ agentSlug: "ask-ai" }),
     });
     expect(res.status).toBe(400);
+    const injected = await fetch(`${base}/internal/agent-warm/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "user-1", agentSlug: "ask-ai\nfake log line" }),
+    });
+    expect(injected.status).toBe(400);
   });
 });
