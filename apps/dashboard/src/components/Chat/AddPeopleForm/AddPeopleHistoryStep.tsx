@@ -8,6 +8,7 @@ import type { AddPeopleHistoryStepProps } from './AddPeopleForm.types';
 import {
   HISTORY_SCOPE_OPTIONS,
   formatMessageTime,
+  historyScopeOptionLabel,
   toPreviewText,
   todayInputValue,
 } from './AddPeopleForm.utils';
@@ -56,7 +57,9 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                 >
                   {isSelected && <span className='h-2 w-2 rounded-full bg-primary' />}
                 </span>
-                <span className='text-sm text-foreground'>{option.label}</span>
+                <span className='text-sm text-foreground'>
+                  {historyScopeOptionLabel(option, customDate)}
+                </span>
               </RadioGroupPrimitive.Item>
 
               {option.requiresDate && isSelected && (
@@ -86,7 +89,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
               </div>
             ) : !hasPreviewItems ? (
               <div className='flex h-full items-center justify-center text-center text-sm text-muted-foreground'>
-                Since there aren&apos;t any messages from this time, no conversation history will be
+                No threads were active in this period, so no conversation history will be
                 included.
               </div>
             ) : (

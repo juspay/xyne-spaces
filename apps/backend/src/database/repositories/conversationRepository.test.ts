@@ -2,11 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Prisma } from '@prisma/client';
 
-const INTENTIONALLY_NOT_MOVED: Record<string, string> = {
-  Ticket:
-    "channelId drives board placement as well as access — three queries list a channel's " +
-    'tickets straight off it, so moving one into a GROUP_DM drops it from its support board.',
-};
+const INTENTIONALLY_NOT_MOVED: Record<string, string> = {};
 
 const hasScalar = (model: Prisma.DMMF.Model, field: string): boolean =>
   model.fields.some(f => f.name === field && f.kind === 'scalar');
