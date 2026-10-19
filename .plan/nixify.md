@@ -104,14 +104,20 @@ Each slice is one PR: add the Nix processes, add them to the smoke test, remove
 the same services from `docker-compose.dev.yml` and the feature from
 `select-services.mjs`, shrink the allowlist. Suggested order:
 
-- [ ] **Dev image, before Core.** Non-Nix contributors lose `pnpm run services` when Core leaves
-      `dev.yml`, so their fallback lands first, built from the same definitions (no second stack):
-      make the bind address configurable (`0.0.0.0` in the image), add a `full` bundle that also
-      runs backend and dashboard, build `packages.dev-image` with `dockerTools` for x86_64 and
-      aarch64 Linux, and publish it to GHCR from CI. Usage: `docker run -v "$PWD":/src -p 3000:3000
-      -p 3001:3001 ghcr.io/juspay/xyne-spaces-dev`; `node_modules` is installed inside the
-      container. CI runs the smoke test inside the image so it cannot drift. Vespa, egress and
-      Superposition (`nix/containers`) stay out of the image.
+- [ ] **A way in without Nix (lands before Core).** When Core leaves `dev.yml`, anyone without
+      Nix loses `pnpm run services`. So before that happens, they get one command instead:
+
+      ```sh
+      docker run -v "$PWD":/src -p 3000:3000 -p 3001:3001 ghcr.io/juspay/xyne-spaces-dev
+      ```
+
+      The image is built *from* the Nix stack, so it is not a second stack to maintain, and CI
+      runs the smoke test inside it, so it cannot drift. It runs everything, backend and dashboard
+      included, because these users have no Node on the host.
+
+      Getting there: services learn to bind `0.0.0.0`, a `full` bundle adds the backend and
+      dashboard, and CI publishes x86_64 and arm64 images to GHCR. Search, call recording and
+      feature flags stay out, since they are containers themselves.
 - [ ] **Core** (Postgres, Redis, Zero, Y-Sweet, fake GCS): already in Nix. Remove them from
       `dev.yml`; `pnpm run services` core path becomes `nix run .#xyne-space-services`.
       Move `apps/backend` ysweet scripts and `watch-transcription-agent.sh` to process-compose.
