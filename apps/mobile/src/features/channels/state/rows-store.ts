@@ -59,12 +59,19 @@ function sameGroup(a: ChannelGroup, b: ChannelGroup): boolean {
     a.kind === b.kind &&
     a.title === b.title &&
     a.isCollapsed === b.isCollapsed &&
+    a.isCollapsible === b.isCollapsible &&
     sameList(a.channelIds, b.channelIds, sameString)
   );
 }
 
 function sameSection(a: ChannelSectionData, b: ChannelSectionData): boolean {
-  return a.id === b.id && a.name === b.name && a.isCollapsed === b.isCollapsed;
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.isCollapsed === b.isCollapsed &&
+    a.filterMode === b.filterMode &&
+    a.sortOrder === b.sortOrder
+  );
 }
 
 /**
@@ -131,6 +138,8 @@ function sameRow(a: ChannelRowData, b: ChannelRowData): boolean {
     a.hasUnread === b.hasUnread &&
     a.messageUnreadCount === b.messageUnreadCount &&
     a.isMentioned === b.isMentioned &&
+    a.hasGroupMention === b.hasGroupMention &&
+    a.isMuted === b.isMuted &&
     a.isStarred === b.isStarred &&
     a.lastActivityAtMs === b.lastActivityAtMs &&
     a.lastViewedAt === b.lastViewedAt &&

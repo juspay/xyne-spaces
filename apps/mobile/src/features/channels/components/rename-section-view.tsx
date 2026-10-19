@@ -41,6 +41,7 @@ export function RenameSectionView(): ReactElement {
         onChangeText={setName}
         onSubmitEditing={rename}
         placeholder='Section name'
+        focusOnArrive
         // Silent while untouched or emptied; the button already says it.
         error={trimmed.length === 0 || isUnchanged ? null : error}
       />

@@ -6,14 +6,21 @@ export type SectionTrayView =
   | 'section-options'
   | 'rename-section'
   | 'manage-channels'
-  | 'delete-section';
+  | 'delete-section'
+  | 'section-filter'
+  | 'section-sort';
 
 type SectionPickerState = {
   isOpen: boolean;
   /** Which view of the tray is showing; opening picks the starting one. */
   view: SectionTrayView;
-  /** The section being managed, for the options / rename / manage / delete views. */
+  /**
+   * The section being managed, for the options and the views they lead to.
+   * `null` with `isChannelsGroup` means the `Channels` group instead.
+   */
   sectionId: string | null;
+  /** The options are for `Channels`, which offers only its filter and sort. */
+  isChannelsGroup: boolean;
   /**
    * The channel being moved. Kept after close on purpose: the tray is still on
    * screen while it dismisses, and clearing this would blank its title.
@@ -32,22 +39,52 @@ export const sectionPicker$ = observable<SectionPickerState>({
   isOpen: false,
   view: 'sections',
   sectionId: null,
+  isChannelsGroup: false,
   channelId: null,
 });
 
 /** Move one channel: starts on the list of sections. */
 export function openSectionPicker(channelId: string): void {
-  sectionPicker$.set({ isOpen: true, view: 'sections', sectionId: null, channelId });
+  sectionPicker$.set({
+    isOpen: true,
+    view: 'sections',
+    sectionId: null,
+    isChannelsGroup: false,
+    channelId,
+  });
 }
 
 /** Create a section from nowhere in particular: starts on the name view. */
 export function openSectionCreator(): void {
-  sectionPicker$.set({ isOpen: true, view: 'new-section', sectionId: null, channelId: null });
+  sectionPicker$.set({
+    isOpen: true,
+    view: 'new-section',
+    sectionId: null,
+    isChannelsGroup: false,
+    channelId: null,
+  });
 }
 
-/** Rename, manage or delete one section: starts on its options. */
+/** Rename, manage, delete, filter or sort one section: starts on its options. */
 export function openSectionOptions(sectionId: string): void {
-  sectionPicker$.set({ isOpen: true, view: 'section-options', sectionId, channelId: null });
+  sectionPicker$.set({
+    isOpen: true,
+    view: 'section-options',
+    sectionId,
+    isChannelsGroup: false,
+    channelId: null,
+  });
+}
+
+/** Filter or sort the `Channels` group: the same options view, with only those two. */
+export function openChannelsGroupOptions(): void {
+  sectionPicker$.set({
+    isOpen: true,
+    view: 'section-options',
+    sectionId: null,
+    isChannelsGroup: true,
+    channelId: null,
+  });
 }
 
 export function setSectionTrayView(view: SectionTrayView): void {

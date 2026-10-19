@@ -1,6 +1,10 @@
 import { useChannelSections } from '@/src/hooks/useChannelSections';
 import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferences';
-import { DEFAULT_CHANNEL_FILTER } from './channel-group-preferences';
+import {
+  CHANNEL_FILTER_OPTIONS,
+  CHANNEL_SORT_OPTIONS,
+  DEFAULT_CHANNEL_FILTER,
+} from './channel-group-preferences';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
@@ -143,18 +147,10 @@ function SectionOptionsSheetContent({
       }
     : preferences[group];
   const [page, setPage] = useState<'menu' | 'filter' | 'sort'>('menu');
-  const filters = [
-    { label: 'Active only', value: ChannelFilterMode.ACTIVE },
-    { label: 'Unreads', value: ChannelFilterMode.UNREADS },
-    { label: 'Mentions', value: ChannelFilterMode.MENTIONS },
-    { label: 'All', value: ChannelFilterMode.ALL },
-  ];
-  const sorts = [
-    { label: 'Unread & Activity', value: ChannelSortOrder.UNREAD },
-    { label: 'Recency', value: ChannelSortOrder.RECENCY },
-    { label: 'Alphabetical A-Z', value: ChannelSortOrder.ALPHABETICAL },
-    ...(section ? [{ label: 'Manual order', value: null }] : []),
-  ];
+  const filters = CHANNEL_FILTER_OPTIONS;
+  const sorts = section
+    ? CHANNEL_SORT_OPTIONS
+    : CHANNEL_SORT_OPTIONS.filter(option => option.value !== null);
   const setFilter = (filterMode: ChannelFilterMode): void => {
     if (target.section && !section) return;
     if (section) updatePreference(section.id, { filterMode });
