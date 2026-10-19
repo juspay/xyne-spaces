@@ -177,6 +177,13 @@ function coerceList(raw: unknown, ...keys: string[]): unknown[] {
 	return [];
 }
 
+/** Unwrap claw-auth's { success, data } envelope to the data object (or the raw
+ * object when there is no envelope). */
+function unwrapData(raw: unknown): Record<string, unknown> {
+	const o = asObject(raw);
+	return o["data"] && typeof o["data"] === "object" ? (o["data"] as Record<string, unknown>) : o;
+}
+
 class ClawClient {
 	constructor(
 		private readonly baseUrl: string,
@@ -309,6 +316,53 @@ class ClawClient {
 		const sessionId = str(raw, "sessionId", "session_id", "id") ?? str((raw.data as Record<string, unknown>) ?? {}, "sessionId", "id");
 		if (!sessionId) throw new ClawApiError("Malformed /run response (missing sessionId).", 502, raw);
 		return { sessionId, conversationId };
+	}
+
+	async createAgentDraft(spec: Record<string, unknown>): Promise<{ requestId: string; slug: string; status: string; unmatchedCapabilities?: string[] }> {
+		const raw = (await this.request("POST", "/agents/draft-requests", { auth: true, body: spec })) as Record<string, unknown>;
+		const data = unwrapData(raw);
+		const requestId = str(data, "requestId") ?? "";
+		if (!requestId) throw new ClawApiError("Malformed draft-request response (missing requestId).", 502, raw);
+		// unmatchedCapabilities rides on the envelope, not inside `data`.
+		const unmatched = Array.isArray(raw["unmatchedCapabilities"])
+			? (raw["unmatchedCapabilities"] as unknown[]).filter((v): v is string => typeof v === "string")
+			: undefined;
+		return {
+			requestId,
+			slug: str(data, "slug") ?? "",
+			status: str(data, "status") ?? "pending",
+			...(unmatched && unmatched.length > 0 ? { unmatchedCapabilities: unmatched } : {}),
+		};
+	}
+
+	async listAgentDrafts(): Promise<Array<{ requestId: string; slug?: string; status?: string; createdAt?: string }>> {
+		const raw = await this.request("GET", "/agents/draft-requests", { auth: true });
+		return coerceList(raw).map((item) => {
+			const o = item as Record<string, unknown>;
+			return {
+				requestId: str(o, "requestId", "id") ?? "",
+				slug: str(o, "slug", "agentSlug"),
+				status: str(o, "status"),
+				createdAt: str(o, "createdAt", "created_at"),
+			};
+		});
+	}
+
+	async decideAgentDraft(
+		requestId: string,
+		decision: "approve" | "reject",
+	): Promise<{ status?: string; slug?: string; note?: string; alreadyResolved: boolean }> {
+		const raw = (await this.request("POST", `/agents/draft-requests/${encodeURIComponent(requestId)}/decision`, {
+			auth: true,
+			body: { decision },
+		})) as Record<string, unknown>;
+		const data = unwrapData(raw);
+		return {
+			status: str(data, "status"),
+			slug: str(data, "slug"),
+			note: str(data, "note"),
+			alreadyResolved: data["alreadyResolved"] === true,
+		};
 	}
 
 	async getRun(sessionId: string): Promise<ClawRun> {
@@ -587,6 +641,49 @@ const tools: Tool[] = [
 			additionalProperties: false,
 		},
 	},
+	{
+		name: "claw_create_agent",
+		description:
+			"Submit a NEW Xyne Claw agent for approval. This does NOT create a live agent — it queues a pending draft that the requester must approve (claw_decide_agent_request, or the Spaces draft card) before the agent exists. Requires claw_login first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "Human-readable agent name, e.g. 'Ticket Triage'." },
+				systemPrompt: { type: "string", description: "The agent's full operating instructions, written in the second person." },
+				slug: { type: "string", description: "Optional kebab-case identifier; derived from name when omitted." },
+				description: { type: "string", description: "One line shown in the agent picker." },
+				tools: { type: "array", items: { type: "string" }, description: "Tool slugs / subagent names to grant." },
+				mcps: { type: "array", items: { type: "string" }, description: "Integration (MCP) names to grant." },
+				skills: { type: "array", items: { type: "string" }, description: "Skill names or slugs." },
+				modelId: { type: "string", description: "Optional model id." },
+				color: { type: "string", description: "Optional hex avatar tint, e.g. '#6366f1'." },
+				providerOrder: { type: "array", items: { type: "string" }, description: "Providers tried in order, e.g. ['claude','codex']." },
+				scope: { type: "string", enum: ["personal", "global"], description: "'personal' (default) or 'global' (org-wide; only materializes as global if the approver is an admin)." },
+				summary: { type: "string", description: "One or two sentences on why this agent was drafted." },
+			},
+			required: ["name", "systemPrompt"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "claw_list_agent_requests",
+		description: "List YOUR pending Xyne Claw agent drafts awaiting approval. Requires claw_login first.",
+		inputSchema: emptyInputSchema,
+	},
+	{
+		name: "claw_decide_agent_request",
+		description:
+			"Approve or reject one of YOUR pending agent drafts. Approving CREATES the agent (owned by you); rejecting discards the draft. Only the person who submitted a draft can decide it. Requires claw_login first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				request_id: { type: "string", description: "Draft request id from claw_create_agent / claw_list_agent_requests." },
+				decision: { type: "string", enum: ["approve", "reject"], description: "Approve (create the agent) or reject (discard the draft)." },
+			},
+			required: ["request_id", "decision"],
+			additionalProperties: false,
+		},
+	},
 ];
 
 const server = new Server(
@@ -726,6 +823,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 					error: run.error,
 					detail,
 				});
+			}
+			case "claw_create_agent": {
+				const config = requireConfigOrThrow();
+				const spec: Record<string, unknown> = {
+					name: requiredString(args, "name"),
+					systemPrompt: requiredString(args, "systemPrompt"),
+				};
+				for (const key of ["slug", "description", "modelId", "color", "scope", "summary"]) {
+					const v = optionalString(args, key);
+					if (v) spec[key] = v;
+				}
+				for (const key of ["tools", "mcps", "skills", "providerOrder"]) {
+					const v = args[key];
+					if (Array.isArray(v)) {
+						const items = v.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+						if (items.length > 0) spec[key] = items;
+					}
+				}
+				const out = await new ClawClient(resolveBaseUrl(), config.token).createAgentDraft(spec);
+				const unmatchedNote = out.unmatchedCapabilities?.length
+					? `\nNote: these capabilities didn't match anything in your org and will be dropped on approval: ${out.unmatchedCapabilities.join(", ")}.`
+					: "";
+				return textResult(
+					`Drafted agent "${out.slug}" and queued it for approval (request ${out.requestId}). ` +
+						`It is NOT live yet — approve it with claw_decide_agent_request(request_id="${out.requestId}", decision="approve"), ` +
+						`or approve the draft card in Spaces.${unmatchedNote}`,
+					{
+						requestId: out.requestId,
+						slug: out.slug,
+						status: out.status,
+						...(out.unmatchedCapabilities ? { unmatchedCapabilities: out.unmatchedCapabilities } : {}),
+					},
+				);
+			}
+			case "claw_list_agent_requests": {
+				const config = requireConfigOrThrow();
+				const drafts = await new ClawClient(resolveBaseUrl(), config.token).listAgentDrafts();
+				if (drafts.length === 0) return textResult("No pending agent drafts.", { count: 0, drafts });
+				const lines = drafts.map(
+					(d) => `- ${d.requestId}${d.slug ? ` [${d.slug}]` : ""}${d.status ? ` ${d.status}` : ""}${d.createdAt ? ` (${d.createdAt})` : ""}`,
+				);
+				return textResult(`Pending agent drafts (${drafts.length}):\n${lines.join("\n")}`, { count: drafts.length, drafts });
+			}
+			case "claw_decide_agent_request": {
+				const config = requireConfigOrThrow();
+				const requestId = requiredString(args, "request_id");
+				const decisionRaw = requiredString(args, "decision");
+				const decision = decisionRaw === "approve" ? "approve" : decisionRaw === "reject" ? "reject" : null;
+				if (!decision) return errorResult('decision must be "approve" or "reject".');
+				const out = await new ClawClient(resolveBaseUrl(), config.token).decideAgentDraft(requestId, decision);
+				if (decision === "approve" && out.status === "approved") {
+					return textResult(`Approved — agent "${out.slug ?? ""}" created.${out.note ? ` Note: ${out.note}` : ""}`, { ...out });
+				}
+				if (decision === "reject") {
+					return textResult(`Rejected draft ${requestId}.`, { ...out });
+				}
+				return textResult(`Decision processed: ${out.status ?? "unknown"}.`, { ...out });
 			}
 			default:
 				return errorResult(`Unknown tool: ${name}`);
