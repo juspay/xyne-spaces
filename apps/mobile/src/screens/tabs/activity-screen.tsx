@@ -1,4 +1,13 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useValue } from '@legendapp/state/react';
 import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { LegendListRef } from '@legendapp/list/react-native';
 import {
@@ -10,8 +19,9 @@ import {
   Platform,
 } from 'react-native';
 import {
+  ActivityFiltersFloatingButton,
+  ActivityFiltersSheet,
   ActivityLoadingSkeleton,
-  ActivityUnreadsFloatingButton,
   ActivityV2,
 } from '@/src/components/activity';
 import { useActivities } from '@/src/hooks/useActivities';
@@ -19,6 +29,9 @@ import { ActivityWithRelated, ActivityTab, TABS, actionableValues } from '@/src/
 import { ChatFilterTabs, type ChatFilterTabOption } from '@/src/components/chat/chat-filter-tabs';
 import { ListEmptyState, EMPTY_STATE_BOTTOM_INSET } from '@/src/components/ui/empty-state';
 import { getActivityEmptyContent } from '@/src/features/activity/presentation/activityEmptyContent';
+import { getActorFilterKey } from '@/src/features/activity/domain/activityActorFilter';
+import { actorFilterFrom } from '@/src/features/activity/model/preferences';
+import { appliedActivityPreferences$ } from '@/src/features/activity/state/preferences-store';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop';
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
@@ -135,6 +148,20 @@ const ActivityScreen = (): ReactElement => {
   const scrollToTop = useCallback(() => scrollListToTop(true), [scrollListToTop]);
   useRegisterTabScrollToTop('activity', scrollToTop);
 
+  // The filters sheet edits a draft; the feed follows what has been applied —
+  // the same stores the Spaces design's filter tray uses.
+  const unreadOnly = useValue(appliedActivityPreferences$.unreadOnly);
+  const actorKind = useValue(appliedActivityPreferences$.actorKind);
+  const actorUserId = useValue(appliedActivityPreferences$.actorUserId);
+  const actionable = useValue(appliedActivityPreferences$.actionable);
+  const actor = useMemo(
+    () => actorFilterFrom({ actorKind, actorUserId }),
+    [actorKind, actorUserId],
+  );
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const openFilters = useCallback(() => setIsFiltersOpen(true), []);
+  const closeFilters = useCallback(() => setIsFiltersOpen(false), []);
+
   const {
     activities,
     isLoading,
@@ -146,19 +173,32 @@ const ActivityScreen = (): ReactElement => {
     showUnreadOnly,
     setShowUnreadOnly,
     activityCounts,
-  } = useActivities({ screenReady: hasFirstLayout && isFocused });
+    markAsRead,
+  } = useActivities({ screenReady: hasFirstLayout && isFocused, actor });
 
   useReportTabReady('activity', !isLoading);
 
-  const handleActivateUnreadsFilter = useCallback(() => {
-    setShowUnreadOnly(true);
-    scrollListToTop(false);
-  }, [scrollListToTop, setShowUnreadOnly]);
+  // Layout timing, so the model asks for the narrowed slice before the frame
+  // that would show the old one.
+  useLayoutEffect(() => {
+    setShowUnreadOnly(unreadOnly);
+  }, [setShowUnreadOnly, unreadOnly]);
 
-  const handleDeactivateUnreadsFilter = useCallback(() => {
-    setShowUnreadOnly(false);
+  // Actionable swaps the chips; a chip that is not in the new set falls back to All.
+  useLayoutEffect(() => {
+    if (activeTab !== 'all' && actionableValues.has(activeTab) !== actionable) {
+      setActiveTab('all');
+    }
+  }, [actionable, activeTab, setActiveTab]);
+
+  // A narrower or wider feed starts from its top.
+  const filtersKey = `${unreadOnly}:${actionable}:${getActorFilterKey(actor)}`;
+  const appliedFiltersKey = useRef(filtersKey);
+  useEffect(() => {
+    if (appliedFiltersKey.current === filtersKey) return;
+    appliedFiltersKey.current = filtersKey;
     scrollListToTop(false);
-  }, [scrollListToTop, setShowUnreadOnly]);
+  }, [filtersKey, scrollListToTop]);
 
   const handleTabChange = useCallback(
     (tab: ActivityTab) => {
@@ -317,12 +357,14 @@ const ActivityScreen = (): ReactElement => {
 
   const activityFilterTabs: ChatFilterTabOption<ActivityTab>[] = useMemo(
     () =>
-      TABS.filter(tab => tab.value === 'all' || !actionableValues.has(tab.value)).map(tab => ({
-        value: tab.value,
-        label: tab.label,
-        ...(tab.value === 'all' ? { count: activityCounts.all } : {}),
-      })),
-    [activityCounts],
+      TABS.filter(tab => tab.value === 'all' || actionableValues.has(tab.value) === actionable).map(
+        tab => ({
+          value: tab.value,
+          label: tab.label,
+          ...(tab.value === 'all' ? { count: activityCounts.all } : {}),
+        }),
+      ),
+    [actionable, activityCounts],
   );
 
   const activityToolbar = useMemo(
@@ -383,7 +425,7 @@ const ActivityScreen = (): ReactElement => {
           ListFooterComponent={listFooterComponent}
           contentContainerStyle={{
             paddingTop: listPaddingTop,
-            // The tuned inset clears the floating unreads button over real rows;
+            // The tuned inset clears the floating filters button over real rows;
             // with none, fall back to the shared reserve so the empty state sits
             // at the same height as the other tabs.
             paddingBottom: activities.length === 0 ? EMPTY_STATE_BOTTOM_INSET : listPaddingBottom,
@@ -405,11 +447,11 @@ const ActivityScreen = (): ReactElement => {
         />
       </View>
 
-      <ActivityUnreadsFloatingButton
-        isActive={showUnreadOnly}
-        count={activityCounts.all}
-        onActivate={handleActivateUnreadsFilter}
-        onDeactivate={handleDeactivateUnreadsFilter}
+      <ActivityFiltersFloatingButton onPress={openFilters} />
+      <ActivityFiltersSheet
+        isOpen={isFiltersOpen}
+        onClose={closeFilters}
+        onMarkAsRead={markAsRead}
       />
     </View>
   );
