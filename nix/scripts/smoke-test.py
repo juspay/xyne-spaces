@@ -2,6 +2,9 @@
 
 Requires free development ports. Uses the exported process-compose configuration,
 without the interactive launcher's port-killing preHook. Leaves data in place.
+
+With --existing-services, services are expected to be running already; a healthy
+backend is reused (the dev image runs one), otherwise the test starts its own.
 """
 import json
 import os
@@ -64,22 +67,40 @@ def wait_for(url, timeout, check=lambda response: True):
     raise RuntimeError(f"Timed out waiting for {url}; inspect {logs}")
 
 
+def backend_healthy():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:3001/api/health", timeout=3) as response:
+            data = json.load(response)["data"]
+            return data["database"]["connected"] and data["commonDatabase"]["connected"]
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def port_occupied(port):
+    with socket.socket() as sock:
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 try:
     # Never kill another developer's services or mask a failure with their health endpoints.
-    ports = [3001] if existing else [3001, 5433, 6379, 7880, 4848, 8080, 4443, 8001]
-    for port in ports:
-        with socket.socket() as sock:
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                raise RuntimeError(f"Port {port} is occupied; stop its service before testing")
     if not existing:
+        for port in [3001, 5433, 6379, 7880, 4848, 8080, 4443, 8001]:
+            if port_occupied(port):
+                raise RuntimeError(f"Port {port} is occupied; stop its service before testing")
         launch(["process-compose", "-f", config_path, "-t=false", "-U", "-u", service_socket],
                "services")
     # LiveKit must actually connect to Redis; NumPy/LiveKit native imports must load.
     wait_for("http://127.0.0.1:7880", 180)
     wait_for("http://127.0.0.1:8001/health", 900)
     wait_for("http://127.0.0.1:4848", 180)
-    launch(["pnpm", "exec", "dotenv", "-e", ".env.local", "--", "pnpm", "exec",
-            "tsx", "src/index.ts"], "backend", "apps/backend")
+    # Reuse a backend that is already serving, like the dev image's.
+    if backend_healthy():
+        print("Reusing the running backend", flush=True)
+    else:
+        if existing and port_occupied(3001):
+            raise RuntimeError("Port 3001 is occupied but not healthy; stop it before testing")
+        launch(["pnpm", "exec", "dotenv", "-e", ".env.local", "--", "pnpm", "exec",
+                "tsx", "src/index.ts"], "backend", "apps/backend")
     wait_for("http://127.0.0.1:3001/api/health", 120,
              lambda response: (lambda data: data["database"]["connected"] and
                                data["commonDatabase"]["connected"])(json.load(response)["data"]))
