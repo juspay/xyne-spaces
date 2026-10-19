@@ -1,16 +1,15 @@
 import { config as envConfig } from '@/config/env';
-import { isJevConfigured, isPrivateJevConfigured, type JevTarget } from '@/services/queryIntent/jevClient';
 import { isLlmDecisionConfigured } from './llmDecision';
-import type { ClassifierEngine, DecisionEngine } from './types';
+import type { ClassifierEngine, ClassifierTarget, DecisionEngine } from './types';
 
 /** The engine that answers typed decision questions live: DECISION_ENGINE. */
 export const configuredEngine = (): ClassifierEngine => envConfig.decisionEngine;
 
 /** XOR_* when XOR_URL is set; otherwise JEV_*, which is where XOR lived before XOR_* existed. */
-const xorTarget = (): JevTarget => (envConfig.xor.url ? envConfig.xor : envConfig.jev);
+const xorTarget = (): ClassifierTarget => (envConfig.xor.url ? envConfig.xor : envConfig.jev);
 
 /** Where a classifier engine is called. */
-export const classifierTarget = (engine: ClassifierEngine): JevTarget =>
+export const classifierTarget = (engine: ClassifierEngine): ClassifierTarget =>
   engine === 'xor' ? xorTarget() : envConfig.jev;
 
 /**
@@ -22,9 +21,8 @@ export const isEngineConfigured = (
   { customerContent = false }: { customerContent?: boolean } = {}
 ): boolean => {
   if (engine === 'llm') return isLlmDecisionConfigured();
-  if (engine === 'jev') return customerContent ? isPrivateJevConfigured() : isJevConfigured();
-  if (envConfig.xor.url) return Boolean(envConfig.xor.apiKey);
-  return customerContent ? isPrivateJevConfigured() : isJevConfigured();
+  if (engine === 'xor' && envConfig.xor.url) return Boolean(envConfig.xor.apiKey);
+  return Boolean(envConfig.jev.apiKey) && (!customerContent || envConfig.jev.urlIsExplicit);
 };
 
 export const isDecisionEngineConfigured = (): boolean => isEngineConfigured(configuredEngine());

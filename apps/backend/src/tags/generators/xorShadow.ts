@@ -2,7 +2,7 @@ import { logger } from '@/utils/logger';
 import { AgentsConfig } from '@/agents/config';
 import { askDecision } from '@/services/decision/ask';
 import { isDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
-import type { JevChoiceQuestion, JevFailure } from '@/services/queryIntent/jevClient';
+import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 import type { CategoryConfig, GeneratedTag } from '../types';
 import { validateGeneratedTags } from './validate';
 
@@ -24,8 +24,8 @@ const SHADOW_TIMEOUT_MS = 30_000;
  */
 export function buildQuestions(
   categories: Record<string, CategoryConfig>,
-): Record<string, JevChoiceQuestion> {
-  const questions: Record<string, JevChoiceQuestion> = {};
+): Record<string, ChoiceQuestion> {
+  const questions: Record<string, ChoiceQuestion> = {};
 
   for (const [name, category] of Object.entries(categories)) {
     const options = (category.tags ?? []).filter((tag) => !category.blacklist?.includes(tag));
@@ -74,7 +74,7 @@ export async function runShadowTagGeneration(
     if (Object.keys(questions).length === 0) return;
 
     // askDecision collapses every failure into a plain null; onFailure recovers the cause.
-    let failure: JevFailure | undefined;
+    let failure: AskFailure | undefined;
     const answers = await askDecision('desk_tags', context, questions, SHADOW_TIMEOUT_MS, undefined, {
       partial: true,
       role: 'shadow',

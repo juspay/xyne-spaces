@@ -1,8 +1,15 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import type { JevAnswer, JevQuestion } from '@/services/queryIntent/jevClient';
-import type { ComparedAnswer, DecisionEngine, QuestionFeature, TaskFeature, TaskInput } from '@/services/decision/types';
+import type {
+  ComparedAnswer,
+  DecisionAnswer,
+  DecisionEngine,
+  DecisionQuestion,
+  QuestionFeature,
+  TaskFeature,
+  TaskInput,
+} from '@/services/decision/types';
 
 export const COMPARE_JOB = 'compare-xor';
 export const EVALUATE_JOB = 'evaluate-task';
@@ -15,8 +22,8 @@ export interface CompareJob {
   feature: QuestionFeature;
   liveEngine: DecisionEngine;
   state: string | Record<string, unknown>;
-  questions: Record<string, JevQuestion>;
-  liveAnswers: Record<string, JevAnswer> | null;
+  questions: Record<string, DecisionQuestion>;
+  liveAnswers: Record<string, DecisionAnswer> | null;
 }
 
 /** A decided task, to put to the engines that did not answer it live. */

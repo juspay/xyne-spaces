@@ -1,7 +1,6 @@
 import { LLMClient, createUserMessage } from '@framework';
 import { config as envConfig } from '@/config/env';
-import type { JevAnswer, JevQuestion } from '@/services/queryIntent/jevClient';
-import type { LlmReply } from './types';
+import type { DecisionAnswer, DecisionQuestion, LlmReply } from './types';
 
 /** The classification agents' default model, so the classifiers are measured against what they replace. */
 export const LLM_DECISION_MODEL = 'glm-flash-experimental';
@@ -18,7 +17,7 @@ const SYSTEM_PROMPT = [
 export const isLlmDecisionConfigured = (): boolean =>
   Boolean(envConfig.litellm.baseUrl && envConfig.litellm.apiKey);
 
-const renderQuestion = (id: string, question: JevQuestion): string => {
+const renderQuestion = (id: string, question: DecisionQuestion): string => {
   const head = `- id: ${id}\n  question: ${question.instructions}`;
   if (question.type === 'choice') {
     const options = Object.entries(question.criteria).map(([key, meaning]) => `    ${key}: ${meaning}`);
@@ -38,7 +37,7 @@ const toProbability = (value: unknown): number => {
   return Number(value);
 };
 
-const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
+const readAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | null => {
   if (raw === null || raw === undefined) return null;
   // Models often skip the wrapper and reply with the bare value: "is_bug": 1, "team": "backend".
   const field = question.type === 'noul' ? 'noul' : question.type === 'choice' ? 'choice' : 'level';
@@ -61,8 +60,8 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
 /** The usable answers in the LLM's reply, keyed like `questions`; null when there are none. */
 export const parseLlmAnswers = (
   content: string,
-  questions: Record<string, JevQuestion>
-): Record<string, JevAnswer> | null => {
+  questions: Record<string, DecisionQuestion>
+): Record<string, DecisionAnswer> | null => {
   const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
@@ -73,7 +72,7 @@ export const parseLlmAnswers = (
   } catch {
     return null;
   }
-  const answers: Record<string, JevAnswer> = {};
+  const answers: Record<string, DecisionAnswer> = {};
   for (const [id, question] of Object.entries(questions)) {
     const answer = readAnswer(question, raw?.[id]);
     if (answer) answers[id] = answer;
@@ -84,9 +83,9 @@ export const parseLlmAnswers = (
 /** The LLM's answers to the same typed questions the classifiers get, on LITELLM_*. Throws on failure. */
 export async function requestLlmAnswers(
   state: string | Record<string, unknown>,
-  questions: Record<string, JevQuestion>,
+  questions: Record<string, DecisionQuestion>,
   timeoutMs = LLM_DECISION_TIMEOUT_MS
-): Promise<LlmReply<Record<string, JevAnswer>>> {
+): Promise<LlmReply<Record<string, DecisionAnswer>>> {
   const client = new LLMClient({
     provider: {
       type: 'litellm',

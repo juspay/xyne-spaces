@@ -1,85 +1,31 @@
 import { logger } from '@/utils/logger';
 import { config as envConfig } from '@/config/env';
+import type {
+  AskFailure,
+  ClassifierEngine,
+  ClassifierTarget,
+  DecisionAnswer,
+  DecisionQuestion,
+  ScoreQuestion,
+  YesNoQuestion,
+} from './types';
 
 /**
- * Client for Jev — a typed classifier: POST a state plus a question, get a probability
+ * Client for typed classifiers (XOR, Jev): POST a state plus questions, get probabilities
  * back, with no text generation. https://jevai.wiki
  *
- * Endpoint and model are config, not code, so this client can talk to any service that
- * speaks the same wire format (TypeSafe's hosted Jev, a LiteLLM-hosted jev, a fine-tuned
- * copy): set JEV_URL and JEV_MODEL. Unset JEV_API_KEY => the feature stays off.
+ * Endpoint and model are config, not code, so it talks to any service that speaks this wire
+ * format (TypeSafe's hosted Jev, LiteLLM's /v1/decisions, a fine-tuned copy).
  *
- * Switching service or model changes probability calibration, so the thresholds in
- * index.ts must be re-tuned against whichever one is live.
+ * Switching service or model changes probability calibration, so thresholds tuned against
+ * one must be re-tuned for another.
  */
-
-/** A yes/no question. */
-export interface JevNoulQuestion {
-  type: 'noul';
-  instructions: string;
-  criteria?: { true?: string; false?: string };
-}
-
-/** Pick one of up to 255 options, each keyed by id and described in plain words. */
-export interface JevChoiceQuestion {
-  type: 'choice';
-  instructions: string;
-  criteria: Record<string, string>;
-}
-
-/** Where the state falls on ordered levels, lowest first (`criteria[0]` is the lowest). */
-export interface JevScoreQuestion {
-  type: 'score';
-  instructions: string;
-  criteria: string[];
-}
-
-export type JevQuestion = JevNoulQuestion | JevChoiceQuestion | JevScoreQuestion;
-
-export type JevAnswer =
-  | { type: 'noul'; noul: number }
-  | {
-      type: 'choice';
-      choice: string;
-      /** Probability per option id. */
-      probabilities: Record<string, number>;
-      /** Jev's confidence in `choice`, when it gave one. */
-      confidence?: number;
-    }
-  | {
-      type: 'score';
-      /** 0 at the lowest level, 1 at the highest. */
-      score: number;
-      /** Index into `criteria` of the most likely level. */
-      level: number;
-      /** Jev's confidence in `level`, when it gave one. */
-      confidence?: number;
-    };
-
-/** Where a request goes; JEV_URL / JEV_API_KEY / JEV_MODEL unless a caller says otherwise. */
-export interface JevTarget {
-  url: string;
-  apiKey: string;
-  model: string;
-}
-
-/** Why a Jev call came back empty; a caller cancelling it is not a failure. */
-export type JevFailure =
-  | { kind: 'timeout' }
-  | { kind: 'network' }
-  | { kind: 'status'; status: number }
-  | { kind: 'unusable' };
-
-export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
-
-export const isPrivateJevConfigured = (): boolean =>
-  isJevConfigured() && Boolean(process.env.JEV_URL?.trim());
 
 const ERROR_BODY_LIMIT = 2048;
 const ERROR_TYPE = /^[a-z0-9_.-]{1,64}$/i;
 
-/** Hostname of the Jev endpoint for logs, or undefined when the URL doesn't parse. */
-const jevHost = (url: string): string | undefined => {
+/** Hostname of the endpoint for logs, or undefined when the URL doesn't parse. */
+const hostOf = (url: string): string | undefined => {
   try {
     return new URL(url).hostname;
   } catch {
@@ -126,9 +72,9 @@ const isProbability = (p: unknown): p is number => typeof p === 'number' && p >=
  * answered; otherwise the index is rescaled.
  */
 const readScore = (
-  question: JevScoreQuestion,
+  question: ScoreQuestion,
   answer: Record<string, unknown>
-): JevAnswer | null => {
+): DecisionAnswer | null => {
   const top = question.criteria.length - 1;
   if (top < 1 || typeof answer.score !== 'number' || !Number.isFinite(answer.score)) return null;
 
@@ -154,7 +100,7 @@ const readScore = (
 };
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
-const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
+const readAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | null => {
   if (!raw || typeof raw !== 'object') return null;
   const answer = raw as Record<string, unknown>;
 
@@ -189,17 +135,17 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
  * it may be missing.
  */
 export const asNoulQuestions = (
-  questions: Record<string, JevNoulQuestion>
-): Record<string, JevNoulQuestion> =>
+  questions: Record<string, YesNoQuestion>
+): Record<string, YesNoQuestion> =>
   Object.fromEntries(
-    Object.entries(questions).map(([key, question]): [string, JevNoulQuestion] => [
+    Object.entries(questions).map(([key, question]): [string, YesNoQuestion] => [
       key,
       { ...question, type: 'noul' },
     ])
   );
 
 /** P(yes) per question; null when there are no answers or any is not a yes/no. */
-export const readNouls = (answers: Record<string, JevAnswer> | null): Record<string, number> | null => {
+export const readNouls = (answers: Record<string, DecisionAnswer> | null): Record<string, number> | null => {
   if (!answers) return null;
   const probabilities: Record<string, number> = {};
   for (const [key, answer] of Object.entries(answers)) {
@@ -217,23 +163,29 @@ export const readNouls = (answers: Record<string, JevAnswer> | null): Record<str
  * unusable answer is left out instead, for a batch of independent questions where
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
- * `target` sends it to another service with the same wire format, e.g. XOR.
- * Never throws.
+ * `target` sends it to another service with the same wire format, e.g. XOR; `engine` names
+ * it in logs. Never throws.
  */
-export const requestJevAnswers = async (
+export const requestClassifierAnswers = async (
   state: string | Record<string, unknown>,
-  questions: Record<string, JevQuestion>,
+  questions: Record<string, DecisionQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
   {
     partial = false,
     onFailure,
     target = envConfig.jev,
-  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void; target?: JevTarget } = {}
-): Promise<Record<string, JevAnswer> | null> => {
+    engine = 'jev',
+  }: {
+    partial?: boolean;
+    onFailure?: (failure: AskFailure) => void;
+    target?: ClassifierTarget;
+    engine?: ClassifierEngine;
+  } = {}
+): Promise<Record<string, DecisionAnswer> | null> => {
   const { apiKey, url, model } = target;
   if (!apiKey) return null;
-  const logContext = { model, host: jevHost(url) };
+  const logContext = { engine, model, host: hostOf(url) };
 
   try {
     const response = await fetch(url, {
@@ -248,13 +200,13 @@ export const requestJevAnswers = async (
       const errorType = await readErrorType(response);
       // Cancelled by the caller while the body was read: not a failure, as in the catch below.
       if (signal?.aborted) return null;
-      logger.warn('Jev request failed', { status: response.status, errorType, ...logContext });
+      logger.warn('Classifier request failed', { status: response.status, errorType, ...logContext });
       onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
 
     const body = (await response.json()) as { answers?: Record<string, unknown> };
-    const answers: Record<string, JevAnswer> = {};
+    const answers: Record<string, DecisionAnswer> = {};
     const unusable: string[] = [];
     for (const [key, question] of Object.entries(questions)) {
       const answer = readAnswer(question, body.answers?.[key]);
@@ -265,7 +217,7 @@ export const requestJevAnswers = async (
       }
     }
     if (unusable.length > 0) {
-      logger.warn('Jev answered with no usable probability', {
+      logger.warn('Classifier answered with no usable probability', {
         questions: unusable.slice(0, 5),
         unusable: unusable.length,
         of: Object.keys(questions).length,
@@ -283,7 +235,7 @@ export const requestJevAnswers = async (
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     // The error's name only: a reply that isn't JSON fails with a message quoting it,
     // and it can echo the request.
-    logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
+    logger.warn(`Classifier request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
       ...logContext,
     });

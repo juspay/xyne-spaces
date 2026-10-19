@@ -14,7 +14,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { askDecision } from '@/services/decision/ask';
 import { isPrivateDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
 import type { RunRole } from '@/services/otel/decisionMetrics';
-import type { JevQuestion } from '@/services/queryIntent/jevClient';
+import type { DecisionQuestion } from '@/services/decision/types';
 
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
@@ -280,7 +280,7 @@ async function scoreWithJev(
       description: normalizePromptText(input.description, JEV_NEW_TICKET_DESCRIPTION_LENGTH),
     },
   };
-  const questions: Record<string, JevQuestion> = {};
+  const questions: Record<string, DecisionQuestion> = {};
   candidates.forEach((candidate, i) => {
     const quoted = quoteCandidate(candidate);
     questions[`same${i}`] = {

@@ -4,10 +4,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
 import { askDecision } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
-import {
-  type JevChoiceQuestion,
-  type JevFailure,
-} from '@/services/queryIntent/jevClient';
+import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 
 export interface AssistantRouteAction {
   id: string;
@@ -137,7 +134,7 @@ const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConf
 };
 
 const failureReason = (
-  failure: JevFailure | undefined,
+  failure: AskFailure | undefined,
   signal?: AbortSignal
 ): UnavailableReason => {
   switch (failure?.kind) {
@@ -202,13 +199,13 @@ export const routeAssistantMessage = async (
     ...prompt.order(actions).map((action) => [action.id, action.description]),
     [NONE_ID, prompt.none],
   ]);
-  const question: JevChoiceQuestion = {
+  const question: ChoiceQuestion = {
     type: 'choice',
     instructions: prompt.instructions,
     criteria,
   };
 
-  let failure: JevFailure | undefined;
+  let failure: AskFailure | undefined;
   const answers = await askDecision('assistant_route', { text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
     onFailure: (f) => {
       failure = f;

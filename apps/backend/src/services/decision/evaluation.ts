@@ -1,5 +1,5 @@
 import { confidenceBucket, recordAgreement, recordRun } from '@/services/otel/decisionMetrics';
-import type { JevAnswer, JevQuestion } from '@/services/queryIntent/jevClient';
+import type { DecisionAnswer, DecisionQuestion } from './types';
 import {
   COMPARE_JOB,
   EVALUATE_JOB,
@@ -33,8 +33,8 @@ export function compareInBackground(
   feature: QuestionFeature,
   liveEngine: DecisionEngine,
   state: string | Record<string, unknown>,
-  questions: Record<string, JevQuestion>,
-  liveAnswers: Record<string, JevAnswer> | null
+  questions: Record<string, DecisionQuestion>,
+  liveAnswers: Record<string, DecisionAnswer> | null
 ): void {
   decisionEvaluationQueue.add(COMPARE_JOB, { feature, liveEngine, state, questions, liveAnswers });
 }
@@ -70,7 +70,7 @@ export async function compare({ feature, liveEngine, state, questions, liveAnswe
   const shadowRuns = await Promise.all(
     others.map((engine) => askEngine(engine, feature, state, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true }))
   );
-  const runs: Pick<EngineRun<Record<string, JevAnswer>>, 'engine' | 'answer' | 'model'>[] = [
+  const runs: Pick<EngineRun<Record<string, DecisionAnswer>>, 'engine' | 'answer' | 'model'>[] = [
     { engine: liveEngine, answer: liveAnswers },
   ];
   for (const run of shadowRuns) {
@@ -87,7 +87,7 @@ export async function compare({ feature, liveEngine, state, questions, liveAnswe
 }
 
 /** Comparable across engines: a yes/no at 0.5, a choice by id, a score by level. */
-const answerLabel = (answer: JevAnswer): string =>
+const answerLabel = (answer: DecisionAnswer): string =>
   answer.type === 'noul' ? String(answer.noul >= 0.5) : answer.type === 'choice' ? answer.choice : String(answer.level);
 
 const comparedAnswer = <T>(task: DecisionTask<T>, run: EngineRun<T>): ComparedAnswer => ({
