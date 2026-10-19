@@ -632,6 +632,49 @@ export async function fetchRouteTable(w: AnalyticsWindow): Promise<RouteRow[]> {
   });
 }
 
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+interface JudgeSummarySqlRow {
+  backend: string;
+  runs: number;
+  calls: bigint | null;
+  failed: bigint | null;
+  compactions: bigint | null;
+}
+
+export function judgeSummarySql(w: AnalyticsWindow): Prisma.Sql {
+  return Prisma.sql`
+    SELECT
+      r."judgeBackend"         AS backend,
+      count(*)::int            AS runs,
+      SUM(r."judgeCalls")      AS calls,
+      SUM(r."judgeFailed")     AS failed,
+      SUM(r."compactionCalls") AS compactions
+    FROM "agent_runs" r
+    WHERE ${windowPredicate(w)}
+      AND r."judgeBackend" IS NOT NULL
+    GROUP BY r."judgeBackend"
+    ORDER BY runs DESC
+  `;
+}
+
+export async function fetchJudgeSummary(w: AnalyticsWindow): Promise<JudgeSummaryRow[]> {
+  const rows = await runAnalytics<JudgeSummarySqlRow>(judgeSummarySql(w));
+  return rows.map((r) => ({
+    backend: r.backend,
+    runs: n0(r.runs),
+    calls: n0(Number(r.calls ?? 0)),
+    failed: n0(Number(r.failed ?? 0)),
+    compactions: n0(Number(r.compactions ?? 0)),
+  }));
+}
+
 
 /** "The agent said it could not do it". String.raw + a bind: a Prisma.sql template cooks the backslashes away. */
 export const APOLOGETIC_PATTERN = String.raw`\m(I couldn|I can\W?t|I don\W?t have|sorry|unable to|I am not able|I cannot|I do not have|I don\W?t know|no findings|I was unable)`;

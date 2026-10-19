@@ -58,7 +58,7 @@ import {
 } from "../../lib/api";
 import type { AgentLight } from "../../lib/types";
 import { cn } from "../../lib/utils";
-import { priceRow, computeCostSavings } from "../lib/modelPricing";
+import { priceRow, computeCostSavings, computeXorSavings } from "../lib/modelPricing";
 import { Skeleton } from "./ui/Skeleton";
 import { Tabs, type TabItem } from "./ui/Tabs";
 import { useAdminStatus } from "../hooks/useAdminStatus";
@@ -68,6 +68,7 @@ import {
   useAgentsTop,
   useMetricsResource,
   useRoutes,
+  useJudge,
   useRunDaily,
   useSentiment,
   useSummary,
@@ -508,6 +509,9 @@ function OverviewTab({ scope, onAgent }: { scope: MetricsScopeParams; onAgent: (
         )}
         <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Cost saved by using open models" skeleton={<RowsSkeleton rows={3} />} />}>
           <CostSavingsCard scope={scope} />
+        </LazyCard>
+        <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Cost saved by using Xor" skeleton={<RowsSkeleton rows={3} />} />}>
+          <XorSavingsCard scope={scope} />
         </LazyCard>
         <LazyCard minHeight={260} placeholder={<CardPlaceholder title="Model time by route and model" skeleton={<TableSkeleton rows={4} cols={8} />} />}>
           <RoutesCard scope={scope} />
@@ -1265,6 +1269,97 @@ function fmtUsd(n: number | null): string {
   if (n == null) return "—";
   if (n >= 100) return `$${n.toFixed(0)}`;
   return `$${n.toFixed(2)}`;
+}
+
+function XorSavingsCard({ scope }: { scope: MetricsScopeParams }): ReactElement {
+  const judge = useJudge(scope);
+  const rows = judge.data?.rows ?? [];
+  const savings = computeXorSavings(rows);
+  const hasData = rows.length > 0;
+  const pill = "inline-flex items-center rounded-full border px-2 py-[1px] text-[10.5px] font-semibold";
+
+  const items: Kpi[] = [
+    {
+      key: "saved",
+      label: "Saved by Xor",
+      icon: Coins,
+      value: fmtUsd(savings.saved),
+      line: <span>Judge-cost + compaction overhead</span>,
+    },
+    {
+      key: "calls",
+      label: "Xor/Jev judge calls",
+      icon: Coins,
+      value: fmtInt(savings.xorCalls),
+      line: <span>Across {fmtInt(savings.xorRuns)} runs</span>,
+    },
+    {
+      key: "compaction",
+      label: "Xor compactions",
+      icon: Coins,
+      value: fmtInt(savings.xorCompactions),
+      line: <span>Handled by Xor, not the pre-Xor path</span>,
+    },
+  ];
+
+  return (
+    <MetricsCard
+      title="Cost saved by using Xor"
+      subtitle="Xor/Jev handles judge decisions and compaction in-harness instead of an LLM-as-judge. The saving splits into judge-cost (measured calls, modeled rates) and avoided pre-Xor compaction overhead (modeled)."
+      loading={!judge.data && !judge.error}
+      busy={judge.isPlaceholder}
+      footnote={
+        <>
+          Judge-cost saving = Xor/Jev calls × (LLM-judge − Xor per-call rate); compaction saving = Xor compactions × a modeled pre-Xor overhead. Per-call rates are pinned config, so both lines are modeled; the call and compaction counts are measured. Runs before judge accounting (or not yet backfilled) carry no backend and are excluded.
+        </>
+      }
+    >
+      {judge.error ? (
+        <PanelError error={judge.error} onRetry={judge.refetch} />
+      ) : !hasData ? (
+        <p className="py-8 text-center text-[13px] text-xyne-fg-muted">No runs recorded a judge backend in this window yet.</p>
+      ) : (
+        <>
+          <KpiStrip items={items} cols="grid-cols-1 @min-[420px]:grid-cols-3" />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wider text-xyne-fg-tertiary">
+                  <th className="py-2 pr-3 text-left font-medium">Backend</th>
+                  <th className="py-2 pr-3 text-left font-medium" />
+                  <th className="py-2 pr-3 text-right font-medium">Runs</th>
+                  <th className="py-2 pr-3 text-right font-medium">Judge calls</th>
+                  <th className="py-2 pr-3 text-right font-medium">Failed</th>
+                  <th className="py-2 pr-3 text-right font-medium">Compactions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savings.byBackend.map((r) => {
+                  const xor = ["xor", "jev", "ournormaljev"].includes(r.backend.toLowerCase());
+                  return (
+                    <tr key={r.backend} className="border-t border-xyne-border-subtle">
+                      <td className="py-2 pr-3 font-mono text-[11.5px] font-semibold">{r.backend}</td>
+                      <td className="py-2 pr-3">
+                        {xor ? (
+                          <span className={`${pill} border-xyne-success-border bg-xyne-success-bg text-xyne-success-fg`}>xor</span>
+                        ) : (
+                          <span className={`${pill} border-xyne-info-border bg-xyne-info-bg text-xyne-info-fg`}>llm</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.runs)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{fmtInt(r.calls)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-xyne-fg-muted">{fmtInt(r.failed)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-xyne-fg-muted">{fmtInt(r.compactions)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </MetricsCard>
+  );
 }
 
 function CostSavingsCard({ scope }: { scope: MetricsScopeParams }): ReactElement {

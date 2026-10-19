@@ -62,6 +62,52 @@ export function priceRow(model: string | null, runs: number, t: TokenCounts): Pr
   };
 }
 
+export const XOR_BACKENDS = new Set(["xor", "jev", "ournormaljev"]);
+
+export const LLM_JUDGE_COST_PER_CALL = 0.05;
+export const XOR_JUDGE_COST_PER_CALL = 0.0002;
+export const PRE_XOR_COMPACTION_OVERHEAD_PER_CALL = 0.1;
+
+export interface JudgeRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+export interface XorSavings {
+  xorRuns: number;
+  xorCalls: number;
+  xorCompactions: number;
+  judgeSaving: number;
+  compactionSaving: number;
+  saved: number;
+  byBackend: JudgeRow[];
+}
+
+export function isXorBackend(backend: string): boolean {
+  return XOR_BACKENDS.has(backend.trim().toLowerCase());
+}
+
+export function computeXorSavings(rows: JudgeRow[]): XorSavings {
+  const xorRows = rows.filter((r) => isXorBackend(r.backend));
+  const xorRuns = xorRows.reduce((a, r) => a + r.runs, 0);
+  const xorCalls = xorRows.reduce((a, r) => a + r.calls, 0);
+  const xorCompactions = xorRows.reduce((a, r) => a + r.compactions, 0);
+  const judgeSaving = xorCalls * (LLM_JUDGE_COST_PER_CALL - XOR_JUDGE_COST_PER_CALL);
+  const compactionSaving = xorCompactions * PRE_XOR_COMPACTION_OVERHEAD_PER_CALL;
+  return {
+    xorRuns,
+    xorCalls,
+    xorCompactions,
+    judgeSaving,
+    compactionSaving,
+    saved: judgeSaving + compactionSaving,
+    byBackend: [...rows].sort((a, b) => b.calls - a.calls),
+  };
+}
+
 export interface CostSavings {
   baselineModel: string;
   openRuns: number;

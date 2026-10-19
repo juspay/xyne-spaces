@@ -6458,6 +6458,19 @@ export interface RoutesResponse {
   rows: RouteRow[];
 }
 
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+export interface JudgeResponse {
+  window: WindowInfo;
+  rows: JudgeSummaryRow[];
+}
+
 export interface MetricsSentiment extends AgentSentiment {
   /** Runs with a non-null llmRetries — the denominator of retriedRate. */
   retriesKnown: number;
@@ -6926,6 +6939,10 @@ export function fetchMetricsActiveAgents(scope: MetricsQueryScope, signal?: Abor
 
 export function fetchMetricsRoutes(scope: MetricsQueryScope, signal?: AbortSignal): Promise<RoutesResponse> {
   return metricsGet(scope.userId, metricsUrl("/routes", scope), signal);
+}
+
+export function fetchMetricsJudge(scope: MetricsQueryScope, signal?: AbortSignal): Promise<JudgeResponse> {
+  return metricsGet(scope.userId, metricsUrl("/judge", scope), signal);
 }
 
 /** Exactly one agent must be selected — the server answers 400 otherwise. */
