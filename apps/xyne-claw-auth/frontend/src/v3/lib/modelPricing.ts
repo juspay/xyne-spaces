@@ -12,10 +12,17 @@ export interface ModelCard {
 
 export const BASELINE_MODEL = "claude-opus-5-5";
 
+const OPEN_RATE: ModelRate = { inPerM: 0.15, outPerM: 0.5, cacheReadPerM: 0.03, cacheWritePerM: 0 };
+
 export const MODEL_CARD: Record<string, ModelCard> = {
   "claude-opus-5-5": { open: false, rate: { inPerM: 4, outPerM: 20, cacheReadPerM: 0.2, cacheWritePerM: 5 } },
+  "claude-opus-5": { open: false, rate: { inPerM: 5, outPerM: 25, cacheReadPerM: 0.25, cacheWritePerM: 6.25 } },
+  "claude-opus-4-8": { open: false, rate: { inPerM: 15, outPerM: 75, cacheReadPerM: 1.5, cacheWritePerM: 18.75 } },
   "claude-sonnet-5-5": { open: false, rate: { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75 } },
-  "private-large-spaces": { open: true, rate: { inPerM: 0.15, outPerM: 0.5, cacheReadPerM: 0.03, cacheWritePerM: 0 } },
+  "claude-sonnet-4-5": { open: false, rate: { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75 } },
+  "private-large-spaces": { open: true, rate: OPEN_RATE },
+  "glm-private-claw": { open: true, rate: OPEN_RATE },
+  "kimi-k3": { open: true, rate: OPEN_RATE },
 };
 
 export interface TokenCounts {
@@ -91,7 +98,18 @@ export function isXorBackend(backend: string): boolean {
 }
 
 export function computeXorSavings(rows: JudgeRow[]): XorSavings {
-  const xorRows = rows.filter((r) => isXorBackend(r.backend));
+  const merged = new Map<string, JudgeRow>();
+  for (const r of rows) {
+    const key = isXorBackend(r.backend) ? "xor" : r.backend;
+    const slot = merged.get(key) ?? { backend: key, runs: 0, calls: 0, failed: 0, compactions: 0 };
+    slot.runs += r.runs;
+    slot.calls += r.calls;
+    slot.failed += r.failed;
+    slot.compactions += r.compactions;
+    merged.set(key, slot);
+  }
+  const byBackend = [...merged.values()].sort((a, b) => b.calls - a.calls);
+  const xorRows = byBackend.filter((r) => isXorBackend(r.backend));
   const xorRuns = xorRows.reduce((a, r) => a + r.runs, 0);
   const xorCalls = xorRows.reduce((a, r) => a + r.calls, 0);
   const xorCompactions = xorRows.reduce((a, r) => a + r.compactions, 0);
@@ -104,7 +122,7 @@ export function computeXorSavings(rows: JudgeRow[]): XorSavings {
     judgeSaving,
     compactionSaving,
     saved: judgeSaving + compactionSaving,
-    byBackend: [...rows].sort((a, b) => b.calls - a.calls),
+    byBackend,
   };
 }
 
