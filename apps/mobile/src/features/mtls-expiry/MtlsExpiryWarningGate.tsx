@@ -12,8 +12,7 @@ import { MtlsExpiryWarningBottomSheet } from './MtlsExpiryWarningBottomSheet';
  */
 export function MtlsExpiryWarningGate(): ReactElement | null {
   const { isEnrolled, isEnrollmentLoading } = useEnrollment();
-  const enabled =
-    !skipsDeviceEnrollmentGate() && isEnrolled === true && !isEnrollmentLoading;
+  const enabled = !skipsDeviceEnrollmentGate() && isEnrolled === true && !isEnrollmentLoading;
   const { visible, daysLeft, notAfterIso, dismiss } = useMtlsExpiryWarning(enabled);
 
   if (daysLeft == null || notAfterIso == null) return null;

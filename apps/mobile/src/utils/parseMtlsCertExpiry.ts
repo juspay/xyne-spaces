@@ -48,7 +48,12 @@ function readTlv(
  * RFC 5280 §4.1.2.5: UTCTime / GeneralizedTime with seconds and trailing Z, no fractions.
  * Returns ISO-8601 UTC, or null.
  */
-function parseAsn1Time(buf: Uint8Array, offset: number, length: number, tag: number): string | null {
+function parseAsn1Time(
+  buf: Uint8Array,
+  offset: number,
+  length: number,
+  tag: number,
+): string | null {
   const text = String.fromCharCode(...buf.subarray(offset, offset + length));
   let yyyymmddhhmmssZ: string;
   if (tag === 0x17) {

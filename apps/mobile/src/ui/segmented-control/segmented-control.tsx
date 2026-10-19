@@ -26,6 +26,21 @@ export type SegmentedControlOption<Id extends string> = {
   icon?: ComponentType<{ active: boolean }>;
 };
 
+/** Colours, as class names, for a surface other than the Spaces one. */
+export type SegmentedControlClassNames = {
+  track: string;
+  indicator: string;
+  activeLabel: string;
+  inactiveLabel: string;
+};
+
+const SPACES_CLASS_NAMES: SegmentedControlClassNames = {
+  track: 'bg-spaces-surface',
+  indicator: 'bg-spaces-background',
+  activeLabel: 'text-spaces-foreground',
+  inactiveLabel: 'text-spaces-muted',
+};
+
 export type SegmentedControlProps<Id extends string> = {
   options: readonly SegmentedControlOption<Id>[];
   value: Id;
@@ -33,6 +48,8 @@ export type SegmentedControlProps<Id extends string> = {
   accessibilityLabel: string;
   /** Called after the indicator has come to rest. */
   onSettled?: () => void;
+  /** Defaults to the Spaces colours. */
+  classNames?: SegmentedControlClassNames;
 };
 
 /**
@@ -57,6 +74,7 @@ export function SegmentedControl<Id extends string>({
   onValueChange,
   accessibilityLabel,
   onSettled,
+  classNames = SPACES_CLASS_NAMES,
 }: SegmentedControlProps<Id>): ReactElement {
   const [width, setWidth] = useState(0);
   const selectedIndex = Math.max(
@@ -102,12 +120,12 @@ export function SegmentedControl<Id extends string>({
       accessibilityRole='tablist'
       accessibilityLabel={accessibilityLabel}
       onLayout={onLayout}
-      className='flex-row rounded-full bg-spaces-surface'
+      className={cn('flex-row rounded-full', classNames.track)}
       style={{ padding: PADDING }}
     >
       <Animated.View
         pointerEvents='none'
-        className='absolute rounded-full bg-spaces-background'
+        className={cn('absolute rounded-full', classNames.indicator)}
         style={[styles.indicator, indicatorStyle]}
       />
 
@@ -132,7 +150,7 @@ export function SegmentedControl<Id extends string>({
               numberOfLines={1}
               className={cn(
                 'text-[15px] font-medium',
-                active ? 'text-spaces-foreground' : 'text-spaces-muted',
+                active ? classNames.activeLabel : classNames.inactiveLabel,
               )}
             >
               {option.label}
