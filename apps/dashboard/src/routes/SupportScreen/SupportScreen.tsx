@@ -5918,8 +5918,6 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
-  // deskSource.appName on the ticket is copied from the source row and can be the desk's name;
-  // the sources endpoint resolves the installed app's real name (same one Desk Settings shows).
   const ticketInstalledAppId = (
     ticket?.metadata as { deskSource?: { installedAppId?: string } } | null
   )?.deskSource?.installedAppId;
@@ -5940,7 +5938,6 @@ export const SupportTicketDetail = ({
     appSources.find(src => src.installedAppId === ticketInstalledAppId) ??
     (appSources.length === 1 ? appSources[0] : undefined)
   )?.displayName;
-  // The ticket stores only the Slack channel id; names come from the workspace channel list.
   const ticketSlackChannelId = (ticket?.metadata as { slackChannelId?: string } | null)
     ?.slackChannelId;
   const { data: slackChannels } = useQuery({

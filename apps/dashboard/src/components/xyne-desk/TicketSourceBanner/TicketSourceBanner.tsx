@@ -63,10 +63,6 @@ type TicketSourceMetadata = {
   source?: string;
 };
 
-/**
- * Per-ticket origin wins over channel type: Slack and app tickets can sit in an EMAIL desk
- * (see getTicketReplyKind in SupportScreen), so the channel alone would mislabel them.
- */
 const resolveSource = (
   channelType: ChannelType | undefined,
   metadata: TicketSourceMetadata | null | undefined,
@@ -122,8 +118,6 @@ export const resolveTicketSource = (
   );
   const { emailProvider, emailAddress, slackChannelName, appName } = external;
   const logo = source.key === 'email' && emailProvider ? LOGOS[emailProvider] : LOGOS[source.key];
-  // App: ticket metadata's appName is copied from the source row, which can just be the desk's
-  // name; the installed app's real name (resolved by the caller) wins.
   const name =
     source.key === 'app'
       ? (appName ?? source.name)
