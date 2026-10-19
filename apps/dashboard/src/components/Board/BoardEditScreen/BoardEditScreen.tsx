@@ -513,11 +513,14 @@ const BoardEditScreen = ({
       // Clone remap ids must be STABLE across effect re-runs: regenerating uuids
       // per run breaks the dedupe below and appends the whole set again (2x bug).
       const newlyClonedSourceIds = new Set<string>();
+      // Copies made from a previous source form, removed if the source form changes.
+      let staleCloneIds = new Set<string>();
       if (isDuplicating) {
         // Keyed on the form the fields are read from (mapping, else board metadata), so the
         // mapping arriving after the metadata does not reset the map and re-append the fields.
         const sourceFormId = customFieldsFormId;
         if (cloneFieldIdMapRef.current.formId !== sourceFormId) {
+          staleCloneIds = new Set(cloneFieldIdMapRef.current.map.values());
           cloneFieldIdMapRef.current = { formId: sourceFormId, map: new Map() };
         }
         for (const field of activeResolvedCustomFields) {
@@ -565,24 +568,26 @@ const BoardEditScreen = ({
       setFields(prev => {
         const customFieldsById = new Map(customFields.map(field => [field.id, field]));
 
-        const updatedFields = prev.map(field => {
-          const updatedCustomField = customFieldsById.get(field.id);
-          if (!updatedCustomField) return field;
+        const updatedFields = prev
+          .filter(field => !staleCloneIds.has(field.id))
+          .map(field => {
+            const updatedCustomField = customFieldsById.get(field.id);
+            if (!updatedCustomField) return field;
 
-          const mergedField: TicketField = {
-            ...field,
-            ...updatedCustomField,
-            order: field.order,
-            visibleInCreate: field.visibleInCreate,
-          };
+            const mergedField: TicketField = {
+              ...field,
+              ...updatedCustomField,
+              order: field.order,
+              visibleInCreate: field.visibleInCreate,
+            };
 
-          if (updatedCustomField.options) {
-            return mergedField;
-          }
+            if (updatedCustomField.options) {
+              return mergedField;
+            }
 
-          const { options: _removed, ...fieldWithoutOptions } = mergedField;
-          return fieldWithoutOptions;
-        });
+            const { options: _removed, ...fieldWithoutOptions } = mergedField;
+            return fieldWithoutOptions;
+          });
 
         const existingIds = new Set(updatedFields.map(field => field.id));
         const newFields = customFields.filter(field => !existingIds.has(field.id));

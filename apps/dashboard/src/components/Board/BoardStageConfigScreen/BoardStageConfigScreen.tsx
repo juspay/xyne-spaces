@@ -827,6 +827,11 @@ const BoardStageConfigScreen = ({
     graphLayoutRef.current = layout;
   }, []);
 
+  // A load replaces the whole transition map when it finishes, so an edge edited while it runs
+  // would be overwritten. Edits from the editor are refused until the load is done.
+  const isTransitionsLoadingRef = useRef(false);
+  isTransitionsLoadingRef.current = isTransitionsLoading;
+
   // ── Unchanged-save detection ────────────────────────────────────────────────
   // What Next would write for stages and transitions, as comparable strings. Next skips saving
   // entirely when nothing differs from what was last loaded or saved: a no-op save still
@@ -1032,18 +1037,21 @@ const BoardStageConfigScreen = ({
       setIsTransitionsLoading(true);
       try {
         let loaded: Awaited<ReturnType<typeof readBoardTransitions>> | null = null;
+        let lastAttemptFailed = false;
         const justSynced =
           Date.now() - (lastTransitionsSyncAt.get(boardId) ?? 0) < RECENT_SYNC_WINDOW_MS;
         for (const [attempt, delayMs] of TRANSITIONS_LOAD_RETRY_DELAYS_MS.entries()) {
           await wait(delayMs);
           try {
             loaded = await readBoardTransitions(boardId);
+            lastAttemptFailed = false;
           } catch (err) {
             logger.error(LogEvent.FRONTEND_ERROR, {
               type: 'migrated_console_error',
               message: String('Failed to load stage transitions:'),
               error: err,
             });
+            lastAttemptFailed = true;
             continue;
           }
           if (loaded.length > 0 || !justSynced) {
@@ -1058,8 +1066,11 @@ const BoardStageConfigScreen = ({
             break;
           }
         }
-        // Every attempt threw: leave the maps untouched; Save and form actions start a new load.
-        if (!loaded) return false;
+        // Every attempt threw, or a just-synced board read empty and the retries then threw:
+        // that empty result may be the lagging read, and applying it would blank the editor
+        // (and a save would delete every transition). Leave the maps untouched; Save and form
+        // actions start a new load.
+        if (!loaded || (loaded.length === 0 && lastAttemptFailed)) return false;
         applyLoadedTransitions(loaded, stagesRef.current);
         transitionsSyncedRef.current = true;
         // Only transitions: a load can finish after stage edits (made during the load, or
@@ -1370,6 +1381,30 @@ const BoardStageConfigScreen = ({
       });
     },
     [],
+  );
+
+  // Editor-facing versions of the two transition edits: refused while a load is running (it
+  // would overwrite them). Form-action handlers call the raw versions and are gated by
+  // syncStageTransitions instead.
+  const toggleTransitionWhenLoaded = useCallback(
+    (fromTempId: number, toTempId: number, enabled: boolean) => {
+      if (isTransitionsLoadingRef.current) {
+        toast.info('Transitions are still loading. Try again in a moment.');
+        return;
+      }
+      toggleTransition(fromTempId, toTempId, enabled);
+    },
+    [toggleTransition],
+  );
+  const updateTransitionMetaWhenLoaded = useCallback(
+    (fromTempId: number, toTempId: number, meta: Partial<TransitionMeta>) => {
+      if (isTransitionsLoadingRef.current) {
+        toast.info('Transitions are still loading. Try again in a moment.');
+        return;
+      }
+      updateTransitionMeta(fromTempId, toTempId, meta);
+    },
+    [updateTransitionMeta],
   );
 
   const handleStartEditEta = useCallback((stage: Stage) => {
@@ -2755,8 +2790,8 @@ const BoardStageConfigScreen = ({
                     onLayoutChange={handleGraphLayoutChange}
                     transitionsByTempId={transitionsByTempId}
                     transitionsMeta={transitionsMeta}
-                    toggleTransition={toggleTransition}
-                    updateTransitionMeta={updateTransitionMeta}
+                    toggleTransition={toggleTransitionWhenLoaded}
+                    updateTransitionMeta={updateTransitionMetaWhenLoaded}
                     onUpdateStage={handleUpdateStage}
                     onDeleteStage={handleDeleteStage}
                     onAddStage={() => handleAddStageAt(stages.length)}

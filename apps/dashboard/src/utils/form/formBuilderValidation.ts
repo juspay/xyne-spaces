@@ -72,6 +72,7 @@ const findGlobalNameIssue = (
   existingGlobalFields: ExistingGlobalField[],
 ): FieldIssue | null => {
   if (!field.definitionId || field.definitionId === field.membershipId) return null;
+  if (!existingGlobalFields.some(existing => existing.id === field.definitionId)) return null;
 
   const name = field.fieldName.trim();
   const taken = existingGlobalFields.some(

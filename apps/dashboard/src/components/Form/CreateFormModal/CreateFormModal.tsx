@@ -101,9 +101,10 @@ export const CreateFormModal = ({
     if (!open) return;
     setIsEditing(false);
     setProjectSearch('');
+    if (!projectId) setSelectedProjectId('');
     setContextType(form?.contextType ?? FormContextType.BOARD);
     setEntityType(form?.entityType ?? FormEntityType.TICKET);
-  }, [open, form?.id, form?.contextType, form?.entityType]);
+  }, [open, form?.id, form?.contextType, form?.entityType, projectId]);
 
   useEffect(() => {
     if (projectId) {

@@ -119,14 +119,18 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
   );
   const hasError = issues.length > 0;
 
-  const selectedGlobalField: GlobalFieldSuggestion | undefined = field.definitionId
-    ? {
-        id: field.definitionId,
-        fieldName: field.fieldName,
-        fieldType: field.fieldType,
-        ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
-      }
-    : undefined;
+  // A legacy field carries its own definition (definitionId === membershipId) and belongs to
+  // this form only: it is not shown as shared and has no "create a copy".
+  const isSharedField = !!field.definitionId && field.definitionId !== field.membershipId;
+  const selectedGlobalField: GlobalFieldSuggestion | undefined =
+    isSharedField && field.definitionId
+      ? {
+          id: field.definitionId,
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+          ...(field.fieldEnum ? { fieldEnum: field.fieldEnum } : {}),
+        }
+      : undefined;
 
   const renderBranchPanel = (option: BuilderFieldOption): ReactElement | null => {
     const branchFields = ctx.getBranchFields(option.id);
