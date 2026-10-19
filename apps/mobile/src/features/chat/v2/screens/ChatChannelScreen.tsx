@@ -946,12 +946,13 @@ const ChatChannelScreen = (): ReactElement => {
 
       const parsedTicket = parseTicketMd(conversation.ticket_md ?? null);
       const resolvedTicketId = conversation.ticketId || parsedTicket?.id || '';
-      // Parent reply wins over ticket details (same as v3 channelThreadOpen).
-      if (resolvedTicketId && !paintRow.parentConversationId) {
+      if (resolvedTicketId) {
+        const replyCount = paintRow.replyPreview?.count ?? paintRow.replyCount ?? 0;
         router.push({
           pathname: '/ticket/[ticketId]',
           params: {
             ticketId: resolvedTicketId,
+            selectedTab: replyCount > 0 ? 'thread' : 'overview',
             channelId: conversation.channelId || channelId || '',
             threadId: conversation.conversationId,
           },

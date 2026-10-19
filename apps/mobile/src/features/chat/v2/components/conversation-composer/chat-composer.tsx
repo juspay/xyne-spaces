@@ -154,7 +154,7 @@ const ChatComposerPressable = ({
   onPress,
   onLongPress,
 }: ChatComposerPressableProps): ReactElement => {
-  const { item, kind, shouldIgnoreBubblePress } = useConversationComposer();
+  const { item, kind, shouldIgnoreBubblePress, paintRow } = useConversationComposer();
   const router = useRouter();
   const resolvedTicketId = item.ticketId || parseTicketMd(item.ticket_md ?? null)?.id || '';
   // Bot messages can own replies and must use the same thread-opening gesture
@@ -174,10 +174,13 @@ const ChatComposerPressable = ({
       return;
     }
     if (resolvedTicketId) {
+      const replyCount =
+        paintRow?.replyPreview?.count ?? paintRow?.replyCount ?? item.replyCount ?? 0;
       router.push({
         pathname: '/ticket/[ticketId]',
         params: {
           ticketId: resolvedTicketId,
+          selectedTab: replyCount > 0 ? 'thread' : 'overview',
           channelId: item.channelId,
           threadId: item.conversationId,
         },

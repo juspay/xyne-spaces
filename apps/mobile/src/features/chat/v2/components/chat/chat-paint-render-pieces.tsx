@@ -658,7 +658,6 @@ const PaintParentPreview = memo(function PaintParentPreview({
   return (
     <Pressable
       onPress={openThread}
-      onPressIn={(event: GestureResponderEvent) => event.stopPropagation()}
       disabled={!canOpenThread}
       accessibilityRole={canOpenThread ? 'button' : undefined}
       accessibilityLabel={`Replied to thread, ${text}`}

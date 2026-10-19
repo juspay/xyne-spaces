@@ -59,11 +59,12 @@ describe('channelThreadOpen', (): void => {
     assert.equal('messageId' in open.params && open.params.messageId, false);
   });
 
-  it('sends ticket conversations to Ticket Details without a jump target', (): void => {
+  it('sends tickets with replies to the thread tab', (): void => {
     const open = channelThreadOpen(
       modelOf({
         messageType: 'SYSTEM',
         metadata: { ticketId: 't-1' },
+        replyCount: 2,
         ticketPreview: {
           ticketId: 't-1',
           title: 'Release',
@@ -79,7 +80,29 @@ describe('channelThreadOpen', (): void => {
     if (open.pathname !== '/ticket/[ticketId]') return;
     assert.equal(open.params.ticketId, 't-1');
     assert.equal(open.params.selectedTab, 'thread');
-    assert.equal('messageId' in open.params, false);
+  });
+
+  it('sends tickets with no replies to overview', (): void => {
+    const open = channelThreadOpen(
+      modelOf({
+        messageType: 'SYSTEM',
+        metadata: { ticketId: 't-1' },
+        replyCount: 0,
+        latestReplierIds: [],
+        ticketPreview: {
+          ticketId: 't-1',
+          title: 'Release',
+          description: null,
+          statusLabel: 'Created',
+          priority: null,
+        },
+      }),
+      'ch',
+      1,
+    );
+    assert.equal(open.pathname, '/ticket/[ticketId]');
+    if (open.pathname !== '/ticket/[ticketId]') return;
+    assert.equal(open.params.selectedTab, 'overview');
   });
 
   it('keeps a parent-preview tap as a jump into that thread', (): void => {
@@ -89,32 +112,6 @@ describe('channelThreadOpen', (): void => {
         parentConversationId: 'parent-thread',
         parentMessageId: 'parent-msg',
         parentMarkdown: 'orig',
-      }),
-      'ch',
-      1,
-    );
-    assert.equal(open.pathname, '/chat/[channelId]/[threadId]');
-    if (open.pathname !== '/chat/[channelId]/[threadId]') return;
-    assert.equal(open.params.threadId, 'parent-thread');
-    assert.equal(open.params.messageId, 'parent-msg');
-  });
-
-  it('prefers parent-preview over ticket details for ticket replies', (): void => {
-    const open = channelThreadOpen(
-      modelOf({
-        conversationId: 'reply-1',
-        parentConversationId: 'parent-thread',
-        parentMessageId: 'parent-msg',
-        parentMarkdown: 'orig',
-        messageType: 'SYSTEM',
-        metadata: { ticketId: 't-1' },
-        ticketPreview: {
-          ticketId: 't-1',
-          title: 'Release',
-          description: null,
-          statusLabel: 'Created',
-          priority: null,
-        },
       }),
       'ch',
       1,
