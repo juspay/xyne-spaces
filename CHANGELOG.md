@@ -1,3 +1,10 @@
+## [1.501.0-release-20261015.5](https://github.com/juspay/xyne-spaces/compare/v1.501.0-release-20261015.4...v1.501.0-release-20261015.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* stop cmd+K browse crashing on large channel lists ([#3178](https://github.com/juspay/xyne-spaces/issues/3178)) ([02d9fae](https://github.com/juspay/xyne-spaces/commit/02d9fae62ec85113012a3664a893857f9dd81174))
+
 ## [1.501.0-release-20261015.4](https://github.com/juspay/xyne-spaces/compare/v1.501.0-release-20261015.3...v1.501.0-release-20261015.4) (2026-10-16)
 
 
