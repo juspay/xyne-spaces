@@ -133,6 +133,7 @@ import { Channel, ChannelVisibility } from '@xyne/shared';
 import { resolveOrCreateDmChannelId } from '../../../utils/searchNavigation';
 import { toast } from 'sonner';
 import Avatar from '../../ui/Avatar/Avatar';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
@@ -1811,6 +1812,7 @@ function UserResultCard({
           >
             {result.title}
           </p>
+          <GuestLabel role={user?.role} />
           {isDeactivated && (
             <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
               Deactivated

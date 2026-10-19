@@ -150,6 +150,7 @@ const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'conversations',
   'conversation_participants',
   'delayed_messages',
+  'calls',
   'call_participants',
   'canvas_participants',
   'canvases',

@@ -63,19 +63,16 @@ export class CallsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CallWhereInput> {
-    const ctx = this.ctx
-    if (isGuestContext(ctx)) {
-      const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
-
-      return {
-        channel: {
-          workspaceId: this.ctx.workspaceId ?? '',
-          id: { in: channelIds },
-        },
-      }
-    }
-
-    const { recordingIds, callIds } = await this.getSharedCallIds()
+    const [channelWhere, { recordingIds, callIds }] = await Promise.all([
+      isGuestContext(this.ctx)
+        ? getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx).then(
+            (channelIds): Prisma.ChannelWhereInput => ({ id: { in: channelIds } }),
+          )
+        : Promise.resolve<Prisma.ChannelWhereInput>({
+            participants: { some: { userId: this.ctx.userId } },
+          }),
+      this.getSharedCallIds(),
+    ])
 
     return {
       AND: [
@@ -83,7 +80,7 @@ export class CallsACL extends BaseQueryACL<
           OR: [
             { createdByUserId: this.ctx.userId },
             { participants: { some: { userId: this.ctx.userId } } },
-            { channel: { participants: { some: { userId: this.ctx.userId } } } },
+            { channel: channelWhere },
             ...(recordingIds.length
               ? [{ callType: CallType.HEADLESS, id: { in: recordingIds } }]
               : []),
@@ -93,7 +90,8 @@ export class CallsACL extends BaseQueryACL<
             { callType: CallType.HEADLESS, visibility: CallVisibility.PUBLIC },
           ],
         },
-        { workspaceId: this.ctx.workspaceId },
+        // Guests fail closed on a missing workspace, as before; members keep their filter.
+        { workspaceId: isGuestContext(this.ctx) ? (this.ctx.workspaceId ?? '') : this.ctx.workspaceId },
       ],
     }
   }

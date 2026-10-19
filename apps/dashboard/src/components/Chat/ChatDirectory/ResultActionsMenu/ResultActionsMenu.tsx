@@ -15,9 +15,7 @@
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { WorkspaceRole } from '@xyne/shared';
 import { cn } from '../../../../utils/classNames';
-import { useAuth } from '../../../../hooks/useAuth';
 import type { CommandTarget } from '../SlashCommands/QuickDmComposer';
 import { RESULT_ACTIONS, type ResultActionKind } from './actionsRegistry';
 
@@ -37,8 +35,6 @@ export const ResultActionsMenu: React.FC<ResultActionsMenuProps> = ({
   onClose,
   anchorRef,
 }) => {
-  // Guests can join calls but not start them — they get Message only.
-  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const [anchorRect, setAnchorRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
   // A select already ran the action; only a real dismiss (Esc / click-outside) should refocus search.
   const justSelectedRef = useRef(false);
@@ -101,9 +97,7 @@ export const ResultActionsMenu: React.FC<ResultActionsMenuProps> = ({
 
   if (!target) return null;
 
-  const actions = isGuest
-    ? RESULT_ACTIONS.filter(action => action.kind !== 'call')
-    : RESULT_ACTIONS;
+  const actions = RESULT_ACTIONS;
 
   return (
     <DropdownMenu.Root

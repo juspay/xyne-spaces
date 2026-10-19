@@ -458,7 +458,6 @@ export const GUEST_HIDDEN_PATHS: ReadonlySet<string> = new Set([
   '/knowledge-base',
   '/apps',
   '/releaseManager',
-  '/recordings',
 ]);
 
 // Paths shown in the toolbar by default (before any user customization).

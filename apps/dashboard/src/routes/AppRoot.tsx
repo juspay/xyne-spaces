@@ -1694,11 +1694,9 @@ export const router = createBrowserRouter([
               {
                 path: 'recordings',
                 element: (
-                  <GuestBlockedRoute>
-                    <ToolbarProtectedRoute path='/recordings'>
-                      <RecordingsRoute />
-                    </ToolbarProtectedRoute>
-                  </GuestBlockedRoute>
+                  <ToolbarProtectedRoute path='/recordings'>
+                    <RecordingsRoute />
+                  </ToolbarProtectedRoute>
                 ),
               },
               {

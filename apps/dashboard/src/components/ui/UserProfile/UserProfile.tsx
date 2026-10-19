@@ -33,7 +33,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { channelService } from '../../../services/Chat/channelService';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { useAuth } from '../../../hooks/useAuth';
-import { WorkspaceRole } from '@xyne/shared';
+import { GuestLabel } from '../GuestLabel';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { useZero } from '../../../hooks/useZero';
@@ -407,6 +407,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             >
               {user?.name || 'Unknown User'}
             </h2>
+            <GuestLabel role={user?.role} />
             {isUserDeactivated(user) && (
               <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground shrink-0'>
                 Deactivated
@@ -524,19 +525,16 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 <MessageSquare className='size-4' />
                 <span>Message</span>
               </Button>
-              {/* Guests can join calls but not start them */}
-              {currentUser?.role !== WorkspaceRole.GUEST && (
-                <Button
-                  onClick={handleHuddleClick}
-                  data-track-category='USER_PROFILE'
-                  data-track-name='START_HUDDLE_WITH_USER'
-                  className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
-                  variant='outline'
-                >
-                  <PhoneDefault className='size-4' />
-                  <span>Huddle</span>
-                </Button>
-              )}
+              <Button
+                onClick={handleHuddleClick}
+                data-track-category='USER_PROFILE'
+                data-track-name='START_HUDDLE_WITH_USER'
+                className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
+                variant='outline'
+              >
+                <PhoneDefault className='size-4' />
+                <span>Huddle</span>
+              </Button>
             </div>
           )}
         </div>
