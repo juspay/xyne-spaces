@@ -478,6 +478,16 @@ in
     '';
   };
 
+  # One `docker run` for contributors without Nix (Linux only). Built from the
+  # same definitions as the dev shell and the services bundle.
+  packages.dev-image = lib.mkIf pkgs.stdenv.isLinux (
+    import ./nix/image.nix {
+      inherit pkgs lib runtimePackages prismaEnvironment;
+      bundle = config.process-compose."dev-image-services".outputs.package;
+      smokeTest = config.packages.nix-smoke-test;
+    }
+  );
+
   checks = let
     sourceCheck = name: nativeBuildInputs: command: pkgs.runCommand name {
       inherit nativeBuildInputs;
