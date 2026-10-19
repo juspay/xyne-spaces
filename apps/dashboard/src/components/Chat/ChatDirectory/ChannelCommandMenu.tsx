@@ -4319,7 +4319,10 @@ const ChannelCommandMenuContent = ({
     // e.g. `from:ar` -> Tab/Right completes to `from:Arjun Rao`, mirroring Enter's mention
     // handling. Must run before tab-cycling and the ArrowRight ticket-preview shortcut below,
     // neither of which know about mention mode.
-    if ((e.key === 'Tab' || e.key === 'ArrowRight') && mentionSearchType !== null) {
+    if (
+      ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowRight') &&
+      mentionSearchType !== null
+    ) {
       e.preventDefault();
       e.stopPropagation();
       acceptHighlightedMention();
