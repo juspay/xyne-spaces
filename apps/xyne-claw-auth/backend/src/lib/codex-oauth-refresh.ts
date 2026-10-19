@@ -16,6 +16,7 @@
 import { decrypt, encrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
+import { OAuthRefreshBusyError, refreshUnderLock } from "./oauth-refresh-lock.js";
 import { parseCodexCred, type CodexOAuthBundle } from "./codex-creds.js";
 
 export const CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
@@ -57,6 +58,7 @@ export async function getValidCodexBearer(
   credKey: string,
   cred: CodexCredRow,
   persist: (enc: EncryptedCred) => Promise<void>,
+  reload?: () => Promise<CodexCredRow | null>,
 ): Promise<string> {
   if (!cred.encryptedKey || !cred.iv || !cred.authTag) {
     throw new CodexAuthError("Codex credential is missing");
@@ -74,7 +76,13 @@ export async function getValidCodexBearer(
   if (existing) return existing;
 
   const refreshToken = bundle.refresh_token;
-  const p = (async () => {
+  const alreadyRefreshed = async (): Promise<string | null> => {
+    const row = reload ? await reload().catch(() => null) : null;
+    if (!row?.encryptedKey || !row.iv || !row.authTag) return null;
+    const latest = parseCodexCred(decrypt(row.encryptedKey, row.iv, row.authTag, CONFIG.encryptionKey));
+    return latest.refresh_token && latest.refresh_token !== refreshToken ? latest.access_token : null;
+  };
+  const doRefresh = async (): Promise<string> => {
     let res: Response;
     try {
       res = await fetch(CODEX_OAUTH_TOKEN_URL, {
@@ -106,9 +114,15 @@ export async function getValidCodexBearer(
     const enc = encrypt(JSON.stringify(next), CONFIG.encryptionKey);
     await persist({ encryptedKey: enc.ciphertext, iv: enc.iv, authTag: enc.authTag });
     return next.access_token;
-  })().finally(() => {
-    inflight.delete(credKey);
-  });
+  };
+  const p = refreshUnderLock(credKey, alreadyRefreshed, doRefresh)
+    .catch((err: unknown) => {
+      if (err instanceof OAuthRefreshBusyError) throw new CodexAuthError(err.message);
+      throw err;
+    })
+    .finally(() => {
+      inflight.delete(credKey);
+    });
 
   inflight.set(credKey, p);
   return p;

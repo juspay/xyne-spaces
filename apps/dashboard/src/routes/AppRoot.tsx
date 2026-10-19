@@ -64,6 +64,7 @@ import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
+import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
@@ -104,6 +105,7 @@ import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/
 import { ActivityCalendarWeekView } from '../components/Activity/ActivityCalendarWeekView';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
+import { FullPageKeepAliveOutlet } from './FullPageKeepAliveOutlet';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
@@ -132,47 +134,11 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
+import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
-import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
-import { logger } from '../utils/logger';
-import {
-  zeroQueryLatency,
-  zeroQueryOperations,
-  zeroMutationLatency,
-  zeroMutationOperations,
-  zeroRunLatency,
-  zeroRunOperations,
-  safeRecordMetric,
-} from '../services/otel';
-
-const dashboardInstrumentation: Instrumentation = {
-  logger,
-  metrics: {
-    recordLatency: (name: string, durationMs: number, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.latency') {
-          zeroQueryLatency.record(durationMs, attributes);
-        } else if (name === 'zero.mutation.latency') {
-          zeroMutationLatency.record(durationMs, attributes);
-        } else if (name === 'zero.run.latency') {
-          zeroRunLatency.record(durationMs, attributes);
-        }
-      });
-    },
-    incrementCounter: (name: string, attributes?: Record<string, string>) => {
-      safeRecordMetric(() => {
-        if (name === 'zero.query.operations') {
-          zeroQueryOperations.add(1, attributes);
-        } else if (name === 'zero.mutation.operations') {
-          zeroMutationOperations.add(1, attributes);
-        } else if (name === 'zero.run.operations') {
-          zeroRunOperations.add(1, attributes);
-        }
-      });
-    },
-  },
-};
+import { InstrumentationProvider } from '@xyne/shared/hooks';
+import { dashboardInstrumentation } from '../services/otel/dashboardInstrumentation';
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
 import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
@@ -926,10 +892,15 @@ const AppRoot = (): ReactElement => {
                                     className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
                                     <AppSidebar />
-                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                    <main
+                                      className='flex-1 no-scrollbar overflow-auto'
+                                      // Cmd+K grows into this box as it expands to full page.
+                                      data-cmdk-full-page
+                                    >
                                       <EditWarningModal />
-                                      <Outlet />
+                                      <FullPageKeepAliveOutlet />
                                     </main>
+                                    <SiteMap />
                                   </div>
                                 </Panel>
                                 <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
@@ -950,10 +921,15 @@ const AppRoot = (): ReactElement => {
                             className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
                             <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
+                            <main
+                              className='flex-1 no-scrollbar overflow-auto'
+                              // Cmd+K grows into this box when it expands to full-page search.
+                              data-cmdk-full-page
+                            >
                               <EditWarningModal />
-                              <Outlet />
+                              <FullPageKeepAliveOutlet />
                             </main>
+                            <SiteMap />
                           </div>
                         </AppSidebarHost>
                       )}
@@ -989,7 +965,7 @@ const AppRoot = (): ReactElement => {
                           {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
                           <BrowserPageLayer />
-                          <GlobalCommandMenu aiOverview ticketScreenScope />
+                          <GlobalCommandMenu aiOverview ticketScreenScope fullPageSearch />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1812,7 +1788,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'support',
                   element: (
-                    <ResourceProtectedRoute resourceName='SUPPORT'>
+                    <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
                       <SupportListRestore>
                         <SaveRoute
                           keyword='support'
@@ -1841,6 +1817,7 @@ export const router = createBrowserRouter(
                         {
                           path: ':ticketId',
                           element: <Outlet />,
+                          children: [{ path: ':canvasId', element: <Outlet /> }],
                         },
                       ],
                     },
@@ -2003,6 +1980,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ToolbarProtectedRoute path='/apps'>
                       <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'apps-marketplace',
+                  element: (
+                    <ToolbarProtectedRoute path='/apps-marketplace'>
+                      <AppsMarketplaceScreen />
                     </ToolbarProtectedRoute>
                   ),
                 },

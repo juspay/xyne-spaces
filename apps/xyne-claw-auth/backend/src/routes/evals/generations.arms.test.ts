@@ -27,15 +27,15 @@ describe("eval generation arms", () => {
   });
 
   it("drops malformed switch specs instead of forwarding them", () => {
-    const parsed = parseAgentSpecs({ agentSlug: "xyne", optimizations: "all; rm -rf /", judgeBackend: "jev!!" });
-    expect("specs" in parsed && parsed.specs[0]).toMatchObject({ optimizations: null, judgeBackend: null });
+    const parsed = parseAgentSpecs({ agentSlug: "xyne", optimizations: "all; rm -rf /" });
+    expect("specs" in parsed && parsed.specs[0]).toMatchObject({ optimizations: null });
   });
 
   it("labels the arm for display without touching the real model", () => {
-    expect(armDisplayModel({ genModel: null, optimizations: null, judgeBackend: null })).toBeNull();
-    expect(armDisplayModel({ genModel: "kimi-latest", optimizations: null, judgeBackend: null })).toBe("kimi-latest");
-    expect(armDisplayModel({ genModel: null, optimizations: "none", judgeBackend: null })).toBe("default · opts:none");
-    expect(armDisplayModel({ genModel: "kimi-latest", optimizations: "all,-jev_compaction", judgeBackend: "ourtrainedjev" }))
-      .toBe("kimi-latest · opts:all,-jev_compaction · judge:ourtrainedjev");
+    expect(armDisplayModel({ genModel: null, optimizations: null })).toBeNull();
+    expect(armDisplayModel({ genModel: "kimi-latest", optimizations: null })).toBe("kimi-latest");
+    expect(armDisplayModel({ genModel: null, optimizations: "none" })).toBe("default · opts:none");
+    expect(armDisplayModel({ genModel: "kimi-latest", optimizations: "all,-jev_compaction" }))
+      .toBe("kimi-latest · opts:all,-jev_compaction");
   });
 });

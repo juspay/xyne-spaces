@@ -37,6 +37,11 @@ export interface StoredProject extends StoredEntity {
   description?: string;
 }
 
+/** A mentionable user group (team). `alias` is what `@` mentions show. */
+export interface StoredUserGroup extends StoredEntity {
+  alias: string;
+}
+
 export interface StoredTicket {
   alias: string;
   title: string;
@@ -59,6 +64,7 @@ export interface StoredUser {
   channels: Record<string, StoredConversation>;
   dms: Record<string, StoredConversation>;
   tickets: Record<string, StoredTicket>;
+  userGroups?: Record<string, StoredUserGroup>;
 }
 
 function cloneValue<T>(value: T): T {

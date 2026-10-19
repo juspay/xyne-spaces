@@ -172,12 +172,25 @@ const ChannelItemV2 = memo(
       </div>
     );
 
+    // The badge and incident dot have no text of their own, so screen readers hear them here; the
+    // name stays the label, the one people (and Buddy) know the conversation by.
+    const dmDescription = [
+      'Direct message',
+      unreadCount > 0 && !isActive && `${unreadCount > 9 ? '9+' : unreadCount} unread`,
+      hasSlashCommandArtifactSideEffect && 'Active incident',
+    ]
+      .filter(Boolean)
+      .join(', ');
+
     return (
       <Link
         className=''
         draggable={false}
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
+        aria-label={isDM ? displayName : undefined}
+        aria-description={isDM ? dmDescription : 'Channel'}
+        aria-current={isActive ? 'page' : undefined}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
         data-track-label='Open channel'
@@ -249,7 +262,7 @@ const ChannelItemV2 = memo(
                     e.stopPropagation();
                   }}
                   onPointerDown={e => e.stopPropagation()}
-                  aria-label='Channel section options'
+                  aria-label={`Sidebar options for ${displayName}`}
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='CHANNEL_SECTION_MENU'
                 >
@@ -321,6 +334,7 @@ const ChannelItemV2 = memo(
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              aria-label={`Close ${displayName}`}
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'

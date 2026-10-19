@@ -58,6 +58,7 @@ export const BoardSubmenu = ({
           const isSelected = selectedBoards.includes(board.id);
           return (
             <Button
+              aria-pressed={isSelected}
               key={board.id}
               variant='ghost'
               onClick={() => handleBoardToggle(board.id)}

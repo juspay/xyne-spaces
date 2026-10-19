@@ -21,6 +21,7 @@ import {
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import { NOTE_TEXT_MAX_CHARS, NOTE_TURNS_MAX, noteParentId, noteTurnsOf, replyRunning } from "../lib/chat-notes.js";
 import {
   agentFacets,
   buildAgentHandoff,
@@ -1246,16 +1247,9 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
 
-function evalRunSwitches(
-  req: Request,
-  optimizations: unknown,
-  judgeBackend: unknown,
-): { optimizations?: string; judgeBackend?: string } {
+function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?: string } {
   if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
-  return {
-    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
-    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
-  };
+  return typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {};
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
@@ -1274,7 +1268,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext,
       providerOverride,
       optimizations: requestedOptimizations,
-      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1296,7 +1289,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
       optimizations?: unknown;
-      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1894,7 +1886,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           ? agentCredRefreshTarget(agent.id, "claude", credRow as { sharedCredentialId?: string | null })
           : userCredRefreshTarget(userId, "claude", credRow as { sharedCredentialId?: string | null });
         try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
+          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist, target.reload);
         } catch (err) {
           log.warn("[agent-chat] Claude OAuth refresh failed — credential likely needs reconnect:", err instanceof Error ? err.message : err);
         }
@@ -2052,7 +2044,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
       // /compact shrinks the session before answering, not just summarises it.
       ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
-      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
+      ...evalRunSwitches(req, requestedOptimizations),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";
@@ -2953,6 +2945,70 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   }
 });
 
+// POST /agents/:slug/chat/:convId/notes — append turns the dashboard answered
+// itself (Buddy acting on screen) as finished messages, so they show in the
+// history like any other turn. No run: the agent's session never sees them, and
+// the rows are chained after the reply the user is on (`parentId`, else the
+// latest), so the next turn continues that path and resumes the same session.
+router.post("/:slug/chat/:convId/notes", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    // Direct chats only: a Spaces thread id is shared with other users' turns.
+    if (!isDirectChatConversation(convId)) {
+      res.status(400).json({ success: false, error: "Only direct chats take notes" });
+      return;
+    }
+    const turns = noteTurnsOf(req.body);
+    if (!turns) {
+      res.status(400).json({
+        success: false,
+        error: `turns must be 1-${NOTE_TURNS_MAX} non-empty request/reply pairs of up to ${NOTE_TEXT_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const existing = await chatMessageRepository.findByConversation(convId);
+    const aliases = new Set(getRequesterAliases(req));
+    if (existing.length > 0 && !existing.some((m) => aliases.has(m.userId))) {
+      res.status(404).json({ success: false, error: "Conversation not found" });
+      return;
+    }
+    if (replyRunning(existing)) {
+      res.status(409).json({ success: false, error: "A reply is still running" });
+      return;
+    }
+
+    // The caller's own rows only: someone else's reply in the thread is no parent for these.
+    const parentId = noteParentId(
+      existing.filter((m) => aliases.has(m.userId)),
+      (req.body as { parentId?: unknown }).parentId,
+    );
+    const ids = await chatMessageRepository.appendTurns({
+      conversationId: convId,
+      agentSlug: slug,
+      userId,
+      orgId: agent.orgId,
+      parentId,
+      turns,
+    });
+    log.info(`[agent-chat/notes] conv=${convId} slug=${slug} rows=${ids.length}`);
+    res.json({ success: true, conversationId: convId, parentId, messageIds: ids });
+  } catch (err) {
+    log.error(`[agent-chat/notes] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to save notes" });
+  }
+});
+
 // POST /agents/:slug/chat/:convId/fork — copy a finished conversation into a
 // NEW conversation owned by the requesting user.
 router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
@@ -3413,6 +3469,17 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // that's already been generated, before the first live `delta` arrives.
     const runningMsg = visible.find((m) => m.role === "assistant" && m.status === "running");
 
+    // The caller's OWN in-flight run, so a reattached tab can Stop it
+    // (XYNE-66347). Prefer the run linked to the streaming placeholder, else
+    // the newest not-yet-linked run on this agent. Never another user's run.
+    const ownRunning = agentRuns.filter(
+      (r) => r.status === "running" && !r.completedAt && liveUserAliases.includes(r.userId),
+    );
+    const runSessionId = (
+      ownRunning.find((r) => runningMsg && r.chatMessageId === runningMsg.id) ??
+      ownRunning.find((r) => !r.chatMessageId && r.agentSlug === slug)
+    )?.sessionId;
+
     // Redis pub/sub has no replay, so a mid-run joiner would otherwise miss
     // every card emitted before it connected.
     const uiFlowsByMsgId: Record<string, unknown[]> = {};
@@ -3427,6 +3494,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         agentSlug: slug,
         invocationsByMsgId,
         inProgress,
+        ...(runSessionId ? { runSessionId } : {}),
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
         ...(runningMsg
           ? {

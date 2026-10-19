@@ -95,6 +95,7 @@ import { Dialog } from '../ui/Dialog/Dialog';
 import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
@@ -542,6 +543,9 @@ const RadarPanel = (): ReactElement => {
     othersMode,
   ]);
 
+  // Under full-page search the feed is out of sight: not reloaded there, and reloaded on return, as
+  // coming back to the page did.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!radarEnabled) return;
     void load();
@@ -555,14 +559,16 @@ const RadarPanel = (): ReactElement => {
     // feed request. visibilitychange alone covers tab switches and app
     // switches; the sequence guard in load() handles anything that still
     // overlaps.
+    const watch = watchShown(pageCoverage, () => void load(true));
     const refresh = (): void => {
-      if (document.visibilityState === 'visible') void load(true);
+      if (document.visibilityState === 'visible' && watch.shown()) void load(true);
     };
     document.addEventListener('visibilitychange', refresh);
     return () => {
       document.removeEventListener('visibilitychange', refresh);
+      watch.stop();
     };
-  }, [load, radarEnabled]);
+  }, [load, radarEnabled, pageCoverage]);
 
   // The header tabs are exclusive; a stored "both" (or "neither") from the old
   // checkboxes opens on Pending me rather than a merged list the paged Pending
@@ -3485,6 +3491,7 @@ const RadarPanel = (): ReactElement => {
           <h1 className='text-xl font-bold text-foreground'>Radar</h1>
           <button
             title='Refresh the feed'
+            aria-label='Refresh the feed'
             className='p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
             disabled={loading}
             data-track-category='RADAR'
@@ -3495,6 +3502,7 @@ const RadarPanel = (): ReactElement => {
           </button>
           <button
             title='Radar settings'
+            aria-label='Radar settings'
             aria-haspopup='dialog'
             className='p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
             data-track-category='RADAR'
@@ -3715,6 +3723,7 @@ const RadarPanel = (): ReactElement => {
               <Bug className='size-4 text-foreground' />
               <span className='text-sm font-bold text-foreground'>Thread debug</span>
               <button
+                aria-label='Close thread debug'
                 className='ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='CLOSE_THREAD_DEBUG'

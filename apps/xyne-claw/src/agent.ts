@@ -19,7 +19,7 @@ import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
-import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
+import { compactionExtension, fitTask, setCompactionSubmitTool } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
@@ -48,13 +48,13 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
-import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
+import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-trace.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
-import { jevThreshold } from "./jev.js";
+import { xorThreshold } from "./xor.js";
 import { attachRunMessages, pinRunTask } from "./run-context.js";
 import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
 import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
-import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
+import { assessAnswer, type AnswerAssessment } from "./xor-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
   BlobIndex,
@@ -473,6 +473,19 @@ export class ProviderTerminalError extends Error {
   }
 }
 
+const REFUSAL_TURN_ERROR = "An unknown error occurred";
+
+export function isRefusalTurnError(provider: string | undefined, detail: string): boolean {
+  return provider === "claude" && detail.trim() === REFUSAL_TURN_ERROR;
+}
+
+export class ProviderRefusalError extends Error {
+  constructor(public readonly provider: string) {
+    super(`Provider ${provider} declined to answer this conversation (stop_reason refusal)`);
+    this.name = "ProviderRefusalError";
+  }
+}
+
 /**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
@@ -486,6 +499,7 @@ export class ProviderTerminalError extends Error {
  * substrings here can't turn a user stop into a fallback.
  */
 export function isTransientProviderError(err: unknown): boolean {
+  if (err instanceof ProviderRefusalError) return false;
   if (err instanceof ProviderStallError) return true;
   if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
@@ -765,7 +779,9 @@ const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
 const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
   ["claude-opus-4-8", 1_000_000],
   ["claude-opus-5", 1_000_000],
+  ["claude-opus-5-5", 1_000_000],
   ["claude-sonnet-5", 1_000_000],
+  ["claude-sonnet-5-5", 1_000_000],
   ["claude-fable-5", 1_000_000],
   ["claude-fable-5-1", 1_000_000],
   ["gpt-5.6-luna", 272_000],
@@ -3326,8 +3342,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "message_end") {
       flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
-      modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
+      if (msg?.role === "assistant") modelActive = false; // turn finished — next turn_start re-arms the watchdog
       if (msg?.role === "assistant" && msg.usage) {
         tokenUsage.input += msg.usage.input ?? 0;
         tokenUsage.output += msg.usage.output ?? 0;
@@ -4098,7 +4114,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     "Your last message did not deliver the result the user asked for — it described what you " +
     "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
     "and then give the COMPLETE answer. Do not restate the plan. " +
-    "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own.";
+    "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own." +
+    (task.trim() ? `\n\nThe task you are completing, verbatim:\n${fitTask(task)}` : "");
   const maxContinuations = optEnabled("jev_auto_continue")
     ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
     : 0;
@@ -4151,7 +4168,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     if (
       optEnabled("auto_continue_strict") &&
       answerAssessment.verdict === "partial" &&
-      answerAssessment.finished >= jevThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
+      answerAssessment.finished >= xorThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
     ) {
       break;
     }
@@ -4291,6 +4308,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       provider: provider ?? "spaces",
       agentSlug: progressMeta?.agentSlug ?? "unknown",
     });
+    if (isRefusalTurnError(provider, lastTurnErrorDetail)) {
+      throw new ProviderRefusalError(provider ?? "spaces");
+    }
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
   const parts = turnParts.finish();

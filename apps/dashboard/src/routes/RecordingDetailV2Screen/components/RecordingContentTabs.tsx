@@ -12,11 +12,18 @@
  * reveals its chevron and opens the picker on click.
  */
 
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { CaptionOn, ChevronBigDown, ListAiGenerated, Spinner } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
+import { Button } from '../../../components/ui/Button/Button';
 import { Popover } from '../../../components/ui/Popover';
+import {
+  SummaryTemplateTourStep,
+  isSummaryTemplateMenuStep,
+  summaryTemplateTour,
+  useSummaryTemplateTour,
+} from '../../../components/SummaryTemplateTour';
 import {
   SummaryTemplateGlyph,
   SummaryTemplateMenu,
@@ -51,6 +58,10 @@ interface RecordingContentTabsProps {
   onRegenerate?: () => void;
   onOpenTemplates?: () => void;
   onNewTemplate?: () => void;
+  /** A one-time offer, after a template switch, to make that template the default. */
+  defaultTemplateOffer?: { templateId: string; name: string } | null;
+  onAcceptDefaultTemplateOffer?: () => void;
+  onDismissDefaultTemplateOffer?: () => void;
 }
 
 const TAB_INDICATOR_ID = 'recording-content-tab-indicator';
@@ -70,9 +81,25 @@ export const RecordingContentTabs = ({
   onRegenerate,
   onOpenTemplates,
   onNewTemplate,
+  defaultTemplateOffer = null,
+  onAcceptDefaultTemplateOffer,
+  onDismissDefaultTemplateOffer,
 }: RecordingContentTabsProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+  // The template tour's first steps point into the dropdown, so it opens for them.
+  const { activeStep: tourStep } = useSummaryTemplateTour();
+  const isTourInMenu = isSummaryTemplateMenuStep(tourStep);
+  useEffect(() => {
+    if (isTourInMenu) setIsTemplateMenuOpen(true);
+  }, [isTourInMenu]);
+  // The offer popover anchors to the summary segment without being its trigger,
+  // since the template menu already owns that role.
+  const [summaryTrigger, setSummaryTrigger] = useState<HTMLButtonElement | null>(null);
+  const offerAnchor = useMemo(
+    () => (summaryTrigger ? { current: summaryTrigger } : undefined),
+    [summaryTrigger],
+  );
   const [hasInteracted, setHasInteracted] = useState(false);
   const pillTransition =
     shouldReduceMotion || !hasInteracted
@@ -157,6 +184,7 @@ export const RecordingContentTabs = ({
 
     const trigger = (
       <button
+        ref={setSummaryTrigger}
         type='button'
         role='tab'
         aria-selected={isActive}
@@ -233,36 +261,113 @@ export const RecordingContentTabs = ({
 
     if (!onOpenTemplates || !hasSummary) return trigger;
 
+    const offer =
+      defaultTemplateOffer && offerAnchor ? (
+        <Popover
+          trigger={<span aria-hidden className='hidden' />}
+          anchor={offerAnchor}
+          open={!isTemplateMenuOpen}
+          onOpenChange={open => {
+            if (!open) onDismissDefaultTemplateOffer?.();
+          }}
+          side='bottom'
+          align='start'
+          sideOffset={8}
+          collisionPadding={12}
+          showArrow
+          onOpenAutoFocus={event => event.preventDefault()}
+          // The template menu hands focus back to the tab as it closes, which lands
+          // outside this popover; only a click elsewhere, Escape or a button closes it.
+          onFocusOutside={event => event.preventDefault()}
+          className='w-72 rounded-xl border-border p-3.5 shadow-xl'
+        >
+          <p className='text-sm font-semibold'>
+            Use {defaultTemplateOffer.name} for future recordings?
+          </p>
+          <p className='mt-1 text-xs text-muted-foreground'>
+            New recordings will be summarised with it. You can change this anytime in Preferences ›
+            Recordings.
+          </p>
+          <div className='mt-3 flex items-center justify-end gap-2'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              onClick={() => onDismissDefaultTemplateOffer?.()}
+              className='text-muted-foreground'
+              data-track-category='RecordingDetailV2'
+              data-track-name='dismiss_default_template_offer'
+            >
+              Not now
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              onClick={() => onAcceptDefaultTemplateOffer?.()}
+              data-track-category='RecordingDetailV2'
+              data-track-name='accept_default_template_offer'
+              data-track-metadata={JSON.stringify({ templateId: defaultTemplateOffer.templateId })}
+            >
+              Set as default
+            </Button>
+          </div>
+        </Popover>
+      ) : null;
+
     return (
-      <Popover
-        trigger={trigger}
-        open={isActive && isTemplateMenuOpen}
-        onOpenChange={open => {
-          if (isActive) {
-            if (open) onTemplateMenuOpen?.();
-            setIsTemplateMenuOpen(open);
-          }
-        }}
-        side='bottom'
-        align='start'
-        sideOffset={8}
-        className='w-60 rounded-xl border-border p-1.5 shadow-xl'
-      >
-        <SummaryTemplateMenu
-          selectedTemplate={selectedTemplate}
-          templates={templates}
-          isLoading={templatesLoading}
-          isRegenerating={isRegenerating}
-          regeneratingTemplateId={regeneratingTemplateId}
-          canRegenerate={Boolean(selectedTemplate?.id)}
-          onSelectTemplate={templateId => onTemplateSelect?.(templateId)}
-          onRegenerate={() => onRegenerate?.()}
-          onOpenTemplates={onOpenTemplates}
-          onNewTemplate={() => onNewTemplate?.()}
-          onRequestClose={() => setIsTemplateMenuOpen(false)}
-          trackCategory='RecordingDetailV2'
-        />
-      </Popover>
+      <>
+        <Popover
+          trigger={trigger}
+          open={isActive && isTemplateMenuOpen}
+          onOpenChange={open => {
+            if (isActive) {
+              if (open) onTemplateMenuOpen?.();
+              // Closing the dropdown by hand ends a tour that was pointing into it.
+              if (!open && isTourInMenu) summaryTemplateTour.dismiss();
+              setIsTemplateMenuOpen(open);
+            }
+          }}
+          side='bottom'
+          align='start'
+          sideOffset={8}
+          className='w-60 rounded-xl border-border p-1.5 shadow-xl'
+        >
+          <SummaryTemplateMenu
+            selectedTemplate={selectedTemplate}
+            templates={templates}
+            isLoading={templatesLoading}
+            isRegenerating={isRegenerating}
+            regeneratingTemplateId={regeneratingTemplateId}
+            canRegenerate={Boolean(selectedTemplate?.id)}
+            onSelectTemplate={templateId => onTemplateSelect?.(templateId)}
+            onRegenerate={() => onRegenerate?.()}
+            onOpenTemplates={onOpenTemplates}
+            onNewTemplate={() => onNewTemplate?.()}
+            onRequestClose={() => setIsTemplateMenuOpen(false)}
+            trackCategory='RecordingDetailV2'
+          />
+          {/* Inside the dropdown's tree so clicking a coachmark does not close it. */}
+          <SummaryTemplateTourStep
+            step='pick-template'
+            target='summary-template-menu-list'
+            side='right'
+            align='start'
+          />
+          <SummaryTemplateTourStep
+            step='new-template'
+            target='summary-template-menu-new'
+            side='right'
+            align='end'
+            showBack
+            onNext={() => {
+              setIsTemplateMenuOpen(false);
+              onNewTemplate?.();
+              summaryTemplateTour.next();
+            }}
+          />
+        </Popover>
+        {offer}
+      </>
     );
   };
 

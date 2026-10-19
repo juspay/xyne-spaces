@@ -9,16 +9,16 @@ import { ClassifiableTicketTypes, BaseTicketType, type ClassifiableTicketType } 
 // Title Generator Prompts
 // ============================================================================
 
-function buildTicketTypeInstructions(): string {
-  const typeDescriptions: Record<ClassifiableTicketType, string> = {
-    [BaseTicketType.Fix]: 'Bug reports, errors, broken functionality, issues, crashes, something not working',
-    [BaseTicketType.Feature]: 'New features, enhancements, additions, improvements, new functionality',
-    [BaseTicketType.Story]: 'User stories (deliverable product work), typically feature-sized, can be planned in sprints',
-    [BaseTicketType.Hotfix]: 'Critical/urgent production issues, outages, blockers requiring immediate attention',
-    [BaseTicketType.Epic]: 'Large initiative or body of work spanning multiple features or sprints',
-  };
+export const TICKET_TYPE_DESCRIPTIONS: Record<ClassifiableTicketType, string> = {
+  [BaseTicketType.Fix]: 'Bug reports, errors, broken functionality, issues, crashes, something not working',
+  [BaseTicketType.Feature]: 'New features, enhancements, additions, improvements, new functionality',
+  [BaseTicketType.Story]: 'User stories (deliverable product work), typically feature-sized, can be planned in sprints',
+  [BaseTicketType.Hotfix]: 'Critical/urgent production issues, outages, blockers requiring immediate attention',
+  [BaseTicketType.Epic]: 'Large initiative or body of work spanning multiple features or sprints',
+};
 
-  return ClassifiableTicketTypes.map((type: ClassifiableTicketType) => `- "${type}": ${typeDescriptions[type] || ''}`).join('\n');
+function buildTicketTypeInstructions(): string {
+  return ClassifiableTicketTypes.map((type: ClassifiableTicketType) => `- "${type}": ${TICKET_TYPE_DESCRIPTIONS[type] || ''}`).join('\n');
 }
 
 function buildTicketTypeOptions(): string {

@@ -15,6 +15,7 @@ export const XyneAIOnboardingHeader = ({ onClose }: XyneAIOnboardingHeaderProps)
         onClick={onClose}
         className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
         title='Skip onboarding'
+        aria-label='Skip onboarding'
         data-track-category='AIOnboarding'
         data-track-name='SkipOnboarding'
       >

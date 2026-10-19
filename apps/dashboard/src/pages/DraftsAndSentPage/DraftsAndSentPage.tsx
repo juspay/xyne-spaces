@@ -50,6 +50,7 @@ const DraftsAndSentPage = (): ReactElement => {
               key={tab.value}
               type='button'
               onClick={() => handleTabChange(tab.value)}
+              data-testid={`drafts-sent-tab-${tab.value}`}
               data-track-category='DRAFTS_AND_SENT_PAGE'
               data-track-name={`switch-tab-${tab.value}`}
               className={cn(
@@ -69,7 +70,7 @@ const DraftsAndSentPage = (): ReactElement => {
         </nav>
       </div>
 
-      <div className='flex-1 min-h-0 overflow-hidden'>
+      <div data-testid='drafts-sent-content' className='flex-1 min-h-0 overflow-hidden'>
         {activeTab === 'drafts' && <DraftsPanel />}
         {activeTab === 'twin' && <TwinDraftsPanel />}
         {activeTab === 'scheduled' && <DelayedMessagesPanel />}

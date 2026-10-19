@@ -130,3 +130,19 @@ test("lineify: malformed JSON (bracket but unparseable) falls back to hard-wrap,
   expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(SPILL_MAX_LINE_CHARS);
   expect(lined.replace(/\n/g, "")).toBe(broken);
 });
+
+test("every tool gets the same large inline cap, prefixed or not", async () => {
+  expect(TOOL_RESULT_INLINE_CAP_BYTES).toBe(128 * 1024);
+  const content = "hit ".repeat(15_000);
+  for (const name of ["Xyne_Spaces__spaces-vespa-search", "Xyne_Spaces__spaces-read-canvas", "Bitbucket__get_file_content", "sandbox-run"]) {
+    expect(await promoteIfOversized(dir, "custom", name, content)).toBe(content);
+  }
+});
+
+test("a result over the cap is saved to a file with a marked preview", async () => {
+  const content = "row\n".repeat(40_000);
+  const out = await promoteIfOversized(dir, "custom", "Bitbucket__get_file_content", content);
+  expect(out).toContain("full result saved to");
+  expect(out).toContain(`Only the first 16384 of ${content.length} chars are shown below. Do not answer from this preview alone`);
+  expect(out).toContain("## Preview (first 16384 chars)");
+});

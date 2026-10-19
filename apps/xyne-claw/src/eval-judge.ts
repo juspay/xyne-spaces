@@ -13,8 +13,7 @@
  */
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
-import { jevAskOn, judgeBackendConfigured, type JevQuestion } from "./jev.js";
-import { resolveJudgeBackend, type JudgeBackendName } from "./judge-backend.js";
+import { xor, xorEnabled, type XorQuestion } from "./xor.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("eval-judge");
@@ -93,7 +92,6 @@ export interface JevJudgeProbabilities {
   empty: number;
 }
 
-const JEV_JUDGE_TIMEOUT_MS = Math.max(1000, Number(process.env["EVAL_JEV_TIMEOUT_MS"] ?? 15_000));
 
 const JEV_CONFIDENT = 0.5;
 const JEV_CONTRADICTS_CONFIDENT = 0.6;
@@ -143,8 +141,10 @@ const JEV_JUDGE_QUESTIONS: Record<keyof JevJudgeProbabilities, string> = {
   empty: "The GENERATED answer is empty, is a refusal, or is completely unrelated to the EXPECTED answer.",
 };
 
-async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Promise<EvalJudgeResult> {
-  if (!judgeBackendConfigured(backend)) return { score: null, reasoning: "judge_unavailable" };
+const XOR_JUDGE_MODELS = new Set(["xor", "jev", "ournormaljev"]);
+
+async function judgeViaXor(input: EvalJudgeInput): Promise<EvalJudgeResult> {
+  if (!xorEnabled()) return { score: null, reasoning: "judge_unavailable" };
   const rubric = (input.prompt && input.prompt.trim()) || DEFAULT_JUDGE_PROMPT;
   const state = [
     rubric,
@@ -157,15 +157,12 @@ async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Pr
     (input.generated || "(empty)").slice(0, 8000),
   ].join("\n");
 
-  const questions: Record<string, JevQuestion> = {};
+  const questions: Record<string, XorQuestion> = {};
   for (const [key, instructions] of Object.entries(JEV_JUDGE_QUESTIONS)) {
     questions[key] = { type: "noul", instructions };
   }
 
-  const answers = await jevAskOn(backend, state, questions, {
-    purpose: "eval-judge",
-    timeoutMs: JEV_JUDGE_TIMEOUT_MS,
-  });
+  const answers = await xor({ state, questions, purpose: "eval-judge" });
   if (!answers) return { score: null, reasoning: "judge_unavailable" };
 
   const probs: Partial<JevJudgeProbabilities> = {};
@@ -177,13 +174,12 @@ async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Pr
   const parts = (Object.keys(JEV_JUDGE_QUESTIONS) as Array<keyof JevJudgeProbabilities>)
     .map((key) => `${key}=${(probs[key] ?? 0).toFixed(2)}`)
     .join(" ");
-  return { score, reasoning: `${backend}: ${parts}`.slice(0, 200) };
+  return { score, reasoning: `xor: ${parts}`.slice(0, 200) };
 }
 
 export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJudgeResult> {
-  const requested = resolveJudgeBackend(input.model);
-  if (!input.copilot?.token && requested && requested !== "llm") {
-    return judgeViaJev(requested, input);
+  if (!input.copilot?.token && XOR_JUDGE_MODELS.has(input.model?.trim().toLowerCase() ?? "")) {
+    return judgeViaXor(input);
   }
   const viaCopilot = !!input.copilot?.token;
   if (!viaCopilot && !LITELLM.apiKey) {

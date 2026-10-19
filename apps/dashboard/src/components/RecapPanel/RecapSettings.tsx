@@ -132,6 +132,7 @@ const ChannelListItem = ({
                 type='button'
                 className='p-3 rounded transition-colors flex-shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent'
                 title={customPrompt ? 'Edit custom recap prompt' : 'Add custom recap prompt'}
+                aria-label={customPrompt ? 'Edit custom recap prompt' : 'Add custom recap prompt'}
                 data-track-category='RECAP_SETTINGS'
                 data-track-name='OPEN_CUSTOM_PROMPT_POPOVER'
               >

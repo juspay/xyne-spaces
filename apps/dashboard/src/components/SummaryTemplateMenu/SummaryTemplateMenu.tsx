@@ -154,7 +154,10 @@ export function SummaryTemplateMenu({
       <p className='px-2.5 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
         Templates
       </p>
-      <div className='thin-scrollbar max-h-72 overflow-y-auto'>
+      <div
+        className='thin-scrollbar max-h-72 overflow-y-auto'
+        data-tour='summary-template-menu-list'
+      >
         {isLoading ? (
           <p className='px-2.5 py-1.5 text-sm text-muted-foreground'>Loading templates…</p>
         ) : (
@@ -246,6 +249,7 @@ export function SummaryTemplateMenu({
         )}
         data-track-category={trackCategory}
         data-track-name='new_summary_template'
+        data-tour='summary-template-menu-new'
       >
         <span
           className={cn(

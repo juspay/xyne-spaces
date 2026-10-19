@@ -235,6 +235,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                   </span>
                 </div>
                 <button
+                  aria-label={`Remove ${file.name}`}
                   onClick={() => removeFile(index)}
                   disabled={disabled}
                   data-track-category='knowledge-base'

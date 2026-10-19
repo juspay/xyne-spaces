@@ -122,3 +122,32 @@ test('rejects a non-URL connect link', () => {
     },
   });
 });
+
+const update = {
+  variant: 'update',
+  agent: { name: 'Ticket Triage', slug: 'ticket-triage' },
+  changes: [
+    { field: 'description', label: 'Description', before: 'Triages', after: 'Routes tickets' },
+    { field: 'systemPrompt', label: 'System prompt', before: 'Old', after: 'New' },
+    { field: 'tools', label: 'Tools', added: ['GitHub'], removed: ['Spaces'] },
+  ],
+  summary: 'Tightening the triage rules',
+  note: 'skipped unknown tools: foo',
+};
+
+test('accepts an update card with scalar, prompt and tool changes', () => {
+  accepts(update);
+});
+
+test('rejects an update card with no changes', () => {
+  rejects({ ...update, changes: [] });
+});
+
+test('rejects an update change on a field the card does not know', () => {
+  rejects({ ...update, changes: [{ field: 'slug', label: 'Slug', after: 'x' }] });
+});
+
+test('rejects draft-only fields on an update card', () => {
+  rejects({ ...update, phase: 'pending' });
+  rejects({ ...update, selected: ['spaces'] });
+});

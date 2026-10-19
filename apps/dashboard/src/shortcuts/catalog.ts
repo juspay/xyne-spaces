@@ -712,6 +712,15 @@ export const shortcuts = {
     description: 'Edit your last message',
     category: 'Composer',
   },
+  'composer.discussionTitle': {
+    keys: 'mod+alt+t',
+    scope: 'global',
+    allowInInputs: true,
+    priority: 100,
+    preventDefault: true,
+    description: 'Add or remove a discussion title',
+    category: 'Composer',
+  },
 
   // ===== HUDDLE SHORTCUTS =====
   'huddle.toggle': {

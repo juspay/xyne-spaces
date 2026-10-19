@@ -18,13 +18,14 @@
 
 import { Router, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { AccessType, MAX_RULES, NotificationStatus } from '@xyne/shared';
+import { AccessType, BoardType, MAX_RULES, NotificationStatus } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
+import { SubTicketController } from '@/controllers/subTicketController';
 import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
 import { callController as callsController } from '@/controllers/callController';
@@ -45,6 +46,7 @@ import { RadarActionError, radarManualActions } from '@/services/radar/radarManu
 import { radarFeedService } from '@/services/radar/radarFeedService';
 import { radarRuleStore } from '@/services/radar/radarRuleStore';
 import { canReadTicket } from '@/services/subTicketLinkService';
+import { channelsDeskTicketsForThreads } from '@/channelsDesk/desk';
 import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
@@ -74,6 +76,7 @@ import { handle } from './handler';
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
 const ticketController = new TicketController();
+const subTicketController = new SubTicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
 // Constructed the way routes/canvas.ts constructs it.
@@ -298,11 +301,27 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/check-duplicate',
     controller: channelController.checkDuplicate,
   },
+  /**
+   * Channels desk tickets for the caller's own threads: status fields only, and only for threads the caller
+   * can open. Refused if any thread isn't theirs.
+   */
+  {
+    method: 'post',
+    path: '/channels-desk/tickets',
+    body: z.object({ conversationIds: z.array(z.string().min(1)).min(1).max(100) }),
+    service: async (req, authData) => {
+      const { conversationIds } = req.body as { conversationIds: string[] };
+      const tickets = await channelsDeskTicketsForThreads(authData.workspaceId, conversationIds);
+      if (!tickets) throw new SdkApiError('forbidden', 'One or more of these conversations are not yours to read.');
+      return { tickets };
+    },
+  },
   {
     method: 'post',
     path: '/tickets',
     middleware: [uploadMultiple],
     controller: ticketController.createTicket,
+    guards: [ticketStageGuard],
     // Multipart turns every field into a string; these two arrive as JSON.
     mapBody: (body) => reviveJsonFields(body, ['metadata', 'dynamicFields']),
   },
@@ -883,6 +902,33 @@ const ROUTES: readonly DirectRoute[] = [
   },
 
   /*
+   * Sub-ticket links: attach an existing ticket under a parent, and detach it.
+   * The same controller as the product's /api/sub-tickets, which is guarded by
+   * session auth alone — every other rule lives in `linkExistingSubTicketTx` and
+   * `unlinkSubTicketTx`: write access to the parent, read access to the child,
+   * manual boards only, no cycles, one parent per ticket, all under a workspace
+   * lock, with the activity, system message and notification committed alongside.
+   * Not the `tickets.createSubTicket` / `updateSubTicket` mutators, which skip
+   * every one of those.
+   */
+  {
+    method: 'post',
+    path: '/sub-tickets/link',
+    controller: subTicketController.linkExisting,
+    body: z.object({
+      ticketId: z.string().min(1),
+      mappedTicketId: z.string().min(1),
+      subTicketTitle: z.string().optional(),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/sub-tickets/unlink',
+    controller: subTicketController.unlink,
+    body: z.object({ mappingId: z.string().min(1) }),
+  },
+
+  /*
    * Desk metrics and the desk report. The controllers enforce access
    * themselves — channel membership, the desk's metricsEnabled preference on
    * the dashboard handlers, and desk owner / channel admin — so nothing is
@@ -954,6 +1000,8 @@ export function createDirectRouter(): Router {
       route.path,
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
+        // Reached by operation id, the v1 handler has already named the call.
+        req.sdkCall ??= { op: `${route.method.toUpperCase()} ${route.path}`, kind: 'direct' };
         for (const guard of route.guards ?? []) await guard(req);
 
         if (route.service) {
@@ -1257,6 +1305,44 @@ async function ticketVisibleGuard(req: Request): Promise<void> {
     !(await canReadTicket(db, { userId: user.id, workspaceId: user.workspaceId, role: user.role }, ticket))
   ) {
     throw SdkApiError.notFound('Ticket');
+  }
+}
+
+/**
+ * A starting stage the board does not have is refused, not replaced.
+ *
+ * The ticket repository falls back to the board's first stage when `stageName`
+ * matches none of its stages, and Flow boards always start at TODO whatever is
+ * sent. The app only ever sends a name it read from the board, so it never sees
+ * either; an API caller types the name, and would get a ticket in a stage it did
+ * not ask for with nothing to say so. The board is named explicitly for the same
+ * reason: without `boardId` the controller picks a default board, and a stage
+ * name cannot be checked against a board nobody chose.
+ */
+async function ticketStageGuard(req: Request): Promise<void> {
+  const body = (req.body ?? {}) as { stageName?: unknown; boardId?: unknown };
+  const stageName = typeof body.stageName === 'string' ? body.stageName : '';
+  if (!stageName) return;
+
+  const boardId = typeof body.boardId === 'string' ? body.boardId : '';
+  if (!boardId) {
+    throw new SdkApiError('validation_failed', 'stageName needs boardId: a stage is checked against the board it is on.');
+  }
+  const board = await db.board.findUnique({ where: { id: boardId }, select: { boardType: true } });
+  if (!board) throw SdkApiError.notFound('Board');
+  if (board.boardType === BoardType.FLOW) {
+    throw new SdkApiError('validation_failed', 'Tickets on a Flow board always start at TODO; omit stageName.');
+  }
+  const stages = await db.stage.findMany({
+    where: { boardId },
+    select: { name: true },
+    orderBy: { sequenceNumber: 'asc' },
+  });
+  if (!stages.some((stage) => stage.name === stageName)) {
+    throw new SdkApiError(
+      'validation_failed',
+      `Board has no stage "${stageName}". Its stages are: ${stages.map((stage) => stage.name).join(', ')}.`,
+    );
   }
 }
 

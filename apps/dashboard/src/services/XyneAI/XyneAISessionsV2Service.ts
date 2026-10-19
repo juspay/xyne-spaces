@@ -401,6 +401,38 @@ export async function updateV2Conversation(
   );
 }
 
+export interface ConversationNote {
+  request: string;
+  reply: string;
+}
+
+/** The rows a save made: user then assistant per turn, the first hung under `parentId`. */
+export interface SavedConversationNotes {
+  conversationId: string;
+  parentId: string | null;
+  messageIds: string[];
+}
+
+/**
+ * Saves turns Buddy answered on screen into a direct chat (`chat-…`) as
+ * finished messages, so they show in the history. No run: the agent never
+ * sees them. `parentId` is the reply the user is on, so the notes follow it.
+ * Rejects with a 409 while a reply in that chat is still running.
+ */
+export async function saveV2ConversationNotes(
+  conversationId: string,
+  turns: readonly ConversationNote[],
+  agentSlug?: string | null,
+  parentId?: string,
+): Promise<SavedConversationNotes> {
+  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
+  const { data } = await apiInstance.post<SavedConversationNotes>(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/notes${query}`,
+    { turns, ...(parentId ? { parentId } : {}) },
+  );
+  return data;
+}
+
 /**
  * Persist a 👍/👎 (+ optional comment) for the AgentRun that produced an
  * assistant message. `messageId` is the assistant ChatMessage id — known the

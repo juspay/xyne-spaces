@@ -155,6 +155,7 @@ export const XyneAIHeader = ({
                 <button
                   className={mwebActionPillClass}
                   title='More'
+                  aria-label='More'
                   data-track-category='XyneAI'
                   data-track-name='OPEN_HEADER_MENU_MOBILE'
                 >
@@ -173,6 +174,7 @@ export const XyneAIHeader = ({
               onClick={onNewChat}
               className={mwebActionPillClass}
               title='New chat'
+              aria-label='New chat'
               data-track-category='XyneAI'
               data-track-name='NEW_CHAT'
               data-track-metadata={JSON.stringify({ surface: 'panel' })}
@@ -184,6 +186,7 @@ export const XyneAIHeader = ({
                 onClick={handleClose}
                 className={mwebActionPillClass}
                 title='Close'
+                aria-label='Close'
                 data-track-category='XyneAI'
                 data-track-name='CLOSE_MOBILE'
               >
@@ -244,6 +247,7 @@ export const XyneAIHeader = ({
             onClick={onNewChat}
             className={headerButtonClass}
             title='New chat'
+            aria-label='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
             data-track-metadata={JSON.stringify({ surface: 'panel' })}
@@ -258,6 +262,7 @@ export const XyneAIHeader = ({
               onClick={onShowHistory}
               className={headerButtonClass}
               title='Chat history'
+              aria-label='Chat history'
               data-track-category='XyneAI'
               data-track-name='SHOW_HISTORY'
             >
@@ -272,6 +277,7 @@ export const XyneAIHeader = ({
                 size='sm'
                 className={headerButtonClass}
                 title='More'
+                aria-label='More'
                 data-track-category='XyneAI'
                 data-track-name='OPEN_HEADER_MENU_DESKTOP'
               >
@@ -294,6 +300,7 @@ export const XyneAIHeader = ({
               onClick={handleClose}
               className={headerButtonClass}
               title='Close'
+              aria-label='Close'
               data-track-category='XyneAI'
               data-track-name='CLOSE_DESKTOP'
             >
