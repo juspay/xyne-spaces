@@ -44,8 +44,7 @@ export function mergeRankedCandidates<T>(
   lists: ReadonlyArray<ReadonlyArray<RankedCandidate<T>>>,
   limit: number,
 ): RankedCandidate<T>[] {
-  const all: RankedCandidate<T>[] = [];
-  for (const list of lists) all.push(...list);
+  const all: RankedCandidate<T>[] = lists.flat();
   if (all.length === 0) return [];
 
   // Normalize scores within a (tier, type) bucket only — across buckets they are three
