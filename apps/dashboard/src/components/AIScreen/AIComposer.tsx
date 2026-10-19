@@ -27,7 +27,7 @@ import {
   type ContextSelections,
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
-import type { UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import type { Message, UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { SANDBOX_MODE_OPTIONS, useSandboxMode } from './SandboxModeSwitch';
 import { useDesignStudio } from './Workspace/design/designStudioContext';
@@ -117,6 +117,9 @@ interface AIComposerProps {
    *  downward), 'bottom' in a chat. See the Composer's `anchor`. */
   anchor?: 'top' | 'bottom';
   voiceStageHost: HTMLElement | null;
+  /** The chat voice mode is in, shown as its transcript; without it, only what is said there. */
+  voiceMessages?: readonly Message[] | undefined;
+  voiceChatTitle?: string | undefined;
 }
 
 interface XyneAIConfigResponse {
@@ -163,6 +166,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onContextChange,
     anchor = 'bottom',
     voiceStageHost,
+    voiceMessages,
+    voiceChatTitle,
   },
   ref,
 ): ReactElement {
@@ -735,7 +740,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           createPortal(
             <div className='absolute inset-0 z-30 bg-background'>
               <div className='mx-auto flex h-full max-w-xl'>
-                <VoiceStage studioMode={voiceStudioMode} />
+                <VoiceStage
+                  studioMode={voiceStudioMode}
+                  messages={voiceMessages}
+                  chatTitle={voiceChatTitle}
+                />
               </div>
             </div>,
             voiceStageHost,
