@@ -53,6 +53,7 @@ import {
 } from '../ui/dropdown-menu';
 import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
+import { discussionTitleOf } from './ChatInput/ChatInput.utils';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
@@ -762,6 +763,12 @@ export const ThreadMessages = ({
 
   // Create thread info for XyneAI context
   const initialMessage = conversation?.messages?.[0] ?? null;
+  const initialMessageContent =
+    typeof initialMessage?.content === 'string' ? initialMessage.content : '';
+  const discussionTitle = useMemo(
+    () => discussionTitleOf(initialMessageContent),
+    [initialMessageContent],
+  );
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
@@ -1529,6 +1536,11 @@ export const ThreadMessages = ({
     </div>
   );
 
+  const headerShowsTitle =
+    !!discussionTitle &&
+    !(isTicketThread && ticket) &&
+    (showHeader || (!simpleView && !derivedTicketId && !tabbedView && !hideHeader && !deskView));
+
   return (
     <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div
@@ -1537,6 +1549,7 @@ export const ThreadMessages = ({
         }`}
         ref={dragAndDropAreaRef}
         data-testid={previewCardMode ? 'thread-preview-card' : 'thread-panel'}
+        data-titled-thread={headerShowsTitle || undefined}
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
@@ -1544,10 +1557,16 @@ export const ThreadMessages = ({
             own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
-            <div className='flex gap-2 items-center min-w-0'>
+            <div className='flex gap-2 items-center min-w-0 px-0.5'>
               <ArrowTurnDownRight size={16} className='flex-shrink-0' />
-              <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
-                {isTicketThread && ticket ? ticket.title : 'Thread message'}
+              <h3
+                className={cn(
+                  'text-[17px] font-semibold overflow-hidden min-w-0',
+                  headerShowsTitle ? 'line-clamp-3 break-words' : 'whitespace-nowrap text-ellipsis',
+                )}
+                {...(headerShowsTitle && { title: discussionTitle })}
+              >
+                {isTicketThread && ticket ? ticket.title : discussionTitle || 'Thread message'}
               </h3>
             </div>
 
@@ -2001,7 +2020,7 @@ export const ThreadMessages = ({
                 style={isDraggableThreadPanel ? APP_DRAG_STYLE : undefined}
               >
                 {/* Title */}
-                <div className='flex items-center gap-2 min-w-0 flex-1'>
+                <div className='flex items-center gap-2 min-w-0 flex-1 px-0.5'>
                   {isStandaloneWindow() && (
                     <Tooltip content='Back to channel'>
                       <Button
@@ -2021,14 +2040,25 @@ export const ThreadMessages = ({
                   {/* Thread indicator — shown when summarizing, or in focused mode so the
                       header reads like Slack's "↳ Thread #channel". */}
                   {!simpleView && (isThreadSummaryActive || isFocusedThread) && (
-                    <ArrowTurnDownRight size={16} className='text-muted-foreground shrink-0' />
+                    <ArrowTurnDownRight
+                      size={16}
+                      className='text-muted-foreground shrink-0 first:ml-1.5'
+                    />
                   )}
-                  <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0 text-foreground'>
+                  <h3
+                    className={cn(
+                      'text-[17px] font-semibold overflow-hidden min-w-0 text-foreground first:ml-1.5',
+                      headerShowsTitle
+                        ? 'line-clamp-3 break-words'
+                        : 'whitespace-nowrap text-ellipsis',
+                    )}
+                    {...(headerShowsTitle && { title: discussionTitle })}
+                  >
                     {simpleView
                       ? 'Thread'
                       : isTicketThread && ticket
                         ? ticket.title
-                        : 'Thread message'}
+                        : discussionTitle || 'Thread message'}
                   </h3>
                   {/* Classifies the whole thread, so it belongs beside the title rather
                       than against any one message. */}

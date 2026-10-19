@@ -207,6 +207,12 @@ export interface RelatedContext {
   failed?: boolean;
 }
 
+export interface DiscussionTitleVerdict {
+  offer: boolean;
+  hold: boolean;
+  score?: number;
+}
+
 export interface VespaSearchResponse {
   success: boolean;
   data: {
