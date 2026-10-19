@@ -36,8 +36,10 @@ export interface AddChannelParticipantsResult {
  * in it keep their role, unless `updateRoles` is set, which sets their role to the one given.
  * Every target must be an active, non-guest user of the channel's own workspace, so no
  * cross-workspace participant can ever be created through this path.
- * Every validation runs before the first write, and the writes commit in one transaction, so a refused
- * or failed call changes nothing. Announcements are the caller's job and run after the commit.
+ * Every validation runs before the first write, so a refused call changes nothing. The writes are
+ * idempotent statements rather than one transaction: a repeated or concurrent identical call changes
+ * nothing twice, and a call that died partway is repaired by the next one. Announcements are the
+ * caller's job and run afterwards.
  */
 export async function addChannelParticipants(
   params: AddChannelParticipantsParams
@@ -140,24 +142,76 @@ export async function addChannelParticipants(
     }
   }
 
-  // One transaction for every insert and role change. What comes back is what it really did: a user a
-  // concurrent call got in first, or whose role was already changed, is not reported (or announced) twice.
-  const changes = await channelParticipantRepository.applyParticipantChanges(
-    channelId,
-    toAdd.map((userId) => ({ userId, role: roleOf.get(userId)! })),
-    toUpdate.map((userId) => ({ userId, role: roleOf.get(userId)! })),
-  );
+  // No transaction: every statement below is safe to repeat, so a retry or a concurrent identical call
+  // converges on the same state, and what is reported (and announced) is only what this call really did.
+
+  // 1. New participants. One statement: INSERT ... ON CONFLICT DO NOTHING on (channelId, userId), returning
+  //    only the rows it created. A user a concurrent call got in first comes back empty here.
+  const inserted =
+    toAdd.length === 0
+      ? []
+      : await db.channelParticipant.createManyAndReturn({
+          data: toAdd.map((userId) => ({
+            channelId,
+            workspaceId: channel.workspaceId,
+            userId,
+            role: roleOf.get(userId)!,
+          })),
+          skipDuplicates: true,
+          select: { id: true, userId: true },
+        });
+
+  // 2. Status rows for everyone targeted, not just the new ones: all of them are participants now, and
+  //    createMany skips the rows that exist. If an earlier call died between steps 1 and 2, this repairs it.
+  const now = new Date();
+  const conversationSeenCutoffAt = await channelParticipantRepository.getConversationSeenCutoffAt(db, channelId, now);
+  const { count: statusRowsCreated } = await db.channelUserStatus.createMany({
+    data: userIds.map((userId) => ({
+      channelId,
+      workspaceId: channel.workspaceId,
+      userId,
+      isClosed: false,
+      isStarred: false,
+      lastViewedAt: now,
+      conversationSeenCutoffAt,
+    })),
+    skipDuplicates: true,
+  });
+
+  // 3. The participant count is set from the rows, not incremented, so a repeat cannot count anyone twice
+  //    and a missed update heals itself. Only touched when something was created: a pure repeat writes nothing.
+  if (inserted.length > 0 || statusRowsCreated > 0) {
+    const participantCount = await db.channelParticipant.count({ where: { channelId } });
+    await db.channelStats.upsert({
+      where: { channelId },
+      update: { participantCount },
+      create: { channelId, workspaceId: channel.workspaceId, participantCount, lastActivityAt: now },
+    });
+  }
+
+  // 4. Role updates. Each is one statement guarded on the role read above, so a repeat (or a concurrent
+  //    identical call) matches no row and is not reported.
+  const changedRoles: Array<{ userId: string; oldRole: string; role: ChannelRole }> = [];
+  for (const userId of toUpdate) {
+    const oldRole = existingRole.get(userId)!;
+    const role = roleOf.get(userId)!;
+    const { count } = await db.channelParticipant.updateMany({
+      where: { channelId, userId, role: oldRole },
+      data: { role },
+    });
+    if (count > 0) changedRoles.push({ userId, oldRole, role });
+  }
 
   const nameOf = (userId: string): string => {
     const user = byId.get(userId)!;
     return user.displayName || user.name;
   };
-  const added = changes.inserted.map((participant) => ({
+  const added = inserted.map((participant) => ({
     userId: participant.userId,
     userName: nameOf(participant.userId),
     participantId: participant.id,
   }));
-  const updated = changes.updated.map((change) => ({ ...change, userName: nameOf(change.userId) }));
+  const updated = changedRoles.map((change) => ({ ...change, userName: nameOf(change.userId) }));
   const touched = new Set([...added.map((a) => a.userId), ...updated.map((u) => u.userId)]);
 
   return { added, updated, alreadyMembers: userIds.filter((id) => !touched.has(id)) };
