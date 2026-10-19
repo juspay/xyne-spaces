@@ -111,7 +111,6 @@ type ExternalNames = {
   appName?: string;
 };
 
-/** Source style + name for a ticket. */
 export const resolveTicketSource = (
   channelType: ChannelType | undefined,
   ticketMetadata: unknown,
@@ -155,7 +154,6 @@ export const TicketSourceIcon = ({ source }: { source: TicketSource }): ReactEle
   );
 };
 
-/** Large faded source logo/icon across the right of the header background. */
 export const TicketSourceWatermark = ({ source }: { source: TicketSource }): ReactElement => {
   const { Icon, logo } = source;
   return (
