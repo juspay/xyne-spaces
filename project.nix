@@ -130,25 +130,7 @@ in
     ];
 
     # Create data directories and cleanup ports before starting processes
-    cli.preHook = ''
-      # Cleanup ports before starting services
-      echo "🧹 Cleaning up development services..."
-      
-      # Kill all process-compose instances
-      ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
-      
-      # Kill processes on specific ports
-      PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
-      for port in "''${PORTS[@]}"; do
-        ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
-      done
-      
-      sleep 1
-      echo "✓ All development ports are free"
-      
-      # Create necessary directories
-      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
-    '';
+    cli.preHook = servicesPreHook;
 
     # Configure log files for all processes
     defaults.processSettings = { name, ... }: {
@@ -402,8 +384,86 @@ in
       availability.restart = "on_failure";
     };
 
+    # Backend and dashboard. Defined here, next to the services, but disabled:
+    # the dev image (nix/image.nix) is their only consumer, and it reuses this
+    # same configuration through process-compose."dev-image-services" below.
+    # The bundle owns their ports; the image entrypoint owns only cwd, the proxy
+    # flag and the user.
+    settings.processes.backend = {
+      command = toString (pkgs.writeShellScript "xyne-backend" ''
+        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.coreutils pkgs.bash pkgs.git pkgs.openssl ]}:$PATH"
+        cd apps/backend
+        exec pnpm run dev
+      '');
+      # The dashboard is served on 3000 in the image, so accept its browser
+      # origin. dotenv does not override variables already in the environment.
+      environment = {
+        FRONTEND_URL = "http://localhost:3000";
+        CORS_ORIGIN = "http://localhost:3000,http://127.0.0.1:3000";
+      };
+      depends_on = {
+        db-setup = { condition = "process_completed_successfully"; };
+        xyne-redis = { condition = "process_healthy"; };
+      };
+      readiness_probe = {
+        http_get = {
+          host = "127.0.0.1";
+          port = 3001;
+          path = "/api/health";
+        };
+        initial_delay_seconds = 10;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 30;
+      };
+      namespace = "app.backend";
+      availability.restart = "on_failure";
+      disabled = true;
+    };
+
+    settings.processes.dashboard = {
+      command = toString (pkgs.writeShellScript "xyne-dashboard" ''
+        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.coreutils pkgs.bash pkgs.git pkgs.openssl ]}:$PATH"
+        cd apps/dashboard
+        exec pnpm run dev
+      '');
+      # Vite dev server port; the image publishes only this port (plus 3001).
+      environment = { VITE_DEV_PORT = "3000"; };
+      depends_on.backend = { condition = "process_started"; };
+      readiness_probe = {
+        http_get = {
+          host = "127.0.0.1";
+          port = 3000;
+          path = "/";
+        };
+        initial_delay_seconds = 10;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 30;
+      };
+      namespace = "app.dashboard";
+      availability.restart = "on_failure";
+      disabled = true;
+    };
+
     # Container infrastructure kept for future use (currently empty)
     containers = { };
+  };
+
+  # The dev image runs this bundle: the same services as above, with backend and
+  # dashboard enabled. One definition, two bundles.
+  process-compose."dev-image-services" = {
+    cli.preHook = servicesPreHook;
+    # The image has no TTY.
+    cli.environment.PC_DISABLE_TUI = true;
+    settings = lib.mkForce (
+      lib.updateManyAttrsByPath [
+        { path = [ "processes" "backend" "disabled" ]; update = _: false; }
+        { path = [ "processes" "dashboard" "disabled" ]; update = _: false; }
+      ] config.process-compose."xyne-space-services".settings
+    );
   };
 
   # Export the exact runtime configuration for the isolated CI smoke check.
