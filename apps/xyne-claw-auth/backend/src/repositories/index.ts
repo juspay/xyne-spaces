@@ -8,6 +8,8 @@ export { chatConversationMetaRepository } from "./chatConversationMetaRepository
 export { chatProjectRepository } from "./chatProjectRepository.js";
 export type { ChatProjectInput, ChatProjectUpdate, ChatProjectMembership } from "./chatProjectRepository.js";
 export { chatAttachmentRepository } from "./chatAttachmentRepository.js";
+export { designSystemRepository, DESIGN_SYSTEM_SOURCES, isDesignSystemSource } from "./designSystemRepository.js";
+export type { DesignSystemSource, DesignSystemOrigin, ResolvedDesignSystem, DesignSystemInput, DesignSystemUpdate } from "./designSystemRepository.js";
 export { agentRunRepository } from "./agentRunRepository.js";
 export { agentChainWorkflowRepository } from "./agentChainWorkflowRepository.js";
 export { userAgentConfigRepository } from "./userAgentConfigRepository.js";
