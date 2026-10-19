@@ -1107,6 +1107,25 @@ export async function listAccessibleClawAgents(req: {
  * be sent with — a "litellm" pin silently no-ops for agents without the
  * credential, and vice versa a "spaces" pin would bypass an agent's own key.
  */
+export async function warmClawAgent(
+  req: { headers?: { cookie?: string }; userId: string },
+  agentSlug: string
+): Promise<void> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-warm/${encodeURIComponent(agentSlug)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok && response.status !== 404) {
+    logger.warn(`[ClawAgentService] warm-up for ${agentSlug} returned ${response.status}`);
+  }
+}
+
 export async function listClawAgentModels(
   req: { headers?: { cookie?: string }; userId: string },
   agentSlug?: string,

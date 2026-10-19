@@ -96,7 +96,7 @@ import { useDefaultAgent, useSelectedAgent } from '../../../hooks/useSelectedAge
 import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
 import { useUserPreference } from '../../../machines/userPreferencesMachine';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
-import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
+import { fetchClawAgentModels, warmClawAgent } from '../../../services/clawAgentModelsService';
 import { collectionsForAgent } from '../../Composer/ComposerCollections';
 import {
   xyneAIActor,
@@ -960,6 +960,9 @@ const XyneAISidebar = ({
     setSelectedModel(null);
     setThinkingLevel(null);
   }, [modelAgentSlug]);
+  useEffect(() => {
+    if (isV2) warmClawAgent(modelAgentSlug);
+  }, [isV2, modelAgentSlug]);
 
   useEffect(() => {
     onDebuggerOpenChange?.(showDebugger && isV2);

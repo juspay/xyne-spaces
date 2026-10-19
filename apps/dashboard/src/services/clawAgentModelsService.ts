@@ -55,3 +55,15 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
     recommendedId: result.recommendedId ?? null,
   };
 }
+
+const WARM_INTERVAL_MS = 5 * 60 * 1000;
+const lastWarmedAt = new Map<string, number>();
+
+export function warmClawAgent(agentSlug: string): void {
+  const now = Date.now();
+  if (now - (lastWarmedAt.get(agentSlug) ?? 0) < WARM_INTERVAL_MS) return;
+  lastWarmedAt.set(agentSlug, now);
+  apiInstance.post(`/xyne-ai/agents/${encodeURIComponent(agentSlug)}/warm`).catch(() => {
+    lastWarmedAt.delete(agentSlug);
+  });
+}

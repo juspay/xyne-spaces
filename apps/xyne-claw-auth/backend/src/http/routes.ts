@@ -39,6 +39,7 @@ import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-sign
 import { dashboardRouter } from "../routes/dashboard.js";
 import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
+import { agentWarmRouter, agentWarmInternalRouter } from "../routes/agent-warm.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
 import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
@@ -207,6 +208,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+  app.use(`${BASE}/agent-warm`, requireAuth, requireNoAccessToken, agentWarmRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
   app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
   // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
@@ -219,6 +221,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
   app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+  app.use(`${BASE}/internal/agent-warm`, requireStrictS2S, agentWarmInternalRouter);
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
