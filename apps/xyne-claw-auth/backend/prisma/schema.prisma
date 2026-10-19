@@ -3321,3 +3321,73 @@ model ProactivePrefs {
 
   @@map("proactive_prefs")
 }
+
+/// A folder of Xyne AI chats that carries shared instructions and knowledge,
+/// in the shape of Claude/Codex projects. Owned by one user, scoped to an org.
+///
+/// `ownerUserId` carries no foreign key to User on purpose: chat-side rows may
+/// be keyed by EITHER the caller's canonical Claw id or their raw Spaces id
+/// (see repositories/userIdFilter.ts), and a constraint would reject the
+/// latter. ChatConversationMeta omits it for the same reason.
+model ChatProject {
+  id          String  @id @default(cuid())
+  ownerUserId String
+  orgId       String
+  name        String
+  icon        String?
+
+  /// Shared instructions applied to every chat in this project.
+  /// Length-capped in the app layer.
+  instructions        String  @default("") @db.Text
+  /// When false the text is retained but NOT injected — a soft toggle rather
+  /// than a delete, mirroring UserAgentInstruction.enabled.
+  instructionsEnabled Boolean @default(true)
+
+  /// Optional link to a Spaces `Project`, read-only. No foreign key: Spaces
+  /// lives in another database that claw-auth reads through a read-only
+  /// Postgres grant, so a dangling id is tolerated.
+  ///
+  /// Stored as given — access is NOT checked on write, so a user can link a
+  /// project they cannot see. Access is checked when the project's context is
+  /// used (XYNE-66811); anything pulling its tickets or channels into a run
+  /// must re-check against the caller every time.
+  spacesProjectId  String?
+  defaultAgentSlug String?
+  sortOrder        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items ChatProjectItem[]
+
+  @@index([ownerUserId, sortOrder])
+  @@index([orgId])
+  @@map("chat_projects")
+}
+
+/// Which project a chat sits in, for one user.
+///
+/// Keyed by [conversationId, userId] with NO agentSlug. A chat can be answered
+/// by several agents, so membership must follow the CHAT; keying it per agent
+/// the way ChatConversationMeta does would let the same chat sit in a project
+/// under one agent and outside it under another.
+///
+/// Deleting a project cascades these rows and nothing else — chat_messages are
+/// untouched, so its chats simply fall back to the main list.
+model ChatProjectItem {
+  conversationId String
+  userId         String
+  projectId      String
+  /// Denormalized tenant key so a query that forgets to join the parent still
+  /// cannot cross orgs.
+  orgId          String
+  createdAt      DateTime @default(now())
+
+  project ChatProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@index([orgId])
+  @@map("chat_project_items")
+}
