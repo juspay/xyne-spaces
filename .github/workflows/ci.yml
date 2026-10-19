@@ -19,11 +19,65 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Change detection: lets mobile-only PRs (every changed file under
+  # apps/mobile/) skip the backend/dashboard/framework/xyne-claw jobs.
+  # apps/mobile is not a member of the root pnpm workspace and nothing outside
+  # it imports it, so those jobs cannot be affected by a mobile-only diff.
+  #
+  # Fails OPEN: merge_group/other events, an empty diff, or any error here
+  # leave non_mobile unset/true, and the gated jobs run as before. Jobs skipped
+  # by a job-level `if` report "skipped", which satisfies required checks.
+  #
+  # Security scans (gitleaks, Trivy) are intentionally NOT gated: mobile holds
+  # Firebase/config files and its own pnpm-lock.yaml.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect changed areas
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    outputs:
+      non_mobile: ${{ steps.detect.outputs.non_mobile }}
+    steps:
+      # For pull_request the default ref is the synthetic merge commit; depth 2
+      # gives us its first parent (the base tip), so HEAD^1..HEAD is exactly
+      # what the PR changes against the base branch.
+      - uses: actions/checkout@v5
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+
+      - name: Classify changed files
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Event is $EVENT_NAME, running the full suite."
+            echo "non_mobile=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! files=$(git diff --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
+            echo "Could not determine changed files, running the full suite."
+            echo "non_mobile=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "$files"
+          if echo "$files" | grep -qv '^apps/mobile/'; then
+            echo "non_mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only apps/mobile/ changed, skipping non-mobile build jobs."
+            echo "non_mobile=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
+    needs: changes
+    # Skip only on an explicit "false" (mobile-only PR); run if detection failed.
+    if: ${{ !cancelled() && needs.changes.outputs.non_mobile != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -94,6 +148,9 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard
+    needs: changes
+    # Skip only on an explicit "false" (mobile-only PR); run if detection failed.
+    if: ${{ !cancelled() && needs.changes.outputs.non_mobile != 'false' }}
     # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
     # Each leg used to run its own Install dependencies in parallel — 3
     # concurrent installs against the mirror per PR. Trades wall-clock time
@@ -263,6 +320,9 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
+    needs: changes
+    # Skip only on an explicit "false" (mobile-only PR); run if detection failed.
+    if: ${{ !cancelled() && needs.changes.outputs.non_mobile != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
@@ -304,6 +364,9 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
+    needs: changes
+    # Skip only on an explicit "false" (mobile-only PR); run if detection failed.
+    if: ${{ !cancelled() && needs.changes.outputs.non_mobile != 'false' }}
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
