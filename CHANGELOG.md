@@ -1,3 +1,10 @@
+## [1.507.0](https://github.com/juspay/xyne-spaces/compare/v1.506.0...v1.507.0) (2026-10-19)
+
+
+### Features
+
+* decision engine evals: compare XOR, Jev and LLM on live decisions ([#3170](https://github.com/juspay/xyne-spaces/issues/3170)) ([78aa162](https://github.com/juspay/xyne-spaces/commit/78aa1626f219bd361565e85265659676deb68304)), closes [#3171](https://github.com/juspay/xyne-spaces/issues/3171)
+
 ## [1.506.0](https://github.com/juspay/xyne-spaces/compare/v1.505.0...v1.506.0) (2026-10-19)
 
 
