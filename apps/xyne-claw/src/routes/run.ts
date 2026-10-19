@@ -70,7 +70,20 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { beginJudgeRun } from "../judge-trace.js";
+import { beginJudgeRun, judgeRunSummary } from "../judge-trace.js";
+
+function judgeCallbackFields(): { judge?: { backend: string; calls: number; failed: number; compactionCalls: number } } {
+  const s = judgeRunSummary();
+  if (!s || s.calls === 0) return {};
+  return {
+    judge: {
+      backend: s.backend,
+      calls: s.calls,
+      failed: s.failed,
+      compactionCalls: s.byPurpose["compaction-call"]?.calls ?? 0,
+    },
+  };
+}
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -1470,6 +1483,7 @@ export function abortTelemetry(
     ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
     ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
     tokenUsage: err.tokenUsage,
+    ...judgeCallbackFields(),
     ...(err.latency ? { latency: err.latency } : {}),
     ...(llmCalls.length > 0 ? { llmCalls } : {}),
   };
@@ -2698,6 +2712,7 @@ export async function processTask(
             toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
             toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
             tokenUsage: result.tokenUsage,
+            ...judgeCallbackFields(),
             ...(result.latency ? { latency: result.latency } : {}),
             ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
           });
@@ -4767,6 +4782,7 @@ export async function processTask(
         }),
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
+        ...judgeCallbackFields(),
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
         ...(result.latency ? { latency: result.latency } : {}),
         ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
@@ -4891,6 +4907,7 @@ export async function processTask(
       ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
+      ...judgeCallbackFields(),
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
         : {}),

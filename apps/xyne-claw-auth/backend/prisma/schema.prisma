@@ -1258,6 +1258,10 @@ model AgentRun {
   /// The `call-agent` tool call that spawned this run, lining a child row up
   /// with its row in the caller's trace.
   parentToolCallId String?
+  judgeBackend     String?
+  judgeCalls       Int?
+  judgeFailed      Int?
+  compactionCalls  Int?
   stats            AgentRunStats?
 
   @@index([userId, status, startedAt])
