@@ -74,7 +74,12 @@ import {
   usePageSelection,
 } from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
-import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import {
+  useCachedV2ConversationTitle,
+  useV2SessionsList,
+  useV2SessionInvalidator,
+} from '../../hooks/useAskAISessionsV2';
+import { chatTitleOf } from '../Voice/voiceTranscript';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
@@ -1714,6 +1719,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     enabled: isV2 && Boolean(conversationId),
   });
   const { invalidateSessions } = useV2SessionInvalidator();
+  // Voice mode names the chat it is in, as the history does.
+  const savedChatTitle = useCachedV2ConversationTitle(isV2 ? conversationId : null);
+  const voiceChatTitle = useMemo(
+    () => chatTitleOf(savedChatTitle, transcriptMessages),
+    [savedChatTitle, transcriptMessages],
+  );
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
     const session = v2Sessions.find(s => s.sessionId === conversationId);
@@ -2772,6 +2783,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
               voiceStageHost={voiceStageHost}
+              voiceMessages={transcriptMessages}
+              voiceChatTitle={voiceChatTitle}
             />
           </div>
         </div>

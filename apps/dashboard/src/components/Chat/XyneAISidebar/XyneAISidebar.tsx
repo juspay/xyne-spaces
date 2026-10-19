@@ -35,7 +35,10 @@ import type {
 } from './utils/XyneAITypes';
 import { flowPhaseKey } from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
-import { useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
+import {
+  useCachedV2ConversationTitle,
+  useV2SessionInvalidator,
+} from '../../../hooks/useAskAISessionsV2';
 import {
   deleteV2Conversation,
   fetchV2ConversationMessages,
@@ -113,6 +116,7 @@ import {
 import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
 import { useVoiceHost } from '../../Voice/voiceSession';
 import { VoiceStage } from '../../Voice/VoiceStage';
+import { chatTitleOf } from '../../Voice/voiceTranscript';
 import { buddy } from '../../Assistant/buddy';
 import { ASSISTANT_PANEL_ATTR } from '../../Assistant/buddy/constants';
 import { tryBuddy } from '../../Assistant/buddy/tryBuddy';
@@ -2420,6 +2424,12 @@ const XyneAISidebar = ({
   };
 
   const [voiceMode, setVoiceMode] = useState(false);
+  // Voice mode names the chat it is in, as the history does.
+  const savedChatTitle = useCachedV2ConversationTitle(isV2 ? conversationId : null);
+  const voiceChatTitle = useMemo(
+    () => chatTitleOf(savedChatTitle, transcriptMessages),
+    [savedChatTitle, transcriptMessages],
+  );
   const submitTranscript = useCallback((text: string): void => {
     autoSendPendingQueryRef.current = text;
     setInputValue(text);
@@ -2944,7 +2954,7 @@ const XyneAISidebar = ({
               </div>
             </div>
 
-            {voiceMode && <VoiceStage />}
+            {voiceMode && <VoiceStage messages={transcriptMessages} chatTitle={voiceChatTitle} />}
 
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
               <div className='px-3 py-2'>
