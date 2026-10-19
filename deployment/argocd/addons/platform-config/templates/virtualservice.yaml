@@ -52,8 +52,17 @@ spec:
       match:
         - uri:
             prefix: /zero/
+      {{- /*
+      Whether /zero/ is stripped before the upstream sees it depends on which
+      sync engine serves it. Zero (rocicorp) is mounted at / and needs the
+      prefix removed; streamgres runs with STREAMGRES_BASE_PATH=/zero and must
+      RECEIVE it -- stripping gives a 404 on every sync connect. Hence
+      services.zero.rewrite rather than an unconditional rewrite.
+      */ -}}
+      {{- if $s.zero.rewrite }}
       rewrite:
         uri: /
+      {{- end }}
       route:
         - destination:
             host: {{ $s.zero.host }}
