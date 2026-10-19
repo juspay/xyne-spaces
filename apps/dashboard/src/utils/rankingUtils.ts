@@ -11,8 +11,8 @@ import { isUserDeactivated } from './userDisplayName';
  */
 
 // Cmd+K user/channel ranking lives in @xyne/shared so the mobile app's global search orders
-// results the same way. It reads MFU affinity from the app's registered AffinityService (this
-// app's singleton, registered in services/affinityService).
+// results the same way. It reads MFU affinity from the shared affinityService, which fetches
+// with this app's client (registered in services/affinityService).
 export {
   buildCmdkChannelGroups,
   filterChannelsBySearchableNames,

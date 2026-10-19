@@ -8,7 +8,8 @@ import { searchChannelsWithScores } from './search.js';
 /**
  * Channel / DM search ranking shared by the dashboard (Cmd+K, `in:` / `#` typeahead, pickers)
  * and the mobile app's global search. Moved verbatim from the dashboard's `utils/rankingUtils.ts`.
- * Channel affinity comes from the app's registered `AffinityService` (`registerAffinityService`).
+ * Channel affinity comes from the shared `affinityService`, which fetches with the app's
+ * registered HTTP client (`registerHttpClient`).
  */
 
 const isDMChannel = (scopeType: ChannelScopeType): boolean => {
