@@ -7,12 +7,17 @@
  * session is returned in the poll body only; no cookie is set, so a poll made
  * from the Spaces origin never disturbs the dashboard's own cookies.
  *
+ * The poll also returns a refresh token, which `/refresh` trades for a new
+ * session (and a new refresh token) for as long as a browser login lasts.
+ *
  * Endpoints:
  * - POST /api/sdk/auth/sso/init     - Initiate device flow (no auth required)
  * - POST /api/sdk/auth/sso/poll     - Poll for authorization result (no auth required)
  * - GET  /api/sdk/auth/sso/consent  - Redirects to the dashboard consent page
  * - GET  /api/sdk/auth/sso/status   - Get device auth status by user_code (session auth)
  * - POST /api/sdk/auth/sso/approve  - Approve/deny authorization (session auth)
+ * - POST /api/sdk/auth/sso/refresh  - Trade a refresh token for a new session (no auth required)
+ * - POST /api/sdk/auth/sso/logout   - End the session a refresh token renews (no auth required)
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -21,7 +26,7 @@ import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
 import { jwtService } from '@/services/jwtService';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
-import { sdkSsoInitLimiter, sdkSsoPollLimiter } from '@/middleware/rateLimiters';
+import { sdkSsoInitLimiter, sdkSsoPollLimiter, sdkSsoRefreshLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -34,6 +39,10 @@ const pollRequestSchema = z.object({
 
 const statusRequestSchema = z.object({
   userCode: z.string().min(1, 'userCode is required'),
+});
+
+const refreshRequestSchema = z.object({
+  refreshToken: z.string().min(1, 'refreshToken is required'),
 });
 
 const approveRequestSchema = z.object({
@@ -124,12 +133,27 @@ router.post('/poll', sdkSsoPollLimiter, async (req: Request, res: Response) => {
           });
         }
 
+        // Without a refresh session the client still gets a working session,
+        // just one that ends with its JWT, as before refresh existed.
+        let grant = null;
+        try {
+          grant = await sdkSsoService.startRefreshSession(session, {
+            ip: req.ip ?? null,
+            userAgent: req.get('user-agent') ?? null,
+          });
+        } catch (error) {
+          logger.error('[SDK-SSO] Could not start a refresh session; issuing the session alone:', error);
+        }
+
         return res.status(200).json({
           status: 'approved',
           cookie: { name: sessionCookieName(session.workspaceId), value: session.token },
           expires_at: session.expiresAt,
           user_id: session.userId,
           workspace_id: session.workspaceId,
+          ...(grant
+            ? { refresh_token: grant.refreshToken, refresh_expires_at: grant.refreshExpiresAt }
+            : {}),
         });
       }
 
@@ -167,6 +191,82 @@ router.post('/poll', sdkSsoPollLimiter, async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/sdk/auth/sso/refresh
+ * Trade a refresh token for a new session and a new refresh token.
+ * No authentication required - the refresh token is the credential.
+ */
+router.post('/refresh', sdkSsoRefreshLimiter, async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = refreshRequestSchema.parse(req.body);
+
+    const result = await sdkSsoService.refresh(refreshToken);
+
+    switch (result.status) {
+      case 'refreshed': {
+        const { session } = result;
+        return res.status(200).json({
+          cookie: { name: sessionCookieName(session.workspaceId), value: session.token },
+          expires_at: session.expiresAt,
+          user_id: session.userId,
+          workspace_id: session.workspaceId,
+          refresh_token: session.refreshToken,
+          refresh_expires_at: session.refreshExpiresAt,
+        });
+      }
+
+      case 'busy':
+        return res.status(503).json({
+          error: 'temporarily_unavailable',
+          message: 'A refresh with this token is already in progress. Retry shortly.',
+        });
+
+      default:
+        return res.status(400).json({
+          error: 'invalid_grant',
+          message: 'The refresh token is invalid, expired or revoked. Sign in again.',
+        });
+    }
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        message: error.errors[0].message,
+      });
+    }
+    logger.error('[SDK-SSO] Error refreshing session:', error);
+    return res.status(500).json({
+      error: 'server_error',
+      message: 'Failed to refresh the session',
+    });
+  }
+});
+
+/**
+ * POST /api/sdk/auth/sso/logout
+ * End the session a refresh token renews. Idempotent: an unknown or already
+ * revoked token also answers 204.
+ */
+router.post('/logout', sdkSsoRefreshLimiter, async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = refreshRequestSchema.parse(req.body);
+    await sdkSsoService.revokeRefreshToken(refreshToken);
+    return res.status(204).send();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        message: error.errors[0].message,
+      });
+    }
+    logger.error('[SDK-SSO] Error signing out:', error);
+    return res.status(500).json({
+      error: 'server_error',
+      message: 'Failed to sign out',
+    });
+  }
+});
+
+/**
  * GET /api/sdk/auth/sso/status
  * Get the status of a device authorization request.
  * Requires user session - used by the consent page to display request info.
@@ -192,8 +292,9 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
         ip: authRequest.origin?.ip ?? null,
         user_agent: authRequest.origin?.userAgent ?? null,
       },
-      // How long an approved session lasts, so the consent page need not guess
-      session_expires_in: config.jwt.expirationSeconds,
+      // How long an approved sign-in lasts with refresh, so the consent page
+      // need not guess: as long as a browser login
+      session_expires_in: config.session.expiryDays * 24 * 60 * 60,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

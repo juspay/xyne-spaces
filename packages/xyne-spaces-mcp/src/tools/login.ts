@@ -7,6 +7,7 @@
  */
 
 import type { SsoSession } from "@xyne/spaces-sdk";
+import { isSessionUsable, signedInUntil } from "../config.js";
 import { describeError } from "../errors.js";
 import { pendingLogin, startLogin, takeLoginFailure } from "../login.js";
 import { ok, optionalBoolean, toIST } from "../render.js";
@@ -23,7 +24,7 @@ const login: ToolDef = {
 	name: "spaces_login",
 	description:
 		"Sign in to Xyne Spaces with Xyne SSO. Returns a link for the user to open and approve (it is also opened in " +
-		"their browser when possible); the session is picked up automatically once they approve, and lasts as long as a Spaces login (24 hours by default). " +
+		"their browser when possible); the session is picked up automatically once they approve, and is renewed automatically for as long as a Spaces browser login lasts. " +
 		"Call this when another tool reports that you are not signed in or the session has expired, then ask the user " +
 		"to approve and call spaces_whoami to confirm. Does nothing if already signed in unless force is true.",
 	inputSchema: {
@@ -38,10 +39,10 @@ const login: ToolDef = {
 		const note = previous ? `\n\n(The previous sign-in attempt ended: ${describeError(previous, ctx.baseUrl)})` : "";
 
 		const current = ctx.config.session;
-		if (!optionalBoolean(args, "force") && !pendingLogin() && current && current.expiresAt > Date.now()) {
+		if (!optionalBoolean(args, "force") && !pendingLogin() && current && isSessionUsable(current)) {
 			return ok(
 				`Already signed in to Xyne Spaces at ${ctx.baseUrl} as user ${current.userId} (workspace ` +
-					`${current.workspaceId}) until ${toIST(current.expiresAt)} IST. Pass force: true to sign in again.`,
+					`${current.workspaceId}) until ${toIST(signedInUntil(current))} IST. Pass force: true to sign in again.`,
 			);
 		}
 

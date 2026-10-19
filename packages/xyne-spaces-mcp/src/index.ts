@@ -20,7 +20,7 @@ import {
 	type CallToolResult,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createSpacesSdk, resolveConfig, resolveWrites } from "./config.js";
+import { createSpacesSdk, isSessionUsable, loadSavedSession, resolveConfig, resolveWrites } from "./config.js";
 import { describeError, NotSignedInError } from "./errors.js";
 import { pendingLogin } from "./login.js";
 import { runLoginCommand } from "./login-command.js";
@@ -30,6 +30,7 @@ import { asObject, err } from "./render.js";
 import { useSession } from "./tools/login.js";
 import type { ToolContext, ToolDef } from "./tools/shared.js";
 import { allTools } from "./tools/index.js";
+import { useSession } from "./tools/login.js";
 
 if (process.argv[2] === "login") {
 	process.exit(await runLoginCommand());
@@ -82,7 +83,7 @@ const instructions = [
 ].join(" ");
 
 const server = new Server(
-	{ name: "xyne-spaces-mcp", version: "0.1.0" },
+	{ name: "xyne-spaces-mcp", version: "0.1.1" },
 	{ capabilities: { tools: { listChanged: true } }, instructions },
 );
 
@@ -104,11 +105,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 	// Checked here rather than per call: the session and its expiry are known
 	// locally, so sending a request would be a round trip to learn something
-	// already known — and it would fail this way while offline too.
+	// already known — and it would fail this way while offline too. An expired
+	// cookie that can still be renewed passes: the SDK renews it first.
 	if (tool.name !== "spaces_login") {
 		const waiting = pendingLogin();
+		// Another process may have signed in, or renewed, since this one started
+		if (config.sessionSource !== "env" && !(config.session && isSessionUsable(config.session))) {
+			const saved = loadSavedSession();
+			if (saved && isSessionUsable(saved)) useSession(ctx, saved);
+		}
 		const session = config.session;
-		if (!session || session.expiresAt <= Date.now()) {
+		if (!session || !isSessionUsable(session)) {
 			if (waiting) {
 				return err(
 					`Sign-in is waiting for approval. Ask the user to open ${waiting.link}, check it shows the code ` +

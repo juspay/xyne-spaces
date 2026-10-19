@@ -7,6 +7,10 @@
  * Xyne CLI and xyne-claw-mcp already use. `spaces_login` and `xyne-spaces-mcp
  * login` write the file; `XYNE_SPACES_COOKIE` overrides it.
  *
+ * A signed-in session carries a refresh token. The SDK client renews the
+ * cookie with it before it expires, through `renewSharedSession` (see
+ * `src/refresh.ts`), and each renewal is saved back to the file.
+ *
  * None of this lives in `@xyne/spaces-sdk`: the SDK takes a base URL and a
  * session and asks no questions about where they came from, which is right for
  * a library and not enough for a binary someone launches from an editor config.
@@ -16,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createClient, type SpacesClient, type SsoSession } from "@xyne/spaces-sdk";
+import { renewSharedSession } from "./refresh.js";
 
 /**
  * This deployment, not the SDK's own default (`https://spaces.xyne.app`).
@@ -86,8 +91,30 @@ function isStoredSession(value: unknown): value is SsoSession {
 		typeof v.cookie.value === "string" &&
 		typeof v.expiresAt === "number" &&
 		typeof v.userId === "string" &&
-		typeof v.workspaceId === "string"
+		typeof v.workspaceId === "string" &&
+		(v.refreshToken === undefined || typeof v.refreshToken === "string") &&
+		(v.refreshExpiresAt === undefined || typeof v.refreshExpiresAt === "number")
 	);
+}
+
+/** The session saved in `~/.xyne/agent/spaces.json`, read fresh: another process may have changed it. */
+export function loadSavedSession(): SsoSession | undefined {
+	const { session } = loadStoredConfig();
+	return isStoredSession(session) ? session : undefined;
+}
+
+/**
+ * Whether a session can still make a call: its cookie has not expired, or it
+ * can be renewed. The SDK renews it before the call that needs it.
+ */
+export function isSessionUsable(session: SsoSession): boolean {
+	const now = Date.now();
+	return session.expiresAt > now || (!!session.refreshToken && (session.refreshExpiresAt ?? 0) > now);
+}
+
+/** When the sign-in ends for good: when renewal stops, or the cookie expires if it cannot be renewed. */
+export function signedInUntil(session: SsoSession): number {
+	return session.refreshToken && session.refreshExpiresAt ? session.refreshExpiresAt : session.expiresAt;
 }
 
 /** The claims of a JWT, read without verifying it — the server does that. */
@@ -213,10 +240,17 @@ function updateStoredConfig(changes: Partial<StoredConfig>): string {
 	return path;
 }
 
-/** Build the SDK client every tool calls through. */
+/**
+ * Build the SDK client every tool calls through. It renews the session
+ * through the shared file, and keeps `config.session` on the newest one.
+ */
 export function createSpacesSdk(config: SpacesConfig): SpacesClient {
 	return createClient({
 		baseUrl: config.baseUrl,
+		refreshSession: (current) => renewSharedSession(config.baseUrl, current),
+		onSessionRefreshed: (session) => {
+			config.session = session;
+		},
 		// `exactOptionalPropertyTypes` is on here and not in the SDK, so an
 		// explicit `undefined` is not the same as an absent key.
 		...(config.session !== undefined ? { session: config.session } : {}),
