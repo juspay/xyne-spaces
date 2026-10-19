@@ -74,8 +74,8 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
     UPDATE "workflow"."workflow_executions"
     SET "status" = 'RUNNING', "updatedAt" = NOW()
     FROM claimed
-    WHERE "workflow_executions"."id" = claimed."id"
-    RETURNING "workflow_executions"."id"
+    WHERE "workflow"."workflow_executions"."id" = claimed."id"
+    RETURNING "workflow"."workflow_executions"."id"
   `
 }
 
