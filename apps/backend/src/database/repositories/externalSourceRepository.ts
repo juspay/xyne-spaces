@@ -191,6 +191,15 @@ export class ExternalSourceRepository {
     });
   }
 
+  /** Sets lastSyncCursor only if it still holds `expected`; false when another writer changed it first. */
+  async compareAndSetSyncCursor(id: string, expected: string | null, next: string): Promise<boolean> {
+    const { count } = await this.db.externalSource.updateMany({
+      where: { id, lastSyncCursor: expected },
+      data: { lastSyncCursor: next },
+    });
+    return count === 1;
+  }
+
   /**
    * Delete external source
    */

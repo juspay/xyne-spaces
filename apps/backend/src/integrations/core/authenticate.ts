@@ -6,7 +6,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ExternalSource } from '@prisma/client';
 import { ExternalSourcePlatform } from './types';
-import { isMetaMessagingPlatform } from '../social-media/constants';
 import { facebookPageIdsInPayload } from '../adapters/social-media/facebook/flow';
 import { logger } from '../../utils/logger';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
@@ -125,12 +124,10 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      // Meta retries on non-2xx indefinitely; return 200 for Instagram/Facebook so a disconnected
-      // account doesn't trigger a retry storm. Other providers keep the original 504
-      // so their own retry semantics are unaffected.
-      const isMeta = isMetaMessagingPlatform(source.sourceType);
-      res.status(isMeta ? 200 : 504).json({
-        success: isMeta,
+      // Acknowledge: any non-2xx makes the provider resend a push that can't succeed (Pub/Sub for
+      // up to 7 days), and the reconnect picks up the mail that arrived meanwhile.
+      res.status(200).json({
+        success: true,
         skipped: true,
         reason: 'inactive_source',
         sourceName: resolvedSourceName,

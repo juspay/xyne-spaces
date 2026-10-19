@@ -132,3 +132,27 @@ export async function enqueueCursorCatchup(params: CursorCatchupJobData): Promis
     });
   }
 }
+
+/** Dated fetch for mail the cursor can no longer reach; one job per desk and window. */
+export async function enqueueGapFetch(params: EmailFetchJobData): Promise<boolean> {
+  try {
+    if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+    await emailFetchQueue.getQueue().add('refetch', params, {
+      jobId: `gapfetch:${params.sourceId}:${params.targetChannelId ?? params.channelId}:${params.startDate}`,
+      removeOnComplete: true,
+      removeOnFail: true,
+    });
+    logger.info('[EMAIL-FETCH-QUEUE] Queued gap fetch', {
+      sourceId: params.sourceId,
+      channelId: params.channelId,
+      startDate: params.startDate,
+    });
+    return true;
+  } catch (error) {
+    logger.error('[EMAIL-FETCH-QUEUE] Failed to queue gap fetch', {
+      sourceId: params.sourceId,
+      error,
+    });
+    return false;
+  }
+}

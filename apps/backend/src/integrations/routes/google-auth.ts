@@ -24,7 +24,8 @@ import {
   sanitizeReturnPath,
 } from './urlHelpers';
 import { encrypt } from '@/services/encryptionService';
-import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
+import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { isSyncCursorExpired, queueReconnectSync } from '@/services/syncCursorRecovery';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
 import { getAuthCallbackTx } from '@/bypassAcl/transactions/googleAuth';
@@ -884,23 +885,41 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         return;
       }
 
+      // Read before the save below: until then, updatedAt is when the desk was disconnected.
+      const beforeReconnect = await db.externalSource.findUnique({
+        where: { id: sourceRow.id },
+        select: { lastSyncCursor: true, updatedAt: true },
+      });
       const reEncrypted = await GoogleService.prepareExternalSourceNetwork({
         emailAddress,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
       });
-      await db.externalSource.update({
+      const cursorExpired = await isSyncCursorExpired({
+        sourceId: sourceRow.id,
+        encryptedCredentials: reEncrypted.encryptedCredentials,
+        cursor: beforeReconnect?.lastSyncCursor ?? null,
+      });
+      const reconnected = await db.externalSource.update({
         where: { id: sourceRow.id },
-        data: { name: sourceName, credentials: reEncrypted.encryptedCredentials, isActive: true },
+        data: {
+          name: sourceName,
+          credentials: reEncrypted.encryptedCredentials,
+          isActive: true,
+          ...(cursorExpired && { lastSyncCursor: reEncrypted.watchResult.historyId }),
+        },
       });
 
       logger.info(`${TAG} Reconnected Gmail integration`, {
         channelId: stateData.channelId,
         sourceId: sourceRow.id,
+        cursorExpired,
       });
 
-      await enqueueCursorCatchup({
-        sourceId: sourceRow.id,
+      await queueReconnectSync({
+        source: reconnected,
+        cursorExpired,
+        disconnectedAt: beforeReconnect?.updatedAt ?? new Date(),
         watchHistoryId: reEncrypted.watchResult.historyId,
         requesterUserId: stateData.userId,
       });
@@ -945,8 +964,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       });
 
       if (existingForWorkspace) {
+        const cursorExpired = await isSyncCursorExpired({
+          sourceId: existingForWorkspace.id,
+          encryptedCredentials: network.encryptedCredentials,
+          cursor: existingForWorkspace.lastSyncCursor,
+        });
         // Reactivate existing source (was soft-disconnected)
-        await db.externalSource.update({
+        const reconnected = await db.externalSource.update({
           where: { id: existingForWorkspace.id },
           data: {
             name: network.sourceName,
@@ -954,14 +978,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
-            ...(existingForWorkspace.lastSyncCursor == null && {
+            ...((existingForWorkspace.lastSyncCursor == null || cursorExpired) && {
               lastSyncCursor: network.watchResult.historyId,
             }),
           },
         });
 
-        await enqueueCursorCatchup({
-          sourceId: existingForWorkspace.id,
+        await queueReconnectSync({
+          source: reconnected,
+          cursorExpired,
+          disconnectedAt: existingForWorkspace.updatedAt,
           watchHistoryId: network.watchResult.historyId,
           requesterUserId: stateData.userId,
         });
@@ -1151,7 +1177,12 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       }
 
       if (existingSource) {
-        await db.externalSource.update({
+        const cursorExpired = await isSyncCursorExpired({
+          sourceId: existingSource.id,
+          encryptedCredentials: network.encryptedCredentials,
+          cursor: existingSource.lastSyncCursor,
+        });
+        const reconnected = await db.externalSource.update({
           where: { id: existingSource.id },
           data: {
             name: network.sourceName,
@@ -1159,14 +1190,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             displayName: emailAddress,
             credentials: network.encryptedCredentials,
             isActive: true,
-            ...(existingSource.lastSyncCursor == null && {
+            ...((existingSource.lastSyncCursor == null || cursorExpired) && {
               lastSyncCursor: network.watchResult.historyId,
             }),
           },
         });
 
-        await enqueueCursorCatchup({
-          sourceId: existingSource.id,
+        await queueReconnectSync({
+          source: reconnected,
+          cursorExpired,
+          disconnectedAt: existingSource.updatedAt,
           watchHistoryId: network.watchResult.historyId,
           requesterUserId: stateData.userId,
         });
