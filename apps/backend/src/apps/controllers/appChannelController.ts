@@ -12,6 +12,8 @@ import { AppError } from '@/middleware/errorHandler';
 import { addChannelParticipants, type AddedChannelParticipant } from '@/services/channelParticipantsService';
 import { ChannelFieldError, prepareChannelFields, writeChannelFields } from '@/services/channelFieldService';
 import { ChannelParticipantsSideEffectHandler } from '@/zero/side-effects/tables/channel-participants-handler';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { GuestError } from '../core/guestUtils';
 import { findMembers, findProject } from '../utils/channelUtils';
@@ -325,6 +327,12 @@ export class AppChannelController {
     });
     // Once for the whole call: the canvas and recording refresh is channel-wide, so per-person calls would repeat it.
     await handler.onBatchInsert(channelId, added.map(({ userId }) => userId));
+
+    // Re-index the channel so Vespa's chat_container participants and search permissions include the new members.
+    // The in-app path gets this from the channel_stats update; these writes bypass that, so queue it here, once.
+    await vespaQueue
+      .addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, userId: bot.id, workspaceId: bot.workspaceId })
+      .catch((error) => logger.error('[APP-CHANNEL] Error queuing Vespa job for channel after adding participants:', error));
   }
 
   /**
