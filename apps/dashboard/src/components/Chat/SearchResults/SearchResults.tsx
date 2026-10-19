@@ -18,7 +18,7 @@ import {
   Minimize2,
   MessageCircle,
   MessageSquare,
-  Mic,
+  AudioLines,
   Paperclip,
   X,
 } from 'lucide-react';
@@ -1800,7 +1800,7 @@ function getAttachmentResultIcon(result: DisplaySearchResult): ReactElement {
     case 'CANVAS':
       return <FileText className='size-4 text-muted-foreground' />;
     case 'TRANSCRIPT':
-      return <Mic className='size-4 text-muted-foreground' />;
+      return <AudioLines className='size-4 text-muted-foreground' />;
     case 'DESK':
       return <Mail className='size-4 text-muted-foreground' />;
     default:

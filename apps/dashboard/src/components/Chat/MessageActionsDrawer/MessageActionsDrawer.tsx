@@ -12,7 +12,7 @@ import {
   Bookmark,
   Forward,
   Copy,
-  Mic,
+  AudioLines,
   ArrowLeft,
   Clock3,
 } from 'lucide-react';
@@ -232,7 +232,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   {/* Start Recording (Take Notes) */}
                   {onStartRecording && messageId === initialMessageId && !isChannelArchived && (
                     <ActionButton
-                      icon={<Mic className='w-5 h-5' />}
+                      icon={<AudioLines className='w-5 h-5' />}
                       label={isRecordingDisabled ? 'Recording in progress' : 'Take Notes'}
                       onClick={() => handleActionClick(onStartRecording)}
                       disabled={isRecordingDisabled}

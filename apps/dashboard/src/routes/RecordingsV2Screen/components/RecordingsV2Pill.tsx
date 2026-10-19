@@ -6,7 +6,6 @@ import {
   ChevronRight,
   DeleteDustbin02,
   DownloadBarDown,
-  MicOn,
   MusicQuaverNote,
   Share01,
   ThreeDotsMenuHorizontal,
@@ -137,7 +136,7 @@ export const RecordingsV2LivePill = ({
       aria-label={`${displayTitle}, recording in progress`}
     >
       <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary'>
-        <MicOn size={16} strokeWidth={2} variant='Contrast' />
+        <AudioLines size={16} strokeWidth={2} />
       </span>
 
       <span className='min-w-0 flex-1'>

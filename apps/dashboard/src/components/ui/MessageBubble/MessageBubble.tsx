@@ -42,7 +42,7 @@ import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { AlertCircle, Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import { AlertCircle, AudioLines, Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -71,7 +71,7 @@ import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
-import { MicOn, PhoneDefault } from '@xyne/icons';
+import { PhoneDefault } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
@@ -952,7 +952,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-failure/15 border-status-failure/30'}`}
               >
-                <MicOn
+                <AudioLines
                   size={16}
                   color={
                     isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-failure)'
