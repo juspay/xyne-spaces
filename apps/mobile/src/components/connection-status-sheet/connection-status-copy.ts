@@ -21,6 +21,8 @@ export interface ConnectionStateCopy {
   dotColor: string;
   /** One sentence: what this state means for the user right now. */
   meaning: string;
+  /** A few words of `meaning`, for the compact list in the Spaces tray. */
+  brief: string;
   /** One sentence: what, if anything, the user should do. */
   whatToDo: string;
   /** Whether "Refresh connection" is a sensible action in this state. */
@@ -39,6 +41,7 @@ const copy = (
   label: string,
   tone: ConnectionTone,
   meaning: string,
+  brief: string,
   whatToDo: string,
   canRefresh: boolean,
 ): ConnectionStateCopy => ({
@@ -47,17 +50,27 @@ const copy = (
   tone,
   dotColor: CONNECTION_TONE_COLOR[tone],
   meaning,
+  brief,
   whatToDo,
   canRefresh,
 });
 
 const STATE_ENTRIES: readonly ConnectionStateCopy[] = [
-  copy('connected', 'Connected', 'good', 'Everything is up to date.', 'Nothing to do.', false),
+  copy(
+    'connected',
+    'Connected',
+    'good',
+    'Everything is up to date.',
+    'Up to date',
+    'Nothing to do.',
+    false,
+  ),
   copy(
     'connecting',
     'Connecting',
     'busy',
     'Connecting to your workspace.',
+    'Catching up',
     'Keep going. Messages you send go out once connected.',
     false,
   ),
@@ -66,6 +79,7 @@ const STATE_ENTRIES: readonly ConnectionStateCopy[] = [
     'Disconnected',
     'bad',
     'No live connection. Nothing new will arrive.',
+    'Nothing new arrives',
     'Check your network, then tap Refresh.',
     true,
   ),
@@ -74,6 +88,7 @@ const STATE_ENTRIES: readonly ConnectionStateCopy[] = [
     'Signing in again',
     'busy',
     'Your session is being renewed.',
+    'Renewing your session',
     'Wait a moment. If it stays here, sign out and back in.',
     true,
   ),
@@ -82,6 +97,7 @@ const STATE_ENTRIES: readonly ConnectionStateCopy[] = [
     'Error',
     'bad',
     'The connection failed.',
+    'Connection failed',
     'Tap Refresh. Still failing? Sign out and back in.',
     true,
   ),
@@ -90,6 +106,7 @@ const STATE_ENTRIES: readonly ConnectionStateCopy[] = [
     'Closed',
     'neutral',
     'The connection was closed, usually while switching workspace.',
+    'Paused, e.g. switching workspace',
     'It reopens on its own. If not, tap Refresh.',
     true,
   ),
@@ -106,6 +123,7 @@ const UNKNOWN_STATE: ConnectionStateCopy = copy(
   'Unknown',
   'neutral',
   'Connection state unknown.',
+  'State unknown',
   'Tap Refresh, or reopen the app.',
   true,
 );

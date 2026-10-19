@@ -3,25 +3,14 @@ import {
   memo,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
-import { useConnectionState } from '@rocicorp/zero/react';
 
 import { useWorkspaceDrawer, WorkspaceAvatar } from '@/src/components/workspace-drawer';
-import { stateMachineActor } from '@xyne/shared/machines';
 import Avatar from '@/src/components/ui/avatar';
 import { PresenceDot } from '@/src/components/ui/presence-dot';
 import { haptics } from '@/src/utils/haptics';
@@ -30,12 +19,13 @@ import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useWorkspaces } from '@/src/hooks/useWorkspaces';
 import { cn } from '@/src/utils/cn';
 import { useRouter } from 'expo-router';
-import { House, RefreshCw, type LucideIcon } from 'lucide-react-native';
+import { House, type LucideIcon } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
 import { XyneAIStarIcon } from '@/src/components/icons';
 import { ConnectionStatusSheet } from '@/src/components/connection-status-sheet';
-import { describeConnectionState } from '@/src/components/connection-status-sheet/connection-status-copy';
+import { ConnectingSpinner } from '@/src/components/connection-status-sheet/connecting-spinner';
+import { useLiveSyncStatus } from '@/src/components/connection-status-sheet/use-live-sync-status';
 import { tabRoute } from '@/src/navigation/routes';
 
 const HEADER_AVATAR_SIZE = 32;
@@ -266,39 +256,12 @@ const Home = memo(function AppHeaderHome() {
  * the state machine to reconnect, exactly as the dashboard does).
  */
 const ConnectionStatus = memo(function AppHeaderConnectionStatus() {
-  const connection = useConnectionState();
-  const state = connection.name;
-  const reason =
-    'reason' in connection && typeof connection.reason === 'string' ? connection.reason : undefined;
+  const { stateName, current, reason, refresh } = useLiveSyncStatus();
   const foregroundColor = useCSSVariable('--color-foreground') as string;
-  const isConnecting = state === 'connecting';
-  const isConnected = state === 'connected';
+  const isConnecting = stateName === 'connecting';
+  const isConnected = stateName === 'connected';
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-
-  const rotation = useSharedValue(0);
-  useEffect(() => {
-    if (isConnecting) {
-      rotation.value = withRepeat(
-        withTiming(360, { duration: 900, easing: Easing.linear }),
-        -1,
-        false,
-      );
-    } else {
-      cancelAnimation(rotation);
-      rotation.value = 0;
-    }
-    return (): void => cancelAnimation(rotation);
-  }, [isConnecting, rotation]);
-
-  const spinnerStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  const { dotColor, label } = describeConnectionState(state);
-
-  const refreshConnection = useCallback(() => {
-    stateMachineActor.send({ type: 'REFRESH_ZERO' });
-  }, []);
+  const { dotColor, label } = current;
 
   const openSheet = useCallback(() => {
     void haptics.buttonTap();
@@ -326,18 +289,14 @@ const ConnectionStatus = memo(function AppHeaderConnectionStatus() {
             {label}
           </Text>
         ) : null}
-        {isConnecting ? (
-          <Animated.View style={spinnerStyle}>
-            <RefreshCw size={12} color={foregroundColor} strokeWidth={2.5} />
-          </Animated.View>
-        ) : null}
+        {isConnecting ? <ConnectingSpinner color={foregroundColor} /> : null}
       </Pressable>
       <ConnectionStatusSheet
         isOpen={isSheetOpen}
         onOpenChange={setIsSheetOpen}
-        stateName={state}
+        stateName={stateName}
         reason={reason}
-        onRefresh={refreshConnection}
+        onRefresh={refresh}
       />
     </>
   );

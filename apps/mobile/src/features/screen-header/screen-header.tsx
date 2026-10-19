@@ -11,6 +11,8 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import type { GlobalSearchTab } from '@/src/features/global-search';
 import { haptics } from '@/src/utils/haptics';
 
+import { LiveSyncStatus } from './live-sync-status';
+
 const AVATAR_SIZE = 32;
 const SEARCH_ICON_SIZE = 22;
 
@@ -21,8 +23,8 @@ type ScreenHeaderProps = {
 };
 
 /**
- * The top of a redesigned tab screen: its title, then search and the profile
- * avatar on the right. Shared by DMs, Channels and Activity so the three match.
+ * The top of a redesigned tab screen: its title, then live sync, search and
+ * the profile avatar on the right. Shared by DMs, Channels and Activity so the three match.
  */
 export function ScreenHeader({ title, searchTab }: ScreenHeaderProps): ReactElement {
   const insets = useSafeAreaInsets();
@@ -34,6 +36,7 @@ export function ScreenHeader({ title, searchTab }: ScreenHeaderProps): ReactElem
     >
       <Text className='text-[28px] font-semibold text-spaces-foreground'>{title}</Text>
       <View className='flex-row items-center gap-4'>
+        <LiveSyncStatus />
         <SearchButton tab={searchTab} />
         <UserProfile />
       </View>

@@ -27,6 +27,9 @@ describe('connection status copy', () => {
       assert.ok(entry.label.length > 0, `${entry.name}: label`);
       assert.ok(entry.meaning.endsWith('.'), `${entry.name}: meaning is a sentence`);
       assert.ok(entry.whatToDo.endsWith('.'), `${entry.name}: whatToDo is a sentence`);
+      // One line in the compact tray: a few words, not a sentence.
+      assert.ok(entry.brief.length > 0 && entry.brief.length <= 32, `${entry.name}: brief`);
+      assert.ok(!entry.brief.endsWith('.'), `${entry.name}: brief is a phrase`);
       assert.equal(entry.dotColor, CONNECTION_TONE_COLOR[entry.tone]);
     }
   });
