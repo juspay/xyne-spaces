@@ -19,14 +19,20 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Change detection: lets mobile-only PRs (every changed file under
-  # apps/mobile/) skip the backend/dashboard/framework/xyne-claw jobs.
-  # apps/mobile is not a member of the root pnpm workspace and nothing outside
-  # it imports it, so those jobs cannot be affected by a mobile-only diff.
+  # Change detection: lets mobile-only changes (every changed file under
+  # apps/mobile/) skip the backend/dashboard/framework/xyne-claw jobs and the
+  # merge-queue automation tests, and runs the mobile typecheck only when
+  # apps/mobile or packages/shared changed. apps/mobile is not a member of the
+  # root pnpm workspace and nothing outside it imports it, so those jobs cannot
+  # be affected by a mobile-only diff.
   #
-  # Fails OPEN: merge_group/other events, an empty diff, or any error here
-  # leave non_mobile unset/true, and the gated jobs run as before. Jobs skipped
-  # by a job-level `if` report "skipped", which satisfies required checks.
+  # Works for both pull_request (diff vs the PR base) and merge_group (diff of
+  # the whole queue entry vs merge_group.base_sha, so a group containing any
+  # non-mobile PR runs the full suite).
+  #
+  # Fails OPEN: other events, an empty diff, or any git error leave both
+  # outputs true and the gated jobs run as before. Jobs skipped by a job-level
+  # `if` report "skipped", which satisfies required checks.
   #
   # Security scans (gitleaks, Trivy) are intentionally NOT gated: mobile holds
   # Firebase/config files and its own pnpm-lock.yaml.
@@ -36,12 +42,14 @@ jobs:
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     outputs:
       non_mobile: ${{ steps.detect.outputs.non_mobile }}
+      mobile: ${{ steps.detect.outputs.mobile }}
     steps:
-      # For pull_request the default ref is the synthetic merge commit; depth 2
-      # gives us its first parent (the base tip), so HEAD^1..HEAD is exactly
-      # what the PR changes against the base branch.
+      # pull_request: the default ref is the synthetic merge commit; depth 2
+      # gives its first parent (the base tip), so HEAD^1..HEAD is exactly what
+      # the PR changes. merge_group: the default ref is the queue's temporary
+      # branch head; the base commit is fetched explicitly below.
       - uses: actions/checkout@v5
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         with:
           fetch-depth: 2
 
@@ -49,19 +57,39 @@ jobs:
         id: detect
         env:
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "Event is $EVENT_NAME, running the full suite."
+          full_suite() {
+            echo "$1, running the full suite."
             echo "non_mobile=true" >> "$GITHUB_OUTPUT"
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
             exit 0
+          }
+          case "$EVENT_NAME" in
+            pull_request)
+              base="HEAD^1"
+              ;;
+            merge_group)
+              [ -n "$MERGE_GROUP_BASE_SHA" ] || full_suite "No merge_group base sha"
+              git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_SHA" \
+                || full_suite "Could not fetch merge_group base $MERGE_GROUP_BASE_SHA"
+              base="$MERGE_GROUP_BASE_SHA"
+              ;;
+            *)
+              full_suite "Event is $EVENT_NAME"
+              ;;
+          esac
+          if ! files=$(git diff --name-only "$base" HEAD) || [ -z "$files" ]; then
+            full_suite "Could not determine changed files"
           fi
-          if ! files=$(git diff --name-only HEAD^1 HEAD) || [ -z "$files" ]; then
-            echo "Could not determine changed files, running the full suite."
-            echo "non_mobile=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Changed files:"
+          echo "Changed files ($EVENT_NAME, base $base):"
           echo "$files"
+          # The mobile app links @xyne/shared, so shared changes re-check mobile.
+          if echo "$files" | grep -qE '^(apps/mobile|packages/shared)/'; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
+          fi
           if echo "$files" | grep -qv '^apps/mobile/'; then
             echo "non_mobile=true" >> "$GITHUB_OUTPUT"
           else
@@ -226,9 +254,13 @@ jobs:
   test:
     name: Automation tests
     # Runs only in the merge queue, not on every PR; RUN_TEST_CASE is the kill switch.
+    # Skipped for mobile-only queue entries (the suite exercises backend + dashboard).
+    needs: changes
     if: >-
-      github.event_name == 'merge_group'
+      !cancelled()
+      && github.event_name == 'merge_group'
       && vars.RUN_TEST_CASE == 'true'
+      && needs.changes.outputs.non_mobile != 'false'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
@@ -406,6 +438,71 @@ jobs:
 
       - name: Typecheck xyne-claw
         run: pnpm --filter xyne-claw run typecheck
+
+  # ---------------------------------------------------------------------------
+  # Mobile typecheck. apps/mobile is NOT a member of the root pnpm workspace:
+  # it installs on its own with apps/mobile/pnpm-lock.yaml and links
+  # @xyne/shared from packages/shared (consumed from its built dist/), so
+  # shared is installed + built first. Runs when apps/mobile or packages/shared
+  # changed, and on every non-PR event (fails open like the jobs above).
+  # ---------------------------------------------------------------------------
+  mobile:
+    name: Mobile typecheck
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.mobile != 'false' }}
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/mobile/pnpm-lock.yaml
+
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      # Written to the user-level config (not the root .npmrc) because
+      # apps/mobile is its own pnpm workspace and does not read the root .npmrc.
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          pnpm config set "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken" "${{ steps.gcp-auth.outputs.access_token }}"
+
+      - name: Install @xyne/shared
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter @xyne/shared...
+
+      - name: Build @xyne/shared
+        run: pnpm --filter @xyne/shared run build
+
+      # --ignore-scripts: the app's postinstall only patches native iOS code,
+      # which a typecheck does not need. patchedDependencies still apply.
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }} --ignore-scripts
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+
+      - name: Typecheck
+        working-directory: apps/mobile
+        run: pnpm run typecheck
 
   # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
