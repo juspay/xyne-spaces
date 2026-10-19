@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import {
   OWNERSHIP_CLAIM_SCRIPT,
+  advertiseRunOwner,
+  withdrawRunOwner,
   OWNERSHIP_TTL_SECONDS,
   POD_ALIVE_TTL_SECONDS,
   __setOwnershipClientForTests,
@@ -298,6 +300,50 @@ describe("refresh strategy switch", () => {
     handleOwnershipLoss("s1", token);
     handleOwnershipLoss("s1", token);
     expect(lost).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("direct run owner advertisement", () => {
+  beforeEach(() => {
+    process.env["REDIS_HOST"] = "127.0.0.1";
+    process.env["POD_ID"] = "pod-direct";
+    setOwnershipRefreshPort({ postMessage: () => {} });
+  });
+
+  afterEach(() => {
+    setOwnershipRefreshPort(null);
+    unregisterOwnedSession("chat-1");
+    delete process.env["POD_ID"];
+  });
+
+  it("lets any pod find the pod running a direct run, and clears it when the run ends", async () => {
+    const { stub, store } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+
+    const token = await advertiseRunOwner("chat-1");
+    expect(token?.startsWith("pod-direct:")).toBe(true);
+    expect(await currentOwnerPod("chat-1")).toBe("pod-direct");
+
+    await withdrawRunOwner("chat-1", token);
+    expect(store.has("claw:run-owner:chat-1")).toBe(false);
+    expect(await currentOwnerPod("chat-1")).toBeNull();
+  });
+
+  it("does not take a session another runner already owns", async () => {
+    const { stub, store } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("chat-1", "pod-queue:11111111-1111-4111-8111-111111111111");
+
+    expect(await advertiseRunOwner("chat-1")).toBeNull();
+    await withdrawRunOwner("chat-1", null);
+    expect(store.get("claw:run-owner:chat-1")?.value).toBe("pod-queue:11111111-1111-4111-8111-111111111111");
+  });
+
+  it("never blocks a run when Redis is down", async () => {
+    __setOwnershipClientForTests(throwingRedis());
+    const token = await advertiseRunOwner("chat-1");
+    expect(token).not.toBeNull();
+    await expect(withdrawRunOwner("chat-1", token)).resolves.toBeUndefined();
   });
 });
 

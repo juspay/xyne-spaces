@@ -39,8 +39,10 @@ import {
   buildSummaryTemplateSelectionPrompt,
   formatSummaryTemplateSections,
   parseSelectedSummaryTemplate,
+  pickSummaryTemplateWithXor,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
+import { AgentsConfig } from '@/agents/config';
 import { getMandatorySummarySectionState } from './summaryTemplateSections';
 import {
   DEFAULT_RECORDING_SUMMARY_TEMPLATE,
@@ -1087,6 +1089,19 @@ export class CallDocumentService {
       return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
     }
 
+    if ((await AgentsConfig.fetch()).summaryTemplateSelectionXorEnabled) {
+      const xorId = await pickSummaryTemplateWithXor(transcript, templates, meetingTitle);
+      const template = templates.find(candidate => candidate.id === xorId);
+      if (template) {
+        logger.info(`[${callId}] recording_summary_template_selected`, {
+          template_id: template.id,
+          template_name: template.name,
+          source: 'xor',
+        });
+        return { template, fellBack: false, reason: null };
+      }
+    }
+
     const result = await executeStreamingLlmRequest({
       userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates, meetingTitle),
       operation: 'recording_summary_template_selection',
@@ -1244,6 +1259,7 @@ export class CallDocumentService {
     callId: string,
     template: SummaryTemplate,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     const context = sanitizeInput(template.autoTriggerPrompt).trim();
     const sections = sanitizeInput(formatSummaryTemplateSections(template.sections));
@@ -1261,6 +1277,7 @@ export class CallDocumentService {
       operation: 'bot_call_summary_generation',
       callId,
       ...(systemPrompt ? { systemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
@@ -1308,7 +1325,53 @@ export class CallDocumentService {
     return rawSummary ? normalizeDetailedSummaryMarkdown(rawSummary) : null;
   }
 
-  /** Generate a headless-recording summary using a saved or code-backed template. */
+  /**
+   * The template the recording's creator chose as their default, if they set one in
+   * Preferences and can still read it. `null` means fall through to the LLM pick.
+   *
+   * Best effort: a default that no longer resolves, or a lookup that fails outright
+   * (e.g. the preference column is not migrated yet), must never block the summary.
+   */
+  private async resolveUserDefaultRecordingSummaryTemplate(
+    call: Call,
+  ): Promise<SummaryTemplate | null> {
+    if (!isRecording(call) || !call.workspaceId) return null;
+    try {
+      const preference = await db.userPreference.findUnique({
+        where: { userId: call.createdByUserId },
+        select: { recordingDefaultSummaryTemplateId: true },
+      });
+      const templateId = preference?.recordingDefaultSummaryTemplateId;
+      if (!templateId) return null;
+
+      const template = await summaryTemplateService.findAccessibleById(
+        templateId,
+        call.workspaceId,
+        call.createdByUserId,
+      );
+      if (template) {
+        logger.info(`[${call.externalId}] recording_summary_template_user_default`, {
+          template_id: template.id,
+        });
+        return template;
+      }
+      logger.warn(`[${call.externalId}] recording_summary_template_user_default_unavailable`, {
+        template_id: templateId,
+      });
+      return null;
+    } catch (error) {
+      logger.warn(`[${call.externalId}] recording_summary_template_user_default_lookup_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Generate a headless-recording summary using a saved or code-backed template.
+   * `unnumberedTranscript` is the transcript before segment numbering; a bot-created
+   * call's template summary is built from it, like its first summary.
+   */
   async generateRecordingSummary(
     transcript: string,
     callId: string,
@@ -1316,26 +1379,41 @@ export class CallDocumentService {
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
     modelType?: SummaryModelType,
+    unnumberedTranscript?: string,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
     markedItems: RecordingSummaryMarkedItem[];
+    // The untouched model output of a bot-created call's template summary.
+    rawSummary?: string;
   } | null> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call?.workspaceId) return null;
 
+    // A bot-created call (e.g. a regeneration requested by its app) follows its template
+    // alone, as its first summary did in generateAndPostDetailedSummary: no Xyne-generated
+    // system prompt and none of the recording summary's Markdown instructions.
+    const botCreated = !isRecording(call) && (await this.isBotCreatedCall(call));
     const selectedTemplate = templateId
       ? await summaryTemplateService.findAccessibleById(
           templateId,
           call.workspaceId,
           call.createdByUserId,
         )
-      : await this.selectRecordingSummaryTemplateForTranscript(
-          transcript,
-          call.workspaceId,
-          call.createdByUserId,
-          callId,
-        );
+      : botCreated
+        ? await this.resolveBotCallSummaryTemplate(
+            unnumberedTranscript ?? transcript,
+            call,
+            call.workspaceId,
+            callId,
+          )
+        : ((await this.resolveUserDefaultRecordingSummaryTemplate(call)) ??
+          (await this.selectRecordingSummaryTemplateForTranscript(
+            transcript,
+            call.workspaceId,
+            call.createdByUserId,
+            callId,
+          )));
 
     if (!selectedTemplate) {
       logger.error(`[${callId}] recording_summary_generation_failed`, {
@@ -1343,6 +1421,23 @@ export class CallDocumentService {
         template_id: templateId,
       });
       return null;
+    }
+
+    if (botCreated) {
+      const rawSummary = await this.generateBotCallSummary(
+        unnumberedTranscript ?? transcript,
+        callId,
+        selectedTemplate,
+        onDelta,
+        modelType,
+      );
+      if (!rawSummary) return null;
+      return {
+        summary: stripRecordingSummaryMarkedItemAnnotations(rawSummary),
+        template: selectedTemplate,
+        markedItems: [],
+        rawSummary,
+      };
     }
 
     const template = await summaryTemplateService.ensureGeneratedSystemPrompt(selectedTemplate);

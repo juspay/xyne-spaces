@@ -110,3 +110,32 @@ export function normalizeAskAiDomain(value: unknown): string {
   if (trimmed.length === 0 || trimmed.length > 253) return '';
   return HOSTNAME_RE.test(trimmed) ? trimmed : '';
 }
+
+/**
+ * A plain in-app route path that is safe to hand to the renderer's router over
+ * 'navigate-to': no embedded scheme, no protocol-relative '//', no backslashes,
+ * no path traversal (raw or percent-encoded), no control characters.
+ */
+export function isSafeInAppPath(pathStr: unknown): pathStr is string {
+  if (typeof pathStr !== 'string' || !pathStr.startsWith('/') || pathStr.startsWith('//')) {
+    return false;
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathStr);
+  } catch {
+    return false;
+  }
+  for (const c of [pathStr, decoded]) {
+    if (c.includes('\\')) return false;                        // backslash
+    if (c.includes('..')) return false;                        // path traversal
+    if (c.includes('//')) return false;                        // protocol-relative / external
+    if (/[\u0000-\u001F\u007F]/.test(c)) return false;     // control chars
+    if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
+  }
+  // Conservative in-app route charset (path + query + hash fragment).
+  // '#' is allowed so shared thread links keep their anchor
+  // (e.g. #origin=…&messageId=…&createdAt=…); the guards above still reject
+  // traversal, protocol-relative '//', backslashes and embedded schemes.
+  return /^\/[A-Za-z0-9\-._~/?=&%#]*$/.test(pathStr);
+}

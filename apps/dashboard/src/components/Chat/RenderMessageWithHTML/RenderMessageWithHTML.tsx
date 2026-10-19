@@ -58,6 +58,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
 import { useReportExpandedToMessage } from '../ExpandableMessage/ExpandableMessageContext';
+import { discussionTitleOfBody } from '../ChatInput/ChatInput.utils';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -1501,6 +1502,9 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       sanitizeDomTree(doc.body);
 
       trimBoundaryWhitespace(doc.body);
+
+      if (discussionTitleOfBody(doc.body))
+        doc.body.firstElementChild?.classList.add('discussion-title');
 
       const nodes: React.ReactNode[] = [];
       let idx = 0;

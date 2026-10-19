@@ -120,6 +120,8 @@ export const CONFIG = {
   // public ingress out of the path. Falls back to spacesBackendUrl so dev /
   // single-node deploys keep working without setting two envs.
   spacesInternalUrl: process.env["SPACES_INTERNAL_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
+  // The dedicated SDLC backend. Empty means SDLC calls go to spacesInternalUrl.
+  sdlcBackendUrl: process.env["SDLC_BACKEND_URL"] ?? "",
   /**
    * Read-only Postgres connection string to the Spaces DB. When set, claw-auth
    * fetches fresh user session credentials (token, sessionId, workspaceId)

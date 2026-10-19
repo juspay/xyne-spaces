@@ -1,33 +1,52 @@
 /**
- * Workspace-wide latency + throughput metrics for the v3 Metrics page.
- *
- * Single endpoint: GET /api/v1/metrics/global?days=7
- *
- * Returns rollups that let the operator answer "are runs getting faster or
- * not". Aggregated across ALL users, ALL agents — no per-user filter. The
- * frontend is admin-only (gated via existing AdminStatusContext).
- *
- * Heavy lifting is one read query against agent_runs. Avoid `SELECT *` —
- * only the latency + status columns are needed, and the `toolInvocations`
- * blob is excluded (a single one can be 50KB+).
+ * Run-level metrics for the v3 Metrics page, the agent tools and apps/dashboard.
+ * One cached block per card (lib/run-analytics.ts); the legacy GET /global and
+ * /agent/:slug keep their historical shapes but compose the same blocks, so they
+ * agree with the v3 cards. Tool, LLM-call and session endpoints live in
+ * routes/metrics-tools.ts.
  */
 
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { isClawAdmin, getOrgId } from "../middleware/agent-acl.js";
-import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
+import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { backfillFailureCurator } from "../services/failure-curator-worker.js";
+import { fetchToolRollup } from "../lib/tool-analytics.js";
+import { fetchMetricSessions } from "../lib/metric-sessions.js";
+import {
+  boundedAll,
+  fetchActiveAgents,
+  fetchAgentLeaderboard,
+  fetchRouteTable,
+  fetchRunDaily,
+  fetchRunSummary,
+  fetchSentiment,
+  type AgentLeaderRow,
+  type AgentSentiment,
+  type DailyPoint,
+  type RouteRow,
+  type SummaryFigures,
+  type TriggerRow as RunTriggerRow,
+} from "../lib/run-analytics.js";
+import {
+  METRIC_TTL,
+  cachedMetric,
+  parseDays,
+  parseIntParam,
+  parseTz,
+  resolveRequestWindow,
+  windowInfo,
+  type AnalyticsWindow,
+  type MetricsDays,
+  type MetricsScope,
+  type TriggerGroup,
+} from "../lib/metrics-core.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("metrics");
 
-/**
- * Per-request metrics scope. Admins see every user in their org; everyone
- * else keeps the legacy personal-run view. CLAW_ADMIN can explicitly request
- * orgScope=all, which bypasses the org filter and is audit-logged by
- * getAdminOrgScope.
- */
+/** Destructuring shape the awakening handlers below use; scope rules live in resolveRequestWindow. */
 async function resolveMetricsScope(req: Request, endpoint: string): Promise<{
   userId: string;
   userFilter: Prisma.Sql;
@@ -36,37 +55,133 @@ async function resolveMetricsScope(req: Request, endpoint: string): Promise<{
   scopeOrgId: string | undefined;
   allOrgs: boolean;
 }> {
-  const userId = String(req.headers["x-user-id"] ?? "");
-  if (!userId) throw new Error("x-user-id header is required");
-  const admin = await isClawAdmin(userId);
-  const adminScope = getAdminOrgScope(req, endpoint, admin);
-  const fallbackOrgId = adminScope.orgId
-    ?? (adminScope.allOrgs ? undefined : (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId);
-  if (!adminScope.allOrgs && !fallbackOrgId) {
-    throw new Error("orgId is required");
-  }
+  const { window, scope } = await resolveRequestWindow(req, endpoint);
   return {
-    userId,
-    userFilter: admin ? Prisma.empty : Prisma.sql`AND "userId" = ${userId}`,
-    orgFilter: adminScope.allOrgs ? Prisma.empty : Prisma.sql`AND "orgId" = ${fallbackOrgId}`,
-    scopeUserId: admin ? undefined : userId,
-    scopeOrgId: adminScope.allOrgs ? undefined : fallbackOrgId,
-    allOrgs: adminScope.allOrgs,
+    userId: scope.requesterId,
+    userFilter: window.userFilter,
+    orgFilter: window.orgFilter,
+    scopeUserId: window.userId,
+    scopeOrgId: window.orgId,
+    allOrgs: window.allOrgs,
   };
 }
 
 export const metricsRouter = Router();
 
-const ALLOWED_DAYS = new Set([1, 7, 30]);
-const DEFAULT_DAYS = 7;
+const CACHE_CONTROL = "private, max-age=30";
 
-type TriggerGroup = "user" | "automation" | "scheduled" | "api";
-const TRIGGER_GROUPS: TriggerGroup[] = ["user", "automation", "scheduled", "api"];
+/** Shared by the card routes and the legacy composites so both hit one cache entry. */
+const KEY = {
+  summary: "summary",
+  daily: "runs/daily",
+  agentsTop: "agents/top",
+  agentsActive: "agents/active",
+  routes: "routes",
+  sentiment: "sentiment",
+  toolRollup: "tools/rollup",
+  legacySlow: "legacy/slow-sessions",
+} as const;
 
-function parseDays(req: Request): number {
-  const raw = Number(req.query["days"]);
-  return ALLOWED_DAYS.has(raw) ? raw : DEFAULT_DAYS;
+const ACTIVE_AGENTS_TTL_MS = 5 * 60_000;
+const ACTIVE_AGENTS_DAYS: MetricsDays = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TOP_AGENTS = 20;
+const MAX_TOP_AGENTS = 100;
+
+function sendError(res: Response, tag: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : "Internal server error";
+  const status = message === "x-user-id header is required" ? 401 : message === "orgId is required" ? 400 : 500;
+  if (status === 500) log.error(`[metrics${tag}] error:`, err);
+  res.status(status).json({ error: message });
 }
+
+const summaryBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.summary, window: w }, METRIC_TTL.current, () => fetchRunSummary(w));
+const dailyBlock = (w: AnalyticsWindow, tz: string) =>
+  cachedMetric({ endpoint: KEY.daily, window: w, params: { tz } }, METRIC_TTL.current, () => fetchRunDaily(w, tz));
+const agentsTopBlock = (w: AnalyticsWindow, limit: number) =>
+  cachedMetric({ endpoint: KEY.agentsTop, window: w, params: { limit } }, METRIC_TTL.current, () => fetchAgentLeaderboard(w, limit));
+const routesBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.routes, window: w }, METRIC_TTL.current, () => fetchRouteTable(w));
+const sentimentBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.sentiment, window: w }, METRIC_TTL.current, () => fetchSentiment(w));
+
+/** GET /summary — headline figures for the window and the previous window of equal length. */
+metricsRouter.get("/summary", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/summary");
+    const { value, cached } = await summaryBlock(window);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), ...value });
+  } catch (err) {
+    sendError(res, "/summary", err);
+  }
+});
+
+/** GET /runs/daily?tz= — zero-filled calendar days in `tz`, plus the trigger breakdown. */
+metricsRouter.get("/runs/daily", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/runs/daily");
+    const tz = parseTz(req);
+    const { value, cached } = await dailyBlock(window, tz);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), tz, ...value });
+  } catch (err) {
+    sendError(res, "/runs/daily", err);
+  }
+});
+
+/** GET /agents/top?limit=20 — agent leaderboard by runs. */
+metricsRouter.get("/agents/top", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/agents/top");
+    const limit = parseIntParam(req.query["limit"], DEFAULT_TOP_AGENTS, 1, MAX_TOP_AGENTS);
+    const { value, cached } = await agentsTopBlock(window, limit);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), rows: value });
+  } catch (err) {
+    sendError(res, "/agents/top", err);
+  }
+});
+
+/** GET /agents/active — agents with a finished run in the last 30 days whatever the page's range, for the agent picker. */
+metricsRouter.get("/agents/active", async (req: Request, res: Response) => {
+  try {
+    const { window: base, scope } = await resolveRequestWindow(req, "/metrics/agents/active");
+    const window: AnalyticsWindow = {
+      ...base,
+      windowStart: new Date(base.windowEnd.getTime() - ACTIVE_AGENTS_DAYS * DAY_MS),
+      agentSlugs: [],
+    };
+    const { value, cached } = await cachedMetric({ endpoint: KEY.agentsActive, window }, ACTIVE_AGENTS_TTL_MS, () => fetchActiveAgents(window));
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, ACTIVE_AGENTS_DAYS, [], cached), agents: value });
+  } catch (err) {
+    sendError(res, "/agents/active", err);
+  }
+});
+
+/** GET /routes — run-level route (agent_runs.provider) x model table. */
+metricsRouter.get("/routes", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/routes");
+    const { value, cached } = await routesBlock(window);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), rows: value });
+  } catch (err) {
+    sendError(res, "/routes", err);
+  }
+});
+
+/** GET /sentiment?agentSlug=<one> — ratings, behavioural rates and memory recall for ONE agent. */
+metricsRouter.get("/sentiment", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/sentiment");
+    if (agentSlugs.length !== 1) {
+      res.status(400).json({ error: "sentiment needs exactly one agentSlug" });
+      return;
+    }
+    const { value, cached } = await sentimentBlock(window);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), ...value });
+  } catch (err) {
+    sendError(res, "/sentiment", err);
+  }
+});
+
+/** Always present, in this order; newer groups follow only when non-zero. */
+const LEGACY_TRIGGER_GROUPS = ["user", "automation", "scheduled", "api"] as const;
 
 interface DayBucket {
   day: string; // ISO date YYYY-MM-DD
@@ -83,6 +198,7 @@ interface DayBucket {
   automation?: number;
   scheduled?: number;
   api?: number;
+  [group: string]: string | number | null | undefined;
 }
 
 interface AgentRow {
@@ -138,74 +254,6 @@ interface SlowSession {
   topTools: SlowSessionToolRow[];
 }
 
-/**
- * Top-N slowest sessions in the window, with per-session top-3 tools (by
- * cumulative ms). Pulls `toolInvocations` JSONB and aggregates in Node so
- * we don't have to LATERAL-join in SQL. 20 sessions × ~30 tool rows each
- * keeps the payload bounded.
- */
-async function fetchSlowSessions(opts: {
-  windowStart: Date;
-  windowEnd: Date;
-  agentSlug?: string | undefined;
-  scopeUserId?: string | undefined;
-  scopeOrgId?: string | undefined;
-  limit: number;
-}): Promise<SlowSession[]> {
-  const rows = await prisma.agentRun.findMany({
-    where: {
-      completedAt: { gte: opts.windowStart, lt: opts.windowEnd },
-      totalMs: { not: null },
-      ...(opts.agentSlug ? { agentSlug: opts.agentSlug } : {}),
-      ...(opts.scopeUserId ? { userId: opts.scopeUserId } : {}),
-      ...(opts.scopeOrgId ? { orgId: opts.scopeOrgId } : {}),
-    },
-    select: {
-      sessionId: true, agentSlug: true,
-      totalMs: true, llmTotalMs: true, toolMs: true,
-      completedAt: true, task: true,
-      toolInvocations: true,
-    },
-    orderBy: { totalMs: "desc" },
-    take: opts.limit,
-  });
-
-  return rows.map((r) => {
-    const invs = Array.isArray(r.toolInvocations)
-      ? (r.toolInvocations as Array<Record<string, unknown>>)
-      : [];
-    // Aggregate by tool name. We're intentionally lenient on shape — the
-    // durationMs field can be missing on placeholder rows we never finalised.
-    const byTool = new Map<string, { ms: number; calls: number; isError: boolean }>();
-    for (const inv of invs) {
-      const tool = typeof inv["toolName"] === "string" ? (inv["toolName"] as string) : "(unknown)";
-      const ms = typeof inv["durationMs"] === "number" ? (inv["durationMs"] as number) : 0;
-      const err = inv["isError"] === true;
-      const cur = byTool.get(tool) ?? { ms: 0, calls: 0, isError: false };
-      cur.ms += ms;
-      cur.calls += 1;
-      cur.isError ||= err;
-      byTool.set(tool, cur);
-    }
-    const topTools: SlowSessionToolRow[] = Array.from(byTool.entries())
-      .map(([tool, v]) => ({ tool, ms: Math.round(v.ms), calls: v.calls, isError: v.isError }))
-      .sort((a, b) => b.ms - a.ms)
-      .slice(0, 5);
-
-    return {
-      sessionId: r.sessionId,
-      agentSlug: r.agentSlug,
-      totalMs: r.totalMs,
-      llmTotalMs: r.llmTotalMs,
-      toolMs: r.toolMs,
-      completedAt: r.completedAt!.toISOString(),
-      // truncate task to keep the payload light; the UI shows it as a tooltip
-      task: r.task ? r.task.slice(0, 240) : null,
-      topTools,
-    };
-  });
-}
-
 interface ToolLatencyRow {
   tool: string;
   calls: number;
@@ -214,800 +262,297 @@ interface ToolLatencyRow {
   p50Ms: number | null;
   p95Ms: number | null;
   totalMs: number;
+  droppedEnd: number;
+  droppedEndRate: number;
 }
 
-interface SentimentComment {
-  sessionId: string;
-  rating: "up" | "down";
-  comment: string;
-  completedAt: string;
+interface HeadlineFigures {
+  runsWithTokens: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  avgTokensInPerRun: number | null;
+  avgTokensOutPerRun: number | null;
+  cacheHitRate: number | null;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgTokensPerSec: number | null;
+  toolCalls: number;
+  toolErrors: number;
+  toolErrorRate: number | null;
 }
 
-interface AgentSentiment {
-  totalRuns: number;
-  ratingUp: number;
-  ratingDown: number;
-  ratingTotal: number;        // rated runs (up + down)
-  ratingRatio: number | null; // up / total, null when no ratings
-  cancelledRate: number;
-  failedRate: number;
-  retriedRate: number;        // % of runs that had at least one LLM retry
-  apologeticRate: number;     // % of completed results matching apologetic regex
-  recentComments: SentimentComment[];
+interface MetricsHeadline extends HeadlineFigures {
+  /** The previous window of equal length; null when it has no runs. */
+  previous: HeadlineFigures | null;
 }
 
-/**
- * Heuristic sentiment + behavioural rollup for an agent. All signals come
- * from columns we already persist on agent_runs, so this is one SQL hit + a
- * second small fetch for recent rating comments. No LLM cost.
- *
- * "Apologetic" regex catches common "I couldn't / I don't have / sorry"
- * markers in the result text — a proxy for the agent telling the user it
- * failed to do something, even when the run technically completed.
- */
-async function fetchSentiment(opts: {
-  windowStart: Date;
-  windowEnd: Date;
-  agentSlug: string;
-  userFilter: Prisma.Sql;
-  orgFilter: Prisma.Sql;
-  scopeUserId?: string | undefined;
-  scopeOrgId?: string | undefined;
-}): Promise<AgentSentiment> {
-  const rows = await prisma.$queryRaw<Array<{
-    total_runs: bigint;
-    rating_up: bigint;
-    rating_down: bigint;
-    cancelled: bigint;
-    failed: bigint;
-    retried: bigint;
-    apologetic: bigint;
-    completed: bigint;
-  }>>`
-    SELECT
-      COUNT(*)                                                              AS total_runs,
-      COUNT(*) FILTER (WHERE "rating" = 'up')                               AS rating_up,
-      COUNT(*) FILTER (WHERE "rating" = 'down')                             AS rating_down,
-      COUNT(*) FILTER (WHERE status = 'cancelled')                          AS cancelled,
-      COUNT(*) FILTER (WHERE status = 'failed')                             AS failed,
-      COUNT(*) FILTER (WHERE "llmRetries" IS NOT NULL AND "llmRetries" > 0) AS retried,
-      COUNT(*) FILTER (
-        WHERE status = 'completed'
-          AND result IS NOT NULL
-          AND result ~* '\m(I couldn|I can\W?t|I don\W?t have|sorry|unable to|I am not able|I cannot|I do not have|I don\W?t know|no findings|I was unable)'
-      )                                                                     AS apologetic,
-      COUNT(*) FILTER (WHERE status = 'completed')                          AS completed
-    FROM "agent_runs"
-    WHERE "agentSlug" = ${opts.agentSlug}
-      AND "completedAt" >= ${opts.windowStart}
-      AND "completedAt" <  ${opts.windowEnd}
-      ${opts.userFilter}
-      ${opts.orgFilter}
-  `;
-
-  const r = rows[0];
-  const total = r ? Number(r.total_runs) : 0;
-  const completedCount = r ? Number(r.completed) : 0;
-  const up = r ? Number(r.rating_up) : 0;
-  const down = r ? Number(r.rating_down) : 0;
-  const ratingTotal = up + down;
-
-  // Recent comments — most-recent 12, only rows with a non-empty comment.
-  // Separate query keeps the rollup above on its own simple plan.
-  const comments = await prisma.agentRun.findMany({
-    where: {
-      agentSlug: opts.agentSlug,
-      completedAt: { gte: opts.windowStart, lt: opts.windowEnd },
-      ratingComment: { not: null },
-      rating: { in: ["up", "down"] },
-      ...(opts.scopeUserId ? { userId: opts.scopeUserId } : {}),
-      ...(opts.scopeOrgId ? { orgId: opts.scopeOrgId } : {}),
-    },
-    select: { sessionId: true, rating: true, ratingComment: true, completedAt: true },
-    orderBy: { ratedAt: "desc" },
-    take: 12,
-  });
-
-  return {
-    totalRuns: total,
-    ratingUp: up,
-    ratingDown: down,
-    ratingTotal,
-    ratingRatio: ratingTotal > 0 ? up / ratingTotal : null,
-    cancelledRate: total > 0 ? Number(r!.cancelled) / total : 0,
-    failedRate:    total > 0 ? Number(r!.failed)    / total : 0,
-    retriedRate:   total > 0 ? Number(r!.retried)   / total : 0,
-    // apologetic rate is a fraction of COMPLETED runs (so a failed run that
-    // never produced text doesn't inflate the denominator).
-    apologeticRate: completedCount > 0 ? Number(r!.apologetic) / completedCount : 0,
-    recentComments: comments
-      .filter((c) => c.ratingComment && c.ratingComment.trim().length > 0)
-      .map((c) => ({
-        sessionId: c.sessionId,
-        rating: c.rating as "up" | "down",
-        comment: c.ratingComment!.slice(0, 600),
-        completedAt: c.completedAt!.toISOString(),
-      })),
-  };
+interface LegacyTotals {
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
+  avgLlmMs: number | null;
+  avgToolMs: number | null;
+  errorRate: number;
+  tokens: { in: number; out: number; cacheRead: number; cacheWrite: number };
+  uniqueUsers: number;
 }
 
-/**
- * Per-tool aggregation for an agent. Unnests every run's toolInvocations
- * JSONB and groups by toolName, surfacing where the agent burns time.
- *
- * Postgres can do this in a single LATERAL + jsonb_array_elements query;
- * the percentile is cheap because the per-tool population is small.
- */
-async function fetchToolLatency(opts: {
-  windowStart: Date;
-  windowEnd: Date;
-  agentSlug: string;
-  userFilter: Prisma.Sql;
-  orgFilter: Prisma.Sql;
-  limit: number;
-}): Promise<ToolLatencyRow[]> {
-  const rows = await prisma.$queryRaw<Array<{
-    tool: string;
-    calls: bigint;
-    errors: bigint;
-    avg_ms: number | null;
-    p50_ms: number | null;
-    p95_ms: number | null;
-    // Postgres SUM(int) returns BIGINT — must Number() before serialising.
-    total_ms: bigint | null;
-  }>>`
-    SELECT
-      inv->>'toolName'                                                     AS tool,
-      COUNT(*)                                                             AS calls,
-      COUNT(*) FILTER (WHERE (inv->>'isError')::boolean)                   AS errors,
-      AVG(NULLIF(inv->>'durationMs','')::int)                              AS avg_ms,
-      PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY NULLIF(inv->>'durationMs','')::int) AS p50_ms,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY NULLIF(inv->>'durationMs','')::int) AS p95_ms,
-      SUM(NULLIF(inv->>'durationMs','')::int)                              AS total_ms
-    FROM "agent_runs" r,
-         LATERAL jsonb_array_elements(r."toolInvocations") inv
-    WHERE r."agentSlug" = ${opts.agentSlug}
-      AND r."completedAt" >= ${opts.windowStart}
-      AND r."completedAt" <  ${opts.windowEnd}
-      AND r."toolInvocations" IS NOT NULL
-      AND NULLIF(inv->>'durationMs','') IS NOT NULL
-      ${opts.userFilter}
-      ${opts.orgFilter}
-    GROUP BY inv->>'toolName'
-    ORDER BY total_ms DESC NULLS LAST
-    LIMIT ${opts.limit}
-  `;
-  const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
-  return rows.map((r) => ({
-    tool: r.tool,
-    calls: Number(r.calls),
-    errors: Number(r.errors),
-    avgMs: round(r.avg_ms),
-    p50Ms: round(r.p50_ms),
-    p95Ms: round(r.p95_ms),
-    totalMs: r.total_ms != null ? Number(r.total_ms) : 0,
-  }));
+interface LegacyDelta {
+  runs: number;       // current - previous (raw)
+  p50TotalMs: number | null;
+  p95TotalMs: number | null;
+  errorRate: number;
 }
 
 interface MetricsResponse {
   days: number;
   windowStart: string;
   windowEnd: string;
-  totals: {
-    runs: number;
-    completed: number;
-    failed: number;
-    cancelled: number;
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    avgLlmMs: number | null;
-    avgToolMs: number | null;
-    errorRate: number;
-    /** Window token totals — fresh input, cached (read/write), and output. */
-    tokens?: { in: number; out: number; cacheRead: number; cacheWrite: number };
-    /** Distinct users in the window. */
-    uniqueUsers?: number;
-    /** Memory adoption — runs that recalled >=1 memory (per-agent endpoint only). */
-    memoryRecall?: { runsWithRecall: number; rate: number };
-  };
-  delta: {
-    runs: number;       // current - previous (raw)
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    errorRate: number;
-  };
+  totals: LegacyTotals;
+  delta: LegacyDelta;
   perDay: DayBucket[];
   byTrigger: TriggerRow[];
   topAgents: AgentRow[];
   byProvider: ProviderRow[];
   slowSessions: SlowSession[];
+  headline: MetricsHeadline;
 }
 
-/**
- * Same shape as `/global` but scoped to a single agentSlug. Used by the
- * agent detail page's Metrics tab so we don't have to filter a global
- * payload client-side. One extra WHERE clause per query; same plan.
- */
+/** Failed + cancelled share, 0 on an empty window: the legacy definition. */
+const legacyErrorRate = (runs: number, completed: number): number => (runs > 0 ? (runs - completed) / runs : 0);
+
+// Legacy run time is the end-to-end wall clock, the same figure the v3 headline shows.
+function legacyTotals(s: SummaryFigures): LegacyTotals {
+  return {
+    runs: s.runs,
+    completed: s.completed,
+    failed: s.failed,
+    cancelled: s.cancelled,
+    p50TotalMs: s.wall.p50Ms,
+    p95TotalMs: s.wall.p95Ms,
+    avgLlmMs: s.agent.avgLlmMs,
+    avgToolMs: s.agent.avgToolMs,
+    errorRate: legacyErrorRate(s.runs, s.completed),
+    tokens: { in: s.tokens.freshTotal, out: s.tokens.outputTotal, cacheRead: s.tokens.cacheReadTotal, cacheWrite: s.tokens.cacheWriteTotal },
+    uniqueUsers: s.users,
+  };
+}
+
+function legacyDelta(cur: SummaryFigures, prev: SummaryFigures | null): LegacyDelta {
+  const diff = (a: number | null, b: number | null | undefined): number | null => (a != null && b != null ? Math.round(a - b) : null);
+  return {
+    runs: cur.runs - (prev?.runs ?? 0),
+    p50TotalMs: diff(cur.wall.p50Ms, prev?.wall.p50Ms),
+    p95TotalMs: diff(cur.wall.p95Ms, prev?.wall.p95Ms),
+    errorRate: legacyErrorRate(cur.runs, cur.completed) - (prev ? legacyErrorRate(prev.runs, prev.completed) : 0),
+  };
+}
+
+function headlineFigures(s: SummaryFigures): HeadlineFigures {
+  return {
+    runsWithTokens: s.tokens.n,
+    tokensIn: s.tokens.freshTotal,
+    tokensOut: s.tokens.outputTotal,
+    cacheRead: s.tokens.cacheReadTotal,
+    cacheWrite: s.tokens.cacheWriteTotal,
+    avgTokensInPerRun: s.tokens.freshPerRun,
+    avgTokensOutPerRun: s.tokens.outputPerRun,
+    cacheHitRate: s.tokens.cacheHitRate,
+    p50TtftMs: s.replyStart.p50Ms,
+    p95TtftMs: s.replyStart.p95Ms,
+    avgTokensPerSec: s.throughput.tokensPerSec,
+    toolCalls: s.tools.calls,
+    toolErrors: s.tools.errors,
+    toolErrorRate: s.tools.errorRate,
+  };
+}
+
+const legacyHeadline = (cur: SummaryFigures, prev: SummaryFigures | null): MetricsHeadline =>
+  ({ ...headlineFigures(cur), previous: prev ? headlineFigures(prev) : null });
+
+function legacyDay(p: DailyPoint, withTriggers: boolean): DayBucket {
+  const bucket: DayBucket = {
+    day: p.day,
+    runs: p.runs,
+    completed: p.completed,
+    failed: p.failed,
+    cancelled: p.cancelled,
+    p50TotalMs: p.wall.p50Ms,
+    p95TotalMs: p.wall.p95Ms,
+    avgLlmMs: p.agent.avgLlmMs,
+    avgToolMs: p.agent.avgToolMs,
+    errorRate: legacyErrorRate(p.runs, p.completed),
+  };
+  if (!withTriggers) return bucket;
+  for (const g of LEGACY_TRIGGER_GROUPS) bucket[g] = p.byTrigger[g] ?? 0;
+  for (const [g, n] of Object.entries(p.byTrigger)) if (!(g in bucket) && n) bucket[g] = n;
+  return bucket;
+}
+
+function legacyTriggers(rows: RunTriggerRow[]): TriggerRow[] {
+  const byGroup = new Map(rows.map((r) => [r.group, r]));
+  const toLegacy = (group: TriggerGroup): TriggerRow => {
+    const r = byGroup.get(group);
+    return {
+      trigger: group,
+      runs: r?.runs ?? 0,
+      completed: r?.completed ?? 0,
+      failed: r?.failed ?? 0,
+      cancelled: r?.cancelled ?? 0,
+      errorRate: r ? legacyErrorRate(r.runs, r.completed) : 0,
+      p50TotalMs: r?.wall.p50Ms ?? null,
+      p95TotalMs: r?.wall.p95Ms ?? null,
+    };
+  };
+  const extra = rows.map((r) => r.group).filter((g) => !(LEGACY_TRIGGER_GROUPS as readonly string[]).includes(g)).sort();
+  return [...LEGACY_TRIGGER_GROUPS, ...extra].map(toLegacy);
+}
+
+const legacyAgent = (r: AgentLeaderRow): AgentRow => ({
+  agentSlug: r.agentSlug,
+  orgId: r.orgId,
+  orgName: r.orgName ?? r.orgId,
+  runs: r.runs,
+  p50TotalMs: r.wall.p50Ms,
+  p95TotalMs: r.wall.p95Ms,
+  avgLlmMs: r.agent.avgLlmMs,
+  avgToolMs: r.agent.avgToolMs,
+  errorRate: r.successRate == null ? 0 : 1 - r.successRate,
+});
+
+const legacyProvider = (r: RouteRow): ProviderRow => ({
+  provider: r.route,
+  model: r.model,
+  runs: r.runs,
+  p50LlmMs: r.llm.p50Ms,
+  p95LlmMs: r.llm.p95Ms,
+  p50TtftMs: r.replyStart.p50Ms,
+  p95TtftMs: r.replyStart.p95Ms,
+  avgTokensPerSec: r.tokensPerSec,
+  errorRate: r.errorRate ?? 0,
+});
+
+const LEGACY_SLOW_LIMIT = 20;
+const LEGACY_TOOL_LATENCY_LIMIT = 30;
+
+/** Slowest runs via the shared sessions lib; cached per viewer because redaction depends on the requester's aliases. */
+async function legacySlowSessions(req: Request, w: AnalyticsWindow, scope: MetricsScope): Promise<SlowSession[]> {
+  const aliases = getRequesterAliases(req).sort();
+  const { value } = await cachedMetric(
+    { endpoint: KEY.legacySlow, window: w, params: { viewer: aliases, limit: LEGACY_SLOW_LIMIT } },
+    METRIC_TTL.current,
+    () => fetchMetricSessions(w, { kind: "slow", limit: LEGACY_SLOW_LIMIT }, { requesterAliases: aliases, isAdmin: scope.isAdmin }),
+  );
+  return value.rows.map((r) => ({
+    sessionId: r.sessionId,
+    agentSlug: r.agentSlug,
+    totalMs: r.totalMs,
+    llmTotalMs: r.split?.llmMs ?? null,
+    toolMs: r.split?.toolMs ?? null,
+    completedAt: r.completedAt ?? r.startedAt,
+    task: r.task ? r.task.slice(0, 240) : null,
+    topTools: (r.split?.topTools ?? []).map((t) => ({ tool: t.tool, ms: t.ms, calls: t.calls, isError: t.errored })),
+  }));
+}
+
+/** Per-tool latency ordered by cumulative time. */
+async function legacyToolLatency(w: AnalyticsWindow): Promise<ToolLatencyRow[]> {
+  const { value } = await cachedMetric({ endpoint: KEY.toolRollup, window: w }, METRIC_TTL.current, () => fetchToolRollup(w));
+  return [...value.rows]
+    .sort((a, b) => b.totalMs - a.totalMs)
+    .slice(0, LEGACY_TOOL_LATENCY_LIMIT)
+    .map((t) => ({
+      tool: t.tool,
+      calls: t.calls,
+      errors: t.errors,
+      avgMs: t.avgMs,
+      p50Ms: t.p50Ms,
+      p95Ms: t.p95Ms,
+      totalMs: t.totalMs,
+      droppedEnd: t.dropped,
+      droppedEndRate: t.droppedRate ?? 0,
+    }));
+}
+
+/** GET /agent/:slug — legacy shape (apps/dashboard): /global for one agent plus tool latency, sentiment and memory recall. */
 metricsRouter.get("/agent/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const { userFilter, orgFilter, scopeUserId, scopeOrgId } = await resolveMetricsScope(req, "/metrics/agent");
+    const { window: base, scope } = await resolveRequestWindow(req, "/metrics/agent");
     const slug = req.params.slug;
     const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const w: AnalyticsWindow = { ...base, agentSlugs: [slug] };
+    const tz = parseTz(req);
 
-    const perDayRaw = await prisma.$queryRaw<Array<{
-      day: Date;
-      runs: bigint;
-      completed: bigint;
-      failed: bigint;
-      cancelled: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      avg_llm_ms: number | null;
-      avg_tool_ms: number | null;
-    }>>`
-      SELECT
-        date_trunc('day', "completedAt")::date AS day,
-        COUNT(*)                                       AS runs,
-        COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
-        COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-        COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        AVG("llmTotalMs")                              AS avg_llm_ms,
-        AVG("toolMs")                                  AS avg_tool_ms
-      FROM "agent_runs"
-      WHERE "agentSlug" = ${slug}
-        AND "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        ${userFilter}
-        ${orgFilter}
-      GROUP BY 1
-      ORDER BY 1 ASC
-    `;
+    // The summary alone runs three statements; the rest follow so a request holds at most three connections.
+    const { value: summary } = await summaryBlock(w);
+    const [daily, slowSessions, toolLatency, sentiment] = await boundedAll<unknown>([
+      async () => (await dailyBlock(w, tz)).value,
+      () => legacySlowSessions(req, w, scope),
+      () => legacyToolLatency(w),
+      async () => (await sentimentBlock(w)).value,
+    ]) as [Awaited<ReturnType<typeof fetchRunDaily>>, SlowSession[], ToolLatencyRow[], Awaited<ReturnType<typeof fetchSentiment>>];
 
-    const totalsRaw = await prisma.$queryRaw<Array<{
-      runs: bigint;
-      completed: bigint;
-      failed: bigint;
-      cancelled: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      avg_llm_ms: number | null;
-      avg_tool_ms: number | null;
-      avg_turns: number | null;
-      avg_tps: number | null;
-      tokens_in: bigint;
-      tokens_out: bigint;
-      tokens_cache_read: bigint;
-      tokens_cache_write: bigint;
-      unique_users: bigint;
-    }>>`
-      SELECT
-        COUNT(*)                                       AS runs,
-        COUNT(DISTINCT "userId")                       AS unique_users,
-        COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
-        COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-        COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        AVG("llmTotalMs")                              AS avg_llm_ms,
-        AVG("toolMs")                                  AS avg_tool_ms,
-        AVG("llmTurns")                                AS avg_turns,
-        AVG("tokensPerSec")                            AS avg_tps,
-        COALESCE(SUM("tokensIn"), 0)                   AS tokens_in,
-        COALESCE(SUM("tokensOut"), 0)                  AS tokens_out,
-        COALESCE(SUM("tokensCacheRead"), 0)            AS tokens_cache_read,
-        COALESCE(SUM("tokensCacheWrite"), 0)           AS tokens_cache_write
-      FROM "agent_runs"
-      WHERE "agentSlug" = ${slug}
-        AND "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        ${userFilter}
-        ${orgFilter}
-    `;
-
-    const prevRaw = await prisma.$queryRaw<Array<{
-      runs: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      errors: bigint;
-    }>>`
-      SELECT
-        COUNT(*)                                                   AS runs,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        COUNT(*) FILTER (WHERE status IN ('failed','cancelled'))   AS errors
-      FROM "agent_runs"
-      WHERE "agentSlug" = ${slug}
-        AND "completedAt" >= ${prevWindowStart}
-        AND "completedAt" <  ${windowStart}
-        ${userFilter}
-        ${orgFilter}
-    `;
-
-    const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
-    const t = totalsRaw[0];
-    const totalsRuns = t ? Number(t.runs) : 0;
-    const totalsErrors = t ? Number(t.failed) + Number(t.cancelled) : 0;
-    const p = prevRaw[0];
-    const prevRuns = p ? Number(p.runs) : 0;
-    const prevErrors = p ? Number(p.errors) : 0;
-
-    res.json({
+    const cur = summary.current;
+    const sentimentShape: AgentSentiment = sentiment.sentiment;
+    res.set("Cache-Control", CACHE_CONTROL).json({
       agentSlug: slug,
       days,
-      windowStart: windowStart.toISOString(),
-      windowEnd: windowEnd.toISOString(),
+      windowStart: w.windowStart.toISOString(),
+      windowEnd: w.windowEnd.toISOString(),
       totals: {
-        runs: totalsRuns,
-        completed: t ? Number(t.completed) : 0,
-        failed: t ? Number(t.failed) : 0,
-        cancelled: t ? Number(t.cancelled) : 0,
-        p50TotalMs: round(t?.p50_total_ms ?? null),
-        p95TotalMs: round(t?.p95_total_ms ?? null),
-        avgLlmMs: round(t?.avg_llm_ms ?? null),
-        avgToolMs: round(t?.avg_tool_ms ?? null),
-        avgTurns: t?.avg_turns != null ? Number(t.avg_turns.toFixed(2)) : null,
-        avgTokensPerSec: round(t?.avg_tps ?? null),
-        errorRate: totalsRuns > 0 ? totalsErrors / totalsRuns : 0,
-        // Token accounting. "fresh" input is what providers bill as new input;
-        // cacheRead is prior context replayed from provider cache (cheap but
-        // real consumption); cacheWrite is context written to cache. Total
-        // input processed = fresh + cacheRead + cacheWrite — reporting only
-        // `tokensIn` understates real volume ~10x on cache-heavy agents.
-        tokens: {
-          in: t ? Number(t.tokens_in) : 0,
-          out: t ? Number(t.tokens_out) : 0,
-          cacheRead: t ? Number(t.tokens_cache_read) : 0,
-          cacheWrite: t ? Number(t.tokens_cache_write) : 0,
-        },
-        uniqueUsers: t ? Number(t.unique_users) : 0,
-        // Memory adoption: fraction of runs that recalled >=1 memory. THE
-        // number to manage after ingesting sessions — a fat bank nobody
-        // queries is dead weight (2026-07-20: ~1% of runs used memory).
-        memoryRecall: await (async () => {
-          const sessions = await prisma.$queryRaw<Array<{ n: bigint }>>`
-            SELECT COUNT(DISTINCT "sessionId") AS n
-            FROM "memory_recall_hits"
-            WHERE "agentSlug" = ${slug}
-              AND "recalledAt" >= ${windowStart}
-              AND "recalledAt" <  ${windowEnd}
-          `;
-          const withRecall = sessions[0] ? Number(sessions[0].n) : 0;
-          return { runsWithRecall: withRecall, rate: totalsRuns > 0 ? withRecall / totalsRuns : 0 };
-        })(),
+        ...legacyTotals(cur),
+        avgTurns: cur.llm.avgTurns,
+        avgTokensPerSec: cur.throughput.tokensPerSec,
+        memoryRecall: { runsWithRecall: sentiment.memoryRecall.recalled, rate: sentiment.memoryRecall.rate ?? 0 },
       },
-      delta: {
-        runs: totalsRuns - prevRuns,
-        p50TotalMs: t?.p50_total_ms != null && p?.p50_total_ms != null
-          ? Math.round(t.p50_total_ms - p.p50_total_ms) : null,
-        p95TotalMs: t?.p95_total_ms != null && p?.p95_total_ms != null
-          ? Math.round(t.p95_total_ms - p.p95_total_ms) : null,
-        errorRate: (totalsRuns > 0 ? totalsErrors / totalsRuns : 0) -
-                   (prevRuns > 0 ? prevErrors / prevRuns : 0),
-      },
-      perDay: perDayRaw.map((r) => {
-        const runs = Number(r.runs);
-        const errors = Number(r.failed) + Number(r.cancelled);
-        return {
-          day: r.day.toISOString().slice(0, 10),
-          runs,
-          completed: Number(r.completed),
-          failed: Number(r.failed),
-          cancelled: Number(r.cancelled),
-          p50TotalMs: round(r.p50_total_ms ?? null),
-          p95TotalMs: round(r.p95_total_ms ?? null),
-          avgLlmMs: round(r.avg_llm_ms ?? null),
-          avgToolMs: round(r.avg_tool_ms ?? null),
-          errorRate: runs > 0 ? errors / runs : 0,
-        };
-      }),
-      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, agentSlug: slug, scopeUserId, scopeOrgId, limit: 20 }),
-      toolLatency:  await fetchToolLatency({ windowStart, windowEnd, agentSlug: slug, userFilter, orgFilter, limit: 30 }),
-      sentiment:    await fetchSentiment({ windowStart, windowEnd, agentSlug: slug, userFilter, orgFilter, scopeUserId, scopeOrgId }),
+      delta: legacyDelta(cur, summary.previous),
+      perDay: daily.days.map((d) => legacyDay(d, false)),
+      slowSessions,
+      toolLatency,
+      sentiment: sentimentShape,
+      headline: legacyHeadline(cur, summary.previous),
     });
   } catch (err) {
-    log.error("[metrics/agent] error:", err);
-    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+    sendError(res, "/agent", err);
   }
 });
 
+/** GET /global — legacy shape (apps/dashboard): workspace run-level rollup. */
 metricsRouter.get("/global", async (req: Request, res: Response) => {
   try {
-    const { userFilter, orgFilter, scopeUserId, scopeOrgId, allOrgs } = await resolveMetricsScope(req, "/metrics/global");
+    const { window: w, scope } = await resolveRequestWindow(req, "/metrics/global");
     const days = parseDays(req);
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
-    const prevWindowStart = new Date(windowStart.getTime() - days * 24 * 60 * 60 * 1000);
+    const tz = parseTz(req);
 
-    // Per-day rollup. PostgreSQL handles the percentile + grouping in one pass.
-    // Using $queryRawUnsafe is unnecessary — parameterise the interval via a
-    // computed start timestamp so the query plan stays cacheable.
-    const perDayRaw = await prisma.$queryRaw<Array<{
-      day: Date;
-      runs: bigint;
-      completed: bigint;
-      failed: bigint;
-      cancelled: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      avg_llm_ms: number | null;
-      avg_tool_ms: number | null;
-    }>>`
-      SELECT
-        date_trunc('day', "completedAt")::date AS day,
-        COUNT(*)                                       AS runs,
-        COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
-        COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-        COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        AVG("llmTotalMs")                              AS avg_llm_ms,
-        AVG("toolMs")                                  AS avg_tool_ms
-      FROM "agent_runs"
-      WHERE "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        ${userFilter}
-        ${orgFilter}
-      GROUP BY 1
-      ORDER BY 1 ASC
-    `;
-
-    // Per-agent leaderboard, top 20 by runs.
-    const topAgentsRaw = await prisma.$queryRaw<Array<{
-      agentSlug: string;
-      orgId: string;
-      runs: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      avg_llm_ms: number | null;
-      avg_tool_ms: number | null;
-      errors: bigint;
-    }>>`
-      SELECT
-        "agentSlug",
-        "orgId",
-        COUNT(*)                                                   AS runs,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        AVG("llmTotalMs")                                          AS avg_llm_ms,
-        AVG("toolMs")                                              AS avg_tool_ms,
-        COUNT(*) FILTER (WHERE status IN ('failed','cancelled'))   AS errors
-      FROM "agent_runs"
-      WHERE "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        ${userFilter}
-        ${orgFilter}
-      GROUP BY "agentSlug", "orgId"
-      ORDER BY runs DESC
-      LIMIT 20
-    `;
-
-    const byProviderRaw = await prisma.$queryRaw<Array<{
-      provider: string;
-      model: string | null;
-      runs: bigint;
-      p50_llm_ms: number | null;
-      p95_llm_ms: number | null;
-      p50_ttft_ms: number | null;
-      p95_ttft_ms: number | null;
-      avg_tps: number | null;
-      errors: bigint;
-    }>>`
-      SELECT
-        provider,
-        model,
-        COUNT(*)                                                        AS runs,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "llmTotalMs")      AS p50_llm_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "llmTotalMs")      AS p95_llm_ms,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "ttftMs")          AS p50_ttft_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "ttftMs")          AS p95_ttft_ms,
-        AVG("tokensPerSec")                                             AS avg_tps,
-        COUNT(*) FILTER (WHERE status IN ('failed','cancelled'))        AS errors
-      FROM "agent_runs"
-      WHERE "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        AND provider IS NOT NULL
-        ${userFilter}
-        ${orgFilter}
-      GROUP BY provider, model
-      ORDER BY runs DESC, provider ASC, model ASC NULLS LAST
-    `;
-
-    // Pre-existing automation rows keep their old labels: webhook automation
-    // history was written as api, and other internal automation dispatches
-    // fell through as spaces before triggerSource=automation existed.
-    const byTriggerRaw = await prisma.$queryRaw<Array<{
-      trigger_group: TriggerGroup;
-      runs: bigint;
-      completed: bigint;
-      failed: bigint;
-      cancelled: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-    }>>`
-      WITH classified AS (
-        SELECT
-          CASE
-            WHEN "triggerSource" IN ('spaces', 'chat') THEN 'user'
-            WHEN "triggerSource" = 'automation' THEN 'automation'
-            WHEN "triggerSource" = 'scheduled' THEN 'scheduled'
-            WHEN "triggerSource" = 'api' THEN 'api'
-            ELSE 'user'
-          END AS trigger_group,
-          status,
-          "totalMs"
-        FROM "agent_runs"
-        WHERE "completedAt" >= ${windowStart}
-          AND "completedAt" <  ${windowEnd}
-          -- Janitor closures of month-old zombie rows (orphan-finalizer)
-          -- carry completedAt = sweep time; counting them as window activity
-          -- paints false failure spikes on sweep days (2026-07-08 backlog).
-          AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-          ${userFilter}
-          ${orgFilter}
-      )
-      SELECT
-        trigger_group,
-        COUNT(*)                                                   AS runs,
-        COUNT(*) FILTER (WHERE status = 'completed')               AS completed,
-        COUNT(*) FILTER (WHERE status = 'failed')                  AS failed,
-        COUNT(*) FILTER (WHERE status = 'cancelled')               AS cancelled,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms
-      FROM classified
-      GROUP BY trigger_group
-      ORDER BY trigger_group ASC
-    `;
-
-    const perDayTriggerRaw = await prisma.$queryRaw<Array<{
-      day: Date;
-      trigger_group: TriggerGroup;
-      runs: bigint;
-    }>>`
-      WITH classified AS (
-        SELECT
-          date_trunc('day', "completedAt")::date AS day,
-          CASE
-            WHEN "triggerSource" IN ('spaces', 'chat') THEN 'user'
-            WHEN "triggerSource" = 'automation' THEN 'automation'
-            WHEN "triggerSource" = 'scheduled' THEN 'scheduled'
-            WHEN "triggerSource" = 'api' THEN 'api'
-            ELSE 'user'
-          END AS trigger_group
-        FROM "agent_runs"
-        WHERE "completedAt" >= ${windowStart}
-          AND "completedAt" <  ${windowEnd}
-          -- Janitor closures of month-old zombie rows (orphan-finalizer)
-          -- carry completedAt = sweep time; counting them as window activity
-          -- paints false failure spikes on sweep days (2026-07-08 backlog).
-          AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-          ${userFilter}
-          ${orgFilter}
-      )
-      SELECT
-        day,
-        trigger_group,
-        COUNT(*) AS runs
-      FROM classified
-      GROUP BY day, trigger_group
-      ORDER BY day ASC, trigger_group ASC
-    `;
-
-    // Current period totals.
-    const totalsRaw = await prisma.$queryRaw<Array<{
-      runs: bigint;
-      completed: bigint;
-      failed: bigint;
-      cancelled: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      avg_llm_ms: number | null;
-      avg_tool_ms: number | null;
-      tokens_in: bigint;
-      tokens_out: bigint;
-      tokens_cache_read: bigint;
-      tokens_cache_write: bigint;
-      unique_users: bigint;
-    }>>`
-      SELECT
-        COUNT(*)                                       AS runs,
-        COUNT(DISTINCT "userId")                       AS unique_users,
-        COUNT(*) FILTER (WHERE status = 'completed')   AS completed,
-        COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-        COUNT(*) FILTER (WHERE status = 'cancelled')   AS cancelled,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        AVG("llmTotalMs")                              AS avg_llm_ms,
-        AVG("toolMs")                                  AS avg_tool_ms,
-        COALESCE(SUM("tokensIn"), 0)                   AS tokens_in,
-        COALESCE(SUM("tokensOut"), 0)                  AS tokens_out,
-        COALESCE(SUM("tokensCacheRead"), 0)            AS tokens_cache_read,
-        COALESCE(SUM("tokensCacheWrite"), 0)           AS tokens_cache_write
-      FROM "agent_runs"
-      WHERE "completedAt" >= ${windowStart}
-        AND "completedAt" <  ${windowEnd}
-        -- Janitor closures of month-old zombie rows (orphan-finalizer) carry
-        -- completedAt = sweep time; counting them as window activity paints
-        -- false failure spikes on the day of the sweep (2026-07-08 backlog).
-        AND (error IS NULL OR error <> 'interrupted (orphaned run)')
-        ${userFilter}
-        ${orgFilter}
-    `;
-
-    // Previous-period totals for delta computation.
-    const prevRaw = await prisma.$queryRaw<Array<{
-      runs: bigint;
-      p50_total_ms: number | null;
-      p95_total_ms: number | null;
-      errors: bigint;
-    }>>`
-      SELECT
-        COUNT(*)                                                   AS runs,
-        PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY "totalMs")    AS p50_total_ms,
-        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "totalMs")    AS p95_total_ms,
-        COUNT(*) FILTER (WHERE status IN ('failed','cancelled'))   AS errors
-      FROM "agent_runs"
-      WHERE "completedAt" >= ${prevWindowStart}
-        AND "completedAt" <  ${windowStart}
-        ${userFilter}
-        ${orgFilter}
-    `;
-
-    const round = (n: number | null): number | null => (n == null ? null : Math.round(n));
-
-    const t = totalsRaw[0];
-    const totalsRuns = t ? Number(t.runs) : 0;
-    const totalsErrors = t ? Number(t.failed) + Number(t.cancelled) : 0;
-    const p = prevRaw[0];
-    const prevRuns = p ? Number(p.runs) : 0;
-    const prevErrors = p ? Number(p.errors) : 0;
-    const orgNames = allOrgs ? await getOrgNameMap(topAgentsRaw.map((r) => r.orgId)) : new Map();
-    const byTriggerLookup = new Map<TriggerGroup, TriggerRow>();
-    for (const r of byTriggerRaw) {
-      const runs = Number(r.runs);
-      const errors = Number(r.failed) + Number(r.cancelled);
-      byTriggerLookup.set(r.trigger_group, {
-        trigger: r.trigger_group,
-        runs,
-        completed: Number(r.completed),
-        failed: Number(r.failed),
-        cancelled: Number(r.cancelled),
-        errorRate: runs > 0 ? errors / runs : 0,
-        p50TotalMs: round(r.p50_total_ms ?? null),
-        p95TotalMs: round(r.p95_total_ms ?? null),
-      });
-    }
-    const triggerCountsByDay = new Map<string, Record<TriggerGroup, number>>();
-    for (const r of perDayTriggerRaw) {
-      const day = r.day.toISOString().slice(0, 10);
-      const counts = triggerCountsByDay.get(day) ?? { user: 0, automation: 0, scheduled: 0, api: 0 };
-      counts[r.trigger_group] = Number(r.runs);
-      triggerCountsByDay.set(day, counts);
-    }
+    const { value: summary } = await summaryBlock(w);
+    const [daily, topAgents, routes, slowSessions] = await boundedAll<unknown>([
+      async () => (await dailyBlock(w, tz)).value,
+      async () => (await agentsTopBlock(w, DEFAULT_TOP_AGENTS)).value,
+      async () => (await routesBlock(w)).value,
+      () => legacySlowSessions(req, w, scope),
+    ]) as [Awaited<ReturnType<typeof fetchRunDaily>>, AgentLeaderRow[], RouteRow[], SlowSession[]];
 
     const response: MetricsResponse = {
       days,
-      windowStart: windowStart.toISOString(),
-      windowEnd: windowEnd.toISOString(),
-      totals: {
-        runs: totalsRuns,
-        completed: t ? Number(t.completed) : 0,
-        failed: t ? Number(t.failed) : 0,
-        cancelled: t ? Number(t.cancelled) : 0,
-        p50TotalMs: round(t?.p50_total_ms ?? null),
-        p95TotalMs: round(t?.p95_total_ms ?? null),
-        avgLlmMs: round(t?.avg_llm_ms ?? null),
-        avgToolMs: round(t?.avg_tool_ms ?? null),
-        errorRate: totalsRuns > 0 ? totalsErrors / totalsRuns : 0,
-        // Same accounting as the per-agent endpoint: fresh vs cached input
-        // reported separately so the UI can show true volume (fresh+cached).
-        tokens: {
-          in: t ? Number(t.tokens_in) : 0,
-          out: t ? Number(t.tokens_out) : 0,
-          cacheRead: t ? Number(t.tokens_cache_read) : 0,
-          cacheWrite: t ? Number(t.tokens_cache_write) : 0,
-        },
-        uniqueUsers: t ? Number(t.unique_users) : 0,
-      },
-      delta: {
-        runs: totalsRuns - prevRuns,
-        p50TotalMs: t?.p50_total_ms != null && p?.p50_total_ms != null
-          ? Math.round(t.p50_total_ms - p.p50_total_ms) : null,
-        p95TotalMs: t?.p95_total_ms != null && p?.p95_total_ms != null
-          ? Math.round(t.p95_total_ms - p.p95_total_ms) : null,
-        errorRate: (totalsRuns > 0 ? totalsErrors / totalsRuns : 0) -
-                   (prevRuns > 0 ? prevErrors / prevRuns : 0),
-      },
-      perDay: perDayRaw.map((r) => {
-        const day = r.day.toISOString().slice(0, 10);
-        const runs = Number(r.runs);
-        const errors = Number(r.failed) + Number(r.cancelled);
-        const triggerCounts = triggerCountsByDay.get(day) ?? { user: 0, automation: 0, scheduled: 0, api: 0 };
-        return {
-          day,
-          runs,
-          completed: Number(r.completed),
-          failed: Number(r.failed),
-          cancelled: Number(r.cancelled),
-          p50TotalMs: round(r.p50_total_ms ?? null),
-          p95TotalMs: round(r.p95_total_ms ?? null),
-          avgLlmMs: round(r.avg_llm_ms ?? null),
-          avgToolMs: round(r.avg_tool_ms ?? null),
-          errorRate: runs > 0 ? errors / runs : 0,
-          user: triggerCounts.user,
-          automation: triggerCounts.automation,
-          scheduled: triggerCounts.scheduled,
-          api: triggerCounts.api,
-        };
-      }),
-      byTrigger: TRIGGER_GROUPS.map((trigger) => byTriggerLookup.get(trigger) ?? ({
-        trigger,
-        runs: 0,
-        completed: 0,
-        failed: 0,
-        cancelled: 0,
-        errorRate: 0,
-        p50TotalMs: null,
-        p95TotalMs: null,
-      })),
-      topAgents: topAgentsRaw.map((r) => {
-        const runs = Number(r.runs);
-        return withOrgLabel({
-          agentSlug: r.agentSlug,
-          orgId: r.orgId,
-          runs,
-          p50TotalMs: round(r.p50_total_ms ?? null),
-          p95TotalMs: round(r.p95_total_ms ?? null),
-          avgLlmMs: round(r.avg_llm_ms ?? null),
-          avgToolMs: round(r.avg_tool_ms ?? null),
-          errorRate: runs > 0 ? Number(r.errors) / runs : 0,
-        }, orgNames);
-      }),
-      byProvider: byProviderRaw.map((r) => {
-        const runs = Number(r.runs);
-        return {
-          provider: r.provider,
-          model: r.model,
-          runs,
-          p50LlmMs: round(r.p50_llm_ms ?? null),
-          p95LlmMs: round(r.p95_llm_ms ?? null),
-          p50TtftMs: round(r.p50_ttft_ms ?? null),
-          p95TtftMs: round(r.p95_ttft_ms ?? null),
-          avgTokensPerSec: round(r.avg_tps ?? null),
-          errorRate: runs > 0 ? Number(r.errors) / runs : 0,
-        };
-      }),
-      slowSessions: await fetchSlowSessions({ windowStart, windowEnd, scopeUserId, scopeOrgId, limit: 20 }),
+      windowStart: w.windowStart.toISOString(),
+      windowEnd: w.windowEnd.toISOString(),
+      totals: legacyTotals(summary.current),
+      delta: legacyDelta(summary.current, summary.previous),
+      perDay: daily.days.map((d) => legacyDay(d, true)),
+      byTrigger: legacyTriggers(daily.triggers),
+      topAgents: topAgents.map(legacyAgent),
+      byProvider: routes.map(legacyProvider),
+      slowSessions,
+      headline: legacyHeadline(summary.current, summary.previous),
     };
-
-    res.json(response);
+    res.set("Cache-Control", CACHE_CONTROL).json(response);
   } catch (err) {
-    log.error("[metrics/global] error:", err);
-    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+    sendError(res, "/global", err);
   }
 });
 

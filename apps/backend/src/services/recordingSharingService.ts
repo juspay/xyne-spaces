@@ -16,6 +16,7 @@ import {
 } from '@xyne/shared';
 import { isRecording, shareEntityTypeFor } from '@/utils/callTypeUtils';
 import { logger } from '@/utils/logger';
+import { queueRecordingTranscriptRefresh } from '@/services/callVespaQueue';
 import {
   recordingSharingNotificationService,
   
@@ -153,6 +154,19 @@ export const targetData = (
 
 export class RecordingSharingService {
   async execute(
+    callId: string,
+    actor: RecordingSharingActor,
+    command: RecordingSharingCommand,
+  ): Promise<RecordingSharingResult> {
+    const result = await this.run(callId, actor, command);
+    // Every command can change who reaches the recording (a linked ticket is a share
+    // to its channel), so re-derive the search ACL rather than track which ones did.
+    // Never throws, so it doesn't hold up the request.
+    void queueRecordingTranscriptRefresh({ externalId: callId }, ['permissions', 'isPrivate']);
+    return result;
+  }
+
+  private async run(
     callId: string,
     actor: RecordingSharingActor,
     command: RecordingSharingCommand,

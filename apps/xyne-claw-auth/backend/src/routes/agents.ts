@@ -14,11 +14,13 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
+import { draftSpecFromCreateAgentParams, createAgentQueueError, createAgentNotGranted } from "../lib/agent-draft-card.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
+import { DEFAULT_NEW_AGENT_TOOL_SOURCES, mergeNewAgentToolDefaults } from "../lib/new-agent-tool-defaults.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
@@ -150,6 +152,14 @@ function readConfigToolSelection(config: unknown): string[] {
     for (const item of configArray(tools[key])) out.push(`${key}:${item}`);
   }
   return out;
+}
+
+async function applyNewAgentToolDefaults(config: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
+  const rows = await prisma.tool.findMany({
+    where: { source: { in: [...DEFAULT_NEW_AGENT_TOOL_SOURCES] } },
+    select: { slug: true },
+  });
+  return mergeNewAgentToolDefaults(config, rows.map((r) => r.slug));
 }
 
 function readTopLevelGatewaySelection(config: unknown): string[] {
@@ -510,6 +520,95 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   });
 }));
 
+// ── Plugin / CLI agent authoring (draft → approval) ──────────────────────────
+// Let an external client (the xyne-claw CLI plugin for Codex / Claude Code)
+// submit a NEW agent for creation WITHOUT minting a live agent. A submission
+// lands in the SAME pipeline the in-thread agent-authoring flow uses: a pending
+// `agent_create` AgentRequest whose `proposedContent` holds the full spec.
+// Nothing is created until the requester approves it (the decision route below,
+// or the Spaces draft card) — so "created only on approval" holds for CLI
+// drafts too, and the plugin can never create a live agent on its own.
+// Registered BEFORE GET "/:slug" so GET "/draft-requests" is not shadowed by it.
+
+/** Submit an agent draft for approval. Returns the pending request id. */
+router.post("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+
+  const params = (req.body ?? {}) as Record<string, unknown>;
+  const spec = draftSpecFromCreateAgentParams(params);
+  if (!spec) throw badRequest("A draft needs at least a name and a systemPrompt.");
+
+  // Slug validity + duplicate check, reusing the SAME guard the in-thread flow
+  // uses so a CLI draft can't persist a row the card flow would have rejected.
+  const queueError = await createAgentQueueError(params, orgId);
+  if (queueError) throw badRequest(queueError);
+
+  // Unresolved capabilities are reported (not fatal): the approver still
+  // decides, and unmatched tools are dropped when the agent is created.
+  const unmatchedCapabilities = await createAgentNotGranted(params, orgId, requesterId);
+
+  const proposedContent = JSON.stringify(spec);
+  const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
+    agentSlug: spec.slug,
+    requesterId,
+    orgId,
+    proposedContent,
+    proposedContentHash: hashSkillContent(proposedContent),
+  });
+
+  log.info(`[agents/draft-requests] queued agent_create slug=${spec.slug} request=${outcome.request.id} requester=${requesterId} org=${orgId}`);
+  res.status(201);
+  ok(
+    res,
+    { requestId: outcome.request.id, slug: spec.slug, status: "pending" },
+    {
+      ...(outcome.supersededCount > 0 ? { supersededCount: outcome.supersededCount } : {}),
+      ...(unmatchedCapabilities.length > 0 ? { unmatchedCapabilities } : {}),
+    },
+  );
+}));
+
+/** List the caller's own pending agent drafts awaiting approval. */
+router.get("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+  const rows = await agentRequestRepository.listPendingAgentCreates(requesterId, orgId);
+  ok(
+    res,
+    rows.map((r) => ({ requestId: r.id, slug: r.agentSlug, status: r.status, createdAt: r.createdAt })),
+  );
+}));
+
+/** Approve or reject one of the caller's own drafts. Approval MATERIALIZES the
+ *  agent through the exact resolver the Spaces draft card uses, so the
+ *  self-approval boundary ("only the requester can decide") and every capability
+ *  gate are enforced identically — this route grants no new authority. */
+router.post("/draft-requests/:requestId/decision", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  const body = (req.body ?? {}) as { decision?: unknown; keptCapabilityIds?: unknown };
+  const decision = body.decision === "approve" ? "approve" : body.decision === "reject" ? "reject" : null;
+  if (!decision) throw badRequest('decision must be "approve" or "reject"');
+  const keptCapabilityIds = Array.isArray(body.keptCapabilityIds)
+    ? body.keptCapabilityIds.filter((v): v is string => typeof v === "string")
+    : undefined;
+
+  const { resolveAgentDraft } = await import("../lib/agent-card.js");
+  const result = await resolveAgentDraft(req.params.requestId, requesterId, decision, keptCapabilityIds);
+  if (!result.ok) throw new HttpError(result.code, result.error);
+  ok(res, {
+    status: result.status,
+    slug: result.identity.slug,
+    alreadyResolved: result.alreadyResolved,
+    ...("note" in result && result.note ? { note: result.note } : {}),
+  });
+}));
+
 router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Response, next) => {
   // Phase-2: org-scope this un-ACL'd read so agent metadata can't be read
   // across orgs by slug. For S2S callers with no derivable org (Spaces'
@@ -567,7 +666,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     kbScope?: string;
   };
 
-  const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+  const normalizedConfig = await applyNewAgentToolDefaults(await normalizeGatewayServicesInConfig(config));
 
   if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
     throw badRequest("slug is required");
@@ -620,6 +719,11 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("orgId is required");
   }
 
+  const slugCollision = await agentRepository.findBySlug(slug.trim(), createOrgId);
+  if (slugCollision) {
+    throw conflict(`Handle "${slug.trim()}" is already taken.`, "SLUG_TAKEN");
+  }
+
   const data: Prisma.AgentCreateInput = {
     slug: slug.trim(),
     name: name.trim(),
@@ -635,7 +739,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (effectiveOwner) {
     data.owner = { connect: { id: effectiveOwner } };
   }
-  const agent = await agentRepository.create(data);
+  let agent;
+  try {
+    agent = await agentRepository.create(data);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw conflict(`Handle "${data.slug}" is already taken.`, "SLUG_TAKEN");
+    }
+    throw e;
+  }
 
   // Attach skills by ID if provided
   if (skills && Array.isArray(skills) && skills.length > 0) {

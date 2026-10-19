@@ -51,6 +51,7 @@ import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
+import { agentCreateCheckRouter } from "../routes/agent-create-check.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "../routes/calendly-oauth.js";
@@ -66,6 +67,10 @@ import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/maile
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
+import { sentryRemoteOAuthRouter, sentryRemoteCallbackRouter } from "../routes/sentry-remote-oauth.js";
+import { mixpanelRemoteOAuthRouter, mixpanelRemoteCallbackRouter } from "../routes/mixpanel-remote-oauth.js";
+import { firefliesRemoteOAuthRouter, firefliesRemoteCallbackRouter } from "../routes/fireflies-remote-oauth.js";
+import { atlassianRemoteOAuthRouter, atlassianRemoteCallbackRouter } from "../routes/atlassian-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -77,6 +82,7 @@ import { settingsRouter } from "../routes/settings.js";
 import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
+import { metricsToolsRouter } from "../routes/metrics-tools.js";
 import { memoryRouter } from "../routes/memory.js";
 import { agentIndexRouter } from "../routes/agent-index.js";
 import { toolIndexRouter } from "../routes/tool-index.js";
@@ -231,6 +237,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/agent-create`, requireStrictS2S, agentCreateCheckRouter);
 }
 
 function mountOAuthProviders(app: Express): void {
@@ -277,6 +284,14 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, customerioCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
   app.use(BASE, notionRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, sentryRemoteOAuthRouter);
+  app.use(BASE, sentryRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mixpanelRemoteOAuthRouter);
+  app.use(BASE, mixpanelRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, firefliesRemoteOAuthRouter);
+  app.use(BASE, firefliesRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, atlassianRemoteOAuthRouter);
+  app.use(BASE, atlassianRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 
@@ -326,7 +341,8 @@ function mountWorkspace(app: Express): void {
   // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
   // /runs/:id). Reads pass with the scope; token writes are still rejected.
   app.use(`${BASE}/runs`, requireAuth, allowReadAccessToken("runs:read"), runsRouter);
-  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
+  // One chain so unhandled requests fall through without re-authenticating.
+  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter, metricsToolsRouter);
   // Mount-level baseline auth (defense-in-depth): every memory route also has
   // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
   // future route that forgets it must still fail closed at the mount. requireAuth

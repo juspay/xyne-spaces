@@ -12,6 +12,7 @@ const AISkillDetailScreen = (): ReactElement => {
         data-id='ai-skill-detail-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         <ClawSkillDetailV2 />
       </main>
     </AIShell>

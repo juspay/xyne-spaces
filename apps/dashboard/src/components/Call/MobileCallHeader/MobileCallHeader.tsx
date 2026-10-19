@@ -79,6 +79,7 @@ export function MobileCallHeader({
             isMicEnabled ? 'bg-muted' : 'bg-destructive/10 hover:bg-destructive/20',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
+          aria-label={isMicEnabled ? 'Mute' : 'Unmute'}
           data-track-category='CALLS'
           data-track-name='Mobile_Toggle_Mic'
           data-track-metadata={JSON.stringify({ enabled: isMicEnabled })}
@@ -114,6 +115,7 @@ export function MobileCallHeader({
           size='icon'
           className='flex-shrink-0 rounded-full'
           title='End call'
+          aria-label='End call'
           data-track-category='CALLS'
           data-track-name='Mobile_End_Call'
         >

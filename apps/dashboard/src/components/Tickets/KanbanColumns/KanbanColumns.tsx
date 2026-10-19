@@ -48,6 +48,9 @@ import { cn } from '../../../utils/classNames';
 import { KanbanIcon } from './KanbanIcon';
 import { HiddenColumnsPanel } from '../HiddenColumnsPanel/HiddenColumnsPanel';
 import { useColumnReorder } from './useColumnReorder';
+import { SubTicketCard, SubTicketsTree } from '../SubTickets/SubTickets';
+import { useSubTicketProgress } from '../SubTickets/useSubTickets';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 // Re-exported for the many call sites that already import it from here.
 export { KanbanIcon };
@@ -103,6 +106,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   activeTicketId,
   showEmailReads,
   slaPolicies,
+  subProgress,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
@@ -138,6 +142,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
         {...(slaPolicies !== undefined && { slaPolicies })}
+        {...(subProgress !== undefined && { subProgress })}
       />
     </div>
   );
@@ -167,6 +172,7 @@ const VirtualizedStageList: React.FC<{
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
+  expandableSubTickets?: boolean;
 }> = ({
   stageId,
   columnKey,
@@ -185,7 +191,9 @@ const VirtualizedStageList: React.FC<{
   showEmailReads,
   onTicketClick,
   slaPolicies,
+  expandableSubTickets = false,
 }) => {
+  const noun = useTicketNoun();
   // Fades at the column's ends while there are more cards past them.
   const fade = useScrollFade<HTMLDivElement>('y', 40);
   const scrollRef = fade.node;
@@ -231,6 +239,29 @@ const VirtualizedStageList: React.FC<{
   });
 
   const virtualItems = virtualizer.getVirtualItems();
+  // Sub-ticket counts for the cards on screen, in one query, as the list view does.
+  const visibleTicketKey = expandableSubTickets
+    ? virtualItems
+        .map(item => stageTickets[item.index]?.id)
+        .filter((id): id is string => !!id)
+        .sort()
+        .join(',')
+    : '';
+  const visibleTicketIds = React.useMemo(
+    () => (visibleTicketKey ? visibleTicketKey.split(',') : []),
+    [visibleTicketKey],
+  );
+  const subProgressByTicketId = useSubTicketProgress(visibleTicketIds);
+  // A card whose sub-tickets opened or grew: measured now, before paint, so the cards
+  // below move in the same frame.
+  const remeasureCard = React.useCallback(
+    (index: number): void => {
+      // resizeItem, not measureElement: called by hand, that returns the cached size.
+      const card = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+      if (card) virtualizer.resizeItem(index, Math.round(card.getBoundingClientRect().height));
+    },
+    [scrollRef, virtualizer],
+  );
 
   return (
     <div
@@ -248,6 +279,7 @@ const VirtualizedStageList: React.FC<{
         {virtualItems.map(virtualItem => {
           const ticket = stageTickets[virtualItem.index];
           if (!ticket) return null;
+          const subProgress = subProgressByTicketId.get(ticket.id);
 
           return (
             <div
@@ -289,7 +321,22 @@ const VirtualizedStageList: React.FC<{
                 {...(activeTicketId !== undefined && { activeTicketId })}
                 {...(showEmailReads !== undefined && { showEmailReads })}
                 {...(slaPolicies !== undefined && { slaPolicies })}
+                {...(subProgress && { subProgress })}
               />
+              {subProgress && (
+                <SubTicketsTree
+                  ticketId={ticket.id}
+                  total={subProgress.total}
+                  layout='kanban'
+                  onResize={() => remeasureCard(virtualItem.index)}
+                  renderItem={subTicket => (
+                    <SubTicketCard
+                      ticket={subTicket}
+                      onOpen={event => onTicketClick(event, subTicket)}
+                    />
+                  )}
+                />
+              )}
             </div>
           );
         })}
@@ -303,7 +350,7 @@ const VirtualizedStageList: React.FC<{
           className='hidden group-hover/kanbancol:flex items-center gap-2 w-full mb-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent/40 hover:text-foreground'
         >
           <Plus className='h-3.5 w-3.5' />
-          New ticket
+          New {noun.singular}
         </button>
       )}
       {isLoadingMore && (
@@ -331,6 +378,7 @@ const PaginatedStageList: React.FC<{
   onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
   expectedCount?: number | undefined;
+  expandableSubTickets?: boolean;
 }> = ({
   stage,
   columnKey,
@@ -349,6 +397,7 @@ const PaginatedStageList: React.FC<{
   onTicketClick,
   onAddTicket,
   slaPolicies,
+  expandableSubTickets = false,
 }) => {
   const columnValue = columnType === 'status' ? stage.id : stage.name;
   const columnStatus = stage.defaultTicketStatusV2;
@@ -506,6 +555,7 @@ const PaginatedStageList: React.FC<{
         onTicketClick={onTicketClick}
         {...(onAddTicket !== undefined && { onAddTicket })}
         {...(slaPolicies !== undefined && { slaPolicies })}
+        expandableSubTickets={expandableSubTickets}
       />
     </SortableContext>
   );
@@ -631,6 +681,8 @@ interface KanbanColumnsProps {
   formValuesByTicketId?: Map<string, FormEntityValues[]>;
   /** User names by ID - used for resolving user IDs to names in form field group validation */
   userNamesById?: Map<string, string>;
+  /** Shows each ticket's sub-tickets under its card. Boards turn it on; the Desk does not. */
+  expandableSubTickets?: boolean;
 }
 
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
@@ -659,6 +711,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   onAddTicketInColumn,
   formValuesByTicketId,
   userNamesById,
+  expandableSubTickets = false,
 }) => {
   const columnType = paginatedColumnConfig?.columnType ?? 'stage';
   const isGroupByActive =
@@ -847,6 +900,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     {...(slaPolicies !== undefined && { slaPolicies })}
                     {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
                     {...(userNamesById !== undefined && { userNamesById })}
+                    expandableSubTickets={expandableSubTickets}
                   />
                 ) : deskPaginationConfig ? (
                   <DeskPaginatedStageList
@@ -885,6 +939,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       onTicketClick={onTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
+                      expandableSubTickets={expandableSubTickets}
                     />
                   </SortableContext>
                 )}

@@ -25,6 +25,7 @@
     "check:fix": "biome check --assist-enabled=true --write .",
     "validate": "biome ci --assist-enabled=true . && biome format . --diagnostic-level=error && pnpm run validate:filename && pnpm run validate:literals",
     "test:runner": "ts-node --project tsconfig.json scripts/runner/index.ts",
+    "release:check": "ts-node --project tsconfig.json scripts/release-check.ts",
     "validate:filename": "ts-node --project tsconfig.json scripts/validation/validate-filename.ts",
     "validate:literals": "ts-node --project tsconfig.json scripts/validation/validate-literals.ts"
   },

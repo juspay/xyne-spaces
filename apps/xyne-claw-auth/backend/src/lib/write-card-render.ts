@@ -1,5 +1,6 @@
 import { buildTicketProposalFlow, buildWriteApprovalFlow, type FlowDefinition } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
+import { buildAgentUpdateCardFlow } from "./agent-update-card.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard, type XyneAiCardTarget } from "./flow-card-delivery.js";
 import { mentionShorthandToText } from "./mention-transform.js";
@@ -49,6 +50,32 @@ export interface WriteCardAction {
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
+/** "MID: merchant_1234" pairs out of a custom-field map, or nothing. */
+function fieldMapEntries(value: unknown): Array<[string, string]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, raw]): [string, string] => [
+      key,
+      Array.isArray(raw) ? raw.map((v) => String(v)).join(", ") : String(raw ?? ""),
+    ])
+    .filter(([, text]) => text.trim() !== "");
+}
+
+/** The same 12-field cap as the WhatsApp card, with the same honest marker:
+ *  a silently shortened list reads as the whole list. */
+function fieldMapLines(value: unknown): string[] {
+  const entries = fieldMapEntries(value);
+  const shown = entries.slice(0, 12).map(([key, text]) => `**${key}:** ${text}`);
+  if (entries.length > 12) shown.push(`_…and ${entries.length - 12} more (all are written)_`);
+  return shown;
+}
+
+/** A recipient list the approver can read, from an array or a bare string. */
+function fieldList(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ");
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const fullContent = mentionShorthandToText(params["content"] as string ?? "");
@@ -77,6 +104,29 @@ export function formatActionDescription(tool: string, params: Record<string, unk
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    // Custom fields are the point of some desks (a MID, a merchant name) and
+    // are invisible in the title, so a card that omits them asks for approval
+    // of a value the approver cannot see.
+    lines.push(...fieldMapLines(params["dynamicFields"]));
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-send-ticket-email") {
+    const to = fieldList(params["to"]);
+    const cc = fieldList(params["cc"]);
+    const bcc = fieldList(params["bcc"]);
+    const subject = (params["subject"] as string) ?? "";
+    const fullBody = (params["body"] as string) ?? "";
+    const body = fullBody.slice(0, 1500);
+    const lines = [`**Send Email from Ticket**`, ``, `**To:** ${to || "(nobody)"}`];
+    if (cc) lines.push(`**Cc:** ${cc}`);
+    if (bcc) lines.push(`**Bcc:** ${bcc}`);
+    if (subject) lines.push(`**Subject:** ${subject}`);
+    lines.push(
+      ``,
+      `**Message:**`,
+      `${body}${fullBody.length > 1500 ? "\n…(truncated — the full message is sent)" : ""}`,
+    );
     return lines.join("\n");
   }
 
@@ -99,7 +149,10 @@ export function formatActionDescription(tool: string, params: Record<string, unk
       const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
       const rawDesc = String(ticket["description"] ?? "");
       const desc = rawDesc.slice(0, 200);
-      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      const fields = fieldMapEntries(ticket["dynamicFields"] ?? params["defaultDynamicFields"])
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(" · ");
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`, fields].filter(Boolean).join(" · ");
       lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
       if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
       lines.push(``);
@@ -255,16 +308,24 @@ export function buildTicketProposalCardFlow(action: WriteCardAction): FlowDefini
   );
 }
 
-/** `usedTicketCard` tells the Spaces caller whether a flow-schema rejection can
+/** `usedRichCard` tells the Spaces caller whether a flow-schema rejection can
  *  be retried with generic components. */
-export function buildWriteApprovalCardFlow(
+export async function buildWriteApprovalCardFlow(
   action: WriteCardAction,
   actionDesc: string,
-): { flow: FlowDefinition; usedTicketCard: boolean } {
+  orgId: string | null | undefined,
+): Promise<{ flow: FlowDefinition; usedRichCard: boolean }> {
+  const agentUpdate = orgId
+    ? await buildAgentUpdateCardFlow(action, orgId).catch((err: unknown) => {
+        log.warn(`[write-card] agent update card not built, using the generic card: ${errMsg(err)}`);
+        return null;
+      })
+    : null;
+  if (agentUpdate) return { flow: agentUpdate, usedRichCard: true };
   const ticket = buildTicketProposalCardFlow(action);
   return ticket
-    ? { flow: ticket, usedTicketCard: true }
-    : { flow: buildWriteApprovalFlow(actionDesc, action), usedTicketCard: false };
+    ? { flow: ticket, usedRichCard: true }
+    : { flow: buildWriteApprovalFlow(actionDesc, action), usedRichCard: false };
 }
 
 /** Null is the fail-safe: no card, so the client suppresses nothing and the
@@ -287,9 +348,10 @@ export async function renderXyneAiWriteApprovalCard(args: {
     return null;
   }
 
-  const { flow } = buildWriteApprovalCardFlow(
+  const { flow } = await buildWriteApprovalCardFlow(
     cardAction,
     formatActionDescription(cardAction.tool, cardAction.params),
+    target.orgId,
   );
   const posted = await postFlowCard(
     { ...flow, data: { ...(flow.data ?? {}), pendingSignature: cardAction.pendingSignature } },

@@ -146,6 +146,7 @@ export interface ActionRequest {
     messageId: string;
     conversationId: string;
   };
+  applyToDraft?: boolean;
 }
 
 // ============================================================================
@@ -162,7 +163,7 @@ export type AppActionResponse =
       componentUpdates?: Record<string, Partial<Pick<FlowComponent, 'props' | 'hidden' | 'disabled'>>>;
     }
   | { type: 'ack'; message?: string }
-  | { type: 'error'; message: string; code?: string };
+  | { type: 'error'; message: string; code?: string; retryable?: boolean };
 
 // ============================================================================
 // MESSAGE METADATA (v2)

@@ -75,6 +75,7 @@ export const TableGroupSection = ({
       {...(renderRowExtras ? { renderRowExtras } : {})}
       {...(bulkActionsContainer ? { bulkActionsContainer } : {})}
       {...(internalScroll ? {} : { scrollElement })}
+      expandableSubTickets
     />
   );
 

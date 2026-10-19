@@ -27,6 +27,8 @@ export const FieldError: React.FC<FieldErrorProps> = ({ error, className }) => (
 interface FieldLabelProps {
   children: React.ReactNode;
   required?: boolean | undefined;
+  /** Marks the field "(optional)", for forms where only some fields are required. */
+  optional?: boolean | undefined;
   htmlFor?: string | undefined;
   className?: string | undefined;
 }
@@ -34,6 +36,7 @@ interface FieldLabelProps {
 export const FieldLabel: React.FC<FieldLabelProps> = ({
   children,
   required,
+  optional,
   htmlFor,
   className,
 }) => (
@@ -47,12 +50,14 @@ export const FieldLabel: React.FC<FieldLabelProps> = ({
         *
       </span>
     )}
+    {optional && <span className='ml-1 font-normal text-muted-foreground'>(optional)</span>}
   </label>
 );
 
 interface FieldProps {
   label?: React.ReactNode;
   required?: boolean | undefined;
+  optional?: boolean | undefined;
   error?: string | undefined;
   htmlFor?: string | undefined;
   labelless?: boolean | undefined;
@@ -63,6 +68,7 @@ interface FieldProps {
 export const Field: React.FC<FieldProps> = ({
   label,
   required,
+  optional,
   error,
   htmlFor,
   labelless,
@@ -71,7 +77,11 @@ export const Field: React.FC<FieldProps> = ({
 }) => (
   <div className={cn('flex flex-col', className)}>
     {!labelless && label !== undefined && (
-      <FieldLabel required={required} {...(htmlFor !== undefined && { htmlFor })}>
+      <FieldLabel
+        required={required}
+        optional={optional}
+        {...(htmlFor !== undefined && { htmlFor })}
+      >
         {label}
       </FieldLabel>
     )}

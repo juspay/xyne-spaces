@@ -1,0 +1,310 @@
+import { StyleSheet } from 'react-native';
+import { callColors } from '../callTheme';
+
+export const s = StyleSheet.create({
+  sheetBackground: {
+    backgroundColor: callColors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  handleIndicator: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 36,
+    height: 4,
+  },
+  stickyHeader: {
+    backgroundColor: callColors.surface,
+  },
+  sheetContent: {
+    paddingTop: 4,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    color: callColors.onColor,
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+    marginBottom: 3,
+  },
+  subtitle: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  closeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeBtnX: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginBottom: 4,
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
+    paddingVertical: 4,
+    paddingHorizontal: 16,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 12,
+  },
+  avatarWrap: {
+    position: 'relative',
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+  },
+  avatarImg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  avatarFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitials: {
+    color: callColors.onColor,
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  mutedBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF453A',
+    borderWidth: 1.5,
+    borderColor: callColors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  name: {
+    flex: 1,
+    color: callColors.onColor,
+    fontSize: 15,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+  },
+  youPill: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexShrink: 0,
+  },
+  youPillText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  // ── Section styles ────────────────────────────────────────────────────────
+  sectionContainer: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  sectionContainerRequested: {
+    borderColor: 'rgba(251,146,60,0.4)',
+    backgroundColor: 'rgba(251,146,60,0.05)',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sectionTitle: {
+    color: callColors.onColor,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sectionCount: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  sectionDividerRequested: {
+    backgroundColor: 'rgba(251,146,60,0.3)',
+  },
+  // ── Host action buttons ───────────────────────────────────────────────────
+  muteAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  muteAllBtnText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  addPeopleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  addPeopleBtnText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  // ── Participant row actions (mute/approve/reject) ─────────────────────────
+  muteBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  muteBtnMuted: {
+    backgroundColor: 'rgba(255,69,58,0.15)',
+  },
+  approveBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lobbyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  // ── Status labels ─────────────────────────────────────────────────────────
+  statusInvited: {
+    color: '#F59E0B',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  statusMuted: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  statusDeclined: {
+    color: '#FF453A',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  statusLeft: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  statusRequesting: {
+    color: '#FB923C',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  externalBadge: {
+    backgroundColor: 'rgba(251,146,60,0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    flexShrink: 0,
+  },
+  externalBadgeText: {
+    color: '#FB923C',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flexWrap: 'nowrap',
+    flexShrink: 1,
+  },
+  // ── Requested participant row (orange-tinted) ─────────────────────────────
+  requestedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  requestedAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FB923C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  requestedAvatarText: {
+    color: callColors.onColor,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // ── Speaking indicator ────────────────────────────────────────────────────
+});

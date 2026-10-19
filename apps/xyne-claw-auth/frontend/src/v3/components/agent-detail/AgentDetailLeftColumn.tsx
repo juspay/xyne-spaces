@@ -1546,6 +1546,10 @@ interface Props {
    *  entities named in a question to ids before the agent's first turn. */
   draftPrefetchContext: boolean;
   onDraftPrefetchContextChange: (v: boolean) => void;
+  /** Answer from Context opt-in (agent.config.answerFromContext). Runs the question
+   *  as a search before the only turn; the agent answers from it with no tools. */
+  draftAnswerFromContext: boolean;
+  onDraftAnswerFromContextChange: (v: boolean) => void;
   // Post TODOs to Spaces opt-OUT (agent.config.postTodos). Default ON: the
   // live plan/TODO card from the todo-write tool is posted into the thread.
   // Turning it OFF sets postTodos=false, suppressing the card at claw-auth's
@@ -1774,6 +1778,8 @@ export function AgentDetailLeftColumn({
   onDraftSuggestGoalChange,
   draftPrefetchContext,
   onDraftPrefetchContextChange,
+  draftAnswerFromContext,
+  onDraftAnswerFromContextChange,
   draftPostTodos,
   onDraftPostTodosChange,
   draftPlanTracking,
@@ -2694,7 +2700,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAnswerFromContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -3128,6 +3134,23 @@ export function AgentDetailLeftColumn({
                 onChange={onDraftPrefetchContextChange}
                 disabled={!canEdit}
                 ariaLabel="Prefetch context"
+              />
+            }
+          />
+        )}
+
+        {(canEdit || draftAnswerFromContext) && (
+          <SettingRow
+            title="Answer from context"
+            summary="Search the workspace and knowledge base for the question first, then answer once from what was found, with no tools and no follow-up turns."
+            detail="Best for quick-answer surfaces like the cmd+K AI tab. Overrides Prefetch context while on."
+            enabled={draftAnswerFromContext}
+            control={
+              <Switch
+                checked={draftAnswerFromContext}
+                onChange={onDraftAnswerFromContextChange}
+                disabled={!canEdit}
+                ariaLabel="Answer from context"
               />
             }
           />

@@ -7,6 +7,7 @@ import {
 } from '../components/ui/AgentSpinner';
 import { apiInstance } from '../services/clients/apiClient';
 import { MessageType } from '@xyne/shared';
+import { usePageCoverage, watchShown } from './usePageCoverage';
 
 /**
  * Ephemeral agent-progress state.
@@ -200,10 +201,12 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
   //      sessionId-transition window (cleanup → new mount) and was therefore missed.
   //      The GET now filters tombstoned entries server-side, so an empty response is
   //      authoritative proof that the run is over.
+  // Not polled under full-page search, out of sight there, as leaving the page stopped it; verified
+  // again once the collapse back to it is over.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (active.size === 0 || !sessionId) return;
-    // Server-verify: poll every 5 s while the spinner is active.
-    const verifyId = setInterval(() => {
+    const verify = (): void => {
       void apiInstance
         .get<{ data?: unknown[] }>(`/conversations/${encodeURIComponent(sessionId)}/agent-progress`)
         .then(res => {
@@ -212,6 +215,11 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
         .catch(() => {
           /* non-fatal */
         });
+    };
+    // Server-verify: poll every 5 s while the spinner is active.
+    const watch = watchShown(pageCoverage, verify);
+    const verifyId = setInterval(() => {
+      if (watch.shown()) verify();
     }, 5_000);
     // Local stale-entry sweep: run every 30 s.
     const staleId = setInterval(() => {
@@ -231,8 +239,9 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
     return (): void => {
       clearInterval(verifyId);
       clearInterval(staleId);
+      watch.stop();
     };
-  }, [active.size, sessionId]);
+  }, [active.size, sessionId, pageCoverage]);
 
   // When another AgentProgressIndicator instance (e.g. channel input vs thread input)
   // successfully aborts the same conversationId, it dispatches this custom event so

@@ -4,6 +4,7 @@ import Button from '../../ui/Button';
 import { useChannel } from '../../../hooks/useChannels';
 import { useCanLinkChannelBoards } from '../../../hooks/useCanLinkChannelBoards';
 import { LinkBoardsDialog } from './LinkBoardsDialog';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 interface ChannelNoBoardsEmptyStateProps {
   channelId: string;
@@ -23,6 +24,7 @@ export const ChannelNoBoardsEmptyState = ({
 }: ChannelNoBoardsEmptyStateProps): ReactElement => {
   const channel = useChannel(channelId);
   const canLinkBoards = useCanLinkChannelBoards(channelId);
+  const noun = useTicketNoun();
   const [isLinkBoardsOpen, setIsLinkBoardsOpen] = useState(false);
 
   return (
@@ -32,8 +34,8 @@ export const ChannelNoBoardsEmptyState = ({
       </p>
       <p className='text-sm text-muted-foreground'>
         {canLinkBoards
-          ? 'Link a board to this channel to start creating and tracking tickets.'
-          : 'Ask a channel admin or a workspace admin to link one, to start creating and tracking tickets.'}
+          ? `Link a board to this channel to start creating and tracking ${noun.plural}.`
+          : `Ask a channel admin or a workspace admin to link one, to start creating and tracking ${noun.plural}.`}
       </p>
       {canLinkBoards && (
         <>

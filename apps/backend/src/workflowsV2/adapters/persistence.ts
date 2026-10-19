@@ -46,10 +46,10 @@ import type {
   ResolvedCredential,
   ResourceAttributes,
   StepRecord,
-  WorkflowCallbackRecord,
   WorkflowContext,
   WorkflowRecord,
 } from '@xyne/workflow-sdk';
+import { GateCategory } from '@xyne/workflow-sdk';
 import { validateCredentialAuth, validateCredentialValues, WorkflowStatus } from '@xyne/workflow-sdk';
 import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
@@ -224,7 +224,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         createdAt: true,
         workflow: { select: { metadata: true, context: true } },
         workflowSteps: {
-          where: { status: { in: [...PARKED_STEP_STATUSES] } },
+          where: {
+            status: { in: [...PARKED_STEP_STATUSES] },
+            OR: [{ stepSubType: GateCategory.WaitingOnApprover }, { stepSubType: null }],
+          },
           select: { stepName: true, status: true, stepExecutorType: true },
         },
       },
@@ -701,12 +704,14 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       executorType: string;
       data?: string;
       attributes: ResourceAttributes<'workflow'>;
+      category?: GateCategory;
     },
   ): Promise<void> {
     const shared = {
       status: data.status,
       stepExecutorType: data.executorType,
       data: data.data ?? null,
+      ...(data.category !== undefined ? { stepSubType: data.category } : {}),
     };
     await db.workflowStep.upsert({
       where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
@@ -723,7 +728,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   async getStepRows(executionId: string): Promise<StepRecord[]> {
     const rows = await db.workflowStep.findMany({
       where: { workflowExecutionId: executionId },
-      select: { stepName: true, status: true, stepExecutorType: true, data: true },
+      select: { stepName: true, status: true, stepExecutorType: true, data: true, stepSubType: true },
     });
     return rows.map(toStepRecord);
   }
@@ -731,7 +736,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   async getStep(executionId: string, stepName: string): Promise<StepRecord | null> {
     const row = await db.workflowStep.findUnique({
       where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-      select: { stepName: true, status: true, stepExecutorType: true, data: true },
+      select: { stepName: true, status: true, stepExecutorType: true, data: true, stepSubType: true },
     });
     return row ? toStepRecord(row) : null;
   }
@@ -999,40 +1004,4 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   async getResumePayload(_executionId: string): Promise<ResumePayload | null> {
     return Promise.resolve(null);
   }
-
-  /**
-   * DEFERRED — workflow_callbacks table not created.
-   *
-   * Serves only the WAIT step's `webhook` mode. WAIT's `delay` and `approval` modes are
-   * unaffected, and `approval` is the one review gates use. The host is what surfaces a
-   * callback URL, so leaving these unimplemented and the `/wait/callback/...` route
-   * unmounted keeps webhook-mode WAIT unreachable rather than half-working.
-   */
-  async storeWorkflowCallback(_record: WorkflowCallbackRecord): Promise<void> {
-    return notBacked('storeWorkflowCallback', "WAIT webhook mode is not enabled");
-  }
-
-  /** DEFERRED — see {@link storeWorkflowCallback}. Null → the callback route 404s. */
-  async getWorkflowCallbackBySecret(_secret: string): Promise<WorkflowCallbackRecord | null> {
-    return Promise.resolve(null);
-  }
-
-  /** DEFERRED — see {@link storeWorkflowCallback}. */
-  async getWorkflowCallback(_workflowId: string): Promise<WorkflowCallbackRecord | null> {
-    return Promise.resolve(null);
-  }
-
-  /** DEFERRED — see {@link storeWorkflowCallback}. */
-  async rotateWorkflowCallback(
-    _workflowId: string,
-    _newSecret: string,
-  ): Promise<WorkflowCallbackRecord> {
-    return notBacked('rotateWorkflowCallback', "WAIT webhook mode is not enabled");
-  }
-
-  /** DEFERRED — see {@link storeWorkflowCallback}. */
-  async removeWorkflowCallback(_workflowId: string): Promise<void> {
-    return Promise.resolve();
-  }
 }
-

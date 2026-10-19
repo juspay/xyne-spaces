@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PencilEditLine } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
@@ -7,9 +7,9 @@ import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { Pill } from '../../shared/primitives/Pill';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
-import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
+import { BUILDER_DRIVER_SLUG } from './AgentBuilderPanel';
 import { AgentPersonaTabV2 } from './persona/AgentPersonaTabV2';
 import { AgentActivityTabV2 } from './activity/AgentActivityTabV2';
 import { AgentBehaviourTabV2 } from './behaviour/AgentBehaviourTabV2';
@@ -56,13 +56,9 @@ const ClawAgentDetailV2 = (): ReactElement => {
       : null;
   const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
   const tab = resolveTab(searchParams.get('tab'));
-  const justCreated = (location.state as { justCreated?: unknown } | null)?.justCreated === true;
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  const dismissBanner = useCallback(() => setBannerDismissed(true), []);
 
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
   const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
-  const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
   const canEdit = actions.permissions?.canEdit ?? false;
   const canRenameHandle = actions.isOwner;
@@ -86,12 +82,21 @@ const ClawAgentDetailV2 = (): ReactElement => {
     setSearchParams(params, { replace: true, state: navigationState });
   };
 
+  const openBuilder = (): void => {
+    const params = new URLSearchParams(searchParams);
+    params.set('build', '1');
+    setSearchParams(params, { replace: true, state: navigationState });
+  };
+
+  const builderOpen = searchParams.get('build') === '1';
+  const canBuild = agent !== undefined && agent.slug !== BUILDER_DRIVER_SLUG && !builderOpen;
+
   const updated = formatUpdated(agent?.updatedAt);
   const version = agent?.activePromptVersion;
 
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentDetailV2'>
-      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
+      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6'>
         <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
           {agent && (
             <AgentDetailHeaderV2
@@ -99,6 +104,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
               actions={actions}
               onChat={() => openAgentChat(agent.slug)}
               canChat={canOpenAgentChat}
+              onBuild={canBuild ? openBuilder : undefined}
               onBack={() => void navigate(returnPath)}
             />
           )}
@@ -138,16 +144,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
           </p>
         ) : (
           <>
-            {showBanner && (
-              <AgentCreatedBanner
-                agent={agent}
-                pendingRegistration={pendingRegistration}
-                onDismiss={dismissBanner}
-              />
-            )}
-
-            <div className='flex w-full items-start gap-3'>
-              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='md' />
+            <div className='flex w-full items-start gap-4'>
+              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='lg' />
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>
@@ -220,6 +218,13 @@ const ClawAgentDetailV2 = (): ReactElement => {
                     Changing the handle breaks existing @mentions and links to @{agent.slug}.
                   </span>
                 )}
+
+                {pendingRegistration && (
+                  <p className='text-xs leading-[18px] text-muted-foreground/70'>
+                    Chat works now. An admin needs to register this agent before it can be
+                    @mentioned in Spaces.
+                  </p>
+                )}
               </div>
 
               {canEdit && (
@@ -282,6 +287,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
             )}
           </>
         )}
+
+        <div className='h-12 shrink-0' aria-hidden />
       </div>
     </div>
   );

@@ -6,7 +6,7 @@
  * so the sidebar can switch between versions seamlessly.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -90,6 +90,33 @@ export function useV2SessionsList({
  * Invalidate the chat history (call after new chat, etc.) — a turn with any
  * agent changes it.
  */
+/**
+ * One chat's saved title, from whichever history page already holds it; null when none does (a new
+ * chat, or a list not loaded yet). Updates as the history is fetched again.
+ */
+export function useCachedV2ConversationTitle(sessionId: string | null | undefined): string | null {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const read = useCallback((): string | null => {
+    if (!sessionId) return null;
+    const lists = queryClient.getQueriesData<InfiniteData<V2ConversationPage>>({
+      queryKey: V2_SESSIONS_KEY,
+    });
+    for (const [, data] of lists) {
+      const row = data?.pages
+        .flatMap(page => page.conversations)
+        .find(conversation => conversation.sessionId === sessionId);
+      // The list says 'New Chat' for a chat with no title at all.
+      if (row?.title && row.title !== 'New Chat') return row.title;
+    }
+    return null;
+  }, [queryClient, sessionId]);
+  return useSyncExternalStore(subscribe, read);
+}
+
 export function useV2SessionInvalidator() {
   const queryClient = useQueryClient();
 

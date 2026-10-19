@@ -55,6 +55,7 @@ import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { type LlmCallStat } from "./llm-turn-stats.js";
 import { installStreamModelFallback } from "./stream-model-fallback.js";
 import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
@@ -404,6 +405,10 @@ export interface SubagentProgressCtx {
   /** Persistent parent agent session key used for filesystem debug artifacts. */
   parentDebugSessionId?: string;
   parentToolsUsed?: string[];
+  /** Durable parent-side sink for child invocations; the live `pushInvocation` stream can drop. */
+  parentToolInvocations?: ToolInvocation[];
+  /** Parent-side sink for the child's LLM calls, tagged with the subagent name. */
+  parentLlmCalls?: LlmCallStat[];
   /** Parent agent's conversationId/agentSlug — used by the sandbox subagent to
    *  look up an existing kata session for this conversation and surface it to
    *  the cold-started child LLM via a system reminder. */
@@ -579,11 +584,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
   // PARENT_PARALLELISM_PREAMBLE refers to when it says "subagent calls are
   // expensive" — without the tag the rule has no concrete anchor.
-  const directFirst = optEnabled("subagent_read_tools") && tools.length > 0
+  const directFirst = optEnabled("subagent_read_tools") && tools.length > 0 && !def.delegationPreferred
     ? "Slow: this runs a whole nested model. Its tools, writes included, are listed in your tool catalog — load them with load-tools and call them yourself first. Delegate here only for open-ended research that needs many queries. "
     : "";
+  const tag = def.delegationPreferred
+    ? "[Subagent — runs on a cheap model; delegate this work instead of doing it yourself]"
+    : "[Subagent — nested LLM run, expensive]";
   const taggedDescription =
-    `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
+    `${tag} ${directFirst}${def.description} ` +
     `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
     `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
   const tool: ToolDefinition & { progressLabels?: string[]; subagent?: true } = {
@@ -734,6 +742,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       const subagentArtifacts: SubagentArtifact[] = [];
       let turnStartedAt: number | null = null;
       let firstDeltaAt: number | null = null;
+      let childCallSeq = 0;
+      let childTtftMs: number | null = null;
       let turnStreamChars = 0;
       let turnStreamThinkingChars = 0;
       let turnStreamTextChars = 0;
@@ -1331,6 +1341,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                   ...(childCitations ? { citations: childCitations } : {}),
                 };
                 pushInvocation(progressCtx.progressUrl, progressCtx.parentSessionId, childInv);
+                // The stream push is fire-and-forget; this is the durable copy.
+                progressCtx.parentToolInvocations?.push(childInv);
               }
             }
             const started = childInflight.get(event.toolCallId);
@@ -1361,6 +1373,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
               if (firstDeltaAt == null && turnStartedAt != null) {
                 firstDeltaAt = Date.now();
+                childTtftMs = turnStartedAt != null ? firstDeltaAt - turnStartedAt : null;
               }
               if (ame.type === "thinking_delta") {
                 turnStreamCount += 1;
@@ -1401,6 +1414,25 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                 const elapsed = Math.max(0.001, (Date.now() - firstDeltaAt) / 1000);
                 lastStreamCharsPerSec = Math.round(turnStreamChars / elapsed);
               }
+              if (progressCtx?.parentLlmCalls) {
+                childCallSeq += 1;
+                const called = msg as unknown as { model?: string; responseModel?: string; provider?: string };
+                progressCtx.parentLlmCalls.push({
+                  i: childCallSeq,
+                  ttft: childTtftMs,
+                  dec: firstDeltaAt != null ? Math.max(0, Date.now() - firstDeltaAt) : 0,
+                  in: msg.usage?.input ?? 0,
+                  out: msg.usage?.output ?? 0,
+                  cr: msg.usage?.cacheRead ?? 0,
+                  cw: msg.usage?.cacheWrite ?? 0,
+                  ...(turnStreamChars ? { ch: turnStreamChars } : {}),
+                  ...(msg.stopReason ? { sr: msg.stopReason } : {}),
+                  ...(called.responseModel ?? called.model ? { m: called.responseModel ?? called.model } : {}),
+                  ...(called.provider ? { p: called.provider } : {}),
+                  sa: def.name,
+                });
+              }
+              childTtftMs = null;
               pushDebugEvent("assistant_turn_end", {
                 usage: (() => {
                   try { return JSON.parse(JSON.stringify(msg.usage ?? {})); }
@@ -1756,7 +1788,7 @@ function resolveCustomSubagentTools(
 }
 
 export function withoutBuiltinSubagents(tools: ToolDefinition[]): ToolDefinition[] {
-  const builtin = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
+  const builtin = new Set(SUBAGENT_DEFINITIONS.filter((d) => !d.delegationPreferred).map((d) => d.name));
   return tools.filter((tool) => !builtin.has(tool.name));
 }
 
