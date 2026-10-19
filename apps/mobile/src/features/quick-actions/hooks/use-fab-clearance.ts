@@ -1,5 +1,5 @@
 import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
-import { SEARCH_BUTTON_SIZE } from '@/src/features/bottom-navigation/constants';
+import { ACTION_BUTTON_SIZE } from '@/src/features/bottom-navigation/constants';
 
 import { FAB_GAP } from '../constants';
 
@@ -18,5 +18,5 @@ const FAB_CONTENT_MARGIN = 16;
  */
 export function useFabClearance(): number {
   const barHeight = useSpacesTabBarHeight();
-  return barHeight + FAB_GAP + SEARCH_BUTTON_SIZE + FAB_CONTENT_MARGIN;
+  return barHeight + FAB_GAP + ACTION_BUTTON_SIZE + FAB_CONTENT_MARGIN;
 }

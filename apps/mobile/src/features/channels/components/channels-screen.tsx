@@ -4,15 +4,15 @@ import { View } from 'react-native';
 import { QuickActionsFab } from '@/src/features/quick-actions';
 
 import { ChannelActionsProvider } from '../hooks/use-channel-actions';
-import { ChannelsHeader } from './channels-header';
 import { ChannelsList } from './channels-list';
 import { SectionTray } from './section-tray';
+import { ScreenHeader } from '@/src/features/screen-header';
 
 export function ChannelsScreen(): ReactElement {
   return (
     <ChannelActionsProvider>
       <View className='flex-1 bg-spaces-background'>
-        <ChannelsHeader />
+        <ScreenHeader title='Channels' searchTab='channels' />
         <ChannelsList />
         <QuickActionsFab tab='channels' />
         <SectionTray />

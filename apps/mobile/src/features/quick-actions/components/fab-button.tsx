@@ -10,8 +10,8 @@ import { Plus } from 'lucide-react-native';
 
 import {
   ICON_SIZE,
-  SEARCH_BAR_RADIUS,
-  SEARCH_BUTTON_SIZE,
+  ACTION_BUTTON_RADIUS,
+  ACTION_BUTTON_SIZE,
   TAB_BAR_HORIZONTAL_PADDING,
 } from '@/src/features/bottom-navigation/constants';
 import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
@@ -50,9 +50,9 @@ export function FabButton({ isOpen }: { isOpen: SharedValue<boolean> }): ReactEl
       }}
       className='absolute items-center justify-center bg-spaces-accent'
       style={{
-        width: SEARCH_BUTTON_SIZE,
-        height: SEARCH_BUTTON_SIZE,
-        borderRadius: SEARCH_BAR_RADIUS,
+        width: ACTION_BUTTON_SIZE,
+        height: ACTION_BUTTON_SIZE,
+        borderRadius: ACTION_BUTTON_RADIUS,
         bottom: barHeight + FAB_GAP,
         right: TAB_BAR_HORIZONTAL_PADDING,
       }}
