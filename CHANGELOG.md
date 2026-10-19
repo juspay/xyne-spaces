@@ -1,3 +1,17 @@
+## [1.506.0](https://github.com/juspay/xyne-spaces/compare/v1.505.0...v1.506.0) (2026-10-19)
+
+
+### Features
+
+* Add to conversation to canvas support in Xyne Desk ([#2153](https://github.com/juspay/xyne-spaces/issues/2153)) ([344515a](https://github.com/juspay/xyne-spaces/commit/344515aa7b59badcc4f8d8db93d030ee39f78ff7))
+* move Digital Twin replies out of Recents into a Replies tab ([#3158](https://github.com/juspay/xyne-spaces/issues/3158)) ([c07277d](https://github.com/juspay/xyne-spaces/commit/c07277d72798d240dba73be815e0174c8f3c6ab5))
+* optional discussion titles in chat, offered by Jev ([#3125](https://github.com/juspay/xyne-spaces/issues/3125)) ([6853f84](https://github.com/juspay/xyne-spaces/commit/6853f84f4c58b9acf81942ae7a5c73bb99905013))
+
+
+### Bug Fixes
+
+* stop cmd+K browse crashing on large channel lists ([#3176](https://github.com/juspay/xyne-spaces/issues/3176)) ([c86b32d](https://github.com/juspay/xyne-spaces/commit/c86b32d1e1457a7b5714f920a03fabb3ae51d036))
+
 ## [1.505.0](https://github.com/juspay/xyne-spaces/compare/v1.504.0...v1.505.0) (2026-10-17)
 
 
