@@ -6,8 +6,7 @@ export const MTLS_EXPIRY_WARN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MtlsExpiryWarningState =
-  | { kind: 'none' }
-  | { kind: 'warn'; notAfterIso: string; daysLeft: number };
+  { kind: 'none' } | { kind: 'warn'; notAfterIso: string; daysLeft: number };
 
 /**
  * Pure check against a known `notAfter`. Caller owns the "warn once" MMKV key.

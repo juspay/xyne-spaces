@@ -61,4 +61,3 @@ describe('evaluateMtlsExpiryWarning', () => {
     assert.deepEqual(evaluateMtlsExpiryWarning(notAfter, now), { kind: 'none' });
   });
 });
-
