@@ -31,7 +31,8 @@ months. Two mechanisms enforce this:
 
 **Nix has:** dev shell (node, pnpm, just, openssl, pinned Prisma engines);
 services bundle (Postgres, Redis, LiveKit, Zero, fake GCS, Y-Sweet, transcription
-agent, db-setup); `nix-ci.yml` with a runtime smoke test; `vira.hs`. Flake
+agent, db-setup); `nix-ci.yml` with a runtime smoke test (manual `workflow_dispatch` only since
+main's 6a08a6a9b: self-hosted runner pods block the sudo the Nix installer needs); `vira.hs`. Flake
 `checks` cover referenced paths, script tests, Compose references, Playwright versions, and the
 python-agent lock. The Kata
 Claw sandboxes already run the bundle.
@@ -90,7 +91,8 @@ cheap jobs first.
 - [x] **Gate:** check Compose references against the allowlist through `nix flake check` in CI.
 - [x] **Delete:** `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`, `docker/dev-infra/`,
       `docker/Dockerfile.call-services`, and `docker/entrypoint.sh`. Move `otel-collector-config.yaml`
-      to `docker/`; keep `docker/livekit.yaml`. Repoint `services:stop` to `just cleanup-ports`.
+      to `docker/`; keep `docker/livekit.yaml`. `services:stop` runs `start-services.sh --stop`:
+      Compose `down` when that stack is running, else Nix port cleanup; no `just` needed.
 - [x] **Delete:** `scripts/start-services-win.sh`, `services:win`, root `setup.sh`, its caller
       `clone-and-setup.sh`, and `just setup`; Windows docs point to WSL2 + Nix.
 - [x] Make `docker-compose.test.yml` standalone with equivalent resolved configuration;
@@ -102,6 +104,14 @@ Each slice is one PR: add the Nix processes, add them to the smoke test, remove
 the same services from `docker-compose.dev.yml` and the feature from
 `select-services.mjs`, shrink the allowlist. Suggested order:
 
+- [ ] **Dev image, before Core.** Non-Nix contributors lose `pnpm run services` when Core leaves
+      `dev.yml`, so their fallback lands first, built from the same definitions (no second stack):
+      make the bind address configurable (`0.0.0.0` in the image), add a `full` bundle that also
+      runs backend and dashboard, build `packages.dev-image` with `dockerTools` for x86_64 and
+      aarch64 Linux, and publish it to GHCR from CI. Usage: `docker run -v "$PWD":/src -p 3000:3000
+      -p 3001:3001 ghcr.io/juspay/xyne-spaces-dev`; `node_modules` is installed inside the
+      container. CI runs the smoke test inside the image so it cannot drift. Vespa, egress and
+      Superposition (`nix/containers`) stay out of the image.
 - [ ] **Core** (Postgres, Redis, Zero, Y-Sweet, fake GCS): already in Nix. Remove them from
       `dev.yml`; `pnpm run services` core path becomes `nix run .#xyne-space-services`.
       Move `apps/backend` ysweet scripts and `watch-transcription-agent.sh` to process-compose.
@@ -191,7 +201,9 @@ are produced changes.
 
 ## Open questions
 
-1. Do the `ci-cluster-github-runners*` runners have Nix? Gates Phases 2 and 4.
+1. Do the `ci-cluster-github-runners*` runners have Nix? Gates Phases 2 and 4. Partly answered:
+   their pods block privilege escalation, so a per-job Nix install fails; Nix must be baked into
+   the runner image, or `nix-ci.yml` stays on GitHub-hosted runners.
 2. Does a Jenkins job still consume `test:push` report branches? No Jenkinsfile is in the repo. If not, delete that machinery in Phase 3.
 3. macOS: are Vespa, Superposition, egress acceptable through podman-in-Nix (needs a VM), or served remotely? The search slice's spike answers.
 4. Which of observability, Superposition, egress are needed in a dev loop? Drop rather than port.

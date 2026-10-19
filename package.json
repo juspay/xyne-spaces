@@ -17,7 +17,7 @@
     "services:sh": "chmod +x scripts/start-services.sh && ./scripts/start-services.sh",
     "secrets": "node scripts/generate-local-secrets.mjs",
     "env:setup": "node scripts/setup-env-files.mjs",
-    "services:stop": "just cleanup-ports",
+    "services:stop": "bash scripts/start-services.sh --stop",
     "dev": "node scripts/dev-interactive.mjs",
     "dev:all": "node scripts/dev-interactive.mjs",
     "dev:all:raw": "node scripts/dev-interactive.mjs",
