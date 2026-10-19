@@ -191,7 +191,6 @@ import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -1807,12 +1806,7 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
-    const taskCommand = routedMode.command;
-    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
-    }
+    const taskCommand = parseTaskCommand(task);
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
