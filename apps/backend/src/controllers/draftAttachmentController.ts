@@ -111,11 +111,18 @@ export class DraftAttachmentController {
       // (create branch pins `id`, but a colliding existing row falls through to an
       // update). Reject any id that already resolves to a row the caller does not own
       // as a DRAFT.
+      let allIdsAlreadySent = false;
       if (attachmentIdsArray.length > 0) {
         const existingAttachments = await this.db.messageAttachment.findMany({
           where: { id: { in: attachmentIdsArray } },
           select: { id: true, uploadedByUserId: true, entityType: true },
         });
+        // A retry of an upload whose message already went out: every id resolves to a row
+        // that has left the draft. Such a request must not conjure a draft back into
+        // existence — that would leave an empty one sitting in the user's Drafts.
+        allIdsAlreadySent =
+          existingAttachments.length === attachmentIdsArray.length &&
+          existingAttachments.every(a => a.entityType !== AttachmentEntityType.DRAFT);
         const foreign = existingAttachments.find(
           a => a.uploadedByUserId !== userId,
         );
@@ -141,7 +148,7 @@ export class DraftAttachmentController {
       });
 
       const finalDraftMessageId = existingDraft?.id || draftMessageId;
-      if (!existingDraft) {
+      if (!existingDraft && !allIdsAlreadySent) {
         const now = new Date();
         try {
           await this.db.draftMessage.upsert({
