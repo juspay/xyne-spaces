@@ -13,6 +13,7 @@ export {
   AffinityServiceProvider,
 } from "./useAffinityService.js";
 export { AffinityService, registerAffinityService } from "../services/affinityService.js";
+export { useAffinityCallback } from "./useAffinityCallback.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
 export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";

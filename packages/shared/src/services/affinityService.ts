@@ -70,12 +70,12 @@ export function registerAffinityService(service: AffinityService): void {
 }
 
 /**
- * The registered app service, as the rankers read it. Weights are 0 until an app registers one,
- * the same as an AffinityService whose weights have not loaded yet.
+ * The registered app service, as the rankers and `useAffinityCallback` read it. Weights are 0 until
+ * an app registers one, the same as an AffinityService whose weights have not loaded yet.
  */
 export const affinityService = {
-  getUserWeight: (userId: string): number =>
-    registeredAffinityService?.getUserWeight(userId) ?? 0,
+  prefetch: (): Promise<void> => registeredAffinityService?.prefetch() ?? Promise.resolve(),
+  getUserWeight: (userId: string): number => registeredAffinityService?.getUserWeight(userId) ?? 0,
   getChannelWeight: (channelId: string): number =>
     registeredAffinityService?.getChannelWeight(channelId) ?? 0,
 };
