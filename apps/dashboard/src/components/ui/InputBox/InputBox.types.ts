@@ -74,6 +74,12 @@ export interface InputBoxProps {
   sendDisabled?: boolean;
   /** Shown on the send button's tooltip in place of 'Send message' while sendDisabled. */
   sendDisabledReason?: string;
+  /**
+   * Attachments the send mutator will drop (upload FAILED), so they must not count as
+   * something worth sending. Without this a composer holding nothing but a dead upload
+   * looks sendable, and pressing send publishes an empty message.
+   */
+  unsendableAttachmentIds?: ReadonlySet<string>;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;

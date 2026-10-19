@@ -74,6 +74,7 @@ import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
+import { useUploadingAttachmentIds } from '../../../store/useAttachmentUploadStore';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileEditor } from './MobileEditor';
@@ -291,6 +292,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       compact = false,
       sendDisabled = false,
       sendDisabledReason,
+      unsendableAttachmentIds,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -309,6 +311,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
     } = useDraftAttachments();
+    // Composer chips show their own spinner while bytes are in flight. Sourced from the
+    // client store rather than the row's uploadStatus because the composer is only ever the
+    // uploader's own view, and the store knows the moment the request starts.
+    const uploadingAttachmentIds = useUploadingAttachmentIds();
     const { enterSendsMessage } = useEnterSendsMessage();
     const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
@@ -440,9 +446,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     // lives inside a high-z surface like the Cmd+K dialog; defaults to `z-50`.
     const overlayZIndex = useOverlayZIndex();
 
+    // A failed upload is not content: the send mutator drops those rows, so counting them
+    // here is what let an attachment-only composer send a message with nothing in it.
+    const sendableAttachmentCount = React.useMemo(
+      () =>
+        unsendableAttachmentIds
+          ? allAttachments.filter(a => !unsendableAttachmentIds.has(a.attachmentId)).length
+          : allAttachments.length,
+      [allAttachments, unsendableAttachmentIds],
+    );
+
     const hasSendableContent = React.useMemo(
-      () => !!content || allAttachments.length > 0 || !!attachedCanvas,
-      [content, allAttachments.length, attachedCanvas],
+      () => !!content || sendableAttachmentCount > 0 || !!attachedCanvas,
+      [content, sendableAttachmentCount, attachedCanvas],
     );
 
     const { notifyTyping } = useTypingState();
@@ -1860,7 +1876,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
                           onPreview={() => void handlePreview(file, attachmentId)}
-                          isUploading={false}
+                          isUploading={uploadingAttachmentIds.has(attachmentId)}
                         />
                       ))}
                       {attachedCanvas && (
@@ -1936,7 +1952,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
                     onPreview={() => void handlePreview(file, attachmentId)}
-                    isUploading={false}
+                    isUploading={uploadingAttachmentIds.has(attachmentId)}
                   />
                 ))}
               </div>

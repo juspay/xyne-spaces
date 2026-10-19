@@ -11,6 +11,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   Download,
   FileCode,
   FileText,
@@ -18,9 +19,13 @@ import {
   Maximize2,
   MoreVertical,
   Play,
+  Loader2,
   Trash2,
   Video,
 } from 'lucide-react';
+import { isAttachmentUploaded } from '@xyne/shared/zero/mutators';
+import { AttachmentUploadStatus } from '@xyne/shared';
+import { useDraftAttachments } from '../../../hooks/useDraft';
 import { Menu } from '@base-ui/react/menu';
 import { AddToStreamBaseUiMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import {
@@ -121,6 +126,7 @@ const Preview: React.FC<{
   isInGrid?: boolean | undefined;
   fullSize?: boolean | undefined;
   isInMultiImageGroup?: boolean;
+  isUploading?: boolean;
   onLoadingChange?: (isLoading: boolean) => void;
   onImageBlobChange?: (blob: Blob | null) => void;
 }> = ({
@@ -135,6 +141,7 @@ const Preview: React.FC<{
   isInGrid,
   fullSize,
   isInMultiImageGroup,
+  isUploading,
   onImageBlobChange,
 }) => {
   const isVideo = isVideoFile(mimeType);
@@ -250,7 +257,11 @@ const Preview: React.FC<{
 
   const { isMobile } = usePlatform();
 
-  if (isLoading) {
+  // A row still uploading has an empty url, so the blob fetch below fails and the error
+  // branch would claim "Preview unavailable" for a perfectly healthy upload. Fall back to
+  // the neutral skeleton instead — but only when nothing is cached, since the sender's own
+  // thumbnail is pre-seeded at pick time and should stay visible under the spinner.
+  if (isLoading || (isUploading && (error || !imageBlobUrl))) {
     return (
       <div
         className={cn(
@@ -854,11 +865,93 @@ const formatDuration = (seconds: number): string => {
  * Shows thumbnail first, loads video only when user clicks play
  * On mobile: Opens expanded modal directly instead of inline player
  */
+/**
+ * Shown while an attachment's bytes are still streaming.
+ *
+ * Deliberately indeterminate: the byte percentage exists only in the uploader's browser
+ * (see useAttachmentUploadStore), while this tile renders for everyone the message reached.
+ * The number belongs to the pill; the tile only says "not ready yet".
+ */
+const UploadingOverlay = ({ label }: { label?: string }): React.JSX.Element => (
+  <div
+    className='absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/30'
+    role='status'
+    aria-live='polite'
+  >
+    <Loader2 className='h-6 w-6 animate-spin text-foreground' aria-hidden='true' />
+    <span className='sr-only'>{label ?? 'Uploading attachment'}</span>
+  </div>
+);
+
+/**
+ * Shown when an upload is never going to finish.
+ *
+ * Rendered for everyone, not just the sender: the message is already published, so a tile
+ * that silently showed nothing would leave recipients wondering what they were supposed to
+ * be looking at. The sender additionally gets a way out — Retry re-uploads against this
+ * same row so the file lands in this message, and Remove tombstones it.
+ */
+const FailedOverlay = ({
+  fileName,
+  canRetry,
+  onRetry,
+  onRemove,
+}: {
+  fileName: string;
+  canRetry: boolean;
+  onRetry?: (() => void) | undefined;
+  onRemove?: (() => void) | undefined;
+}): React.JSX.Element => (
+  <div
+    className='absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/85 px-3 text-center'
+    role='alert'
+  >
+    <AlertCircle className='h-6 w-6 text-destructive' aria-hidden='true' />
+    <span className='text-xs font-medium text-foreground'>Failed to upload</span>
+    <span className='sr-only'>{fileName}</span>
+    {canRetry && (
+      <div className='flex items-center gap-2'>
+        {onRetry && (
+          <button
+            type='button'
+            onClick={e => {
+              e.stopPropagation();
+              onRetry();
+            }}
+            className='rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90'
+            data-track-category='CHAT_ATTACHMENT_UPLOAD'
+            data-track-name='Retry_Failed_Attachment_Tile'
+          >
+            Retry
+          </button>
+        )}
+        {onRemove && (
+          <button
+            type='button'
+            onClick={e => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className='rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent'
+            data-track-category='CHAT_ATTACHMENT_UPLOAD'
+            data-track-name='Remove_Failed_Attachment_Tile'
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    )}
+  </div>
+);
+
 const InlineVideoPlayer: React.FC<{
   attachmentId: string;
   fileName: string;
   mimeType: string;
   uploadedBy: string;
+  isUploading?: boolean;
+  /** Pre-built failed-upload overlay; the video tile early-returns before the card renders. */
+  failedOverlay?: React.ReactNode;
   thumbnailUrl?: string | null;
   fileSize: number;
   height?: number | undefined;
@@ -876,6 +969,8 @@ const InlineVideoPlayer: React.FC<{
   fileName,
   mimeType,
   uploadedBy,
+  isUploading,
+  failedOverlay,
   width,
   height,
   thumbnailUrl,
@@ -1130,6 +1225,8 @@ const InlineVideoPlayer: React.FC<{
         <div
           className={`relative bg-black rounded-lg overflow-hidden border border-border shadow-sm w-full h-full ${isInGrid ? '' : 'max-w-md'}`}
         >
+          {isUploading && <UploadingOverlay label={`Uploading ${fileName}`} />}
+          {failedOverlay}
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
             <div className='bg-muted animate-pulse flex items-center justify-center w-full h-full' />
@@ -1251,6 +1348,13 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   parentMessage,
 }) => {
   const { isMobile } = usePlatform();
+  // The row is created the moment a file is picked and rides onto the message with an empty
+  // url, filling in when the upload lands. Until then there is nothing to preview, so the
+  // tile would otherwise render its "Preview unavailable" placeholder for a perfectly healthy
+  // upload. Legacy rows (no uploadStatus) are treated as uploaded by the helper.
+  const isFailed = attachment.uploadStatus === AttachmentUploadStatus.FAILED;
+  const isUploading = !isFailed && !isAttachmentUploaded(attachment);
+  const { retryAttachment } = useDraftAttachments();
   const isOpen = useSelector(
     attachmentViewerActor,
     (s: AttachmentViewerState) => s.value !== 'closed',
@@ -1261,6 +1365,25 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.originalFilename,
     attachment.uploadedByUserId,
   );
+
+  // Built once and handed to both the card and the video tile, which returns early and so
+  // never reaches the card's markup. canDelete doubles as "is the sender": only they have a
+  // file to retry with, and only they may remove it.
+  const retryChannelId = attachment.channelId;
+  const failedOverlay = isFailed ? (
+    <FailedOverlay
+      fileName={attachment.originalFilename}
+      canRetry={canDelete}
+      // The row's channelId is nullable, and the upload endpoint is channel-scoped. Without
+      // one there is nowhere to send the bytes, so offer Remove alone rather than a Retry
+      // that cannot work.
+      {...(retryChannelId && {
+        onRetry: () =>
+          void retryAttachment(attachment.id, retryChannelId, attachment.conversationId),
+      })}
+      onRemove={handleDelete}
+    />
+  ) : null;
 
   // Track the decoded preview blob for copy functionality
   const [imageBlob, setImageBlob] = useState<Blob | null>(null);
@@ -1286,6 +1409,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     isHeicAttachment(attachment.mimetype, attachment.originalFilename);
 
   const handleCardClick = (): void => {
+    // Opening the viewer mid-upload would fetch an attachment that has no bytes yet and
+    // land the user on a broken preview with no way to tell it apart from a real failure.
+    if (isUploading) return;
     const fallback: AttachmentRef = {
       attachmentId: attachment.id,
       fileName: attachment.originalFilename,
@@ -1378,6 +1504,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         fileName={attachment.originalFilename}
         mimeType={attachment.mimetype}
         uploadedBy={attachment.uploadedByUserId}
+        isUploading={isUploading}
+        failedOverlay={failedOverlay}
         thumbnailUrl={attachment.thumbnailUrl}
         fileSize={attachment.size}
         height={attachment.height ?? undefined}
@@ -1444,11 +1572,16 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
             isInGrid={isInGrid}
             fullSize={fullSize}
             {...(isInMultiImageGroup && { isInMultiImageGroup: true })}
+            isUploading={isUploading}
             onImageBlobChange={setImageBlob}
           />
 
-          {/* Slack-style hover action tray */}
-          {!compact && (
+          {isUploading && <UploadingOverlay label={`Uploading ${attachment.originalFilename}`} />}
+          {failedOverlay}
+
+          {/* Slack-style hover action tray. Hidden mid-upload: download and copy would hand
+              back an empty url, and the overlay covers the tray anyway. */}
+          {!compact && !isUploading && (
             <ActionTray
               attachmentId={attachment.id}
               fileName={attachment.originalFilename}

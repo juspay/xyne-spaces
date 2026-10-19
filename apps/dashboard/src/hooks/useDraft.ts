@@ -18,6 +18,9 @@ import {
 } from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
+import { useAttachmentUpload } from '../store/useAttachmentUploadStore';
+import { getBaseRoute } from './useRouteContext';
+import { AttachmentUploadStatus } from '@xyne/shared';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
 const getFileExtension = (name: string): string => {
@@ -27,6 +30,38 @@ const getFileExtension = (name: string): string => {
 
 // Format: Record<attachmentId, File> - local cache of File objects for newly uploaded files
 const filesMapRef: Record<string, File> = {};
+
+/**
+ * Is the original File for this attachment still held in memory?
+ *
+ * Callers that retry without the user asking must check this first: `retryAttachment` falls
+ * back to a file picker when the bytes are gone, and a picker opening by itself — on a
+ * reconnect, say — would be a dialog nobody asked for.
+ */
+export function hasFileInMemory(attachmentId: string): boolean {
+  return filesMapRef[attachmentId] instanceof File;
+}
+
+/**
+ * Opens a file picker and resolves with what was chosen (empty if cancelled).
+ *
+ * Needed for retrying an upload after a reload: the original File only ever existed in
+ * memory, so there is nothing to resend and the user has to point at it again.
+ */
+function promptForFiles(multiple: boolean): Promise<File[]> {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = multiple;
+    // Chrome fires neither change nor cancel in some dismissal paths; resolving empty on
+    // cancel keeps the caller from hanging on a promise that never settles.
+    input.addEventListener('cancel', () => resolve([]), { once: true });
+    input.addEventListener('change', () => resolve(input.files ? Array.from(input.files) : []), {
+      once: true,
+    });
+    input.click();
+  });
+}
 
 // Helper function to get image dimensions by loading the image
 async function getImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
@@ -110,14 +145,26 @@ export function useDraftAttachments() {
   const draftMessages = useSelector(stateMachineActor, state => state.context.draftMessages);
 
   const addDroppedFiles = useCallback(
-    async (files: File | File[], channelId: string, conversationId?: string) => {
+    async (
+      files: File | File[],
+      channelId: string,
+      conversationId?: string,
+      /**
+       * Retry of a batch that already has rows. Reusing the ids is what lets a retried file
+       * land back in the message it was sent with: the row is already entityType=CHAT
+       * pointing at that message, and the upload controller upserts by id without touching
+       * entityType, so filling in the url is all that is left to do.
+       */
+      retryAttachmentIds?: string[],
+    ) => {
       // Normalize to array
       const filesArray = Array.isArray(files) ? files : [files];
       const draftMessageId = uuidv4();
       const timestamp = Date.now();
+      const isRetry = !!retryAttachmentIds?.length;
 
       // Generate attachment IDs for all files
-      const attachmentIds = filesArray.map(() => uuidv4());
+      const attachmentIds = retryAttachmentIds ?? filesArray.map(() => uuidv4());
 
       // Process all files in parallel: generate thumbnails and get dimensions
       const fileProcessingPromises = filesArray.map(async (file, index) => {
@@ -252,17 +299,30 @@ export function useDraftAttachments() {
       // Get draft content to pass to mutator
       const currentContent = getDraft(channelId, conversationId ?? null) || '';
 
-      // Create draft and attachment entries via mutator (batch operation)
-      zero.mutate(
-        mutators.draft.createAttachments({
-          draftMessageId,
-          attachments: attachmentsData,
-          channelId,
-          conversationId,
-          content: currentContent,
-          timestamp,
-        }),
-      );
+      if (isRetry) {
+        // The rows already exist — and may already be on a sent message. Only their status
+        // moves back to PENDING, so the tile returns to a spinner instead of staying failed.
+        attachmentIds.forEach(id => {
+          zero.mutate(
+            mutators.messageAttachment.setUploadStatus({
+              attachmentId: id,
+              uploadStatus: AttachmentUploadStatus.PENDING,
+            }),
+          );
+        });
+      } else {
+        // Create draft and attachment entries via mutator (batch operation)
+        zero.mutate(
+          mutators.draft.createAttachments({
+            draftMessageId,
+            attachments: attachmentsData,
+            channelId,
+            conversationId,
+            content: currentContent,
+            timestamp,
+          }),
+        );
+      }
 
       // Store files in local map
       processedFiles.forEach(({ attachmentId, file }) => {
@@ -270,9 +330,23 @@ export function useDraftAttachments() {
       });
 
       // Upload all files to API in a single batch request
+      const batchId = uuidv4();
       try {
         const uploadStartTime = Date.now();
         const totalSizeBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
+
+        // Byte progress lives only here — the DB tracks PENDING/FAILED, never a percentage.
+        // Registered before the request so the pill appears the moment the upload starts,
+        // and carries the channel so it can route back once the user navigates away.
+        useAttachmentUpload.getState().startBatch({
+          batchId,
+          attachmentIds,
+          fileNames: filesArray.map(f => f.name),
+          channelId,
+          conversationId: conversationId ?? null,
+          baseRoute: getBaseRoute(window.location.pathname),
+          totalBytes: totalSizeBytes,
+        });
 
         logger.info(Event.ATTACHMENT_UPLOAD_STARTED, {
           fileCount: filesArray.length,
@@ -324,7 +398,11 @@ export function useDraftAttachments() {
           }
         });
 
-        await apiInstance.post('/drafts/attachments/upload', formData);
+        await apiInstance.post('/drafts/attachments/upload', formData, {
+          onUploadProgress: event => {
+            useAttachmentUpload.getState().setProgress(batchId, event.loaded, event.total);
+          },
+        });
 
         logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
           fileCount: filesArray.length,
@@ -332,6 +410,10 @@ export function useDraftAttachments() {
           channelId,
           draftMessageId,
         });
+
+        // Only on success. A failed batch stays in the store so the pill can keep showing
+        // it in red until the user retries or dismisses it.
+        useAttachmentUpload.getState().endBatch(batchId);
 
         // Return results in same order as input
         return processedFiles.map(({ attachmentId, file }) => ({
@@ -351,7 +433,26 @@ export function useDraftAttachments() {
           conversationId,
           draftMessageId,
         });
-        removeDroppedFiles(attachmentIds);
+        // Mark every row in the batch FAILED. The server does this too when it sees the
+        // transfer break, but it cannot see a request that never arrived, and a row left
+        // PENDING is a tile that spins forever. Writing it from here is what turns a dead
+        // upload into something the user can see and retry.
+        attachmentIds.forEach(id => {
+          zero.mutate(
+            mutators.messageAttachment.setUploadStatus({
+              attachmentId: id,
+              uploadStatus: AttachmentUploadStatus.FAILED,
+            }),
+          );
+        });
+        useAttachmentUpload.getState().failBatch(batchId);
+
+        // Rows are deliberately NOT deleted here. Since send does not wait for the upload,
+        // these ids may already have ridden onto a posted message, and a batch fails as a
+        // whole even when only one file died — deleting would strip attachments, including
+        // healthy ones, off live messages. Worse, deleting a row the composer still shows
+        // leaves a stale chip that keeps send enabled and ships an empty message. The
+        // FAILED row above renders as a failed tile instead: honest, and retryable.
         throw error;
       }
     },
@@ -381,6 +482,73 @@ export function useDraftAttachments() {
       });
     },
     [zero],
+  );
+
+  /**
+   * Re-runs a failed upload against the rows it already created.
+   *
+   * The File objects live in a module-level map, so a retry within the same session needs
+   * nothing from the user. After a reload that map is empty — the bytes were never
+   * persisted anywhere — so the only honest option is to ask for the file again. The picker
+   * is filtered to the original names where the browser allows it, but whatever is chosen
+   * is uploaded against the original attachment ids, which is what puts it back into the
+   * message it was sent with.
+   */
+  const retryUpload = useCallback(
+    async (batchId: string) => {
+      const batch = useAttachmentUpload.getState().batches[batchId];
+      if (!batch) return;
+
+      const held = batch.attachmentIds.map(id => filesMapRef[id]);
+      let files = held.filter((f): f is File => f instanceof File);
+
+      if (files.length !== batch.attachmentIds.length) {
+        files = await promptForFiles(batch.fileNames.length > 1);
+        // Cancelled picker, or the wrong number of files back: leave the batch failed
+        // rather than uploading a mismatched set against these ids.
+        if (files.length !== batch.attachmentIds.length) return;
+      }
+
+      useAttachmentUpload.getState().restartBatch(batchId);
+      try {
+        await addDroppedFiles(
+          files,
+          batch.channelId,
+          batch.conversationId ?? undefined,
+          batch.attachmentIds,
+        );
+      } catch {
+        // addDroppedFiles has already marked the rows FAILED and the batch failed.
+      }
+    },
+    [addDroppedFiles],
+  );
+
+  const dismissUpload = useCallback((batchId: string) => {
+    useAttachmentUpload.getState().endBatch(batchId);
+  }, []);
+
+  /**
+   * Retry one attachment from its tile, where there may be no upload batch to speak of —
+   * after a reload the store is empty but the FAILED row is still sitting in the message.
+   * Takes the channel from the row rather than the component, since a tile can render in
+   * surfaces that never pass one.
+   */
+  const retryAttachment = useCallback(
+    async (attachmentId: string, channelId: string, conversationId: string | null) => {
+      let file = filesMapRef[attachmentId];
+      if (!file) {
+        const picked = await promptForFiles(false);
+        if (picked.length !== 1 || !picked[0]) return;
+        file = picked[0];
+      }
+      try {
+        await addDroppedFiles([file], channelId, conversationId ?? undefined, [attachmentId]);
+      } catch {
+        // addDroppedFiles has already marked the row FAILED again.
+      }
+    },
+    [addDroppedFiles],
   );
 
   const clearDroppedFiles = useCallback(
@@ -472,6 +640,9 @@ export function useDraftAttachments() {
       removeDroppedFiles,
       clearDroppedFiles,
       getDroppedFilesForEntity,
+      retryUpload,
+      dismissUpload,
+      retryAttachment,
     }),
     [
       addDroppedFiles,
@@ -479,6 +650,9 @@ export function useDraftAttachments() {
       removeDroppedFiles,
       clearDroppedFiles,
       getDroppedFilesForEntity,
+      retryUpload,
+      dismissUpload,
+      retryAttachment,
     ],
   );
 }

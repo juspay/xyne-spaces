@@ -252,6 +252,8 @@ import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
+import { AttachmentUploadToast } from '../components/Chat/AttachmentUploadToast';
+import { AttachmentUploadReconnect } from '../components/Chat/AttachmentUploadReconnect';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
 import MigrationsScreen, { MigrationsIndexRedirect } from './MigrationsScreen/MigrationsScreen';
@@ -979,6 +981,8 @@ const AppRoot = (): ReactElement => {
                           <RecordingCameraBubble />
                           <ScreenPickerHost />
                           <GlobalUploadProgress />
+                          <AttachmentUploadToast />
+                          <AttachmentUploadReconnect />
                           <NotificationHandler />
                           <EphemeralFlowHost />
                           <ElectronBadgeSync />

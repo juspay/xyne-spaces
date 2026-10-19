@@ -53,7 +53,11 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useRelatedContextAvailable } from '../../../contexts/RelatedContextAvailabilityContext';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
-import { getSlashCommandArtifactDefinition } from '@xyne/shared';
+import {
+  getSlashCommandArtifactDefinition,
+  AttachmentUploadStatus,
+  isEffectivelyEmptyHtml,
+} from '@xyne/shared';
 import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
@@ -584,6 +588,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // composer; used to carry attachments through the pending-message send.
     const channelDraftForSend = useDraftFromDB(channelId, conversationId ?? null);
 
+    // Attachments the send mutators will drop. A dead upload still shows a chip, and that
+    // chip used to be enough to enable send — so a composer holding only a failed upload
+    // published an empty message and left the attachment behind in the draft.
+    const unsendableAttachmentIds = useMemo(
+      () =>
+        new Set(
+          (channelDraftForSend?.attachments ?? [])
+            .filter(a => a.uploadStatus === AttachmentUploadStatus.FAILED)
+            .map(a => a.id),
+        ),
+      [channelDraftForSend?.attachments],
+    );
+
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
       if (isForwardedContent || initialContent) return initialContent;
@@ -786,6 +803,21 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         // Thrown, like the checks above, so the composer keeps what was written.
         if (processedHtml === null) throw new Error('Discussion title required');
         const hasFiles = files && files.length > 0;
+
+        // Backstop for callers that reach the send handler with the button bypassed. The
+        // mutator drops FAILED rows, so without this the message goes out with neither
+        // text nor attachment — see unsendableAttachmentIds above.
+        const draftAttachments = channelDraftForSend?.attachments ?? [];
+        const hasSendableAttachment =
+          !messageId && draftAttachments.some(a => !unsendableAttachmentIds.has(a.id));
+        if (!hasSendableAttachment && isEffectivelyEmptyHtml(processedHtml)) {
+          toast.warning('Nothing to send', {
+            description: draftAttachments.length
+              ? 'That attachment failed to upload — retry or remove it, or add a message.'
+              : 'Add a message or an attachment first.',
+          });
+          throw new Error('Nothing to send');
+        }
 
         // Past every check that can stop the send. Clearing the editor after a send
         // emits no content change, so the suggestions are cleared here.
@@ -1415,6 +1447,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
               sendDisabled={isOffline}
+              {...(isOffline && { sendDisabledReason: 'Trying to connect…' })}
+              unsendableAttachmentIds={unsendableAttachmentIds}
               onScheduleSend={handleScheduleSend}
               showSchedulePresets={!!isDM && !conversationId}
               {...(globalShortcuts.length > 0 && {

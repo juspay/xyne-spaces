@@ -59,3 +59,23 @@ export function validateMessageContentLength(
   }
   return undefined;
 }
+
+/**
+ * Markup that is a message even with no words in it. Stripping tags would reduce these to
+ * an empty string, so they are checked before the text measurement.
+ */
+const MEANINGFUL_TAGS = /<(img|video|audio|iframe|embed|object|table|hr|input|canvas)\b/i;
+
+/**
+ * Does this body amount to nothing a reader would see?
+ *
+ * An "empty" editor still emits markup — `<p></p>`, `<p><br></p>`,
+ * `<p class="m-0 leading-6"></p> `— so a plain string check always says non-empty. Built on
+ * getMessageContentLength so emptiness and the length limit agree on what counts as text,
+ * and isomorphic for the same reason: it has to run in the Zero mutators on both sides.
+ */
+export function isEffectivelyEmptyHtml(html: string | null | undefined): boolean {
+  if (!html) return true;
+  if (MEANINGFUL_TAGS.test(html)) return false;
+  return getMessageContentLength(html) === 0;
+}

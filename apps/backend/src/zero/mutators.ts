@@ -4836,6 +4836,30 @@ export function createMutators(
           }
         },
       ),
+      /**
+       * Server half of the client's upload-fate report. See the shared mutator for why the
+       * client needs to write this at all: a request that never reaches the server leaves a
+       * row PENDING forever, and nothing else can observe that.
+       */
+      setUploadStatus: defineMutator(
+        z.object({
+          attachmentId: z.string(),
+          uploadStatus: z.enum([AttachmentUploadStatus.PENDING, AttachmentUploadStatus.FAILED]),
+        }),
+        async ({ tx, args: { attachmentId, uploadStatus } }) => {
+          const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
+          if (!attachment) return;
+          if (attachment.createdBy !== authData.sub) {
+            throw new ApplicationError('Only the uploader can change an attachment upload status', {
+              details: { attachmentId },
+            });
+          }
+          // A row that already has its url is done; a late client call must not undo that.
+          if (attachment.url) return;
+
+          await tx.mutate.message_attachments.update({ id: attachmentId, uploadStatus });
+        },
+      ),
     },
     calls: {
       initiate: defineMutator(

@@ -7,6 +7,7 @@ import { recapWorker } from './recapWorker';
 import { deskReportWorker } from './deskReportWorker';
 import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
 import { facebookCatchUpWorker } from './facebookCatchUpWorker';
+import { attachmentUploadSweepWorker } from './attachmentUploadSweepWorker';
 
 /**
  * Worker Scheduler
@@ -22,6 +23,7 @@ export class WorkerScheduler {
     private deskReportCleanupQueue: Bull.Queue | null = null;
     private instagramTokenRefreshQueue: Bull.Queue | null = null;
     private facebookCatchUpQueue: Bull.Queue | null = null;
+    private attachmentUploadSweepQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -390,6 +392,33 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Facebook catch-up is disabled (ENABLE_SOCIAL_MEDIA_SYNC_WORKER=false)');
         }
 
+        // Stale attachment-upload sweep — every 10 minutes. Unconditional: without it a
+        // browser that dies mid-upload leaves a tile spinning forever in a sent message,
+        // and nothing else in the system can notice that happened.
+        this.attachmentUploadSweepQueue = new Bull('attachment-upload-sweep', { redis: workerRedisConfig });
+        this.attachmentUploadSweepQueue.process(async (job) => {
+            try {
+                const { failed } = await attachmentUploadSweepWorker.run();
+                if (failed > 0) {
+                    logger.info(`[WORKER_SCHEDULER] Attachment upload sweep job ${job.id} failed out ${failed} row(s)`);
+                }
+            } catch (error) {
+                logger.error(`[WORKER_SCHEDULER] Attachment upload sweep job ${job.id} failed:`, error);
+                throw error;
+            }
+        });
+        await this.attachmentUploadSweepQueue.add(
+            {},
+            {
+                repeat: { cron: '*/10 * * * *' },
+                jobId: 'attachment-upload-sweep-repeatable',
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+                removeOnComplete: true,
+            },
+        );
+        logger.info('[WORKER_SCHEDULER] Attachment upload sweep scheduled via Bull (every 10 minutes)');
+
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
@@ -455,6 +484,11 @@ export class WorkerScheduler {
         if (this.instagramTokenRefreshQueue) {
             await this.instagramTokenRefreshQueue.close();
             this.instagramTokenRefreshQueue = null;
+        }
+
+        if (this.attachmentUploadSweepQueue) {
+            await this.attachmentUploadSweepQueue.close();
+            this.attachmentUploadSweepQueue = null;
         }
 
         if (this.facebookCatchUpQueue) {

@@ -13,6 +13,7 @@ import {
   ReactionsData,
   parseTicketMd,
 } from '@xyne/shared';
+import { isAttachmentUploaded } from '@xyne/shared/zero/mutators';
 import {
   formatFullTimestamp,
   formatTimeAmPm,
@@ -399,6 +400,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                   fileName={attachment.originalFilename}
                   mimeType={attachment.mimetype}
                   fileId={attachment.id}
+                  isUploading={!isAttachmentUploaded(attachment)}
                   uploadedByUserId={attachment.uploadedByUserId}
                   onClick={() => handleFileClick(attachment)}
                   onDownload={() => {

@@ -3327,6 +3327,34 @@ export const mutators = defineMutators({
         }
       },
     ),
+    /**
+     * Records the fate of an upload from the client.
+     *
+     * The server marks a row FAILED when it sees the transfer die, but it cannot see a
+     * request that never arrived — a dropped connection or a closed tab leaves the row
+     * PENDING forever, and since send no longer waits for uploads that is a tile spinning
+     * with nothing behind it. The uploader's own browser is the only witness, hence this.
+     *
+     * Narrow on purpose: only PENDING and FAILED, only your own row, and only while the row
+     * has no url. A completed upload has already written its url and must never be walked
+     * back by a late-arriving client call.
+     */
+    setUploadStatus: defineMutator(
+      z.object({
+        attachmentId: z.string(),
+        uploadStatus: z.enum([AttachmentUploadStatus.PENDING, AttachmentUploadStatus.FAILED]),
+      }),
+      async ({ tx, ctx, args: { attachmentId, uploadStatus } }) => {
+        const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
+        if (!attachment) return;
+        if (attachment.createdBy !== ctx.userID) {
+          throw new Error('Only the uploader can change an attachment upload status');
+        }
+        if (attachment.url) return;
+
+        await tx.mutate.message_attachments.update({ id: attachmentId, uploadStatus });
+      },
+    ),
   },
   draft: {
     createAttachments: defineMutator(
