@@ -26,6 +26,9 @@ export function TrayContent({
   horizontalInset = TRAY_HORIZONTAL_INSET,
   bottomOffset = TRAY_BOTTOM_OFFSET,
   topInset = TRAY_TOP_INSET,
+  // The library fades the card as it is dragged down. Here it stays fully
+  // visible until it has gone; a caller can still opt back in.
+  fadeOnDrag = false,
   children,
   ...rest
 }: TrayContentProps): ReactElement {
@@ -38,6 +41,7 @@ export function TrayContent({
       horizontalInset={horizontalInset}
       bottomOffset={bottomOffset}
       topInset={topInset}
+      fadeOnDrag={fadeOnDrag}
       cornerRadius={TRAY_CORNER_RADIUS}
       {...rest}
     >

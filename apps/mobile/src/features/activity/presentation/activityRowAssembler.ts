@@ -123,7 +123,7 @@ const getTimeLabel = (activity: ActivityWithRelated): string => {
   return formatDistanceToNowStrict(date, { addSuffix: false });
 };
 
-const getNavigationTarget = (activity: ActivityWithRelated): ActivityNavigationTarget => {
+export const getNavigationTarget = (activity: ActivityWithRelated): ActivityNavigationTarget => {
   const message = activity.message;
   const conversation = activity.message?.conversation;
   const shouldOpenThread = shouldOpenActivityThread({

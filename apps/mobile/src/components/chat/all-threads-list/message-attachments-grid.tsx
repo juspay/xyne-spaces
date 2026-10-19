@@ -102,7 +102,7 @@ const MediaCell = memo(function MediaCell({ attachment, overflowCount, onPress }
 // ─── Full grid ────────────────────────────────────────────────────────────────
 
 type Props = {
-  attachments: MessageAttachment[];
+  attachments: readonly MessageAttachment[];
   conversationId: string;
 };
 
