@@ -217,7 +217,11 @@ export function BriefLine({ children, context }: BriefLineProps): ReactElement |
   const text = linkifyMentions(cited, ticketPrefixes);
   if (!text.trim()) return null;
   return (
-    <Markdown remarkPlugins={REMARK_PLUGINS} urlTransform={safeMarkdownUrlTransform} components={components}>
+    <Markdown
+      remarkPlugins={REMARK_PLUGINS}
+      urlTransform={safeMarkdownUrlTransform}
+      components={components}
+    >
       {text}
     </Markdown>
   );
