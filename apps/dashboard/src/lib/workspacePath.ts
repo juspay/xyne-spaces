@@ -6,6 +6,7 @@ import type { To } from 'react-router-dom';
  */
 const WORKSPACE_EXEMPT_PREFIXES = [
   '/auth',
+  '/redeem',
   '/invite',
   '/launch',
   '/newWindow',

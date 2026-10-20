@@ -55,7 +55,7 @@ export interface UseAuthReturn {
   startEnterpriseLogin: () => void;
   selectWorkspace: (workspaceId: string) => void;
   joinCommunityWorkspace: (workspaceId: string) => void;
-  createOrg: (orgName: string, workspaceName: string) => void;
+  createOrg: (orgName: string, workspaceName: string, couponCode?: string) => void;
 }
 
 export const useAuth = (): UseAuthReturn => {
@@ -158,8 +158,13 @@ export const useAuth = (): UseAuthReturn => {
   );
 
   const createOrg = useCallback(
-    (orgName: string, workspaceName: string) => {
-      send({ type: 'SUBMIT_CREATE_ORG', orgName, workspaceName });
+    (orgName: string, workspaceName: string, couponCode?: string) => {
+      send({
+        type: 'SUBMIT_CREATE_ORG',
+        orgName,
+        workspaceName,
+        ...(couponCode ? { couponCode } : {}),
+      });
     },
     [send],
   );

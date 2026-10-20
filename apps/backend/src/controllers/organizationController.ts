@@ -11,6 +11,8 @@ import { buildInvitationLink } from '@/controllers/invitationController';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createId } from '@paralleldrive/cuid2';
 import { createOrganizationWithWorkspace, createOwnerInvitation } from '@/bypassAcl/orgServices';
+import { OrgCouponError, orgCouponService } from '@/services/orgCouponService';
+import { aiUsageService } from '@/services/aiUsageService';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -288,7 +290,84 @@ export class OrganizationController {
     }
   };
 
-  // GET /api/organizations/{orgId} - Get organization details
+  // GET /api/organizations/{orgId}/ai-usage - Get AI credit usage for the org and current member
+  getOrganizationAiUsage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { orgId } = req.params;
+      if (!(await this.isOrgMember(req, orgId))) {
+        res.status(403).json({ error: 'Access denied - not an organization member' });
+        return;
+      }
+
+      const includeOrg = await this.isOrgMember(req, orgId, ['OWNER', 'ADMIN']);
+      res
+        .status(200)
+        .json(await aiUsageService.getOrgUsage(orgId, req.user!.memberId, includeOrg));
+    } catch (error) {
+      logger.error('Error fetching organization AI usage:', error);
+      res.status(500).json({ error: 'Failed to fetch AI usage' });
+    }
+  };
+
+  // GET /api/organizations/{orgId}/coupon - Get the coupon applied to the org
+  getOrganizationCoupon = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { orgId } = req.params;
+      if (!(await this.isOrgMember(req, orgId))) {
+        res.status(403).json({ error: 'Access denied - not an organization member' });
+        return;
+      }
+
+      res.status(200).json({ applied: await orgCouponService.getApplied(orgId) });
+    } catch (error) {
+      logger.error('Error fetching organization coupon:', error);
+      res.status(500).json({ error: 'Failed to fetch coupon' });
+    }
+  };
+
+  applyOrganizationCoupon = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { orgId } = req.params;
+      const { code } = req.body as { code?: string };
+
+      if (!(await this.isOrgMember(req, orgId, ['OWNER', 'ADMIN']))) {
+        res.status(403).json({ error: 'Access denied - insufficient permissions' });
+        return;
+      }
+
+      const coupon = orgCouponService.validate(typeof code === 'string' ? code : '');
+      const { applied } = await orgCouponService.apply(orgId, coupon, req.user!.id);
+
+      // Enqueue on every successful apply, not only the first: the coupon is already saved, so a
+      // retry after a failed enqueue must still push the budget. The status row makes it idempotent.
+      await aiProvisioningService.enqueueOrgBudgetSync(orgId);
+
+      res.status(200).json({ applied });
+    } catch (error) {
+      if (error instanceof OrgCouponError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error applying organization coupon:', error);
+      res.status(500).json({ error: 'Failed to apply coupon' });
+    }
+  };
+
+  private async isOrgMember(req: Request, orgId: string, roles?: string[]): Promise<boolean> {
+    const memberId = req.user?.memberId;
+    if (!memberId) return false;
+    const member = await DatabaseClient.getInstance().orgMember.findUnique({
+      where: { memberId },
+      select: { orgId: true, role: true, leftAt: true },
+    });
+    return (
+      !!member &&
+      member.orgId === orgId &&
+      !member.leftAt &&
+      (!roles || roles.includes(member.role))
+    );
+  }
+
   getOrganizationDetails = async (req: Request, res: Response): Promise<void> => {
     try {
       const { orgId } = req.params;
