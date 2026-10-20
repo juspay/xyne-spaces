@@ -29,6 +29,103 @@ const log = createLogger("chat-projects");
 
 export const chatProjectsRouter: Router = Router();
 
+/**
+ * Filing a chat into a project, and the `?projectId=` list scope, are project
+ * operations that the conversation routes in agent-chat.ts drive. They live
+ * here with the rest of the project domain — and, practically, because
+ * agent-chat.ts cannot be imported in a test without its whole dependency
+ * graph, while this module can.
+ */
+
+export type ProjectMoveResult =
+  | { status: "ok"; projectId: string | null }
+  | { status: "project-not-found" };
+
+/**
+ * Move one chat into a project, or unfile it when `projectId` is null.
+ *
+ * `ownerUserId` must be the id the conversation's own chat rows use, so the
+ * membership is found again on read; `aliases` lets the repository sweep a row
+ * filed earlier under the caller's other verified id.
+ */
+export async function applyProjectMove(args: {
+  conversationId: string;
+  ownerUserId: string;
+  ownerOrgId: string;
+  aliases: string[];
+  projectId: string | null;
+}): Promise<ProjectMoveResult> {
+  if (args.projectId === null) {
+    await chatProjectRepository.removeConversation(args.conversationId, args.aliases);
+    return { status: "ok", projectId: null };
+  }
+
+  const project = await chatProjectRepository.findOwned(
+    args.projectId.trim(),
+    args.aliases,
+    args.ownerOrgId,
+  );
+  // Owner-only, and same org as the chat. Null covers "not yours" and "no such
+  // project" alike, so the caller answers 404 either way.
+  if (!project) return { status: "project-not-found" };
+
+  await chatProjectRepository.moveConversation(
+    {
+      conversationId: args.conversationId,
+      userId: args.ownerUserId,
+      projectId: project.id,
+      // Taken from the project row, never the request: nothing in the schema
+      // enforces item.orgId == project.orgId.
+      orgId: project.orgId,
+    },
+    args.aliases,
+  );
+  return { status: "ok", projectId: project.id };
+}
+
+/** conversationId sets for `?projectId=`. `only` narrows to a project (and
+ *  stays empty for an empty one); `exclude` powers `?projectId=none`. */
+export interface ProjectListScope {
+  only?: string[];
+  exclude?: string[];
+}
+
+export type ProjectScopeResult =
+  | { status: "ok"; scope: ProjectListScope | undefined }
+  | { status: "project-not-found" };
+
+/**
+ * Turn `?projectId=` into a conversationId set for the list aggregate.
+ *
+ * Returns `scope: undefined` when the param is absent — no filtering. An empty
+ * `only` is NOT the same thing and must survive: it means a project with no
+ * chats, which lists nothing.
+ */
+export async function resolveProjectScope(args: {
+  projectParam: string | undefined;
+  userIds: string[];
+  orgId: string | undefined;
+}): Promise<ProjectScopeResult> {
+  if (!args.projectParam) return { status: "ok", scope: undefined };
+
+  if (args.projectParam === "none") {
+    return {
+      status: "ok",
+      scope: { exclude: await chatProjectRepository.filedConversationIds(args.userIds) },
+    };
+  }
+
+  const project = args.orgId
+    ? await chatProjectRepository.findOwned(args.projectParam, args.userIds, args.orgId)
+    : null;
+  if (!project) return { status: "project-not-found" };
+
+  return {
+    status: "ok",
+    scope: { only: await chatProjectRepository.conversationIdsInProject(project.id, args.userIds) },
+  };
+}
+
 const MAX_PROJECT_NAME_CHARS = 120;
 const MAX_PROJECT_ICON_CHARS = 64;
 const MAX_PROJECT_INSTRUCTIONS_CHARS = 10_000;

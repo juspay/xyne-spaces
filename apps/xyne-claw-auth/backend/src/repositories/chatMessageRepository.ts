@@ -251,12 +251,29 @@ export const chatMessageRepository = {
    *  activity and row counts — the whole all-agents history in one aggregate
    *  query instead of loading every message. Rows may be keyed by either of
    *  the caller's verified ids (see getRequesterAliases). */
+  /**
+   * `scope` narrows the aggregate itself rather than its result, so cursor
+   * pagination downstream still sees a complete, correctly ordered set.
+   *
+   * Both arrays are honoured when EMPTY and must be: an empty `only` means a
+   * project with no chats and has to return nothing, while an empty `exclude`
+   * means nothing is filed and has to return everything. Guarding on
+   * truthiness instead of `undefined` turns the first case into "no filter"
+   * and lists every chat the user has.
+   */
   conversationAgentGroupsForUser: async (
     userIds: string | string[],
+    scope?: { only?: string[]; exclude?: string[] },
   ): Promise<Array<{ conversationId: string; agentSlug: string; firstAt: Date; lastAt: Date; count: number }>> => {
+    const conversationId: Record<string, string[]> = {};
+    if (scope?.only !== undefined) conversationId["in"] = scope.only;
+    if (scope?.exclude !== undefined) conversationId["notIn"] = scope.exclude;
     const rows = await prisma.chatMessage.groupBy({
       by: ["conversationId", "agentSlug"],
-      where: userIdFilter(userIds),
+      where: {
+        ...userIdFilter(userIds),
+        ...(Object.keys(conversationId).length > 0 ? { conversationId } : {}),
+      },
       _min: { createdAt: true },
       _max: { createdAt: true },
       _count: { _all: true },
@@ -324,6 +341,7 @@ export const chatMessageRepository = {
       await prisma.chatConversationMeta.deleteMany({
         where: { conversationId, agentSlug, ...userIdFilter(userIds) },
       });
+      await dropProjectMembershipIfChatGone(userIds, conversationId);
     }
     return result.count;
   },
@@ -336,7 +354,32 @@ export const chatMessageRepository = {
     const result = await prisma.chatMessage.deleteMany({ where: { ...userIdFilter(userIds), conversationId } });
     if (result.count > 0) {
       await prisma.chatConversationMeta.deleteMany({ where: { conversationId, ...userIdFilter(userIds) } });
+      await dropProjectMembershipIfChatGone(userIds, conversationId);
     }
     return result.count;
   },
 };
+
+/**
+ * Drop this user's ChatProjectItem once their last message in the conversation
+ * is gone. `chat_project_items` has no foreign key to `chat_messages` — it
+ * cannot, since a conversation is just an id shared by rows — so nothing else
+ * reclaims the membership, and a stale row would keep a deleted chat counted in
+ * its project and inside `?projectId=` results.
+ *
+ * Conditional on nothing remaining because the per-agent delete above removes
+ * only one agent's turns: a chat the user switched agents in still exists under
+ * the others and must keep its project.
+ */
+async function dropProjectMembershipIfChatGone(
+  userIds: string | string[],
+  conversationId: string,
+): Promise<void> {
+  const remaining = await prisma.chatMessage.count({
+    where: { ...userIdFilter(userIds), conversationId },
+  });
+  if (remaining > 0) return;
+  await prisma.chatProjectItem.deleteMany({
+    where: { conversationId, ...userIdFilter(userIds) },
+  });
+}

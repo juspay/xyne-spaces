@@ -443,3 +443,165 @@ describe("chat project routes", () => {
     });
   });
 });
+
+const ALIASES = [CANONICAL, SPACES_ALIAS];
+const load = () => import("./chat-projects.js");
+
+describe("applyProjectMove", () => {
+  beforeEach(() => {
+    state.projects = [
+      { id: "proj-mine", ownerUserId: CANONICAL, orgId: ORG, name: "Mine", sortOrder: 0 },
+      { id: "proj-theirs", ownerUserId: "user-other", orgId: ORG, name: "Theirs", sortOrder: 0 },
+      { id: "proj-otherorg", ownerUserId: CANONICAL, orgId: "org-2", name: "Elsewhere", sortOrder: 0 },
+    ];
+    state.items = [];
+    vi.clearAllMocks();
+  });
+
+  it("files a chat into a project the caller owns", async () => {
+    const { applyProjectMove } = await load();
+    const result = await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-mine",
+    });
+
+    expect(result).toEqual({ status: "ok", projectId: "proj-mine" });
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0]).toMatchObject({
+      conversationId: "conv-1", userId: CANONICAL, projectId: "proj-mine",
+    });
+  });
+
+  it("stamps the item's orgId from the project row", async () => {
+    const { applyProjectMove } = await load();
+    await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-mine",
+    });
+    const project = state.projects.find((p) => p["id"] === "proj-mine");
+    expect(state.items[0]?.["orgId"]).toBe(project?.["orgId"]);
+  });
+
+  it("writes membership under the conversation's own id, not the first alias", async () => {
+    const { applyProjectMove } = await load();
+    await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: SPACES_ALIAS, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-mine",
+    });
+    expect(state.items[0]?.["userId"]).toBe(SPACES_ALIAS);
+  });
+
+  it("sweeps a row filed earlier under the other alias, leaving one", async () => {
+    state.items = [{ conversationId: "conv-1", userId: SPACES_ALIAS, projectId: "proj-mine", orgId: ORG }];
+    const { applyProjectMove } = await load();
+    await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-mine",
+    });
+    expect(state.items.filter((i) => i["conversationId"] === "conv-1")).toHaveLength(1);
+  });
+
+  it("unfiles on null and writes nothing", async () => {
+    state.items = [{ conversationId: "conv-1", userId: CANONICAL, projectId: "proj-mine", orgId: ORG }];
+    const { applyProjectMove } = await load();
+    const result = await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: null,
+    });
+
+    expect(result).toEqual({ status: "ok", projectId: null });
+    expect(state.items).toHaveLength(0);
+  });
+
+  it("refuses a project owned by someone else and files nothing", async () => {
+    const { applyProjectMove } = await load();
+    const result = await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-theirs",
+    });
+
+    expect(result).toEqual({ status: "project-not-found" });
+    expect(state.items).toHaveLength(0);
+  });
+
+  it("refuses a project in another org", async () => {
+    const { applyProjectMove } = await load();
+    const result = await applyProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-otherorg",
+    });
+
+    expect(result).toEqual({ status: "project-not-found" });
+    expect(state.items).toHaveLength(0);
+  });
+});
+
+describe("resolveProjectScope", () => {
+  beforeEach(() => {
+    state.projects = [
+      { id: "proj-mine", ownerUserId: CANONICAL, orgId: ORG, name: "Mine", sortOrder: 0 },
+      { id: "proj-empty", ownerUserId: CANONICAL, orgId: ORG, name: "Empty", sortOrder: 1 },
+      { id: "proj-theirs", ownerUserId: "user-other", orgId: ORG, name: "Theirs", sortOrder: 0 },
+    ];
+    state.items = [
+      { conversationId: "conv-a", userId: CANONICAL, projectId: "proj-mine", orgId: ORG },
+      { conversationId: "conv-b", userId: SPACES_ALIAS, projectId: "proj-mine", orgId: ORG },
+      { conversationId: "conv-theirs", userId: "user-other", projectId: "proj-theirs", orgId: ORG },
+    ];
+    vi.clearAllMocks();
+  });
+
+  it("does not filter when no project is requested", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: undefined, userIds: ALIASES, orgId: ORG });
+    expect(got).toEqual({ status: "ok", scope: undefined });
+  });
+
+  it("narrows to the project's chats, across both aliases", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "proj-mine", userIds: ALIASES, orgId: ORG });
+
+    expect(got.status).toBe("ok");
+    const only = got.status === "ok" ? got.scope?.only ?? [] : [];
+    expect([...only].sort()).toEqual(["conv-a", "conv-b"]);
+  });
+
+  it("returns an EMPTY only-set for an empty project, never undefined", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "proj-empty", userIds: ALIASES, orgId: ORG });
+
+    expect(got).toEqual({ status: "ok", scope: { only: [] } });
+    // The distinction that matters: an empty project lists nothing, whereas
+    // `undefined` would list the caller's entire history.
+    const scope = got.status === "ok" ? got.scope : undefined;
+    expect(scope?.only).toBeDefined();
+  });
+
+  it("excludes every filed chat for ?projectId=none", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "none", userIds: ALIASES, orgId: ORG });
+
+    expect(got.status).toBe("ok");
+    const exclude = got.status === "ok" ? got.scope?.exclude ?? [] : [];
+    expect([...exclude].sort()).toEqual(["conv-a", "conv-b"]);
+  });
+
+  it("excludes nothing for ?projectId=none when the user has filed nothing", async () => {
+    state.items = [];
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "none", userIds: ALIASES, orgId: ORG });
+    expect(got).toEqual({ status: "ok", scope: { exclude: [] } });
+  });
+
+  it("refuses another user's project id", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "proj-theirs", userIds: ALIASES, orgId: ORG });
+    expect(got).toEqual({ status: "project-not-found" });
+  });
+
+  it("refuses when no org could be resolved", async () => {
+    const { resolveProjectScope } = await load();
+    const got = await resolveProjectScope({ projectParam: "proj-mine", userIds: ALIASES, orgId: undefined });
+    expect(got).toEqual({ status: "project-not-found" });
+  });
+});

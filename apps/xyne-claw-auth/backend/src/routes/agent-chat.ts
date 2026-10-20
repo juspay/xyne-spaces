@@ -49,8 +49,8 @@ import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
-import { chatProjectsRouter } from "./chat-projects.js";
+import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
+import { chatProjectsRouter, applyProjectMove, resolveProjectScope } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -3989,9 +3989,13 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       return;
     }
 
-    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
-    if (title === undefined && pinned === undefined) {
-      res.status(400).json({ success: false, error: "title or pinned is required" });
+    const { title, pinned, projectId } = (req.body ?? {}) as {
+      title?: unknown;
+      pinned?: unknown;
+      projectId?: unknown;
+    };
+    if (title === undefined && pinned === undefined && projectId === undefined) {
+      res.status(400).json({ success: false, error: "title, pinned or projectId is required" });
       return;
     }
     if (title !== undefined && (typeof title !== "string" || !title.trim())) {
@@ -4000,6 +4004,11 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     }
     if (pinned !== undefined && typeof pinned !== "boolean") {
       res.status(400).json({ success: false, error: "pinned must be a boolean" });
+      return;
+    }
+    // null unfiles the chat; a string moves it. Absent leaves it where it is.
+    if (projectId !== undefined && projectId !== null && (typeof projectId !== "string" || !projectId.trim())) {
+      res.status(400).json({ success: false, error: "projectId must be a non-empty string or null" });
       return;
     }
 
@@ -4036,14 +4045,38 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       await chatConversationMetaRepository.setPinned({ ...target, pinned });
     }
 
+    // Membership is written under `owned.userId` — the id this conversation's
+    // own rows use — so the move is found again on read.
+    if (projectId === null || typeof projectId === "string") {
+      const moved = await applyProjectMove({
+        conversationId: req.params.convId,
+        ownerUserId: owned.userId,
+        ownerOrgId: owned.orgId,
+        aliases: userAliases,
+        projectId,
+      });
+      if (moved.status === "project-not-found") {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+    }
+
     const meta = await chatConversationMetaRepository.find({
       conversationId: req.params.convId,
       userId: owned.userId,
       agentSlug: target.agentSlug,
     });
+    const filedIn = await chatProjectRepository.projectIdsForConversations(
+      [req.params.convId],
+      userAliases,
+    );
     res.json({
       success: true,
-      data: { title: meta?.title ?? null, pinned: meta?.pinned ?? false },
+      data: {
+        title: meta?.title ?? null,
+        pinned: meta?.pinned ?? false,
+        projectId: filedIn.get(req.params.convId) ?? null,
+      },
     });
   } catch (err) {
     log.error("[agent-chat] patch conversation error:", err);
@@ -4132,8 +4165,42 @@ async function sendConversationList(
       : CONVERSATION_PAGE_SIZE;
     const query = opts.paged ? singleQueryParam(req, "q")?.toLowerCase() : undefined;
 
+    // orgId for project lookups: the header, else the listed user's own record.
+    // Resolved at most once per request.
+    let cachedOrgId: string | null | undefined;
+    const resolveOrgId = async (): Promise<string | undefined> => {
+      if (cachedOrgId === undefined) {
+        const header = getOrgId(req);
+        cachedOrgId = header
+          ?? (await prisma.user
+            .findFirst({ where: { id: { in: userIds } }, select: { orgId: true } })
+            .catch(() => null))?.orgId
+          ?? null;
+      }
+      return cachedOrgId ?? undefined;
+    };
+
+    // `?projectId=<id>` narrows to one project, `?projectId=none` to unfiled
+    // chats. Both become a conversationId set applied INSIDE the aggregate
+    // below, so cursor pagination still walks a complete, correctly ordered
+    // list — unlike `q`, which is matched in memory after the fact and so
+    // cannot page past the first screenful of matches.
+    const projectParam = opts.paged ? singleQueryParam(req, "projectId") : undefined;
+    const scoped = await resolveProjectScope({
+      projectParam,
+      userIds,
+      orgId: projectParam && projectParam !== "none" ? await resolveOrgId() : undefined,
+    });
+    if (scoped.status === "project-not-found") {
+      res.status(404).json({ success: false, error: "Project not found" });
+      return;
+    }
+    const scope = scoped.scope;
+
     // One aggregate for the whole history; titles and pins only for what is sent.
-    const all = conversationEntries(await chatMessageRepository.conversationAgentGroupsForUser(userIds));
+    const all = conversationEntries(
+      await chatMessageRepository.conversationAgentGroupsForUser(userIds, scope),
+    );
     const { agentSlug } = opts;
     const entries = agentSlug ? all.filter((entry) => entry.agentSlugs.includes(agentSlug)) : all;
     const resolve = async (list: ConversationEntry[]): Promise<ConversationListRow[]> => {
@@ -4149,7 +4216,13 @@ async function sendConversationList(
           log.error("[agent-chat] conversation title fallback failed:", err);
           return [];
         });
-      return buildConversationList({ entries: list, meta, firstUserMessages });
+      const projectIds = await chatProjectRepository
+        .projectIdsForConversations([...new Set(list.map((entry) => entry.conversationId))], userIds)
+        .catch((err) => {
+          log.error("[agent-chat] conversation project lookup failed:", err);
+          return new Map<string, string>();
+        });
+      return buildConversationList({ entries: list, meta, firstUserMessages, projectIds });
     };
 
     if (!opts.paged) {
@@ -4171,7 +4244,26 @@ async function sendConversationList(
       const selected = selectPage(entries, { isPinned: (entry) => pinned.has(entryMetaKey(entry)), limit, cursor });
       page = { items: await resolve(selected.items), nextCursor: selected.nextCursor };
     }
-    res.json({ success: true, data: page.items, nextCursor: page.nextCursor, agents: agentFacets(all) });
+    // Sidebar counts. Same source as `chatCount` on GET /chat/projects, so the
+    // two cannot disagree, and deliberately NOT narrowed by `scope` — the
+    // sidebar shows every project's total while one of them is being viewed.
+    const countsOrgId = await resolveOrgId();
+    const projectCounts = countsOrgId
+      ? Object.fromEntries(
+          await chatProjectRepository.countsByProject(userIds, countsOrgId).catch((err) => {
+            log.error("[agent-chat] project counts failed:", err);
+            return new Map<string, number>();
+          }),
+        )
+      : {};
+
+    res.json({
+      success: true,
+      data: page.items,
+      nextCursor: page.nextCursor,
+      agents: agentFacets(all),
+      projectCounts,
+    });
   } catch (err) {
     log.error("[agent-chat] conversations error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
