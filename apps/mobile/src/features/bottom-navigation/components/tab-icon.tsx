@@ -1,4 +1,4 @@
-import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -32,6 +32,7 @@ import {
   tabCenterX,
   useTabBarPalette,
 } from '../constants';
+import { BadgeCutout } from './badge-cutout';
 import { navIcon, type NavIcon } from './nav-icon';
 
 const CHEVRON_BADGE_SIZE = 13;
@@ -92,6 +93,8 @@ export const TabIcon = memo(function TabIcon({
   dragSelectorVisible,
 }: TabIconProps): ReactElement {
   const palette = useTabBarPalette();
+  // The badge sizes to its count; the icon's cutout follows that width.
+  const [badgeWidth, setBadgeWidth] = useState(BADGE_HEIGHT);
   const destinationProgress = useSharedValue(menuDestinationIcon ? 1 : 0);
   const latchedDestination = useRef<NavIcon | null>(menuDestinationIcon);
   const DestinationIcon = menuDestinationIcon ?? latchedDestination.current;
@@ -266,7 +269,7 @@ export const TabIcon = memo(function TabIcon({
               ) : null}
             </>
           ) : (
-            <>
+            <BadgeCutout badgeWidth={badgeLabel === null ? null : badgeWidth}>
               <Animated.View pointerEvents='none' style={[styles.stackedIcon, restColorStyle]}>
                 <Icon size={ICON_SIZE} color={palette.icon} strokeWidth={NAV_ICON_STROKE_WIDTH} />
               </Animated.View>
@@ -277,10 +280,15 @@ export const TabIcon = memo(function TabIcon({
                   strokeWidth={NAV_ICON_STROKE_WIDTH}
                 />
               </Animated.View>
-            </>
+            </BadgeCutout>
           )}
           {badgeLabel === null ? null : (
-            <View pointerEvents='none' style={styles.badge} className='bg-spaces-accent'>
+            <View
+              pointerEvents='none'
+              style={styles.badge}
+              className='bg-spaces-accent'
+              onLayout={event => setBadgeWidth(event.nativeEvent.layout.width)}
+            >
               <Text
                 numberOfLines={1}
                 allowFontScaling={false}
