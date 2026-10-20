@@ -8,7 +8,7 @@ let
   inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
   transcriptionEnv = import ./nix/python-agent.nix { inherit pkgs lib flakeInputs; };
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
-  prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
+  prismaEnvironment = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
     PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
   };
@@ -443,7 +443,7 @@ in
       PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
     };
 
-    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
+    shellHook = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
       export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     '';
 
@@ -509,7 +509,7 @@ in
 
   # One `docker run` for contributors without Nix (Linux only). Built from the
   # same definitions as the dev shell and the services bundle.
-  packages.dev-image = lib.mkIf pkgs.stdenv.isLinux (
+  packages.dev-image = lib.mkIf pkgs.stdenv.hostPlatform.isLinux (
     import ./nix/image.nix {
       inherit pkgs lib imagePackages prismaEnvironment;
       bundle = config.process-compose."dev-image-services".outputs.package;
