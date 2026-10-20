@@ -24,6 +24,7 @@ import { DEFAULT_AGENT_SLUG } from '../api/xyneAICatalog';
 import type { PendingAction } from '../api/xyneAIEvents';
 import { fetchConversationMessages, type ConversationSummary } from '../api/xyneAIConversations';
 import { useXyneAIChat } from '../hooks/useXyneAIChat';
+import { useXyneAINavigation } from '../hooks/useXyneAINavigation';
 import { useXyneAISelection } from '../hooks/useXyneAISelection';
 import { useStableCallback } from '../hooks/useStableCallback';
 import { isBranched, turnsFromMessages, type ChatTurn } from '../model/assistantTurn';
@@ -31,6 +32,7 @@ import { channelPick, oneLine } from '../model/contextPicks';
 import { firstName, greeting } from '../model/greeting';
 import { ConversationHistorySheet } from './ConversationHistorySheet';
 import { IconButton } from './IconButton';
+import { NavigationChoices } from './NavigationChoices';
 import { TurnRow } from './TurnRow';
 import { XyneAIComposer, type XyneAIComposerHandle } from './XyneAIComposer';
 
@@ -73,6 +75,8 @@ export const XyneAIScreen = (): ReactElement => {
   const { width } = useWindowDimensions();
   const renderTokens = useChatRenderTokens(width);
   const openUrl = useMentionPress();
+  const navigation = useXyneAINavigation(openUrl);
+  const { choices } = navigation;
   const selection = useXyneAISelection();
   // "Ask AI" on a message pushes a new screen, so each ask starts from its own params.
   const {
@@ -148,11 +152,33 @@ export const XyneAIScreen = (): ReactElement => {
 
   const scrollToEnd = (): void => scrollRef.current?.scrollToEnd({ animated: true });
 
-  const submit: typeof send = (...message) => {
+  const deliver: typeof send = (...message) => {
+    navigation.dismiss();
     pendingScroll.current = 'animated';
     if (editing) edit(editing, ...message);
     else send(...message);
     setEditing(undefined);
+  };
+
+  // A short command may open a screen; anything else, or any miss, is sent as a question.
+  const submit: typeof send = (...message) => {
+    const [text, context = [], attachments = []] = message;
+    if (editing || context.length + attachments.length > 0 || !navigation.isCommand(text)) {
+      deliver(...message);
+      return;
+    }
+    void navigation.route(text).then(handled => {
+      if (!handled) deliver(...message);
+    });
+  };
+
+  const stopOrCancel = (): void => {
+    if (navigation.routing === undefined) {
+      stop();
+      return;
+    }
+    composerRef.current?.setText(navigation.routing);
+    navigation.cancel();
   };
 
   const startEditing = (turn: ChatTurn): void => {
@@ -165,9 +191,7 @@ export const XyneAIScreen = (): ReactElement => {
   });
   const onSwitchVersion = useStableCallback(switchVersion);
   const onEdit = useStableCallback(startEditing);
-  const onOpenUrl = useStableCallback((url: string): void => {
-    void openUrl(url);
-  });
+  const onOpenUrl = useStableCallback(navigation.openLink);
   const onFlowClose = useStableCallback(refresh);
   const onFollowUp = useStableCallback((suggestion: string): void =>
     composerRef.current?.setText(suggestion),
@@ -352,11 +376,25 @@ export const XyneAIScreen = (): ReactElement => {
               composerHeight.value = nativeEvent.layout.height;
             }}
           >
+            {choices ? (
+              <NavigationChoices
+                choices={choices}
+                onPick={(id): void => {
+                  void navigation.pick(id).then(handled => {
+                    if (!handled) deliver(choices.text);
+                  });
+                }}
+                onAskAI={(text): void => {
+                  navigation.dismiss();
+                  deliver(text);
+                }}
+              />
+            ) : null}
             <XyneAIComposer
               ref={composerRef}
-              isStreaming={isStreaming}
+              isStreaming={isStreaming || navigation.routing !== undefined}
               onSubmit={submit}
-              onStop={stop}
+              onStop={stopOrCancel}
               selection={selection}
               onSelectAgent={selectAgent}
               onSheetChange={setIsSheetOpen}
