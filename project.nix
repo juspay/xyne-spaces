@@ -363,15 +363,13 @@ let
     settings.processes.backend = {
       command = toString (pkgs.writeShellScript "xyne-backend" ''
         export PATH="${appPath}:$PATH"
+        # Defaults only: `docker run -e CORS_ORIGIN=...` (or FRONTEND_URL) wins,
+        # which is what a browser on another host needs.
+        export CORS_ORIGIN="''${CORS_ORIGIN:-http://localhost:${toString dashboardPort},http://127.0.0.1:${toString dashboardPort}}"
+        export FRONTEND_URL="''${FRONTEND_URL:-http://localhost:${toString dashboardPort}}"
         cd apps/backend
         exec pnpm run dev
       '');
-      # The dashboard is served on this port in the image, so accept its browser
-      # origin. dotenv does not override variables already in the environment.
-      environment = {
-        FRONTEND_URL = "http://localhost:${toString dashboardPort}";
-        CORS_ORIGIN = "http://localhost:${toString dashboardPort},http://127.0.0.1:${toString dashboardPort}";
-      };
       depends_on = {
         db-setup = { condition = "process_completed_successfully"; };
         xyne-redis = { condition = "process_healthy"; };

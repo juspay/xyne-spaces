@@ -75,6 +75,20 @@ Check the running container from inside it:
 docker exec <container> nix-smoke-test --existing-services
 ```
 
+### Over a LAN or Tailscale
+
+Add the host to Vite and the dashboard's origin to the backend's CORS list:
+
+```bash
+docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
+  -e __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ts.net \
+  -e CORS_ORIGIN=http://localhost:3000,http://<your-host>:3000 \
+  ghcr.io/juspay/xyne-spaces-dev
+```
+
+A leading dot allows the whole domain (Vite's own variable, as in
+[Access over a LAN or Tailscale](#access-over-a-lan-or-tailscale)).
+
 ## Automatic shell loading with direnv
 
 The repository already tracks an [`.envrc`](../../.envrc). With direnv,
