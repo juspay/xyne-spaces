@@ -39,7 +39,11 @@ let
       cd /src
       # One origin for the host browser: the dashboard proxies /api and /zero.
       export VITE_DEV_PROXY=true
+      # No TTY here: `pnpm install` must not wait on its "reinstall modules?"
+      # prompt. Scoped to prepare so the app processes do not run as CI.
+      export CI=true
       just prepare
+      unset CI
       exec ${bundle}/bin/dev-image-services
     '';
   };
