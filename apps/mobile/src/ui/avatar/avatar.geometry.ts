@@ -8,19 +8,17 @@
 export const AVATAR_GEOMETRY = {
   /** Squircle corner: 13.33px at 40, the radius the design specifies. */
   radiusDivisor: 3,
-  /** Each face inside a group stack: 32px at 40. */
+  /** Each face inside a group stack: 36px at 40. */
   faceRatio: 0.9,
-  /**
-   * The gap the front face cuts out of the one behind it: 2px at 40.
-   *
-   * Drawn as a border in the surface color, not as a real alpha mask. A mask
-   * needs an SVG or a MaskedView per row, and this list has to stay smooth
-   * while it scrolls — the ring is indistinguishable from a cut-out as long as
-   * it matches what is behind it, which `ringClassName` is for.
-   */
-  ringRatio: 0.05,
-  /** Member-count bubble: 18px at 40. */
+  /** The clear gap a shape cuts around itself in whatever sits under it: 2px at 40. */
+  gapRatio: 0.05,
+  /** Member-count bubble: 22px at 40. */
   badgeRatio: 0.55,
+  /**
+   * How far a bubble hangs past the corner of the face it sits on, as a share
+   * of its own diameter.
+   */
+  overhang: 0.25,
 } as const;
 
 export function avatarRadius(size: number): number {
@@ -31,10 +29,98 @@ export function groupFaceSize(size: number): number {
   return Math.round(size * AVATAR_GEOMETRY.faceRatio);
 }
 
-export function avatarRing(size: number): number {
-  return Math.max(1, Math.round(size * AVATAR_GEOMETRY.ringRatio));
+export function avatarGap(size: number): number {
+  return Math.max(1, Math.round(size * AVATAR_GEOMETRY.gapRatio));
 }
 
 export function avatarBadgeSize(size: number): number {
   return Math.round(size * AVATAR_GEOMETRY.badgeRatio);
+}
+
+/** A rounded rect; a circle when `radius` is half its side. */
+export type AvatarRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius: number;
+};
+
+export type AvatarFaceSlot = {
+  rect: AvatarRect;
+  /** What sits on top of this face, in the face's own coordinates. */
+  holes: AvatarRect[];
+};
+
+export type AvatarLayout = {
+  /** Back to front: the order they paint in. */
+  faces: AvatarFaceSlot[];
+  /** The group's member count, top-right of the front face. */
+  countBubble: AvatarRect | null;
+};
+
+type AvatarLayoutOptions = {
+  isGroup: boolean;
+};
+
+/**
+ * Where every part of the avatar sits in its slot, and what each face has to
+ * be cut away under.
+ *
+ * Shapes are separated by real cut-outs, not by rings painted in a guessed
+ * background colour: each face is masked by the shapes above it, grown by the
+ * gap, so whatever is truly behind the avatar shows through.
+ */
+export function avatarLayout(size: number, { isGroup }: AvatarLayoutOptions): AvatarLayout {
+  const gap = avatarGap(size);
+
+  if (!isGroup) {
+    return {
+      faces: [{ rect: square(0, 0, size), holes: [] }],
+      countBubble: null,
+    };
+  }
+
+  const faceSize = groupFaceSize(size);
+  const back = square(0, 0, faceSize);
+  const front = square(size - faceSize, 0, faceSize);
+
+  const badge = avatarBadgeSize(size);
+  const countBubble = circleAt(
+    front.x + front.width - badge * (0.5 - AVATAR_GEOMETRY.overhang),
+    front.y + badge * (0.5 - AVATAR_GEOMETRY.overhang),
+    badge,
+  );
+  const countHole = grow(countBubble, gap);
+
+  return {
+    faces: [
+      { rect: back, holes: [grow(front, gap), countHole].map(hole => toLocal(hole, back)) },
+      { rect: front, holes: [toLocal(countHole, front)] },
+    ],
+    countBubble,
+  };
+}
+
+function square(x: number, y: number, side: number): AvatarRect {
+  return { x, y, width: side, height: side, radius: avatarRadius(side) };
+}
+
+function circleAt(cx: number, cy: number, diameter: number): AvatarRect {
+  const r = diameter / 2;
+  return { x: cx - r, y: cy - r, width: diameter, height: diameter, radius: r };
+}
+
+function grow(rect: AvatarRect, by: number): AvatarRect {
+  return {
+    x: rect.x - by,
+    y: rect.y - by,
+    width: rect.width + by * 2,
+    height: rect.height + by * 2,
+    radius: rect.radius + by,
+  };
+}
+
+function toLocal(rect: AvatarRect, face: AvatarRect): AvatarRect {
+  return { ...rect, x: rect.x - face.x, y: rect.y - face.y };
 }

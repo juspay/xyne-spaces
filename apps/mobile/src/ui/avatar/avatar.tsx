@@ -8,9 +8,6 @@ import type { AvatarProps } from './avatar.types';
 /** The DM row's slot. Every other size is this one scaled. */
 export const DEFAULT_AVATAR_SIZE = 40;
 
-/** The DM list draws rows straight onto the screen background. */
-const DEFAULT_RING_CLASS = 'border-spaces-background';
-
 /**
  * The Spaces avatar: one squircle for a person, two stacked for a group.
  *
@@ -28,7 +25,6 @@ export const Avatar = memo(function Avatar({
   fallbackUsers = [],
   memberCount,
   size = DEFAULT_AVATAR_SIZE,
-  ringClassName = DEFAULT_RING_CLASS,
   style,
 }: AvatarProps): ReactElement | null {
   const validUserIds = useMemo(
@@ -63,7 +59,6 @@ export const Avatar = memo(function Avatar({
         fallbackUsers={fallbackUsers}
         memberCount={memberCount ?? validUserIds.length}
         size={size}
-        ringClassName={ringClassName}
       />
     </View>
   );

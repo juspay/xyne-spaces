@@ -1,8 +1,9 @@
 import { memo, type ReactElement } from 'react';
 import { Text, View } from 'react-native';
 
+import { AvatarCutout } from './avatar-cutout';
 import { AvatarFace } from './avatar-face';
-import { avatarBadgeSize, avatarRadius, avatarRing, groupFaceSize } from './avatar.geometry';
+import { avatarLayout } from './avatar.geometry';
 import type { AvatarFallbackUser } from './avatar.types';
 
 type AvatarStackProps = {
@@ -12,82 +13,55 @@ type AvatarStackProps = {
   /** Everyone in the conversation, which is what the bubble counts. */
   memberCount: number;
   size: number;
-  ringClassName: string;
 };
 
 /**
  * Two people, stacked, with the group's size in a bubble.
  *
- * The back face sits at the top-left corner of the slot and the front one at
- * the bottom-right, so the back shows as an L-shaped sliver. The front face
- * carries a border in the surface color, which reads as the front shape having
- * been cut out of the one behind it. Same trick for the bubble.
- *
- * Both faces are `faceRatio` of the slot and every offset falls out of that,
- * so nothing here can overflow the box the row reserved for it.
+ * The back face sits at the left of the slot and the front one at the right,
+ * so the back shows as a sliver. The front face is cut out of the back one,
+ * and the count bubble — at the front face's top-right corner — out of both,
+ * each with a clear gap, so the shapes stay apart on any background.
  */
 export const AvatarStack = memo(function AvatarStack({
   userIds,
   fallbackUsers = [],
   memberCount,
   size,
-  ringClassName,
 }: AvatarStackProps): ReactElement {
   const [frontUserId, backUserId] = userIds;
-  const faceSize = groupFaceSize(size);
-  const ring = avatarRing(size);
-  const offset = size - faceSize;
-  const badgeSize = avatarBadgeSize(size);
-
-  const frontFallback = fallbackUsers.find(user => user.id === frontUserId);
-  const backFallback = fallbackUsers.find(user => user.id === backUserId);
+  const { faces, countBubble } = avatarLayout(size, { isGroup: true });
+  const faceUserIds = [backUserId, frontUserId];
 
   return (
     <View style={{ width: size, height: size }}>
-      <View style={{ position: 'absolute', top: 0, left: 0 }}>
-        <AvatarFace userId={backUserId} size={faceSize} fallbackUser={backFallback} />
-      </View>
+      {faces.map(({ rect, holes }, index) => {
+        const userId = faceUserIds[index] ?? frontUserId;
+        return (
+          <View key={userId} style={{ position: 'absolute', left: rect.x, top: rect.y }}>
+            <AvatarCutout width={rect.width} height={rect.height} holes={holes}>
+              <AvatarFace
+                userId={userId}
+                size={rect.width}
+                radius={rect.radius}
+                fallbackUser={fallbackUsers.find(user => user.id === userId)}
+              />
+            </AvatarCutout>
+          </View>
+        );
+      })}
 
-      {/*
-        The ring is drawn inside this box, so the face is `faceSize` across
-        including it. That keeps the front face within the slot while still
-        separating it from the one behind.
-      */}
-      <View
-        className={ringClassName}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: offset,
-          width: faceSize,
-          height: faceSize,
-          borderWidth: ring,
-          borderRadius: avatarRadius(faceSize) + ring,
-        }}
-      >
-        <AvatarFace
-          userId={frontUserId}
-          size={faceSize - ring * 2}
-          radius={avatarRadius(faceSize)}
-          fallbackUser={frontFallback}
-        />
-      </View>
-
-      <View
-        className={ringClassName}
-        style={{
-          position: 'absolute',
-          right: 0,
-          bottom: 0,
-          width: badgeSize,
-          height: badgeSize,
-          borderWidth: ring,
-          borderRadius: badgeSize / 2,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <View className='flex-1 w-full items-center justify-center rounded-full bg-spaces-surface'>
+      {countBubble ? (
+        <View
+          className='items-center justify-center rounded-full bg-spaces-surface'
+          style={{
+            position: 'absolute',
+            left: countBubble.x,
+            top: countBubble.y,
+            width: countBubble.width,
+            height: countBubble.height,
+          }}
+        >
           <Text
             className='text-spaces-foreground'
             style={{ fontSize: Math.max(9, Math.round(size * 0.26)), fontWeight: '600' }}
@@ -95,7 +69,7 @@ export const AvatarStack = memo(function AvatarStack({
             {memberCount}
           </Text>
         </View>
-      </View>
+      ) : null}
     </View>
   );
 });

@@ -22,13 +22,5 @@ export type AvatarProps = {
   memberCount?: number;
   /** Outer slot size in px. Default 40, the DM row. */
   size?: number;
-  /**
-   * The surface the avatar sits on, as a Uniwind border class.
-   *
-   * The stack separates its two faces with a ring in this color, so it has to
-   * match what is actually behind the avatar. Defaults to the screen
-   * background, which is where the DM list puts it.
-   */
-  ringClassName?: string;
   style?: ViewStyle;
 };
