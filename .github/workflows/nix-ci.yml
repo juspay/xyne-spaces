@@ -145,6 +145,11 @@ jobs:
       - name: Wait for backend health
         run: |
           for attempt in $(seq 1 120); do
+            if [ "$(docker inspect -f '{{.State.Running}}' xyne-dev)" != "true" ]; then
+              echo "Container exited before becoming healthy" >&2
+              docker logs xyne-dev >&2
+              exit 1
+            fi
             if curl -fsS http://127.0.0.1:3001/api/health >/dev/null; then
               echo "Backend healthy after $attempt attempts"
               exit 0
