@@ -33,19 +33,25 @@ logs.mkdir(parents=True, exist_ok=True)
 children = []
 
 
-def check_services():
+def process_list():
     # Both bundles expose process-compose's API on the same Unix socket, so this
-    # runs whether the test launched the services or found them running.
+    # works whether the test launched the services or found them running.
     if not Path(service_socket).exists():
-        return
+        return None
     result = subprocess.run(
         ["process-compose", "-U", "-u", service_socket, "process", "list", "-o", "json"],
         capture_output=True, text=True, timeout=10, env=env)
     if result.returncode != 0:
-        return  # the API is not answering yet
+        return None  # the API is not answering yet
     try:
-        services = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except ValueError:
+        return None
+
+
+def check_services():
+    services = process_list()
+    if services is None:
         return
     for service in services:
         if service["exit_code"] != 0 or service["restarts"] > 0:
@@ -121,6 +127,13 @@ try:
     time.sleep(10)
     wait_for("http://127.0.0.1:8001/health", 10)
     wait_for("http://127.0.0.1:3001/api/health", 10)
+    # Report the process-compose health the whole run was checked against.
+    services = process_list()
+    if services is not None:
+        restarts = sum(service["restarts"] for service in services)
+        failures = [service["name"] for service in services if service["exit_code"] != 0]
+        print(f"process-compose health: {len(services)} processes, "
+              f"{restarts} restarts, {len(failures)} failures ({service_socket})", flush=True)
     print("Nix runtime smoke test passed", flush=True)
 except BaseException:
     # Keep actionable errors in the job output even if artifact upload fails.
