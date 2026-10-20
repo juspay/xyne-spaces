@@ -1,4 +1,4 @@
-import { memo, type ReactElement } from 'react';
+import { memo, type ReactElement, type ReactNode } from 'react';
 import { Text, View } from 'react-native';
 
 import { AvatarCutout } from './avatar-cutout';
@@ -7,31 +7,38 @@ import { avatarLayout } from './avatar.geometry';
 import type { AvatarFallbackUser } from './avatar.types';
 
 type AvatarStackProps = {
-  /** The two faces to draw, front first. */
-  userIds: readonly [string, string];
+  /** The faces to draw, front first: one person, or two for a group. */
+  userIds: readonly [string] | readonly [string, string];
   fallbackUsers?: readonly AvatarFallbackUser[];
-  /** Everyone in the conversation, which is what the bubble counts. */
+  /** Everyone in the conversation, which a group's bubble counts. */
   memberCount: number;
   size: number;
+  /** Drawn centred in a cut-out at the front face's bottom-right corner. */
+  cornerBadge?: ReactNode;
 };
 
 /**
- * Two people, stacked, with the group's size in a bubble.
+ * The avatar's faces and what sits on them, each cut out of what lies below.
  *
- * The back face sits at the left of the slot and the front one at the right,
- * so the back shows as a sliver. The front face is cut out of the back one,
- * and the count bubble — at the front face's top-right corner — out of both,
- * each with a clear gap, so the shapes stay apart on any background.
+ * A group stacks two people: the back face at the left of the slot and the
+ * front one at the right, so the back shows as a sliver, with the group's size
+ * in a bubble at the front face's top-right corner. A corner badge sits at the
+ * front face's bottom-right. Every shape is cut out of the ones beneath it with
+ * a clear gap, so they stay apart on any background.
  */
 export const AvatarStack = memo(function AvatarStack({
   userIds,
   fallbackUsers = [],
   memberCount,
   size,
+  cornerBadge,
 }: AvatarStackProps): ReactElement {
   const [frontUserId, backUserId] = userIds;
-  const { faces, countBubble } = avatarLayout(size, { isGroup: true });
-  const faceUserIds = [backUserId, frontUserId];
+  const hasCornerBadge = cornerBadge !== undefined && cornerBadge !== null;
+  const layout = avatarLayout(size, { isGroup: backUserId !== undefined, hasCornerBadge });
+  const { faces, countBubble } = layout;
+  // Faces paint back to front.
+  const faceUserIds = backUserId === undefined ? [frontUserId] : [backUserId, frontUserId];
 
   return (
     <View style={{ width: size, height: size }}>
@@ -68,6 +75,22 @@ export const AvatarStack = memo(function AvatarStack({
           >
             {memberCount}
           </Text>
+        </View>
+      ) : null}
+
+      {layout.cornerBadge ? (
+        <View
+          pointerEvents='none'
+          className='items-center justify-center'
+          style={{
+            position: 'absolute',
+            left: layout.cornerBadge.x,
+            top: layout.cornerBadge.y,
+            width: layout.cornerBadge.width,
+            height: layout.cornerBadge.height,
+          }}
+        >
+          {cornerBadge}
         </View>
       ) : null}
     </View>

@@ -14,6 +14,8 @@ export const AVATAR_GEOMETRY = {
   gapRatio: 0.05,
   /** Member-count bubble: 22px at 40. */
   badgeRatio: 0.55,
+  /** Corner badge, the DM list's star: 16px at 40. */
+  cornerBadgeRatio: 0.4,
   /**
    * How far a bubble hangs past the corner of the face it sits on, as a share
    * of its own diameter.
@@ -37,6 +39,11 @@ export function avatarBadgeSize(size: number): number {
   return Math.round(size * AVATAR_GEOMETRY.badgeRatio);
 }
 
+/** The corner badge's circle, which is also the hole it sits in. */
+export function avatarCornerBadgeSize(size: number): number {
+  return Math.round(size * AVATAR_GEOMETRY.cornerBadgeRatio);
+}
+
 /** A rounded rect; a circle when `radius` is half its side. */
 export type AvatarRect = {
   x: number;
@@ -57,10 +64,13 @@ export type AvatarLayout = {
   faces: AvatarFaceSlot[];
   /** The group's member count, top-right of the front face. */
   countBubble: AvatarRect | null;
+  /** The corner badge's circle, bottom-right of the front face. */
+  cornerBadge: AvatarRect | null;
 };
 
 type AvatarLayoutOptions = {
   isGroup: boolean;
+  hasCornerBadge?: boolean;
 };
 
 /**
@@ -71,34 +81,51 @@ type AvatarLayoutOptions = {
  * background colour: each face is masked by the shapes above it, grown by the
  * gap, so whatever is truly behind the avatar shows through.
  */
-export function avatarLayout(size: number, { isGroup }: AvatarLayoutOptions): AvatarLayout {
+export function avatarLayout(
+  size: number,
+  { isGroup, hasCornerBadge = false }: AvatarLayoutOptions,
+): AvatarLayout {
   const gap = avatarGap(size);
+  const inset = 0.5 - AVATAR_GEOMETRY.overhang;
+
+  const front = isGroup
+    ? square(size - groupFaceSize(size), 0, groupFaceSize(size))
+    : square(0, 0, size);
+
+  // The badge is its own hole: whatever it holds sits inside with room to spare.
+  const cornerSize = avatarCornerBadgeSize(size);
+  const cornerBadge = hasCornerBadge
+    ? circleAt(
+        front.x + front.width - cornerSize * inset,
+        front.y + front.height - cornerSize * inset,
+        cornerSize,
+      )
+    : null;
 
   if (!isGroup) {
     return {
-      faces: [{ rect: square(0, 0, size), holes: [] }],
+      faces: [{ rect: front, holes: cornerBadge ? [cornerBadge] : [] }],
       countBubble: null,
+      cornerBadge,
     };
   }
 
-  const faceSize = groupFaceSize(size);
-  const back = square(0, 0, faceSize);
-  const front = square(size - faceSize, 0, faceSize);
-
+  const back = square(0, 0, front.width);
   const badge = avatarBadgeSize(size);
   const countBubble = circleAt(
-    front.x + front.width - badge * (0.5 - AVATAR_GEOMETRY.overhang),
-    front.y + badge * (0.5 - AVATAR_GEOMETRY.overhang),
+    front.x + front.width - badge * inset,
+    front.y + badge * inset,
     badge,
   );
-  const countHole = grow(countBubble, gap);
+  const aboveFront = [grow(countBubble, gap), ...(cornerBadge ? [cornerBadge] : [])];
 
   return {
     faces: [
-      { rect: back, holes: [grow(front, gap), countHole].map(hole => toLocal(hole, back)) },
-      { rect: front, holes: [toLocal(countHole, front)] },
+      { rect: back, holes: [grow(front, gap), ...aboveFront].map(hole => toLocal(hole, back)) },
+      { rect: front, holes: aboveFront.map(hole => toLocal(hole, front)) },
     ],
     countBubble,
+    cornerBadge,
   };
 }
 

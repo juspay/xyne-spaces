@@ -113,7 +113,6 @@ e
           <View className='items-end' style={{ paddingLeft: 8, paddingTop: DM_META_TOP }}>
             <DmRow.Timestamp />
             <View className='flex-row items-center gap-1' style={{ marginTop: DM_BADGE_GAP }}>
-              <DmRow.Starred />
               <DmRow.UnreadBadge />
             </View>
           </View>

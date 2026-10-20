@@ -9,7 +9,8 @@ import type { AvatarProps } from './avatar.types';
 export const DEFAULT_AVATAR_SIZE = 40;
 
 /**
- * The Spaces avatar: one squircle for a person, two stacked for a group.
+ * The Spaces avatar: one squircle for a person, two stacked for a group, with
+ * an optional badge cut into its bottom-right corner.
  *
  * Takes the same props as the classic avatar and resolves identities through
  * the same hooks — this is a second look at the same data, not a second source
@@ -25,6 +26,7 @@ export const Avatar = memo(function Avatar({
   fallbackUsers = [],
   memberCount,
   size = DEFAULT_AVATAR_SIZE,
+  cornerBadge,
   style,
 }: AvatarProps): ReactElement | null {
   const validUserIds = useMemo(
@@ -38,7 +40,9 @@ export const Avatar = memo(function Avatar({
     return null;
   }
 
-  if (second === undefined) {
+  const hasCornerBadge = cornerBadge !== undefined && cornerBadge !== null;
+
+  if (second === undefined && !hasCornerBadge) {
     return (
       <View style={style}>
         <AvatarFace
@@ -54,11 +58,12 @@ export const Avatar = memo(function Avatar({
   return (
     <View style={style}>
       <AvatarStack
-        key={`${first}:${second}`}
-        userIds={[first, second]}
+        key={second === undefined ? first : `${first}:${second}`}
+        userIds={second === undefined ? [first] : [first, second]}
         fallbackUsers={fallbackUsers}
         memberCount={memberCount ?? validUserIds.length}
         size={size}
+        cornerBadge={cornerBadge}
       />
     </View>
   );

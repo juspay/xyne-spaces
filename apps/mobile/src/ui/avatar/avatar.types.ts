@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { ViewStyle } from 'react-native';
 
 import type { AvatarFallbackUser } from '@/src/components/ui/avatar/avatar.types';
@@ -22,5 +23,10 @@ export type AvatarProps = {
   memberCount?: number;
   /** Outer slot size in px. Default 40, the DM row. */
   size?: number;
+  /**
+   * Drawn centred in a circle cut into the bottom-right corner of the front
+   * face, sized by `avatarCornerBadgeSize`. The DM list's star.
+   */
+  cornerBadge?: ReactNode;
   style?: ViewStyle;
 };

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   avatarBadgeSize,
+  avatarCornerBadgeSize,
   avatarGap,
   avatarLayout,
   avatarRadius,
@@ -69,5 +70,35 @@ describe('avatarLayout', () => {
       },
     ]);
     assert.equal(faces[0]?.holes.length, 2);
+  });
+
+  it('cuts a corner badge into a single face, hanging past its bottom-right corner', () => {
+    const { faces, cornerBadge } = avatarLayout(SIZE, { isGroup: false, hasCornerBadge: true });
+    const diameter = avatarCornerBadgeSize(SIZE);
+    assert.ok(cornerBadge);
+    assert.equal(cornerBadge.width, diameter);
+    assert.equal(cornerBadge.radius, diameter / 2);
+    assert.ok(cornerBadge.x + diameter > SIZE, 'overhangs the right edge');
+    assert.ok(cornerBadge.y + diameter > SIZE, 'overhangs the bottom edge');
+    // The badge is its own hole, with no extra gap.
+    assert.deepEqual(faces[0]?.holes, [cornerBadge]);
+  });
+
+  it('cuts the corner badge out of both faces of a group, beside the count bubble', () => {
+    const { faces, cornerBadge, countBubble } = avatarLayout(SIZE, {
+      isGroup: true,
+      hasCornerBadge: true,
+    });
+    assert.ok(cornerBadge && countBubble);
+    assert.ok(cornerBadge.y > countBubble.y + countBubble.height, 'sits below the bubble');
+    const [back, front] = faces;
+    assert.equal(back?.holes.length, 3);
+    assert.equal(front?.holes.length, 2);
+    assert.deepEqual(front?.holes[1], { ...cornerBadge, x: cornerBadge.x - (front?.rect.x ?? 0) });
+  });
+
+  it('leaves the corner badge out unless asked for', () => {
+    assert.equal(avatarLayout(SIZE, { isGroup: true }).cornerBadge, null);
+    assert.equal(avatarLayout(SIZE, { isGroup: false }).cornerBadge, null);
   });
 });
