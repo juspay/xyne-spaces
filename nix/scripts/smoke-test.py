@@ -49,14 +49,18 @@ def process_list():
         return None
 
 
-def check_services():
-    services = process_list()
-    if services is None:
-        return
+def assert_services_ok(services):
     for service in services:
         if service["exit_code"] != 0 or service["restarts"] > 0:
             raise RuntimeError(f"Service failed or restarted: {service['name']} "
                                f"(exit={service['exit_code']}, restarts={service['restarts']})")
+
+
+def check_services():
+    # Lenient while polling: the API may still be coming up.
+    services = process_list()
+    if services is not None:
+        assert_services_ok(services)
 
 
 def launch(command, name, cwd=None):
@@ -127,13 +131,16 @@ try:
     time.sleep(10)
     wait_for("http://127.0.0.1:8001/health", 10)
     wait_for("http://127.0.0.1:3001/api/health", 10)
-    # Report the process-compose health the whole run was checked against.
+    # Strict at the end: both bundles guarantee the socket, so a missing API is a
+    # bug, not a skip. Report the process health the whole run was checked against.
     services = process_list()
-    if services is not None:
-        restarts = sum(service["restarts"] for service in services)
-        failures = [service["name"] for service in services if service["exit_code"] != 0]
-        print(f"process-compose health: {len(services)} processes, "
-              f"{restarts} restarts, {len(failures)} failures ({service_socket})", flush=True)
+    if services is None:
+        raise RuntimeError(f"process-compose API not reachable on {service_socket}")
+    assert_services_ok(services)
+    restarts = sum(service["restarts"] for service in services)
+    failures = [service["name"] for service in services if service["exit_code"] != 0]
+    print(f"process-compose health: {len(services)} processes, {restarts} restarts, "
+          f"{len(failures)} failures ({service_socket})", flush=True)
     print("Nix runtime smoke test passed", flush=True)
 except BaseException:
     # Keep actionable errors in the job output even if artifact upload fails.
