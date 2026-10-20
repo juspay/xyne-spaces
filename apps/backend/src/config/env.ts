@@ -556,7 +556,7 @@ const envSchema = Joi.object({
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
-  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(50),
+  GMAIL_WEBHOOK_MAX_BATCH: Joi.number().integer().min(1).default(20),
   EMAIL_MERGE_MODE_DEFAULT: Joi.string().valid('DISABLED', 'ENABLED').default('ENABLED'),
   // Docling Configuration
   DOCLING_ENABLED: Joi.boolean().default(false),
