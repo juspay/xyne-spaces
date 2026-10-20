@@ -5,12 +5,16 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
+import android.graphics.RuntimeShader
 import android.os.Build
+import android.util.Log
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.annotation.RequiresApi
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
+import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -33,6 +37,11 @@ import kotlin.math.roundToInt
  *
  * Before API 31 there is no `RenderEffect`, and the surface is the solid
  * background colour under the tint.
+ *
+ * [Material.GLASS] swaps the frost for liquid glass (see [XyneBlurSpec.Glass]):
+ * a sharper capture, refracted through the surface's rounded rim by a shader,
+ * with the tint applied in the same pass. It needs API 33 for runtime shaders;
+ * below that the surface stays frosted.
  */
 class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
   /** The screen's background, drawn under the content and wherever there is none. */
@@ -59,8 +68,53 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
       invalidate()
     }
 
-  private val capture: Capture? =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Capture(resources.displayMetrics.density) else null
+  enum class Material { FROST, GLASS }
+
+  var material: Material = Material.FROST
+    set(value) {
+      if (field == value) return
+      field = value
+      capture?.release()
+      glass?.release()
+      glass = createGlass()
+      capture = createCapture()
+      invalidate()
+    }
+
+  /** The corner radius of the shape the surface is clipped to, in px. Glass bends light along it. */
+  var cornerRadius: Float = 0f
+    set(value) {
+      if (field == value) return
+      field = value
+      if (glass != null) invalidate()
+    }
+
+  private val density = resources.displayMetrics.density
+
+  /** Set when glass was asked for and the device can draw it; frost otherwise. */
+  private var glass: Glass? = createGlass()
+  private var capture: Capture? = createCapture()
+
+  private fun createCapture(): Capture? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+    return if (glass != null) {
+      Capture(XyneBlurSpec.Glass.DOWNSCALE, XyneBlurSpec.Glass.createEffect(density), XyneBlurSpec.Glass.CAPTURE_MARGIN_DP)
+    } else {
+      Capture(XyneBlurSpec.DOWNSCALE, XyneBlurSpec.createEffect(density), XyneBlurSpec.CAPTURE_MARGIN_DP)
+    }
+  }
+
+  private fun createGlass(): Glass? {
+    if (material != Material.GLASS || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
+    return try {
+      Glass()
+    } catch (error: IllegalArgumentException) {
+      // The shader is compiled on the device. Should a GPU driver reject it,
+      // the surface stays frosted rather than taking the screen down.
+      Log.w(TAG, "Liquid glass shader unavailable; using the frost", error)
+      null
+    }
+  }
 
   private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
     // Invalidating here does not cost an extra frame: the frame this runs in
@@ -81,6 +135,7 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
   override fun onDetachedFromWindow() {
     viewTreeObserver.removeOnPreDrawListener(preDrawListener)
     capture?.release()
+    glass?.release()
     super.onDetachedFromWindow()
   }
 
@@ -91,39 +146,126 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
     val saved = canvas.save()
     canvas.clipRect(0, 0, width, height)
 
-    val capture = capture
-    if (capture != null && canvas.isHardwareAccelerated) {
-      if (!capture.hasContent()) capture.update(this)
-      canvas.drawColor(baseColor)
-      canvas.translate(capture.originX, capture.originY)
-      canvas.drawRenderNode(capture.node)
-      canvas.translate(-capture.originX, -capture.originY)
-      // A target that had not drawn yet has nothing to show; look again next frame.
-      if (capture.waitingForTarget) postInvalidateOnAnimation()
-    } else {
-      canvas.drawColor(baseColor)
-    }
-
     val tint = Color.argb(
       (Color.alpha(tintColor) * tintAlpha).roundToInt().coerceIn(0, 255),
       Color.red(tintColor),
       Color.green(tintColor),
       Color.blue(tintColor),
     )
-    if (Color.alpha(tint) != 0) canvas.drawColor(tint)
+
+    val capture = capture
+    val glass = glass
+    if (capture != null && canvas.isHardwareAccelerated) {
+      if (!capture.hasContent()) capture.update(this)
+      canvas.drawColor(baseColor)
+      if (glass != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // The glass pass lays the tint itself, under its own highlights.
+        glass.draw(canvas, capture, width, height, tint)
+      } else {
+        canvas.translate(capture.originX, capture.originY)
+        canvas.drawRenderNode(capture.node)
+        canvas.translate(-capture.originX, -capture.originY)
+        if (Color.alpha(tint) != 0) canvas.drawColor(tint)
+      }
+      // A target that had not drawn yet has nothing to show; look again next frame.
+      if (capture.waitingForTarget) postInvalidateOnAnimation()
+    } else {
+      canvas.drawColor(baseColor)
+      if (Color.alpha(tint) != 0) canvas.drawColor(tint)
+    }
 
     canvas.restoreToCount(saved)
   }
 
   /**
+   * The liquid glass layer: the capture, drawn into a node the size of the
+   * surface, with the glass shader as that node's effect.
+   *
+   * The node only holds a pointer to the capture, so content scrolling under
+   * the glass updates it without this view redrawing. The shader's inputs are
+   * pushed — and the effect rebuilt — only when one of them changes: a resize,
+   * a radius step of the menu morph, a theme switch.
+   */
+  @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+  private inner class Glass {
+    private val node = RenderNode("XyneGlassSurface")
+    private val shader = RuntimeShader(XyneBlurSpec.Glass.SHADER)
+    private val thicknessPx = XyneBlurSpec.Glass.THICKNESS_DP * density
+
+    private var appliedWidth = -1
+    private var appliedHeight = -1
+    private var appliedRadius = -1f
+    private var appliedTint = 0
+
+    fun draw(canvas: Canvas, capture: Capture, width: Int, height: Int, tint: Int) {
+      node.setPosition(0, 0, width, height)
+      val recording = node.beginRecording(width, height)
+      try {
+        recording.translate(capture.originX, capture.originY)
+        recording.drawRenderNode(capture.node)
+      } finally {
+        node.endRecording()
+      }
+      applyShape(width, height, tint)
+      canvas.drawRenderNode(node)
+    }
+
+    fun release() {
+      node.discardDisplayList()
+    }
+
+    private fun applyShape(width: Int, height: Int, tint: Int) {
+      val shortSide = min(width, height).toFloat()
+      val radius = cornerRadius.coerceIn(0f, shortSide / 2f)
+      if (
+        width == appliedWidth &&
+        height == appliedHeight &&
+        abs(radius - appliedRadius) < 0.1f &&
+        tint == appliedTint
+      ) {
+        return
+      }
+      appliedWidth = width
+      appliedHeight = height
+      appliedRadius = radius
+      appliedTint = tint
+
+      // A narrow surface keeps a flat middle: the rim takes at most a fifth of it.
+      val thickness = thicknessPx.coerceAtMost(shortSide / 5f).coerceAtLeast(1f)
+      val alpha = Color.alpha(tint) / 255f
+
+      shader.setFloatUniform("halfSize", width / 2f, height / 2f)
+      shader.setFloatUniform("cornerRadius", radius)
+      shader.setFloatUniform("thickness", thickness)
+      shader.setFloatUniform("refractiveIndex", XyneBlurSpec.Glass.REFRACTIVE_INDEX)
+      shader.setFloatUniform("strength", XyneBlurSpec.Glass.REFRACTION_STRENGTH)
+      // Premultiplied, as the shader composites it over the content directly.
+      shader.setFloatUniform(
+        "tint",
+        Color.red(tint) / 255f * alpha,
+        Color.green(tint) / 255f * alpha,
+        Color.blue(tint) / 255f * alpha,
+        alpha,
+      )
+      // An effect keeps the uniforms it was built with; new ones need a new effect.
+      node.setRenderEffect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
+    }
+  }
+
+  /**
    * The blurred copy of what is behind the surface.
    *
-   * Recorded at 1/8 size: the targets are drawn into a node an eighth of the
-   * capture area's size, the node blurs and saturates itself, and it is drawn
-   * back at 8x. The blur runs on 1/64 of the pixels.
+   * Recorded at 1/[downscale] size: the targets are drawn into a node that
+   * much smaller than the capture area, the node blurs and saturates itself,
+   * and it is drawn back scaled up. For the frost's 1/8 the blur runs on 1/64
+   * of the pixels.
    */
   @RequiresApi(Build.VERSION_CODES.S)
-  private inner class Capture(private val density: Float) {
+  private inner class Capture(
+    private val downscale: Int,
+    private val effect: RenderEffect,
+    marginDp: Float,
+  ) {
     val node = RenderNode("XyneBlurSurface")
 
     /** Where the node's top-left corner sits, relative to the surface. */
@@ -134,8 +276,7 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
     var waitingForTarget = false
       private set
 
-    private val effect: RenderEffect = XyneBlurSpec.createEffect(density)
-    private val margin = (XyneBlurSpec.CAPTURE_MARGIN_DP * density).roundToInt()
+    private val margin = (marginDp * density).roundToInt()
     private val surfaceLocation = IntArray(2)
     private val targetLocation = IntArray(2)
     private var recordedKey = 0L
@@ -144,8 +285,8 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
     init {
       node.setPivotX(0f)
       node.setPivotY(0f)
-      node.setScaleX(XyneBlurSpec.DOWNSCALE.toFloat())
-      node.setScaleY(XyneBlurSpec.DOWNSCALE.toFloat())
+      node.setScaleX(downscale.toFloat())
+      node.setScaleY(downscale.toFloat())
       node.setRenderEffect(effect)
     }
 
@@ -178,8 +319,8 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
       val top = floorTo(surfaceLocation[1] - margin, grid)
       val right = ceilTo(surfaceLocation[0] + width + margin, grid)
       val bottom = ceilTo(surfaceLocation[1] + height + margin, grid)
-      val smallWidth = ceilDiv(right - left, XyneBlurSpec.DOWNSCALE)
-      val smallHeight = ceilDiv(bottom - top, XyneBlurSpec.DOWNSCALE)
+      val smallWidth = ceilDiv(right - left, downscale)
+      val smallHeight = ceilDiv(bottom - top, downscale)
 
       originX = (left - surfaceLocation[0]).toFloat()
       originY = (top - surfaceLocation[1]).toFloat()
@@ -205,7 +346,7 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
       try {
         // The screen's own background goes in first, so the blur has something to mix with beyond the content's edges.
         canvas.drawColor(baseColor)
-        canvas.scale(1f / XyneBlurSpec.DOWNSCALE, 1f / XyneBlurSpec.DOWNSCALE)
+        canvas.scale(1f / downscale, 1f / downscale)
         forEachTargetBehind(surface, left, top, right, bottom) { target, x, y ->
           val targetNode = target.renderNode
           if (targetNode != null && targetNode.hasDisplayList()) {
@@ -253,6 +394,8 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
   }
 
   private companion object {
+    const val TAG = "XyneBlur"
+
     fun isAncestor(candidate: View, view: View): Boolean {
       var parent = view.parent
       while (parent is View) {

@@ -24,6 +24,16 @@ class XyneBlurModule : Module() {
       Prop("tintAlpha") { view: XyneBlurSurfaceView, alpha: Float ->
         view.tintAlpha = alpha.coerceIn(0f, 1f)
       }
+
+      Prop("material") { view: XyneBlurSurfaceView, material: String? ->
+        view.material =
+          if (material == "glass") XyneBlurSurfaceView.Material.GLASS else XyneBlurSurfaceView.Material.FROST
+      }
+
+      // In dp, like every other length React hands over.
+      Prop("cornerRadius") { view: XyneBlurSurfaceView, radius: Float? ->
+        view.cornerRadius = (radius ?: 0f).coerceAtLeast(0f) * view.resources.displayMetrics.density
+      }
     }
 
     View(XyneBlurTargetView::class) {

@@ -18,6 +18,14 @@ public final class XyneBlurModule: Module {
       Prop("colorScheme") { (view: XyneBlurSurfaceView, scheme: String?) in
         view.setColorScheme(scheme)
       }
+
+      Prop("material") { (view: XyneBlurSurfaceView, material: String?) in
+        view.setMaterial(material)
+      }
+
+      Prop("cornerRadius") { (view: XyneBlurSurfaceView, radius: Double?) in
+        view.setCornerRadius(CGFloat(max(radius ?? 0, 0)))
+      }
     }
   }
 }

@@ -10,6 +10,11 @@ import UIKit
  * ship — so the system's thinnest material stands in for Android's 40dp blur,
  * and the tint on top is the same colour and opacity as on Android.
  *
+ * The `glass` material is the system's own Liquid Glass on iOS 26, shaped to
+ * the surface's corner radius. It is left untinted: Apple's glass keeps what is
+ * on it legible by itself, and a tint at the frost's opacity would hide the
+ * glass. Before iOS 26 the surface stays frosted.
+ *
  * Childless: React's children would be inserted under the effect view.
  */
 public final class XyneBlurSurfaceView: ExpoView {
@@ -19,6 +24,7 @@ public final class XyneBlurSurfaceView: ExpoView {
   // Not `tintColor`: UIView already has one, with a different meaning.
   private var surfaceTint: UIColor?
   private var surfaceTintAlpha: CGFloat = 0
+  private var usesGlass = false
 
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -52,7 +58,35 @@ public final class XyneBlurSurfaceView: ExpoView {
     }
   }
 
+  func setMaterial(_ material: String?) {
+    var glass = false
+    #if compiler(>=6.2)
+    if #available(iOS 26.0, *), material == "glass" {
+      glass = true
+    }
+    #endif
+    guard glass != usesGlass else { return }
+    usesGlass = glass
+    applyEffect()
+    applyTint()
+  }
+
+  func setCornerRadius(_ radius: CGFloat) {
+    effectView.layer.cornerRadius = radius
+    effectView.layer.cornerCurve = .circular
+  }
+
+  private func applyEffect() {
+    #if compiler(>=6.2)
+    if #available(iOS 26.0, *), usesGlass {
+      effectView.effect = UIGlassEffect(style: .regular)
+      return
+    }
+    #endif
+    effectView.effect = UIBlurEffect(style: .systemUltraThinMaterial)
+  }
+
   private func applyTint() {
-    tintView.backgroundColor = surfaceTint?.withAlphaComponent(surfaceTintAlpha)
+    tintView.backgroundColor = usesGlass ? nil : surfaceTint?.withAlphaComponent(surfaceTintAlpha)
   }
 }

@@ -18,8 +18,9 @@ function isSharedRadius(value: number | SharedValue<number>): value is SharedVal
 
 /**
  * The bar's surface — the pill, the menu panel it opens into, and the search
- * button. Frosted with Xyne Blur: the screen behind it shows through blurred,
- * under the bar's own colour.
+ * button. Liquid glass with Xyne Blur where the device can draw it, frosted
+ * elsewhere: the screen behind it shows through under the bar's own colour.
+ * The glass follows the surface's corner radius, animated or not.
  *
  * The blur sits inside the clip, so it takes the surface's animated rounded
  * shape; the shadow stays on the outer view, outside it.
@@ -54,7 +55,7 @@ export function GlassMaterial({
         pointerEvents='box-none'
         style={[StyleSheet.absoluteFill, styles.clip, radiusStyle]}
       >
-        <ChromeBlur variant='bar' color={palette.background} />
+        <ChromeBlur variant='bar' color={palette.background} cornerRadius={borderRadius} />
         {children}
       </Animated.View>
       <OutlineHalf edge='top' color={palette.outlineTop} radiusStyle={radiusStyle} />

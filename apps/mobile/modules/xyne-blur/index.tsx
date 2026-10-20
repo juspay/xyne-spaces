@@ -1,4 +1,4 @@
-import { type ReactElement } from 'react';
+import { type ReactElement, type Ref } from 'react';
 import { Platform, processColor, View, type ViewProps } from 'react-native';
 import { requireNativeView } from 'expo';
 
@@ -11,7 +11,26 @@ export type BlurSurfaceProps = Omit<ViewProps, 'children'> & {
   tintAlpha: number;
   /** The app's theme, which the iOS material follows instead of the system's. */
   colorScheme: 'light' | 'dark';
+  /**
+   * `glass` is liquid glass where the device can draw it ({@link isGlassSupported})
+   * and the frost everywhere else.
+   */
+  material?: BlurMaterial;
+  /** Corner radius of the shape the surface is clipped to. Glass bends light along it. */
+  cornerRadius?: number;
+  ref?: Ref<unknown>;
 };
+
+export type BlurMaterial = 'frost' | 'glass';
+
+/**
+ * Whether `material='glass'` draws glass here: Android 13 (API 33) for its
+ * runtime shaders, iOS 26 for the system's Liquid Glass.
+ */
+export const isGlassSupported =
+  Platform.OS === 'android'
+    ? Platform.Version >= 33
+    : Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26;
 
 type NativeSurfaceProps = Omit<BlurSurfaceProps, 'baseColor' | 'tintColor'> & {
   baseColor: unknown;
