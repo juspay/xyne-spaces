@@ -62,6 +62,15 @@ export const FLAGS = {
     // Same reason as the DMs screen: search lives in the new bottom bar.
     requires: 'ui.shell',
   },
+  'ui.conversation': {
+    label: 'New conversation screen',
+    description: 'The redesigned channel and thread screens, in place of the classic ones.',
+    default: false,
+    removeBy: '2026-12-31',
+    // The new room header has no in-chat search field of its own yet; it
+    // ships with the new shell like the other redesigned screens.
+    requires: 'ui.shell',
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FlagKey = keyof typeof FLAGS;

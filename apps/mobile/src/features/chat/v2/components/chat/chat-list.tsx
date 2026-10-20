@@ -38,12 +38,13 @@ import {
   type RowPresentationStore,
 } from '@/src/features/chat/v2/components/chat/chat-message-list-row';
 import { toSharedMessagesOptions } from '@/src/features/chat/messagesOptions.types';
+import type { ChatRowRenderers } from '@/src/features/chat/v2/components/chat/chat-renderers';
 import { RowEntranceController } from '@/src/features/chat/v2/components/chat/chat-row-entrance-controller';
 import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/chat-render-tokens';
 import {
   findTargetRowIndex,
   getChatListEstimatedItemSize,
-  getChatRowFixedSize,
+  resolveFixedItemSize,
   getUnreadJumpTargetRowIndex,
   hasLoadedMessageAtOrBefore,
   hasLoadedTimestampBoundaryCoverage,
@@ -282,6 +283,8 @@ type ChatListProps = {
   composerGeometry: ChatComposerGeometry;
   freeze?: SharedValue<boolean> | undefined;
   keyboardOffset?: number | undefined;
+  /** Optional replacements for the message, date and unread-divider rows. */
+  renderers?: ChatRowRenderers | undefined;
   onMessagePress: (conversation: ConversationItem, paintRow: ChatPaintRow) => void;
   onMessageLongPress: (conversation: ConversationItem) => void;
   onScrolledUpChange?: ((isScrolledUp: boolean) => void) | undefined;
@@ -293,6 +296,8 @@ type ChatListProps = {
 };
 
 export type ChatInitialLoadState = 'loading' | 'ready' | 'error';
+
+const NO_PREVIOUS_PAINT: ReadonlyMap<string, ChatPaintRow> = new Map();
 
 const getRowPromotionPassKey = ({
   window,
@@ -357,6 +362,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     composerGeometry,
     freeze,
     keyboardOffset,
+    renderers,
     onMessagePress,
     onMessageLongPress,
     onScrolledUpChange,
@@ -1036,6 +1042,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     paintRows,
     unreadBoundaryCursor,
   });
+  const estimateMessageHeight = renderers?.estimateMessageHeight;
   const estimatedItemSize = useMemo(() => {
     const cachedEstimate = estimatedItemSizeRef.current;
     if (cachedEstimate?.identityKey === openIdentityKey) return cachedEstimate.value;
@@ -1044,10 +1051,11 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     const estimate = getChatListEstimatedItemSize(
       displayRows,
       estimateCharsPerLine(Math.max(120, windowWidth * 0.78 - 12)),
+      estimateMessageHeight,
     );
     estimatedItemSizeRef.current = { identityKey: openIdentityKey, value: estimate };
     return estimate;
-  }, [displayRows, openIdentityKey, windowWidth]);
+  }, [displayRows, estimateMessageHeight, openIdentityKey, windowWidth]);
 
   const handleFirstLayout = useCallback(() => {
     if (didMarkLayoutRef.current) return;
@@ -2496,12 +2504,36 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     ],
   );
 
+  const dateRowHeight = renderers?.dateRowHeight;
+  const unreadDividerHeight = renderers?.unreadDividerHeight;
+  const getFixedItemSize = useMemo(
+    () => resolveFixedItemSize({ dateRowHeight, unreadDividerHeight }),
+    [dateRowHeight, unreadDividerHeight],
+  );
+
+  // Only a custom MessageRow wants the row above, so the classic row never pays for this.
+  const hasCustomMessageRow = renderers?.MessageRow !== undefined;
+  const previousPaintByRowId = useMemo(() => {
+    // Shared and stable when unused, so the classic row callback never sees a new dependency.
+    if (!hasCustomMessageRow) return NO_PREVIOUS_PAINT;
+    const byId = new Map<string, ChatPaintRow>();
+    for (let index = 1; index < displayRows.length; index += 1) {
+      const row = displayRows[index];
+      const previous = displayRows[index - 1];
+      if (row?.type === 'message' && previous?.type === 'message') {
+        byId.set(row.id, previous.paint);
+      }
+    }
+    return byId;
+  }, [displayRows, hasCustomMessageRow]);
+
   const renderRow = useCallback(
     ({ item }: { item: ChatRow }): ReactElement => {
       if (item.type === 'date') {
         const dateText = formatDatePill(item.date);
+        const DateRowComponent = renderers?.DateRow ?? DatePill;
         return (
-          <DatePill
+          <DateRowComponent
             dateText={dateText}
             onLayout={layout =>
               recordDateSeparatorLayout('channel-inline', item.id, item.date, dateText, layout)
@@ -2510,17 +2542,20 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
         );
       }
       if (item.type === 'unread-divider') {
-        return <UnreadMessagesDivider />;
+        const UnreadDividerComponent = renderers?.UnreadDivider ?? UnreadMessagesDivider;
+        return <UnreadDividerComponent />;
       }
       const animateEntrance = rowEntranceController.getPending().has(item.id);
+      const MessageRowComponent = renderers?.MessageRow ?? ChatMessageListRow;
       return (
-        <ChatMessageListRow
+        <MessageRowComponent
           item={item}
           animateEntrance={animateEntrance}
           {...(channelType !== undefined ? { channelType } : {})}
           {...(targetConversationId !== undefined ? { targetConversationId } : {})}
           currentUser={currentUser}
           conversation={conversationsById.get(item.paint.conversationId)}
+          {...(hasCustomMessageRow ? { previousPaint: previousPaintByRowId.get(item.id) } : {})}
           presentationStore={rowPresentationStore}
           handleTargetRowReady={handleTargetRowReady}
           isRichRenderingEnabled={isRichRenderingEnabled}
@@ -2546,7 +2581,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       onMessagePress,
       onMessageLongPress,
       handleTargetRowReady,
+      hasCustomMessageRow,
+      previousPaintByRowId,
       recordDateSeparatorLayout,
+      renderers,
       targetConversationId,
     ],
   );
@@ -2895,7 +2933,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       key={listInstanceKey}
       recycleItems
       estimatedItemSize={estimatedItemSize}
-      getFixedItemSize={getChatRowFixedSize}
+      getFixedItemSize={getFixedItemSize}
       getItemType={getChatRowItemType}
       initialScrollAtEnd={shouldUseInitialScrollAtEnd}
       {...(shouldExposeInitialScrollIndex ? { initialScrollIndex } : {})}

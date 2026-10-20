@@ -18,10 +18,10 @@ import {
 import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
 import { haptics } from '@/src/utils/haptics';
 import { CallIcon, XyneAIStarIcon } from '@/src/components/icons';
-import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { ChannelScopeType } from '@xyne/shared';
 
 import { ChatHeaderV3Props } from './chat-header-v3.types';
+import { useConversationHeaderRoutes } from './use-conversation-header-routes';
 import { chatOpenProfiler } from '@/src/features/chat/chatOpenProfiler';
 import { openBaseConversationListRoute } from '@/src/utils/openChatRoute';
 import {
@@ -130,14 +130,7 @@ const ChatHeaderV3: React.FC<ChatHeaderV3Props> = ({
     void haptics.buttonTap();
   }, []);
 
-  const handleOpenInfo = useCallback(() => {
-    // Haptic fires on press-in (handlePillPressIn), matching HeaderIconButton.
-    router.push({ pathname: '/(protected)/chat/[channelId]/info', params: { channelId } });
-  }, [router, channelId]);
-
-  const handleAskAI = useCallback(() => {
-    router.push({ pathname: '/xyne-ai', params: channelScopeParams(channel) });
-  }, [channel, router]);
+  const { handleOpenInfo, handleAskAI } = useConversationHeaderRoutes(channelId, channel);
 
   return (
     <View

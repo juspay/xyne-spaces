@@ -22,6 +22,7 @@ import { Edited } from './conversation-composer-edited';
 import { Pinned } from './conversation-composer-pinned';
 import { Bookmarked } from './conversation-composer-bookmarked';
 import { Reactions } from './conversation-composer-reactions';
+import { LinkPreview } from './conversation-composer-link-preview';
 import { SystemMessage } from './conversation-composer-system-message';
 import { Deleted } from './conversation-composer-deleted';
 import type { ConversationItem } from './conversation-composer.types';
@@ -150,6 +151,7 @@ const ConversationComposer = {
   Pinned,
   Bookmarked,
   Reactions,
+  LinkPreview,
   SystemMessage,
   Deleted,
 };

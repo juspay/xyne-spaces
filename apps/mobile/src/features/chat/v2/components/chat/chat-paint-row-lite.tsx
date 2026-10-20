@@ -13,7 +13,10 @@ import { ChannelScopeType } from '@xyne/shared';
 import { useCSSVariable } from 'uniwind';
 
 import Avatar from '@/src/components/ui/avatar';
-import { useChatUserProfileActionsSheet } from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
+import {
+  useChatUserProfileActionsSheet,
+  useOpenSenderProfile,
+} from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import { cn } from '@/src/utils/cn';
 import { colorFromUsernamePalette } from '@/src/features/chat/v2/components/conversation-composer/utils/getUserColor';
@@ -401,7 +404,7 @@ const InlineRichPaintPreviewText = ({
   );
 };
 
-const PaintPreviewText = ({
+export const PaintPreviewText = ({
   row,
   className,
   compact = false,
@@ -610,16 +613,10 @@ const PaintPreviewText = ({
 
 const PaintAvatar = ({ row }: { row: ChatPaintRow }): ReactElement | null => {
   const profileActions = useChatUserProfileActionsSheet();
-  const handlePress = useCallback(
-    (event: GestureResponderEvent): void => {
-      event.stopPropagation();
-      profileActions?.openUserProfileActions({
-        userId: row.senderPaintModel.senderId,
-        displayName: row.senderPaintModel.displayName,
-      });
-    },
-    [profileActions, row.senderPaintModel.displayName, row.senderPaintModel.senderId],
-  );
+  const handlePress = useOpenSenderProfile({
+    userId: row.senderPaintModel.senderId,
+    displayName: row.senderPaintModel.displayName,
+  });
 
   if (!row.showAvatar) {
     return <View className='h-6 w-6' />;
@@ -759,16 +756,10 @@ const ChatPaintRowLiteComponent = ({
   const reactionSummaryCount = row.reactionSummaryCount;
   const hasParentPreview = !!(row.parentPreview?.text ?? row.parentPreviewText);
   const replyCount = row.replyPreview?.count ?? row.replyCount;
-  const handleSenderNamePress = useCallback(
-    (event: GestureResponderEvent): void => {
-      event.stopPropagation();
-      profileActions?.openUserProfileActions({
-        userId: row.senderPaintModel.senderId,
-        displayName: row.senderPaintModel.displayName,
-      });
-    },
-    [profileActions, row.senderPaintModel.displayName, row.senderPaintModel.senderId],
-  );
+  const handleSenderNamePress = useOpenSenderProfile({
+    userId: row.senderPaintModel.senderId,
+    displayName: row.senderPaintModel.displayName,
+  });
 
   if (row.isTicketActivity) {
     return (

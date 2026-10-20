@@ -1,6 +1,6 @@
 import type { ThemeName } from 'uniwind';
 
-import { coral, neutral } from './primitives';
+import { blue, coral, indigo, neutral, orange } from './primitives';
 import type { RoleValues } from './roles';
 
 export type ThemeMode = 'light' | 'dark';
@@ -30,6 +30,13 @@ const PALETTES = {
       background: neutral[0],
       foreground: neutral[900],
       muted: neutral[600],
+      subtle: neutral[500],
+      outline: neutral[200],
+      mention: blue[600],
+      'mention-surface': blue[50],
+      'mention-self': orange[700],
+      'mention-self-surface': orange[100],
+      'identity-self': indigo[500],
       surface: neutral[100],
       'surface-raised': neutral[0],
       accent: coral[500],
@@ -39,6 +46,13 @@ const PALETTES = {
       background: neutral[900],
       foreground: neutral[0],
       muted: neutral[400],
+      subtle: neutral[500],
+      outline: neutral[700],
+      mention: blue[500],
+      'mention-surface': blue[900],
+      'mention-self': orange[300],
+      'mention-self-surface': orange[900],
+      'identity-self': indigo[500],
       surface: neutral[800],
       /**
        * Lighter than both the page and `surface`, which is the dark-theme

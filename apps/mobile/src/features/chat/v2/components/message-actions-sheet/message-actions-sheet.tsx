@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -57,6 +58,28 @@ export type MessageActionsSheetHandle = {
   openForward: () => void;
 };
 
+/**
+ * What a replacement actions view receives. It stands in for the classic
+ * bottom sheet's `actions` view only; forward, the emoji picker, keyboard
+ * handling, back button and the close/dismiss bookkeeping stay the sheet's.
+ */
+export type MessageActionsViewProps = {
+  target: MessageActionsTarget;
+  /** The visible actions, in the classic order. */
+  actions: MessageAction[];
+  isOpen: boolean;
+  /** False for deleted and unsent messages, as in the classic rail. */
+  showReactionRail: boolean;
+  /** Toggles a quick emoji reaction on the message and closes. */
+  onReact: (emoji: string) => void;
+  /** Switches to the full emoji picker. */
+  onOpenEmojiPicker: () => void;
+  /** Asks the sheet to close; the view reports `onDismissed` once it is gone. */
+  onRequestClose: () => void;
+  /** The view has finished leaving the screen after `isOpen` went false. */
+  onDismissed: () => void;
+};
+
 export type MessageActionsSheetProps = {
   target: MessageActionsTarget | null;
   actions: MessageAction[];
@@ -66,6 +89,8 @@ export type MessageActionsSheetProps = {
   currentUserId?: string | undefined;
   /** Observes emoji-driven reactions (the reaction mutation itself is handled internally). */
   onEmojiSelect?: ((selection: EmojiPickerSelection) => void) | undefined;
+  /** Optional replacement for the bottom-sheet `actions` view. Unset keeps the classic sheet. */
+  actionsView?: ComponentType<MessageActionsViewProps> | undefined;
 };
 
 type ViewType = 'actions' | 'forward' | 'emoji';
@@ -111,9 +136,10 @@ const ActionButton = ({
 
 export const MessageActionsSheet = forwardRef<MessageActionsSheetHandle, MessageActionsSheetProps>(
   (
-    { target, actions, isOpen, onOpenChange, onDismiss, currentUserId, onEmojiSelect },
+    { target, actions, isOpen, onOpenChange, onDismiss, currentUserId, onEmojiSelect, actionsView },
     ref,
   ): ReactElement => {
+    const ActionsView = actionsView;
     const emojiPickerTraceIdRef = useRef<string | null>(null);
     const reactionTargetRef = useRef<ReactionTarget | null>(null);
     const afterActionSheetDismissRef = useRef<(() => void) | null>(null);
@@ -256,6 +282,15 @@ export const MessageActionsSheet = forwardRef<MessageActionsSheetHandle, Message
       onDismiss?.();
     }, [onDismiss, onOpenChange, resetSheetState, runAfterActionSheetDismiss]);
 
+    // A replacement actions view has no native dismissal to report once its
+    // target is gone, so finish the dismissal here (freeze, after-dismiss work).
+    const replacementViewOrphaned = Boolean(
+      ActionsView && sheetMounted && view === 'actions' && !renderTarget,
+    );
+    useEffect(() => {
+      if (replacementViewOrphaned) handleModalDismiss();
+    }, [handleModalDismiss, replacementViewOrphaned]);
+
     const handleOpenEmojiPicker = useCallback(() => {
       emojiPickerTraceIdRef.current = createEmojiPickerTraceId();
       logEmojiPickerDiagnostic(emojiPickerTraceIdRef.current, 'more_reactions_pressed');
@@ -350,6 +385,11 @@ export const MessageActionsSheet = forwardRef<MessageActionsSheetHandle, Message
       ],
     );
 
+    const handleQuickReact = useCallback(
+      (emoji: string): void => handleEmojiSelect({ type: 'emoji', value: emoji }),
+      [handleEmojiSelect],
+    );
+
     const visibleActions = useMemo(
       () => renderActions.filter(action => action.visible),
       [renderActions],
@@ -367,7 +407,20 @@ export const MessageActionsSheet = forwardRef<MessageActionsSheetHandle, Message
 
     return (
       <>
-        {sheetMounted && view === 'actions' ? (
+        {sheetMounted && view === 'actions' && ActionsView ? (
+          renderTarget ? (
+            <ActionsView
+              target={renderTarget}
+              actions={visibleActions}
+              isOpen={isOpen}
+              showReactionRail={showReactionRail}
+              onReact={handleQuickReact}
+              onOpenEmojiPicker={handleOpenEmojiPicker}
+              onRequestClose={close}
+              onDismissed={handleModalDismiss}
+            />
+          ) : null
+        ) : sheetMounted && view === 'actions' ? (
           <AppBottomSheet
             isOpen={isOpen}
             onOpenChange={handleActionsSheetOpenChange}

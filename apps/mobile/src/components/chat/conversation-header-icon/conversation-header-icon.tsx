@@ -25,6 +25,15 @@ export type ConversationHeaderIconProps = {
   isOnline: boolean;
 };
 
+/** The online / offline dot on a DM avatar in a conversation header. */
+export const HeaderPresenceDot: React.FC<{ isOnline: boolean }> = ({ isOnline }) => (
+  <View
+    className={`absolute bottom-0 right-0 size-2 translate-x-px translate-y-px rounded-full border border-background ${
+      isOnline ? 'bg-green-500' : 'bg-[#9CA3AF]'
+    }`}
+  />
+);
+
 const ConversationHeaderIcon: React.FC<ConversationHeaderIconProps> = ({
   isDM,
   isChannel,
@@ -38,11 +47,7 @@ const ConversationHeaderIcon: React.FC<ConversationHeaderIconProps> = ({
     return (
       <View className='relative '>
         <Avatar userIds={dmProfileUserId ? [dmProfileUserId] : []} size={20} />
-        <View
-          className={`absolute bottom-0 right-0 size-2 translate-x-px translate-y-px rounded-full border border-background ${
-            isOnline ? 'bg-green-500' : 'bg-[#9CA3AF]'
-          }`}
-        />
+        <HeaderPresenceDot isOnline={isOnline} />
       </View>
     );
   }

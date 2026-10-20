@@ -1,5 +1,9 @@
 export { MessageActionsSheet } from './message-actions-sheet';
-export type { MessageActionsSheetHandle, MessageActionsSheetProps } from './message-actions-sheet';
+export type {
+  MessageActionsSheetHandle,
+  MessageActionsSheetProps,
+  MessageActionsViewProps,
+} from './message-actions-sheet';
 export { MessageReminderOptionsSheet } from './message-reminder-options-sheet';
 export {
   conversationItemToActionsTarget,

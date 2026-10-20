@@ -1,4 +1,11 @@
-import { memo, useCallback, useMemo, useSyncExternalStore, type ReactElement } from 'react';
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import {
   Pressable,
   type PressableStateCallbackType,
@@ -146,7 +153,7 @@ const useRowPresentation = (store: RowPresentationStore, conversationId: string)
     () => EMPTY_ROW_PRESENTATION,
   );
 
-type ChatMessageListRowProps = {
+export type ChatMessageListRowProps = {
   item: ChatMessageRow;
   channelType?: ChannelScopeType | undefined;
   targetConversationId?: string | undefined;
@@ -161,22 +168,14 @@ type ChatMessageListRowProps = {
   onMessagePress: (conversation: ConversationItem, paintRow: ChatPaintRow) => void;
 };
 
-export const ChatMessageListRow = memo(function ChatMessageListRow({
-  item,
-  channelType,
-  targetConversationId,
-  animateEntrance = false,
-  currentUser,
-  conversation,
-  presentationStore,
-  handleTargetRowReady,
-  isRichRenderingEnabled,
-  onRowContentExpanded,
-  onMessageLongPress,
-  onMessagePress,
-}: ChatMessageListRowProps): ReactElement {
-  const zero = useZero();
-  const presentation = useRowPresentation(presentationStore, item.paint.conversationId);
+/** What kind of message the conversation's first message is. */
+export const useInitialMessageFacts = (
+  conversation: ConversationItem | undefined,
+): {
+  initialMessageSummary: InitialMessageSummary;
+  isForwardedMessage: boolean;
+  isFlowJsonMessage: boolean;
+} => {
   const initialMessageSummary = useMemo(
     () =>
       conversation?.initial_message_md
@@ -184,14 +183,35 @@ export const ChatMessageListRow = memo(function ChatMessageListRow({
         : null,
     [conversation?.initial_message_md],
   );
-  const useStableTicketRow = !!item.paint.ticketPreview;
   const isForwardedMessage = initialMessageSummary?.msgType === MessageType.FORWARDED;
   const isFlowJsonMessage = isFlowJsonHtml(initialMessageSummary?.content ?? '');
-  const useSpecialSystemComposer =
-    item.paint.rowKind === 'SYSTEM' && hasSpecialSystemMessageUi(initialMessageSummary);
-  const useStableSystemRow =
-    item.paint.rowKind === 'SYSTEM' && !useSpecialSystemComposer && !isFlowJsonMessage;
-  const useMessageRow = useStableTicketRow || useStableSystemRow;
+  return { initialMessageSummary, isForwardedMessage, isFlowJsonMessage };
+};
+
+type ChatMessageRowStateArgs = {
+  item: ChatMessageRow;
+  conversation: ConversationItem | undefined;
+  presentationStore: RowPresentationStore;
+  isRichRenderingEnabled: boolean;
+};
+
+/** Presentation, message-kind facts and the lite-to-rich decision for one row. */
+export const useChatMessageRowState = ({
+  item,
+  conversation,
+  presentationStore,
+  isRichRenderingEnabled,
+}: ChatMessageRowStateArgs): {
+  presentation: RowPresentation;
+  initialMessageSummary: InitialMessageSummary;
+  isForwardedMessage: boolean;
+  isFlowJsonMessage: boolean;
+  showRichShell: boolean;
+  allowMediaHydration: boolean;
+} => {
+  const presentation = useRowPresentation(presentationStore, item.paint.conversationId);
+  const { initialMessageSummary, isForwardedMessage, isFlowJsonMessage } =
+    useInitialMessageFacts(conversation);
   const shouldKeepPaintPreview = shouldKeepChatPaintPreview({
     isCollapsible: item.paint.collapse.isCollapsible,
     isForwardedMessage,
@@ -204,6 +224,34 @@ export const ChatMessageListRow = memo(function ChatMessageListRow({
     !shouldKeepPaintPreview &&
     (isFlowJsonMessage || isForwardedMessage || (isRichRenderingEnabled && presentation.rich));
   const allowMediaHydration = showRichShell && (isForwardedMessage || presentation.media);
+  return {
+    presentation,
+    initialMessageSummary,
+    isForwardedMessage,
+    isFlowJsonMessage,
+    showRichShell,
+    allowMediaHydration,
+  };
+};
+
+type ChatMessageRowInteractionsArgs = {
+  item: ChatMessageRow;
+  conversation: ConversationItem | undefined;
+  onMessageLongPress: (conversation: ConversationItem) => void;
+  onMessagePress: (conversation: ConversationItem, paintRow: ChatPaintRow) => void;
+};
+
+/** Tap, retry and long-press behaviour shared by every message row layout. */
+export const useChatMessageRowInteractions = ({
+  item,
+  conversation,
+  onMessageLongPress,
+  onMessagePress,
+}: ChatMessageRowInteractionsArgs): {
+  handlePress: () => void;
+  handleLongPress: () => void;
+} => {
+  const zero = useZero();
   const pending = usePendingByMessageId(item.paint.messageId ?? '');
   const pendingStatus = usePendingStatusByMessageId(item.paint.messageId ?? '');
   // Only intercept the tap when there's something for the user to act on
@@ -238,10 +286,75 @@ export const ChatMessageListRow = memo(function ChatMessageListRow({
     onMessageLongPress(conversation);
   }, [conversation, onMessageLongPress]);
 
+  return { handlePress, handleLongPress };
+};
+
+type ChatMessageRowShellProps = {
+  rowId: string;
+  targetConversationId?: string | undefined;
+  animateEntrance?: boolean | undefined;
+  handleTargetRowReady: (rowId: string) => void;
+  children: ReactNode;
+};
+
+/** Reports when the deep-link target row has laid out, highlights it, and animates entrance. */
+export const ChatMessageRowShell = ({
+  rowId,
+  targetConversationId,
+  animateEntrance = false,
+  handleTargetRowReady,
+  children,
+}: ChatMessageRowShellProps): ReactElement => {
   const handleLayout = useCallback((): void => {
-    handleTargetRowReady(item.id);
-  }, [handleTargetRowReady, item.id]);
-  const isTargetRow = targetConversationId === item.id;
+    handleTargetRowReady(rowId);
+  }, [handleTargetRowReady, rowId]);
+  const isTargetRow = targetConversationId === rowId;
+  const rowContent = isTargetRow ? (
+    <MessageHighlight enabled>{children}</MessageHighlight>
+  ) : (
+    children
+  );
+
+  return (
+    <View {...(isTargetRow ? { onLayout: handleLayout } : {})}>
+      {animateEntrance ? <ChatRowEntrance>{rowContent}</ChatRowEntrance> : rowContent}
+    </View>
+  );
+};
+
+export const ChatMessageListRow = memo(function ChatMessageListRow({
+  item,
+  channelType,
+  targetConversationId,
+  animateEntrance = false,
+  currentUser,
+  conversation,
+  presentationStore,
+  handleTargetRowReady,
+  isRichRenderingEnabled,
+  onRowContentExpanded,
+  onMessageLongPress,
+  onMessagePress,
+}: ChatMessageListRowProps): ReactElement {
+  const {
+    presentation,
+    initialMessageSummary,
+    isFlowJsonMessage,
+    showRichShell,
+    allowMediaHydration,
+  } = useChatMessageRowState({ item, conversation, presentationStore, isRichRenderingEnabled });
+  const useStableTicketRow = !!item.paint.ticketPreview;
+  const useSpecialSystemComposer =
+    item.paint.rowKind === 'SYSTEM' && hasSpecialSystemMessageUi(initialMessageSummary);
+  const useStableSystemRow =
+    item.paint.rowKind === 'SYSTEM' && !useSpecialSystemComposer && !isFlowJsonMessage;
+  const useMessageRow = useStableTicketRow || useStableSystemRow;
+  const { handlePress, handleLongPress } = useChatMessageRowInteractions({
+    item,
+    conversation,
+    onMessageLongPress,
+    onMessagePress,
+  });
 
   const shouldHydrateInlineEmoji =
     isRichRenderingEnabled || (item.paint.body?.customEmojiIds.length ?? 0) > 0;
@@ -308,15 +421,15 @@ export const ChatMessageListRow = memo(function ChatMessageListRow({
       {content}
     </View>
   );
-  const rowContent = isTargetRow ? (
-    <MessageHighlight enabled>{paddedContent}</MessageHighlight>
-  ) : (
-    paddedContent
-  );
 
   return (
-    <View {...(isTargetRow ? { onLayout: handleLayout } : {})}>
-      {animateEntrance ? <ChatRowEntrance>{rowContent}</ChatRowEntrance> : rowContent}
-    </View>
+    <ChatMessageRowShell
+      rowId={item.id}
+      targetConversationId={targetConversationId}
+      animateEntrance={animateEntrance}
+      handleTargetRowReady={handleTargetRowReady}
+    >
+      {paddedContent}
+    </ChatMessageRowShell>
   );
 });

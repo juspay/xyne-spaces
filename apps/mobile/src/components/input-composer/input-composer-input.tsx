@@ -1,5 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Alert, Text, View } from 'react-native';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
+import { Alert, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import {
   EnrichedTextInput,
   type EnrichedTextInputProps,
@@ -52,6 +61,20 @@ import {
 type InputProps = EnrichedTextInputProps & {
   className?: string;
   disabled?: boolean;
+  /**
+   * Optional restyle seams. When all are absent the composer renders exactly the
+   * classic pill. `surfaceClassName` replaces the pill + unfocused-preview fill.
+   */
+  surfaceClassName?: string;
+  /** Merged over the pill's base style (radius / overflow). */
+  shellStyle?: StyleProp<ViewStyle>;
+  /** Drops the inline unfocused "+" overlay (caller renders its own entry point). */
+  hideLeadingAttach?: boolean;
+  /** Pinned to the field's trailing edge; reserve its width with `trailingInset`. */
+  trailingSlot?: ReactNode;
+  trailingInset?: number;
+  /** Replaces the focused footer row (attach / format / emoji / send). */
+  footerSlot?: ReactNode;
 };
 
 const normalizePastedText = (value: string): string =>
@@ -74,10 +97,17 @@ const nativeTextMatchesMultilineClipboard = (
 };
 
 const DEFAULT_MENTION_INDICATORS = ['@', '#'];
+const shellBaseStyle = { borderRadius: 20, overflow: 'hidden' as const };
 
 const InputComponent = ({
   className,
   disabled = false,
+  surfaceClassName,
+  shellStyle,
+  hideLeadingAttach = false,
+  trailingSlot,
+  trailingInset = 0,
+  footerSlot,
   editable = true,
   placeholder,
   onChangeText,
@@ -500,9 +530,9 @@ const InputComponent = ({
     isInputFocused,
     hasDraft: hasComposerContent || showUnfocusedTextPreview,
   });
-  const showLeadingAttach = !isInputFocused && !isEditing;
+  const showLeadingAttach = !isInputFocused && !isEditing && !hideLeadingAttach;
   const inputPaddingLeft = composerInputLeadingInset(isInputFocused, showLeadingAttach);
-  const inputPaddingRight = composerInputTrailingInset(isInputFocused);
+  const inputPaddingRight = composerInputTrailingInset(isInputFocused) + trailingInset;
   const truncatedPlaceholder =
     resolvedPlaceholder.length > PLACEHOLDER_MAX_LENGTH
       ? `${resolvedPlaceholder.slice(0, PLACEHOLDER_MAX_LENGTH)}...`
@@ -542,11 +572,11 @@ const InputComponent = ({
     <View
       className={cn(
         'relative w-full min-w-0 self-stretch gap-2 py-2.5 px-2',
-        'bg-conversation-input-bg',
+        surfaceClassName ?? 'bg-conversation-input-bg',
         isTwinEditing ? '' : 'shadow-xs',
         className,
       )}
-      style={{ borderRadius: 20, overflow: 'hidden' }}
+      style={shellStyle ? [{ borderRadius: 20, overflow: 'hidden' }, shellStyle] : shellBaseStyle}
     >
       <ChatInput.AttachmentsList />
       <View className='relative w-full min-w-0'>
@@ -581,7 +611,10 @@ const InputComponent = ({
         {showUnfocusedTextPreview ? (
           <View
             pointerEvents='none'
-            className='absolute inset-0 z-[2] flex-row items-center overflow-hidden bg-conversation-input-bg'
+            className={cn(
+              'absolute inset-0 z-[2] flex-row items-center overflow-hidden',
+              surfaceClassName ?? 'bg-conversation-input-bg',
+            )}
             style={{
               paddingLeft: inputPaddingLeft,
               paddingRight: inputPaddingRight,
@@ -627,8 +660,15 @@ const InputComponent = ({
           editable={disabled ? false : editable}
           accessibilityState={{ disabled }}
         />
+        {trailingSlot ? (
+          <View className='absolute right-0 top-0 bottom-0 z-10 justify-center'>
+            {trailingSlot}
+          </View>
+        ) : null}
       </View>
-      {isInputFocused ? (
+      {isInputFocused && footerSlot !== undefined ? (
+        footerSlot
+      ) : isInputFocused ? (
         <View className='w-full flex-row items-center'>
           <View className='min-w-0 flex-1 flex-row items-center gap-2'>
             <ChatInput.AttachmentAction />

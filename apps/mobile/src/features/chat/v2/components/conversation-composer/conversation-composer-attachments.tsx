@@ -122,26 +122,17 @@ const Cell = ({
   );
 };
 
-type AttachmentsProps = {
-  className?: string;
-};
-
-const Attachments = memo(({ className }: AttachmentsProps): ReactElement | null => {
-  const { item, allowMediaHydration } = useConversationComposer();
+/** A message's live attachments, and a function that opens the viewer on one of them by id. */
+export const useMessageAttachmentViewer = (
+  item: ConversationItem,
+): {
+  all: AttachmentItem[];
+  openAttachment: (attachmentId: string) => void;
+} => {
   const router = useRouter();
-  const { width: windowWidth } = useWindowDimensions();
-  const gridMinWidth = Math.min(windowWidth * 0.6, 280);
   const all = useMemo(
     () => activeAttachmentsOf(item.initialMessageAttachments),
     [item.initialMessageAttachments],
-  );
-  const media = useMemo(
-    () => all.filter(a => getAttachmentMediaKind(a.mimetype, a.originalFilename) != null),
-    [all],
-  );
-  const files = useMemo(
-    () => all.filter(a => getAttachmentMediaKind(a.mimetype, a.originalFilename) == null),
-    [all],
   );
   const viewerItems = useMemo<AttachmentsViewerItem[]>(
     () =>
@@ -167,6 +158,26 @@ const Attachments = memo(({ className }: AttachmentsProps): ReactElement | null 
     [router, viewerItems, item.conversationId],
   );
 
+  return { all, openAttachment };
+};
+
+type AttachmentsProps = {
+  className?: string;
+};
+
+const Attachments = memo(({ className }: AttachmentsProps): ReactElement | null => {
+  const { item, allowMediaHydration } = useConversationComposer();
+  const { width: windowWidth } = useWindowDimensions();
+  const gridMinWidth = Math.min(windowWidth * 0.6, 280);
+  const { all, openAttachment } = useMessageAttachmentViewer(item);
+  const media = useMemo(
+    () => all.filter(a => getAttachmentMediaKind(a.mimetype, a.originalFilename) != null),
+    [all],
+  );
+  const files = useMemo(
+    () => all.filter(a => getAttachmentMediaKind(a.mimetype, a.originalFilename) == null),
+    [all],
+  );
   const renderMediaCell = useCallback(
     (attachment: AttachmentItem, overflowCount?: number): ReactElement => (
       <Cell

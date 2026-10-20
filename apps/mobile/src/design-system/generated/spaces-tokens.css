@@ -9,6 +9,13 @@
       --color-spaces-background: #ffffff;
       --color-spaces-foreground: #181819;
       --color-spaces-muted: #595959;
+      --color-spaces-subtle: #727272;
+      --color-spaces-outline: #e5e5e5;
+      --color-spaces-mention: #1d6ae5;
+      --color-spaces-mention-surface: #e6f0fc;
+      --color-spaces-mention-self: #c2610c;
+      --color-spaces-mention-self-surface: #fceede;
+      --color-spaces-identity-self: #5e6ad2;
       --color-spaces-surface: #f2f2f2;
       --color-spaces-surface-raised: #ffffff;
       --color-spaces-accent: #F0716A;
@@ -18,6 +25,13 @@
       --color-spaces-background: #181819;
       --color-spaces-foreground: #ffffff;
       --color-spaces-muted: #9b9b9b;
+      --color-spaces-subtle: #727272;
+      --color-spaces-outline: #3c3c3c;
+      --color-spaces-mention: #2f7cf6;
+      --color-spaces-mention-surface: #1b2a40;
+      --color-spaces-mention-self: #f0a35e;
+      --color-spaces-mention-self-surface: #3a2614;
+      --color-spaces-identity-self: #5e6ad2;
       --color-spaces-surface: #222222;
       --color-spaces-surface-raised: #3c3c3c;
       --color-spaces-accent: #F0716A;

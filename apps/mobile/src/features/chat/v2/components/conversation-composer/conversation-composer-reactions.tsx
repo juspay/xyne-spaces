@@ -250,21 +250,25 @@ export const ReactionsBottomSheet = ({
   );
 };
 
-type ReactionsProps = {
-  availableBubbleWidth: number;
+type ReactionsSheetModelArgs = {
+  raw: readonly RawReaction[];
+  messageId: string | undefined;
+  currentUserId: string | undefined;
 };
 
-const Reactions = memo(({ availableBubbleWidth }: ReactionsProps): ReactElement | null => {
-  const { item, summary, currentUser, allowInlineEmojiHydration, paintRow } =
-    useConversationComposer();
-  const messageId = summary?.messageId;
-  const paintReactions = paintRow?.reactionPreview?.reactions;
-  const reactionsMd = summary?.reactions_md ?? getConversationReactionsMd(item);
+/** What `ReactionsBottomSheet` needs for one message's reactions: groups, rows, and removal. */
+export const useReactionsSheetModel = ({
+  raw,
+  messageId,
+  currentUserId,
+}: ReactionsSheetModelArgs): {
+  groups: PillEmojiGroup[];
+  total: number;
+  rows: ReactionRow[];
+  handleRemoveReaction: (emojiName: string) => void;
+} => {
   const users = useUsers();
   const zero = useZero();
-  const { user } = useAuth();
-  const currentUserId = currentUser?.id ?? user?.user_id;
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const handleRemoveReaction = useCallback(
     (emojiName: string) => {
@@ -281,15 +285,8 @@ const Reactions = memo(({ availableBubbleWidth }: ReactionsProps): ReactElement 
     [currentUserId, messageId, zero],
   );
 
-  const raw = useMemo<RawReaction[]>(() => {
-    if (!messageId) return [];
-    if (paintRow) return paintReactions ? [...paintReactions] : [];
-    return reactionsMdToRawReactions(reactionsMd, messageId);
-  }, [messageId, paintReactions, paintRow, reactionsMd]);
-
   const groups = useMemo(() => groupReactionsForPill(raw), [raw]);
   const total = totalReactionCount(raw);
-  const visibleEmojiCount = getVisibleEmojiCount(availableBubbleWidth, total);
 
   const rows = useMemo<ReactionRow[]>(() => {
     return [...raw]
@@ -309,6 +306,36 @@ const Reactions = memo(({ availableBubbleWidth }: ReactionsProps): ReactElement 
         };
       });
   }, [raw, users, currentUserId]);
+
+  return { groups, total, rows, handleRemoveReaction };
+};
+
+type ReactionsProps = {
+  availableBubbleWidth: number;
+};
+
+const Reactions = memo(({ availableBubbleWidth }: ReactionsProps): ReactElement | null => {
+  const { item, summary, currentUser, allowInlineEmojiHydration, paintRow } =
+    useConversationComposer();
+  const messageId = summary?.messageId;
+  const paintReactions = paintRow?.reactionPreview?.reactions;
+  const reactionsMd = summary?.reactions_md ?? getConversationReactionsMd(item);
+  const { user } = useAuth();
+  const currentUserId = currentUser?.id ?? user?.user_id;
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+
+  const raw = useMemo<RawReaction[]>(() => {
+    if (!messageId) return [];
+    if (paintRow) return paintReactions ? [...paintReactions] : [];
+    return reactionsMdToRawReactions(reactionsMd, messageId);
+  }, [messageId, paintReactions, paintRow, reactionsMd]);
+
+  const { groups, total, rows, handleRemoveReaction } = useReactionsSheetModel({
+    raw,
+    messageId,
+    currentUserId,
+  });
+  const visibleEmojiCount = getVisibleEmojiCount(availableBubbleWidth, total);
 
   const handleOpen = useCallback((event: GestureResponderEvent) => {
     event.stopPropagation();

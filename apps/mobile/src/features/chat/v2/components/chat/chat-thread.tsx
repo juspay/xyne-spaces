@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type ReactElement,
 } from 'react';
 import {
@@ -43,6 +44,7 @@ import {
   type MessageActionsSheetHandle,
   MessageReminderOptionsSheet,
   type MessageActionsTarget,
+  type MessageActionsViewProps,
   messageItemToActionsTarget,
   useMessageActions,
 } from '@/src/features/chat/v2/components/message-actions-sheet';
@@ -50,6 +52,7 @@ import { JoinChannelCard } from '@/src/components/chat/join-channel-card';
 import {
   ConversationInput,
   getConversationInputMinimumHeight,
+  type ConversationInputProps,
   type ChatInputEditingMessage,
   type ChatInputSendPayload,
 } from '@/src/components/input-composer';
@@ -103,6 +106,7 @@ import { ChatPaintRowLite } from '@/src/features/chat/v2/components/chat/chat-pa
 import { ChatRowEntrance } from '@/src/features/chat/v2/components/chat/chat-row-entrance';
 import { ChatUserProfileActionsSheetProvider } from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
 import { ReactionsSheetHost } from '@/src/features/chat/v2/components/chat/reactions-sheet-host';
+import type { ChatRowRenderers } from '@/src/features/chat/v2/components/chat/chat-renderers';
 import { RowEntranceController } from '@/src/features/chat/v2/components/chat/chat-row-entrance-controller';
 import {
   ChatComposer,
@@ -261,6 +265,23 @@ export type ChatThreadProps = {
   isSurfacePending?: boolean;
   hideHeader?: boolean;
   isTranscript?: boolean;
+  /** Optional replacements for the thread message content and inline date block. */
+  renderers?: ChatRowRenderers | undefined;
+  /** Replaces ThreadHeaderV3 when provided. */
+  renderHeader?:
+    | ((props: { channelId: string; threadId: string; onBack: () => void }) => ReactElement)
+    | undefined;
+  /** Height of the custom header spacer; only used when provided. */
+  headerHeight?: number | undefined;
+  /** Background class of the thread surface. */
+  surfaceClassName?: string | undefined;
+  /** Optional replacement for the bottom-sheet actions view. Unset keeps the classic sheet. */
+  messageActionsView?: ComponentType<MessageActionsViewProps> | undefined;
+  /** Optional replacement for the reply composer. Unset keeps ConversationInput. */
+  composerInput?: ComponentType<ConversationInputProps> | undefined;
+  /** Least height the replacement composer occupies. Unset keeps the classic input's. */
+  composerMinimumHeight?:
+    ((safeAreaBottom: number, includeBottomSafeArea: boolean) => number) | undefined;
 };
 
 type EditingTarget = {
@@ -301,7 +322,15 @@ function ChatThreadInner({
   hideHeader = false,
   isTranscript = false,
   composerInsetMode,
+  renderers,
+  renderHeader,
+  headerHeight,
+  surfaceClassName = 'bg-chat-screen',
+  messageActionsView,
+  composerInput,
+  composerMinimumHeight = getConversationInputMinimumHeight,
 }: ChatThreadProps): ReactElement {
+  const ThreadComposerInput = composerInput ?? ConversationInput;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const includeBottomSafeArea = includesChatComposerBottomSafeArea(composerInsetMode);
@@ -309,7 +338,9 @@ function ChatThreadInner({
     () => getChatKeyboardGeometry(insets.bottom, composerInsetMode),
     [composerInsetMode, insets.bottom],
   );
-  const threadHeaderHeight = hideHeader ? 0 : getThreadHeaderCollapsedHeight(insets.top);
+  const threadHeaderHeight = hideHeader
+    ? 0
+    : (headerHeight ?? getThreadHeaderCollapsedHeight(insets.top));
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const estimatedCharsPerLine = useMemo(
     () => estimateCharsPerLine(Math.max(120, windowWidth * 0.78 - 12)),
@@ -445,7 +476,7 @@ function ChatThreadInner({
   );
   const [editingTarget, setEditingTarget] = useState<EditingTarget | null>(null);
   const composerGeometry = useChatComposerGeometry(
-    getConversationInputMinimumHeight(insets.bottom, includeBottomSafeArea),
+    composerMinimumHeight(insets.bottom, includeBottomSafeArea),
     composerHeightResetKey,
   );
   const [threadListViewportHeight, setThreadListViewportHeight] = useState(0);
@@ -1931,57 +1962,101 @@ function ChatThreadInner({
       });
       const canRenderLandingRichContent = !isTicketActivity && !shouldKeepPaintPreview;
       const animateEntrance = rowEntranceController.getPending().has(item.messageId);
-      const content =
+      const showRichContent =
         canRenderLandingRichContent &&
-        (richHydrationReady || isForwardedMessage || isFlowJsonMessage) ? (
-          <ChatComposer
+        (richHydrationReady || isForwardedMessage || isFlowJsonMessage);
+      const allowMediaHydration = mediaHydrationReady || isForwardedMessage || isFlowJsonMessage;
+      const allowInlineEmojiHydration =
+        richHydrationReady || isForwardedMessage || isFlowJsonMessage;
+      const classicContent = showRichContent ? (
+        <ChatComposer
+          key={paintItem.paint.conversationId}
+          conversation={paintItem.conversation}
+          currentUser={currentUser}
+          {...(channel?.scopeType !== undefined ? { channelType: channel.scopeType } : {})}
+          paintRow={paintItem.paint}
+          allowMediaHydration={allowMediaHydration}
+          allowInlineEmojiHydration={allowInlineEmojiHydration}
+          isContentExpanded={isContentExpanded}
+          onContentExpanded={handleThreadContentExpanded}
+          onPress={() => handleThreadMessagePress(item.messageId)}
+          {...(handleParentTicketPress ? { onTicketPress: handleParentTicketPress } : {})}
+          {...(!shouldShowJoinChannel
+            ? { onLongPress: (): void => handleLongPress(item.messageId) }
+            : {})}
+        />
+      ) : (
+        <Pressable
+          onPress={() => handleThreadMessagePress(item.messageId)}
+          onLongPress={
+            !shouldShowJoinChannel ? (): void => handleLongPress(item.messageId) : undefined
+          }
+          delayLongPress={300}
+          style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
+        >
+          <ChatPaintRowLite
             key={paintItem.paint.conversationId}
-            conversation={paintItem.conversation}
-            currentUser={currentUser}
+            row={paintItem.paint}
             {...(channel?.scopeType !== undefined ? { channelType: channel.scopeType } : {})}
-            paintRow={paintItem.paint}
-            allowMediaHydration={mediaHydrationReady || isForwardedMessage || isFlowJsonMessage}
-            allowInlineEmojiHydration={
-              richHydrationReady || isForwardedMessage || isFlowJsonMessage
-            }
-            isContentExpanded={isContentExpanded}
-            onContentExpanded={handleThreadContentExpanded}
-            onPress={() => handleThreadMessagePress(item.messageId)}
+            isPreviousTicketActivity={previousPaintItem?.paint.isTicketActivity === true}
+            isNextTicketActivity={nextPaintItem?.paint.isTicketActivity === true}
+            hydrateInlineEmoji={postPaintReady}
+            isExpanded={isContentExpanded}
+            onExpand={handleThreadContentExpanded}
             {...(handleParentTicketPress ? { onTicketPress: handleParentTicketPress } : {})}
-            {...(!shouldShowJoinChannel
-              ? { onLongPress: (): void => handleLongPress(item.messageId) }
+            {...(handleParentTicketPress && !shouldShowJoinChannel
+              ? { onTicketLongPress: (): void => handleLongPress(item.messageId) }
               : {})}
           />
-        ) : (
-          <Pressable
-            onPress={() => handleThreadMessagePress(item.messageId)}
-            onLongPress={
-              !shouldShowJoinChannel ? (): void => handleLongPress(item.messageId) : undefined
-            }
-            delayLongPress={300}
-            style={({ pressed }) => (pressed ? { opacity: 0.7 } : null)}
-          >
-            <ChatPaintRowLite
-              key={paintItem.paint.conversationId}
-              row={paintItem.paint}
-              {...(channel?.scopeType !== undefined ? { channelType: channel.scopeType } : {})}
-              isPreviousTicketActivity={previousPaintItem?.paint.isTicketActivity === true}
-              isNextTicketActivity={nextPaintItem?.paint.isTicketActivity === true}
-              hydrateInlineEmoji={postPaintReady}
-              isExpanded={isContentExpanded}
-              onExpand={handleThreadContentExpanded}
-              {...(handleParentTicketPress ? { onTicketPress: handleParentTicketPress } : {})}
-              {...(handleParentTicketPress && !shouldShowJoinChannel
-                ? { onTicketLongPress: (): void => handleLongPress(item.messageId) }
-                : {})}
-            />
-          </Pressable>
-        );
+        </Pressable>
+      );
+      const ThreadMessageRowComponent = renderers?.ThreadMessageRow;
+      const content = ThreadMessageRowComponent ? (
+        <ThreadMessageRowComponent
+          key={paintItem.paint.conversationId}
+          paintRow={paintItem.paint}
+          conversation={paintItem.conversation}
+          currentUser={currentUser}
+          {...(channel?.scopeType !== undefined ? { channelType: channel.scopeType } : {})}
+          isContentExpanded={isContentExpanded}
+          classicContent={classicContent}
+          showRichContent={showRichContent}
+          allowMediaHydration={allowMediaHydration}
+          allowInlineEmojiHydration={allowInlineEmojiHydration}
+          hydrateInlineEmoji={postPaintReady}
+          onContentExpanded={handleThreadContentExpanded}
+          onPress={() => handleThreadMessagePress(item.messageId)}
+          {...(!shouldShowJoinChannel
+            ? { onLongPress: (): void => handleLongPress(item.messageId) }
+            : {})}
+          // The replies divider sits between the root and its first reply, so that
+          // reply cannot join the root's block.
+          {...(previousPaintItem && !(index === 1 && replyCount > 0)
+            ? { previousPaint: previousPaintItem.paint }
+            : {})}
+        />
+      ) : (
+        classicContent
+      );
 
       return (
         <View>
           <MessageHighlight enabled={isHighlightTarget}>
-            {showDateDivider ? (
+            {showDateDivider && renderers?.DateRow ? (
+              <renderers.DateRow
+                key={`thread-date-${item.createdAt}`}
+                dateText={dateText ?? ''}
+                onLayout={layout =>
+                  recordDateSeparatorLayout(
+                    'thread-inline',
+                    item.messageId,
+                    item.createdAt,
+                    dateText ?? '',
+                    layout,
+                  )
+                }
+              />
+            ) : showDateDivider ? (
               <View className='items-center justify-center py-4.5'>
                 <DatePillBadge
                   key={`thread-date-${item.createdAt}`}
@@ -2003,29 +2078,33 @@ function ChatThreadInner({
                 {animateEntrance ? <ChatRowEntrance>{content}</ChatRowEntrance> : content}
               </View>
               {index === 0 && replyCount > 0 ? (
-                <View
-                  className='flex-row items-center pr-1'
-                  style={{
-                    minHeight: THREAD_REPLY_DIVIDER_HEIGHT,
-                    marginLeft: THREAD_REPLY_DIVIDER_GUTTER,
-                    marginTop: THREAD_REPLY_DIVIDER_TOP_GAP,
-                    paddingTop: 8,
-                    paddingBottom: 10,
-                  }}
-                >
-                  <Text
-                    className='text-xs text-secondary-foreground'
-                    numberOfLines={1}
+                renderers?.ReplyDivider ? (
+                  <renderers.ReplyDivider replyCount={replyCount} />
+                ) : (
+                  <View
+                    className='flex-row items-center pr-1'
                     style={{
-                      flexShrink: 0,
-                      lineHeight: 18,
-                      minWidth: THREAD_REPLY_DIVIDER_LABEL_MIN_WIDTH,
+                      minHeight: THREAD_REPLY_DIVIDER_HEIGHT,
+                      marginLeft: THREAD_REPLY_DIVIDER_GUTTER,
+                      marginTop: THREAD_REPLY_DIVIDER_TOP_GAP,
+                      paddingTop: 8,
+                      paddingBottom: 10,
                     }}
                   >
-                    {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
-                  </Text>
-                  <View className='h-px flex-1 bg-border opacity-70' style={{ marginLeft: 8 }} />
-                </View>
+                    <Text
+                      className='text-xs text-secondary-foreground'
+                      numberOfLines={1}
+                      style={{
+                        flexShrink: 0,
+                        lineHeight: 18,
+                        minWidth: THREAD_REPLY_DIVIDER_LABEL_MIN_WIDTH,
+                      }}
+                    >
+                      {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
+                    </Text>
+                    <View className='h-px flex-1 bg-border opacity-70' style={{ marginLeft: 8 }} />
+                  </View>
+                )
               ) : null}
             </View>
           </MessageHighlight>
@@ -2055,6 +2134,7 @@ function ChatThreadInner({
       resolvedParentTicketMd,
       postPaintReady,
       recordDateSeparatorLayout,
+      renderers,
       replyCount,
       richHydrationReady,
       rowEntranceController,
@@ -2243,14 +2323,21 @@ function ChatThreadInner({
 
   return (
     <ReactionsSheetHost getConversationById={getThreadConversationById} currentUser={currentUser}>
-      <View className='flex-1 bg-chat-screen'>
-        {!hideHeader && (
-          <ThreadHeaderV3
-            channelId={channelId ?? ''}
-            threadId={threadId ?? ''}
-            onBack={handleBackNavigation}
-          />
-        )}
+      <View className={`flex-1 ${surfaceClassName}`}>
+        {!hideHeader &&
+          (renderHeader ? (
+            renderHeader({
+              channelId: channelId ?? '',
+              threadId: threadId ?? '',
+              onBack: handleBackNavigation,
+            })
+          ) : (
+            <ThreadHeaderV3
+              channelId={channelId ?? ''}
+              threadId={threadId ?? ''}
+              onBack={handleBackNavigation}
+            />
+          ))}
         {!hideHeader ? <View pointerEvents='none' style={{ height: threadHeaderHeight }} /> : null}
 
         <View className='flex-1 overflow-hidden rounded-t-[10px]'>
@@ -2425,7 +2512,7 @@ function ChatThreadInner({
                 {shouldShowJoinChannel ? (
                   <JoinChannelCard channelId={channelId ?? ''} channelTitle={channel?.name} />
                 ) : (
-                  <ConversationInput
+                  <ThreadComposerInput
                     conversationId={channelId ?? ''}
                     threadId={threadId}
                     disabled={isComposerDisabled}
@@ -2448,6 +2535,7 @@ function ChatThreadInner({
           onOpenChange={handleActionsOpenChange}
           onDismiss={handleActionsSheetDismiss}
           currentUserId={currentUser?.id}
+          {...(messageActionsView ? { actionsView: messageActionsView } : {})}
         />
         <MessageReminderOptionsSheet
           target={reminderTarget}

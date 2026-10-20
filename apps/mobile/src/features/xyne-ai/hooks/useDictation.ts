@@ -40,15 +40,19 @@ export interface Dictation {
   interrupt: () => void;
 }
 
-const showPermissionAlert = (): void =>
-  Alert.alert(
-    'Microphone access is off',
-    'Allow microphone and speech recognition access in Settings to dictate to Xyne AI.',
-    [
-      { text: 'Not now', style: 'cancel' },
-      { text: 'Open Settings', onPress: (): void => void Linking.openSettings() },
-    ],
-  );
+const DEFAULT_PERMISSION_MESSAGE =
+  'Allow microphone and speech recognition access in Settings to dictate to Xyne AI.';
+
+export interface DictationOptions {
+  /** Body of the alert shown when microphone access is off. Unset keeps the Xyne AI wording. */
+  permissionMessage?: string;
+}
+
+const showPermissionAlert = (message: string): void =>
+  Alert.alert('Microphone access is off', message, [
+    { text: 'Not now', style: 'cancel' },
+    { text: 'Open Settings', onPress: (): void => void Linking.openSettings() },
+  ]);
 
 // The recogniser leaves the iOS audio session active, which keeps other apps' audio paused.
 const releaseAudioSession = (): void => {
@@ -57,7 +61,12 @@ const releaseAudioSession = (): void => {
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-export function useDictation(text: string, setText: (text: string) => void): Dictation {
+export function useDictation(
+  text: string,
+  setText: (text: string) => void,
+  options: DictationOptions = {},
+): Dictation {
+  const permissionMessage = options.permissionMessage ?? DEFAULT_PERMISSION_MESSAGE;
   const [status, setStatus] = useState<DictationStatus>('idle');
   // Lives until the recogniser reports `end`, so a new session never overlaps the old one.
   const session = useRef<Session | null>(null);
@@ -74,7 +83,7 @@ export function useDictation(text: string, setText: (text: string) => void): Dic
   useSpeechRecognitionEvent('error', ({ error }) => {
     if (!session.current?.writes) return;
     session.current.writes = false;
-    if (error === 'not-allowed') showPermissionAlert();
+    if (error === 'not-allowed') showPermissionAlert(permissionMessage);
     else if (!QUIET_ERRORS.has(error))
       showMessageToast('Dictation stopped. Please try again.', 'error');
   });
@@ -116,7 +125,7 @@ export function useDictation(text: string, setText: (text: string) => void): Dic
     if (!granted) {
       session.current = null;
       setStatus('idle');
-      if (!canAskAgain) showPermissionAlert();
+      if (!canAskAgain) showPermissionAlert(permissionMessage);
       return;
     }
     Speech.start({

@@ -36,8 +36,23 @@ export const neutral = {
 
 /** Kept for palettes that want a blue accent; the default theme uses coral. */
 export const blue = {
+  50: '#e6f0fc',
   500: '#2f7cf6',
   600: '#1d6ae5',
+  900: '#1b2a40',
+} as const;
+
+/** Mentions of the viewer. */
+export const orange = {
+  100: '#fceede',
+  300: '#f0a35e',
+  700: '#c2610c',
+  900: '#3a2614',
+} as const;
+
+/** The viewer's own avatar. */
+export const indigo = {
+  500: '#5e6ad2',
 } as const;
 
 /** The default theme's accent: unread badges, the compose button. */

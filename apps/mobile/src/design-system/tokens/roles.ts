@@ -7,6 +7,18 @@ export const SEMANTIC_ROLES = [
   'foreground',
   /** Secondary text: message preview, timestamp. */
   'muted',
+  /** Tertiary text, quieter than `muted`: message time, member count. */
+  'subtle',
+  /** Hairline borders: cards, the thread hook line. */
+  'outline',
+  /** A mention of someone else, and the surface behind it. */
+  'mention',
+  'mention-surface',
+  /** A mention of the viewer, and the surface behind it. */
+  'mention-self',
+  'mention-self-surface',
+  /** The viewer's own avatar fill. */
+  'identity-self',
   /** A raised block on the background: the active filter chip. */
   'surface',
   /**

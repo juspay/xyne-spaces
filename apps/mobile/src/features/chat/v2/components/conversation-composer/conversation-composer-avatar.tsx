@@ -1,10 +1,13 @@
-import { memo, type ReactElement } from 'react';
-import { Pressable, View, type GestureResponderEvent } from 'react-native';
+import { memo, useCallback, type ReactElement } from 'react';
+import { Pressable, View } from 'react-native';
 import { ChannelScopeType } from '@xyne/shared';
 
 import Avatar from '@/src/components/ui/avatar';
 import type { AvatarFallbackUser } from '@/src/components/ui/avatar/avatar.types';
-import { useChatUserProfileActionsSheet } from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
+import {
+  useChatUserProfileActionsSheet,
+  useOpenSenderProfile,
+} from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
 import { getSenderAvatarFallbackUsers } from '@/src/features/chat/v2/paint/chatPaintAvatarFallback';
 import { useConversationComposer } from './conversation-composer-context';
 import { useOpenUserDm } from './utils/useOpenUserDm';
@@ -33,6 +36,21 @@ const AvatarSlot = memo(({ showCurrentUser = false }: AvatarSlotProps): ReactEle
   const currentUserDisplayName =
     currentUser?.displayName ?? currentUser?.name ?? currentUser?.email ?? 'You';
 
+  const profileDisplayName =
+    paintRow?.senderPaintModel.displayName ??
+    (isCurrentUserMessage ? currentUserDisplayName : undefined);
+  const openSenderDm = useCallback((): void => {
+    void openUserDm(senderId);
+  }, [openUserDm, senderId]);
+  const handlePress = useOpenSenderProfile(
+    {
+      userId: senderId,
+      displayName: profileDisplayName,
+      email: isCurrentUserMessage ? currentUser?.email : undefined,
+    },
+    openSenderDm,
+  );
+
   if (channelType === ChannelScopeType.DM && !shouldShowCurrentUser) {
     return null;
   }
@@ -55,22 +73,6 @@ const AvatarSlot = memo(({ showCurrentUser = false }: AvatarSlotProps): ReactEle
             },
           ]
         : [];
-
-  const handlePress = (event: GestureResponderEvent): void => {
-    event.stopPropagation();
-    if (profileActions) {
-      const profileDisplayName =
-        paintRow?.senderPaintModel.displayName ??
-        (isCurrentUserMessage ? currentUserDisplayName : undefined);
-      profileActions.openUserProfileActions({
-        userId: senderId,
-        displayName: profileDisplayName,
-        email: isCurrentUserMessage ? currentUser?.email : undefined,
-      });
-      return;
-    }
-    void openUserDm(senderId);
-  };
 
   return (
     <DebugBoundary>

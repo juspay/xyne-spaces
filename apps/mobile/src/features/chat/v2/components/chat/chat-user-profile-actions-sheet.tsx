@@ -21,6 +21,7 @@ import {
   Pressable,
   Text,
   View,
+  type GestureResponderEvent,
 } from 'react-native';
 import { BottomSheetView } from '@gorhom/bottom-sheet';
 import { Info, MessageSquare, Phone } from 'lucide-react-native';
@@ -53,6 +54,30 @@ const ChatUserProfileActionsSheetContext =
 
 export const useChatUserProfileActionsSheet = (): ChatUserProfileActionsSheetContextValue | null =>
   useContext(ChatUserProfileActionsSheetContext);
+
+/**
+ * The press handler for a sender's avatar or name: opens the profile actions
+ * sheet when one is mounted, otherwise runs `fallback`. Stops the press from
+ * reaching the message row beneath.
+ */
+export const useOpenSenderProfile = (
+  target: ChatUserProfileActionsTarget,
+  fallback?: () => void,
+): ((event: GestureResponderEvent) => void) => {
+  const profileActions = useChatUserProfileActionsSheet();
+  const { userId, displayName, email } = target;
+  return useCallback(
+    (event: GestureResponderEvent): void => {
+      event.stopPropagation();
+      if (profileActions) {
+        profileActions.openUserProfileActions({ userId, displayName, email });
+        return;
+      }
+      fallback?.();
+    },
+    [displayName, email, fallback, profileActions, userId],
+  );
+};
 
 type ProviderProps = {
   children: ReactNode;

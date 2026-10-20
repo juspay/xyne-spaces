@@ -18,9 +18,20 @@ type SendProps = {
   style?: StyleProp<ViewStyle>;
   onSend?: ChatInputSendHandler;
   children?: ReactNode;
+  /** Optional edge length; unset keeps the composer's send button size. */
+  size?: number;
+  /** Optional style for the wrapper around the button (e.g. to drop its bottom margin). */
+  containerStyle?: StyleProp<ViewStyle>;
 };
 
-const SendComponent = ({ className, style, onSend, children }: SendProps): ReactElement | null => {
+const SendComponent = ({
+  className,
+  style,
+  onSend,
+  children,
+  size = COMPOSER_SEND_BUTTON_SIZE,
+  containerStyle,
+}: SendProps): ReactElement | null => {
   const { isEditing, isTwinEditing } = useChatInputConversation();
   const { accentBg, accentFg } = useBubbleAccent();
   const { canSend } = useChatInputText();
@@ -50,19 +61,22 @@ const SendComponent = ({ className, style, onSend, children }: SendProps): React
   return (
     <View
       collapsable={false}
-      style={{
-        width: COMPOSER_SEND_BUTTON_SIZE,
-        height: COMPOSER_SEND_BUTTON_SIZE,
-        marginBottom: 4,
-        flexShrink: 0,
-      }}
+      style={[
+        {
+          width: size,
+          height: size,
+          marginBottom: 4,
+          flexShrink: 0,
+        },
+        containerStyle,
+      ]}
     >
       <Pressable
         className={cn('items-center justify-center rounded-full', className)}
         style={[
           {
-            width: COMPOSER_SEND_BUTTON_SIZE,
-            height: COMPOSER_SEND_BUTTON_SIZE,
+            width: size,
+            height: size,
             backgroundColor: accentBg,
           },
           style,

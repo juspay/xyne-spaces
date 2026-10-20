@@ -19,7 +19,7 @@ import {
 } from '@/src/features/chat/v3/composer/chatKeyboardConfig';
 
 const DEFAULT_PLACEHOLDER = 'Type a message...';
-const EDIT_PLACEHOLDER = 'Edit message…';
+export const EDIT_PLACEHOLDER = 'Edit message…';
 const noopCancelEdit = (): void => {};
 
 export const getConversationInputMinimumHeight = (

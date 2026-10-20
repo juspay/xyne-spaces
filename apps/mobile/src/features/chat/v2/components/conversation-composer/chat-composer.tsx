@@ -10,7 +10,6 @@ import { cn } from '@/src/utils/cn';
 import { DELETED_ATTACHMENT_PLACEHOLDER } from '@/src/utils/activeAttachments';
 import { DebugBoundary } from './utils/debug-boundary';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
-import { LinkPreviewCard } from '@/src/features/chat/v2/components/chat/link-preview-card';
 import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/message-row';
 import { hasBlockMarkdown } from './utils/parseInlineRich';
 import { hasMarkdownTable } from '@/src/utils/markdownTable';
@@ -52,18 +51,8 @@ const ChatComposerInner = (): ReactElement => {
   const hasAttachments =
     !isDeleted && (hasAnyAttachment(item) || !!paintRow?.allAttachmentsDeleted);
   const showBorderTop = replyCount > 0 && !hasTicket && !hasAttachments;
-  const {
-    ambientAccentColor,
-    currentUserBubbleBg,
-    embeddedBgUser,
-    embeddedMutedUser,
-    embeddedTitleUser,
-    inlineContentMaxWidth,
-    mutedForeground,
-    rootAccentUser,
-    rootTextOther,
-    rootTextUser,
-  } = useChatRenderTokens();
+  const { currentUserBubbleBg, inlineContentMaxWidth, rootTextOther, rootTextUser } =
+    useChatRenderTokens();
   const deletedAttachmentLabelColor = isCurrentUser ? rootTextUser : rootTextOther;
   const hasExpandedBlockBody =
     isContentExpanded && !!paintRow?.body?.markdown && hasBlockMarkdown(paintRow.body.markdown);
@@ -96,18 +85,7 @@ const ChatComposerInner = (): ReactElement => {
             <ConversationComposer.Forwarded className='mb-2.5' />
             <ConversationComposer.Content />
             <ConversationComposer.Ticket className='mb-2.5' />
-            <LinkPreviewCard
-              preview={paintRow?.linkPreview ?? null}
-              isCurrentUser={isCurrentUser}
-              mutedForeground={mutedForeground}
-              accentColor={ambientAccentColor}
-              currentUserColors={{
-                backgroundColor: embeddedBgUser,
-                titleColor: embeddedTitleUser,
-                mutedColor: embeddedMutedUser,
-                accentColor: rootAccentUser,
-              }}
-            />
+            <ConversationComposer.LinkPreview />
             <ConversationComposer.Attachments />
             {paintRow?.allAttachmentsDeleted ? (
               <Text

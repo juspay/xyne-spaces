@@ -2,9 +2,8 @@ import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useUniwind } from 'uniwind';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChannelScopeType } from '@xyne/shared';
 
 import { ConversationHeaderIcon } from '@/src/components/chat/conversation-header-icon';
 import { ConversationHeaderTitleSkeleton } from '@/src/components/chat/conversation-header-title-skeleton';
@@ -15,17 +14,13 @@ import {
   HeaderPill,
   HEADER_ICON_BUTTON_SIZE,
 } from '@/src/components/ui/header-icon-button';
-import { channelScopeParams, messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
-import { useQuery } from '@/src/hooks/useQuery';
-import { composerHtmlToPlainText } from '@/src/components/input-composer/utils/conversation-input.utils';
 import { haptics } from '@/src/utils/haptics';
 import { SUPPORTS_LIQUID_GLASS } from '@/src/utils/platform';
-import { queries } from '@/src/zero/queries';
-import type { BaseConversationSurface } from '@/src/features/chat/baseConversationSurface';
 
 import { ThreadHeaderV3Props } from './thread-header-v3.types';
 import { ThreadHeaderOverflowMenu } from './thread-header-overflow-menu';
+import { useThreadHeaderActions } from './use-thread-header-actions';
 
 const ROOT_SIZE = HEADER_ICON_BUTTON_SIZE;
 const GAP_SIZE = 8;
@@ -39,7 +34,6 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme } = useUniwind();
-  const { surface: surfaceParam } = useLocalSearchParams<{ surface?: string }>();
 
   const isDark = theme === 'dark';
   const blurTint: 'light' | 'dark' = isDark ? 'dark' : 'light';
@@ -59,11 +53,6 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
     canUseMemberActions,
   } = useConversationHeaderData(channelId, { enabled: false });
 
-  const baseConversationSurface: BaseConversationSurface =
-    surfaceParam === 'dms' || isDM || channel?.scopeType === ChannelScopeType.GROUP_DM
-      ? 'dms'
-      : 'channels';
-
   const handleBack = useCallback(() => {
     if (onBack) {
       onBack();
@@ -78,39 +67,12 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
     void haptics.buttonTap();
   }, []);
 
-  /**
-   * Slack's treatment: the pill names the parent conversation, so tapping it
-   * goes there. dismissTo pops to the chat screen when it already sits below
-   * this thread and replaces the thread with it when it does not (deeplink,
-   * notification), so no entry point can strand a thread underneath.
-   *
-   * Deliberately not `onBack` — that is canGoBack() ? back() : replace(), which
-   * from an Activity entry lands on Activity while the pill names the channel.
-   */
-  const handleOpenParentConversation = useCallback(() => {
-    router.dismissTo({
-      pathname: '/chat/[channelId]',
-      params: { channelId, surface: baseConversationSurface },
-    });
-  }, [baseConversationSurface, channelId, router]);
-
-  const [conversation] = useQuery(queries.getConversationById({ conversationId: threadId }), {
-    enabled: Boolean(threadId),
+  const { handleOpenParentConversation, handleAskAI } = useThreadHeaderActions({
+    channelId,
+    threadId,
+    channel,
+    isDM,
   });
-  const rootMessage = conversation?.initialMessage;
-
-  const handleAskAI = useCallback(() => {
-    router.push({
-      pathname: '/xyne-ai',
-      params: {
-        ...channelScopeParams(channel),
-        conversationId: threadId,
-        ...(rootMessage
-          ? messageScopeParams(rootMessage, composerHtmlToPlainText)
-          : { previewText: 'Thread' }),
-      },
-    });
-  }, [channel, rootMessage, router, threadId]);
 
   return (
     <View

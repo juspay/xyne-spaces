@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import type { ChannelScopeType, User } from '@xyne/shared';
 
 import type { ChatMessageRow } from '@/src/features/chat/v2/components/chat/chat-message-list-row';
+import type { ChatRowRenderers } from '@/src/features/chat/v2/components/chat/chat-renderers';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import { getDuplicateChatRowIds } from './chat-list-policy';
 import {
@@ -165,6 +166,23 @@ export const hasLoadedTimestampBoundaryCoverage = (
 export const getChatRowFixedSize = (item: ChatRow): number | undefined =>
   item.type === 'unread-divider' ? getUnreadDividerRowHeight() : undefined;
 
+/** The list's fixed-size callback: the classic one unless the renderers fix a divider height. */
+export const resolveFixedItemSize = (
+  renderers: Pick<ChatRowRenderers, 'dateRowHeight' | 'unreadDividerHeight'>,
+): ((item: ChatRow) => number | undefined) => {
+  const { dateRowHeight, unreadDividerHeight } = renderers;
+  if (dateRowHeight === undefined && unreadDividerHeight === undefined) {
+    return getChatRowFixedSize;
+  }
+  return (item: ChatRow): number | undefined => {
+    if (item.type === 'date' && dateRowHeight !== undefined) return dateRowHeight;
+    if (item.type === 'unread-divider' && unreadDividerHeight !== undefined) {
+      return unreadDividerHeight;
+    }
+    return getChatRowFixedSize(item);
+  };
+};
+
 /**
  * LegendList accepts one initial estimate and then learns averages per item type.
  * Seed that first allocation with the current rows so media/ticket-heavy opens do
@@ -174,18 +192,26 @@ export const getChatRowFixedSize = (item: ChatRow): number | undefined =>
 export const getChatListEstimatedItemSize = (
   rows: readonly ChatRow[],
   charsPerLine?: number,
+  estimateMessageHeight?: (row: ChatPaintRow, previous?: ChatPaintRow) => number,
 ): number => {
   if (rows.length === 0) return CHAT_LIST_INITIAL_ITEM_SIZE;
 
   let totalHeight = 0;
+  let previousRow: ChatRow | undefined;
   for (const row of rows) {
     if (row.type === 'date') {
       totalHeight += getDateRowEstimatedHeight();
     } else if (row.type === 'unread-divider') {
       totalHeight += getUnreadDividerRowHeight();
     } else {
-      totalHeight += getChatRowEstimatedHeight(row.paint, charsPerLine);
+      totalHeight += estimateMessageHeight
+        ? estimateMessageHeight(
+            row.paint,
+            previousRow?.type === 'message' ? previousRow.paint : undefined,
+          )
+        : getChatRowEstimatedHeight(row.paint, charsPerLine);
     }
+    previousRow = row;
   }
 
   return Math.max(
