@@ -1,3 +1,31 @@
+## [1.513.0](https://github.com/juspay/xyne-spaces/compare/v1.512.0...v1.513.0) (2026-10-19)
+
+
+### Features
+
+* design systems as their own records, several per org ([#3190](https://github.com/juspay/xyne-spaces/issues/3190)) ([2428c65](https://github.com/juspay/xyne-spaces/commit/2428c65568885a61733152d6aa6d4b063cfa5105))
+
+## [1.512.0](https://github.com/juspay/xyne-spaces/compare/v1.511.0...v1.512.0) (2026-10-19)
+
+
+### Features
+
+* one xor row + price glm-private-claw/kimi-k3/opus-5/opus-4-8/sonnet-4-5 ([#3215](https://github.com/juspay/xyne-spaces/issues/3215)) ([74a81ac](https://github.com/juspay/xyne-spaces/commit/74a81acb8cb4e57ecdc4f8c73b98212c142697a1))
+
+
+### Bug Fixes
+
+* warm the agent's MCP tools on the user's claw-auth pod when the Ask AI panel opens ([#3199](https://github.com/juspay/xyne-spaces/issues/3199)) ([aefc1c7](https://github.com/juspay/xyne-spaces/commit/aefc1c77513ce078d0cb1aeea40e193c829d0519))
+
+## [1.511.0](https://github.com/juspay/xyne-spaces/compare/v1.510.0...v1.511.0) (2026-10-19)
+
+
+### Features
+
+* cost saved by using Xor metric on the Claw usage dashboard ([#3211](https://github.com/juspay/xyne-spaces/issues/3211)) ([af35866](https://github.com/juspay/xyne-spaces/commit/af35866c77b0770c6f5f44cba0c7c40437ed60b3))
+* extension points for optional claw-auth modules (routes, admin tabs, shared-credential override) ([#3206](https://github.com/juspay/xyne-spaces/issues/3206)) ([6bcd063](https://github.com/juspay/xyne-spaces/commit/6bcd0632a47637d839c21a4cd04c8e5694945b07))
+* record per-run judge/Xor activity on AgentRun ([#3209](https://github.com/juspay/xyne-spaces/issues/3209)) ([805d057](https://github.com/juspay/xyne-spaces/commit/805d057004a0e84f27efebe1931078ecccff03f6))
+
 ## [1.510.0](https://github.com/juspay/xyne-spaces/compare/v1.509.0...v1.510.0) (2026-10-19)
 
 

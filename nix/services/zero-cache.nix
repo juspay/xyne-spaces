@@ -1,5 +1,5 @@
 # Zero-cache service module for services-flake
-# Runs @rocicorp/zero's zero-cache CLI natively via npx
+# Runs the workspace-installed @rocicorp/zero CLI
 #
 # Usage:
 #   services.zero-cache."my-zero-cache" = {
@@ -16,12 +16,6 @@ in
     type = types.attrsOf (types.submodule ({ name, config, ... }: {
       options = {
         enable = lib.mkEnableOption "Zero-cache server";
-
-        package = lib.mkOption {
-          type = types.package;
-          default = pkgs.nodejs;
-          description = "Node.js package to use for running npx";
-        };
 
         port = lib.mkOption {
           type = types.port;
@@ -114,9 +108,8 @@ in
         };
 
         nodeModulesPath = lib.mkOption {
-          type = types.nullOr types.str;
-          default = null;
-          description = "Path to node_modules containing @rocicorp/zero. If null, uses npx.";
+          type = types.str;
+          description = "Runtime path to workspace node_modules containing @rocicorp/zero.";
         };
 
         outputs = {
@@ -163,13 +156,17 @@ in
                   lib.mapAttrsToList (k: v: "${k}=${lib.escapeShellArg v}") envVars
                 );
 
-                # Command to run zero-cache
-                # If nodeModulesPath is provided, use it directly; otherwise use npx with explicit package
-                zeroCacheCmd = if config.nodeModulesPath != null
-                  then "${config.nodeModulesPath}/.bin/zero-cache"
-                  else "${config.package}/bin/npx --yes -p @rocicorp/zero@1.6.1 zero-cache";
+                zeroCacheCmd = lib.escapeShellArg "${config.nodeModulesPath}/.bin/zero-cache";
               in
-              "${pkgs.coreutils}/bin/mkdir -p ${lib.escapeShellArg (builtins.dirOf config.replicaFile)} && ${envExports} ${zeroCacheCmd}";
+              toString (pkgs.writeShellScript "${name}-start" ''
+                set -eu
+                if [ ! -x ${zeroCacheCmd} ]; then
+                  echo "zero-cache is missing from ${config.nodeModulesPath}; run just prepare" >&2
+                  exit 1
+                fi
+                ${pkgs.coreutils}/bin/mkdir -p ${lib.escapeShellArg (builtins.dirOf config.replicaFile)}
+                exec ${pkgs.coreutils}/bin/env ${envExports} ${zeroCacheCmd}
+              '');
 
             readiness_probe = {
               http_get = {

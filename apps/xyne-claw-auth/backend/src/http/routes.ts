@@ -37,10 +37,15 @@ import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-intern
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
+// TEMPORARY — delete this import + its mount + the file once XYNE-66817's
+// backfill has run everywhere and `agent.config.designSystem` is dropped.
+import { adminBackfillDesignSystemsRouter } from "../routes/admin-backfill-design-systems.js";
 import { dashboardRouter } from "../routes/dashboard.js";
 import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
+import { agentWarmRouter, agentWarmInternalRouter } from "../routes/agent-warm.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
+import { designSystemsRouter } from "../routes/design-systems.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
 import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
 import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-shares.js";
@@ -207,9 +212,12 @@ function mountCoreApi(app: Express): void {
   extension?.mount(app, { base: BASE, requireAuth, requireNoAccessToken });
   // TEMPORARY — delete this mount + the import above + the file after backfill.
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
+  app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillDesignSystemsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+  app.use(`${BASE}/agent-warm`, requireAuth, requireNoAccessToken, agentWarmRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
+  app.use(`${BASE}/design-systems`, requireAuth, requireNoAccessToken, designSystemsRouter);
   app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
   // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
   // own workspaceId claim turned into the cookie form requireAuth expects.
@@ -221,6 +229,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
   app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+  app.use(`${BASE}/internal/agent-warm`, requireStrictS2S, agentWarmInternalRouter);
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)

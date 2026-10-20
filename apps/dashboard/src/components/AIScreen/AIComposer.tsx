@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { commandsForSurface } from '@xyne/shared/commands';
-import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
+import { fetchClawAgentModels, warmClawAgent } from '../../services/clawAgentModelsService';
 import { useVoiceHost } from '../Voice/voiceSession';
 import { VoiceStage } from '../Voice/VoiceStage';
 import type { StreamState } from '../../services/XyneAI';
@@ -251,6 +251,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   });
   // Reset the pin/thinking picks when the AGENT changes — but not on mount,
   // where they may be seeded from initialExtras (landing → chat handoff).
+  useEffect(() => {
+    warmClawAgent(modelAgentSlug);
+  }, [modelAgentSlug]);
   const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
     if (prevModelAgentSlug.current === modelAgentSlug) return;
