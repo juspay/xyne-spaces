@@ -65,6 +65,7 @@ import { getFileTypeConfig } from '@/src/components/chat/file-attachment-card';
 import type { ComposerAttachment } from '@/src/components/input-composer/input-composer.types';
 import { withAlpha } from '@/src/utils/color';
 import { showMessageToast } from '@/src/utils/toast';
+import { Event, logger } from '@/src/utils/logger';
 import { useCachedQuery } from '@/src/hooks/useCachedQuery';
 import { queries } from '@/src/zero/queries';
 
@@ -494,6 +495,10 @@ const MailboxReplyRoot = memo(function MailboxReplyRoot({
         if (picked.length === 0) return;
         await addPickedAttachments(picked);
       } catch (error) {
+        logger.logError(Event.FRONTEND_ERROR, error, {
+          context: 'attachment_picker',
+          source: 'mailbox_reply',
+        });
         const message = error instanceof Error ? error.message : 'Unable to add attachment';
         Alert.alert('Attachment unavailable', message);
       } finally {
