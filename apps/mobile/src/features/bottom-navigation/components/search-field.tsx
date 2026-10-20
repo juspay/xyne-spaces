@@ -7,7 +7,6 @@ import Animated, {
   useDerivedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { SearchIcon as RawSearchIcon, CloseIcon as RawCloseIcon } from '../icons';
 
 import { GlassMaterial } from './glass-material';
@@ -42,57 +41,6 @@ export type SearchFieldBinding = {
   onKeyPress?: (event: Parameters<NonNullable<TextInputProps['onKeyPress']>>[0]) => void;
 };
 
-export type GlowOverlayProps = {
-  size: number;
-  id: string;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
-};
-
-export function GlowOverlay({
-  size,
-  id,
-  touchX,
-  touchY,
-  glowProgress,
-}: GlowOverlayProps): ReactElement {
-  const half = size / 2;
-
-  const glowStyle = useAnimatedStyle(() => {
-    const progress = glowProgress.get();
-    const opacity =
-      progress <= 1 ? progress * 0.2 : interpolate(progress, [1, 2], [0.2, 0], 'clamp');
-    const scale = progress <= 1 ? 1 : interpolate(progress, [1, 2], [1, 4], 'clamp');
-
-    return {
-      opacity,
-      transform: [
-        { translateX: touchX.get() - half },
-        { translateY: touchY.get() - half },
-        { scale },
-      ],
-    };
-  });
-
-  return (
-    <Animated.View
-      pointerEvents='none'
-      style={[styles.glow, { width: size, height: size }, glowStyle]}
-    >
-      <Svg width={size} height={size}>
-        <Defs>
-          <RadialGradient id={id} cx='50%' cy='50%' r='50%'>
-            <Stop offset='0%' stopColor='#fff' stopOpacity={1} />
-            <Stop offset='100%' stopColor='#fff' stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
-        <Rect width={size} height={size} fill={`url(#${id})`} />
-      </Svg>
-    </Animated.View>
-  );
-}
-
 /** Focuses the field as it finishes opening, and blurs it on the way out. */
 function useSearchAutofocus(ref: RefObject<TextInput | null>, active: boolean): void {
   useEffect(() => {
@@ -117,9 +65,6 @@ export type SearchButtonProps = {
   pressed: SharedValue<number>;
   overflowX: SharedValue<number>;
   overflowY: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
   composedGesture: ComposedGesture;
 };
 
@@ -130,9 +75,6 @@ export function SearchButton({
   pressed,
   overflowX,
   overflowY,
-  touchX,
-  touchY,
-  glowProgress,
   composedGesture,
 }: SearchButtonProps): ReactElement {
   const palette = useTabBarPalette();
@@ -228,13 +170,6 @@ export function SearchButton({
                   pointerEvents={isSearchActive ? 'auto' : 'none'}
                 />
               </Animated.View>
-              <GlowOverlay
-                size={120}
-                id='searchGlow'
-                touchX={touchX}
-                touchY={touchY}
-                glowProgress={glowProgress}
-              />
             </GlassMaterial>
           </Animated.View>
         </Animated.View>
@@ -251,9 +186,6 @@ export type CloseSearchButtonProps = {
   pressed: SharedValue<number>;
   overflowX: SharedValue<number>;
   overflowY: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
   composedGesture: ComposedGesture;
 };
 
@@ -262,9 +194,6 @@ export function CloseSearchButton({
   pressed,
   overflowX,
   overflowY,
-  touchX,
-  touchY,
-  glowProgress,
   composedGesture,
 }: CloseSearchButtonProps): ReactElement {
   const CloseIcon = useMemo(() => navIcon(RawCloseIcon), []);
@@ -311,13 +240,6 @@ export function CloseSearchButton({
               <View style={styles.iconCenter}>
                 <CloseIcon color={palette.iconActive} />
               </View>
-              <GlowOverlay
-                size={120}
-                id='closeGlow'
-                touchX={touchX}
-                touchY={touchY}
-                glowProgress={glowProgress}
-              />
             </GlassMaterial>
           </Animated.View>
         </Animated.View>
@@ -327,11 +249,6 @@ export function CloseSearchButton({
 }
 
 const styles = StyleSheet.create({
-  glow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-  },
   searchWrapper: {
     flex: 1,
   },

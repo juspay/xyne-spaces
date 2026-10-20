@@ -42,9 +42,6 @@ type PillGestures = {
   pillPressed: SharedValue<number>;
   overflowX: SharedValue<number>;
   overflowY: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
   dragSelector: DragSelector;
   panGesture: ComposedGesture;
 };
@@ -78,9 +75,6 @@ export function usePillGestures(
   const pillPressed = useSharedValue(0);
   const overflowX = useSharedValue(0);
   const overflowY = useSharedValue(0);
-  const touchX = useSharedValue(PILL_WIDTH / 2);
-  const touchY = useSharedValue(PILL_HEIGHT / 2);
-  const glowProgress = useSharedValue(0);
   const menuTriggeredByDrag = useSharedValue(false);
   const selectorVisible = useSharedValue(0);
   const selectorX = useSharedValue(tabCenterX(0));
@@ -100,7 +94,6 @@ export function usePillGestures(
       'worklet';
       menuTriggeredByDrag.set(false);
       pillPressed.set(withTiming(0, { duration: 150 }));
-      glowProgress.set(withTiming(2, { duration: 300 }));
       overflowX.set(withSpring(0, SPRING_BOUNCY));
       overflowY.set(withSpring(0, SPRING_BOUNCY));
       releaseHover();
@@ -135,11 +128,7 @@ export function usePillGestures(
       .onStart(event => {
         cancelAnimation(overflowX);
         cancelAnimation(overflowY);
-        cancelAnimation(glowProgress);
-        touchX.set(event.x);
-        touchY.set(event.y);
         pillPressed.set(withTiming(1, { duration: 80 }));
-        glowProgress.set(1);
         if (searchProgress.get() < 0.5) hoveredTab.set(detectAnyTab(event.x));
       })
       .onFinalize(settle);
@@ -149,11 +138,7 @@ export function usePillGestures(
       .onStart(event => {
         cancelAnimation(overflowX);
         cancelAnimation(overflowY);
-        cancelAnimation(glowProgress);
-        touchX.set(event.x);
-        touchY.set(event.y);
         pillPressed.set(withTiming(1, { duration: 80 }));
-        glowProgress.set(1);
 
         if (searchProgress.get() >= 0.5 || menuProgress.get() > 0.01) return;
         // Starts on the tab that was lit and glides to the finger.
@@ -167,9 +152,6 @@ export function usePillGestures(
         selectorVisible.set(1);
       })
       .onUpdate(event => {
-        touchX.set(event.x);
-        touchY.set(event.y);
-
         const nextOverflowX =
           event.x < 0 ? event.x : event.x > PILL_WIDTH ? event.x - PILL_WIDTH : 0;
         const nextOverflowY =
@@ -263,7 +245,6 @@ export function usePillGestures(
     selectorVisible,
     selectorX,
     commitTab,
-    glowProgress,
     hoveredTab,
     menuProgress,
     menuTriggeredByDrag,
@@ -273,8 +254,6 @@ export function usePillGestures(
     releaseHover,
     searchProgress,
     toggleMenu,
-    touchX,
-    touchY,
     triggerHaptic,
     commitMenuItem,
     hoveredMenuItem,
@@ -285,9 +264,6 @@ export function usePillGestures(
     pillPressed,
     overflowX,
     overflowY,
-    touchX,
-    touchY,
-    glowProgress,
     dragSelector: { visible: selectorVisible, x: selectorX, offset: selectorOffset },
     panGesture,
   };

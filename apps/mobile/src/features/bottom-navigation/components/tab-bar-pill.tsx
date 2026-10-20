@@ -18,7 +18,6 @@ import type { DragSelector as DragSelectorValues } from '../hooks/use-pill-gestu
 import { DragSelector } from './drag-selector';
 import { GlassMaterial } from './glass-material';
 import { MenuPanel } from './menu-panel';
-import { GlowOverlay } from './search-field';
 import { TabIcon } from './tab-icon';
 import {
   ICON_PADDING,
@@ -32,7 +31,6 @@ import {
 
 const HALF_W = PILL_WIDTH / 2;
 const HALF_H = PILL_HEIGHT / 2;
-const GLOW_SIZE = 200;
 
 export type TabBarPillProps = {
   activeTab: SharedValue<number>;
@@ -53,9 +51,6 @@ export type TabBarPillProps = {
   pillPressed: SharedValue<number>;
   overflowX: SharedValue<number>;
   overflowY: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
   dragSelector: DragSelectorValues;
   panGesture: ComposedGesture;
   isMenuOpen: boolean;
@@ -83,9 +78,6 @@ export const TabBarPill = memo(function TabBarPill({
   pillPressed,
   overflowX,
   overflowY,
-  touchX,
-  touchY,
-  glowProgress,
   dragSelector,
   panGesture,
   isMenuOpen,
@@ -145,9 +137,6 @@ export const TabBarPill = memo(function TabBarPill({
                   searchProgress={searchProgress}
                   menuProgress={menuProgress}
                   pillPressed={pillPressed}
-                  touchX={touchX}
-                  touchY={touchY}
-                  glowProgress={glowProgress}
                   dragSelectorVisible={dragSelector.visible}
                 />
               ))}
@@ -162,13 +151,6 @@ export const TabBarPill = memo(function TabBarPill({
             hoveredMenuItem={hoveredMenuItem}
             onSelect={onMenuSelect}
             onCustomize={onCustomize}
-          />
-          <GlowOverlay
-            size={GLOW_SIZE}
-            id='pillGlow'
-            touchX={touchX}
-            touchY={touchY}
-            glowProgress={glowProgress}
           />
         </GlassMaterial>
       </Animated.View>

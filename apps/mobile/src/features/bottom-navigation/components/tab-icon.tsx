@@ -2,7 +2,6 @@ import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  cancelAnimation,
   Easing,
   interpolate,
   useAnimatedStyle,
@@ -24,7 +23,6 @@ import {
   INDICATOR_INSET,
   INDICATOR_RADIUS,
   PILL_BORDER_RADIUS,
-  PILL_HEIGHT,
   PILL_WIDTH,
   BADGE_FONT_SIZE,
   BADGE_HEIGHT,
@@ -72,9 +70,6 @@ export type TabIconProps = {
   searchProgress: SharedValue<number>;
   menuProgress: SharedValue<number>;
   pillPressed: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
   /** 1 while a drag carries the highlight; the tab's own then stands down. */
   dragSelectorVisible: SharedValue<number>;
 };
@@ -94,9 +89,6 @@ export const TabIcon = memo(function TabIcon({
   searchProgress,
   menuProgress,
   pillPressed,
-  touchX,
-  touchY,
-  glowProgress,
   dragSelectorVisible,
 }: TabIconProps): ReactElement {
   const palette = useTabBarPalette();
@@ -117,18 +109,13 @@ export const TabIcon = memo(function TabIcon({
     () =>
       Gesture.Tap()
         .onBegin(() => {
-          touchX.set(tabCenterX(index));
-          touchY.set(PILL_HEIGHT / 2);
           pillPressed.set(withTiming(1, { duration: 80 }));
-          cancelAnimation(glowProgress);
-          glowProgress.set(1);
           if (searchProgress.get() < 0.5) hoveredTab.set(index);
         })
         // The pill's own gesture cancels this tap the moment it activates, so
         // the press has to be acted on here rather than in `onEnd`.
         .onFinalize(() => {
           pillPressed.set(withTiming(0, { duration: 150 }));
-          glowProgress.set(withTiming(2, { duration: 300 }));
           scheduleOnRN(triggerHaptic);
           if (isMenuTab) {
             hoveredTab.set(-1);
@@ -139,15 +126,12 @@ export const TabIcon = memo(function TabIcon({
         }),
     [
       commitTab,
-      glowProgress,
       hoveredTab,
       index,
       isMenuTab,
       onMenuPress,
       pillPressed,
       searchProgress,
-      touchX,
-      touchY,
       triggerHaptic,
     ],
   );
