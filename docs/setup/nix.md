@@ -41,8 +41,9 @@ environment, exit and re-enter `nix develop` so commands inherit the new variabl
 
 ## Without Nix
 
-If you cannot install Nix, run the same stack from a container. Mount your
-checkout and publish the dashboard and backend ports:
+If you cannot install Nix, run the same stack from a container. The image is
+Linux/amd64 and runs as uid 1000. Mount your checkout and publish the dashboard
+and backend ports:
 
 ```bash
 docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
@@ -50,7 +51,12 @@ docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
 ```
 
 It runs `just prepare`, then the services, backend and dashboard. Open
-http://localhost:3000.
+http://localhost:3000. The workspace, `node_modules` and the pnpm store live in
+the mount, so a second run reuses them.
+
+On Linux the checkout must be writable by uid 1000, the image's user; the CI
+image job runs `chown -R 1000:1000` on it first. Docker Desktop on macOS handles
+the mount itself.
 
 ## Automatic shell loading with direnv
 

@@ -16,7 +16,7 @@ waits on runners that can install Nix, so it shouldn't hold up the main track.
 | Phase | What changes | Status |
 | --- | --- | --- |
 | **0** | Nix stack becomes reproducible; Compose leftovers removed | ✅ [#2597] |
-| **1** | One `docker run` for contributors without Nix | ✅ [#3220] |
+| **1** | One `docker run` for contributors without Nix | ✅ [#3220] (built and tested; publish waits on CI 1) |
 | **2** | Dev services move to Nix; dev Compose deleted | |
 | **3** | Docs and agents default to Nix | |
 | **4** | Multi-sandbox runs on Nix; sandbox Compose deleted | |
@@ -56,7 +56,7 @@ definitions.*
 
 - One image runs the services, backend and dashboard[^image]
 - CI runs the smoke test inside it, so it can't drift from the Nix stack
-- Needs CI 1, to build, test and publish the image
+- Built and tested; publishing it waits on CI 1
 
 Nothing leaves Compose until this ships, so nobody loses access.
 
