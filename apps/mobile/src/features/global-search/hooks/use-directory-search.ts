@@ -78,7 +78,7 @@ type SearchablePerson = { user: DirectoryUser; name: string; email: string };
  */
 const peopleSearches = new WeakMap<readonly DirectoryUser[], Search<SearchablePerson>>();
 
-function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePerson> {
+export function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePerson> {
   const cached = peopleSearches.get(users);
   if (cached) return cached;
 
