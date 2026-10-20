@@ -44,15 +44,17 @@ environment, exit and re-enter `nix develop` so commands inherit the new variabl
 If you cannot install Nix, run the same stack from a container. The image is
 Linux/amd64 and runs as uid 1000.
 
-The GHCR image is not published until CI 1 runs the workflow. Until then, build it
-locally (Linux only; a cold build compiles Y-Sweet and takes about 15 minutes):
+The GHCR image is not published until CI 1 runs the workflow. Until then, build and
+run it from this checkout (Linux only; a cold build compiles Y-Sweet and takes about
+15 minutes):
 
 ```bash
-nix build .#dev-image
-./result | docker load
+just dev-image
 ```
 
-Mount your checkout and publish the dashboard and backend ports:
+`just dev-image` builds `.#dev-image`, loads it, and runs it against the checkout
+with the dashboard and backend ports published. With the published image, the plain
+form is:
 
 ```bash
 docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
@@ -77,13 +79,12 @@ docker exec <container> nix-smoke-test --existing-services
 
 ### Over a LAN or Tailscale
 
-Add the host to Vite and the dashboard's origin to the backend's CORS list:
+Pass extra docker flags through `just dev-image` to add the host to Vite and the
+dashboard's origin to the backend's CORS list:
 
 ```bash
-docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
-  -e __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ts.net \
-  -e CORS_ORIGIN=http://localhost:3000,http://<your-host>:3000 \
-  ghcr.io/juspay/xyne-spaces-dev
+just dev-image -e __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ts.net \
+  -e CORS_ORIGIN=http://localhost:3000,http://<your-host>:3000
 ```
 
 A leading dot allows the whole domain (Vite's own variable, as in
