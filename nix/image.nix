@@ -28,9 +28,12 @@ let
     name = "xyne-spaces-dev-entrypoint";
     runtimeInputs = [ pkgs.coreutils pkgs.git pkgs.cacert pkgs.just ];
     text = ''
-      if [ ! -d /src ]; then
-        echo "Mount your checkout at /src:" >&2
-        echo "  docker run -v \"\$PWD\":/src -p 3000:3000 -p 3001:3001 ${imageName}" >&2
+      # Docker creates the working directory if it is missing, so test for the
+      # checkout itself: a missing -v then fails here, not inside `just prepare`.
+      if [ ! -f /src/flake.nix ]; then
+        echo "Mount your checkout at /src, for example:" >&2
+        echo "  docker run -v \"\$PWD\":/src ${imageName}" >&2
+        echo "See docs/setup/nix.md for the published ports." >&2
         exit 1
       fi
       cd /src
@@ -65,6 +68,9 @@ pkgs.dockerTools.streamLayeredImage {
       "HOME=/home/dev"
       "PATH=${lib.makeBinPath (runtimePackages ++ [ smokeTest ])}:/bin:/usr/bin"
       "NODE_ENV=development"
+      # Keep the pnpm store inside the mount so a second `docker run` on the same
+      # checkout does not re-download the workspace.
+      "npm_config_store_dir=/src/.cache/pnpm-store"
       "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
     ] ++ lib.mapAttrsToList (name: value: "${name}=${value}") prismaEnvironment;
