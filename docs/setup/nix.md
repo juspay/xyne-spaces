@@ -42,7 +42,7 @@ environment, exit and re-enter `nix develop` so commands inherit the new variabl
 ## Without Nix
 
 If you cannot install Nix, run the same stack from a container. The image is
-Linux/amd64 and runs as uid 1000.
+Linux (amd64 and arm64) and runs as uid 1000.
 
 The GHCR image is not published until CI 1 runs the workflow. Until then, build and
 run it from this checkout (a cold build compiles Y-Sweet and takes about 15 minutes):
@@ -53,9 +53,13 @@ just dev-image
 
 `just dev-image` builds `.#packages.<system>.dev-image` (default `x86_64-linux` on an
 Intel/AMD host), loads it, and runs it against the checkout with the dashboard and
-backend ports published. It needs a Linux builder: build on Linux, or on macOS through
-nix-darwin's `nix.linux-builder` or a `nixos/nix` container under Docker Desktop or
-OrbStack. With an arm64 builder, pass the system:
+backend ports published. It needs a Linux builder: use Linux, or on macOS
+[nix-darwin's `nix.linux-builder`](https://nixcademy.com/posts/macos-linux-builder/)
+(same arch as the host), or
+[nix-rosetta-builder / a `nixos/nix` container](https://github.com/JamesGuthrie/nix-docker-builder-macos)
+as an ssh-ng builder for both arches; Nix only uses it when a Linux system is requested,
+which is why the recipe names `.#packages.<system>.dev-image`. With an arm64 builder,
+pass the system:
 
 ```bash
 just dev-image aarch64-linux
