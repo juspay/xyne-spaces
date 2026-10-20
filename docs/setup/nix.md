@@ -42,21 +42,38 @@ environment, exit and re-enter `nix develop` so commands inherit the new variabl
 ## Without Nix
 
 If you cannot install Nix, run the same stack from a container. The image is
-Linux/amd64 and runs as uid 1000. Mount your checkout and publish the dashboard
-and backend ports:
+Linux/amd64 and runs as uid 1000.
+
+The GHCR image is not published until CI 1 runs the workflow. Until then, build it
+locally (Linux only; a cold build compiles Y-Sweet and takes about 15 minutes):
+
+```bash
+nix build .#dev-image
+./result | docker load
+```
+
+Mount your checkout and publish the dashboard and backend ports:
 
 ```bash
 docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
   ghcr.io/juspay/xyne-spaces-dev
 ```
 
-It runs `just prepare`, then the services, backend and dashboard. Open
-http://localhost:3000. The workspace, `node_modules` and the pnpm store live in
-the mount, so a second run reuses them.
+The first run executes `just prepare` and installs the workspace into the mount;
+the services, backend and dashboard follow. Open http://localhost:3000. The
+workspace, `node_modules` and the pnpm store live in the mount, so a second run
+reuses them. Do not share the checkout with a host Node install: the container's
+`node_modules` are Linux builds.
 
 On Linux the checkout must be writable by uid 1000, the image's user; the CI
 image job runs `chown -R 1000:1000` on it first. Docker Desktop on macOS handles
 the mount itself.
+
+Check the running container from inside it:
+
+```bash
+docker exec <container> nix-smoke-test --existing-services
+```
 
 ## Automatic shell loading with direnv
 
@@ -160,6 +177,7 @@ deletes references; a new entry needs a justification in the PR description.
 
 ```bash
 nix flake check -L
+nix build .#dev-image
 nix build .#xyne-space-services
 nix develop --command just prepare
 # Stop any running local services/backend before this command:
@@ -174,7 +192,7 @@ kill unrelated processes. To check the backend against services you already have
 running, use `nix run .#nix-smoke-test -- --existing-services`.
 
 The [Nix CI workflow](../../.github/workflows/nix-ci.yml) runs these checks on Linux
-for pull requests, protected-branch pushes and `fix/nix-*` branches. It also supports
-manual dispatch and uploads logs on failure. This is a startup check, not a full UI,
-provider, or call-transcription integration test. macOS and ARM runtime behavior
-are not covered by the Linux CI job.
+when dispatched manually; its pull-request and push triggers stay off until CI 1. It
+uploads logs on failure. This is a startup check, not a full UI, provider, or
+call-transcription integration test. macOS and ARM runtime behavior are not covered
+by the Linux CI job.
