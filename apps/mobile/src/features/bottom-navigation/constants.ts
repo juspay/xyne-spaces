@@ -53,8 +53,15 @@ export const ICON_SPACING = 52;
  */
 export const NAV_ICON_STROKE_WIDTH = 1.6;
 export const ICON_PADDING = 4;
-/** Vertical inset of a tab's highlight inside the pill. */
-export const INDICATOR_INSET = 4;
+/**
+ * Gap between a tab's highlight and the pill's edge — the same above, below
+ * and beside the end tabs, as in Telegram — so it is the row's side padding.
+ */
+export const INDICATOR_INSET = ICON_PADDING;
+/** Concentric with the pill: its radius less the gap between them. */
+export const INDICATOR_RADIUS = PILL_BORDER_RADIUS - INDICATOR_INSET;
+/** Telegram's outline width for its floating tabs: 0.4dp. */
+export const SURFACE_OUTLINE_WIDTH = 0.4;
 
 export const SEARCH_BUTTON_SIZE = 56;
 export const SEARCH_BAR_RADIUS = PILL_BORDER_RADIUS;
@@ -146,11 +153,13 @@ export type TabBarPalette = {
   iconActive: string;
   activeIndicator: string;
   /**
-   * Hairline around the bar's surfaces. The drop shadow separates them from a
-   * light page on its own, but against a dark one it disappears and the panel
-   * runs into the screen behind it.
+   * The hairline around the bar's surfaces, as Telegram draws its floating
+   * tabs: lighter along the top half, darker along the bottom half.
    */
-  surfaceBorder: string;
+  outlineTop: string;
+  outlineBottom: string;
+  /** Telegram's tight shadow under the surface (`setShadowLayer`). */
+  surfaceShadow: string;
   textPrimary: string;
   textSecondary: string;
   divider: string;
@@ -165,7 +174,9 @@ export function useTabBarPalette(): TabBarPalette {
       icon: '#8A8B8D',
       iconActive: '#F4F4F5',
       activeIndicator: '#FFFFFF14',
-      surfaceBorder: 'rgba(255, 255, 255, 0.10)',
+      outlineTop: 'rgba(255, 255, 255, 0.024)',
+      outlineBottom: 'rgba(255, 255, 255, 0.067)',
+      surfaceShadow: '0px 0.85px 2.667px 0px rgba(255, 255, 255, 0.016)',
       textPrimary: 'rgba(255, 255, 255, 0.92)',
       textSecondary: 'rgba(255, 255, 255, 0.45)',
       divider: 'rgba(255, 255, 255, 0.12)',
@@ -178,7 +189,9 @@ export function useTabBarPalette(): TabBarPalette {
     icon: '#A2A3A4',
     iconActive: '#17181C',
     activeIndicator: ACTIVE_TAB_INDICATOR,
-    surfaceBorder: 'rgba(18, 20, 28, 0.06)',
+    outlineTop: 'rgba(0, 0, 0, 0.067)',
+    outlineBottom: 'rgba(0, 0, 0, 0.125)',
+    surfaceShadow: '0px 0.85px 2.667px 0px rgba(0, 0, 0, 0.125)',
     textPrimary: '#111111',
     textSecondary: '#8E8E93',
     divider: 'rgba(18, 20, 28, 0.08)',

@@ -22,6 +22,7 @@ import {
   NAV_ICON_STROKE_WIDTH,
   INDICATOR_FADE,
   INDICATOR_INSET,
+  INDICATOR_RADIUS,
   PILL_BORDER_RADIUS,
   PILL_HEIGHT,
   PILL_WIDTH,
@@ -316,14 +317,15 @@ const styles = StyleSheet.create({
     borderRadius: PILL_BORDER_RADIUS,
   },
   // Inset vertically so the highlight sits inside the pill while the tab itself
-  // stays tappable across the pill's full height.
+  // stays tappable across the pill's full height. With the row's side padding
+  // equal to this inset, the gap around the highlight is the same on all sides.
   indicator: {
     position: 'absolute',
     top: INDICATOR_INSET,
     bottom: INDICATOR_INSET,
     left: 0,
     right: 0,
-    borderRadius: PILL_BORDER_RADIUS,
+    borderRadius: INDICATOR_RADIUS,
   },
   iconWrapper: {
     width: ICON_SIZE,
