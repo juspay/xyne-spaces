@@ -24,6 +24,11 @@ let
     pkgs.process-compose
     pkgs.bash
     pkgs.coreutils
+    pkgs.gnused
+    pkgs.gnugrep
+    pkgs.findutils
+    pkgs.gawk
+    pkgs.which
     pkgs.git
     pkgs.cacert
     transcriptionEnv
