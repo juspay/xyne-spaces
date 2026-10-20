@@ -22,6 +22,7 @@ import { GlassSurface } from '@/src/components/ui/glass-surface';
 
 import type { MessageAttachment } from '../message-attachments.utils';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
+import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
 import { safePlay } from '@/src/utils/safeVideoPlayer';
 
 interface VideoViewerPageProps {
@@ -55,6 +56,17 @@ export const VideoViewerPage = memo(function VideoViewerPage({
     isLoading: isStreamLoading,
     error: streamError,
   } = useMtlsVideoStream(attachment.id, { enabled: isActive });
+  const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
+    surface: 'chat_viewer',
+    subject: {
+      attachmentId: attachment.id,
+      mimetype: attachment.mimetype,
+      originalFilename: attachment.originalFilename,
+      sizeBytes: attachment.size,
+    },
+    sourceKey: attachment.id,
+    active: isActive,
+  });
 
   const [showControls, setShowControls] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -87,8 +99,9 @@ export const VideoViewerPage = memo(function VideoViewerPage({
   useEffect(() => {
     if (streamError) {
       setErrorMessage(streamError.message);
+      reportFailure('stream_url', streamError);
     }
-  }, [streamError]);
+  }, [reportFailure, streamError]);
 
   useEffect(
     (): (() => void) => () => {
@@ -119,12 +132,17 @@ export const VideoViewerPage = memo(function VideoViewerPage({
   });
 
   useEventListener(player, 'sourceLoad', payload => {
+    reportSourceLoad(payload.availableVideoTracks);
     setDurationMs(Math.max(0, Math.round(payload.duration * 1000)));
   });
 
   useEventListener(player, 'statusChange', payload => {
     if (payload.status === 'readyToPlay') {
       setHasLoaded(true);
+      reportReady(Math.round(playerRef.current.duration * 1000));
+    }
+    if (payload.status === 'error') {
+      reportFailure('player_status', payload.error ?? 'Failed to load video');
     }
     if (payload.status === 'readyToPlay' && isActive && shouldAutoPlayRef.current) {
       shouldAutoPlayRef.current = false;
@@ -176,13 +194,14 @@ export const VideoViewerPage = memo(function VideoViewerPage({
         shouldAutoPlayRef.current = false;
         loadedStreamUrlRef.current = null;
         setErrorMessage(err instanceof Error ? err.message : 'Failed to load video');
+        reportFailure('source_replace', err);
       });
 
     return (): void => {
       cancelled = true;
       shouldAutoPlayRef.current = false;
     };
-  }, [streamUrl, isActive, attachment.id]);
+  }, [streamUrl, isActive, attachment.id, reportFailure]);
 
   const hideControlsAfterDelay = useCallback((): void => {
     if (controlsTimeoutRef.current) {

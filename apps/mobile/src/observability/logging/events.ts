@@ -1,5 +1,6 @@
 import { Event } from '@xyne/shared/logger';
 
+import type { VideoPlaybackFailedFields, VideoPlaybackReadyFields } from './media/videoPlayback';
 import type { DefineLogEventMap } from './types';
 
 /** Catalog of structured log events. See `EVENTS.md` in this directory for purpose and when each fires. */
@@ -309,6 +310,10 @@ type AppLogEvents = {
     fcmSentTime: number | null;
     error: unknown;
   }>;
+
+  video_playback_ready: VideoPlaybackReadyFields;
+
+  video_playback_failed: VideoPlaybackFailedFields;
 
   mmkv_handoff_last_op: Readonly<{
     caller: string;
