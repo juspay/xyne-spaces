@@ -1,6 +1,8 @@
 import { Dimensions, ViewStyle } from 'react-native';
 import { Easing, interpolate } from 'react-native-reanimated';
-import { useUniwind } from 'uniwind';
+import { useCSSVariable, useUniwind } from 'uniwind';
+
+import { withAlpha } from '@/src/utils/color';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -155,10 +157,17 @@ export const TAB_BAR_SHADOW =
 
 export const ACTIVE_TAB_INDICATOR = '#0000000D';
 
+/**
+ * How much of the theme's accent the active tab's highlight carries: a shade of
+ * the active Spaces theme's accent rather than a neutral grey.
+ */
+const ACTIVE_INDICATOR_ALPHA = 0.09;
+
 export type TabBarPalette = {
   background: string;
   icon: string;
   iconActive: string;
+  /** The active tab's highlight: a shade of the Spaces theme's accent. */
   activeIndicator: string;
   /**
    * The hairline around the bar's surfaces, as Telegram draws its floating
@@ -176,12 +185,14 @@ export type TabBarPalette = {
 
 export function useTabBarPalette(): TabBarPalette {
   const { theme } = useUniwind();
+  const accent = useCSSVariable('--color-spaces-accent') as string | undefined;
+  const activeIndicator = withAlpha(accent, ACTIVE_INDICATOR_ALPHA);
   if (theme === 'dark') {
     return {
       background: '#181818',
       icon: '#8A8B8D',
       iconActive: '#F4F4F5',
-      activeIndicator: '#FFFFFF14',
+      activeIndicator,
       outlineTop: 'rgba(255, 255, 255, 0.024)',
       outlineBottom: 'rgba(255, 255, 255, 0.067)',
       surfaceShadow: '0px 0.85px 2.667px 0px rgba(255, 255, 255, 0.016)',
@@ -196,7 +207,7 @@ export function useTabBarPalette(): TabBarPalette {
     background: '#FFFFFF',
     icon: '#A2A3A4',
     iconActive: '#17181C',
-    activeIndicator: ACTIVE_TAB_INDICATOR,
+    activeIndicator,
     outlineTop: 'rgba(0, 0, 0, 0.067)',
     outlineBottom: 'rgba(0, 0, 0, 0.125)',
     surfaceShadow: '0px 0.85px 2.667px 0px rgba(0, 0, 0, 0.125)',
