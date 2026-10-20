@@ -13,15 +13,28 @@ let
     PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
   };
 
-  # What the stack needs to run. The dev shell adds developer-only tools on top
-  # (below); the dev image (nix/image.nix) ships this set only.
-  runtimePackages = [
+  # Packages the dev shell and the dev image both need.
+  corePackages = [
     pkgs.nodejs_22
     pkgs.pnpm
     pkgs.just
     pkgs.openssl
     postgres
     pkgs.process-compose
+  ];
+  # Dev-shell only. Together with corePackages this is exactly the shell's old
+  # package set; the heavy Python agent, Y-Sweet and LiveKit stay out of it (the
+  # bundle reaches them by store path, nothing runs them from a shell).
+  devExtraPackages = with pkgs; [
+    ffmpeg
+    gitleaks
+    trivy
+    kubernetes-helm
+    gauge
+    playwright-driver.browsers
+  ];
+  # Image only: the POSIX userland pnpm's bin shims and the repo's scripts call.
+  imageExtraPackages = [
     pkgs.bash
     pkgs.coreutils
     pkgs.gnused
@@ -31,21 +44,25 @@ let
     pkgs.which
     pkgs.git
     pkgs.cacert
-    transcriptionEnv
-    y-sweet
-    pkgs.livekit
   ];
-  devExtraPackages = with pkgs; [
-    playwright-driver.browsers
-    trivy
-    kubernetes-helm
-    gauge
-    ffmpeg
-    gitleaks
+  runtimePackages = corePackages ++ imageExtraPackages;
+
+  # backend and dashboard run from the checkout with a Node/pnpm toolchain.
+  appPath = lib.makeBinPath [
+    pkgs.nodejs_22
+    pkgs.pnpm
+    pkgs.coreutils
+    pkgs.bash
+    pkgs.git
+    pkgs.openssl
   ];
 
-  # The image runs this bundle: the services below with backend and dashboard
-  # enabled. Defined once; see process-compose."xyne-space-services".
+  # Both bundles expose process-compose's control API on this Unix socket, so the
+  # smoke test can inspect running processes in either mode. It must be a socket,
+  # not TCP: process-compose's default port is 8080, which Y-Sweet needs.
+  serviceSocket = ".logs/process-compose.sock";
+
+  # Create data directories and cleanup ports before starting processes
   servicesPreHook = ''
     # Cleanup ports before starting services
     echo "🧹 Cleaning up development services..."
@@ -65,68 +82,11 @@ let
     # Create necessary directories
     mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
   '';
-in
-{
-  imports = [
-    ./nix/modules/devshell.nix
-    ./nix/modules/playwright-version.nix
-  ];
 
-  packages.transcription-agent-env = transcriptionEnv;
-
-  # Development shell configuration
-  devShell = {
-    name = "xyne-spaces-dev";
-
-    packages = runtimePackages ++ devExtraPackages;
-
-    environment = prismaEnvironment // {
-      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
-      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
-    };
-
-    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
-      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    '';
-
-    banner = ''
-      # Xyne Spaces Dev Environment
-
-      Node.js: ${pkgs.nodejs_22.version}
-
-      ## Getting Started
-
-      ```bash
-      # Install, build, generate clients, and create local env files
-      just prepare
-      # Start services (automatically cleans up ports first)
-      nix run .#xyne-space-services  # Or, `just services`
-      # Run backend
-      just backend
-      # Run dashboard
-      just dashboard
-      ```
-
-      ## Cleanup Commands
-
-      ```bash
-      # Cleanup ports and database volumes (like docker-compose down -v)
-      nix run .#cleanup    # Or, `just cleanup`
-      
-      # Quick port cleanup only (no database wipe)
-      just cleanup-ports
-      ```
-
-      ## More info?
-
-      Edit `project.nix` to modify Nix setup.
-      Run `just` to see all available commands.
-    '';
-  };
-
-  # Process-compose configuration for all services
-  process-compose."xyne-space-services" = {
+  # The one definition of the stack. Both `xyne-space-services` (developer, apps
+  # off) and `dev-image-services` (image, apps on) import it, so cli options and
+  # services cannot drift between them. `enableApps` is the only difference.
+  servicesModule = { enableApps }: { config, pkgs, lib, ... }: {
     imports = [
       flakeInputs.services-flake.processComposeModules.default
       ./nix/containers
@@ -134,8 +94,14 @@ in
       ./nix/services/zero-cache.nix
     ];
 
-    # Create data directories and cleanup ports before starting processes
     cli.preHook = servicesPreHook;
+    cli.options = {
+      # services-flake defaults no-server to true. We keep the API instead, but on
+      # a Unix socket (see serviceSocket), so nothing binds TCP 8080.
+      no-server = false;
+      use-uds = true;
+      unix-socket = serviceSocket;
+    };
 
     # Configure log files for all processes
     defaults.processSettings = { name, ... }: {
@@ -273,13 +239,13 @@ in
     settings.processes."xyne-livekit".depends_on."xyne-redis".condition = "process_healthy";
     # Read credentials at runtime; local secrets must never enter the Nix store.
     settings.processes."xyne-livekit".command = lib.mkForce (
-      let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
+      let livekit = config.services.livekit."xyne-livekit";
       in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs_22}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
     );
 
     # Load runtime secrets without changing the module's repo-relative working directory.
     settings.processes."xyne-zero".command = lib.mkForce (
-      let zero = config.process-compose."xyne-space-services".services.zero-cache."xyne-zero";
+      let zero = config.services.zero-cache."xyne-zero";
       in "${pkgs.nodejs_22}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
     );
 
@@ -389,14 +355,11 @@ in
       availability.restart = "on_failure";
     };
 
-    # Backend and dashboard. Defined here, next to the services, but disabled:
-    # the dev image (nix/image.nix) is their only consumer, and it reuses this
-    # same configuration through process-compose."dev-image-services" below.
-    # The bundle owns their ports; the image entrypoint owns only cwd, the proxy
-    # flag and the user.
+    # Backend and dashboard. Disabled for the developer bundle; enabled only in
+    # the dev image, which has no Node on the host. The bundle owns their ports.
     settings.processes.backend = {
       command = toString (pkgs.writeShellScript "xyne-backend" ''
-        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.coreutils pkgs.bash pkgs.git pkgs.openssl ]}:$PATH"
+        export PATH="${appPath}:$PATH"
         cd apps/backend
         exec pnpm run dev
       '');
@@ -424,12 +387,12 @@ in
       };
       namespace = "app.backend";
       availability.restart = "on_failure";
-      disabled = true;
+      disabled = !enableApps;
     };
 
     settings.processes.dashboard = {
       command = toString (pkgs.writeShellScript "xyne-dashboard" ''
-        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.coreutils pkgs.bash pkgs.git pkgs.openssl ]}:$PATH"
+        export PATH="${appPath}:$PATH"
         cd apps/dashboard
         exec pnpm run dev
       '');
@@ -450,25 +413,82 @@ in
       };
       namespace = "app.dashboard";
       availability.restart = "on_failure";
-      disabled = true;
+      disabled = !enableApps;
     };
 
     # Container infrastructure kept for future use (currently empty)
     containers = { };
   };
+in
+{
+  imports = [
+    ./nix/modules/devshell.nix
+    ./nix/modules/playwright-version.nix
+  ];
 
-  # The dev image runs this bundle: the same services as above, with backend and
-  # dashboard enabled. One definition, two bundles.
+  packages.transcription-agent-env = transcriptionEnv;
+
+  # Development shell configuration
+  devShell = {
+    name = "xyne-spaces-dev";
+
+    packages = corePackages ++ devExtraPackages;
+
+    environment = prismaEnvironment // {
+      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+    };
+
+    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    '';
+
+    banner = ''
+      # Xyne Spaces Dev Environment
+
+      Node.js: ${pkgs.nodejs_22.version}
+
+      ## Getting Started
+
+      ```bash
+      # Install, build, generate clients, and create local env files
+      just prepare
+      # Start services (automatically cleans up ports first)
+      nix run .#xyne-space-services  # Or, `just services`
+      # Run backend
+      just backend
+      # Run dashboard
+      just dashboard
+      ```
+
+      ## Cleanup Commands
+
+      ```bash
+      # Cleanup ports and database volumes (like docker-compose down -v)
+      nix run .#cleanup    # Or, `just cleanup`
+      
+      # Quick port cleanup only (no database wipe)
+      just cleanup-ports
+      ```
+
+      ## More info?
+
+      Edit `project.nix` to modify Nix setup.
+      Run `just` to see all available commands.
+    '';
+  };
+
+  # Process-compose configuration for all services (backend/dashboard disabled)
+  process-compose."xyne-space-services" = {
+    imports = [ (servicesModule { enableApps = false; }) ];
+  };
+
+  # The dev image runs the same stack with backend and dashboard enabled.
   process-compose."dev-image-services" = {
-    cli.preHook = servicesPreHook;
+    imports = [ (servicesModule { enableApps = true; }) ];
     # The image has no TTY.
     cli.environment.PC_DISABLE_TUI = true;
-    settings = lib.mkForce (
-      lib.updateManyAttrsByPath [
-        { path = [ "processes" "backend" "disabled" ]; update = _: false; }
-        { path = [ "processes" "dashboard" "disabled" ]; update = _: false; }
-      ] config.process-compose."xyne-space-services".settings
-    );
   };
 
   # Export the exact runtime configuration for the isolated CI smoke check.
@@ -479,7 +499,7 @@ in
     name = "nix-smoke-test";
     runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ];
     text = ''
-      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
+      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} ${serviceSocket} "$@"
     '';
   };
 

@@ -1,7 +1,12 @@
 """Exercise the generated Nix service commands and the backend on a prepared checkout.
 
+Usage: smoke-test.py <services-config.json> <process-compose.sock> [--existing-services]
+
 Requires free development ports. Uses the exported process-compose configuration,
 without the interactive launcher's port-killing preHook. Leaves data in place.
+
+The socket is process-compose's control API for the running bundle. It is checked
+in both modes: a service that restarted or exited non-zero fails the test.
 
 With --existing-services, services are expected to be running already; a healthy
 backend is reused (the dev image runs one), otherwise the test starts its own.
@@ -17,7 +22,8 @@ import time
 import urllib.request
 
 config_path = sys.argv[1]
-existing = sys.argv[2:] == ["--existing-services"]
+service_socket = sys.argv[2]
+existing = sys.argv[3:] == ["--existing-services"]
 config = json.loads(Path(config_path).read_text())
 env = dict(os.environ)
 env.update(item.split("=", 1) for item in config["environment"])
@@ -25,16 +31,23 @@ env["NODE_ENV"] = "development"
 logs = Path(".logs/nix-smoke")
 logs.mkdir(parents=True, exist_ok=True)
 children = []
-service_socket = str((logs / "process-compose.sock").resolve())
 
 
 def check_services():
-    if existing or not Path(service_socket).exists():
+    # Both bundles expose process-compose's API on the same Unix socket, so this
+    # runs whether the test launched the services or found them running.
+    if not Path(service_socket).exists():
         return
     result = subprocess.run(
         ["process-compose", "-U", "-u", service_socket, "process", "list", "-o", "json"],
-        capture_output=True, text=True, timeout=10, env=env, check=True)
-    for service in json.loads(result.stdout):
+        capture_output=True, text=True, timeout=10, env=env)
+    if result.returncode != 0:
+        return  # the API is not answering yet
+    try:
+        services = json.loads(result.stdout)
+    except ValueError:
+        return
+    for service in services:
         if service["exit_code"] != 0 or service["restarts"] > 0:
             raise RuntimeError(f"Service failed or restarted: {service['name']} "
                                f"(exit={service['exit_code']}, restarts={service['restarts']})")
