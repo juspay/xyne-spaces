@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: nixbuild/nix-quick-install-action@v34
+      - uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
         with:
           nix_conf: |
             substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
@@ -57,7 +57,7 @@ jobs:
       # Cache /nix/store across runs — a cold closure for this stack is minutes;
       # a warm restore is ~1 min. Keyed on the Nix inputs so it invalidates when
       # the flake, project.nix, or nix/ tree changes.
-      - uses: nix-community/cache-nix-action@v6
+      - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -106,14 +106,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: nixbuild/nix-quick-install-action@v34
+      - uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
         with:
           nix_conf: |
             substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= juspay:5aHaNForWL03wKOGhUn/al4BZd3HqZDWZ3hrVTcf6Fg=
             accept-flake-config = true
 
-      - uses: nix-community/cache-nix-action@v6
+      - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
         with:
           # A distinct key from the `nix` job so the two never purge each other;
           # the shared prefix still restores the main job's store.
@@ -170,9 +170,7 @@ jobs:
           docker exec xyne-dev sh -c 'cat .logs/nix-smoke/*.log' 2>/dev/null || true
 
       - name: Publish ghcr.io/juspay/xyne-spaces-dev
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         run: |
-          nix shell nixpkgs#skopeo -c skopeo copy \
-            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            docker-daemon:ghcr.io/juspay/xyne-spaces-dev:latest \
-            docker://ghcr.io/juspay/xyne-spaces-dev:latest
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push ghcr.io/juspay/xyne-spaces-dev:latest
