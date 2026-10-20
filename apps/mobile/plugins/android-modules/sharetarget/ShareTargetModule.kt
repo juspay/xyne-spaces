@@ -58,6 +58,7 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
   private val copyExecutorShutdown = AtomicBoolean(false)
   private val copyGeneration = AtomicInteger(0)
   private var pendingPayload: CachedSharePayload? = null
+  private var pendingSourceIntent: Intent? = null
 
   init {
     ctx.addActivityEventListener(this)
@@ -114,13 +115,8 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
             promise.resolve(null)
             return@enqueueCopy
           }
-          val payload = parseIntent(intent, generation)
+          val payload = resolvePayload(intent, generation)
           if (payload == null) {
-            promise.resolve(null)
-            return@enqueueCopy
-          }
-          if (!publishPayload(generation, payload)) {
-            clearShareFiles(payload.id)
             promise.resolve(null)
             return@enqueueCopy
           }
@@ -155,6 +151,7 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
       shouldClearPending = pending != null && (shareId == null || pending.id == shareId)
       if (shouldClearPending) {
         pendingPayload = null
+        pendingSourceIntent = null
       }
     }
     val clearedSignature = if (shouldClearPending) pending?.signature else null
@@ -174,7 +171,10 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
   @ReactMethod
   fun clearAllPendingShares(promise: Promise) {
     invalidateCopyGeneration()
-    synchronized(lock) { pendingPayload = null }
+    synchronized(lock) {
+      pendingPayload = null
+      pendingSourceIntent = null
+    }
     clearShareFiles()
     clearActivityShareIntent(null)
     promise.resolve(true)
@@ -186,11 +186,7 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
       enqueueCopy {
         try {
           if (isCopyGenerationStale(generation)) return@enqueueCopy
-          val payload = parseIntent(intent, generation) ?: return@enqueueCopy
-          if (!publishPayload(generation, payload)) {
-            clearShareFiles(payload.id)
-            return@enqueueCopy
-          }
+          val payload = resolvePayload(intent, generation) ?: return@enqueueCopy
           ctx.runOnJSQueueThread {
             if (isCopyGenerationStale(generation)) return@runOnJSQueueThread
             try {
@@ -508,12 +504,24 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
     copyGeneration.incrementAndGet()
   }
 
-  private fun publishPayload(generation: Int, payload: CachedSharePayload): Boolean {
+  private fun resolvePayload(intent: Intent?, generation: Int): CachedSharePayload? {
+    // The same share is delivered via both onNewIntent and getInitialShare as one
+    // Intent instance; reuse its payload so JS never sees two different ids.
     synchronized(lock) {
-      if (isCopyGenerationStale(generation)) return false
-      pendingPayload = payload
-      return true
+      if (intent != null && intent === pendingSourceIntent) return pendingPayload
     }
+    val payload = parseIntent(intent, generation) ?: return null
+    val published = synchronized(lock) {
+      if (isCopyGenerationStale(generation)) return@synchronized false
+      pendingPayload = payload
+      pendingSourceIntent = intent
+      true
+    }
+    if (!published) {
+      clearShareFiles(payload.id)
+      return null
+    }
+    return payload
   }
 
   private fun enqueueCopy(work: () -> Unit) {
@@ -532,7 +540,10 @@ class ShareTargetModule(private val ctx: ReactApplicationContext) :
       return
     }
     invalidateCopyGeneration()
-    synchronized(lock) { pendingPayload = null }
+    synchronized(lock) {
+      pendingPayload = null
+      pendingSourceIntent = null
+    }
     copyExecutor.shutdownNow()
     clearShareFiles()
     try {
