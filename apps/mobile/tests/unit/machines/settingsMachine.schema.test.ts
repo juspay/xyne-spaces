@@ -12,6 +12,7 @@ describe('SettingsSchema defaults', () => {
   it('fills every section with its documented default', () => {
     assert.deepEqual(DEFAULTS, {
       appearance: { reduceMotion: false, haptics: true },
+      ai: { navigation: false },
       chatTheme: { bubbleColorVar: '--color-chat-message-bubble-1' },
       notifications: { sound: true, soundId: 'string', preview: 'always' },
       developers: {

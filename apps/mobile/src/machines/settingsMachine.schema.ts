@@ -15,6 +15,12 @@ export const SettingsSchema = z
         haptics: z.boolean().default(true),
       })
       .prefault({}),
+    ai: z
+      .object({
+        // Lets a short command in Xyne AI open a screen instead of being sent as a question.
+        navigation: z.boolean().default(false),
+      })
+      .prefault({}),
     chatTheme: z
       .object({
         bubbleColorVar: z.enum(CHAT_BUBBLE_COLOR_VARS).default(DEFAULT_CHAT_BUBBLE_COLOR_VAR),

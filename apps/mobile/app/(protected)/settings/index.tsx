@@ -6,6 +6,7 @@ import { SafeAreaView } from '@/src/components/ui/safe-area-view';
 import {
   Bell,
   ChevronRight,
+  Compass,
   LogOut,
   MessageCircle,
   Palette,
@@ -127,6 +128,7 @@ export default function AccountSettingsScreen(): ReactElement {
   const statusContent = getActiveUserStatusContent(userData);
   const themeLabel = selectedTheme.charAt(0).toUpperCase() + selectedTheme.slice(1);
   const hapticsEnabled = useSetting('appearance.haptics');
+  const aiNavigationEnabled = useSetting('ai.navigation');
   // Same CAC list as Settings → Beta. Hide the row when there is nothing to toggle.
   const { flags } = useBetaFlags();
   const showBetaSettings = flags.length > 0;
@@ -250,6 +252,19 @@ export default function AccountSettingsScreen(): ReactElement {
       label: 'Haptic feedback',
       trailing: <Switch isSelected={hapticsEnabled} onSelectedChange={handleHapticsToggle} />,
       onPress: () => handleHapticsToggle(!hapticsEnabled),
+    },
+    {
+      colors,
+      icon: Compass,
+      label: 'Xyne AI navigation',
+      value: 'Open screens by asking, e.g. "open #general"',
+      trailing: (
+        <Switch
+          isSelected={aiNavigationEnabled}
+          onSelectedChange={(next): void => setSetting('ai.navigation', next)}
+        />
+      ),
+      onPress: () => setSetting('ai.navigation', !aiNavigationEnabled),
     },
     ...(showBetaSettings
       ? [
