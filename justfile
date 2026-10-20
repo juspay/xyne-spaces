@@ -20,7 +20,7 @@ cleanup:
 cleanup-ports:
     ./nix/scripts/cleanup-ports.sh
 
-# Build the dev image from Nix and run it against this checkout (extra args go to docker run)
+# Build the dev image from Nix and run it against this checkout (Linux only; extra args go to docker run)
 [group('nix')]
 dev-image *ARGS:
     nix build .#dev-image
