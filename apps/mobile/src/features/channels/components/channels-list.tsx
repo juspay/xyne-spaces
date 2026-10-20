@@ -78,7 +78,7 @@ export function ChannelsList(): ReactElement {
         ))}
         {isEmpty || !hasRows ? <EmptyState isFiltering={isFiltering} /> : null}
       </Animated.ScrollView>
-      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} topInset={headerHeight} />
     </View>
   );
 }

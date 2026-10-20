@@ -188,12 +188,12 @@ e
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingTop: headerHeight + LIST_TOP_GAP,
-        paddingBottom: bottomInset,
+          paddingBottom: bottomInset,
           flexGrow: order.length === 0 ? 1 : undefined,
-          }}
+        }}
         className='bg-spaces-background'
       />
-      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} topInset={headerHeight} />
     </View>
   );
 }
