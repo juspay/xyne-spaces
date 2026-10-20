@@ -1,6 +1,7 @@
 /**
  * One Gmail sync per mailbox at a time. A push that finds a sync running sets the pending
  * flag and returns; the running sync sees the flag after its round and runs another.
+ * The worker's catch-up takes the same lock without handing off, and retries later when it is busy.
  */
 
 import { acquireLock, releaseLock, renewLock } from '@/utils/distributedLock';
@@ -14,23 +15,36 @@ const PENDING_TTL_SECONDS = 60 * 60;
 
 class RedisUnavailableError extends Error {}
 
-/** Runs `sync` for the mailbox, and again for every push that lands while a round is running. */
-export async function syncMailboxSerially(sourceId: string, sync: () => Promise<void>): Promise<void> {
+/**
+ * Runs `sync` for the mailbox, and again for every push that lands while a round is running.
+ * With `handOff: false` a busy mailbox resolves false instead, so the caller can retry its round later.
+ */
+export async function syncMailboxSerially(
+  sourceId: string,
+  sync: () => Promise<void>,
+  { handOff = true }: { handOff?: boolean } = {},
+): Promise<boolean> {
   const lockKey = `lock:gmail-sync:${sourceId}`;
   const pendingKey = `pending:gmail-sync:${sourceId}`;
   let rounds = 0;
+  // Without hand-off this call's own round must run, so its first take doesn't wait on the flag.
+  let ownRound = !handOff;
 
   try {
-    await viaRedis(() => redisService.set(pendingKey, '1', PENDING_TTL_SECONDS));
+    if (handOff) await viaRedis(() => redisService.set(pendingKey, '1', PENDING_TTL_SECONDS));
     // Re-checked after each release: a push can set the flag after our last take but before the release.
-    while (await viaRedis(() => redisService.exists(pendingKey))) {
+    while (ownRound || (await viaRedis(() => redisService.exists(pendingKey)))) {
       const lock = await acquireLock(lockKey, { ttlSeconds: LOCK_TTL_SECONDS });
       if (!lock) {
+        if (ownRound) return false;
         logger.info(`${TAG} [SYNC_RUNNING] another request holds this mailbox and will run again`, { sourceId });
-        return;
+        return true;
       }
       const heartbeat = setInterval(() => void renewLock(lock, LOCK_TTL_SECONDS), LOCK_RENEW_INTERVAL_MS);
       try {
+        // Set only once we hold the lock, so no other sync can take this round.
+        if (ownRound) await viaRedis(() => redisService.set(pendingKey, '1', PENDING_TTL_SECONDS));
+        ownRound = false;
         // Take the flag before each round, so a push that lands mid-round sets it again.
         while ((await viaRedis(() => redisService.getClient().del(pendingKey))) === 1) {
           rounds++;
@@ -41,11 +55,13 @@ export async function syncMailboxSerially(sourceId: string, sync: () => Promise<
         await releaseLock(lock);
       }
     }
+    return true;
   } catch (error) {
     if (!(error instanceof RedisUnavailableError)) throw error;
     // Fail open like acquireLock: a duplicate sync is safer than a dropped one.
     logger.warn(`${TAG} Redis unavailable — syncing without the mailbox lock`, { sourceId, error: error.message });
     if (rounds === 0) await sync();
+    return true;
   }
 }
 
