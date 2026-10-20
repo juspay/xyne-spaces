@@ -136,6 +136,14 @@ export function menuItemAtY(x: number, y: number, count: number): number {
   return index;
 }
 
+/** Clamps a touch to the span between the first and last tab centres. */
+export function clampToTabCenters(x: number): number {
+  'worklet';
+  const first = TAB_CENTER_XS[0];
+  const last = TAB_CENTER_XS[PILL_TAB_COUNT - 1] ?? first;
+  return x < first ? first : x > last ? last : x;
+}
+
 export function tabCenterX(index: number): number {
   'worklet';
   return TAB_CENTER_XS[index] ?? TABS_START + TAB_ZONE_WIDTH * 0.5;
@@ -225,6 +233,15 @@ export const SPRING = { damping: 24, stiffness: 170, mass: 1 } as const;
 export const SPRING_BOUNCY = { damping: 22, stiffness: 250, mass: 0.6 } as const;
 export const SPRING_MENU_OPEN = { damping: 14, stiffness: 170, mass: 0.7 } as const;
 export const SPRING_MENU_CLOSE = { damping: 22, stiffness: 120, mass: 0.9 } as const;
+
+/**
+ * The drag highlight's springs, as Telegram's tab bar runs them: Android's
+ * `STIFFNESS_MEDIUM` (1500) at `DAMPING_RATIO_LOW_BOUNCY` (0.75), mass 1 —
+ * damping 2 × 0.75 × √1500.
+ */
+export const SPRING_DRAG_SELECTOR = { stiffness: 1500, damping: 58.09, mass: 1 } as const;
+/** How long the drag highlight stays after release before the tabs' own take over. */
+export const DRAG_SELECTOR_LINGER_MS = 450;
 
 /** Highlight travel between rows. Quick enough to keep up with a fast drag. */
 export const SPRING_MENU_HOVER = { damping: 20, stiffness: 340, mass: 0.6 } as const;

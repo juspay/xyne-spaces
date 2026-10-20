@@ -13,7 +13,9 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import type { TabEntry } from '../model/catalog';
+import type { DragSelector as DragSelectorValues } from '../hooks/use-pill-gestures';
 
+import { DragSelector } from './drag-selector';
 import { GlassMaterial } from './glass-material';
 import { MenuPanel } from './menu-panel';
 import { GlowOverlay } from './search-field';
@@ -54,6 +56,7 @@ export type TabBarPillProps = {
   touchX: SharedValue<number>;
   touchY: SharedValue<number>;
   glowProgress: SharedValue<number>;
+  dragSelector: DragSelectorValues;
   panGesture: ComposedGesture;
   isMenuOpen: boolean;
   menuItems: readonly TabEntry[];
@@ -83,6 +86,7 @@ export const TabBarPill = memo(function TabBarPill({
   touchX,
   touchY,
   glowProgress,
+  dragSelector,
   panGesture,
   isMenuOpen,
   menuItems,
@@ -123,6 +127,7 @@ export const TabBarPill = memo(function TabBarPill({
               style={styles.iconsRow}
               pointerEvents={isMenuOpen ? 'none' : 'auto'}
             >
+              <DragSelector selector={dragSelector} />
               {icons.map((icon, index) => (
                 <TabIcon
                   key={index}
@@ -143,6 +148,7 @@ export const TabBarPill = memo(function TabBarPill({
                   touchX={touchX}
                   touchY={touchY}
                   glowProgress={glowProgress}
+                  dragSelectorVisible={dragSelector.visible}
                 />
               ))}
             </View>

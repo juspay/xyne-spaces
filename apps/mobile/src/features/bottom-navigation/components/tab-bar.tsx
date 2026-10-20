@@ -225,6 +225,7 @@ export const TabBar = memo(function TabBar({
             touchX={pill.touchX}
             touchY={pill.touchY}
             glowProgress={pill.glowProgress}
+            dragSelector={pill.dragSelector}
             panGesture={pill.panGesture}
             isMenuOpen={isMenuOpen}
             menuItems={menuItems}

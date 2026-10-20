@@ -75,6 +75,8 @@ export type TabIconProps = {
   touchX: SharedValue<number>;
   touchY: SharedValue<number>;
   glowProgress: SharedValue<number>;
+  /** 1 while a drag carries the highlight; the tab's own then stands down. */
+  dragSelectorVisible: SharedValue<number>;
 };
 
 export const TabIcon = memo(function TabIcon({
@@ -95,6 +97,7 @@ export const TabIcon = memo(function TabIcon({
   touchX,
   touchY,
   glowProgress,
+  dragSelectorVisible,
 }: TabIconProps): ReactElement {
   const palette = useTabBarPalette();
   const destinationProgress = useSharedValue(menuDestinationIcon ? 1 : 0);
@@ -203,7 +206,9 @@ export const TabIcon = memo(function TabIcon({
     withTiming(activeTab.get() === index ? 1 : 0, INDICATOR_FADE),
   );
 
-  const indicatorStyle = useAnimatedStyle(() => ({ opacity: indicatorProgress.get() }));
+  const indicatorStyle = useAnimatedStyle(() => ({
+    opacity: indicatorProgress.get() * (1 - dragSelectorVisible.get()),
+  }));
 
   const restColorStyle = useAnimatedStyle(() => ({ opacity: 1 - activeProgress.get() }));
 
