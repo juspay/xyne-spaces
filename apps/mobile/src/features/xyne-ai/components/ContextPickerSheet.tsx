@@ -90,7 +90,15 @@ function resultRows(results: readonly DisplaySearchResult[]): PickRow[] {
 const useRemoteResults = (tab: GlobalSearchTab, isEnabled: boolean, query: string): SearchResults =>
   useSearchResults(
     isEnabled
-      ? buildSearchRequest({ tab, query, chips: [], onlyMyChannels: false, scope: null })
+      ? buildSearchRequest({
+          tab,
+          query,
+          chips: [],
+          onlyMyChannels: false,
+          includeBotMessages: false,
+          exactMatch: false,
+          scope: null,
+        })
       : null,
   );
 
