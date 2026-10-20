@@ -7,10 +7,12 @@ import {
 import {
   buildVideoPlaybackFailed,
   buildVideoPlaybackReady,
+  toVideoTrackFields,
   VideoPlaybackSession,
   type VideoPlaybackFailureStage,
   type VideoPlaybackSubject,
   type VideoPlaybackSurface,
+  type VideoTrackInput,
 } from '@/src/observability/logging/media/videoPlayback';
 
 interface UseVideoPlaybackTelemetryOptions {
@@ -23,6 +25,8 @@ interface UseVideoPlaybackTelemetryOptions {
 }
 
 interface VideoPlaybackTelemetry {
+  /** Call from `sourceLoad` with `payload.availableVideoTracks`. */
+  reportSourceLoad: (videoTracks: readonly VideoTrackInput[] | null | undefined) => void;
   reportReady: (durationMs?: number | null) => void;
   reportFailure: (stage: VideoPlaybackFailureStage, error: unknown) => void;
 }
@@ -52,6 +56,17 @@ export function useVideoPlaybackTelemetry({
     session.open(Date.now());
   }, [active, sourceKey]);
 
+  const reportSourceLoad = useCallback(
+    (videoTracks: readonly VideoTrackInput[] | null | undefined): void => {
+      try {
+        sessionRef.current.setVideoTrack(toVideoTrackFields(videoTracks));
+      } catch {
+        // Telemetry is best-effort.
+      }
+    },
+    [],
+  );
+
   const reportReady = useCallback(
     (durationMs?: number | null): void => {
       try {
@@ -64,6 +79,7 @@ export function useVideoPlaybackTelemetry({
             openedAtMs: session.openedAt,
             nowMs: Date.now(),
             durationMs,
+            videoTrack: session.videoTrack,
           }),
         );
       } catch {
@@ -88,6 +104,7 @@ export function useVideoPlaybackTelemetry({
             openedAtMs: session.openedAt,
             nowMs: Date.now(),
             reachedReady,
+            videoTrack: session.videoTrack,
           }),
         );
       } catch {
@@ -97,5 +114,5 @@ export function useVideoPlaybackTelemetry({
     [surface],
   );
 
-  return { reportReady, reportFailure };
+  return { reportSourceLoad, reportReady, reportFailure };
 }

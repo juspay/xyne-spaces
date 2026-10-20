@@ -82,7 +82,7 @@ function VideoBackedPlayer({ uri }: { uri: string }): ReactElement {
   const [isReady, setIsReady] = useState(false);
   const [hasError, setHasError] = useState(false);
   // Never log the recording URI: it can carry signed/capability tokens.
-  const { reportReady, reportFailure } = useVideoPlaybackTelemetry({
+  const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
     surface: 'call_recording',
     subject: { attachmentId: null, mimetype: null },
     sourceKey: uri,
@@ -98,6 +98,7 @@ function VideoBackedPlayer({ uri }: { uri: string }): ReactElement {
   });
 
   useEventListener(player, 'sourceLoad', payload => {
+    reportSourceLoad(payload.availableVideoTracks);
     setDurationMs(Math.max(0, payload.duration * 1000));
   });
 

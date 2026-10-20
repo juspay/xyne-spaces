@@ -496,15 +496,16 @@ told apart from network or server failures.
 
 **Fields:** Same subject fields as `video_playback_ready`, plus:
 
-| Field           | Meaning                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `stage`         | `stream_url` (mTLS proxy URL failed) · `source_replace` (`replaceAsync` rejected) · `player_status` (native player error) |
-| `errorCategory` | `decoder_unsupported` · `container_parse` · `http` · `network` · `stream_setup` · `unknown`                               |
-| `errorCode`     | ExoPlayer `ERROR_CODE_*` or `NSError` `Domain:code` parsed from the message, when present                                 |
-| `decoderName`   | Native decoder named in the error (e.g. `c2.mtk.hevc.decoder`), when present                                              |
-| `errorMessage`  | Player error message (truncated to 500 chars)                                                                             |
-| `msSinceOpen`   | Viewer opened → failure                                                                                                   |
-| `reachedReady`  | `true` when the failure happened mid-playback after `readyToPlay`                                                         |
+| Field                                                                                   | Meaning                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stage`                                                                                 | `stream_url` (mTLS proxy URL failed) · `source_replace` (`replaceAsync` rejected) · `player_status` (native player error)                                                                         |
+| `errorCategory`                                                                         | `decoder_unsupported` · `container_parse` · `network` · `http` (only on `Response code: 4xx/5xx`) · `stream_setup` · `unknown`                                                                    |
+| `errorCode`                                                                             | iOS `NSError` `Domain:code` parsed from the message. Always `null` on Android (expo-video forwards only the exception message, not ExoPlayer's `ERROR_CODE_*`)                                    |
+| `decoderName`                                                                           | Native decoder named in the error (e.g. `c2.mtk.hevc.decoder`), when present                                                                                                                      |
+| `errorMessage`                                                                          | Player error message with URLs replaced by `[url]`, truncated to 500 chars                                                                                                                        |
+| `videoTrackMimeType` · `videoTrackWidth` · `videoTrackHeight` · `videoTrackIsSupported` | Primary video track from `sourceLoad` (also on `video_playback_ready`); `null` if the source never loaded. `videoTrackIsSupported=false` is the player saying this device cannot decode the track |
+| `msSinceOpen`                                                                           | Viewer opened → failure                                                                                                                                                                           |
+| `reachedReady`                                                                          | `true` when the failure happened mid-playback after `readyToPlay`                                                                                                                                 |
 
 **When:** First failure per opened source (duplicate `statusChange` /
 `replaceAsync` rejections for the same failure are dropped). Remote logs are

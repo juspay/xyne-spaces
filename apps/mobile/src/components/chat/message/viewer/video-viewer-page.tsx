@@ -56,7 +56,7 @@ export const VideoViewerPage = memo(function VideoViewerPage({
     isLoading: isStreamLoading,
     error: streamError,
   } = useMtlsVideoStream(attachment.id, { enabled: isActive });
-  const { reportReady, reportFailure } = useVideoPlaybackTelemetry({
+  const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
     surface: 'chat_viewer',
     subject: {
       attachmentId: attachment.id,
@@ -132,6 +132,7 @@ export const VideoViewerPage = memo(function VideoViewerPage({
   });
 
   useEventListener(player, 'sourceLoad', payload => {
+    reportSourceLoad(payload.availableVideoTracks);
     setDurationMs(Math.max(0, Math.round(payload.duration * 1000)));
   });
 

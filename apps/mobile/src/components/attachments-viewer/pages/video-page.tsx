@@ -29,7 +29,7 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
     isLoading: isStreamLoading,
     error: streamError,
   } = useMtlsVideoStream(attachment.id, { enabled: isActive });
-  const { reportReady, reportFailure } = useVideoPlaybackTelemetry({
+  const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
     surface: 'attachments_viewer',
     subject: {
       attachmentId: attachment.id,
@@ -89,6 +89,10 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
       reportFailure('stream_url', streamError);
     }
   }, [reportFailure, streamError]);
+
+  useEventListener(player, 'sourceLoad', payload => {
+    reportSourceLoad(payload.availableVideoTracks);
+  });
 
   useEventListener(player, 'statusChange', payload => {
     if (payload.status === 'readyToPlay') {
