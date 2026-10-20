@@ -45,7 +45,7 @@ let
     pkgs.git
     pkgs.cacert
   ];
-  runtimePackages = corePackages ++ imageExtraPackages;
+  imagePackages = corePackages ++ imageExtraPackages;
 
   # backend and dashboard run from the checkout with a Node/pnpm toolchain.
   appPath = lib.makeBinPath [
@@ -61,6 +61,9 @@ let
   # smoke test can inspect running processes in either mode. It must be a socket,
   # not TCP: process-compose's default port is 8080, which Y-Sweet needs.
   serviceSocket = ".logs/process-compose.sock";
+
+  # The dashboard's Vite dev server. The image publishes this port.
+  dashboardPort = 3000;
 
   # Create data directories and cleanup ports before starting processes
   servicesPreHook = ''
@@ -162,8 +165,8 @@ let
       availability.restart = "on_failure";
     };
 
-    # Disable TUI for headless operation
-    settings.environment = prismaEnvironment // { PC_DISABLE_TUI = "true"; };
+    # Environment for every process: Prisma's Nix-patched engines.
+    settings.environment = prismaEnvironment;
 
     # PostgreSQL service
     services.postgres."xyne-db" = {
@@ -363,11 +366,11 @@ let
         cd apps/backend
         exec pnpm run dev
       '');
-      # The dashboard is served on 3000 in the image, so accept its browser
+      # The dashboard is served on this port in the image, so accept its browser
       # origin. dotenv does not override variables already in the environment.
       environment = {
-        FRONTEND_URL = "http://localhost:3000";
-        CORS_ORIGIN = "http://localhost:3000,http://127.0.0.1:3000";
+        FRONTEND_URL = "http://localhost:${toString dashboardPort}";
+        CORS_ORIGIN = "http://localhost:${toString dashboardPort},http://127.0.0.1:${toString dashboardPort}";
       };
       depends_on = {
         db-setup = { condition = "process_completed_successfully"; };
@@ -397,12 +400,12 @@ let
         exec pnpm run dev
       '');
       # Vite dev server port; the image publishes only this port (plus 3001).
-      environment = { VITE_DEV_PORT = "3000"; };
+      environment = { VITE_DEV_PORT = toString dashboardPort; };
       depends_on.backend = { condition = "process_started"; };
       readiness_probe = {
         http_get = {
           host = "127.0.0.1";
-          port = 3000;
+          port = dashboardPort;
           path = "/";
         };
         initial_delay_seconds = 10;
@@ -487,7 +490,8 @@ in
   # The dev image runs the same stack with backend and dashboard enabled.
   process-compose."dev-image-services" = {
     imports = [ (servicesModule { enableApps = true; }) ];
-    # The image has no TTY.
+    # The image has no TTY. This is the process-compose CLI's own environment,
+    # the only one that disables its TUI (settings.environment is for children).
     cli.environment.PC_DISABLE_TUI = true;
   };
 
@@ -507,7 +511,7 @@ in
   # same definitions as the dev shell and the services bundle.
   packages.dev-image = lib.mkIf pkgs.stdenv.isLinux (
     import ./nix/image.nix {
-      inherit pkgs lib runtimePackages prismaEnvironment;
+      inherit pkgs lib imagePackages prismaEnvironment;
       bundle = config.process-compose."dev-image-services".outputs.package;
       smokeTest = config.packages.nix-smoke-test;
     }

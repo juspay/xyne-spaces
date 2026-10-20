@@ -9,7 +9,7 @@
 # Built from the same definitions as the dev shell and the services bundle.
 # Nothing is baked from the checkout: `just prepare` runs on the mounted /src,
 # so node_modules and local secrets live there.
-{ pkgs, lib, runtimePackages, prismaEnvironment, bundle, smokeTest }:
+{ pkgs, lib, imagePackages, prismaEnvironment, bundle, smokeTest }:
 let
   uid = 1000;
   gid = 1000;
@@ -41,9 +41,7 @@ let
       export VITE_DEV_PROXY=true
       # No TTY here: `pnpm install` must not wait on its "reinstall modules?"
       # prompt. Scoped to prepare so the app processes do not run as CI.
-      export CI=true
-      just prepare
-      unset CI
+      CI=true just prepare
       exec ${bundle}/bin/dev-image-services
     '';
   };
@@ -58,7 +56,7 @@ pkgs.dockerTools.streamLayeredImage {
     passwd
     pkgs.dockerTools.binSh
     pkgs.dockerTools.usrBinEnv
-  ] ++ runtimePackages;
+  ] ++ imagePackages;
   fakeRootCommands = ''
     mkdir -p home/dev tmp
     chown ${toString uid}:${toString gid} home/dev
@@ -70,7 +68,7 @@ pkgs.dockerTools.streamLayeredImage {
     Cmd = [ "${entrypoint}/bin/xyne-spaces-dev-entrypoint" ];
     Env = [
       "HOME=/home/dev"
-      "PATH=${lib.makeBinPath (runtimePackages ++ [ smokeTest ])}:/bin:/usr/bin"
+      "PATH=${lib.makeBinPath (imagePackages ++ [ smokeTest ])}:/bin:/usr/bin"
       "NODE_ENV=development"
       # Keep the pnpm store inside the mount so a second `docker run` on the same
       # checkout does not re-download the workspace.
