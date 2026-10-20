@@ -163,6 +163,11 @@ jobs:
       - name: Run the smoke test inside the container
         run: docker exec xyne-dev nix-smoke-test --existing-services
 
+      # The cache action's post step hashes the workspace as the runner user.
+      - name: Hand the checkout back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+
       - name: Container and smoke test logs
         if: always()
         run: |
