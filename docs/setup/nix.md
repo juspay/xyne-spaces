@@ -193,6 +193,7 @@ running, use `nix run .#nix-smoke-test -- --existing-services`.
 
 The [Nix CI workflow](../../.github/workflows/nix-ci.yml) runs these checks on Linux
 when dispatched manually; its pull-request and push triggers stay off until CI 1. It
-uploads logs on failure. This is a startup check, not a full UI, provider, or
-call-transcription integration test. macOS and ARM runtime behavior are not covered
-by the Linux CI job.
+uploads logs on failure. Its `publish` input pushes the dev image to GHCR: `:latest`
+from `main`, and `:sha-<short>` from any other ref. This is a startup check, not a
+full UI, provider, or call-transcription integration test. macOS and ARM runtime
+behavior are not covered by the Linux CI job.

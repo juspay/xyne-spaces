@@ -17,6 +17,13 @@ name: Nix CI
 # (allowPrivilegeEscalation: false) — staying on GitHub-hosted for now.
 on:
   workflow_dispatch:
+    inputs:
+      # One-off publish. `main` always pushes :latest; any other ref with
+      # `publish: true` pushes :sha-<7-char sha> only, never :latest.
+      publish:
+        description: Push the dev image to GHCR (non-main refs push :sha-<short>)
+        type: boolean
+        default: false
   # pull_request:
   # push:
   #   branches:
@@ -175,10 +182,17 @@ jobs:
           docker exec xyne-dev sh -c 'cat .logs/nix-smoke/*.log' 2>/dev/null || true
 
       - name: Publish ghcr.io/juspay/xyne-spaces-dev
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || inputs.publish == true
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
-          docker push ghcr.io/juspay/xyne-spaces-dev:latest
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            docker push ghcr.io/juspay/xyne-spaces-dev:latest
+          else
+            # Non-main refs never touch :latest.
+            tag="sha-$(echo "$GITHUB_SHA" | cut -c1-7)"
+            docker tag ghcr.io/juspay/xyne-spaces-dev:latest "ghcr.io/juspay/xyne-spaces-dev:$tag"
+            docker push "ghcr.io/juspay/xyne-spaces-dev:$tag"
+          fi
