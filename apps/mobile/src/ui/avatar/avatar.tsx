@@ -1,7 +1,6 @@
 import { memo, useMemo, type ReactElement } from 'react';
 import { View } from 'react-native';
 
-import { AvatarFace } from './avatar-face';
 import { AvatarStack } from './avatar-stack';
 import type { AvatarProps } from './avatar.types';
 
@@ -40,25 +39,15 @@ export const Avatar = memo(function Avatar({
     return null;
   }
 
-  const hasCornerBadge = cornerBadge !== undefined && cornerBadge !== null;
-
-  if (second === undefined && !hasCornerBadge) {
-    return (
-      <View style={style}>
-        <AvatarFace
-          key={first}
-          userId={first}
-          size={size}
-          fallbackUser={fallbackUsers.find(user => user.id === first)}
-        />
-      </View>
-    );
-  }
-
+  /*
+   * One tree for every shape — a person, a group, with or without a badge —
+   * and no identity keys. In a recycled list a row moves from one conversation
+   * to the next; this way it keeps its views and redraws them, rather than
+   * unmounting the avatar and mounting a new one on every row that scrolls in.
+   */
   return (
     <View style={style}>
       <AvatarStack
-        key={second === undefined ? first : `${first}:${second}`}
         userIds={second === undefined ? [first] : [first, second]}
         fallbackUsers={fallbackUsers}
         memberCount={memberCount ?? validUserIds.length}

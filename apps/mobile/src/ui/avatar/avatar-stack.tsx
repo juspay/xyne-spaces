@@ -44,8 +44,14 @@ export const AvatarStack = memo(function AvatarStack({
     <View style={{ width: size, height: size }}>
       {faces.map(({ rect, holes }, index) => {
         const userId = faceUserIds[index] ?? frontUserId;
+        // Keyed by position, not by person: a list row recycled onto another
+        // conversation keeps its views and only swaps who is drawn in them.
+        const isFront = index === faces.length - 1;
         return (
-          <View key={userId} style={{ position: 'absolute', left: rect.x, top: rect.y }}>
+          <View
+            key={isFront ? 'front' : 'back'}
+            style={{ position: 'absolute', left: rect.x, top: rect.y }}
+          >
             <AvatarCutout width={rect.width} height={rect.height} holes={holes}>
               <AvatarFace
                 userId={userId}

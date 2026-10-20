@@ -1,6 +1,6 @@
-import MaskedView from '@react-native-masked-view/masked-view';
 import { type ReactElement, type ReactNode } from 'react';
-import Svg, { Defs, Mask, Rect } from 'react-native-svg';
+
+import { CutoutView } from '@/modules/xyne-cutout';
 
 import type { AvatarRect } from './avatar.geometry';
 
@@ -13,54 +13,20 @@ type AvatarCutoutProps = {
 };
 
 /**
- * Cuts holes out of its children with a real alpha mask.
+ * Cuts holes out of its children with a real alpha cut-out, so whatever is
+ * behind the avatar shows through.
  *
- * A luminance mask rather than an even-odd path, so holes that overlap — the
- * front face and the count bubble over the back face — still read as one
- * cut-out instead of cancelling each other out.
+ * Holes that overlap — the front face and the count bubble over the back face
+ * — still read as one cut-out instead of cancelling each other out.
  *
- * With nothing to cut it draws its children as they are: a single avatar with
- * no badge, which is most of them, pays nothing for this.
+ * Always the same native view, holes or not: a list row recycled from a
+ * starred conversation onto a plain one keeps its avatar and only drops the
+ * hole, instead of tearing the avatar down and mounting a new one.
  */
 export function AvatarCutout({ width, height, holes, children }: AvatarCutoutProps): ReactElement {
-  if (holes.length === 0) return <>{children}</>;
-
   return (
-    <MaskedView
-      // The native mask is drawn once per layout; a new set of holes is a new mask.
-      key={holes.map(hole => `${hole.x},${hole.y},${hole.width},${hole.height}`).join('|')}
-      style={{ width, height }}
-      maskElement={
-        <Svg width={width} height={height}>
-          <Defs>
-            <Mask
-              id='avatar-cutout'
-              maskUnits='userSpaceOnUse'
-              x={0}
-              y={0}
-              width={width}
-              height={height}
-            >
-              <Rect width={width} height={height} fill='#fff' />
-              {holes.map((hole, index) => (
-                <Rect
-                  key={index}
-                  x={hole.x}
-                  y={hole.y}
-                  width={hole.width}
-                  height={hole.height}
-                  rx={hole.radius}
-                  ry={hole.radius}
-                  fill='#000'
-                />
-              ))}
-            </Mask>
-          </Defs>
-          <Rect width={width} height={height} fill='#000' mask='url(#avatar-cutout)' />
-        </Svg>
-      }
-    >
+    <CutoutView holes={holes} style={{ width, height }}>
       {children}
-    </MaskedView>
+    </CutoutView>
   );
 }
