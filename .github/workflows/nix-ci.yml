@@ -104,12 +104,22 @@ jobs:
           retention-days: 7
 
   # Phase 1: the same Nix stack as one `docker run`, for contributors without
-  # Nix. amd64 only for now. Runs the smoke test inside the container so the
+  # Nix. One job per arch; each runs the smoke test inside its container so the
   # image cannot drift from the flake.
   image:
-    name: Build, run and publish the dev image
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    name: Build, run and publish the dev image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -122,18 +132,17 @@ jobs:
 
       - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
         with:
-          # A distinct key from the `nix` job so the two never purge each other;
-          # the shared prefix still restores the main job's store.
-          primary-key: nix-image-${{ runner.os }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # Per-arch keys: the two runners share no store paths.
+          primary-key: nix-image-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
+          restore-prefixes-first-match: nix-image-${{ runner.os }}-${{ matrix.arch }}-
           gc-max-store-size-linux: 5G
           purge: true
-          purge-prefixes: nix-image-${{ runner.os }}-
+          purge-prefixes: nix-image-${{ runner.os }}-${{ matrix.arch }}-
           purge-last-accessed: 604800
           purge-primary-key: never
 
       - name: Build the dev image
-        run: nix build -L .#dev-image
+        run: nix build -L .#packages.${{ matrix.system }}.dev-image
 
       - name: Load the image
         run: ./result | docker load
@@ -186,13 +195,43 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
+          ARCH: ${{ matrix.arch }}
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
           if [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            docker push ghcr.io/juspay/xyne-spaces-dev:latest
+            tag=latest
           else
             # Non-main refs never touch :latest.
             tag="sha-$(echo "$GITHUB_SHA" | cut -c1-7)"
-            docker tag ghcr.io/juspay/xyne-spaces-dev:latest "ghcr.io/juspay/xyne-spaces-dev:$tag"
-            docker push "ghcr.io/juspay/xyne-spaces-dev:$tag"
           fi
+          # Per-arch image; the `manifest` job ties the two together.
+          docker tag ghcr.io/juspay/xyne-spaces-dev:latest "ghcr.io/juspay/xyne-spaces-dev:$tag-$ARCH"
+          docker push "ghcr.io/juspay/xyne-spaces-dev:$tag-$ARCH"
+
+  # One manifest over the per-arch images, so `docker run` picks the host's arch.
+  manifest:
+    name: Publish the multi-arch manifest
+    needs: image
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || inputs.publish == true
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Create and inspect the manifest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tag=latest
+          else
+            tag="sha-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+          docker buildx imagetools create -t "ghcr.io/juspay/xyne-spaces-dev:$tag" \
+            "ghcr.io/juspay/xyne-spaces-dev:$tag-amd64" \
+            "ghcr.io/juspay/xyne-spaces-dev:$tag-arm64"
+          docker manifest inspect "ghcr.io/juspay/xyne-spaces-dev:$tag" > /tmp/manifest.json
+          cat /tmp/manifest.json
+          echo "platforms:"
+          jq -r '.manifests[].platform | "  \(.os)/\(.architecture)"' /tmp/manifest.json

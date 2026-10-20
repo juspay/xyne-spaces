@@ -181,9 +181,9 @@ The plan ends when Compose is gone. Two follow-ups could come after, decided the
     It runs backend and dashboard too, since these users have no Node on the host. The
     services stay on loopback and the dashboard uses the Vite dev proxy, so the host
     browser needs only the dashboard port — no `0.0.0.0` change. It runs as a non-root
-    `dev` user (uid 1000); `node_modules` live inside the mount. amd64 now, arm64
-    later. Calls (LiveKit UDP) are out of scope, as are search, call recording and
-    feature flags (they're containers themselves).
+    `dev` user (uid 1000); `node_modules` live inside the mount. x86_64 and arm64
+    images published to GHCR. Calls (LiveKit UDP) are out of scope, as are search,
+    call recording and feature flags (they're containers themselves).
 
 [^slice]: Each slice also adds the service to the smoke test, removes the feature from
     `select-services.mjs`, and shrinks the allowlist. Along the way: one source of truth

@@ -61,7 +61,8 @@ OrbStack. With an arm64 builder, pass the system:
 just dev-image aarch64-linux
 ```
 
-Otherwise run the published image, amd64 under Rosetta on Apple Silicon:
+Otherwise run the published image; it is multi-arch (amd64 and arm64), so Apple
+Silicon runs the arm64 image natively:
 
 ```bash
 docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
