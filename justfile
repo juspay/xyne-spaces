@@ -20,10 +20,10 @@ cleanup:
 cleanup-ports:
     ./nix/scripts/cleanup-ports.sh
 
-# Build the dev image from Nix and run it against this checkout (Linux only; extra args go to docker run)
+# Build the dev image and run it against this checkout (Linux, or macOS via a Linux builder; extra args go to docker run)
 [group('nix')]
-dev-image *ARGS:
-    nix build .#dev-image
+dev-image SYSTEM=(arch() + "-linux") *ARGS:
+    nix build .#packages.{{SYSTEM}}.dev-image
     ./result | docker load
     docker run --rm -it \
       -v "$PWD":/src \
