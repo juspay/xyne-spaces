@@ -31,7 +31,7 @@ describe("xor config", () => {
     expect(xorEnabled()).toBe(false);
   });
 
-  it("sends xor calls to <LITELLM_URL>/v1/systemone with jev-latest", async () => {
+  it("sends xor calls to <LITELLM_URL>/v1/decisions with xor-latest", async () => {
     process.env["LITELLM_URL"] = "https://grid.example";
     process.env["LITELLM_API_KEY"] = "k";
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ answers: { a: { type: "noul", noul: 0.9 } } }), { status: 200 }));
@@ -39,8 +39,8 @@ describe("xor config", () => {
     const answers = await xor({ state: "state", questions: { a: { type: "noul", instructions: "x" } }, purpose: "t" });
     expect(answers?.["a"]?.noul).toBe(0.9);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://grid.example/v1/systemone");
-    expect(JSON.parse(String(init.body)).model).toBe("jev-latest");
+    expect(url).toBe("https://grid.example/v1/decisions");
+    expect(JSON.parse(String(init.body)).model).toBe("xor-latest");
   });
 
   it("every Jev call uses one timeout, and the llm backend never exceeds it (bug C)", () => {

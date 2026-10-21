@@ -23,6 +23,8 @@ import {
   activeGoalRepository,
   experimentRepository,
 } from "../repositories/index.js";
+// Direct import: route tests stub the index with factories lacking this.
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
@@ -3148,6 +3150,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       toolMs?: number;
       lastRetryReason?: string;
     };
+    /** Run-level outcome of the citation-reflection pass. */
+    citationReflection?: {
+      outcome?: string;
+      initialCited?: boolean;
+      sourcesWereCiteable?: boolean;
+      finalCited?: boolean;
+      rounds?: number;
+    };
+    /** Per-LLM-call series, stored verbatim (shape owned by xyne-claw's llm-turn-stats.ts). */
+    llmCalls?: unknown;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
@@ -3473,9 +3485,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-      ...(payload.latency ? { latency: payload.latency } : {}),
+      ...clawMetricsFields(payload),
       ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
   }

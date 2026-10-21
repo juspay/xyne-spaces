@@ -51,6 +51,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
+import { useTicketFieldSuggestions } from '../../../hooks/useTicketFieldSuggestions';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
@@ -2070,21 +2071,91 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     clearRepos();
   }, [isReleaseLine, effectiveChannelId, clearRepos]);
 
-  const boardOptions = useMemo(
-    () =>
-      boards
-        ?.filter(board => !isReleaseBoard(board.boardType))
-        .map(board => ({
-          label: board.name,
-          value: board.id,
-          icon: (
-            <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
-              {board.name.charAt(0)}
-            </span>
-          ),
-        })) ?? [],
+  const taskBoards = useMemo(
+    () => boards?.filter(board => !isReleaseBoard(board.boardType)) ?? [],
     [boards],
   );
+  const boardOptions = useMemo(
+    () =>
+      taskBoards.map(board => ({
+        label: board.name,
+        value: board.id,
+        icon: (
+          <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
+            {board.name.charAt(0)}
+          </span>
+        ),
+      })),
+    [taskBoards],
+  );
+
+  const boardTouchedRef = useRef(false);
+  const ticketTypeTouchedRef = useRef(false);
+  // The description box writes to the form only on submit, so suggestions read it here.
+  const [typedDescription, setTypedDescription] = useState<string | null>(null);
+  const typedDescriptionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isOpen) {
+      boardTouchedRef.current = false;
+      ticketTypeTouchedRef.current = false;
+    } else {
+      setTypedDescription(null);
+    }
+    return (): void => {
+      if (typedDescriptionTimerRef.current) clearTimeout(typedDescriptionTimerRef.current);
+    };
+  }, [isOpen]);
+  useEffect(() => {
+    if (ticketKind !== 'task' || boardOptions.length !== 1) return;
+    // Setting a board resets the type.
+    if (boardTouchedRef.current || ticketTypeTouchedRef.current || form.getFieldValue('boardId')) {
+      return;
+    }
+    const boardId = boardOptions[0]!.value;
+    form.setFieldValue('boardId', boardId);
+    markAutoApplied({ boardId });
+  }, [ticketKind, boardOptions, form, markAutoApplied]);
+  const suggestionBoards = useMemo(
+    () =>
+      taskBoards.map(board => {
+        const description = board.description?.trim();
+        return { id: board.id, name: board.name, ...(description ? { description } : {}) };
+      }),
+    [taskBoards],
+  );
+  const fieldSuggestions = useTicketFieldSuggestions({
+    title: formValues.title ?? '',
+    description: typedDescription ?? formValues.description ?? '',
+    boards: suggestionBoards,
+    enabled: isOpen && ticketKind === 'task',
+  });
+  useEffect(() => {
+    const boardId = fieldSuggestions.board?.id;
+    // Only an empty board: switching one resets the type and custom fields.
+    if (!boardId || boardTouchedRef.current || form.getFieldValue('boardId')) return;
+    if (!suggestionBoards.some(board => board.id === boardId)) return;
+    form.setFieldValue('boardId', boardId);
+    markAutoApplied({ boardId });
+  }, [fieldSuggestions.board?.id, suggestionBoards, form, markAutoApplied]);
+  // Must run after the board effect, which resets the type.
+  useEffect(() => {
+    const type = fieldSuggestions.ticketType?.type;
+    if (!type || ticketTypeTouchedRef.current || generatedTicketType) return;
+    if (isFlowRootTicket || ticketKind === 'release' || isReleaseBoard(selectedBoard?.boardType))
+      return;
+    if (!ticketTypeOptions?.some(option => option.value === type)) return;
+    form.setFieldValue('ticketType', type);
+    markAutoApplied({ ticketType: type });
+  }, [
+    fieldSuggestions.ticketType?.type,
+    generatedTicketType,
+    isFlowRootTicket,
+    ticketKind,
+    selectedBoard,
+    ticketTypeOptions,
+    form,
+    markAutoApplied,
+  ]);
 
   // Get status options and memomize them
   const statusOptions = [
@@ -2595,6 +2666,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       const target = e.target;
                       target.style.height = 'auto';
                       target.style.height = `${target.scrollHeight}px`;
+                      if (typedDescriptionTimerRef.current) {
+                        clearTimeout(typedDescriptionTimerRef.current);
+                      }
+                      typedDescriptionTimerRef.current = setTimeout(
+                        () => setTypedDescription(target.value),
+                        500,
+                      );
                       // Validation runs at submit time only. While an error is
                       // showing, re-evaluate it live against the typed value so
                       // it clears as soon as the text is fixed — without writing
@@ -2794,6 +2872,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       options={boardOptions}
                       selectedValue={field.state.value || ''}
                       onSelect={(value: string | null) => {
+                        boardTouchedRef.current = true;
                         field.handleChange(value as CreateTicketFormData['boardId']);
                         setBoardSelectorOpen(false);
                       }}
@@ -3118,9 +3197,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       showSearch={false}
                       options={typeOptions}
                       selectedValue={field.state.value || ''}
-                      onSelect={(value: string | null) =>
-                        field.handleChange(value as CreateTicketFormData['ticketType'])
-                      }
+                      onSelect={(value: string | null) => {
+                        ticketTypeTouchedRef.current = true;
+                        field.handleChange(value as CreateTicketFormData['ticketType']);
+                      }}
                       searchPlaceholder={`${noun.singular} type`}
                       placeholder={`${noun.singular} type${mandatoryTicketType ? ' *' : ''}`}
                       inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}

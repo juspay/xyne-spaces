@@ -72,7 +72,7 @@ describe("entry-stage swap", () => {
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {
     // Without this gate the fallback re-lists the user server (with app
     // creds) right after the swap removed it, resurrecting the duplicate.
-    expect(mcpSrc).toContain("if (!hasSpacesConnection && !automationAppSwap)");
+    expect(mcpSrc).toContain("!hasSpacesConnection && !automationAppSwap\n      ? (async () => {");
   });
 });
 

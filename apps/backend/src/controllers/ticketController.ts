@@ -64,6 +64,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
+import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
+import { AgentsConfig } from '@/agents/config';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
   FormContextType,
@@ -1987,13 +1989,33 @@ export class TicketController {
     }
   };
 
+  suggestFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!(await AgentsConfig.fetch()).ticketFieldSuggestionsXorEnabled) {
+        res.json({ success: true, data: {} });
+        return;
+      }
+      const { title, description = '', boards } = req.body as TicketFieldSuggestionInput;
+      // Stop the XOR call when the dashboard drops the request.
+      const controller = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      const data = await suggestTicketFields({ title, description, boards }, controller.signal);
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error suggesting ticket fields:', error);
+      res.status(500).json({ error: 'Failed to suggest ticket fields' });
+    }
+  };
+
   private async getBoardCandidates(projectId: string): Promise<TicketBoardCandidate[]> {
     const boards = await this.boardRepository.findBoardsByProject(projectId);
 
     return boards.map(board => ({
       id: board.id,
       name: board.name,
-      description: undefined, // Board model doesn't have description field
+      description: board.description || undefined,
       boardType: board.boardType || undefined,
       stageCount: undefined, // Can be populated if needed by fetching stages count
     }));

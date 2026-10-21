@@ -39,6 +39,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Menu, MenuItem } from "./ui/Menu";
 import { useSnackbar } from "./ui/Snackbar";
 import { SandboxReposTab } from "./SandboxReposTab";
+import { extensionAdminTabs } from "./extensionAdminTabs";
 
 import {
   listAdminRoles,
@@ -111,7 +112,8 @@ type TabKey =
   | "usage"
   | "scheduled"
   | "globalmcp"
-  | "sandboxrepos";
+  | "sandboxrepos"
+  | `ext:${string}`;
 
 interface Props {
   userId: string;
@@ -1214,6 +1216,7 @@ export function AdminPageV3({ userId }: Props) {
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
       { id: "sandboxrepos", label: "Sandbox Repos" },
+      ...extensionAdminTabs.map((extensionTab): TabItem<TabKey> => ({ id: `ext:${extensionTab.id}`, label: extensionTab.label })),
     ],
     [requests.length, mcpRequests.length, mcpEditRequests.length, gatewayRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
@@ -1509,6 +1512,9 @@ export function AdminPageV3({ userId }: Props) {
                 )}
 
                 {tab === "sandboxrepos" && <SandboxReposTab userId={userId} />}
+                {extensionAdminTabs.map((extensionTab) =>
+                  tab === `ext:${extensionTab.id}` ? <extensionTab.Component key={extensionTab.id} userId={userId} /> : null,
+                )}
 
                 {tab === "globalmcp" && (
                   <GlobalMcpTab

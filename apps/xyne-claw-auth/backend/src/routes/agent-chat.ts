@@ -50,6 +50,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { chatProjectsRouter } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -60,6 +61,7 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -810,6 +812,11 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
     ...(workspaceId ? { workspaceId } : {}),
   };
 }
+
+// Chat projects (routes/chat-projects.ts). Mounted here, ahead of every
+// `/:slug/...` route below, so `/chat/projects*` is resolved before any
+// slug pattern gets a chance at it.
+router.use(chatProjectsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({
@@ -2604,7 +2611,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, attachments, llmCitations, provider, model, fastMode } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -2677,8 +2684,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(model ? { model } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
-        ...(tokenUsage ? { tokenUsage } : {}),
+        ...clawMetricsFields(req.body as Record<string, unknown>),
         ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {

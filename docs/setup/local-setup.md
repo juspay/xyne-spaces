@@ -121,7 +121,8 @@ Continue at [Clone and run](#clone-and-run).
 ## Windows (WSL2)
 
 Native Windows is possible (`pnpm run services:win`) but far less exercised. The
-supported path is WSL2 — a real Linux environment inside Windows.
+supported path is WSL2 — a real Linux environment inside Windows — using either the
+[Nix setup](nix.md) or Docker.
 
 ### 1. Install WSL2 + Ubuntu
 
@@ -133,19 +134,19 @@ wsl --install -d Ubuntu
 
 Reboot when asked, then open the "Ubuntu" app and create your Linux user.
 
-### 2. Docker Desktop with the WSL2 backend
+### 2. Pick a setup
 
-Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/),
+**Nix:** inside Ubuntu, follow [Local development with Nix](nix.md).
+
+**Docker:** install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/),
 then in *Settings → Resources → WSL integration* enable your Ubuntu distro. Give it
-at least **8 GB memory** under *Resources*. `docker` now works inside Ubuntu.
+at least **8 GB memory** under *Resources*. `docker` now works inside Ubuntu. Inside
+the Ubuntu terminal, do the [Linux section](#linux-debian--ubuntu) — skip its Docker
+step (Docker Desktop already provides it).
 
-### 3. Follow the Linux steps
-
-Inside the Ubuntu terminal, do the [Linux section](#linux-debian--ubuntu) — skip its
-Docker step (Docker Desktop already provides it). One important rule: **keep the
-repo inside the Linux filesystem** (e.g. `~/code/xyne-spaces`), never under
-`/mnt/c/...` — file watching and installs are an order of magnitude slower on the
-Windows mount.
+Either way, **keep the repo inside the Linux filesystem** (e.g. `~/code/xyne-spaces`),
+never under `/mnt/c/...` — file watching and installs are an order of magnitude
+slower on the Windows mount.
 
 ---
 

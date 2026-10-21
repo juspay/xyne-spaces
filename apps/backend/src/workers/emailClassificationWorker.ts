@@ -85,7 +85,7 @@ export class EmailClassificationWorker {
   }
 
   async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
-    const { ticketId, channelId, emailId, groupId } = job.data;
+    const { ticketId, channelId, emailId, groupId, sourceChannelId } = job.data;
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;
@@ -122,6 +122,7 @@ export class EmailClassificationWorker {
       if (runClassification || runPriority) {
         classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
           emailMetadata: buildEmailMetadata(emailRecord),
+          evaluate: true,
         });
       }
     } catch (error) {
@@ -256,9 +257,11 @@ export class EmailClassificationWorker {
         });
         const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
+        // Channels desks assign by rule alone, as their own auto-assignment does.
         if (
-          (Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
-          || boardMetadata?.fullRoleAssignment === true
+          !sourceChannelId
+          && ((Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
+            || boardMetadata?.fullRoleAssignment === true)
         ) {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
             ticketId,
@@ -288,6 +291,7 @@ export class EmailClassificationWorker {
             undefined,
             ticket.projectId ?? undefined,
             ticket.channelId ?? undefined,
+            sourceChannelId,
           );
           if (assignmentResult.assignedUserId) {
             newAssignedTo = assignmentResult.assignedUserId;

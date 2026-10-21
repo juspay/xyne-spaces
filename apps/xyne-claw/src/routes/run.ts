@@ -28,7 +28,11 @@ import {
   type ProgressDest,
   type ProgressEmitter,
   type Attachment,
+  type ToolInvocation,
+  type LatencyMetrics,
+  type TokenUsage,
 } from "../agent.js";
+import { mergeLlmCallSeries, type LlmCallStat } from "../llm-turn-stats.js";
 import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
@@ -66,7 +70,20 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { beginJudgeRun } from "../judge-trace.js";
+import { beginJudgeRun, judgeRunSummary } from "../judge-trace.js";
+
+function judgeCallbackFields(): { judge?: { backend: string; calls: number; failed: number; compactionCalls: number } } {
+  const s = judgeRunSummary();
+  if (!s || s.calls === 0) return {};
+  return {
+    judge: {
+      backend: s.backend,
+      calls: s.calls,
+      failed: s.failed,
+      compactionCalls: s.byPurpose["compaction-call"]?.calls ?? 0,
+    },
+  };
+}
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -187,7 +204,6 @@ import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -201,6 +217,7 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1440,6 +1457,38 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
     : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
+/** Telemetry fields an aborted run's terminal callback carries. */
+export interface AbortTelemetry {
+  toolsUsed?: string[];
+  toolInvocations?: ToolInvocation[];
+  tokenUsage?: TokenUsage;
+  latency?: LatencyMetrics;
+  llmCalls?: LlmCallStat[];
+}
+
+/** Run telemetry for abort-path callbacks. Only RunCancelledError / ProviderStallError carry a snapshot; other errors report nothing. */
+export function abortTelemetry(
+  err: unknown,
+  nested: {
+    toolsUsed?: readonly string[];
+    invocations?: readonly ToolInvocation[];
+    llmCalls?: readonly LlmCallStat[];
+  } = {},
+): AbortTelemetry {
+  if (!(err instanceof RunCancelledError || err instanceof ProviderStallError)) return {};
+  const toolsUsed = [...err.toolsUsed, ...(nested.toolsUsed ?? [])];
+  const toolInvocations = [...err.toolInvocations, ...(nested.invocations ?? [])];
+  const llmCalls = mergeLlmCallSeries(err.llmCalls, nested.llmCalls).calls;
+  return {
+    ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
+    ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
+    tokenUsage: err.tokenUsage,
+    ...judgeCallbackFields(),
+    ...(err.latency ? { latency: err.latency } : {}),
+    ...(llmCalls.length > 0 ? { llmCalls } : {}),
+  };
+}
+
 export async function processTask(
   sessionId: string,
   sessionToken: string,
@@ -1533,9 +1582,12 @@ export async function processTask(
   agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
+  // Answer from Context: retrieve once before the only turn, then answer with no
+  // tools (see answer-context.ts). It replaces prefetch, whose id hints it makes moot.
+  const answerFromContext = answerFromContextEnabled(agentConfig);
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
-  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+  const prefetchSpecPromise = prefetchEnabled(agentConfig) && !answerFromContext
     ? startPrefetchExtraction(task)
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
@@ -1634,6 +1686,15 @@ export async function processTask(
     true,
   );
   const runDebugStartedAt = new Date().toISOString();
+  // Nested-loop sinks live outside the try so the catch can report them (aborted runs land there).
+  // Subagents append inner MCP tool names here so chain `toolsMustInclude`/`toolsMustExclude`
+  // can target nested tools (e.g. Bitbucket__create_pull_request), not just wrapper names.
+  const subagentInnerTools: string[] = [];
+  // Durable sink for subagent tool calls: the live push is fire-and-forget. Finalize dedupes by
+  // toolCallId. A2A callees are not folded in; each has its own run row.
+  const nestedInvocations: ToolInvocation[] = [];
+  // Subagent LLM calls, tagged with the subagent name, merged into the parent's series.
+  const nestedLlmCalls: LlmCallStat[] = [];
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1651,6 +1712,109 @@ export async function processTask(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
 
+    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
+    const isTwinAgent = isDigitalTwinAgent(agentSlug);
+    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
+    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
+    // (which post todo cards to the thread and instruct "write your final answer
+    // as plain text with NO trailing tool call") are both inapplicable AND
+    // actively conflict with twin_deliver — the model followed the primer and
+    // never called the delivery tool, fail-closing to silence. Exclude the twin
+    // mention flow from plan tools/primer entirely.
+    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
+    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
+    // thread mentions): the agent gets a READ-ONLY palette + the terminal
+    // propose-plan tool, proposes a plan, and STOPS for approval. The
+    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
+    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
+    // is 'auto'/undefined this is false and every branch below is the existing
+    // path, so auto-mode behavior is unchanged (INVARIANT A).
+    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
+    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
+    // the agent gets the FULL read-only palette + subagents + the terminal
+    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
+    // structured brief, and STOPS. Like plan mode, the palette + primer are
+    // server-owned here and cannot be changed from the dashboard. Excluded from the
+    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
+    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
+    // `postTodos`, which only hides the Spaces card while the agent still keeps
+    // the list: this removes the todo tools AND the primer, so no turn is spent
+    // on plan bookkeeping at all.
+    //
+    // Why an agent would turn it off: `todo-write` ends the assistant turn like
+    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
+    // of a run ("before your first tool call", and again immediately before the
+    // final answer). On a slow model that is two full round trips of pure
+    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
+    // agents that answer in one message get no value from the checklist card and
+    // pay the whole cost.
+    const planTrackingEnabled =
+      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
+    const planGateEligible =
+      planTrackingEnabled &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    const planGatePreviousReply =
+      planGateEligible && isShortFollowUp(task)
+        ? readPreviousAgentReply(
+            sessionDir(
+              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+                piSessionConversationId ??
+                conversationId ??
+                "",
+            ),
+          )
+        : undefined;
+    const planGateDecision = planGateEligible
+      ? decidePlanTracking(task, agentConfig, {}, planGatePreviousReply).catch(() => null)
+      : Promise.resolve(null);
+
+    // Key the workspace by the CONVERSATION, not the run.
+    //
+    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
+    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
+    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
+    // a brand-new cwd, so that filter never matched: the session directory was
+    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
+    // silently handed back an empty session. Every turn started from zero, and
+    // the agent would answer follow-ups with "I don't have any record of that in
+    // this conversation" (2026-08-30).
+    //
+    // Same identifier as the session store below, so cwd is stable exactly when
+    // the session is. Runs with no conversation (one-shots, automations) keep a
+    // per-run ephemeral workspace.
+    const workspaceStoreKey =
+      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+      (piSessionConversationId ?? conversationId);
+    const workspaceDir =
+      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
+    const toolPermissions =
+      (agentConfig?.["toolPermissions"] as
+        | Record<string, string>
+        | undefined) ?? {};
+    // Over-large MCP results spill to the persistent session dir (survives the
+    // ephemeral workspace teardown + resume) when a conversation is in play;
+    // the workspace is still used for binary attachments. See toolOutputBaseDir.
+    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoad = loadMcpToolsForUser(
+      sessionId,
+      sessionToken,
+      workspaceDir,
+      toolPermissions,
+      agentSlug,
+      mcpOutputDir,
+      (att) => pushAttachment(progressUrl, sessionId, att),
+      trustedSdlcBindings,
+      (serverType) => blockedConnectors.add(serverType),
+      undefined,
+      userId,
+    ).then((value) => ({ value }), (error: unknown) => ({ error }));
+
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
     // in attachment-ingest.ts. derivedContextFiles ordering is significant —
@@ -1658,12 +1822,7 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
-    const taskCommand = routedMode.command;
-    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
-    }
+    const taskCommand = parseTaskCommand(task);
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -1694,25 +1853,6 @@ export async function processTask(
         : []),
     ];
 
-    // Key the workspace by the CONVERSATION, not the run.
-    //
-    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
-    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
-    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
-    // a brand-new cwd, so that filter never matched: the session directory was
-    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
-    // silently handed back an empty session. Every turn started from zero, and
-    // the agent would answer follow-ups with "I don't have any record of that in
-    // this conversation" (2026-08-30).
-    //
-    // Same identifier as the session store below, so cwd is stable exactly when
-    // the session is. Runs with no conversation (one-shots, automations) keep a
-    // per-run ephemeral workspace.
-    const workspaceStoreKey =
-      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
-      (piSessionConversationId ?? conversationId);
-    const workspaceDir =
-      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1754,32 +1894,15 @@ export async function processTask(
       log(`Record-skill originals staged: ${recordingFiles.length}`);
     }
 
-    const toolPermissions =
-      (agentConfig?.["toolPermissions"] as
-        | Record<string, string>
-        | undefined) ?? {};
-    // Over-large MCP results spill to the persistent session dir (survives the
-    // ephemeral workspace teardown + resume) when a conversation is in play;
-    // the workspace is still used for binary attachments. See toolOutputBaseDir.
-    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoaded = await mcpLoad;
+    if ("error" in mcpLoaded) throw mcpLoaded.error;
     const {
       groups: mcpGroups,
       unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
-    } = await loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-    );
+    } = mcpLoaded.value;
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
     // copilot-mode respond-to-user terminations can still recover signed
@@ -2053,8 +2176,6 @@ export async function processTask(
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
-    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
-    const isTwinAgent = isDigitalTwinAgent(agentSlug);
     if (agentSlug && memoryEnabled && isTwinAgent) {
       const taxonomy = await listSubsystemTaxonomy(agentSlug, `user:${userId}`).catch(() => []);
       if (taxonomy.length > 0) activeInjections.push(buildTaxonomyInjection(taxonomy));
@@ -2139,11 +2260,6 @@ export async function processTask(
       subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
-    // Shared ref: subagents append their inner MCP tool names here so chain
-    // `toolsMustInclude`/`toolsMustExclude` conditions can target specific
-    // nested tools (e.g. Bitbucket__create_pull_request), not just the
-    // subagent wrapper names returned by the parent agent.
-    const subagentInnerTools: string[] = [];
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2239,6 +2355,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: subagentInnerTools,
+            parentToolInvocations: nestedInvocations,
+            parentLlmCalls: nestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               ...(agentSlug ? { agentSlug } : {}),
@@ -2392,6 +2510,8 @@ export async function processTask(
         // A delegated agent's 401/403 is the same signal as the parent's: the
         // user's own connection is the fix, so it feeds the same connector card.
         (serverType) => blockedConnectors.add(serverType),
+        undefined,
+        userId,
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2420,6 +2540,9 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        // The callee's subagent work belongs on the callee's run row, so it gets its own sinks.
+        const calleeNestedInvocations: ToolInvocation[] = [];
+        const calleeNestedLlmCalls: LlmCallStat[] = [];
         const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
@@ -2442,6 +2565,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: calleeInnerTools,
+            parentToolInvocations: calleeNestedInvocations,
+            parentLlmCalls: calleeNestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               agentSlug: spec.slug,
@@ -2574,16 +2699,22 @@ export async function processTask(
             },
             { toolCallId },
           );
+          // Reported on the callee's own run row, never folded into the caller's (double count).
+          const calleeLlmCalls = mergeLlmCallSeries(result.llmCalls, calleeNestedLlmCalls).calls;
+          const calleeModel = result.model ?? providerConfig?.model;
           await reportDelegatedRunFinish({
             sessionId: calleeSessionId,
             status: "completed",
             result: result.text,
-            ...(spec.provider ? { provider: spec.provider } : {}),
-            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
-            toolsUsed: result.toolsUsed,
-            toolInvocations: result.toolInvocations,
+            // Resolved values, as a top-level run reports them (unset provider is the platform route).
+            provider: spec.provider ?? "spaces",
+            ...(calleeModel ? { model: calleeModel } : {}),
+            toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
+            toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
             tokenUsage: result.tokenUsage,
+            ...judgeCallbackFields(),
             ...(result.latency ? { latency: result.latency } : {}),
+            ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
           });
           return {
             text: result.text,
@@ -2607,7 +2738,13 @@ export async function processTask(
             sessionId: calleeSessionId,
             status: signal?.aborted ? "cancelled" : "failed",
             error: err instanceof Error ? err.message : String(err),
-            ...(spec.provider ? { provider: spec.provider } : {}),
+            provider: spec.provider ?? "spaces",
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            ...abortTelemetry(err, {
+              toolsUsed: calleeInnerTools,
+              invocations: calleeNestedInvocations,
+              llmCalls: calleeNestedLlmCalls,
+            }),
           });
           throw err;
         }
@@ -2867,62 +3004,7 @@ export async function processTask(
     // (already ctx-threaded by loadCustomTools). Mirrors the isScheduledRun /
     // isReadOnlyJob logic computed later — inlined here because tool assembly
     // runs before it.
-    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
-    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
-    // (which post todo cards to the thread and instruct "write your final answer
-    // as plain text with NO trailing tool call") are both inapplicable AND
-    // actively conflict with twin_deliver — the model followed the primer and
-    // never called the delivery tool, fail-closing to silence. Exclude the twin
-    // mention flow from plan tools/primer entirely.
-    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
-    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
-    // thread mentions): the agent gets a READ-ONLY palette + the terminal
-    // propose-plan tool, proposes a plan, and STOPS for approval. The
-    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
-    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
-    // is 'auto'/undefined this is false and every branch below is the existing
-    // path, so auto-mode behavior is unchanged (INVARIANT A).
-    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
-    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
-    // the agent gets the FULL read-only palette + subagents + the terminal
-    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
-    // structured brief, and STOPS. Like plan mode, the palette + primer are
-    // server-owned here and cannot be changed from the dashboard. Excluded from the
-    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
-    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
-    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
-    // `postTodos`, which only hides the Spaces card while the agent still keeps
-    // the list: this removes the todo tools AND the primer, so no turn is spent
-    // on plan bookkeeping at all.
-    //
-    // Why an agent would turn it off: `todo-write` ends the assistant turn like
-    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
-    // of a run ("before your first tool call", and again immediately before the
-    // final answer). On a slow model that is two full round trips of pure
-    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
-    // agents that answer in one message get no value from the checklist card and
-    // pay the whole cost.
-    const planTrackingEnabled =
-      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planGateEligible =
-      planTrackingEnabled &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isPlanMode &&
-      !isDailyBrief;
-    const planGatePreviousReply =
-      planGateEligible && isShortFollowUp(task)
-        ? readPreviousAgentReply(
-            sessionDir(
-              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
-                piSessionConversationId ??
-                conversationId ??
-                "",
-            ),
-          )
-        : undefined;
-    const planGate = planGateEligible ? await decidePlanTracking(task, agentConfig, {}, planGatePreviousReply) : null;
+    const planGate = await planGateDecision;
     const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
     if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
@@ -3422,7 +3504,7 @@ export async function processTask(
           ...(sessionId && sessionToken
             ? {
                 searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
-                  searchDeploymentTools(sessionId, sessionToken, params),
+                  searchDeploymentTools(sessionId, sessionToken, params, userId),
               }
             : {}),
           openPalette: openPaletteEnabled,
@@ -3901,6 +3983,23 @@ export async function processTask(
         : idLines.join("\n");
     }
 
+    // Answer from Context: the palette is final, so its search tools can run the
+    // question now — through their own `execute`, so ACL and KB grants apply.
+    if (answerFromContext) {
+      const retrieveStartedAt = Date.now();
+      const scope = answerScopeFrom(agentConfig);
+      const { block, sections } = await buildAnswerContext({
+        query: task,
+        scope,
+        tools: allTools as unknown as ExecutableTool[],
+        askerName: userName,
+        progressUrl,
+        sessionId,
+      });
+      fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+      log(`[answer-context] scope=${scope} sources=${sections.length} chars=${block.length} in ${Date.now() - retrieveStartedAt}ms`);
+    }
+
     // Resolve the prefetch spec now that the tool palette is final: the
     // resolvers ARE the agent's own Spaces tools, invoked through the same
     // `execute` closure the model would use, so ACL and permissions come along
@@ -4154,7 +4253,8 @@ export async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
-        customTools: tools,
+        // Answer from Context answers in one turn from the retrieved block: no tools.
+        customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -4195,7 +4295,7 @@ export async function processTask(
         ...(verifyResponses && !isCopilot
           ? { verifyResponsesRef: evidenceRef }
           : {}),
-        citationReflection,
+        citationReflection: answerFromContext ? false : citationReflection,
         replyFormat,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
@@ -4511,6 +4611,10 @@ export async function processTask(
     // on specific inner tools (Bitbucket__create_pull_request) in addition to
     // subagent wrappers (bitbucket).
     const combinedToolsUsed = [...result.toolsUsed, ...subagentInnerTools];
+    if (nestedInvocations.length > 0) {
+      result.toolInvocations.push(...nestedInvocations);
+    }
+    const llmCallSeries = mergeLlmCallSeries(result.llmCalls, nestedLlmCalls).calls;
 
     const lat = result.latency;
     const latencyStr = lat
@@ -4678,7 +4782,10 @@ export async function processTask(
         }),
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
+        ...judgeCallbackFields(),
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        ...(result.latency ? { latency: result.latency } : {}),
+        ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
         provider: completedProvider,
         model: completedModel,
       });
@@ -4800,6 +4907,7 @@ export async function processTask(
       ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
+      ...judgeCallbackFields(),
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
         : {}),
@@ -4813,6 +4921,8 @@ export async function processTask(
           }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
+      ...(result.citationReflection ? { citationReflection: result.citationReflection } : {}),
+      ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
       ...(result.toolInvocations.length > 0
         ? { toolInvocations: result.toolInvocations }
         : {}),
@@ -4985,6 +5095,11 @@ export async function processTask(
     // "Query aborted by user." in the UI. When the user cancelled, fall through
     // to the cancelled branch below instead.
     const isUserCancel = activeRuns.get(sessionId)?.userCancelled === true;
+    const abortFields = abortTelemetry(err, {
+      toolsUsed: subagentInnerTools,
+      invocations: nestedInvocations,
+      llmCalls: nestedLlmCalls,
+    });
     if (
       pendingResponsesAtError.length > 0 &&
       !isUserCancel &&
@@ -5049,9 +5164,7 @@ export async function processTask(
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         ...(llmCitationsAtError && llmCitationsAtError.length > 0 ? { llmCitations: llmCitationsAtError } : {}),
         provider: callbackProvider,
         model: callbackModel,
@@ -5080,9 +5193,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5110,9 +5221,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingAgentCard: proposeAgentRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5140,9 +5249,7 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5161,9 +5268,7 @@ export async function processTask(
         fastMode: fastModeForCallback,
         status: "completed",
         result: partialResult || "Experiment complete — report recorded.",
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5184,15 +5289,7 @@ export async function processTask(
           fastMode: fastModeForCallback,
           status: "completed",
           result: interruptSummary,
-          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-            ? { toolsUsed: err.toolsUsed }
-            : {}),
-          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-            ? { toolInvocations: err.toolInvocations }
-            : {}),
-          ...(err instanceof RunCancelledError
-            ? { tokenUsage: err.tokenUsage }
-            : {}),
+          ...abortFields,
           provider: callbackProvider,
           model: callbackModel,
         });
@@ -5209,15 +5306,7 @@ export async function processTask(
         ...(err instanceof RunCancelledError && err.partialText
           ? { result: err.partialText }
           : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof RunCancelledError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5291,15 +5380,7 @@ export async function processTask(
           : { status: "completed" as const, result: "" }),
         emptyReason: "provider_capacity" as const,
         ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
-        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof ProviderStallError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });

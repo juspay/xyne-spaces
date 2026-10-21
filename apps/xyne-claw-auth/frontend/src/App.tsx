@@ -58,11 +58,13 @@ export function App() {
   const location = useLocation();
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // AppV3 runs its own admin check; this flag is only read by the v1 shell.
+  const onV3 = location.pathname.startsWith("/v3");
   useEffect(() => {
-    if (auth.status === "authenticated") {
+    if (auth.status === "authenticated" && !onV3) {
       checkIsAdmin(auth.user.id).then(setIsAdmin).catch(() => {});
     }
-  }, [auth.status, auth.status === "authenticated" ? auth.user.id : ""]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : "", onV3]);
 
   // Public Design links deliberately bypass every auth shell. The bearer is
   // kept in the URL fragment and validated by claw-auth's public share API.

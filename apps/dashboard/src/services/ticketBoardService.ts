@@ -55,6 +55,28 @@ export const checkBoardSuggestion = async (
   return responseData.data;
 };
 
+export interface TicketFieldSuggestions {
+  board?: { id: string; confidence: number };
+  ticketType?: { type: string; confidence: number };
+}
+
+export const suggestTicketFields = async (
+  payload: {
+    title: string;
+    description: string;
+    boards: { id: string; name: string; description?: string }[];
+  },
+  options?: { signal?: AbortSignal },
+): Promise<TicketFieldSuggestions> => {
+  const requestConfig = options?.signal ? { signal: options.signal } : undefined;
+  const response = await apiInstance.post<{ success: boolean; data?: TicketFieldSuggestions }>(
+    '/tickets/suggest-fields',
+    payload,
+    requestConfig,
+  );
+  return response.data.data ?? {};
+};
+
 export const generateReleaseNotes = async (
   ticketId: string,
   options?: { signal?: AbortSignal },

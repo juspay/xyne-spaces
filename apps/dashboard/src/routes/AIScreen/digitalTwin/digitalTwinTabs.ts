@@ -1,5 +1,6 @@
 export type DigitalTwinTabId =
   | 'memories'
+  | 'replies'
   | 'hot'
   | 'proposals'
   | 'recall'
@@ -14,6 +15,7 @@ export interface DigitalTwinTab {
 
 export const DIGITAL_TWIN_TABS: readonly DigitalTwinTab[] = [
   { id: 'memories', label: 'Memories' },
+  { id: 'replies', label: 'Replies' },
   { id: 'hot', label: 'Hot' },
   { id: 'proposals', label: 'Proposals' },
   { id: 'recall', label: 'Recall' },

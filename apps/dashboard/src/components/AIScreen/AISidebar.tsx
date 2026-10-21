@@ -56,7 +56,11 @@ import {
   ConversationRowContent,
   useAgentDirectory,
 } from './ConversationAgents';
-import { agentIdentity, groupByRecency } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
+import {
+  agentIdentity,
+  groupByRecency,
+  splitAutoReplies,
+} from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -623,7 +627,9 @@ export function AISidebar({
   } = useV2SessionsList({ agentSlug: agentFilter });
   const directory = useAgentDirectory();
   const pinnedSessions = sessions.filter(session => session.isStarred);
-  const recentGroups = groupByRecency(sessions.filter(session => !session.isStarred));
+  const { own: ownSessions } = splitAutoReplies(sessions.filter(session => !session.isStarred));
+  const recentGroups = groupByRecency(ownSessions);
+  const visibleCount = pinnedSessions.length + ownSessions.length;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
   const { patchSession } = useV2SessionPatcher();
 
@@ -795,7 +801,7 @@ export function AISidebar({
 
             {recentsOpen && (
               <div className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
-                {agentFilter && sessions.length === 0 ? (
+                {agentFilter && visibleCount === 0 ? (
                   <div className='px-3 pt-6 text-center' data-testid='agent-filter-empty'>
                     <p className='text-sm text-sidebar-accent-foreground'>
                       No chats with {agentIdentity(directory, agentFilter).name}
@@ -818,7 +824,7 @@ export function AISidebar({
                     onDelete={handleDeleteSession}
                     onRename={handleRenameSession}
                     onTogglePin={handleTogglePinSession}
-                    showEmpty={sessions.length === 0}
+                    showEmpty={visibleCount === 0}
                   />
                 ) : (
                   recentGroups.map(group => (
