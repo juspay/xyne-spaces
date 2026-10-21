@@ -14,7 +14,7 @@ import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
-import type { Canvas } from '../Canvas.types';
+import type { Canvas, CanvasFolder } from '../Canvas.types';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import { logger, Event } from '../../../utils/logger';
 import { useAuth } from '../../../hooks/useAuth';
@@ -189,6 +189,58 @@ const CanvasPanel = (): ReactElement => {
       setIsCreatingCanvas(false);
     }
   }, [navigate, viewMode, user?.id]);
+
+  const handleCreateCanvasInFolder = useCallback(
+    async (folder: CanvasFolder): Promise<void> => {
+      setIsCreatingCanvas(true);
+      const newCanvasId = uuidv4();
+
+      try {
+        await canvasService.createCollaborativeCanvas({
+          id: newCanvasId,
+          title: 'Untitled Canvas',
+          folderId: folder.id,
+          ...(folder.channelId ? { channelId: folder.channelId } : {}),
+          ...(folder.projectId ? { projectId: folder.projectId } : {}),
+        });
+        void navigate(`/chat/canvas/${newCanvasId}`);
+      } catch (error) {
+        logger.error(Event.CANVAS_CREATE_FAILED, {
+          canvasId: newCanvasId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        toast.error('Error', { description: 'Failed to create canvas in folder.' });
+      } finally {
+        setIsCreatingCanvas(false);
+      }
+    },
+    [navigate],
+  );
+
+  const handleMoveCanvas = useCallback(
+    async (canvas: Canvas, folderId: string | null): Promise<void> => {
+      try {
+        const result = z.mutate(
+          mutators.canvas.update({
+            id: canvas.id,
+            folderId,
+            ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
+            timestamp: Date.now(),
+          }),
+        );
+        const serverResult = await result.server;
+        if (serverResult.type === 'error') {
+          throw new Error(serverResult.error.message || 'Failed to move canvas');
+        }
+        toast.success(folderId ? 'Canvas moved to folder' : 'Canvas moved to channel root');
+      } catch (error) {
+        toast.error('Failed to move canvas', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      }
+    },
+    [z],
+  );
 
   const handleSelectCanvas = useCallback(
     (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
@@ -514,6 +566,8 @@ const CanvasPanel = (): ReactElement => {
               showStarredOnly={false}
               onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
+              onCreateCanvasInFolder={handleCreateCanvasInFolder}
+              onMoveCanvas={handleMoveCanvas}
               {...(selectedCanvasId ? { selectedCanvasId } : {})}
             />
           )}
