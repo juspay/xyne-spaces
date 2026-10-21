@@ -332,6 +332,8 @@ export function SdlcKnowledgeSection(props: {
   onCreateWithAi: (draft: HubKnowledgeAiDraft) => void;
   /** Status and start button of the workflow that generates knowledge files. */
   generateControl: ReactNode;
+  /** A generation run is in progress: an empty list is waiting on it, not inviting one. */
+  generating: boolean;
   /** The hub's name, for the count under the list. */
   channelName: string;
 }): ReactElement {
@@ -936,11 +938,15 @@ export function SdlcKnowledgeSection(props: {
               showSkeleton && <SkeletonRows />
             ) : empty ? (
               <div className='rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground'>
-                No knowledge files or skills yet.
+                {props.generating
+                  ? 'Knowledge files are being generated.'
+                  : 'No knowledge files or skills yet.'}
                 <p className='mt-1 text-xs'>
-                  {isHubAdmin
-                    ? "Generate knowledge files from this hub's repositories, or add a skill."
-                    : 'A hub admin can generate knowledge files or add skills.'}
+                  {props.generating
+                    ? 'They show here as the run writes them.'
+                    : isHubAdmin
+                      ? "Generate knowledge files from this hub's repositories, or add a skill."
+                      : 'A hub admin can generate knowledge files or add skills.'}
                 </p>
               </div>
             ) : pinnedRows.length + otherRows.length === 0 ? (

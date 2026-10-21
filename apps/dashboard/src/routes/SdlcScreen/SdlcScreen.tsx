@@ -4328,6 +4328,7 @@ export default function SdlcScreen(): ReactElement {
                       channelName={channel.name}
                       channelId={channel.id}
                       isHubAdmin={isHubAdmin}
+                      generating={state.phase === 'RUNNING'}
                       files={knowledgeDocs.map(canvas => ({
                         id: canvas.id,
                         title: canvas.title,

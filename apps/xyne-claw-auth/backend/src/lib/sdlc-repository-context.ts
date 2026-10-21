@@ -8,6 +8,7 @@ import { getSpacesAuthForUser } from "./spaces-db.js";
 import { spacesUserIdForClawUser } from "./users-jit.js";
 import { SpacesApiError, spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
 import { agentRequestRepository } from "../repositories/index.js";
+import { writeAuditLog } from "./audit.js";
 
 const log = createLogger("sdlc-repository-context");
 
@@ -258,6 +259,12 @@ export async function linkSdlcHubSkill(channelId: string, userId: string, skillI
     requestType: "push_to_global",
     requesterId: skill.ownerUserId,
     orgId: skill.orgId,
+  });
+  await writeAuditLog({
+    actorUserId: skill.ownerUserId,
+    eventType: "REQUEST_CREATED",
+    targetId: skill.id,
+    description: `push_to_global request for skill "${skill.name}"`,
   });
 }
 

@@ -21,7 +21,7 @@ import { apiInstance } from '../../services/clients/apiClient';
 
 /** Why a repo skill cannot be added, or null when it can. */
 function importBlocked(skill: ImportPreviewSkill): string | null {
-  if (skill.alreadyImported) return 'Already in your skills, listed above.';
+  if (skill.alreadyImported) return 'Already in your skills.';
   if (skill.error) return skill.error;
   if (!skill.slugValid) return 'Its name is not a valid skill handle.';
   if (skill.slugTaken) return 'Another skill already uses this name.';
