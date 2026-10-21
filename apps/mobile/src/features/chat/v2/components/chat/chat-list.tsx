@@ -1242,6 +1242,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     dividerShownWithoutMessageBelow: boolean;
     emptyBelowDetailJson: string | null;
     loggedFailure: boolean;
+    revealedAtMs: number | null;
   } | null>(null);
   if (unreadDiagRef.current?.key !== openIdentityKey) {
     unreadDiagRef.current = {
@@ -1262,6 +1263,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       dividerShownWithoutMessageBelow: false,
       emptyBelowDetailJson: null,
       loggedFailure: false,
+      revealedAtMs: null,
     };
   }
   const unreadDiagOpenRecord = getUnreadDiagOpenRecord(channelId, openStartedAtMs);
@@ -1405,6 +1407,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   useEffect(() => {
     const diag = unreadDiagRef.current;
     if (!diag || !isUnreadDiagRevealed) return;
+    diag.revealedAtMs ??= getElapsedMs(openCycleState.startedAtMs);
     const hasBoundary = !!isUnreadOpen || unreadBoundaryLastViewedAt !== undefined;
     const samples: [number, number][] = [];
     // Sampled for the whole open, so a divider the user scrolls to still counts.
@@ -1505,6 +1508,11 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       dividerLastTopPx: diag.dividerLastTopPx,
       dividerShownWithoutMessageBelow: diag.dividerShownWithoutMessageBelow,
       emptyBelowDetailJson: diag.emptyBelowDetailJson,
+      // How long the shimmer covered this open, and how many cached rows it began with.
+      shimmerMs: diag.revealedAtMs,
+      seedRows: openCycleState.initialSeedRows,
+      unreadLastActivityAt,
+      isUnreadCacheCurrent,
     };
     logUnreadDiag('unread_diag_list_summary', summary);
     // One line per failed open, so Grafana can list every miss directly.
