@@ -26,7 +26,6 @@ import {
   EyeOff,
   ChevronDown,
   Check,
-  Search,
 } from 'lucide-react';
 import { PhoneDefault, ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
@@ -113,12 +112,9 @@ import { MessageBarPreview } from './MessageBarPreview';
 import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarActions';
 import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
-import {
-  searchSettings,
-  findSettingElement,
-  type SettingsSearchEntry,
-  type SettingsSearchResult,
-} from './settingsSearch';
+import { searchSettings, findSettingElement, type SettingsSearchEntry } from './settingsSearch';
+import { SettingsSearchInput } from './SettingsSearchInput';
+import { SettingsSearchResults } from './SettingsSearchResults';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -1590,80 +1586,6 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
-};
-
-// ─── Settings search ────────────────────────────────────────────────────────
-const SettingsSearchInput: FC<{
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  className?: string;
-}> = ({ value, onChange, onSubmit, className }) => (
-  <div className={className}>
-    <div className='relative'>
-      <Search className='pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
-      <Input
-        type='search'
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            onSubmit();
-          }
-        }}
-        placeholder='Search settings'
-        aria-label='Search settings'
-        className='h-8 pl-8 pr-2 text-sm'
-        data-track-category='PREFERENCES'
-        data-track-name='SearchSettings'
-      />
-    </div>
-  </div>
-);
-
-const SettingsSearchResults: FC<{
-  query: string;
-  results: SettingsSearchResult[];
-  navItems: NavItem[];
-  onSelect: (entry: SettingsSearchEntry) => void;
-  itemClassName?: string;
-}> = ({ query, results, navItems, onSelect, itemClassName }) => {
-  if (results.length === 0) {
-    return (
-      <p className='px-2 py-3 text-sm text-muted-foreground break-words'>
-        No settings match “{query.trim()}”
-      </p>
-    );
-  }
-  return (
-    <div role='listbox' aria-label='Matching settings' className='flex flex-col gap-0.5'>
-      {results.map(result => {
-        const nav = navItems.find(item => item.id === result.section);
-        return (
-          <button
-            key={`${result.section}:${result.label}`}
-            type='button'
-            role='option'
-            aria-selected={false}
-            onClick={() => onSelect(result)}
-            className={cn(
-              'flex items-start gap-2.5 px-2 py-2 rounded-md text-left w-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors',
-              itemClassName,
-            )}
-            data-track-category='PREFERENCES'
-            data-track-name={`SearchResult_${result.section}`}
-          >
-            <span className='mt-0.5 shrink-0'>{nav?.icon}</span>
-            <span className='min-w-0'>
-              <span className='block text-sm text-foreground break-words'>{result.label}</span>
-              <span className='block text-xs text-muted-foreground'>{nav?.label}</span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
 };
 
 // ════════════════════════════════════════════════════════════════════════════
