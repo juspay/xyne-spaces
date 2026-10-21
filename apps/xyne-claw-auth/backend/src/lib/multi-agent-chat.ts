@@ -257,6 +257,10 @@ export interface ConversationListRow {
    *  active most recently. */
   agentSlug: string;
   agentSlugs: string[];
+  /** The chat project this conversation sits in FOR THIS USER, or null when
+   *  unfiled. Membership is per user, so two people in one conversation can
+   *  file it differently. */
+  projectId: string | null;
 }
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -337,6 +341,9 @@ export function buildConversationList(args: {
   entries: ConversationEntry[];
   meta: ConversationMetaRow[];
   firstUserMessages: FirstUserMessageRow[];
+  /** conversationId → projectId for this user. Absent means "projects not
+   *  resolved", which renders the same as unfiled. */
+  projectIds?: Map<string, string>;
 }): ConversationListRow[] {
   const metaByKey = new Map<string, ConversationMetaRow>(args.meta.map((m) => [`${m.conversationId}:${m.agentSlug}`, m]));
   // Rows arrive oldest-first, so the first one seen per key is the earliest.
@@ -362,6 +369,7 @@ export function buildConversationList(args: {
       lastMessageAt: entry.lastMessageAt,
       agentSlug: entry.latestAgentSlug,
       agentSlugs: entry.agentSlugs,
+      projectId: args.projectIds?.get(entry.conversationId) ?? null,
     };
   });
 }
