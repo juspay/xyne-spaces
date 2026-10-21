@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useAllChannels } from '@/src/hooks/useChannels';
+import { useHydrateWorkspaceChannels } from '@/src/hooks/useHydrateWorkspaceChannels';
 import { useUsers } from '@/src/hooks/useUsers';
 import { stateMachineActor } from '@/src/machines/appStateMachine';
 import {
@@ -138,6 +139,7 @@ export function useChannelsSearch(
   const allChannels = useAllChannels();
   const visibleChannels = useSelector(stateMachineActor, selectVisibleChannels);
   const statuses = useSelector(stateMachineActor, selectChannelStatuses);
+  useHydrateWorkspaceChannels();
 
   const channels = useMemo(() => {
     const byStatus = statusMap(statuses);
@@ -151,7 +153,12 @@ export function useChannelsSearch(
         visibility?: unknown;
         isArchived?: boolean;
       };
-      if (record.type !== ChannelType.DEFAULT) continue;
+      if (
+        record.type !== ChannelType.DEFAULT &&
+        !isDeskChannelType(record.type as string | undefined)
+      ) {
+        continue;
+      }
       if (record.scopeType !== ChannelScopeType.DEFAULT) continue;
       if (record.visibility !== ChannelVisibility.PUBLIC) continue;
       if (record.isArchived) continue;

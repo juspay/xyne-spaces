@@ -1,5 +1,8 @@
 import { router } from 'expo-router';
+import { isDeskChannelType } from '@xyne/shared';
+
 import type { DisplaySearchResult } from '@/src/types/search';
+import { getChannelById } from '@/src/hooks/useChannels';
 import { ChannelService } from '@/src/services/ChannelService';
 import {
   createChatOpenIntent,
@@ -104,6 +107,11 @@ export async function navigateToGlobalSearchResult(result: DisplaySearchResult):
       case 'channel': {
         const channelId = context?.channelId || result.id;
         logSearchNavigation('decision_channel_result', { channelId });
+        if (isDeskChannelType(getChannelById(channelId)?.type)) {
+          logSearchNavigation('route_desk_channel', { channelId });
+          router.push(`/xyne-desks/${channelId}`);
+          return true;
+        }
         navigateToChannel(channelId);
         return true;
       }

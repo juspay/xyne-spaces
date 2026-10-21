@@ -9,7 +9,7 @@ import { queries } from '@/src/zero/queries';
 
 export type UseJoinDeskChannelReturn = {
   joiningIds: ReadonlySet<string>;
-  joinDesk: (channelId: string, channelName: string) => void;
+  joinDesk: (channelId: string, channelName: string) => Promise<boolean>;
 };
 
 /**
@@ -35,8 +35,8 @@ export function useJoinDeskChannel(): UseJoinDeskChannelReturn {
   const [joiningIds, setJoiningIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const joinDesk = useCallback(
-    (channelId: string, channelName: string) => {
-      if (!channelId || joiningIds.has(channelId)) return;
+    (channelId: string, channelName: string): Promise<boolean> => {
+      if (!channelId || joiningIds.has(channelId)) return Promise.resolve(false);
 
       setJoiningIds(prev => {
         const next = new Set(prev);
@@ -44,15 +44,15 @@ export function useJoinDeskChannel(): UseJoinDeskChannelReturn {
         return next;
       });
 
-      void (async () => {
+      return (async () => {
         try {
           const channelReady = await ensureChannelInZeroReplica(zero, channelId);
           if (!channelReady) {
             Alert.alert(
-              'Could not join desk',
-              "This desk isn't available right now. Pull to refresh or try again shortly.",
+              'Could not join',
+              "This channel isn't available right now. Pull to refresh or try again shortly.",
             );
-            return;
+            return false;
           }
 
           const mutation = zero.mutate(
@@ -65,10 +65,12 @@ export function useJoinDeskChannel(): UseJoinDeskChannelReturn {
           );
 
           await mutation.client;
-          showMessageToast(`Joined "${channelName.trim() || 'desk'}"`, 'success');
+          showMessageToast(`Joined "${channelName.trim() || 'channel'}"`, 'success');
+          return true;
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Please try again.';
-          Alert.alert('Could not join desk', message);
+          Alert.alert('Could not join', message);
+          return false;
         } finally {
           setJoiningIds(prev => {
             const next = new Set(prev);

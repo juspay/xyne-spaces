@@ -2,11 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useEmailChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
-import { useFallbackHydratedQuery } from '@/src/hooks/useFallbackHydratedQuery';
-import { withFallbackHydratedQueryArgs } from '@/src/hooks/with-fallback-hydrated-query-args';
-import { stateMachineActor } from '@/src/machines/appStateMachine';
-import { filterAllChannelsForWorkspace } from '@/src/providers/initialStateLoaderUtils';
-import { queries } from '@/src/zero/queries';
+import { useHydrateWorkspaceChannels } from '@/src/hooks/useHydrateWorkspaceChannels';
 
 import { getDesksPaintCache, setDesksPaintCache } from '../utils';
 import type { DeskListItemData } from '../types';
@@ -28,25 +24,8 @@ export type UseDesksListDataReturn = {
  * Without that catalog, not-joined public desks never appear.
  */
 export function useDesksListData(): UseDesksListDataReturn {
-  const { workspaceSessionKey: sessionKey, user } = useAuth();
-  const workspaceId = user?.workspaceId;
-
-  // Materialize ACL-visible channels into Zero SQLite (join mutators need the row)
-  // and feed the state-machine catalog that useEmailChannels merges for not-joined.
-  const channelsQuery = useMemo(() => withFallbackHydratedQueryArgs(queries.userAllChannels()), []);
-  const [allChannelRows, channelsDetails] = useFallbackHydratedQuery(channelsQuery, {
-    enabled: true,
-  });
-
-  useEffect(() => {
-    if (!workspaceId || channelsDetails.type !== 'complete') return;
-
-    const workspaceChannels = filterAllChannelsForWorkspace(allChannelRows, workspaceId);
-    stateMachineActor.send({
-      type: 'ADD_ALL_CHANNELS',
-      channels: workspaceChannels,
-    });
-  }, [allChannelRows, channelsDetails.type, workspaceId]);
+  const { workspaceSessionKey: sessionKey } = useAuth();
+  useHydrateWorkspaceChannels();
 
   const emailChannels = useEmailChannels();
   const userChannelStatuses = useUserChannelStatuses();
