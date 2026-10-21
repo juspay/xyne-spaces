@@ -102,7 +102,7 @@ export class NoteTakerCallRepository {
       },
     });
 
-    await this.clearConversationRecordingState(tx, metadata.conversationId);
+    await this.clearConversationRecordingState(tx, metadata.conversationId, call.externalId);
 
     return true;
   }
@@ -111,20 +111,33 @@ export class NoteTakerCallRepository {
    * Clear conversation.callId so the channel row's live-recording indicator
    * turns off immediately, and drop the isHeadlessRecording metadata flag
    * stamped in createThreadAnchorMessage (merge-safe: only removes that key).
+   *
+   * Only acts while the conversation still points at THIS recording. A thread
+   * can host a regular call while a recording is running; the call takes over
+   * conversation.callId when it starts, and ending the recording must not wipe
+   * the live call's id (that re-enables "Start call" and allows a duplicate call).
    */
-  async clearConversationRecordingState(tx: Prisma.TransactionClient, conversationId: string): Promise<void> {
+  async clearConversationRecordingState(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    recordingExternalId: string,
+  ): Promise<void> {
     const conversation = await tx.conversation.findUnique({
       where: { conversationId },
-      select: { metadata: true },
+      select: { callId: true, metadata: true },
     });
+    if (!conversation || conversation.callId !== recordingExternalId) return;
+
     const conversationMetadata: Record<string, unknown> =
-      conversation?.metadata && typeof conversation.metadata === 'object' && !Array.isArray(conversation.metadata)
+      conversation.metadata && typeof conversation.metadata === 'object' && !Array.isArray(conversation.metadata)
         ? { ...(conversation.metadata as Record<string, unknown>) }
         : {};
     delete conversationMetadata.isHeadlessRecording;
 
-    await tx.conversation.update({
-      where: { conversationId },
+    // Compare-and-clear: a call that took over the slot between the read and
+    // this write keeps its id.
+    await tx.conversation.updateMany({
+      where: { conversationId, callId: recordingExternalId },
       data: { callId: null, metadata: conversationMetadata as Prisma.InputJsonValue },
     });
   }

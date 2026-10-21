@@ -15,8 +15,15 @@ export function useStopRecording(): () => void {
   const navigate = useNavigate();
 
   return useCallback((): void => {
-    const { startTime, pauseStartedAt, accumulatedPausedMs, externalId, title, transcripts } =
-      getRecordingContext();
+    const {
+      startTime,
+      pauseStartedAt,
+      accumulatedPausedMs,
+      externalId,
+      title,
+      transcripts,
+      conversationId,
+    } = getRecordingContext();
     const isViewingThisRecording =
       Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
     const stoppedRecordingId = externalId;
@@ -27,8 +34,13 @@ export function useStopRecording(): () => void {
 
     sendRecordingEvent({ type: 'stopRecording' });
 
+    // Recordings started from a thread ("Take notes") keep the user where they
+    // are: the thread's anchor message flips to "Recording ended" in place and
+    // links to the recording, so jumping to its detail page is a surprise.
+    const startedFromThread = Boolean(conversationId);
+
     // The recording just transitioned to ENDED — land the user on its detail
-    if (stoppedRecordingId && !isViewingThisRecording) {
+    if (stoppedRecordingId && !isViewingThisRecording && !startedFromThread) {
       void navigate(`/recordings/${stoppedRecordingId}`, {
         state: { justStopped: true, durationMs, endedAtMs, hasTranscript: !capturedNothing },
       });
