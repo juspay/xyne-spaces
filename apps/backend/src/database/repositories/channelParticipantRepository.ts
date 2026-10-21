@@ -1,8 +1,10 @@
 import { BaseRepository } from './base';
 import { ChannelParticipant } from '@prisma/client';
-import { ChannelRole, UserStatus, UserType } from '@xyne/shared';
+import { ChannelRole, ChannelScopeType, UserStatus, UserType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
+import { getContextOrNull } from '@/database/tenant/context';
+import { getGuestVisibleUserIds } from '@/database/acl/tables/channel-access-helper';
 import { createTx } from '@/bypassAcl/transactions/channelParticipantRepository';
 import { addParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
 import { removeParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
@@ -47,6 +49,31 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
   }
 
+  /**
+   * Participant inserts run in ACL-free transactions, so ChannelParticipantsACL.canCreate never
+   * sees them. Checked here instead: a guest may add others only to a DM / group DM they can
+   * see, and only people they can already see (who share a channel or canvas with them).
+   */
+  private async assertGuestMayAdd(channelId: string, userIds: string[]): Promise<void> {
+    const ctx = getContextOrNull();
+    if (ctx?.role !== 'GUEST' || ctx.actor !== 'user') return;
+    const others = userIds.filter((id) => id !== ctx.userId);
+    if (others.length === 0) return;
+
+    const channel = await this.db.channel.findFirst({
+      where: { id: channelId, workspaceId: ctx.workspaceId },
+      select: { scopeType: true },
+    });
+    const isDm =
+      channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
+    const visible = isDm
+      ? new Set(await getGuestVisibleUserIds(this.db, ctx.workspaceId, ctx.userId))
+      : new Set<string>();
+    if (!isDm || !others.every((id) => visible.has(id))) {
+      throw new Error('Guests can only add people they share a channel or canvas with to a DM');
+    }
+  }
+
   async create(data: CreateChannelParticipantInput): Promise<ChannelParticipant> {
     await this.validateString(data.channelId, 'channelId');
     await this.validateString(data.userId, 'userId');
@@ -55,6 +82,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await this.validateEnum(data.role, 'role', ['ADMIN', 'MEMBER']);
     }
 
+    await this.assertGuestMayAdd(data.channelId, [data.userId]);
     return await createTx(this, data);
   }
 
@@ -186,6 +214,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return existing;
     }
 
+    await this.assertGuestMayAdd(channelId, [userId]);
     const conversationSeenCutoffAt = await this.resolveSeenCutoff(channelId);
 
     const { participant } = await addParticipantTx(this, channelId, userId, conversationSeenCutoffAt, role, isClosed);
@@ -327,6 +356,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return { addedCount: 0, existingCount: 0 };
     }
 
+    await this.assertGuestMayAdd(channelId, userIds);
     return await addParticipantsBatchTx(this, overrideCutoffAt, channelId, userIds, role, isClosed);
   }
 
