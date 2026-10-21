@@ -1,0 +1,130 @@
+name: Sync streamgres
+
+# Keeps ./streamgres an exact, read-only mirror of juspay/streamgres@main.
+# Pull-based: streamgres (public) needs no workflow, secret or token of its own.
+# Once a night, compare streamgres main's SHA with streamgres/.synced-from;
+# when they differ, mirror the files (rsync --delete), push the sync/streamgres
+# branch and open (or update) a PR against BASE_BRANCH. No auto-merge (yet).
+#
+# The PR only ever touches streamgres/ — a guard step fails the run if anything
+# else is in the diff.
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
+  workflow_dispatch:
+  # TEMPORARY (testing, remove before merging to main): lets the workflow run
+  # from a PR branch, since schedule/dispatch only work from the default branch.
+  # Only fires on PRs that change this file.
+  pull_request:
+    paths:
+      - .github/workflows/sync-streamgres.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-streamgres
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: juspay/streamgres
+  UPSTREAM_BRANCH: main
+  TARGET_DIR: streamgres
+  SYNC_BRANCH: sync/streamgres
+  # Branch of this repo that is mirrored into and that the PR targets.
+  BASE_BRANCH: feature/sync-streamgres
+  # Commit/PR titles must carry a ticket (commitlint.config.js).
+  TICKET: XYNE-0
+
+jobs:
+  sync:
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Check upstream for new commits
+        id: check
+        run: |
+          set -euo pipefail
+          new=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          [ -n "$new" ] || { echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"; exit 1; }
+          old=$(cat "${TARGET_DIR}/.synced-from" 2>/dev/null || true)
+          echo "upstream=$new synced=${old:-none}"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$old" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Mirror streamgres into ${{ env.TARGET_DIR }}/
+        if: steps.check.outputs.changed == 'true'
+        env:
+          NEW: ${{ steps.check.outputs.new }}
+        run: |
+          set -euo pipefail
+          git clone --quiet "https://github.com/${UPSTREAM_REPO}.git" "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" checkout --quiet "$NEW"
+          mkdir -p "$TARGET_DIR"
+          rsync -a --delete \
+            --exclude '/.git' --exclude '/.github' --exclude '/target' \
+            --exclude '/.synced-from' \
+            "$RUNNER_TEMP/upstream/" "$TARGET_DIR/"
+          echo "$NEW" > "${TARGET_DIR}/.synced-from"
+
+      - name: Commit, push and open PR
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.check.outputs.new }}
+          OLD: ${{ steps.check.outputs.old }}
+        run: |
+          set -euo pipefail
+          short="${NEW::7}"
+          title="chore: ${TICKET} sync streamgres to ${short}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$SYNC_BRANCH"
+          git add -A "$TARGET_DIR"
+          if git diff --cached --quiet; then
+            echo "No file changes after mirroring; nothing to do."
+            exit 0
+          fi
+
+          # Guard: this flow may only ever change files under ${TARGET_DIR}/.
+          outside=$(git diff --cached --name-only | grep -v "^${TARGET_DIR}/" || true)
+          if [ -n "$outside" ]; then
+            echo "::error::Sync would touch files outside ${TARGET_DIR}/:"; echo "$outside"; exit 1
+          fi
+
+          git commit --quiet -m "$title" -m "Mirrors https://github.com/${UPSTREAM_REPO}/commit/${NEW}"
+
+          # Already pushed this exact state? Then the PR is up to date.
+          if git fetch --quiet origin "$SYNC_BRANCH" 2>/dev/null \
+             && git diff --quiet HEAD "origin/${SYNC_BRANCH}"; then
+            echo "Branch ${SYNC_BRANCH} already has this state."
+            exit 0
+          fi
+          git push --force origin "$SYNC_BRANCH"
+
+          # Body: upstream commits since the last sync.
+          if [ -n "$OLD" ] && git -C "$RUNNER_TEMP/upstream" cat-file -e "${OLD}^{commit}" 2>/dev/null; then
+            log=$(git -C "$RUNNER_TEMP/upstream" log --no-merges --format='- `%h` %s (%an)' "${OLD}..${NEW}")
+            range="https://github.com/${UPSTREAM_REPO}/compare/${OLD::7}...${short}"
+          else
+            log="- first sync or unknown previous commit"
+            range="https://github.com/${UPSTREAM_REPO}/commit/${NEW}"
+          fi
+          body=$(printf 'Automated mirror of [%s@%s](%s).\n\n%s\n\n`%s/` is read-only: it is overwritten from upstream on every sync. Change streamgres instead.' \
+            "$UPSTREAM_REPO" "$short" "$range" "$log" "$TARGET_DIR")
+
+          pr=$(gh pr list --head "$SYNC_BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "$title" --body "$body"
+            echo "Updated PR #$pr"
+          else
+            pr=$(gh pr create --head "$SYNC_BRANCH" --base "$BASE_BRANCH" --title "$title" --body "$body" | grep -oE '[0-9]+$')
+            echo "Opened PR #$pr"
+          fi
