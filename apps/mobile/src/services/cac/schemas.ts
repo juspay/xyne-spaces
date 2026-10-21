@@ -58,6 +58,22 @@ export const BetaAccessSchema = z
   .catch({ force: [], disabled: false });
 
 /**
+ * The "Beta features available" sheet.
+ *
+ * Forgiving like `BetaAccessSchema`: its neutral value (`enabled: false`) can
+ * only hide a nudge, never take a feature away. Off when absent, so shipping
+ * the build changes nothing until the key is turned on in Superposition — and
+ * turning it off again is the kill switch.
+ */
+export const BetaPromptConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    title: z.string().default(''),
+    message: z.string().default(''),
+  })
+  .catch({ enabled: false, title: '', message: '' });
+
+/**
  * Registry of known CAC keys → Zod schema + cache policy.
  * Add a new Superposition key here; CacService picks it up with full type inference.
  *
@@ -89,6 +105,13 @@ export const CAC_REGISTRY = {
     schema: BetaAccessSchema,
     staleTimeMs: BETA_FLAGS_STALE_TIME_MS,
     fallback: { force: [], disabled: false },
+    requireValue: false,
+  },
+  [CAC_KEYS.betaPrompt]: {
+    schema: BetaPromptConfigSchema,
+    staleTimeMs: BETA_FLAGS_STALE_TIME_MS,
+    fallback: { enabled: false, title: '', message: '' },
+    // Absent means "no sheet", which is the resting state.
     requireValue: false,
   },
 } as const;

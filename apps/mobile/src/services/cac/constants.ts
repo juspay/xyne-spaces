@@ -7,6 +7,8 @@ export const CAC_KEYS = {
   betaFlagsEnabled: 'lotus_beta_flags_enabled',
   /** Global switches applied on top of the per-user grants. No overrides. */
   betaAccess: 'lotus_beta_access',
+  /** The "Beta features available" sheet: on/off switch and copy. No overrides needed. */
+  betaPrompt: 'lotus_beta_prompt',
 } as const;
 
 export const CAC_QUERY_KEY = 'cac-config';

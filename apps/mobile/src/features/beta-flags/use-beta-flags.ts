@@ -28,9 +28,6 @@ export function useBetaFlags(enabled = true): BetaFlagsResult {
   const granted = useCacConfig(CAC_KEYS.betaFlagsEnabled, { enabled });
   const access = useCacConfig(CAC_KEYS.betaAccess, { enabled });
 
-  console.log('Flags Catalog', JSON.stringify(catalog.data, null, 2));
-  console.log('Granted Catalog', JSON.stringify(granted.data, null, 2));
-
   /**
    * `isSuccess`, not `isFetched`.
    *

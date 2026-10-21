@@ -8,6 +8,7 @@ export type LotusUpdateConfig = CacConfigOf<'lotus_update_config'>;
 export type BetaFlagCatalog = CacConfigOf<'lotus_beta_flag_catalog'>;
 export type BetaFlagsEnabled = CacConfigOf<'lotus_beta_flags_enabled'>;
 export type BetaAccess = CacConfigOf<'lotus_beta_access'>;
+export type BetaPromptConfig = CacConfigOf<'lotus_beta_prompt'>;
 export type PlatformUpdateConfig = z.infer<typeof PlatformUpdateConfigSchema>;
 export type UpdatePromptMode = PlatformUpdateConfig['mode'];
 

@@ -14,6 +14,7 @@ export type {
   BetaAccess,
   BetaFlagCatalog,
   BetaFlagsEnabled,
+  BetaPromptConfig,
   CacConfigOf,
   CacKey,
   DismissRecord,

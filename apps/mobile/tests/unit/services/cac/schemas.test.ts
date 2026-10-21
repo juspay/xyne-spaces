@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   BetaAccessSchema,
   BetaFlagsEnabledSchema,
+  BetaPromptConfigSchema,
   CAC_REGISTRY,
   LotusUpdateConfigSchema,
   PlatformUpdateConfigSchema,
@@ -102,5 +103,27 @@ describe('beta keys refuse to invent a value', () => {
     for (const key of Object.keys(CAC_REGISTRY) as (keyof typeof CAC_REGISTRY)[]) {
       assert.notEqual(CAC_REGISTRY[key].fallback, undefined, `${key} has no fallback`);
     }
+  });
+});
+
+describe('BetaPromptConfigSchema', () => {
+  const off = { enabled: false, title: '', message: '' };
+
+  it('is off when the key is absent or malformed', () => {
+    assert.deepEqual(BetaPromptConfigSchema.parse({}), off);
+    assert.deepEqual(BetaPromptConfigSchema.parse('nonsense'), off);
+    assert.deepEqual(BetaPromptConfigSchema.parse({ enabled: 'yes' }), off);
+  });
+
+  it('keeps the copy CAC supplies', () => {
+    assert.deepEqual(
+      BetaPromptConfigSchema.parse({ enabled: true, title: 'Try it', message: 'New stuff' }),
+      { enabled: true, title: 'Try it', message: 'New stuff' },
+    );
+  });
+
+  it('is registered as a key that may fall back', () => {
+    assert.equal(CAC_REGISTRY['lotus_beta_prompt'].requireValue, false);
+    assert.deepEqual(CAC_REGISTRY['lotus_beta_prompt'].fallback, off);
   });
 });
