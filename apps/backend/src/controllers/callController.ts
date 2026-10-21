@@ -3301,6 +3301,17 @@ export class CallController {
         return;
       }
 
+      // Deleting mid-recording only removes the DB rows: the LiveKit room, egress and
+      // transcription agent keep running, every later webhook 404s on "Call not found",
+      // and the audio + transcript end up orphaned in storage. Refuse until it has ended.
+      if (call.status === CallStatus.ACTIVE) {
+        res.status(409).json({
+          success: false,
+          error: 'Recording is still in progress. Stop it before deleting.',
+        });
+        return;
+      }
+
       await this.deleteHeadlessRecordingCascade(call);
 
       logger.info(`User ${userId} deleted HEADLESS recording ${callId}`);
@@ -3428,7 +3439,7 @@ export class CallController {
           createdByUserId: userId,
           callType: CallType.HEADLESS,
         },
-        select: { id: true, externalId: true },
+        select: { id: true, externalId: true, status: true },
       });
 
       const ownedByExternalId = new Map(owned.map(c => [c.externalId, c]));
@@ -3443,13 +3454,20 @@ export class CallController {
         }
       }
 
+      // Same rule as the single delete: an in-progress recording is not deletable yet.
+      const deletable = owned.filter(call => {
+        if (call.status !== CallStatus.ACTIVE) return true;
+        failed.push({ callId: call.externalId, reason: 'Recording is still in progress' });
+        return false;
+      });
+
       // Delete each owned recording independently so one failure doesn't abort the rest.
       const results = await Promise.allSettled(
-        owned.map(call => this.deleteHeadlessRecordingCascade(call)),
+        deletable.map(call => this.deleteHeadlessRecordingCascade(call)),
       );
 
       results.forEach((result, index) => {
-        const call = owned[index]!;
+        const call = deletable[index]!;
         if (result.status === 'fulfilled') {
           deleted.push(call.externalId);
         } else {
