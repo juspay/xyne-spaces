@@ -123,6 +123,16 @@ export function GlobalSearchScreen({
     if (fieldHostedElsewhere) searchField$.placeholder.set(placeholderForTab(state.tab));
   }, [fieldHostedElsewhere, state.tab]);
 
+  // Bottom-bar field mirrors the committed query. `"ab"` rewrites that query
+  // with quotes, so push the rewrite into the hosted field.
+  const hostedExactRef = useRef(state.exactMatch);
+  useEffect(() => {
+    if (!fieldHostedElsewhere) return;
+    if (hostedExactRef.current === state.exactMatch) return;
+    hostedExactRef.current = state.exactMatch;
+    searchField$.query.set(state.query);
+  }, [fieldHostedElsewhere, state.exactMatch, state.query]);
+
   /** The locked conversation comes from the route and is never part of the state. */
   const scope = useMemo((): SearchScope | null => {
     const channelId = firstParam(params.scopeChannelId);
@@ -380,6 +390,7 @@ const SearchToolbar = memo(function SearchToolbar({
               tab={tab}
               chips={chips}
               scope={scope}
+              exactMatch={exactMatch}
               dispatch={dispatch}
               onRequestClose={onRequestClose}
               filterBadgeCount={filterBadgeCount}

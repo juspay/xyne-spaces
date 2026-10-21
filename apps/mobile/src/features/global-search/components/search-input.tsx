@@ -48,6 +48,7 @@ import {
   SEARCH_BAR_TEXT_LINE_HEIGHT,
   SEARCH_SIDE_MARGIN,
 } from '../constants';
+import { unwrapExactSearchQuery, wrapExactSearchQuery } from '../utils/exact-search';
 import { filterChipTitle, placeholderForTab, type GlobalSearchTab } from '../utils/search-tabs';
 import type { SearchFilterChip, SearchScope } from '../types';
 
@@ -92,6 +93,8 @@ export type SearchInputProps = {
   tab: GlobalSearchTab;
   chips: readonly SearchFilterChip[];
   scope: SearchScope | null;
+  /** `"ab"` pill. Turning it on wraps the typed text in quotes, like dashboard. */
+  exactMatch?: boolean;
   dispatch: SearchDispatch;
   onRequestClose: () => void;
   /**
@@ -118,6 +121,7 @@ export const SearchInput = memo(function SearchInput({
   tab,
   chips,
   scope,
+  exactMatch = false,
   dispatch,
   onRequestClose,
   onFilterPress,
@@ -149,6 +153,19 @@ export const SearchInput = memo(function SearchInput({
   const committer = committerRef.current;
 
   useEffect(() => (): void => committer.cancel(), [committer]);
+
+  // `"ab"` rewrites the box itself (dashboard SearchFilterBar), not only the request.
+  const exactMatchRef = useRef(exactMatch);
+  useEffect(() => {
+    if (exactMatchRef.current === exactMatch) return;
+    exactMatchRef.current = exactMatch;
+    const current = draftRef.current;
+    const next = exactMatch ? wrapExactSearchQuery(current) : unwrapExactSearchQuery(current);
+    if (next === current) return;
+    committer.cancel();
+    writeDraft(next);
+    dispatch({ type: 'queryCommitted', query: toFreeText(next) });
+  }, [committer, dispatch, exactMatch, writeDraft]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {

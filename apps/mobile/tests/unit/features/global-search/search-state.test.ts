@@ -40,7 +40,7 @@ describe('global search state', () => {
       query: '',
       chips: [],
       structured: DEFAULT_STRUCTURED_FILTERS,
-      onlyMyChannels: false,
+      onlyMyChannels: true,
       includeBotMessages: false,
       exactMatch: false,
       sortBy: DEFAULT_SORT_BY,
@@ -192,12 +192,13 @@ describe('global search state', () => {
   });
 
   describe('only my channels', () => {
-    it('toggles', () => {
-      const on = searchReducer(initial, { type: 'onlyMyChannelsToggled' });
-      const off = searchReducer(on, { type: 'onlyMyChannelsToggled' });
+    it('starts on and toggles off, matching dashboard @Ch', () => {
+      assert.equal(initial.onlyMyChannels, true);
+      const off = searchReducer(initial, { type: 'onlyMyChannelsToggled' });
+      const on = searchReducer(off, { type: 'onlyMyChannelsToggled' });
 
-      assert.equal(on.onlyMyChannels, true);
       assert.equal(off.onlyMyChannels, false);
+      assert.equal(on.onlyMyChannels, true);
     });
   });
 
@@ -309,6 +310,17 @@ describe('global search state', () => {
       const off = searchReducer(on, { type: 'exactMatchToggled' });
 
       assert.equal(on.exactMatch, true);
+      assert.equal(off.exactMatch, false);
+    });
+
+    it('wraps the typed text in quotes when exact match turns on', () => {
+      const typed = searchReducer(initial, { type: 'queryCommitted', query: 'ab' });
+      const on = searchReducer(typed, { type: 'exactMatchToggled' });
+      const off = searchReducer(on, { type: 'exactMatchToggled' });
+
+      assert.equal(on.query, '"ab"');
+      assert.equal(on.exactMatch, true);
+      assert.equal(off.query, 'ab');
       assert.equal(off.exactMatch, false);
     });
 
