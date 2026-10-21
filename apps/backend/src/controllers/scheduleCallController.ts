@@ -29,6 +29,7 @@ import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { assertChannelMembership } from '@/utils/channelMembership';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 export const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -256,6 +257,45 @@ export class ScheduleCallController {
     return template !== null;
   }
 
+  // Runs before any transaction: the tenant filter is off inside one, so the channel and
+  // participant lookups there would accept ids from another workspace.
+  private async validateCallTargets(
+    req: Request,
+    targets: {
+      channelId?: string;
+      callUpdatesChannel?: string;
+      conversationId?: string;
+      targetUserIds?: string[];
+    },
+  ): Promise<{ status: number; error: string } | null> {
+    const { channelId, callUpdatesChannel, conversationId, targetUserIds } = targets;
+
+    for (const id of [channelId, callUpdatesChannel]) {
+      if (!id) continue;
+      const access = await assertChannelMembership(req, id);
+      if (!access.ok) return { status: access.status, error: access.error };
+    }
+
+    if (conversationId) {
+      const conversation = await repositories.conversations.findById(conversationId);
+      if (!conversation || conversation.channelId !== channelId) {
+        return { status: 404, error: 'Conversation not found' };
+      }
+    }
+
+    if (targetUserIds?.length) {
+      const ids = [...new Set(targetUserIds)];
+      const users = await repositories.users.findMany({
+        where: { id: { in: ids }, workspaceId: req.user!.workspaceId! },
+      });
+      if (users.length !== ids.length) {
+        return { status: 400, error: 'Invalid participants' };
+      }
+    }
+
+    return null;
+  }
+
   // POST /api/calls/series - Create a recurring call series
   createRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -286,6 +326,16 @@ export class ScheduleCallController {
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
+
+      const invalidTargets = await this.validateCallTargets(req, {
+        channelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        targetUserIds,
+      });
+      if (invalidTargets) {
+        res.status(invalidTargets.status).json({ success: false, error: invalidTargets.error });
         return;
       }
 
@@ -422,6 +472,17 @@ export class ScheduleCallController {
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
+
+      const invalidTargets = await this.validateCallTargets(req, {
+        channelId,
+        callUpdatesChannel: reqCallUpdatesChannel,
+        conversationId,
+        targetUserIds,
+      });
+      if (invalidTargets) {
+        res.status(invalidTargets.status).json({ success: false, error: invalidTargets.error });
         return;
       }
 
@@ -660,6 +721,17 @@ export class ScheduleCallController {
         !(await this.canPinSummaryTemplate(summaryTemplateId, req, call.createdByUserId))
       ) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
+
+      // Unchanged channels are not re-checked, so an organizer who has since left one can still edit.
+      const invalidTargets = await this.validateCallTargets(req, {
+        ...(reqChannelId !== call.channelId && { channelId: reqChannelId }),
+        ...(reqCallUpdatesChannel !== call.callUpdatesChannel && { callUpdatesChannel: reqCallUpdatesChannel }),
+        targetUserIds,
+      });
+      if (invalidTargets) {
+        res.status(invalidTargets.status).json({ success: false, error: invalidTargets.error });
         return;
       }
 
@@ -996,6 +1068,17 @@ export class ScheduleCallController {
         !(await this.canPinSummaryTemplate(summaryTemplateId, req, series.organizerId))
       ) {
         res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
+
+      // Unchanged channels are not re-checked, so an organizer who has since left one can still edit.
+      const invalidTargets = await this.validateCallTargets(req, {
+        ...(reqChannelId !== series.channelId && { channelId: reqChannelId }),
+        ...(reqCallUpdatesChannel !== series.callUpdatesChannel && { callUpdatesChannel: reqCallUpdatesChannel }),
+        targetUserIds,
+      });
+      if (invalidTargets) {
+        res.status(invalidTargets.status).json({ success: false, error: invalidTargets.error });
         return;
       }
 

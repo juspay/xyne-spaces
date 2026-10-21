@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
+import { Channel, Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
 
 type GuestScope = {
   workspaceId: string
@@ -113,6 +113,41 @@ export async function hasGuestChannelAccess(
   )
 
   return accessibleChannelIds.includes(channelId)
+}
+
+/**
+ * The one channel-membership predicate: is `userId` a participant of `channelId`, and does that
+ * channel belong to `workspaceId`? Client-injected so each caller passes the right prisma — a
+ * request guard passes the ACL-wrapped db; an ACL hook passes its own base client so this does
+ * not recurse back through the extension. `requireActive` also rejects an archived channel.
+ *
+ * Shared by CallsACL.canCreate and the request-time assertChannelMembership so the two cannot
+ * drift; the HTTP status/error mapping lives in assertChannelMembership, not here.
+ */
+export type ChannelMembership =
+  | { ok: true; channel: Channel }
+  | { ok: false; reason: 'not_found' | 'not_member' }
+
+export async function checkChannelMembership(
+  prisma: PrismaClient,
+  channelId: string,
+  userId: string,
+  workspaceId: string,
+  opts: { requireActive?: boolean } = {}
+): Promise<ChannelMembership> {
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } })
+  if (!channel || channel.workspaceId !== workspaceId || (opts.requireActive && channel.isArchived)) {
+    return { ok: false, reason: 'not_found' }
+  }
+
+  const participant = await prisma.channelParticipant.findUnique({
+    where: { channelId_userId: { channelId, userId } },
+  })
+  if (!participant) {
+    return { ok: false, reason: 'not_member' }
+  }
+
+  return { ok: true, channel }
 }
 
 export async function getAccessibleChannelIds(

@@ -2,8 +2,8 @@ import { Request } from 'express';
 import { Channel } from '@prisma/client';
 import { ChannelRole, UserStatus } from '@xyne/shared';
 import { db } from '@/database/client';
-import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { checkChannelMembership } from '@/database/acl/tables/channel-access-helper';
 
 export type ChannelAccessGranted = {
   ok: true;
@@ -20,7 +20,6 @@ export type ChannelAccessDenied = {
 
 export type ChannelAccessResult = ChannelAccessGranted | ChannelAccessDenied;
 
-const channelRepo = new ChannelRepository();
 const channelParticipantRepo = new ChannelParticipantRepository();
 
 /**
@@ -39,17 +38,14 @@ export async function assertChannelMembership(
     return { ok: false, status: 401, error: 'Authentication required' };
   }
 
-  const channel = await channelRepo.findById(channelId);
-  if (!channel || channel.workspaceId !== workspaceId) {
-    return { ok: false, status: 404, error: 'Channel not found' };
+  const access = await checkChannelMembership(db, channelId, userId, workspaceId);
+  if (!access.ok) {
+    return access.reason === 'not_found'
+      ? { ok: false, status: 404, error: 'Channel not found' }
+      : { ok: false, status: 403, error: 'Not a member of this channel' };
   }
 
-  const isParticipant = await channelParticipantRepo.isParticipant(channelId, userId);
-  if (!isParticipant) {
-    return { ok: false, status: 403, error: 'Not a member of this channel' };
-  }
-
-  return { ok: true, userId, workspaceId, channel };
+  return { ok: true, userId, workspaceId, channel: access.channel };
 }
 
 export function assertDeskOwner(
