@@ -1,0 +1,179 @@
+name: Sync streamgres
+
+# Nightly (02:00 IST): bring juspay/streamgres@main into ./streamgres and raise a
+# PR into main. Two steps, so the upstream history is never lost:
+#
+#   1. On the long-lived `subtree` branch, `git subtree pull` merges the new
+#      upstream commits (real authors, real hashes) and the job pushes the result
+#      straight back to `subtree`. Nothing but this job touches that branch, so
+#      the pull cannot conflict.
+#   2. A throwaway branch is cut fresh from main, streamgres/ is replaced by the
+#      folder from `subtree`'s tip, and a PR into main is raised (or updated).
+#      main only ever receives one squash commit per PR; the bookkeeping that
+#      `git subtree pull` needs lives on `subtree`, which main's squash merges
+#      cannot touch.
+#
+# The job never merges or pushes to main. Reviews, required checks and the merge
+# queue still apply to the PR into main.
+# PRs opened with the default GITHUB_TOKEN do not start CI; set the optional
+# STREAMGRES_SYNC_TOKEN secret (App/PAT with contents + pull-requests write) so
+# the required checks run on the PR.
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-streamgres
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: juspay/streamgres
+  UPSTREAM_URL: https://github.com/juspay/streamgres.git
+  UPSTREAM_BRANCH: main
+  PREFIX: streamgres
+  SUBTREE_BRANCH: subtree
+  PR_BRANCH: sync/streamgres-pr
+  BASE_BRANCH: main
+  # Commit/PR titles must carry a ticket (commitlint.config.js).
+  TICKET: XYNE-67075
+
+jobs:
+  sync:
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      # git subtree needs the commit graph, not the file contents: full history,
+      # blobs fetched on demand.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SUBTREE_BRANCH }}
+          fetch-depth: 0
+          filter: blob:none
+          token: ${{ secrets.STREAMGRES_SYNC_TOKEN || github.token }}
+
+      - name: Check git subtree is available
+        run: |
+          test -x "$(git --exec-path)/git-subtree" \
+            || { echo "::error::git subtree is not installed on this runner"; exit 1; }
+
+      - name: Pull streamgres into the subtree branch
+        id: pull
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --quiet "$UPSTREAM_URL" "$UPSTREAM_BRANCH"
+          up=$(git rev-parse FETCH_HEAD)
+          short="${up::7}"
+          echo "up=$up" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$up" HEAD; then
+            echo "${SUBTREE_BRANCH} already contains upstream ${short}"
+          else
+            git subtree pull --prefix="$PREFIX" "$UPSTREAM_URL" "$UPSTREAM_BRANCH" \
+              -m "chore: ${TICKET} sync streamgres to ${short}"
+          fi
+
+          # The folder must be byte-identical to upstream at $up. A mismatch means
+          # something edited ${PREFIX}/ on the subtree branch; stop rather than ship it.
+          have=$(git rev-parse "HEAD:${PREFIX}")
+          want=$(git rev-parse "${up}^{tree}")
+          if [ "$have" != "$want" ]; then
+            echo "::error::${PREFIX}/ on ${SUBTREE_BRANCH} (${have}) does not match upstream ${short} (${want})"
+            exit 1
+          fi
+
+          git push origin "HEAD:refs/heads/${SUBTREE_BRANCH}"
+
+      - name: Build the PR branch from main
+        id: prep
+        env:
+          UP: ${{ steps.pull.outputs.up }}
+          SHORT: ${{ steps.pull.outputs.short }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$BASE_BRANCH"
+          src=$(git rev-parse HEAD)
+
+          main_tree=$(git rev-parse "origin/${BASE_BRANCH}:${PREFIX}" 2>/dev/null || echo none)
+          if [ "$main_tree" = "$(git rev-parse "${src}:${PREFIX}")" ]; then
+            echo "${BASE_BRANCH} already has this ${PREFIX}/; no PR needed."
+            echo "open_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fresh branch from main; replace the folder with the one from subtree.
+          git checkout -q -B sync-pr "origin/${BASE_BRANCH}"
+          git rm -rq --ignore-unmatch "$PREFIX"
+          git read-tree --prefix="${PREFIX}/" -u "${src}:${PREFIX}"
+
+          # Guard: this flow may only ever change files under ${PREFIX}/.
+          outside=$(git diff --cached --name-only | grep -v "^${PREFIX}/" || true)
+          if [ -n "$outside" ]; then
+            echo "::error::Sync would touch files outside ${PREFIX}/:"; echo "$outside"; exit 1
+          fi
+
+          title="chore: ${TICKET} sync streamgres to ${SHORT}"
+          git commit -q -m "$title" -m "Mirrors https://github.com/${UPSTREAM_REPO}/commit/${UP}"
+          git push --force origin "HEAD:refs/heads/${PR_BRANCH}"
+
+          # PR body: upstream commits since the version main currently has (found by
+          # matching main's folder against the upstream commit trees).
+          prev=""
+          if [ "$main_tree" != none ]; then
+            prev=$(git log --format='%H %T' "$UP" | awk -v t="$main_tree" '$2 == t { print $1; exit }')
+          fi
+          if [ -n "$prev" ]; then
+            log=$(git log --no-merges --format='- `%h` %s (%an)' "${prev}..${UP}" | head -100)
+            range="https://github.com/${UPSTREAM_REPO}/compare/${prev::7}...${SHORT}"
+          else
+            log="- previous synced commit not found; latest 20 upstream commits:
+          $(git log --no-merges --format='- `%h` %s (%an)' -20 "$UP")"
+            range="https://github.com/${UPSTREAM_REPO}/commit/${UP}"
+          fi
+          # Point #123 at the upstream repo so it does not link to our own issues.
+          log=$(printf '%s\n' "$log" | sed -E "s|#([0-9]+)|${UPSTREAM_REPO}#\1|g")
+          body=$(printf 'Automated sync of [%s@%s](%s).\n\n%s\n\nFull upstream history is kept on the `%s` branch. `%s/` is overwritten from it on every sync; change streamgres instead.' \
+            "$UPSTREAM_REPO" "$SHORT" "$range" "$log" "$SUBTREE_BRANCH" "$PREFIX")
+
+          {
+            echo "open_pr=true"
+            echo "title=$title"
+            echo "body<<PR_BODY_EOF"
+            echo "$body"
+            echo "PR_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # actions/github-script instead of the gh CLI: the self-hosted runner image
+      # has neither gh nor jq.
+      - name: Open or update the PR into main
+        if: steps.prep.outputs.open_pr == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_TITLE: ${{ steps.prep.outputs.title }}
+          PR_BODY: ${{ steps.prep.outputs.body }}
+        with:
+          github-token: ${{ secrets.STREAMGRES_SYNC_TOKEN || github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const head = process.env.PR_BRANCH;
+            const base = process.env.BASE_BRANCH;
+            const title = process.env.PR_TITLE;
+            const body = process.env.PR_BODY;
+
+            const { data: open } = await github.rest.pulls.list({
+              owner, repo, state: 'open', base, head: `${owner}:${head}`,
+            });
+            if (open.length > 0) {
+              await github.rest.pulls.update({ owner, repo, pull_number: open[0].number, title, body });
+              core.info(`Updated PR #${open[0].number}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({ owner, repo, head, base, title, body });
+              core.info(`Opened PR #${pr.number}: ${pr.html_url}`);
+            }
