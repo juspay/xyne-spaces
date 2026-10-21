@@ -204,136 +204,6 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Recap scheduler is disabled (ENABLE_RECAP_SCHEDULER=false)');
         }
 
-        // Initialize Desk Report Generation Queue
-        if (config.deskReportScheduler.enabled) {
-            this.deskReportGenerationQueue = new Bull('desk-report-generation', {
-                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
-                defaultJobOptions: {
-                    removeOnComplete: true,
-                    removeOnFail: false,
-                    attempts: 3,
-                    backoff: {
-                        type: 'exponential',
-                        delay: 5000,
-                    },
-                },
-                settings: {
-                    stalledInterval: 30 * 60 * 1000, // 30 minutes - dispatch loop over many desks
-                    maxStalledCount: 1,
-                },
-            });
-
-            this.deskReportGenerationQueue.process(async (job) => {
-                logger.info(`[WORKER_SCHEDULER] Processing desk report generation job ${job.id}...`);
-                try {
-                    await deskReportWorker.processGenerationJob(job);
-                    logger.info(`[WORKER_SCHEDULER] Desk report generation job ${job.id} completed successfully`);
-                } catch (error) {
-                    logger.error(`[WORKER_SCHEDULER] Desk report generation job ${job.id} failed:`, error);
-                    throw error;
-                }
-            });
-
-            // Remove existing repeatable job(s) to allow CRON updates
-            try {
-                const existingRepeatable = await this.deskReportGenerationQueue.getRepeatableJobs();
-                for (const job of existingRepeatable) {
-                    if (job.id !== 'desk-report-generation-repeatable') continue;
-                    await this.deskReportGenerationQueue.removeRepeatableByKey(job.key);
-                    logger.info(`[WORKER_SCHEDULER] Removed existing desk report generation repeatable job (cron: ${job.cron})`);
-                }
-            } catch (error) {
-                logger.debug('[WORKER_SCHEDULER] No existing desk report generation repeatable job to remove', error);
-            }
-
-            const deskReportCron = config.deskReportScheduler.generationCron;
-            logger.info(`[WORKER_SCHEDULER] Scheduling desk report generation with cron: "${deskReportCron}"`);
-
-            try {
-                await this.deskReportGenerationQueue.add(
-                    {},
-                    {
-                        repeat: { cron: deskReportCron },
-                        jobId: 'desk-report-generation-repeatable',
-                        attempts: 3,
-                        backoff: {
-                            type: 'exponential',
-                            delay: 5000,
-                        },
-                        removeOnComplete: true,
-                    }
-                );
-                logger.info(`[WORKER_SCHEDULER] Desk report generation scheduled via Bull (${deskReportCron})`);
-            } catch (cronError) {
-                logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report generation with cron "${deskReportCron}":`, cronError);
-                logger.warn(`[WORKER_SCHEDULER] Desk report generation will not be automatically scheduled. Manual triggers will still work.`);
-            }
-            // Initialize Desk Report Cleanup Queue
-            this.deskReportCleanupQueue = new Bull('desk-report-cleanup', {
-                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
-                defaultJobOptions: {
-                    removeOnComplete: true,
-                    removeOnFail: false,
-                    attempts: 3,
-                    backoff: {
-                        type: 'exponential',
-                        delay: 5000,
-                    },
-                },
-                settings: {
-                    stalledInterval: 10 * 60 * 1000,
-                    maxStalledCount: 1,
-                },
-            });
-
-            this.deskReportCleanupQueue.process(async (job) => {
-                logger.info(`[WORKER_SCHEDULER] Processing desk report cleanup job ${job.id}...`);
-                try {
-                    await deskReportWorker.processCleanupJob(job);
-                    logger.info(`[WORKER_SCHEDULER] Desk report cleanup job ${job.id} completed successfully`);
-                } catch (error) {
-                    logger.error(`[WORKER_SCHEDULER] Desk report cleanup job ${job.id} failed:`, error);
-                    throw error;
-                }
-            });
-
-            try {
-                const existingCleanupRepeatable = await this.deskReportCleanupQueue.getRepeatableJobs();
-                for (const job of existingCleanupRepeatable) {
-                    if (job.id !== 'desk-report-cleanup-repeatable') continue;
-                    await this.deskReportCleanupQueue.removeRepeatableByKey(job.key);
-                    logger.info(`[WORKER_SCHEDULER] Removed existing desk report cleanup repeatable job (cron: ${job.cron})`);
-                }
-            } catch (error) {
-                logger.debug('[WORKER_SCHEDULER] No existing desk report cleanup repeatable job to remove', error);
-            }
-
-            const deskReportCleanupCron = config.deskReportScheduler.cleanupCron;
-            logger.info(`[WORKER_SCHEDULER] Scheduling desk report cleanup with cron: "${deskReportCleanupCron}"`);
-
-            try {
-                await this.deskReportCleanupQueue.add(
-                    { retentionDays: config.deskReportScheduler.retentionDays },
-                    {
-                        repeat: { cron: deskReportCleanupCron },
-                        jobId: 'desk-report-cleanup-repeatable',
-                        attempts: 3,
-                        backoff: {
-                            type: 'exponential',
-                            delay: 5000,
-                        },
-                        removeOnComplete: true,
-                    }
-                );
-                logger.info(`[WORKER_SCHEDULER] Desk report cleanup scheduled via Bull (${deskReportCleanupCron})`);
-            } catch (cronError) {
-                logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report cleanup with cron "${deskReportCleanupCron}":`, cronError);
-                logger.warn(`[WORKER_SCHEDULER] Desk report cleanup will not be automatically scheduled. Manual triggers will still work.`);
-            }
-        } else {
-            logger.info('[WORKER_SCHEDULER] Desk report scheduler is disabled (ENABLE_DESK_REPORT_SCHEDULER=false)');
-        }
-
         // Instagram long-lived token refresh — runs daily at 03:17 UTC
         if (config.enableInstagramTokenRefreshWorker) {
             this.instagramTokenRefreshQueue = new Bull('instagram-token-refresh', { redis: workerRedisConfig });
@@ -442,16 +312,6 @@ export class WorkerScheduler {
             this.recapCleanupQueue = null;
         }
 
-        if (this.deskReportGenerationQueue) {
-            await this.deskReportGenerationQueue.close();
-            this.deskReportGenerationQueue = null;
-        }
-
-        if (this.deskReportCleanupQueue) {
-            await this.deskReportCleanupQueue.close();
-            this.deskReportCleanupQueue = null;
-        }
-
         if (this.instagramTokenRefreshQueue) {
             await this.instagramTokenRefreshQueue.close();
             this.instagramTokenRefreshQueue = null;
@@ -464,6 +324,146 @@ export class WorkerScheduler {
 
         this.isRunning = false;
         logger.info('[WORKER_SCHEDULER] Workers stopped');
+    }
+
+    async startDeskReportScheduler(): Promise<void> {
+        // Initialize Desk Report Generation Queue
+        this.deskReportGenerationQueue = new Bull('desk-report-generation', {
+            redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+            defaultJobOptions: {
+                removeOnComplete: true,
+                removeOnFail: false,
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 5000,
+                },
+            },
+            settings: {
+                stalledInterval: 30 * 60 * 1000, // 30 minutes - dispatch loop over many desks
+                maxStalledCount: 1,
+            },
+        });
+
+        this.deskReportGenerationQueue.process(async (job) => {
+            logger.info(`[WORKER_SCHEDULER] Processing desk report generation job ${job.id}...`);
+            try {
+                await deskReportWorker.processGenerationJob(job);
+                logger.info(`[WORKER_SCHEDULER] Desk report generation job ${job.id} completed successfully`);
+            } catch (error) {
+                logger.error(`[WORKER_SCHEDULER] Desk report generation job ${job.id} failed:`, error);
+                throw error;
+            }
+        });
+
+        // Remove existing repeatable job(s) to allow CRON updates
+        try {
+            const existingRepeatable = await this.deskReportGenerationQueue.getRepeatableJobs();
+            for (const job of existingRepeatable) {
+                if (job.id !== 'desk-report-generation-repeatable') continue;
+                await this.deskReportGenerationQueue.removeRepeatableByKey(job.key);
+                logger.info(`[WORKER_SCHEDULER] Removed existing desk report generation repeatable job (cron: ${job.cron})`);
+            }
+        } catch (error) {
+            logger.debug('[WORKER_SCHEDULER] No existing desk report generation repeatable job to remove', error);
+        }
+
+        const deskReportCron = config.deskReportScheduler.generationCron;
+        logger.info(`[WORKER_SCHEDULER] Scheduling desk report generation with cron: "${deskReportCron}"`);
+
+        try {
+            await this.deskReportGenerationQueue.add(
+                {},
+                {
+                    repeat: { cron: deskReportCron },
+                    jobId: 'desk-report-generation-repeatable',
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 5000,
+                    },
+                    removeOnComplete: true,
+                }
+            );
+            logger.info(`[WORKER_SCHEDULER] Desk report generation scheduled via Bull (${deskReportCron})`);
+        } catch (cronError) {
+            logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report generation with cron "${deskReportCron}":`, cronError);
+            logger.warn(`[WORKER_SCHEDULER] Desk report generation will not be automatically scheduled. Manual triggers will still work.`);
+        }
+        // Initialize Desk Report Cleanup Queue
+        this.deskReportCleanupQueue = new Bull('desk-report-cleanup', {
+            redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+            defaultJobOptions: {
+                removeOnComplete: true,
+                removeOnFail: false,
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 5000,
+                },
+            },
+            settings: {
+                stalledInterval: 10 * 60 * 1000,
+                maxStalledCount: 1,
+            },
+        });
+
+        this.deskReportCleanupQueue.process(async (job) => {
+            logger.info(`[WORKER_SCHEDULER] Processing desk report cleanup job ${job.id}...`);
+            try {
+                await deskReportWorker.processCleanupJob(job);
+                logger.info(`[WORKER_SCHEDULER] Desk report cleanup job ${job.id} completed successfully`);
+            } catch (error) {
+                logger.error(`[WORKER_SCHEDULER] Desk report cleanup job ${job.id} failed:`, error);
+                throw error;
+            }
+        });
+
+        try {
+            const existingCleanupRepeatable = await this.deskReportCleanupQueue.getRepeatableJobs();
+            for (const job of existingCleanupRepeatable) {
+                if (job.id !== 'desk-report-cleanup-repeatable') continue;
+                await this.deskReportCleanupQueue.removeRepeatableByKey(job.key);
+                logger.info(`[WORKER_SCHEDULER] Removed existing desk report cleanup repeatable job (cron: ${job.cron})`);
+            }
+        } catch (error) {
+            logger.debug('[WORKER_SCHEDULER] No existing desk report cleanup repeatable job to remove', error);
+        }
+
+        const deskReportCleanupCron = config.deskReportScheduler.cleanupCron;
+        logger.info(`[WORKER_SCHEDULER] Scheduling desk report cleanup with cron: "${deskReportCleanupCron}"`);
+
+        try {
+            await this.deskReportCleanupQueue.add(
+                { retentionDays: config.deskReportScheduler.retentionDays },
+                {
+                    repeat: { cron: deskReportCleanupCron },
+                    jobId: 'desk-report-cleanup-repeatable',
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 5000,
+                    },
+                    removeOnComplete: true,
+                }
+            );
+            logger.info(`[WORKER_SCHEDULER] Desk report cleanup scheduled via Bull (${deskReportCleanupCron})`);
+        } catch (cronError) {
+            logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report cleanup with cron "${deskReportCleanupCron}":`, cronError);
+            logger.warn(`[WORKER_SCHEDULER] Desk report cleanup will not be automatically scheduled. Manual triggers will still work.`);
+        }
+    }
+
+    async stopDeskReportScheduler(): Promise<void> {
+        if (this.deskReportGenerationQueue) {
+            await this.deskReportGenerationQueue.close();
+            this.deskReportGenerationQueue = null;
+        }
+
+        if (this.deskReportCleanupQueue) {
+            await this.deskReportCleanupQueue.close();
+            this.deskReportCleanupQueue = null;
+        }
     }
 }
 
