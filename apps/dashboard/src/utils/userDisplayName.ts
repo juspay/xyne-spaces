@@ -1,5 +1,5 @@
 import { isStatusExpired } from './statusUtils';
-import { UserStatus } from '@xyne/shared';
+import { UserStatus, UserType } from '@xyne/shared';
 import { matchesAllTokens } from '@xyne/shared/utils';
 import type { User } from '../machines/stateMachine';
 import type { MentionResult } from '@xyne/shared';
@@ -17,6 +17,15 @@ export function isUserDeactivated(
 ): boolean {
   if (!user) return false;
   return user.status === UserStatus.INACTIVE;
+}
+
+/**
+ * Bots, apps and agents. Their messages are indexed as `messageType = BOT`, which search hides
+ * unless the Bot toggle is on, so a `from:` filter on one of them needs that toggle.
+ * An unknown sender (not loaded, or a Desk email id) is never treated as non-human.
+ */
+export function isNonHumanUser(user: { userType?: UserType | null } | undefined): boolean {
+  return !!user?.userType && user.userType !== UserType.USER;
 }
 
 /**
