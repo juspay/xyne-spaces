@@ -1,0 +1,100 @@
+[package]
+name = "streamgres"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+
+[dependencies]
+# The hasher of the engine's integer-keyed maps (subscription, row, read
+# and tree ids): one multiply per key instead of SipHash (see
+# `model::ids`). Keys that are user data keep the default hasher.
+rustc-hash = "2"
+
+# The catalog behind one handle every thread reads and the feed replaces
+# whole when a migration adds a table or a column (see `sync::catalog`):
+# a lock-free load per operation, never a half-written catalog.
+arc-swap = "1"
+
+# Vectorised byte search: a JSON cell is looked through for a number with a
+# padded fraction at the speed of a copy (see `sync::pg::text`), which is
+# what nearly every cell has none of.
+memchr = "2"
+
+# Only `NaiveDate` / `NaiveDateTime` are used (see `Value` in src/model/value.rs).
+# Default features pull in a timezone database and wasm bindings we do not need.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+# The server (`src/ws.rs`, and the `server` binary) and the asynchronous
+# sync driver (`src/sync/service.rs`).
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+# For raising the open-file limit at startup (`src/bin/server.rs`).
+libc = "0.2"
+
+# The Postgres storage backend and change feed (`src/sync/pg`).
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+uuid = { version = "1", features = ["v4"] }
+# The change feed's transport (`src/sync/pg/stream.rs`): a replication
+# connection speaking START_REPLICATION with the `pgoutput` plugin, and the
+# row messages it carries, decoded. Apache-2.0 OR MIT and MIT respectively;
+# TLS is left off, as it is for tokio-postgres above.
+pgwire-replication = { version = "0.4", default-features = false, features = ["scram"] }
+pgoutput = "0.0.7"
+# The replication-protocol connection that mints exported snapshots
+# (`src/sync/pg/replication.rs`): tokio-postgres cannot open one, so the
+# startup, authentication and simple-query messages are spoken directly.
+postgres-protocol = "0.6"
+fallible-iterator = "0.2"
+bytes = "1"
+# TCP keepalive on that connection (`keep_alive` there): nothing can be sent
+# on it without discarding its snapshot, so the kernel probes it instead.
+# The crate tokio-postgres uses for the same on the connections it opens.
+socket2 = { version = "0.6", features = ["all"] }
+
+# The write-once cell holding a row image's wire bytes (`RowData::wire`):
+# `race::OnceBox` is one atomic pointer, so every row image and key stays
+# in the allocation size it had without it, and a reader never waits.
+# Already in the tree through `pyroscope` and `jemalloc_pprof`.
+once_cell = "1"
+
+# The client side (`src/client`): message encoding, the
+# HTTP calls to the application server, and the WebSocket handshake.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22"
+percent-encoding = "2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# The load bench's WebSocket clients (`src/bin/load.rs`): the crate axum's
+# `ws` feature already builds, at the same version, so nothing new is
+# compiled; `connect` alone, no TLS, since the bench talks to a server on
+# the same host.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+
+# Continuous CPU and heap profiling pushed to Pyroscope (`src/profile.rs`), off
+# unless STREAMGRES_PYROSCOPE_URL is set. The pprof-rs backend samples on
+# SIGPROF and unwinds with framehop from the unwind tables, so no frame
+# pointers are needed. TLS is rustls without a provider of its own: the
+# ring provider the reqwest above already builds is installed for it,
+# rather than compiling aws-lc for an upload every ten seconds. `log` carries
+# the agent's upload failures into the server's log.
+pyroscope = { version = "2.1", default-features = false, features = ["backend-pprof-rs", "backend-jemalloc", "rustls-no-provider"] }
+# The allocator of both binaries (`src/bin/server.rs`, `src/bin/bench.rs`):
+# jemalloc built with its heap profiler, which samples an allocation every
+# 512 KiB allocated once `src/profile.rs` switches it on, and costs a
+# branch per allocation while off. `jemalloc_pprof` is what switches it
+# on and turns its dumps into the pprof the Pyroscope agent sends.
+tikv-jemallocator = { version = "0.7", features = ["profiling"] }
+jemalloc_pprof = "0.9"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+log = "0.4"
+
+# Limited debug info in the release binary, so a profile's frames name
+# the functions inlined into their callers by their full paths
+# (`ivm::multi::MultiTableIVM::incremental_update`): line
+# tables alone name an inlined function by its last segment only
+# (`incremental_update`). No types or variables; the code generated is
+# the same.
+[profile.release]
+debug = "limited"
