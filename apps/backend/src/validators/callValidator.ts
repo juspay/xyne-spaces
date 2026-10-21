@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CallStatus, MeetingStatus, RecurringCallSeriesStatus, RingStatus } from '@xyne/shared';
+import { CallStatus, CallType, MeetingStatus, RecurringCallSeriesStatus, RingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
@@ -300,8 +300,7 @@ const adminListPaging = {
 export const CallAdminListCallsQuerySchema = z.object({
   ...adminListPaging,
   status: csvQueryList(z.nativeEnum(CallStatus)),
-  // HEADLESS is a recording; every other callType is a call.
-  type: z.enum(['call', 'recording']).optional(),
+  type: csvQueryList(z.nativeEnum(CallType)),
   summaryStatus: csvQueryList(z.enum(['pending', 'ready', 'failed'])),
   hasTranscript: z
     .enum(['true', 'false'])

@@ -785,10 +785,8 @@ export function useCallHistory(
   const handleCopyTranscript = (call: Call): void => {
     void (async () => {
       try {
-        // Matches the call detail transcript panel: this list has no recordings, and only
-        // recordings have a speaker-identified transcript.
         await copyFetchedTextToClipboard(() =>
-          recordingService.getCopyableTranscript(call.externalId, { preferIdentified: false }),
+          recordingService.getCopyableTranscript(call.externalId),
         );
         toast.success('Transcript copied', { id: 'copy-transcript' });
       } catch (error) {

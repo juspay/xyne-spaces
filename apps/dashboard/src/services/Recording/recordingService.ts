@@ -447,21 +447,10 @@ class RecordingService {
   }
 
   /**
-   * What "Copy transcript" puts on the clipboard, matching the transcript panel on
-   * "Original": the speaker-identified transcript when asked for and there is one, else
-   * the stored transcript. Only recordings (HEADLESS) have an identified transcript.
-   * Throws NoTranscriptError when there is no text.
+   * What "Copy transcript" puts on the clipboard: the stored transcript, as the transcript
+   * panel shows it on "Original". Throws NoTranscriptError when there is no text.
    */
-  async getCopyableTranscript(
-    callId: string,
-    options: { preferIdentified: boolean; detail?: RecordingDetail | null },
-  ): Promise<string> {
-    if (options.preferIdentified) {
-      const detail = options.detail ?? (await this.getRecordingDetail(callId));
-      if (detail.hasIdentifiedTranscript && detail.identifiedTranscript) {
-        return detail.identifiedTranscript;
-      }
-    }
+  async getCopyableTranscript(callId: string): Promise<string> {
     const { text } = await this.translateTranscript(callId, ORIGINAL_TRANSCRIPT_LANGUAGE);
     if (!text) throw new NoTranscriptError();
     return text;

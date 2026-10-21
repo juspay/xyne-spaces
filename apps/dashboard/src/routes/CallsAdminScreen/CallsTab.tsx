@@ -33,7 +33,6 @@ import {
   unlinkAdminTranscript,
   type CallAdminAction,
   type CallAdminCallFilters,
-  type CallAdminCallKind,
   type CallAdminCallRow,
   type CallAdminListScope,
 } from '@/services/Call/callAdminService';
@@ -76,10 +75,11 @@ const STATUS_OPTIONS = [
   ...Object.values(CallStatus).map(status => ({ value: status, label: titleCase(status) })),
 ];
 
-const TYPE_OPTIONS: { value: '' | CallAdminCallKind; label: string }[] = [
+// A recording is HEADLESS; every other type is a call.
+const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
-  { value: 'call', label: 'Call' },
-  { value: 'recording', label: 'Recording' },
+  { value: `${CallType.AUDIO},${CallType.VIDEO}`, label: 'Call' },
+  { value: CallType.HEADLESS, label: 'Recording' },
 ];
 
 type DirectAction = Exclude<CallAdminAction, 'changeOwner'>;
@@ -156,7 +156,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
-  const [type, setType] = useState<'' | CallAdminCallKind>('');
+  const [type, setType] = useState('');
   const [quickFilter, setQuickFilter] = useState<QuickFilterId | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{
     action: DirectAction;
@@ -233,7 +233,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
           ariaLabel='Call type filter'
           icon={<VideoCallDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
           value={type}
-          onChange={value => setType(value as '' | CallAdminCallKind)}
+          onChange={setType}
           options={TYPE_OPTIONS}
         />
         <FilterSelect

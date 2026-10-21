@@ -27,7 +27,6 @@ import {
   type OatsRecordingEntry,
 } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
-import { useSpeakerIdentificationEnabled } from '../../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   NoTranscriptError,
   recordingService,
@@ -227,7 +226,6 @@ const RecordingsV2Pill = ({
   const canDownloadRecording = Boolean(menuDetail?.hasRecording);
   const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
   const [isCopyingTranscript, setIsCopyingTranscript] = useState(false);
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const [isDownloadingRecording, setIsDownloadingRecording] = useState(false);
 
   const handleDownloadTranscript = async (): Promise<void> => {
@@ -261,10 +259,7 @@ const RecordingsV2Pill = ({
     setIsCopyingTranscript(true);
     try {
       await copyFetchedTextToClipboard(() =>
-        recordingService.getCopyableTranscript(recording.externalId, {
-          preferIdentified: speakerIdentificationEnabled,
-          detail: menuDetail,
-        }),
+        recordingService.getCopyableTranscript(recording.externalId),
       );
       toast.success('Transcript copied');
     } catch (err) {

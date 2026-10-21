@@ -146,15 +146,12 @@ export interface UpdateCallInput {
   summaryTemplateId?: string | null;
 }
 
-export type CallKind = 'call' | 'recording';
-
 export interface CallAdminListFilters {
   workspaceId: string;
   /** SELF tier: only calls this user created or participates in. */
   participantUserId?: string;
   statuses?: CallStatus[];
-  /** `recording` is HEADLESS, `call` is every other callType. */
-  callType?: CallKind;
+  callTypes?: CallType[];
   /** Case-insensitive title match, or an exact externalId. */
   search?: string;
   /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
@@ -568,11 +565,7 @@ export class CallRepository {
       });
     }
     if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
-    if (filters.callType) {
-      conditions.push({
-        callType: filters.callType === 'recording' ? CallType.HEADLESS : { not: CallType.HEADLESS },
-      });
-    }
+    if (filters.callTypes?.length) conditions.push({ callType: { in: filters.callTypes } });
     if (filters.search) {
       // Support pastes a call id as often as a title, so match either.
       conditions.push({

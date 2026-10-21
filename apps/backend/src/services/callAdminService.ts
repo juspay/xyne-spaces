@@ -2,6 +2,7 @@ import type { Call, Prisma, PrismaClient, RecurringCallSeries } from '@prisma/cl
 import {
   CallOrigin,
   CallStatus,
+  CallType,
   InvitationResponse,
   MeetingStatus,
   NotificationType,
@@ -12,7 +13,7 @@ import {
 import { db } from '@/database/client';
 import { ACLFactory } from '@/database/acl';
 import { repositories } from '@/database/repositories';
-import type { CallKind, CallMetadata } from '@/database/repositories/callRepository';
+import type { CallMetadata } from '@/database/repositories/callRepository';
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock, type LockHandle } from '@/utils/distributedLock';
 import { isRecording } from '@/utils/callTypeUtils';
@@ -92,7 +93,7 @@ export interface CallAdminSeriesRow {
 export interface ListCallsInput {
   mineOnly: boolean;
   statuses?: CallStatus[];
-  callType?: CallKind;
+  callTypes?: CallType[];
   search?: string;
   summaryStatuses?: SummaryStatus[];
   hasTranscript?: boolean;
@@ -182,7 +183,7 @@ class CallAdminService {
         workspaceId: actor.workspaceId,
         ...(input.mineOnly ? { participantUserId: actor.userId } : {}),
         statuses: input.statuses,
-        callType: input.callType,
+        callTypes: input.callTypes,
         search: input.search,
         summaryStatuses: input.summaryStatuses,
         hasTranscript: input.hasTranscript,
