@@ -1280,6 +1280,7 @@ CREATE TABLE "public"."channels" (
     "addUserPolicy" TEXT DEFAULT 'EVERYONE',
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
     "showTicketsTabTicketsInChat" BOOLEAN DEFAULT true,
+    "expandChannelEmailsByDefault" BOOLEAN DEFAULT false,
     "callSummaryPrompt" TEXT,
 
     CONSTRAINT "channels_pkey" PRIMARY KEY ("id")

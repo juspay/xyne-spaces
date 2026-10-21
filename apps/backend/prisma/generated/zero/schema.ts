@@ -1120,6 +1120,7 @@ export const channelTable = table("channels")
     addUserPolicy: string().optional(),
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
+    expandChannelEmailsByDefault: boolean().optional(),
     callSummaryPrompt: string().optional(),
   })
   .primaryKey("id");

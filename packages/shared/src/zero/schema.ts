@@ -793,6 +793,7 @@ export const channelTable = table('channels')
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
+    expandChannelEmailsByDefault: boolean().optional(), // Render channel-email messages expanded by default
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })

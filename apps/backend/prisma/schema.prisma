@@ -2010,6 +2010,7 @@ model Channel {
   addUserPolicy   String?                @default("EVERYONE")
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
+  expandChannelEmailsByDefault Boolean? @default(false) // Channel-email messages render expanded instead of collapsed
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
   connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
   connectGroups   ConnectGroup[] @relation("ChannelConnectGroups")
