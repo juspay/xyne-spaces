@@ -56,6 +56,7 @@ import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
+import { videoRenditionQueue } from '@/queues/videoRenditionQueue';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -261,6 +262,14 @@ class WorkerService {
       logger.info('Starting HEIC rendition worker...');
       await heicRenditionQueue.initialize();
       heicRenditionQueue.startProcessing();
+
+      // Compatible video renditions (ffmpeg H.264 SDR). CPU-heavy and needs the
+      // ffmpeg binary, so opt-in per deployment like the stitch worker.
+      if (appConfig.enableVideoRenditionWorker) {
+        logger.info('Starting video rendition worker...');
+        await videoRenditionQueue.initialize();
+        videoRenditionQueue.startProcessing();
+      }
 
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
@@ -530,6 +539,7 @@ class WorkerService {
       }
 
       await heicRenditionQueue.shutdown();
+      await videoRenditionQueue.shutdown();
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();
