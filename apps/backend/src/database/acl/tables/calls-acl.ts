@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { CallType, CallVisibility, EntityUserAccess, ShareableEntityType } from '@xyne/shared'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import { checkChannelMembership, getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 
 export class CallsACL extends BaseQueryACL<
   Prisma.CallWhereInput,
@@ -135,15 +135,16 @@ export class CallsACL extends BaseQueryACL<
   async canCreate(data: Prisma.CallUncheckedCreateInput): Promise<boolean> {
     if (data.workspaceId !== this.ctx.workspaceId) return false
     if (!data.channelId) return data.createdByUserId === this.ctx.userId
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: data.channelId, workspaceId: this.ctx.workspaceId, isArchived: false },
-      select: { id: true },
-    })
-    if (!channel) return false
-    const participant = await this.prisma.channelParticipant.findFirst({
-      where: { channelId: data.channelId, userId: this.ctx.userId },
-      select: { id: true },
-    })
-    return participant !== null
+    // Same membership predicate the scheduling guard (assertChannelMembership) uses, run on the
+    // base client so it does not recurse through this extension. requireActive keeps the previous
+    // isArchived:false filter.
+    const access = await checkChannelMembership(
+      this.prisma,
+      data.channelId,
+      this.ctx.userId,
+      this.ctx.workspaceId,
+      { requireActive: true },
+    )
+    return access.ok
   }
 }
