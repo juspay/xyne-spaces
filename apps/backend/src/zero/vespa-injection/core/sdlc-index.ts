@@ -306,13 +306,8 @@ function sdlcHub(hubId: string) {
     }
     if (!containerIds.size) return null;
 
-    // 3. Only the deepest containers: one above another in the list is left out.
-    const scopes = new Map<string, string[]>();
-    for (const id of containerIds) scopes.set(id, (await container(id))!.scopeIds);
-    const deepest = [...containerIds].filter(id => ![...containerIds].some(other => other !== id && scopes.get(other)!.includes(id)));
-
     return {
-      sdlcContainerIds: deepest,
+      sdlcContainerIds: [...containerIds],
       sdlcDocumentIds: [...documentIds],
       sdlcRepoIds: [...repoIds],
     };

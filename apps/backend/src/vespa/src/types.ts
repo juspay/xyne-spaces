@@ -670,8 +670,8 @@ export interface SdlcDiscussionFields {
  * are fed as lists rather than imported through a single container reference.
  */
 export interface SdlcTicketFields {
-  /** The deepest containers it sits in (sdlc_container docIds): the track or folder of every item it is
-   * linked from and every track holding it, minus any that is above another in the list. */
+  /** The container of each item it is linked to (sdlc_container docIds): the track or folder each
+   * item sits in, and every track whose board holds it. Only those, not the containers above them. */
   sdlcContainerIds: string[];
   /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
   sdlcDocumentIds: string[];
