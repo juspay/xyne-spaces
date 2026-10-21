@@ -34,8 +34,9 @@ export function DeleteSectionView(): ReactElement {
           Delete this section?
         </Text>
         <Text className='pb-3 text-[15px] leading-[22px] text-spaces-foreground'>
-          Any channels you added to <Text className='font-semibold'>{section?.name ?? ''}</Text>{' '}
-          will move back to the Channels list.
+          Any channels and DMs you added to{' '}
+          <Text className='font-semibold'>{section?.name ?? ''}</Text> will move back to your
+          Channels and DMs lists.
         </Text>
         <Text className='text-[15px] leading-[22px] text-spaces-muted'>
           Don&apos;t worry — deleting this section won&apos;t remove you from any channels.

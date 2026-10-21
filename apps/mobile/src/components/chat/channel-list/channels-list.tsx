@@ -235,7 +235,7 @@ export const ChannelsList = ({ headerTitleScrollY }: ChannelsListProps = {}): Re
     (section: ChannelSection) => {
       Alert.alert(
         `Delete "${section.name}"?`,
-        'The channels in this section will move back to your main channel list.',
+        'Channels and DMs in this section will move back to your main lists.',
         [
           { text: 'Cancel', style: 'cancel' },
           {

@@ -48,6 +48,14 @@ export type ChannelRowData = {
   sectionId: string | null;
   /** Orders a channel inside its section. */
   sectionPosition: string;
+  /**
+   * A DM or group DM. Carried so a section can show the DMs filed into it, as
+   * web does; it never appears anywhere else on this screen — not in the
+   * Channels group, the filtered list or the filter counts.
+   */
+  isDm?: boolean;
+  /** For a DM: whose avatar the row draws in place of the channel glyph. */
+  avatarUserIds?: readonly string[];
 };
 
 export type ChannelSectionData = {
@@ -98,6 +106,8 @@ export const CHANNELS_GROUP_ID = 'channels';
 export const FLAT_GROUP_ID = 'flat';
 
 const isUnread = (channel: ChannelRowData): boolean => channel.hasUnread;
+
+const isChannel = (channel: ChannelRowData): boolean => channel.isDm !== true;
 
 /**
  * A mention you have already read is not waiting on you, so Mentions stays
@@ -204,10 +214,12 @@ export function buildChannelLayout({
   channelsPreference,
   now,
 }: ChannelLayoutInput): ChannelLayout {
-  const counts = countChannels(channels);
+  // DMs only ever live inside a section; everything else counts channels alone.
+  const plainChannels = channels.filter(isChannel);
+  const counts = countChannels(plainChannels);
 
   if (filter !== 'all') {
-    const matching = channels.filter(PREDICATES[filter]).sort(compareChannels);
+    const matching = plainChannels.filter(PREDICATES[filter]).sort(compareChannels);
     return {
       counts,
       groups: [
@@ -238,7 +250,8 @@ export function buildChannelLayout({
   });
 
   if (sections.length === 0) {
-    return { counts, groups: [channelsGroup(channels, false)] };
+    // With no section to hold them, DMs stay on the DMs tab.
+    return { counts, groups: [channelsGroup(plainChannels, false)] };
   }
 
   const bySection = new Map<string, ChannelRowData[]>(sections.map(section => [section.id, []]));
@@ -249,7 +262,8 @@ export function buildChannelLayout({
     // than invisible.
     const bucket = channel.sectionId === null ? undefined : bySection.get(channel.sectionId);
     if (bucket) bucket.push(channel);
-    else unsectioned.push(channel);
+    // An unsectioned DM belongs to the DMs tab, not the Channels group.
+    else if (isChannel(channel)) unsectioned.push(channel);
   }
 
   const groups: ChannelGroup[] = sections.map(section => ({

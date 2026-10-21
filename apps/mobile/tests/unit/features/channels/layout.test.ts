@@ -246,3 +246,45 @@ describe('buildChannelLayout', () => {
     });
   });
 });
+
+describe('buildChannelLayout with DMs', () => {
+  const dm = (id: string, overrides: Partial<ChannelRowData> = {}): ChannelRowData =>
+    channel(id, { isDm: true, avatarUserIds: ['u1'], ...overrides });
+
+  it('shows a DM inside the section it is filed in', () => {
+    const { groups } = layout({
+      channels: [channel('c1', { sectionId: 's1' }), dm('d1', { sectionId: 's1' })],
+      sections: [section('s1')],
+    });
+    assert.deepEqual(groups[0]?.channelIds.sort(), ['c1', 'd1']);
+  });
+
+  it('keeps unsectioned DMs out of the Channels group', () => {
+    const { groups } = layout({
+      channels: [channel('c1'), dm('d1'), dm('d2', { sectionId: 'gone' })],
+      sections: [section('s1')],
+    });
+    const channelsGroup = groups.find(group => group.kind === 'channels');
+    assert.deepEqual(channelsGroup?.channelIds, ['c1']);
+  });
+
+  it('keeps DMs out of the flat list, the filters and the counts', () => {
+    const rows = [
+      channel('c1', { hasUnread: true, isStarred: true }),
+      dm('d1', { hasUnread: true, isStarred: true, sectionId: 's1' }),
+    ];
+    for (const filter of ['all', 'unread', 'starred', 'mentions'] as const) {
+      const { groups } = layout({
+        channels: rows,
+        sections: filter === 'all' ? [] : [section('s1')],
+        filter,
+      });
+      assert.ok(!groups.some(group => group.channelIds.includes('d1')), filter);
+    }
+    const { counts } = layout({
+      channels: rows,
+      sections: [section('s1')],
+    });
+    assert.deepEqual(counts, { all: 1, unread: 1, mentions: 0, starred: 1 });
+  });
+});

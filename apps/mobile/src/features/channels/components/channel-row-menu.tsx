@@ -25,6 +25,7 @@ export function ChannelRowMenu({ id }: { id: string }): ReactElement {
   const muted = useCSSVariable('--color-spaces-muted') as string;
 
   const name = useValue(() => channelRow$(id).name.get());
+  const isDm = useValue(() => channelRow$(id).isDm.get()) === true;
   const isStarred = useValue(() => channelRow$(id).isStarred.get()) === true;
   const sectionName = useValue(() => {
     const sectionId = channelRow$(id).sectionId.get();
@@ -33,7 +34,7 @@ export function ChannelRowMenu({ id }: { id: string }): ReactElement {
   });
 
   return (
-    <ContextMenu.Content label={`#${name ?? ''}`}>
+    <ContextMenu.Content label={isDm ? (name ?? '') : `#${name ?? ''}`}>
       <ContextMenu.Item
         label={isStarred ? 'Unstar' : 'Star'}
         icon={<StarIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={STAR_COLOR} />}

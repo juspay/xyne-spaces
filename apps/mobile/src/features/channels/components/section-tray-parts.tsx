@@ -1,5 +1,5 @@
 import { useValue } from '@legendapp/state/react';
-import { Check, Lock } from 'lucide-react-native';
+import { Check, Lock, MessageCircle } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
@@ -163,6 +163,7 @@ type ChannelOptionProps = {
 export function ChannelOption({ id, checked, onToggle }: ChannelOptionProps): ReactElement {
   const name = useValue(() => channelRow$(id).name.get());
   const isPrivate = useValue(() => channelRow$(id).isPrivate.get());
+  const isDm = useValue(() => channelRow$(id).isDm.get()) === true;
   const muted = useCSSVariable('--color-spaces-muted') as string;
 
   return (
@@ -170,7 +171,9 @@ export function ChannelOption({ id, checked, onToggle }: ChannelOptionProps): Re
       label={name ?? ''}
       highlighted={checked}
       leading={
-        isPrivate ? (
+        isDm ? (
+          <MessageCircle size={CHANNEL_GLYPH_SIZE} color={muted} strokeWidth={2} />
+        ) : isPrivate ? (
           <Lock size={CHANNEL_GLYPH_SIZE} color={muted} strokeWidth={2} />
         ) : (
           <HashIcon size={CHANNEL_GLYPH_SIZE} color={muted} />
@@ -183,7 +186,8 @@ export function ChannelOption({ id, checked, onToggle }: ChannelOptionProps): Re
 }
 
 /**
- * Every channel id, alphabetically and optionally narrowed by a query.
+ * Every channel id, then every DM id, each alphabetically and optionally
+ * narrowed by a query — channels first, as web's section pickers list them.
  *
  * Alphabetical so the list does not reshuffle under the finger as activity
  * arrives while a tray is open.
@@ -192,9 +196,12 @@ export function useChannelIds(query = ''): string[] {
   const allIds = useValue(channelAllIds$);
   const sorted = useMemo(
     () =>
-      [...allIds].sort((a, b) =>
-        (channelRow$(a).name.peek() ?? '').localeCompare(channelRow$(b).name.peek() ?? ''),
-      ),
+      [...allIds].sort((a, b) => {
+        const aIsDm = channelRow$(a).isDm.peek() === true;
+        const bIsDm = channelRow$(b).isDm.peek() === true;
+        if (aIsDm !== bIsDm) return aIsDm ? 1 : -1;
+        return (channelRow$(a).name.peek() ?? '').localeCompare(channelRow$(b).name.peek() ?? '');
+      }),
     [allIds],
   );
 

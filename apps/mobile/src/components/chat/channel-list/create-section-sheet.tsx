@@ -206,7 +206,7 @@ function CreateSectionSheetContent({
             withDivider
             leading='skip'
             onLeadingPress={dismissSheet}
-            title='Add channels'
+            title='Add channels & DMs'
             subtitle={trimmedName}
             actionLabel='Done'
             onActionPress={handleDone}

@@ -54,7 +54,7 @@ export function SectionChannelPickerStep({
           onChangeText={setFilter}
           variant='bottomsheet'
           inputClassName='text-sm'
-          placeholder='Search channels'
+          placeholder='Search channels & DMs'
           placeholderTextColor={placeholderColor}
           leftIconColor={placeholderColor}
           clearIconColor={placeholderColor}
@@ -79,7 +79,7 @@ export function SectionChannelPickerStep({
         }}
         ListEmptyComponent={
           <Text className='py-10 text-center text-sm text-bottomsheet-text-muted'>
-            {hasChannels ? 'No channels found' : 'No channels available'}
+            {hasChannels ? 'No channels or DMs found' : 'No channels or DMs available'}
           </Text>
         }
       />

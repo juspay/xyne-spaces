@@ -145,6 +145,8 @@ function sameRow(a: ChannelRowData, b: ChannelRowData): boolean {
     a.lastViewedAt === b.lastViewedAt &&
     a.lastViewedConversationId === b.lastViewedConversationId &&
     a.sectionId === b.sectionId &&
-    a.sectionPosition === b.sectionPosition
+    a.sectionPosition === b.sectionPosition &&
+    a.isDm === b.isDm &&
+    (a.avatarUserIds ?? []).join(',') === (b.avatarUserIds ?? []).join(',')
   );
 }

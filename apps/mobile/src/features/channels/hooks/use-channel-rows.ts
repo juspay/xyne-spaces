@@ -18,6 +18,9 @@ import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferenc
 import { useChannelSections } from '@/src/hooks/useChannelSections';
 import { groupWorkspaceChannels } from '@/src/hooks/useChannelList';
 import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
+import { useUsers } from '@/src/hooks/useUsers';
+import { selectSectionableDms } from '@/src/components/chat/channel-list/section-dms';
+import { getChannelDisplayName, getDmAvatarUserIds } from '@/src/utils/channel-utils';
 
 import { buildChannelLayout, type ChannelRowData, type ChannelSectionData } from '../model/layout';
 import { channelFilter$, setChannelFilterCounts } from '../state/filter-store';
@@ -47,6 +50,8 @@ export function useChannelRows(): ChannelListMeta {
   const filter = useValue(channelFilter$);
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? null;
+  const currentUserId = user?.user_id ?? '';
+  const users = useUsers();
 
   const visibleChannels = useAllVisibleChannels();
   const userChannelStatuses = useUserChannelStatuses();
@@ -75,39 +80,73 @@ export function useChannelRows(): ChannelListMeta {
       userChannelStatuses,
     );
 
-    return (
-      [...starred, ...rest]
-        // Only plain channels, as on the dashboard. Email, support, Slack and
-        // the other system-managed types live in Desks, not here.
-        .filter(channel => channel.type === ChannelType.DEFAULT)
-        .map(channel => {
-          const status = statusById.get(channel.id);
-          const unreadCount = unreadCounts.get(channel.id) ?? 0;
-          const lastActivityAtMs = channel.channelStats?.lastActivityAt ?? 0;
-          const isMentioned = mentioned.has(channel.id);
-          return {
-            id: channel.id,
-            name: channel.name,
-            isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-            unreadCount,
-            messageUnreadCount: status?.unreadCount ?? 0,
-            // The same test the classic list bolds a row on, plus an unread
-            // mention, which the activity feed knows about before the counter.
-            hasUnread:
-              isMentioned || hasNewActivity(unreadCount, status?.lastViewedAt, lastActivityAtMs),
-            isMentioned,
-            hasGroupMention: groupMentioned.has(channel.id),
-            isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
-            isStarred: status?.isStarred === true,
-            lastActivityAtMs,
-            lastViewedAt: status?.lastViewedAt ?? undefined,
-            lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
-            sectionId: status?.sectionId ?? null,
-            sectionPosition: status?.sectionPosition ?? '',
-          };
-        })
+    /**
+     * Open DMs ride along so a section can show the ones filed into it and the
+     * section pickers can offer them, as web does. The layout keeps them out
+     * of every other group and out of the filter counts. They use the DMs
+     * tab's unread rule: the message counter, unread only when non-zero.
+     */
+    const usersById = new Map(users.map(entry => [entry.id, entry] as const));
+    const dmRows: ChannelRowData[] = selectSectionableDms(visibleChannels, userChannelStatuses).map(
+      channel => {
+        const status = statusById.get(channel.id);
+        const messageUnreadCount = status?.unreadCount ?? 0;
+        return {
+          id: channel.id,
+          name: getChannelDisplayName(channel, currentUserId, usersById),
+          isPrivate: false,
+          unreadCount: messageUnreadCount,
+          messageUnreadCount,
+          hasUnread: messageUnreadCount > 0,
+          isMentioned: false,
+          // A section's Mentions filter and sort read these for DMs as well.
+          hasGroupMention: groupMentioned.has(channel.id),
+          isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
+          isStarred: status?.isStarred === true,
+          lastActivityAtMs: channel.channelStats?.lastActivityAt ?? 0,
+          lastViewedAt: status?.lastViewedAt ?? undefined,
+          lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
+          sectionId: status?.sectionId ?? null,
+          sectionPosition: status?.sectionPosition ?? '',
+          isDm: true,
+          avatarUserIds: getDmAvatarUserIds(channel, currentUserId),
+        };
+      },
     );
-  }, [unreadActivities, userChannelStatuses, visibleChannels]);
+
+    const channelRows: ChannelRowData[] = [...starred, ...rest]
+      // Only plain channels, as on the dashboard. Email, support, Slack and
+      // the other system-managed types live in Desks, not here.
+      .filter(channel => channel.type === ChannelType.DEFAULT)
+      .map(channel => {
+        const status = statusById.get(channel.id);
+        const unreadCount = unreadCounts.get(channel.id) ?? 0;
+        const lastActivityAtMs = channel.channelStats?.lastActivityAt ?? 0;
+        const isMentioned = mentioned.has(channel.id);
+        return {
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          unreadCount,
+          messageUnreadCount: status?.unreadCount ?? 0,
+          // The same test the classic list bolds a row on, plus an unread
+          // mention, which the activity feed knows about before the counter.
+          hasUnread:
+            isMentioned || hasNewActivity(unreadCount, status?.lastViewedAt, lastActivityAtMs),
+          isMentioned,
+          hasGroupMention: groupMentioned.has(channel.id),
+          isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
+          isStarred: status?.isStarred === true,
+          lastActivityAtMs,
+          lastViewedAt: status?.lastViewedAt ?? undefined,
+          lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
+          sectionId: status?.sectionId ?? null,
+          sectionPosition: status?.sectionPosition ?? '',
+        };
+      });
+
+    return [...channelRows, ...dmRows];
+  }, [currentUserId, unreadActivities, userChannelStatuses, users, visibleChannels]);
 
   const sectionData = useMemo<ChannelSectionData[]>(
     () =>
@@ -144,8 +183,19 @@ export function useChannelRows(): ChannelListMeta {
     setChannelFilterCounts(layout.counts);
   }, [layout.counts]);
 
+  // Empty means nothing to draw: no channels, and no DM sitting in a section.
+  const isEmpty = useMemo(
+    () =>
+      !channels.some(
+        channel =>
+          channel.isDm !== true ||
+          (channel.sectionId !== null && sectionData.some(s => s.id === channel.sectionId)),
+      ),
+    [channels, sectionData],
+  );
+
   return {
-    isEmpty: channels.length === 0,
+    isEmpty,
     isFiltering: filter !== 'all',
   };
 }

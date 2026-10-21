@@ -12,6 +12,7 @@ import { useCSSVariable } from 'uniwind';
 import { ChannelListItemProvider, useChannelListItemContext } from './channel-list-item-context';
 import { ListRowPressable } from '@/src/components/ui/list-row-pressable';
 import { CHANNEL_ICON_GLYPH_SIZE, CHANNEL_ICON_SIZE } from './channel-list-layout';
+import Avatar from '@/src/components/ui/avatar';
 
 export type ChannelListItemRootProps = {
   data: ChannelListItemData;
@@ -28,9 +29,15 @@ function ChannelListItemRoot({ data, children, onPress }: ChannelListItemRootPro
 }
 
 const Icon = memo(function ChannelListItemIcon() {
-  const { visibility, unreadCount, lastViewedAt, lastActivityAt } = useChannelListItemContext();
+  const { visibility, unreadCount, lastViewedAt, lastActivityAt, participantUserIds } =
+    useChannelListItemContext();
   const foreground = useCSSVariable('--color-foreground') as string;
   const muted = useCSSVariable('--color-secondary-foreground') as string;
+
+  // A DM inside a custom section shows the person, as the DMs tab does.
+  if (participantUserIds && participantUserIds.length > 0) {
+    return <Avatar userIds={participantUserIds} size={CHANNEL_ICON_SIZE} />;
+  }
   const isPrivate = visibility === ChannelVisibility.PRIVATE;
   const shouldShowBold = hasNewActivity(unreadCount, lastViewedAt, lastActivityAt);
   const iconColor = shouldShowBold ? foreground : muted;

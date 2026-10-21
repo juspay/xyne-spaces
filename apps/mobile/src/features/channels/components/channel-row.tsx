@@ -10,6 +10,7 @@ import { formatDmTimestamp } from '@/src/features/dms/model/timestamp';
 import { todayStart$ } from '@/src/features/dms/state/day-clock';
 import { ContextMenu } from '@/src/ui/context-menu';
 import { HashIcon } from '@/src/ui/icons';
+import Avatar from '@/src/components/ui/avatar';
 import { cn } from '@/src/utils/cn';
 import { formatCountLabel } from '@/src/utils/countLabel';
 import { haptics } from '@/src/utils/haptics';
@@ -39,8 +40,15 @@ import { ChannelRowMenu } from './channel-row-menu';
  */
 function IconSlot({ id }: { id: string }): ReactElement {
   const isPrivate = useValue(() => channelRow$(id).isPrivate.get());
+  const avatarKey = useValue(() => (channelRow$(id).avatarUserIds.get() ?? []).join(','));
   const muted = useCSSVariable('--color-spaces-muted') as string;
   const Glyph = isPrivate ? Lock : HashIcon;
+  const avatarUserIds = useMemo(() => (avatarKey ? avatarKey.split(',') : []), [avatarKey]);
+
+  // A DM filed into a section shows the person, as the DMs list does.
+  if (avatarUserIds.length > 0) {
+    return <Avatar userIds={avatarUserIds} size={CHANNEL_ICON_SLOT} />;
+  }
 
   return (
     <View
