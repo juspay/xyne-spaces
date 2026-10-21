@@ -135,8 +135,6 @@ export class MicrosoftAuthController {
       'profile',
       'User.Read',
       'offline_access',
-      'Contacts.Read',
-      'People.Read',
     ];
   }
 
