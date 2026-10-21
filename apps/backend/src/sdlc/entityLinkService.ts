@@ -42,6 +42,75 @@ export async function ensureLink(
  * the writers that file items outside Zero. Call it after writing or removing the
  * item's containment edge, in the same transaction.
  */
+/** Files a call under the SDLC track, item or artifact it was booked from. */
+export async function linkCallToSdlcOwner(
+  db: Db,
+  owner: { ownerType: string; ownerId: string },
+  call: { callId: string; channelId: string; workspaceId: string; userId: string }
+): Promise<void> {
+  await ensureLink(
+    db,
+    {
+      channelId: call.channelId,
+      sourceType: owner.ownerType,
+      sourceId: owner.ownerId,
+      targetType: 'CALL',
+      targetId: call.callId,
+      relationType: 'CALL',
+    },
+    { workspaceId: call.workspaceId, userId: call.userId }
+  );
+}
+
+/**
+ * When a scheduled call starts, its conversation becomes a discussion wherever the
+ * call is filed (OWNER -> CONVERSATION), as an instant call's does in the webhook.
+ * An item's conversation is also filed against the item's track.
+ */
+export async function fileScheduledCallDiscussion(
+  db: Db,
+  callId: string,
+  conversationId: string,
+  createdBy: string
+): Promise<void> {
+  const owners = await db.sdlcEntityLink.findMany({
+    where: { targetType: 'CALL', targetId: callId, relationType: 'CALL' },
+    select: { workspaceId: true, channelId: true, sourceType: true, sourceId: true },
+  });
+  for (const owner of owners) {
+    const actor = { workspaceId: owner.workspaceId, userId: createdBy };
+    await ensureLink(
+      db,
+      {
+        channelId: owner.channelId,
+        sourceType: owner.sourceType,
+        sourceId: owner.sourceId,
+        targetType: 'CONVERSATION',
+        targetId: conversationId,
+        relationType: 'DISCUSSION',
+      },
+      actor
+    );
+    if (owner.sourceType === 'FOLDER' || owner.sourceType === 'ATTACHMENT' || owner.sourceType === 'LINK') {
+      const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+      if (trackId) {
+        await ensureLink(
+          db,
+          {
+            channelId: owner.channelId,
+            sourceType: 'TRACK',
+            sourceId: trackId,
+            targetType: 'CONVERSATION',
+            targetId: conversationId,
+            relationType: SDLC_TRACK_FLAT_RELATION,
+          },
+          actor
+        );
+      }
+    }
+  }
+}
+
 export async function refileFolderEdges(
   db: Db,
   input: {

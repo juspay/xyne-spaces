@@ -1,7 +1,7 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
 import { channelService } from '../../../services/Chat/channelService';
 import { useSelf, useActiveUsers, useUsersById } from '../../../hooks/useUsers';
@@ -102,6 +102,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
   initialEndsAt,
   channelId: threadChannelId,
   conversationId: threadConversationId,
+  sdlcLink,
   initialTitle,
   externalInviteDelivery = 'standalone',
   initialParticipants,
@@ -131,6 +132,9 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
   );
 
   const threadChannel = useChannel(threadChannelId ?? '');
+  // Booked from an SDLC hub: picking people keeps the call in the hub, not a new DM.
+  const sdlcHubChannelId =
+    threadChannel?.type === ChannelType.SDLC ? (threadChannelId ?? undefined) : undefined;
   const channelOwnEmail = useMemo(() => {
     const name = threadChannel?.name?.trim().toLowerCase();
     if (!name) return null;
@@ -622,6 +626,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
         if (value.startsWith('user:')) userIds.push(value.replace('user:', ''));
         else if (value.startsWith('channel:')) channelId = value.replace('channel:', '');
       });
+      // Only with teammates picked: a hub channelId with no targets would invite the whole hub.
+      if (!channelId && userIds.length > 0) channelId = sdlcHubChannelId;
       const effExternals = data.externalEmails ?? [];
       const buildExternalInvitation = (): NonNullable<ScheduleCallRequest['invitation']> => ({
         bodyHtml: DEFAULT_INVITATION_BODY_HTML,
@@ -742,6 +748,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
           startTime: recurringStartTime,
           endTime: recurringEndTime,
           startsOn: data.startsAt.getTime(),
+          ...(sdlcLink && { sdlcLink }),
         };
         if (seriesEndsType === 'on' && seriesEndsOn !== null) {
           recurringRequest.endsOn = seriesEndsOn.getTime();
@@ -761,6 +768,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
           title: data.title,
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
+          ...(sdlcLink && { sdlcLink }),
         };
         if (threadConversationId) {
           // Thread-linked: always use the thread's channel and pass conversationId

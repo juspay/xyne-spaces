@@ -23,7 +23,7 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner, fileScheduledCallDiscussion } from '@/sdlc/entityLinkService';
 import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
 
 /** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
@@ -734,6 +734,25 @@ export class LiveKitWebhookController {
           });
 
           logger.info(`[LiveKit Webhook] Scheduled call ${roomName} activated (status → ACTIVE)`);
+
+          // Booked from an SDLC track or item: file the call's conversation there too.
+          try {
+            const activated = await this.db.call.findUnique({
+              where: { id: call.id },
+              select: { metadata: true },
+            });
+            const activatedConversationId = (activated?.metadata as { conversationId?: string } | null)
+              ?.conversationId;
+            if (activatedConversationId) {
+              await fileScheduledCallDiscussion(this.db, call.id, activatedConversationId, call.createdByUserId);
+            }
+          } catch (sdlcLinkError) {
+            // Linking must never break call activation.
+            logger.warn('[LiveKit Webhook] sdlc_scheduled_discussion_link_failed', {
+              call: roomName,
+              error: sdlcLinkError,
+            });
+          }
           // ── End scheduled call activation ──────────────────────────────────────
         }
 
