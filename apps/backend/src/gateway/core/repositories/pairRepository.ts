@@ -4,7 +4,6 @@ import type { GatewayErrorCode } from '../errors';
 import type { Pair, PairStatus, ProviderId } from '../types';
 
 export interface CreatePairInput {
-  /** Unique: the use case builds it so there is one pair per external resource. */
   name: string;
   sourceType: string;
   displayName: string;

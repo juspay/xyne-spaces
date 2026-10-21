@@ -12,6 +12,8 @@ export { encrypt, decrypt } from '@/services/encryptionService';
 export { acquireLock, releaseLock } from '@/utils/distributedLock';
 export type { LockHandle } from '@/utils/distributedLock';
 export { redisService } from '@/services/redisService';
+export { createRedisClient } from '@/services/redisFactory';
+export { notificationService } from '@/services/notificationService';
 export { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 
 export { authMiddleware } from '@/middleware/auth';
@@ -42,6 +44,9 @@ export {
   ExternalEntityType,
   MessageDirection,
   MessageType,
+  NotificationType,
+  OrgRole,
+  WorkspaceRole,
   isDeskChannelType,
 } from '@xyne/shared';
 export { extractUserMentions } from '@xyne/shared/utils';

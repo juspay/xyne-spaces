@@ -4,8 +4,11 @@ export type GatewayErrorCode =
   | 'VALIDATION_ERROR'
   | 'INVALID_SIGNATURE'
   | 'NOT_CHANNEL_MEMBER'
+  | 'NOT_CHANNEL_ADMIN'
   | 'NOT_CONFIGURED'
   | 'LINK_NOT_FOUND'
+  | 'REQUEST_NOT_FOUND'
+  | 'REQUEST_CLOSED'
   | 'ALREADY_CONFIGURED'
   | 'CHANNEL_TAKEN'
   | 'RATE_LIMITED'
@@ -20,8 +23,11 @@ const STATUS: Record<GatewayErrorCode, number> = {
   VALIDATION_ERROR: 400,
   INVALID_SIGNATURE: 401,
   NOT_CHANNEL_MEMBER: 403,
+  NOT_CHANNEL_ADMIN: 403,
   NOT_CONFIGURED: 404,
   LINK_NOT_FOUND: 404,
+  REQUEST_NOT_FOUND: 404,
+  REQUEST_CLOSED: 409,
   ALREADY_CONFIGURED: 409,
   CHANNEL_TAKEN: 409,
   RATE_LIMITED: 429,
@@ -35,7 +41,6 @@ const STATUS: Record<GatewayErrorCode, number> = {
 
 export interface GatewayErrorOptions {
   retryAfterMs?: number;
-  /** The provider's own error code, e.g. Slack's `channel_not_found`. */
   providerCode?: string;
 }
 

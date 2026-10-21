@@ -18,7 +18,6 @@ export interface UserAuthSession {
 }
 
 export interface UserAuthStatus {
-  /** The admin config can sign people in. */
   available: boolean;
   connected: boolean;
   connectedAt: Date | null;

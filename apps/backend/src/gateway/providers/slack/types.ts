@@ -3,7 +3,6 @@ import { z } from 'zod';
 export const SlackCredentialsSchema = z.object({
   botToken: z.string().trim().startsWith('xoxb-', 'Must be a Slack bot token (xoxb-…)'),
   signingSecret: z.string().trim().min(1),
-  // Optional: the Slack app's OAuth client, needed only to let people post as themselves.
   clientId: z.string().trim().min(1).optional(),
   clientSecret: z.string().trim().min(1).optional(),
 });

@@ -1,4 +1,5 @@
 import type { ExternalSource } from '@prisma/client';
+import { z } from 'zod';
 import { decrypt, encrypt } from '../../re-exports';
 import type { BaseProvider } from '../base/baseProvider';
 import { GatewayError } from '../errors';
@@ -10,7 +11,11 @@ import type { ProviderConfig, ProviderWorkspace } from '../types';
 interface StoredConfig {
   credentials: unknown;
   workspace: ProviderWorkspace;
+  appName?: string;
 }
+
+// Saved beside the provider's own credentials schema, which drops keys it doesn't know.
+const ConfigInputSchema = z.object({ appName: z.string().trim().min(1).max(80).optional() });
 
 /** One provider workspace per Spaces workspace, saved encrypted on a CONNECTION row in ExternalSource. */
 export class ConfigService {
@@ -20,8 +25,9 @@ export class ConfigService {
 
   constructor(private readonly provider: BaseProvider) {}
 
-  async getConnectedWorkspace(workspaceId: string): Promise<ProviderWorkspace> {
-    return (await this.getConfigByWorkspace(workspaceId)).workspace;
+  async findConfigByWorkspace(workspaceId: string): Promise<ProviderConfig | null> {
+    const source = await this.sources.findActiveConfig(workspaceId, this.provider.configSourceType);
+    return source && this.decryptConfig(source);
   }
 
   async saveConfig(
@@ -30,6 +36,7 @@ export class ConfigService {
     input: unknown
   ): Promise<ProviderWorkspace> {
     const credentials = this.provider.credentialsSchema.parse(input);
+    const { appName } = ConfigInputSchema.parse(input);
     const workspace = await this.provider.validateCredentials(credentials);
     const name = this.provider.configSourceName(workspace.externalWorkspaceId);
 
@@ -50,7 +57,7 @@ export class ConfigService {
       );
     }
 
-    const stored: StoredConfig = { credentials, workspace };
+    const stored: StoredConfig = { credentials, workspace, appName };
     const encrypted = encrypt(JSON.stringify(stored));
     if (existing) {
       await this.sources.update(existing.id, {
@@ -82,6 +89,11 @@ export class ConfigService {
     await this.pairs.pauseByConnection(source.id, 'NOT_CONFIGURED');
   }
 
+  /** The config can sign people in, so their messages are posted as them. */
+  canAuthorizeUsers(config: ProviderConfig): boolean {
+    return this.provider.canAuthorizeUsers(config.credentials);
+  }
+
   async getConfigByWorkspace(workspaceId: string): Promise<ProviderConfig> {
     const source = await this.sources.findActiveConfig(workspaceId, this.provider.configSourceType);
     if (!source) throw this.notConfiguredError();
@@ -108,6 +120,7 @@ export class ConfigService {
       workspaceId: source.workspaceId,
       workspace: stored.workspace,
       credentials: this.provider.credentialsSchema.parse(stored.credentials),
+      appName: stored.appName ?? null,
     };
   }
 

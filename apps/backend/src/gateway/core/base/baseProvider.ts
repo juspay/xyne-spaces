@@ -15,7 +15,6 @@ import type {
 export abstract class BaseProvider<TCredentials = unknown> {
   abstract readonly id: ProviderId;
   abstract readonly displayName: string;
-  /** User metadata key holding the provider user id, e.g. `slackId`. */
   abstract readonly userMetadataKey: string;
   abstract readonly credentialsSchema: z.ZodType<TCredentials>;
   abstract readonly transformer: BaseTransformer<TCredentials>;

@@ -26,9 +26,7 @@ import type { MirrorLink } from '../types';
 interface OutboundContext {
   link: MirrorLink;
   api: BaseApi;
-  /** Where new map rows go. */
   sourceId: string;
-  /** Where existing map rows are looked up: sourceId plus older migrations'. */
   sourceIds: string[];
 }
 

@@ -1,10 +1,6 @@
 import type { BaseProvider } from './base/baseProvider';
 import type { ConfigService } from './services/configService';
 import type { IdentityService } from './services/identityService';
-import type { InboundService } from '../useCases/mirror/services/inboundService';
-import type { LinkService } from '../useCases/mirror/services/linkService';
-import type { MemberSyncService } from '../useCases/mirror/services/memberSyncService';
-import type { OutboundService } from '../useCases/mirror/services/outboundService';
 import type { UserAuthService } from './services/userAuthService';
 
 export type ProviderId = 'slack';
@@ -15,11 +11,8 @@ export interface Pair {
   id: string;
   workspaceId: string;
   provider: ProviderId;
-  /** The provider workspace's CONNECTION row. */
   connectionId: string;
-  /** The provider's resource, e.g. a Slack channel. */
   externalId: string;
-  /** The Spaces resource, e.g. a channel. */
   spacesId: string;
   status: PairStatus;
   statusReason: string | null;
@@ -48,6 +41,7 @@ export interface ProviderConfig<TCredentials = unknown> {
   workspaceId: string;
   workspace: ProviderWorkspace;
   credentials: TCredentials;
+  appName: string | null;
 }
 
 /** The ExternalSource row that scopes a link's message map. */
@@ -73,14 +67,12 @@ export interface ProviderFile {
 export interface ProviderMessage {
   channelId: string;
   id: string;
-  /** Parent message id, set only on replies. */
   threadId?: string;
   authorId?: string;
   botId?: string;
   appId?: string;
   authorName?: string;
   text: string;
-  /** Provider-native rich content, rendered by the transformer. */
   attachments?: unknown[];
   files: ProviderFile[];
   createdAt: Date;
@@ -118,7 +110,6 @@ export interface OutboundMessage {
   channelId: string;
   threadId?: string;
   text: string;
-  /** Shown instead of the bot's own; ignored when posting with a person's own token. */
   senderName?: string;
   senderAvatarUrl?: string;
 }
@@ -143,14 +134,17 @@ export interface SpacesMemberChange {
   userId: string;
 }
 
-/** Everything wired for one provider; built once in index.ts. */
+/** What every use of the gateway shares for one provider; built once in index.ts. */
 export interface ProviderServices {
   provider: BaseProvider;
   config: ConfigService;
   identity: IdentityService;
   userAuth: UserAuthService;
-  links: LinkService;
-  members: MemberSyncService;
-  inbound: InboundService;
-  outbound: OutboundService;
+}
+
+/** What core hands verified provider events and Spaces changes to, e.g. Mirror. Core never imports it. */
+export interface GatewayHandler {
+  onProviderEvent(config: ProviderConfig, event: ProviderEvent): Promise<void>;
+  onSpacesMessageChanged(change: SpacesMessageChange): Promise<void>;
+  onSpacesMemberChanged(change: SpacesMemberChange): Promise<void>;
 }

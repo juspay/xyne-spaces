@@ -1,22 +1,30 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { asyncRoute } from '../../../core/middleware/errorHandler';
+import { isOrgAdmin } from '../middleware/channelGuards';
+import type { LinkRequestService } from '../services/linkRequestService';
 import type { LinkService } from '../services/linkService';
 
 const ChannelQuerySchema = z.object({ channelId: z.string().trim().min(1) });
-const LinkChannelBodySchema = z.object({
-  spacesChannelId: z.string().trim().min(1),
-  externalChannelId: z.string().trim().min(1),
-});
 const LinkParamsSchema = z.object({ id: z.string().trim().min(1) });
 
+/** A channel's sync card. Links are made by approving a request, so there is no endpoint to create one. */
 export class LinkController {
-  constructor(private readonly linkService: LinkService) {}
+  constructor(
+    private readonly linkService: LinkService,
+    private readonly linkRequestService: LinkRequestService
+  ) {}
 
-  getLink: RequestHandler = asyncRoute(async (req, res) => {
+  getChannelStatus: RequestHandler = asyncRoute(async (req, res) => {
     const { channelId } = ChannelQuerySchema.parse(req.query);
-    const view = await this.linkService.findChannelLink(channelId);
-    res.json(view ?? { link: null, externalChannel: null });
+    res.json(
+      await this.linkRequestService.getChannelStatus(
+        req.user!.workspaceId!,
+        req.user!.id,
+        channelId,
+        isOrgAdmin(req.user!)
+      )
+    );
   });
 
   listLinkableChannels: RequestHandler = asyncRoute(async (req, res) => {
@@ -26,12 +34,6 @@ export class LinkController {
       req.user!.id
     );
     res.json({ channels });
-  });
-
-  linkChannel: RequestHandler = asyncRoute(async (req, res) => {
-    const body = LinkChannelBodySchema.parse(req.body);
-    const link = await this.linkService.linkChannel(req.user!.workspaceId!, req.user!.id, body);
-    res.status(201).json({ link });
   });
 
   pauseLink: RequestHandler = asyncRoute(async (req, res) => {

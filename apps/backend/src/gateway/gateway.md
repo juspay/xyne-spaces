@@ -2,14 +2,15 @@
 
 The gateway carries everything between Spaces and an external app (a provider). Mirror, two-way channel sync, is the first use case on it. Slack is the first provider; `providers/slack/` is the reference to copy.
 
-`core/` already does config storage, people's sign-in, errors and retries, the Spaces hooks, and Mirror's links, message map, locks, pausing and member sync. A provider supplies only what is specific to its API.
+`core/` already does config storage, people's sign-in, errors and retries, provider events and the Spaces hooks; `useCases/mirror/` does Mirror's links, message map, locks, pausing and member sync. A provider supplies only what is specific to its API.
 
 ## Rules
 
 - Only `re-exports.ts` imports from outside `gateway/`. Need repo code? Re-export it there. npm packages are imported directly.
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
-- `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories stay in `core/repositories/`, since every use case uses the same tables.
+- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler` (`onProviderEvent`, `onSpacesMessageChanged`, `onSpacesMemberChanged`) and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories over the tables every use case shares stay in `core/repositories/`, and a use case's own stores (Mirror's Redis sync requests) in `useCases/<name>/repositories/`.
 
 ## Steps
 
@@ -17,8 +18,11 @@ The gateway carries everything between Spaces and an external app (a provider). 
 2. Create `providers/<id>/` with the six files below.
 3. Register it in `index.ts`:
    ```ts
-   const teams = createServices(new TeamsProvider()); // and add it to servicesByProvider
-   gatewayRouter.use('/teams', teamsRoutes(teams));
+   const teams = createServices(new TeamsProvider());
+   const teamsMirror = createMirror(teams);
+   gatewayRouter.use('/teams', teamsRoutes(teams, [teamsMirror.handler]));
+   gatewayRouter.use('/teams', teamsMirror.router);
+   // and add teamsMirror.handler to gatewayHooks
    ```
 4. Point the provider's webhook at `<backend>/api/gateway/<id>/events`.
 
@@ -61,6 +65,13 @@ A person signs in once per Spaces workspace (`GET /user/connect`, then the provi
 - A rejected token is dropped, and a person who can't reach the channel or didn't post that message falls back to the bot. These never pause a link.
 - The provider echoes their post back as theirs. A lock per link and person is held until the post is mapped; an echo that arrives first gets 503 and is skipped on retry.
 - Edits and deletes made in the provider to messages that came from Spaces are not copied back, so a change never bounces between the two.
+
+## Sync requests (Mirror)
+
+- A channel admin (`ChannelParticipant.role = ADMIN`) picks a provider channel and submits a request; an organisation admin approves or rejects it. Approving creates the link. Other members only see the status.
+- Requests live in Redis with no expiry, like self-serve migration's jobs (`useCases/mirror/repositories/syncRequestRepository.ts`): `mirror:request:<id>`, an index per workspace `mirror:requests:<workspace>`, and a lock on the Spaces and the provider channel while one is pending. Statuses: `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`; a rejected or cancelled channel can be requested again.
+- Approval re-runs the link checks as the requester. A failed check rejects the request with its reason; the requester is notified either way.
+- The channel admin or an organisation admin can pause, resume and unlink.
 
 ## Data
 
@@ -106,4 +117,5 @@ Never retry anything else yourself: a timed-out post may already be sent.
 - Webhook URL above, subscribed to message and channel-member events.
 - Bot permissions to post (with a custom name and avatar), edit, delete and upload; read channel info and members; invite and remove members; read users and look them up by email.
 - The bot is in every channel to sync.
+- The admin also enters the app's name in the config; people's instructions use it.
 - To let people post as themselves: the app's OAuth client id and secret in the config, user scope to post as the user, and redirect URL `<backend>/api/gateway/<id>/user/callback`.

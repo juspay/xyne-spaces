@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { getBackendUrl } from '../../re-exports';
 import { asyncRoute } from '../middleware/errorHandler';
 import type { ConfigService } from '../services/configService';
 
@@ -6,9 +7,16 @@ import type { ConfigService } from '../services/configService';
 export class ConfigController {
   constructor(private readonly configService: ConfigService) {}
 
+  /** What is connected, if anything, and the two URLs the admin pastes into the provider app. */
   getConfig: RequestHandler = asyncRoute(async (req, res) => {
-    const workspace = await this.configService.getConnectedWorkspace(req.user!.workspaceId!);
-    res.json({ workspace });
+    const config = await this.configService.findConfigByWorkspace(req.user!.workspaceId!);
+    const base = `${getBackendUrl(req)}${req.baseUrl}`;
+    res.json({
+      workspace: config?.workspace ?? null,
+      appName: config?.appName ?? null,
+      userSignIn: !!config && this.configService.canAuthorizeUsers(config),
+      urls: { events: `${base}/events`, userSignInRedirect: `${base}/user/callback` },
+    });
   });
 
   saveConfig: RequestHandler = asyncRoute(async (req, res) => {

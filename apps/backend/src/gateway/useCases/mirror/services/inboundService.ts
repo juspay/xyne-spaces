@@ -36,9 +36,7 @@ interface InboundContext {
   config: ProviderConfig;
   api: BaseApi;
   sourceName: string;
-  /** Where new map rows go. */
   sourceId: string;
-  /** Where existing map rows are looked up: sourceId plus older migrations'. */
   sourceIds: string[];
 }
 
