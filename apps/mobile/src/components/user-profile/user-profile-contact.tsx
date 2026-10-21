@@ -1,5 +1,5 @@
 import { memo, useState, type ReactElement, type ReactNode } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import {
   Check,
   Edit2,
@@ -7,6 +7,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  PhoneCall,
   User as UserIcon,
   X,
   type LucideIcon,
@@ -47,6 +48,26 @@ const ContactRow = ({ icon, label, children }: ContactRowProps): ReactElement =>
 );
 
 type EditableField = 'displayName' | 'phoneNumber';
+
+/** Builds a `tel:` URL, keeping only digits and a leading `+` so stored formatting can't break the dialer. */
+const toTelUrl = (phoneNumber: string): string | null => {
+  const trimmed = phoneNumber.trim();
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return null;
+  return `tel:${trimmed.startsWith('+') ? '+' : ''}${digits}`;
+};
+
+const dialPhoneNumber = (phoneNumber: string): void => {
+  const url = toTelUrl(phoneNumber);
+  if (!url) return;
+  void haptics.buttonTap();
+  // openURL (not canOpenURL) so iOS doesn't need `tel` in LSApplicationQueriesSchemes;
+  // it rejects on devices without a dialer (iPad, simulator).
+  Linking.openURL(url).catch(() => {
+    void haptics.error();
+    Alert.alert('Unable to open dialer', 'This device cannot place phone calls.');
+  });
+};
 
 const validateField = (field: EditableField, value: string): string | null => {
   if (!value.trim()) return null;
@@ -161,6 +182,44 @@ const Contact = memo(({ className }: ContactProps): ReactElement | null => {
             </Pressable>
           </View>
           {editError ? <Text className='mt-1 text-xs text-red-600'>{editError}</Text> : null}
+        </View>
+      );
+    }
+
+    if (value && field === 'phoneNumber') {
+      return (
+        <View className='mt-1 flex-row items-center gap-2'>
+          <CopyableValue
+            value={value}
+            variant='row'
+            className='min-w-0 flex-1'
+            textClassName='text-sm'
+            copyAccessibilityLabel='Copy phone number'
+            trailingActions={
+              <Pressable
+                onPress={() => dialPhoneNumber(value)}
+                hitSlop={8}
+                className='shrink-0 p-1 active:opacity-60'
+                accessibilityRole='button'
+                accessibilityLabel='Call phone number'
+              >
+                <PhoneCall size={14} color={mutedIconColor} />
+              </Pressable>
+            }
+          />
+          {isOwnProfile ? (
+            <Pressable
+              onPress={() => {
+                void haptics.buttonTap();
+                startEdit(field, value);
+              }}
+              className='p-1 active:opacity-60'
+              accessibilityRole='button'
+              accessibilityLabel='Edit phone number'
+            >
+              <Edit2 size={14} color={mutedIconColor} />
+            </Pressable>
+          ) : null}
         </View>
       );
     }
