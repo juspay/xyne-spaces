@@ -10480,8 +10480,8 @@ packages:
     peerDependencies:
       typescript: ^5
 
-  '@xyne/workflow-sdk@3.2.57':
-    resolution: {integrity: sha512-YM/r2W6991IeGGkUPiVatk/8JqVUSddbwhNK7hqtxtBE7RcLIvO3G9CYfhsGg1Rj2KZOWDqv/llPcWxaQzMDmg==}
+  '@xyne/workflow-sdk@3.2.58':
+    resolution: {integrity: sha512-V4kh9ZdPAHGrfnyphegOx3AAxo1jdzPZ9Ku8C37lBpVhGdjbSGOFIMRFK/aJ11HhkTJthjjc7MtexNFDDww8XQ==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@earendil-works/pi-agent-core': '>=0.79.0'
@@ -10498,8 +10498,8 @@ packages:
       typebox:
         optional: true
 
-  '@xyne/workflow-ui@1.3.57':
-    resolution: {integrity: sha512-vujJS4fYmBMOjG88p4plpwl48dQcF94crcdj4ZhxBGXCxUCncWFXRd8muWwJq5dfPLblwdt8wE8Z+VDu6WyMjg==}
+  '@xyne/workflow-ui@1.3.58':
+    resolution: {integrity: sha512-R9g91zv5GGAEGhC0OaqzF2egQPlQ7zFC0CzojQNzDsa4UYLm/LiFG8Fc8fHNTzOdUVtrzKVYVDI7RuCisriGlg==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@codemirror/autocomplete': '>=6.20.0'
