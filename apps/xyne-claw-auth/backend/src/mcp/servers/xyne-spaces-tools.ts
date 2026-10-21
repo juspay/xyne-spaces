@@ -8145,6 +8145,8 @@ const spacesVespaSearch: ToolDef = {
         built.rankProfile,
         undefined,
         workspaceId,
+        undefined,
+        built.summary,
       );
       return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
