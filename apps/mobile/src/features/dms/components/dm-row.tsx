@@ -40,6 +40,7 @@ import { formatDmTimestamp } from '../model/timestamp';
 import { todayStart$ } from '../state/day-clock';
 import { dmRow$ } from '../state/rows-store';
 import { cn } from '@/src/utils/cn';
+import { logUnreadDiagRowPress } from '@/src/utils/unreadDiagnostics';
 
 /**
  * Module-level, so a row that is mid-teardown or still hydrating hands the
@@ -216,6 +217,7 @@ function DmRowComponent({ id, children, onSelect }: DmRowProps): ReactElement {
       return;
     }
     const row = row$.peek();
+    logUnreadDiagRowPress('dm_row', id, row);
     openBaseChatRoute(router, id, {
       surface: 'dms',
       unreadCount: row?.unreadCount,

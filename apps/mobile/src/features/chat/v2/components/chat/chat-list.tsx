@@ -137,6 +137,7 @@ import {
   type ChatOpenPaintSource,
 } from '@/src/features/chat/v2/chatOpenTimingLogger';
 import { Event, logger } from '@/src/utils/logger';
+import { describeUnreadBoundaryRows, logUnreadDiag } from '@/src/utils/unreadDiagnostics';
 import {
   reportActivityChatSkeletonShown,
   reportActivityListReady,
@@ -1203,6 +1204,181 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     initialScrollIndex !== undefined &&
     !listInstanceLoadedRef.current &&
     (!hasRequestedAnchor || anchorScrollIssuedKey !== anchorScrollKey);
+  // TEMPORARY unread diagnostics (never commit): one log per open stage, plus a
+  // summary when the open ends, so a missing divider can be explained from Grafana.
+  const unreadDiagRef = useRef<{
+    key: string;
+    loggedOpen: boolean;
+    loggedDecision: boolean;
+    loggedLive: boolean;
+    loggedResult: boolean;
+    maxRows: number;
+    dividerFirstSeenMs: number | null;
+    dividerEverPresent: boolean;
+    rowCountChanges: number;
+    lastRowCount: number;
+  } | null>(null);
+  if (unreadDiagRef.current?.key !== openIdentityKey) {
+    unreadDiagRef.current = {
+      key: openIdentityKey,
+      loggedOpen: false,
+      loggedDecision: false,
+      loggedLive: false,
+      loggedResult: false,
+      maxRows: 0,
+      dividerFirstSeenMs: null,
+      dividerEverPresent: false,
+      rowCountChanges: 0,
+      lastRowCount: 0,
+    };
+  }
+  const unreadDiagBase = {
+    cycleId: openCycleState.cycleId,
+    channelId,
+    openStartedAtMs,
+    entryPoint,
+    elapsedMs: getElapsedMs(openCycleState.startedAtMs),
+    isUnreadOpen: !!isUnreadOpen,
+    isNotificationOpen: !!isNotificationOpen,
+    hasRouteAnchor,
+    hasUnreadOpenAnchor,
+    unreadCount,
+    openPhase,
+    isInitialLoadComplete,
+    initialLoadError: initialLoadError ? String(initialLoadError) : null,
+    linkedAnchorStatus,
+    initialScrollMode,
+    unreadPlacement,
+    holdExpired: hasUnreadHoldExpired,
+    hasMoreBefore,
+    hasMoreAfter,
+    shouldPaintLatestTail,
+    didListInitialLoadComplete,
+    didUserScroll,
+  };
+  const describeUnreadRows = (): Record<string, unknown> =>
+    describeUnreadBoundaryRows(
+      displayRows,
+      unreadBoundaryLastViewedAt,
+      unreadBoundaryLastViewedConversationId,
+    );
+  const unreadDiagSnapshotRef = useRef<() => Record<string, unknown>>(() => ({}));
+  unreadDiagSnapshotRef.current = (): Record<string, unknown> => ({
+    ...unreadDiagBase,
+    ...describeUnreadRows(),
+  });
+  useEffect(() => {
+    const diag = unreadDiagRef.current;
+    if (!diag) return;
+    if (displayRows.length !== diag.lastRowCount) {
+      diag.rowCountChanges += 1;
+      diag.lastRowCount = displayRows.length;
+    }
+    diag.maxRows = Math.max(diag.maxRows, displayRows.length);
+    if (unreadDividerRowIndex >= 0 && !diag.dividerEverPresent) {
+      diag.dividerEverPresent = true;
+      diag.dividerFirstSeenMs = getElapsedMs(openCycleState.startedAtMs);
+    }
+    if (!isUnreadOpen && unreadBoundaryLastViewedAt === undefined) return;
+    if (!diag.loggedOpen) {
+      diag.loggedOpen = true;
+      logUnreadDiag('unread_diag_list_open', {
+        ...unreadDiagBase,
+        unreadBoundaryLastViewedAt,
+        unreadBoundaryLastViewedConversationId,
+        boundaryLastViewedAtValid:
+          typeof unreadBoundaryLastViewedAt === 'number' &&
+          Number.isFinite(unreadBoundaryLastViewedAt) &&
+          unreadBoundaryLastViewedAt > 0,
+      });
+    }
+    if (!diag.loggedDecision && shouldAnchorToUnreadBoundary && initialScrollMode !== null) {
+      diag.loggedDecision = true;
+      logUnreadDiag('unread_diag_list_decision', {
+        ...unreadDiagSnapshotRef.current(),
+        boundaryCovered: hasUnreadBoundaryCoverage,
+        hasInitialScrollIndex: initialScrollIndex !== undefined,
+        shouldExposeInitialScrollIndex,
+        seedRows: openCycleState.initialSeedRows,
+      });
+    }
+    if (!diag.loggedLive && isInitialLoadComplete && openPhase === 'liveFresh') {
+      diag.loggedLive = true;
+      logUnreadDiag('unread_diag_list_live', unreadDiagSnapshotRef.current());
+    }
+  });
+  const isUnreadDiagRevealed = revealedChatListIdentityKey === openIdentityKey;
+  useEffect(() => {
+    const diag = unreadDiagRef.current;
+    if (!diag || diag.loggedResult || !isUnreadDiagRevealed) return;
+    if (!isUnreadOpen && unreadBoundaryLastViewedAt === undefined) return;
+    const samples: [number, number][] = [];
+    let lastTop: number | null = null;
+    const sample = (): void => {
+      const state = listRef.current?.getState?.();
+      const index = rowsRef.current.findIndex(row => row.type === 'unread-divider');
+      if (!state || index < 0) return;
+      const top = Math.round(state.positionAtIndex(index) - state.scroll);
+      if (lastTop === null || Math.abs(top - lastTop) > 2) {
+        samples.push([getElapsedMs(openCycleState.startedAtMs), top]);
+        lastTop = top;
+      }
+    };
+    sample();
+    const interval = setInterval(sample, 50);
+    const resultTimer = setTimeout(() => {
+      if (diag.loggedResult) return;
+      diag.loggedResult = true;
+      const state = listRef.current?.getState?.();
+      const dividerIndex = rowsRef.current.findIndex(row => row.type === 'unread-divider');
+      logUnreadDiag('unread_diag_list_result', {
+        ...unreadDiagSnapshotRef.current(),
+        firstVisibleIndex: state?.start,
+        lastVisibleIndex: state?.end,
+        isAtEnd: state?.isAtEnd,
+        scroll: state?.scroll,
+        scrollLength: state?.scrollLength,
+        contentLength: state?.contentLength,
+        dividerVisible:
+          dividerIndex >= 0 &&
+          state !== undefined &&
+          dividerIndex >= state.start &&
+          dividerIndex <= state.end,
+      });
+    }, 600);
+    const motionTimer = setTimeout(() => {
+      clearInterval(interval);
+      logUnreadDiag('unread_diag_list_motion', {
+        cycleId: openCycleState.cycleId,
+        channelId,
+        dividerTopSamplesJson: JSON.stringify(samples),
+      });
+    }, 3_000);
+    return (): void => {
+      clearInterval(interval);
+      clearTimeout(resultTimer);
+      clearTimeout(motionTimer);
+    };
+    // Once per reveal; the snapshot ref carries the latest values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnreadDiagRevealed, openIdentityKey]);
+  useEffect(
+    () => (): void => {
+      const diag = unreadDiagRef.current;
+      if (!diag) return;
+      logUnreadDiag('unread_diag_list_summary', {
+        ...unreadDiagSnapshotRef.current(),
+        openDurationMs: getElapsedMs(openCycleState.startedAtMs),
+        maxRows: diag.maxRows,
+        rowCountChanges: diag.rowCountChanges,
+        dividerEverPresent: diag.dividerEverPresent,
+        dividerFirstSeenMs: diag.dividerFirstSeenMs,
+      });
+    },
+    // Logs the open that is ending, on identity change or unmount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openIdentityKey],
+  );
   const usesInitialAnchorPlacement =
     !listInstanceLoadedRef.current &&
     hasRequestedAnchor &&

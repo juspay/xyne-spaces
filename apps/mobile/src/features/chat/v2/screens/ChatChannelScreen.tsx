@@ -56,7 +56,8 @@ import {
   useMessageActions,
 } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { sendMessage } from '@xyne/shared/messages';
-import { useChannelDisplayName } from '@/src/hooks/useChannels';
+import { useChannelDisplayName, useGetChannelUserStatus } from '@/src/hooks/useChannels';
+import { logUnreadDiag } from '@/src/utils/unreadDiagnostics';
 import { useJoinableChannel } from '@/src/hooks/useJoinableChannel';
 import { useSelf } from '@/src/hooks/useUsers';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -356,7 +357,7 @@ const ChatChannelScreen = (): ReactElement => {
     () => queries.getChannelUserStatus({ channelId: channelId ?? '' }),
     [channelId],
   );
-  const [zeroChannelUserStatus] = useQuery(channelUserStatusQuery, {
+  const [zeroChannelUserStatus, zeroChannelUserStatusDetails] = useQuery(channelUserStatusQuery, {
     enabled: Boolean(channelId),
   });
   existingZeroDraftContentRef.current =
@@ -545,6 +546,89 @@ const ChatChannelScreen = (): ReactElement => {
   const frozenUnreadCount = isUnreadOpen
     ? (requestedUnreadCount ?? channelUserStatus?.unreadCount ?? undefined)
     : undefined;
+  // TEMPORARY unread diagnostics (never commit).
+  const machineChannelUserStatus = useGetChannelUserStatus(channelId ?? '');
+  const leaveLogContextRef = useRef<Record<string, unknown>>({});
+  leaveLogContextRef.current = {
+    isUnreadOpen,
+    openStartedAtMs,
+    statusLastViewedAt: rawLastViewedAt,
+    statusLastViewedConversationId: channelUserStatus?.lastViewedConversationId,
+    channelLastActivityAt,
+    frozenUnreadBoundaryLastViewedAt,
+    zeroQueryResultType: zeroChannelUserStatusDetails.type,
+  };
+  const unreadStatusLogRef = useRef<{
+    key: string;
+    startedAtMs: number;
+    bothAbsent: boolean;
+    lateLogged: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!channelId) return;
+    const machinePresent = Boolean(machineChannelUserStatus);
+    const zeroPresent = Boolean(zeroChannelUserStatus);
+    const logState = unreadStatusLogRef.current;
+    const isFirstLog = logState?.key !== screenOpenIdentityKey;
+    if (!isFirstLog && (logState.lateLogged || !logState.bothAbsent)) return;
+    if (!isFirstLog && !machinePresent && !zeroPresent) return;
+    const nowMs = Date.now();
+    logUnreadDiag(isFirstLog ? 'unread_diag_screen_status' : 'unread_diag_screen_status_late', {
+      channelId,
+      openStartedAtMs,
+      ...(isFirstLog ? {} : { lateByMs: nowMs - logState.startedAtMs }),
+      chatOpenSource,
+      entryPoint: chatOpenEntryPoint,
+      isNotificationOpen,
+      routeConversationId: conversationId,
+      isUnreadOpen,
+      paramUnreadCount: requestedUnreadCount,
+      paramLastViewedAt: requestedUnreadLastViewedAt,
+      paramLastViewedConversationId: unreadLastViewedConversationIdParam,
+      machineStatusPresent: machinePresent,
+      machineLastViewedAt: machineChannelUserStatus?.lastViewedAt,
+      machineUnreadCount: machineChannelUserStatus?.unreadCount,
+      machineLastViewedConversationId: machineChannelUserStatus?.lastViewedConversationId,
+      zeroStatusPresent: zeroPresent,
+      zeroLastViewedAt: zeroChannelUserStatus?.lastViewedAt,
+      zeroUnreadCount: zeroChannelUserStatus?.unreadCount,
+      zeroLastViewedConversationId: zeroChannelUserStatus?.lastViewedConversationId,
+      zeroQueryResultType: zeroChannelUserStatusDetails.type,
+      channelLastActivityAt,
+      hasUnreadMessages,
+      frozenUnreadBoundaryLastViewedAt,
+      frozenUnreadBoundaryLastViewedConversationId,
+      frozenUnreadCount,
+    });
+    unreadStatusLogRef.current = isFirstLog
+      ? {
+          key: screenOpenIdentityKey,
+          startedAtMs: nowMs,
+          bothAbsent: !machinePresent && !zeroPresent,
+          lateLogged: false,
+        }
+      : { ...logState, lateLogged: true };
+  }, [
+    channelId,
+    channelLastActivityAt,
+    chatOpenEntryPoint,
+    chatOpenSource,
+    conversationId,
+    frozenUnreadBoundaryLastViewedAt,
+    frozenUnreadBoundaryLastViewedConversationId,
+    frozenUnreadCount,
+    hasUnreadMessages,
+    isNotificationOpen,
+    isUnreadOpen,
+    machineChannelUserStatus,
+    openStartedAtMs,
+    requestedUnreadCount,
+    requestedUnreadLastViewedAt,
+    screenOpenIdentityKey,
+    unreadLastViewedConversationIdParam,
+    zeroChannelUserStatus,
+    zeroChannelUserStatusDetails.type,
+  ]);
   const isOpenRevealReady = postPaintReady && listInitialLoadComplete && keyboardShellReady;
   // The list is the only writer of shimmer visibility. Do not reset this to
   // true in a parent layout effect — that runs after the list reports "no
@@ -623,16 +707,33 @@ const ChatChannelScreen = (): ReactElement => {
   // "Not a channel participant" and rolls the leave flush back.
   useEffect(() => {
     if (!channelId) return;
+    const mountedAtMs = Date.now();
+    const logMarkViewedOnLeave = (outcome: string, timestamp?: number): void => {
+      logUnreadDiag('unread_diag_mark_viewed_on_leave', {
+        channelId,
+        outcome,
+        timestamp,
+        ...leaveLogContextRef.current,
+        wasScrolledUp: isScrolledUpRef.current,
+        openDurationMs: Date.now() - mountedAtMs,
+      });
+    };
     return (): void => {
       if (skipMarkAsReadRef.current) {
         skipMarkAsReadRef.current = false;
+        logMarkViewedOnLeave('skipped_mark_unread');
         return;
       }
-      if (!canMarkChannelAsViewedRef.current) return;
+      if (!canMarkChannelAsViewedRef.current) {
+        logMarkViewedOnLeave('skipped_not_participant');
+        return;
+      }
+      const leaveTimestamp = Date.now();
+      logMarkViewedOnLeave('mark_attempted', leaveTimestamp);
       zeroRef.current.mutate(
         mutators.channel.markChannelAsViewed({
           channelId,
-          timestamp: Date.now(),
+          timestamp: leaveTimestamp,
           draftMessageId: uuidv4(),
           draftMessage: getZeroDraftFlushContent(channelId, existingZeroDraftContentRef.current),
         }),

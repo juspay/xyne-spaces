@@ -32,6 +32,7 @@ import {
 } from '../constants';
 import { channelRow$ } from '../state/rows-store';
 import { ChannelRowMenu } from './channel-row-menu';
+import { logUnreadDiagRowPress } from '@/src/utils/unreadDiagnostics';
 
 /**
  * The glyph in its slot. Subscribed to visibility alone, so a channel
@@ -178,6 +179,7 @@ export const ChannelRow = memo(function ChannelRow({ id }: { id: string }): Reac
   const handlePress = useCallback(() => {
     void haptics.buttonTap();
     const row = row$.peek();
+    logUnreadDiagRowPress('channel_row', id, row);
     openBaseChatRoute(router, id, {
       surface: 'channels',
       unreadCount: row?.messageUnreadCount ?? 0,

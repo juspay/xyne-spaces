@@ -13,6 +13,7 @@ import {
   releaseChatOpen,
   tryBeginChatOpen,
 } from '@/src/utils/chatOpenGuard';
+import { logUnreadDiag } from '@/src/utils/unreadDiagnostics';
 import {
   beginCriticalWindow,
   endCriticalWindow,
@@ -94,6 +95,30 @@ export const openBaseChatRoute = (
   const openStartedAtMs = Date.now();
   const { surface } = options;
   const criticalWindowTag = getChatCriticalWindowTag(channelId);
+  const diagLastViewedAt = options.unreadLastViewedAt;
+  logUnreadDiag('unread_diag_route', {
+    channelId,
+    surface,
+    openStartedAtMs,
+    droppedAsDuplicateTap: !newChatOpenAttemptId,
+    unreadOpen: unreadParams['unreadOpen'],
+    inputUnreadCount: options.unreadCount,
+    inputLastViewedAt: diagLastViewedAt,
+    inputLastActivityAt: options.unreadLastActivityAt,
+    inputLastViewedConversationId: options.unreadLastViewedConversationId,
+    activityAheadOfViewedMs:
+      typeof diagLastViewedAt === 'number' && typeof options.unreadLastActivityAt === 'number'
+        ? options.unreadLastActivityAt - diagLastViewedAt
+        : undefined,
+    unreadOpenOffReason:
+      unreadParams['unreadOpen'] === '1'
+        ? undefined
+        : typeof diagLastViewedAt !== 'number' ||
+            !Number.isFinite(diagLastViewedAt) ||
+            diagLastViewedAt <= 0
+          ? 'last_viewed_missing'
+          : 'no_unread_count_and_no_newer_activity',
+  });
   if (!newChatOpenAttemptId) {
     // The first route is still in flight. Re-pushing the same singular route
     // only queues duplicate navigation work when iOS delivers delayed taps.
