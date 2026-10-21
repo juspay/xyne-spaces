@@ -120,8 +120,9 @@ async function post(
     if (images.length > 0) throw new Error("llm backend cannot read images");
     return llmJudgePost(state, questions, signal);
   }
-  const vision = images.length > 0 ? xorVisionConfig() : null;
-  if (vision && !vision.url) throw new Error("no image-capable xor endpoint (set XOR_VISION_URL)");
+  const needsOmni = images.length > 0 || Object.values(questions).some((q) => q.type === "value");
+  const vision = needsOmni ? xorVisionConfig() : null;
+  if (vision && !vision.url) throw new Error(images.length > 0 ? "no image-capable xor endpoint (set XOR_VISION_URL)" : "no value-capable xor endpoint (set XOR_VISION_URL)");
   const res = await fetch(vision ? vision.url : cfg.url, {
     method: "POST",
     signal,
