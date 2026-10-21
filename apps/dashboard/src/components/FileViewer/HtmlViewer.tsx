@@ -3,13 +3,19 @@ import { BaseViewerProps } from './utils';
 import { inlineAuthenticatedImages } from '../../utils/inlineAuthenticatedImages';
 import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
-const declaresEncoding = async (file: Blob): Promise<boolean> => {
-  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
-  return /<meta[^>]+charset/i.test(new TextDecoder('latin1').decode(head));
+// Decode to a string (for srcDoc), honouring a declared charset so non-UTF-8 files render right.
+const readHtml = async (file: Blob): Promise<string> => {
+  const head = new TextDecoder('latin1').decode(await file.slice(0, 1024).arrayBuffer());
+  const charset = /<meta[^>]+charset=["']?\s*([\w-]+)/i.exec(head)?.[1] ?? 'utf-8';
+  try {
+    return new TextDecoder(charset).decode(await file.arrayBuffer());
+  } catch {
+    return file.text(); // Unsupported charset label: fall back to UTF-8.
+  }
 };
 
 const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [page, setPage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,23 +32,15 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     try {
       if (source.size === 0) throw new Error('File is empty');
 
-      const type = (await declaresEncoding(source)) ? 'text/html' : 'text/html;charset=utf-8';
-
-      // The sandbox='allow-scripts' iframe below runs from an opaque origin —
-      // its <img> loads send no cookies, so authenticated-origin images would
-      // 401 (broken render, and in Electron a session-killing 401). Inline
-      // them first; when the document has none, keep the original bytes so
-      // non-UTF-8 files are untouched.
-      let fileBlob = source.slice(0, source.size, type);
+      // Sandboxed frame sends no cookies, so inline authenticated-origin images first.
+      let html = await readHtml(source);
       try {
-        const { html, changed } = await inlineAuthenticatedImages(await fileBlob.text());
-        if (changed) fileBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        html = (await inlineAuthenticatedImages(html)).html;
       } catch {
         // Fall back to the original document.
       }
 
-      const url = URL.createObjectURL(fileBlob);
-      setBlobUrl(url);
+      setPage(html);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HTML file');
     } finally {
@@ -52,10 +50,6 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
   useEffect(() => {
     void loadFile();
-    return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFile]);
 
   if (loading) {
@@ -91,14 +85,17 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     );
   }
 
-  if (!blobUrl) return null;
+  if (page === null) return null;
 
-  // Its scripts stop under full-page search, as leaving the page stopped them.
+  // srcDoc, not a blob: URL: an opaque origin with no standalone address to open
+  // outside the sandbox (XYNE-66491). Its scripts stop under full-page search,
+  // as leaving the page stopped them.
   return (
     <UnmountWhenCovered fallback={<div className='w-full h-full bg-white' />}>
       <iframe
-        src={blobUrl}
+        srcDoc={page}
         sandbox='allow-scripts'
+        referrerPolicy='no-referrer'
         title='HTML Document'
         className='w-full h-full border-0 bg-white'
         style={{ minHeight: '100%' }}
