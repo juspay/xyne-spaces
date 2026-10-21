@@ -405,6 +405,15 @@ jobs:
         if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-claw run typecheck
 
+      # The governance core (parser, rule packs, decide) is pure and its tests are
+      # the only gate on it: rule corpus, recheck ReDoS check, parser p99 budget.
+      - name: Governance tests (xyne-claw-shared)
+        if: steps.affected.outputs.run == 'true'
+        env:
+          GOV_BENCH: "1"
+          GOV_BENCH_CLASS: ubuntu-latest
+        run: pnpm --filter xyne-claw-shared exec vitest run src/governance
+
   # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
   # .gitleaks.toml allowlist, mirroring the Jenkins gitleaksScan() step.
