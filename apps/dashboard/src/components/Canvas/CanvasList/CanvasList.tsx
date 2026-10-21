@@ -23,6 +23,7 @@ import {
   Folder,
   Layers,
   Bot,
+  Plus,
 } from 'lucide-react';
 import {
   CanvasListProps,
@@ -30,7 +31,7 @@ import {
   type CanvasFolder,
   type CanvasParticipant,
 } from '../Canvas.types';
-import { CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
+import { CanvasRole, CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
 import Input from '../../ui/Input';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { searchUsers, useActiveUsers, useUsers } from '../../../hooks/useUsers';
@@ -79,6 +80,11 @@ import {
   type CanvasLabelMap,
   useCanvasLabelMapResult,
 } from '../useCanvasLabels';
+import {
+  ChannelCanvasDropTarget,
+  ChannelCanvasMoveDndProvider,
+  DraggableChannelCanvas,
+} from '../ChannelCanvasList/ChannelCanvasMoveDnd';
 import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
@@ -717,6 +723,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onAvailableLabelsChange: (folderId: string, labels: CanvasLabelCount[] | null) => void;
   selectedCanvasLabelSnapshot?: Canvas | undefined;
   renderCanvasItem: (canvas: Canvas) => React.ReactNode;
+  onCreateCanvasInFolder?: (folder: CanvasFolder) => void | Promise<void>;
+  onMoveCanvas?: (canvas: Canvas, folderId: string | null) => void | Promise<void>;
 }> = ({
   folder,
   isCollapsed,
@@ -739,6 +747,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onAvailableLabelsChange,
   selectedCanvasLabelSnapshot,
   renderCanvasItem,
+  onCreateCanvasInFolder,
+  onMoveCanvas,
 }) => {
   const [folderCanvasesResult, folderCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
@@ -855,32 +865,74 @@ const ChannelScopeFolderGroupSection: React.FC<{
 
   return (
     <section>
-      <button
-        type='button'
-        className='flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent'
-        onClick={() => onToggleFolder(folder.id)}
-        data-track-category='CANVAS'
-        data-track-name='Toggle_Channel_Folder_Filter_Group'
-        data-track-metadata={JSON.stringify({
-          folderId: folder.id,
-          channelId: selectedScopeChannelId,
-        })}
-      >
-        {isCollapsed ? (
-          <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
-        ) : (
-          <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+      <ChannelCanvasDropTarget id={`canvas-folder:${folder.id}`} folderId={folder.id}>
+        {isOver => (
+          <div
+            className={cn(
+              'flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent',
+              isOver && 'bg-sidebar-accent',
+            )}
+          >
+            <button
+              type='button'
+              className='flex min-w-0 flex-1 items-center gap-1.5 text-left'
+              onClick={() => onToggleFolder(folder.id)}
+              data-track-category='CANVAS'
+              data-track-name='Toggle_Channel_Folder_Filter_Group'
+              data-track-metadata={JSON.stringify({
+                folderId: folder.id,
+                channelId: selectedScopeChannelId,
+              })}
+            >
+              {isCollapsed ? (
+                <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              ) : (
+                <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              )}
+              <Folder className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>
+                {folder.name}
+              </span>
+              <span className='text-[12px] text-sidebar-foreground/45'>
+                {isFolderLoading ? '...' : visibleFolderCanvases.length}
+              </span>
+            </button>
+            {onCreateCanvasInFolder && (
+              <button
+                type='button'
+                className='flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                onClick={() => void onCreateCanvasInFolder(folder)}
+                aria-label={`Create canvas in ${folder.name}`}
+                title='Create canvas in folder'
+                data-track-category='CANVAS'
+                data-track-name='CREATE_CANVAS_IN_FOLDER'
+              >
+                <Plus className='size-4' />
+              </button>
+            )}
+          </div>
         )}
-        <Folder className='size-3.5 shrink-0 text-sidebar-foreground/55' />
-        <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>{folder.name}</span>
-        <span className='text-[12px] text-sidebar-foreground/45'>
-          {isFolderLoading ? '...' : visibleFolderCanvases.length}
-        </span>
-      </button>
+      </ChannelCanvasDropTarget>
       {!isCollapsed && (
         <div className='space-y-0.5 pl-5'>
           {visibleFolderCanvases.map(canvas => (
-            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+            <DraggableChannelCanvas
+              key={canvas.id}
+              canvas={canvas}
+              disabled={
+                !onMoveCanvas ||
+                Boolean(canvas.isArchived) ||
+                Boolean(searchQuery.trim()) ||
+                (canvas.createdBy !== currentUserId && canvas.accessLevel !== CanvasRole.EDITOR)
+              }
+            >
+              {dragHandle => (
+                <div className='flex items-center gap-1'>
+                  {dragHandle}
+                  <div className='min-w-0 flex-1'>{renderCanvasItem(canvas)}</div>
+                </div>
+              )}
+            </DraggableChannelCanvas>
           ))}
         </div>
       )}
@@ -907,6 +959,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   includeArchived = false,
   onlyArchived = false,
   onToggleStar,
+  onCreateCanvasInFolder,
+  onMoveCanvas,
 }) => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -2113,12 +2167,43 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onAvailableLabelsChange={handleChannelFolderAvailableLabelsChange}
                 selectedCanvasLabelSnapshot={selectedCanvasLabelSnapshot ?? undefined}
                 renderCanvasItem={renderCanvasItem}
+                {...(onCreateCanvasInFolder ? { onCreateCanvasInFolder } : {})}
+                {...(onMoveCanvas ? { onMoveCanvas } : {})}
               />
             );
           })}
 
+          <ChannelCanvasDropTarget id='canvas-channel-root' folderId={null}>
+            {isOver => (
+              <div
+                className={cn(
+                  'flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-sidebar-foreground/55',
+                  isOver && 'bg-sidebar-accent text-sidebar-foreground',
+                )}
+              >
+                <Folder className='size-3.5 shrink-0' />
+                <span>Channel root</span>
+              </div>
+            )}
+          </ChannelCanvasDropTarget>
           {selectedChannelRootCanvases.map(canvas => (
-            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+            <DraggableChannelCanvas
+              key={canvas.id}
+              canvas={canvas}
+              disabled={
+                !onMoveCanvas ||
+                Boolean(canvas.isArchived) ||
+                Boolean(searchQuery.trim()) ||
+                (canvas.createdBy !== currentUserId && canvas.accessLevel !== CanvasRole.EDITOR)
+              }
+            >
+              {dragHandle => (
+                <div className='flex items-center gap-1'>
+                  {dragHandle}
+                  <div className='min-w-0 flex-1'>{renderCanvasItem(canvas)}</div>
+                </div>
+              )}
+            </DraggableChannelCanvas>
           ))}
         </div>
       ) : (
@@ -2630,7 +2715,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
           </div>
         ) : shouldRenderChannelFolderGroups ? (
-          renderChannelFolderGroupedList()
+          <ChannelCanvasMoveDndProvider onMoveCanvas={onMoveCanvas}>
+            {renderChannelFolderGroupedList()}
+          </ChannelCanvasMoveDndProvider>
         ) : filteredCanvases.length === 0 && isFilteredScanIncomplete ? (
           <div className='flex items-center justify-center h-64'>
             <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
