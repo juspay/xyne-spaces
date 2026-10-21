@@ -321,7 +321,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
         )}
 
         {hasMixedSources && (
-          <p className='text-xs text-destructive'>Tickets from different sources can't be merged.</p>
+          <p className='text-xs text-destructive'>Tickets from different sources can&apos;t be merged.</p>
         )}
 
         <div className='flex justify-end gap-3 pt-2'>
