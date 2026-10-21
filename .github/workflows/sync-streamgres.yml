@@ -12,12 +12,6 @@ on:
   schedule:
     - cron: "30 20 * * *" # 02:00 IST
   workflow_dispatch:
-  # TEMPORARY (testing, remove before merging to main): lets the workflow run
-  # from a PR branch, since schedule/dispatch only work from the default branch.
-  # Only fires on PRs that change this file.
-  pull_request:
-    paths:
-      - .github/workflows/sync-streamgres.yml
 
 permissions:
   contents: write
@@ -32,8 +26,7 @@ env:
   UPSTREAM_BRANCH: main
   TARGET_DIR: streamgres
   SYNC_BRANCH: sync/streamgres
-  # Branch of this repo that is mirrored into and that the PR targets.
-  BASE_BRANCH: feature/sync-streamgres
+  BASE_BRANCH: main
   # Commit/PR titles must carry a ticket (commitlint.config.js).
   TICKET: XYNE-0
 
