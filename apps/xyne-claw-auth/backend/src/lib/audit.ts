@@ -16,22 +16,26 @@ export interface AuditLogEntry {
   metadata?: Record<string, unknown> | undefined;
 }
 
-const orgByActor = new Map<string, { orgId: string; until: number }>();
 let platformOrgId: string | undefined;
+
+const orgByActor = new Map<string, { orgId: string | undefined; until: number }>();
+
+/** A user's org, cached for five minutes (a miss for one minute): the gate asks on every approval. */
+export async function orgIdForUser(userId: string): Promise<string | undefined> {
+  const hit = orgByActor.get(userId);
+  if (hit && hit.until > Date.now()) return hit.orgId;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+  const orgId = user?.orgId || undefined;
+  if (orgByActor.size > 10_000) orgByActor.clear();
+  orgByActor.set(userId, { orgId, until: Date.now() + (orgId ? 300_000 : 60_000) });
+  return orgId;
+}
 
 // The actor's org, else the target agent's, else the platform org (the seed's first org): every mirrored row needs one.
 async function resolveOrgId(entry: AuditLogEntry): Promise<string | undefined> {
   if (entry.orgId) return entry.orgId;
-  if (entry.actorUserId) {
-    const hit = orgByActor.get(entry.actorUserId);
-    if (hit && hit.until > Date.now()) return hit.orgId;
-    const user = await prisma.user.findUnique({ where: { id: entry.actorUserId }, select: { orgId: true } });
-    if (user?.orgId) {
-      if (orgByActor.size > 10_000) orgByActor.clear();
-      orgByActor.set(entry.actorUserId, { orgId: user.orgId, until: Date.now() + 300_000 });
-      return user.orgId;
-    }
-  }
+  const actorOrg = entry.actorUserId ? await orgIdForUser(entry.actorUserId) : undefined;
+  if (actorOrg) return actorOrg;
   const agent = await prisma.agent.findUnique({ where: { id: entry.targetId }, select: { orgId: true } });
   if (agent) return agent.orgId;
   platformOrgId ??= (await prisma.organization.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;

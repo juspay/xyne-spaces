@@ -59,6 +59,7 @@ import { type LlmCallStat } from "./llm-turn-stats.js";
 import { installStreamModelFallback } from "./stream-model-fallback.js";
 import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
+import { createRunGovernance, governanceForRun, toolMetaOf, type GovernedAgent } from "./governance.js";
 import { metric } from "./metrics.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
 import crypto from "node:crypto";
@@ -1204,6 +1205,17 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           recorder,
           ...(resolvedProvider?.provider ? { provider: resolvedProvider.provider } : {}),
         });
+
+        // Governance hooks share the parent's conversation state (installed last, see governance.ts).
+        createRunGovernance({
+          sessionId: parentSessionId ?? `subagent-${def.name}`,
+          userId: debugCtx?.parentMeta?.userId ?? "",
+          conversationId: debugCtx?.parentMeta?.conversationId,
+          agentSlug: debugCtx?.parentMeta?.agentSlug,
+          role: "subagent",
+          parent: parentSessionId ? governanceForRun(parentSessionId) : undefined,
+          toolMeta: (tools ?? []).map((t) => toolMetaOf(t as unknown as { name: string } & Record<string, unknown>)),
+        }).install(session.agent as unknown as GovernedAgent);
 
         pushDebugEvent("session_start", {
           sessionId: parentSessionId,

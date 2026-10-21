@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
+import { createRunGovernance, toolMetaOf, type GovernedAgent } from "./governance.js";
 import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
 import { checkTwinDelivery } from "./twin-delivery-check.js";
@@ -3077,6 +3078,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     fastMode: fastMode === true,
     ...(provider ? { provider } : {}),
   });
+
+  // Governance (A, B, C1), installed last so it wraps every hook above; see governance.ts.
+  createRunGovernance({
+    sessionId: sessionId ?? conversationId ?? "unknown",
+    userId,
+    conversationId: conversationId ?? undefined,
+    agentSlug: progressMeta?.agentSlug ?? undefined,
+    role: "parent",
+    toolMeta: allCustomTools.map((t) => toolMetaOf(t as unknown as { name: string } & Record<string, unknown>)),
+  }).install(session.agent as unknown as GovernedAgent);
 
   // Attach the judge sink only once capture has started: it flushes every Jev
   // call made so far (pre-run sites: mode router, prefetch gate, plan gate,

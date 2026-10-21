@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { governanceDecisionFor } from "./governance.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Attachment } from "./agent.js";
 import { SERVER } from "./config.js";
@@ -469,6 +470,7 @@ export async function loadMcpToolsForUser(
                 permission,
                 agentSlug,
                 ...((subagentId ?? currentSubagentMcpId()) ? { subagentId: subagentId ?? currentSubagentMcpId() } : {}),
+                ...(governanceDecisionFor(_toolCallId) ? { governance: governanceDecisionFor(_toolCallId) } : {}),
               }),
             },
             server.serverType,

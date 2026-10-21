@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { governanceForRun } from "../governance.js";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
@@ -4883,6 +4884,8 @@ export async function processTask(
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
+    // D: the answer passes the output check before it leaves the run (shadow records, enforce strips).
+    const governedResultText = governanceForRun(sessionId)?.inspectAnswer(callbackResultText).text ?? callbackResultText;
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
       userId,
@@ -4890,7 +4893,7 @@ export async function processTask(
       agentSlug: agentSlug ?? null,
       fastMode: fastModeForCallback,
       status: "completed",
-      result: callbackResultText,
+      result: governedResultText,
       ...(emptyReason ? { emptyReason } : {}),
       ...(emptyReasonDetail ? { emptyReasonDetail } : {}),
       // Raw JSON for machine consumers (chain-workflows/triggers). Present only
@@ -4965,6 +4968,7 @@ export async function processTask(
       provider: completedProvider,
       model: completedModel,
     });
+    void governanceForRun(sessionId)?.finish();
     if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
       // Attached only after the main result callback above has been sent, so
       // claw-auth always sees the answer before its follow-up suggestions.

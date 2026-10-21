@@ -2,10 +2,12 @@
  * The one door through which xyne-claw (which has no database) records governance data: runtime
  * findings and audit events. A tool_call event with a side effect is written before the response, so a
  * failed write refuses the call ("audit unavailable"); reads and findings are queued and batched.
+ * claw knows the run's session id, not its org: the run row supplies org, run and conversation.
  */
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { asyncHandler, badRequest, ok } from "../lib/http.js";
+import { orgIdForUser } from "../lib/audit.js";
 import {
   ACTOR_KINDS,
   GOVERNANCE_EVENT_TYPES,
@@ -13,7 +15,9 @@ import {
   queueGovernanceEvent,
   recordGovernanceEvent,
   withoutUndefined,
+  type GovernanceEventInput,
 } from "../lib/governance-audit.js";
+import { runContextForSession } from "../lib/governance-gate.js";
 import { contentScanFindingRepository } from "../repositories/governanceRepository.js";
 import { createLogger } from "../logger.js";
 
@@ -21,9 +25,10 @@ const log = createLogger("governance-internal");
 const text = (max = 500) => z.string().max(max).nullish();
 const ms = z.number().int().nonnegative().nullish();
 const ids = (max: number) => z.array(z.string().max(100)).max(max).optional();
+const origin = { orgId: z.string().max(100).optional(), sessionId: z.string().max(200).optional(), userId: z.string().max(200).optional() };
 
 const eventSchema = z.object({
-  orgId: z.string().min(1).max(100),
+  ...origin,
   eventType: z.enum(GOVERNANCE_EVENT_TYPES),
   occurredAt: z.coerce.date().optional(),
   actorKind: z.enum(ACTOR_KINDS).optional(),
@@ -41,7 +46,7 @@ const eventSchema = z.object({
   sync: z.boolean().optional(),
 });
 const findingSchema = z.object({
-  orgId: z.string().min(1).max(100),
+  ...origin,
   foundIn: z.enum(["static_version", "tool_result", "user_message", "subagent_result", "compaction_summary", "agent_answer"]),
   staticContentVersionId: text(), runId: text(), conversationId: text(), toolCallId: text(), chunkSha256: text(64),
   foundByCheck: z.enum(["parser", "xor_judge", "llm_judge", "detonator"]),
@@ -52,18 +57,45 @@ const findingSchema = z.object({
 });
 const bodySchema = z.object({ events: z.array(eventSchema).max(500).default([]), findings: z.array(findingSchema).max(500).default([]) });
 type EventBody = z.infer<typeof eventSchema>;
+type FindingBody = z.infer<typeof findingSchema>;
 
 // An unclassified tool call counts as a side effect, like everywhere else in the framework.
 const sideEffect = (e: EventBody): boolean => e.sync === true || (e.eventType === "tool_call" && e.toolEffect !== "read");
+
+type Placed<T> = Omit<T, "sessionId" | "userId" | "orgId" | "runId" | "conversationId"> & { orgId: string; runId: string | null; conversationId: string | null };
+
+/** Fills org, run and conversation from the session's run row, or the org from the user; null when neither resolves. */
+async function placed<T extends { orgId?: string | undefined; sessionId?: string | undefined; userId?: string | undefined; runId?: string | null | undefined; conversationId?: string | null | undefined }>(
+  row: T,
+): Promise<Placed<T> | null> {
+  const { sessionId, userId, ...rest } = row;
+  const run = await runContextForSession(sessionId);
+  const orgId = rest.orgId ?? run.orgId ?? (userId ? await orgIdForUser(userId) : undefined);
+  if (!orgId) return null;
+  return { ...rest, orgId, runId: rest.runId ?? run.runId ?? null, conversationId: rest.conversationId ?? run.conversationId ?? null } as Placed<T>;
+}
 
 export const governanceInternalRouter = Router();
 
 governanceInternalRouter.post("/events", asyncHandler(async (req: Request, res: Response) => {
   const parsed = bodySchema.safeParse(req.body ?? {});
   if (!parsed.success) throw badRequest(parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));
-  const { events, findings } = parsed.data;
-  const now = events.filter(sideEffect).map(({ sync: _sync, ...e }) => e);
-  const later = events.filter((e) => !sideEffect(e)).map(({ sync: _sync, ...e }) => e);
+  let unplaced = 0;
+  const events: Array<GovernanceEventInput & { sync?: boolean | undefined }> = [];
+  for (const e of parsed.data.events) {
+    const p = await placed({ ...e, onBehalfOfUserId: e.onBehalfOfUserId ?? e.userId ?? null });
+    if (p) events.push(p);
+    else unplaced++;
+  }
+  const findings: Placed<FindingBody>[] = [];
+  for (const f of parsed.data.findings) {
+    const p = await placed(f);
+    if (p) findings.push(p);
+    else unplaced++;
+  }
+  if (unplaced > 0) log.warn(`[governance-internal] ${unplaced} record(s) without an org (unknown session and user) dropped`);
+  const now = events.filter((e) => sideEffect(e as EventBody)).map(({ sync: _sync, ...e }) => e);
+  const later = events.filter((e) => !sideEffect(e as EventBody)).map(({ sync: _sync, ...e }) => e);
   try {
     await Promise.all(now.map((e) => recordGovernanceEvent(e)));
   } catch (err) {
@@ -73,5 +105,5 @@ governanceInternalRouter.post("/events", asyncHandler(async (req: Request, res: 
   }
   for (const e of later) queueGovernanceEvent(e);
   if (findings.length > 0) await contentScanFindingRepository.createMany(findings.map(withoutUndefined));
-  ok(res, { recorded: now.length, queued: later.length, findings: findings.length, dropped: governanceQueueStats().dropped });
+  ok(res, { recorded: now.length, queued: later.length, findings: findings.length, unplaced, dropped: governanceQueueStats().dropped });
 }));

@@ -23,3 +23,6 @@ export { estimateTokens, chunkText } from "./chunker.js";
 export { planChecks } from "./policy.js";
 export { decide, matchKillSwitches } from "./decide.js";
 export { buildJudgeBatch, checkJudgeAnswer, parseJudgeAnswer, planSplit, escapeJudgeData, SPLIT_BUDGET } from "./judge-protocol.js";
+export { GOVERNANCE_COMPONENTS, parseComponentModes, componentMode, resetComponentModes, type GovernanceComponent, type ComponentModes } from "./modes.js";
+export { resolveToolDescriptor, externalHostInArgs, type ToolDescriptor, type ToolDescriptorInput, type ToolAnnotations } from "./tool-descriptor.js";
+export { checkAnswer, type AnswerCheck, type AnswerLink } from "./output-check.js";

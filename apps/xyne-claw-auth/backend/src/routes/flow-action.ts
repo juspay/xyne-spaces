@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { gateCall, blockedToolResultText } from "../lib/governance-gate.js";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { classifyToolError, flowActionError } from "../lib/flow-action-error.js";
@@ -964,6 +965,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             resultText: rejectionResultText(tool),
           }).catch((err: unknown) => log.warn("[flow-action] local-harness rejection resume failed:", errMsg(err)));
         })();
+        return;
+      }
+
+      const gate = await gateCall({ site: "approval_executor", userId: writeClawUserId, agentSlug, conversationId, serverType, tool, params, writeTool: true });
+      if (gate.enforce && gate.decision === "block") {
+        res.json(flowActionError("MISCONFIGURED", blockedToolResultText(gate)) satisfies AppActionResponse);
         return;
       }
 

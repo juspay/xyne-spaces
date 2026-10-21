@@ -18,6 +18,7 @@
  * deleting a check.
  */
 import { createLogger } from "../logger.js";
+import { gateCall, blockedToolResultText } from "./governance-gate.js";
 import { errMsg } from "./errors.js";
 import type { SignedWriteAction as BaseWriteAction } from "./write-actions.js";
 import { AGENT_TOOL_SLUGS } from "./agent-tools-apply.js";
@@ -86,6 +87,8 @@ export async function executeApprovedWrite(input: {
     log.error(`[approved-write] HMAC verification failed tool=${tool} user=${userId}`);
     return { ok: false, reason: "signature", message: "This action could not be verified. Please approve it in Xyne Spaces." };
   }
+  const gate = await gateCall({ site: "approval_executor", userId, agentSlug: action.agentSlug, conversationId: input.conversationId, serverType, tool, params, writeTool: true });
+  if (gate.enforce && gate.decision === "block") return { ok: false, reason: "failed", message: blockedToolResultText(gate) };
 
   if (isOAuthProvider(serverType)) {
     const prepared = await prepareOAuthCustomTool({ provider: serverType, tool, userId });

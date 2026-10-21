@@ -10,6 +10,8 @@ import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./t
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
+import { componentMode } from "xyne-claw-shared/governance";
+import { killSwitchForTool } from "../lib/governance-gate.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
@@ -708,6 +710,9 @@ export async function callTool(
   lane?: SessionLane,
   instance?: string,
 ): Promise<McpCallResult> {
+  // Server and tool kill switches apply to every lane, artifact apps and health checks included.
+  const killed = killSwitchForTool(serverType, tool);
+  if (killed && componentMode("kill") === "enforce") throw new Error(`Blocked by policy (GOV-KILL-${killed.mode.toUpperCase()}): ${serverType}/${tool} is switched off.`);
   const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
