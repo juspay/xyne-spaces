@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: juspay/xyne-spaces/.github/workflows/ci.yml@feature/build-optimization
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
     secrets: inherit
     permissions:
       contents: read
