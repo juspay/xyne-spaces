@@ -5,6 +5,7 @@ import { repositories } from './index';
 import { createThreadAnchorMessageTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleParticipantLeaveTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleRoomFinishedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
+import { markThreadAnchorDeletedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 
 export interface CreateNoteTakerCallParams {
   callId: string;
@@ -101,11 +102,19 @@ export class NoteTakerCallRepository {
       },
     });
 
-    // Clear conversation.callId so the channel row's live-recording indicator
-    // turns off immediately, and drop the isHeadlessRecording metadata flag
-    // stamped in createThreadAnchorMessage (merge-safe: only removes that key).
+    await this.clearConversationRecordingState(tx, metadata.conversationId);
+
+    return true;
+  }
+
+  /**
+   * Clear conversation.callId so the channel row's live-recording indicator
+   * turns off immediately, and drop the isHeadlessRecording metadata flag
+   * stamped in createThreadAnchorMessage (merge-safe: only removes that key).
+   */
+  async clearConversationRecordingState(tx: Prisma.TransactionClient, conversationId: string): Promise<void> {
     const conversation = await tx.conversation.findUnique({
-      where: { conversationId: metadata.conversationId },
+      where: { conversationId },
       select: { metadata: true },
     });
     const conversationMetadata: Record<string, unknown> =
@@ -115,10 +124,25 @@ export class NoteTakerCallRepository {
     delete conversationMetadata.isHeadlessRecording;
 
     await tx.conversation.update({
-      where: { conversationId: metadata.conversationId },
+      where: { conversationId },
       data: { callId: null, metadata: conversationMetadata as Prisma.InputJsonValue },
     });
+  }
 
+  /**
+   * Owner deleted the recording. Thread-linked recordings keep their anchor ids on
+   * call.metadata (conversationId/messageId), not on conversation.metadata.callId,
+   * so the channel-flow cascade in CallController never finds them. Returns false
+   * (no throw) for recordings that weren't started from a thread.
+   */
+  async markThreadAnchorDeleted(
+    call: { externalId: string; metadata: Prisma.JsonValue | null },
+    deletedAt: Date,
+  ): Promise<boolean> {
+    const metadata = (call.metadata as NoteTakerCallMetadata | null) ?? {};
+    if (!metadata.conversationId || !metadata.messageId) return false;
+
+    await markThreadAnchorDeletedTx(this, metadata.messageId, metadata.conversationId, deletedAt);
     return true;
   }
 

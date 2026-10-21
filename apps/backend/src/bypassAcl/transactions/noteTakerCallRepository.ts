@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { NoteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { type Prisma } from '@prisma/client';
-import { MessageType, CallType, CallStatus } from '@xyne/shared';
+import { MessageType, CallType, CallStatus, AttachmentEntityType } from '@xyne/shared';
 
 
 export function createThreadAnchorMessageTx(self: NoteTakerCallRepository, messageId: string, conversationId: string, workspaceId: string, initiator: any, now: Date, callExternalId: string, notesCanvasId: string, createdBy: string, existingMetadata: Record<string, unknown>, callId: string, detailedSummaryCanvasId: string, channelId: string) {
@@ -56,6 +56,31 @@ export function createThreadAnchorMessageTx(self: NoteTakerCallRepository, messa
         } as Prisma.InputJsonValue,
       },
     });
+  });
+}
+/**
+ * Owner deleted a thread-linked recording. The anchor becomes the same placeholder
+ * the channel-flow cascade writes, its attachments go, and the thread's
+ * live-recording state is cleared — updateThreadMessageOnEnd never gets to do that
+ * once the Call row is gone, because room_finished then fails on "Call not found".
+ */
+export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, messageId: string, conversationId: string, deletedAt: Date) {
+  return transaction(['Conversation', 'Message', 'MessageAttachment'], 'markThreadAnchorDeleted: anchor placeholder, its attachments and the thread live-recording flag must change atomically; tx is not ACL-wrapped', self.db, async (tx) => {
+    await tx.messageAttachment.deleteMany({
+      where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
+    });
+
+    // Dropping isRecordingMessage is deliberate: RecordingBubble would otherwise keep
+    // querying a Call that no longer exists. The message renders as plain system text.
+    await tx.message.update({
+      where: { messageId },
+      data: {
+        content: '<p>Transcript was deleted for this recording</p>',
+        metadata: { deleted: true, deletedAt: deletedAt.toISOString() },
+      },
+    });
+
+    await self.clearConversationRecordingState(tx, conversationId);
   });
 }
 export function handleParticipantLeaveTx(self: NoteTakerCallRepository, callExternalId: string, userId: string, leftAt: Date) {

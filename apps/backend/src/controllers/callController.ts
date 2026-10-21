@@ -9,6 +9,7 @@ import {
   isHumanParticipant,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
+import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -3323,7 +3324,9 @@ export class CallController {
     }
   };
 
-  private deleteHeadlessRecordingCascade = async (call: { id: string; externalId: string }): Promise<void> => {
+  private deleteHeadlessRecordingCascade = async (
+    call: { id: string; externalId: string; metadata: Prisma.JsonValue | null },
+  ): Promise<void> => {
     const db = DatabaseClient.getInstance();
     const callId = call.externalId;
 
@@ -3371,6 +3374,14 @@ export class CallController {
       });
 
       logger.info(`Updated messages in conversation ${conversation.conversationId} for deleted recording ${callId}`);
+    }
+
+    // Note-taker recordings started from a thread are not found by the lookup above:
+    // their anchor lives in an existing discussion thread and is addressed by id from
+    // call.metadata. Only that one message is touched — an updateMany on the thread
+    // would overwrite the user's own messages.
+    if (await noteTakerCallRepository.markThreadAnchorDeleted(call, new Date())) {
+      logger.info(`Marked thread anchor message deleted for recording ${callId}`);
     }
 
     // Delete activities
@@ -3439,7 +3450,7 @@ export class CallController {
           createdByUserId: userId,
           callType: CallType.HEADLESS,
         },
-        select: { id: true, externalId: true, status: true },
+        select: { id: true, externalId: true, status: true, metadata: true },
       });
 
       const ownedByExternalId = new Map(owned.map(c => [c.externalId, c]));
