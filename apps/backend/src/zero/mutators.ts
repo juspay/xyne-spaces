@@ -2616,6 +2616,56 @@ export function createMutators(
           });
         },
       ),
+      moveManyToSection: defineMutator(
+        z.object({
+          sectionId: z.string().nullable(),
+          items: z
+            .array(z.object({ channelId: z.string(), position: z.string() }))
+            .min(1)
+            .max(200),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { sectionId, items, timestamp } }) => {
+          if (sectionId) {
+            const section = await tx.run(
+              zql.channel_sections
+                .where('id', sectionId)
+                .where('userId', authData.sub)
+                .where('isDeleted', false)
+                .one(),
+            );
+            if (!section) {
+              throw new Error('Section not found');
+            }
+          }
+
+          const statuses = await tx.run(
+            zql.channel_user_status
+              .where('userId', authData.sub)
+              .where('isDeleted', false)
+              .where(h =>
+                h.cmp(
+                  'channelId',
+                  'IN',
+                  items.map(item => item.channelId),
+                ),
+              ),
+          );
+          const statusByChannelId = new Map(statuses.map(status => [status.channelId, status]));
+
+          for (const item of items) {
+            const userStatus = statusByChannelId.get(item.channelId);
+            if (!userStatus) continue;
+            await tx.mutate.channel_user_status.update({
+              id: userStatus.id,
+              sectionId,
+              sectionPosition: sectionId ? item.position : null,
+              ...(sectionId ? { isStarred: false } : {}),
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
     },
     channelSection: {
       create: defineMutator(
