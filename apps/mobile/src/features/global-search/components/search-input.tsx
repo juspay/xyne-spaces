@@ -154,19 +154,6 @@ export const SearchInput = memo(function SearchInput({
 
   useEffect(() => (): void => committer.cancel(), [committer]);
 
-  // `"ab"` rewrites the box itself (dashboard SearchFilterBar), not only the request.
-  const exactMatchRef = useRef(exactMatch);
-  useEffect(() => {
-    if (exactMatchRef.current === exactMatch) return;
-    exactMatchRef.current = exactMatch;
-    const current = draftRef.current;
-    const next = exactMatch ? wrapExactSearchQuery(current) : unwrapExactSearchQuery(current);
-    if (next === current) return;
-    committer.cancel();
-    writeDraft(next);
-    dispatch({ type: 'queryCommitted', query: toFreeText(next) });
-  }, [committer, dispatch, exactMatch, writeDraft]);
-
   useEffect(() => {
     if (Platform.OS !== 'android') {
       inputRef.current?.focus();
@@ -190,6 +177,19 @@ export const SearchInput = memo(function SearchInput({
     },
     [dispatch],
   );
+
+  // `"ab"` rewrites the box itself (dashboard SearchFilterBar), not only the request.
+  const exactMatchRef = useRef(exactMatch);
+  useEffect(() => {
+    if (exactMatchRef.current === exactMatch) return;
+    exactMatchRef.current = exactMatch;
+    const current = draftRef.current;
+    const next = exactMatch ? wrapExactSearchQuery(current) : unwrapExactSearchQuery(current);
+    if (next === current) return;
+    committer.cancel();
+    writeDraft(next);
+    dispatch({ type: 'queryCommitted', query: toFreeText(next) });
+  }, [committer, dispatch, exactMatch, writeDraft]);
 
   useImperativeHandle(
     ref,
