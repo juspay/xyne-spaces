@@ -8,13 +8,21 @@ import {
   type ReactElement,
 } from 'react';
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Code2,
+  Copy,
   Download,
+  ExternalLink,
+  Maximize2,
+  Minimize2,
   MousePointerClick,
+  Palette,
+  RefreshCw,
   RotateCcw,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '../../../../utils/classNames';
 import { fetchFile } from '../../../../services/clients/fileFetchService';
 import type { ConversationArtifact } from '../../../../services/XyneAI/XyneAIArtifactsService';
@@ -39,6 +47,12 @@ import {
 } from './designDocument';
 import { designSelectionPayload, useDesignStudio } from './designStudioContext';
 import { UnmountWhenCovered } from '../../../../hooks/usePageCoverage';
+import {
+  canvasBackgroundStyle,
+  nextCanvasBackground,
+  openSandboxedPreview,
+  type CanvasBackground,
+} from './designPreviewChrome';
 
 const DEVICE_PRESETS = [
   { id: 'desktop', label: 'Desktop', width: null },
@@ -186,7 +200,28 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   const [inspecting, setInspecting] = useState(false);
   const [devicePreset, setDevicePreset] = useState<DevicePresetId>('desktop');
   const [showCode, setShowCode] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('light');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [copied, setCopied] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const exitOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.stopImmediatePropagation();
+      setFullscreen(false);
+    };
+    window.addEventListener('keydown', exitOnEscape, { capture: true });
+    return () => window.removeEventListener('keydown', exitOnEscape, { capture: true });
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
 
   const { html: rawHtml, loading, error } = useDesignSourceHtml(active?.source ?? null);
 
@@ -319,6 +354,21 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [editedHtml, active]);
 
+  const openInNewTab = useCallback((): void => {
+    if (!editedHtml) return;
+    if (!openSandboxedPreview(editedHtml, title ?? artifact?.title ?? 'Design preview')) {
+      toast.error('Your browser blocked the new tab');
+    }
+  }, [editedHtml, title, artifact]);
+
+  const copySource = useCallback((): void => {
+    if (!editedHtml) return;
+    void navigator.clipboard.writeText(editedHtml).then(
+      () => setCopied(true),
+      () => toast.error('Could not copy the source'),
+    );
+  }, [editedHtml]);
+
   const presetWidth = DEVICE_PRESETS.find(p => p.id === devicePreset)?.width ?? null;
   const frameStyle: CSSProperties = presetWidth
     ? { width: `${presetWidth}px`, maxWidth: '100%', height: '100%' }
@@ -327,7 +377,14 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   const heading = title ?? artifact?.title ?? 'Design preview';
 
   return (
-    <div className='flex h-full min-h-0 w-full flex-col bg-background'>
+    <div
+      className={cn(
+        'flex min-h-0 w-full flex-col bg-background',
+        fullscreen ? 'fixed inset-0 z-[70] h-dvh' : 'h-full',
+      )}
+      data-testid='design-panel'
+      data-fullscreen={fullscreen || undefined}
+    >
       <div className='flex flex-wrap items-center gap-1.5 border-b border-border px-2 py-1.5'>
         <span className='mr-auto flex min-w-0 flex-col leading-tight'>
           <span className='truncate text-xs text-muted-foreground' title={heading}>
@@ -424,6 +481,53 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
         </button>
         <button
           type='button'
+          onClick={() => setCanvasBackground(nextCanvasBackground)}
+          aria-label={`Canvas background: ${canvasBackground}. Click to change`}
+          title={`Canvas background: ${canvasBackground}`}
+          className='grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          data-track-category='AskAI'
+          data-track-name='design-canvas-background'
+        >
+          <Palette className='h-4 w-4' />
+        </button>
+        <button
+          type='button'
+          onClick={() => setReloadKey(key => key + 1)}
+          disabled={!srcDoc}
+          aria-label='Refresh preview'
+          title='Refresh preview'
+          className='grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground disabled:opacity-40'
+          data-track-category='AskAI'
+          data-track-name='design-refresh'
+        >
+          <RefreshCw className='h-4 w-4' />
+        </button>
+        <button
+          type='button'
+          onClick={openInNewTab}
+          disabled={!editedHtml}
+          aria-label='Open in new tab'
+          title='Open in new tab'
+          className='grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground disabled:opacity-40'
+          data-track-category='AskAI'
+          data-track-name='design-open-new-tab'
+        >
+          <ExternalLink className='h-4 w-4' />
+        </button>
+        <button
+          type='button'
+          onClick={() => setFullscreen(value => !value)}
+          aria-pressed={fullscreen}
+          aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+          className='grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          data-track-category='AskAI'
+          data-track-name='design-fullscreen'
+        >
+          {fullscreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
+        </button>
+        <button
+          type='button'
           onClick={download}
           disabled={!editedHtml}
           aria-label='Download HTML'
@@ -436,7 +540,15 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
         </button>
       </div>
 
-      <div className='relative min-h-0 flex-1 overflow-hidden bg-muted/40'>
+      <div
+        className={cn(
+          'relative min-h-0 flex-1 overflow-hidden',
+          canvasBackground === 'light' && 'bg-muted/40',
+        )}
+        style={canvasBackgroundStyle(canvasBackground)}
+        data-testid='design-canvas'
+        data-background={canvasBackground}
+      >
         {loading && !srcDoc ? (
           <div className='flex h-full items-center justify-center'>
             <div className='h-6 w-6 animate-spin rounded-full border-b-2 border-ring' />
@@ -450,14 +562,27 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
             No design to preview yet.
           </div>
         ) : showCode ? (
-          <pre className='h-full overflow-auto bg-background p-3 text-[11px] leading-relaxed text-foreground'>
-            <code>{editedHtml}</code>
-          </pre>
+          <div className='relative h-full'>
+            <button
+              type='button'
+              onClick={copySource}
+              className='absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded border border-border bg-background/95 px-2 text-[11px] text-foreground shadow-sm hover:bg-secondary'
+              data-track-category='AskAI'
+              data-track-name='design-copy-source'
+            >
+              {copied ? <Check className='h-3.5 w-3.5' /> : <Copy className='h-3.5 w-3.5' />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <pre className='h-full overflow-auto bg-background p-3 pr-24 text-[11px] leading-relaxed text-foreground'>
+              <code>{editedHtml}</code>
+            </pre>
+          </div>
         ) : (
           <div className='flex h-full w-full justify-center overflow-auto'>
             {/* Its scripts stop under full-page search, as leaving the page stopped them. */}
             <UnmountWhenCovered fallback={<div style={frameStyle} className='bg-white' />}>
               <iframe
+                key={reloadKey}
                 ref={iframeRef}
                 title={heading}
                 srcDoc={srcDoc}
