@@ -7,7 +7,7 @@
 
 import { createPortal } from 'react-dom';
 import { useEffect, useState, useRef } from 'react';
-import { Square, Pause, Play, Mic, ArrowUpRight } from 'lucide-react';
+import { Square, Pause, Play, AudioLines, ArrowUpRight } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   useRecordingStore,
@@ -327,7 +327,7 @@ export function RecordingOverlay(): React.ReactElement | null {
               data-track-category='RecordingOverlay'
               data-track-name='toggle_live_transcript'
             >
-              <Mic className='size-3.5' />
+              <AudioLines className='size-3.5' />
               {showTranscript ? 'Hide Live Transcript' : 'View Live Transcript'}
             </Button>
             <Button

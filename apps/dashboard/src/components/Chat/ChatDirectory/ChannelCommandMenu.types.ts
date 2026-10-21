@@ -153,6 +153,41 @@ export const GROUP_KEY_TO_DOC_TYPE = Object.fromEntries(
   ).flatMap(([docType, { groupKeys }]) => groupKeys.map(groupKey => [groupKey, docType])),
 ) as Record<string, SearchResultsDocType>;
 
+/** Render order of backend-result groups in the palette's search-active branch. */
+export const BACKEND_GROUP_KEYS = [
+  'conversation',
+  'ticket',
+  'attachment',
+  'canvas',
+  'transcript',
+  'recording',
+  'desk',
+] as const;
+
+/** Section heading per result group — shared by the cmd+K palette and the full-page results. */
+export const RESULT_GROUP_LABELS: Record<string, string> = {
+  user: 'Users',
+  channel: 'Channels',
+  conversation: 'Messages',
+  ticket: 'Tickets',
+  attachment: 'Attachments',
+  canvas: 'Canvas',
+  transcript: 'Calls',
+  recording: 'Recordings',
+  desk: 'Desk',
+  // The flat ALL list is every backend type in one score-ordered list, not a leftovers bucket.
+  others: 'Results',
+};
+
+/**
+ * Backend-result group key -> palette TabType, for the groups that show a loading skeleton
+ * on the ALL tab while a search is pending (Messages and Tickets).
+ */
+export const ALL_TAB_SKELETON_GROUPS: Partial<Record<string, TabType>> = {
+  conversation: TabType.MESSAGES,
+  ticket: TabType.TICKETS,
+};
+
 export const VespaApps = {
   CHAT: 'chat',
   TICKET: 'ticket',

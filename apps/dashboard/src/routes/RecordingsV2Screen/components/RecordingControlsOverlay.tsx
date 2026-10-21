@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
-import { CommandCmd, MicOn, Spinner } from '@xyne/icons';
+import { CommandCmd, Spinner } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { usePlatform } from '../../../hooks/usePlatform';
 import type { RecordingState } from '../../../stores/recordingStore';
@@ -55,7 +56,7 @@ const RecordingControlsOverlay = ({
             data-track-name='start_recording'
           >
             <span className='flex size-5 shrink-0 items-center justify-center text-primary-foreground'>
-              <MicOn size={15} strokeWidth={2.2} variant='Contrast' />
+              <AudioLines size={15} strokeWidth={2.2} />
             </span>
             <span className='whitespace-nowrap text-sm font-semibold tracking-tight'>
               Start recording

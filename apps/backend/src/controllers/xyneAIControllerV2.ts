@@ -29,6 +29,7 @@ import {
   downloadClawAttachment,
   listAccessibleClawAgents,
   listClawAgentModels,
+  warmClawAgent,
   deleteClawConversation,
   patchClawConversation,
   saveClawConversationNotes,
@@ -1436,6 +1437,18 @@ export class XyneAIControllerV2 {
       logger.error('[XyneAIv2] listAgentModels error:', error);
       res.status(503).json({ success: false, error: message });
     }
+  };
+
+  warmAgent = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    res.status(202).json({ success: true });
+    await warmClawAgent({ headers: req.headers, userId }, req.params['slug'] ?? 'ask-ai').catch((error) =>
+      logger.warn('[XyneAIv2] warmAgent failed:', error)
+    );
   };
 
   private handleError(res: Response, error: unknown, operation: string): void {

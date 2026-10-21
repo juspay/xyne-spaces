@@ -1,12 +1,12 @@
 import type { ReactElement } from 'react';
 import {
+  AudioLines,
   Bookmark,
   Copy,
   CornerUpLeft,
   Forward,
   Link,
   MessageCircleMore,
-  Mic,
   Pin,
   SquareAsterisk,
   Ticket,
@@ -34,7 +34,7 @@ const MESSAGE_BAR_ACTION_META: Record<
   },
   notes: {
     label: 'Take notes',
-    icon: <Mic className='w-4 h-4' />,
+    icon: <AudioLines className='w-4 h-4' />,
     hint: 'On the first message of a thread',
   },
   askAI: { label: 'Ask AI', icon: <XyneAIStar size={16} /> },

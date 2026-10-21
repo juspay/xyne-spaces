@@ -70,7 +70,20 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { beginJudgeRun } from "../judge-trace.js";
+import { beginJudgeRun, judgeRunSummary } from "../judge-trace.js";
+
+function judgeCallbackFields(): { judge?: { backend: string; calls: number; failed: number; compactionCalls: number } } {
+  const s = judgeRunSummary();
+  if (!s || s.calls === 0) return {};
+  return {
+    judge: {
+      backend: s.backend,
+      calls: s.calls,
+      failed: s.failed,
+      compactionCalls: s.byPurpose["compaction-call"]?.calls ?? 0,
+    },
+  };
+}
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -191,7 +204,6 @@ import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -1471,6 +1483,7 @@ export function abortTelemetry(
     ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
     ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
     tokenUsage: err.tokenUsage,
+    ...judgeCallbackFields(),
     ...(err.latency ? { latency: err.latency } : {}),
     ...(llmCalls.length > 0 ? { llmCalls } : {}),
   };
@@ -1798,6 +1811,8 @@ export async function processTask(
       (att) => pushAttachment(progressUrl, sessionId, att),
       trustedSdlcBindings,
       (serverType) => blockedConnectors.add(serverType),
+      undefined,
+      userId,
     ).then((value) => ({ value }), (error: unknown) => ({ error }));
 
     // All per-type attachment ingestion (filter → decode → convert to a
@@ -1807,12 +1822,7 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
-    const taskCommand = routedMode.command;
-    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
-    }
+    const taskCommand = parseTaskCommand(task);
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -2500,6 +2510,8 @@ export async function processTask(
         // A delegated agent's 401/403 is the same signal as the parent's: the
         // user's own connection is the fix, so it feeds the same connector card.
         (serverType) => blockedConnectors.add(serverType),
+        undefined,
+        userId,
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2700,6 +2712,7 @@ export async function processTask(
             toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
             toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
             tokenUsage: result.tokenUsage,
+            ...judgeCallbackFields(),
             ...(result.latency ? { latency: result.latency } : {}),
             ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
           });
@@ -3491,7 +3504,7 @@ export async function processTask(
           ...(sessionId && sessionToken
             ? {
                 searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
-                  searchDeploymentTools(sessionId, sessionToken, params),
+                  searchDeploymentTools(sessionId, sessionToken, params, userId),
               }
             : {}),
           openPalette: openPaletteEnabled,
@@ -4769,6 +4782,7 @@ export async function processTask(
         }),
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
+        ...judgeCallbackFields(),
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
         ...(result.latency ? { latency: result.latency } : {}),
         ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
@@ -4893,6 +4907,7 @@ export async function processTask(
       ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
+      ...judgeCallbackFields(),
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
         : {}),

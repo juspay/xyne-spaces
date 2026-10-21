@@ -4,34 +4,30 @@
   # Y-Sweet server built from source
   y-sweet = pkgs.rustPlatform.buildRustPackage rec {
     pname = "y-sweet";
-    version = "0.4.1";
+    version = "0-unstable-221d5af";
 
     src = pkgs.fetchFromGitHub {
-      owner = "jamsocket";
+      owner = "juspay";
       repo = "y-sweet";
-      rev = "v${version}";
-      hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # Will be replaced after first build
+      rev = "221d5afd7dd0504ed75e6dbdc798fba303a65e32";
+      hash = "sha256-oDDWdEhNx4afDa1Uo3FlpVm6x8M7l4n+De3qFk5M32U=";
     };
 
-    cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # Will be replaced after first build
+    cargoHash = "sha256-uA5QFEdfYtpLwTLGAbcQ/itSEbW0bw5BRJDWO5r/8mo=";
 
     # Build only the y-sweet server binary
-    buildAndTestSubdir = "crates/y-sweet";
+    sourceRoot = "${src.name}/crates";
+    buildAndTestSubdir = "y-sweet";
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = [ pkgs.openssl ];
 
     meta = with lib; {
       description = "A standalone yjs server with persistence to S3 or filesystem";
-      homepage = "https://github.com/jamsocket/y-sweet";
+      homepage = "https://github.com/juspay/y-sweet";
       license = licenses.mit;
       maintainers = [ ];
       mainProgram = "y-sweet";
     };
   };
 
-  # Python environment for transcription agent
-  transcription-agent-env = pkgs.python3.withPackages (ps: with ps; [
-    # Core dependencies (adjust based on requirements.txt)
-    aiohttp
-    redis
-    # Add other dependencies as needed
-  ]);
 }

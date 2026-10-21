@@ -451,15 +451,23 @@ async function spawnSession(
 const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
   "xyne-spaces",
   "xyne-spaces-app-tools",
+  "xyne-workflows",
+  "xyne-dashboard",
   "heisenberg",
   "research-agent-mcp",
+  "google",
+  "microsoft",
+  "jenkins",
+  "reddit",
+  "twitter",
+  "x-news",
+  "linkedin-rapidapi",
+  "bitbot",
+  "query-routing",
 ]);
-const TOOL_LIST_CACHE_TTL_MS = Number(process.env["MCP_TOOL_LIST_CACHE_TTL_MS"] ?? 10 * 60 * 1000);
 const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 
-const USER_TOOL_LIST_FRESH_MS = Number(process.env["MCP_USER_TOOL_LIST_FRESH_MS"] ?? 10 * 60 * 1000);
-const USER_TOOL_LIST_MAX_AGE_MS = Number(process.env["MCP_USER_TOOL_LIST_MAX_AGE_MS"] ?? 6 * 60 * 60 * 1000);
 const userToolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const userToolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 
@@ -507,32 +515,23 @@ function refreshToolList(
   return started;
 }
 
-function staleWhileRefresh(
+function cachedToolList(
   cache: ToolListCache,
   inflightMap: Map<string, Promise<McpToolInfo[]>>,
   key: string,
-  serverType: string,
-  freshMs: number,
   fetchTools: () => Promise<McpToolInfo[]>,
 ): Promise<McpToolInfo[]> {
   const cached = cache.get(key);
-  const age = cached ? Date.now() - cached.at : Infinity;
-  if (cached && age < freshMs) return Promise.resolve(cached.tools);
-  if (cached && age < USER_TOOL_LIST_MAX_AGE_MS) {
-    refreshToolList(cache, inflightMap, key, fetchTools).catch((err) => {
-      log.warn(`[mcp/runner] background tool-list refresh failed for ${serverType}: ${err instanceof Error ? err.message : String(err)}`);
-    });
-    return Promise.resolve(cached.tools);
-  }
+  if (cached) return Promise.resolve(cached.tools);
   return refreshToolList(cache, inflightMap, key, fetchTools);
 }
 
-function userToolList(key: string, serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  return staleWhileRefresh(userToolListCache, userToolListInflight, key, serverType, USER_TOOL_LIST_FRESH_MS, fetchTools);
+function userToolList(key: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  return cachedToolList(userToolListCache, userToolListInflight, key, fetchTools);
 }
 
 function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  return staleWhileRefresh(toolListCache, toolListInflight, serverType, serverType, TOOL_LIST_CACHE_TTL_MS, fetchTools);
+  return cachedToolList(toolListCache, toolListInflight, serverType, fetchTools);
 }
 
 const MISSING_TOOL_ERROR = /unknown tool|tool\b.*\bnot found|no such tool/i;
@@ -559,14 +558,11 @@ export async function listToolsForUser(
   options: { fresh?: boolean; lane?: SessionLane } = {},
 ): Promise<McpServerTools> {
   const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
-  const useShared =
-    !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
-  const usePerUser = !options.fresh && !useShared && USER_TOOL_LIST_FRESH_MS > 0;
-  const tools = useShared
-    ? await sharedToolList(serverType, fetchTools)
-    : usePerUser
-      ? await userToolList(`${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`, serverType, fetchTools)
-      : await fetchTools();
+  const tools = options.fresh
+    ? await fetchTools()
+    : SHARED_TOOL_LIST_SERVER_TYPES.has(serverType)
+      ? await sharedToolList(serverType, fetchTools)
+      : await userToolList(`${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`, fetchTools);
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
@@ -827,6 +823,33 @@ export async function evictAllSessionsForUser(userId: string): Promise<void> {
     }
   }
   await Promise.all(evictions);
+}
+
+function sessionServerType(key: string): string {
+  return key.split("#")[0]?.split(":")[1] ?? "";
+}
+
+export async function restartMcpServers(serverType?: string): Promise<{ sessions: number; toolLists: number }> {
+  const matches = (key: string) => !serverType || sessionServerType(key) === serverType;
+  let toolLists = 0;
+  for (const key of [...toolListCache.keys()]) {
+    if (serverType && key !== serverType) continue;
+    toolListCache.delete(key);
+    toolListInflight.delete(key);
+    toolLists++;
+  }
+  for (const key of [...userToolListCache.keys()]) if (matches(key)) toolLists++;
+  dropUserToolLists(matches);
+  if (!serverType) toolListInflight.clear();
+  const closing: Promise<void>[] = [];
+  for (const [key, session] of sessions) {
+    if (!matches(key)) continue;
+    sessions.delete(key);
+    closing.push(session.transport.close().catch(() => {}));
+  }
+  await Promise.all(closing);
+  log.info(`[mcp/runner] restart ${serverType ?? "all servers"}: closed ${closing.length} session(s), dropped ${toolLists} tool list(s)`);
+  return { sessions: closing.length, toolLists };
 }
 
 export function hasAdapter(serverType: string): boolean {

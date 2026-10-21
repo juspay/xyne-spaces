@@ -1,3 +1,74 @@
+## [1.513.0](https://github.com/juspay/xyne-spaces/compare/v1.512.0...v1.513.0) (2026-10-19)
+
+
+### Features
+
+* design systems as their own records, several per org ([#3190](https://github.com/juspay/xyne-spaces/issues/3190)) ([2428c65](https://github.com/juspay/xyne-spaces/commit/2428c65568885a61733152d6aa6d4b063cfa5105))
+
+## [1.512.0](https://github.com/juspay/xyne-spaces/compare/v1.511.0...v1.512.0) (2026-10-19)
+
+
+### Features
+
+* one xor row + price glm-private-claw/kimi-k3/opus-5/opus-4-8/sonnet-4-5 ([#3215](https://github.com/juspay/xyne-spaces/issues/3215)) ([74a81ac](https://github.com/juspay/xyne-spaces/commit/74a81acb8cb4e57ecdc4f8c73b98212c142697a1))
+
+
+### Bug Fixes
+
+* warm the agent's MCP tools on the user's claw-auth pod when the Ask AI panel opens ([#3199](https://github.com/juspay/xyne-spaces/issues/3199)) ([aefc1c7](https://github.com/juspay/xyne-spaces/commit/aefc1c77513ce078d0cb1aeea40e193c829d0519))
+
+## [1.511.0](https://github.com/juspay/xyne-spaces/compare/v1.510.0...v1.511.0) (2026-10-19)
+
+
+### Features
+
+* cost saved by using Xor metric on the Claw usage dashboard ([#3211](https://github.com/juspay/xyne-spaces/issues/3211)) ([af35866](https://github.com/juspay/xyne-spaces/commit/af35866c77b0770c6f5f44cba0c7c40437ed60b3))
+* extension points for optional claw-auth modules (routes, admin tabs, shared-credential override) ([#3206](https://github.com/juspay/xyne-spaces/issues/3206)) ([6bcd063](https://github.com/juspay/xyne-spaces/commit/6bcd0632a47637d839c21a4cd04c8e5694945b07))
+* record per-run judge/Xor activity on AgentRun ([#3209](https://github.com/juspay/xyne-spaces/issues/3209)) ([805d057](https://github.com/juspay/xyne-spaces/commit/805d057004a0e84f27efebe1931078ecccff03f6))
+
+## [1.510.0](https://github.com/juspay/xyne-spaces/compare/v1.509.0...v1.510.0) (2026-10-19)
+
+
+### Features
+
+* chat project data model and API (claw-auth) ([#3201](https://github.com/juspay/xyne-spaces/issues/3201)) ([b4a6116](https://github.com/juspay/xyne-spaces/commit/b4a6116df7297e299ba72b894966d7a1fe79030c))
+
+## [1.509.0](https://github.com/juspay/xyne-spaces/compare/v1.508.0...v1.509.0) (2026-10-19)
+
+
+### Features
+
+* cost saved by open models metric on the Claw usage dashboard ([#3205](https://github.com/juspay/xyne-spaces/issues/3205)) ([99ac359](https://github.com/juspay/xyne-spaces/commit/99ac35910ed39d001ed880aa54cc56ca0e3af1f0))
+
+
+### Bug Fixes
+
+* hide DMs and group DMs from admins/owners unless they participate ([#3203](https://github.com/juspay/xyne-spaces/issues/3203)) ([a3f50c2](https://github.com/juspay/xyne-spaces/commit/a3f50c224c1d1196a239bd15c9f8e323d2317c3c))
+* make recordings icon consistent across the app ([#3195](https://github.com/juspay/xyne-spaces/issues/3195)) ([35ce163](https://github.com/juspay/xyne-spaces/commit/35ce1637c3cac9ea4c27aa21032ca9578967edf2))
+
+## [1.508.0](https://github.com/juspay/xyne-spaces/compare/v1.507.0...v1.508.0) (2026-10-19)
+
+
+### Features
+
+* answer from context for single-turn agents ([#2341](https://github.com/juspay/xyne-spaces/issues/2341)) ([8b21be3](https://github.com/juspay/xyne-spaces/commit/8b21be31ef493d68d803569df1061ce7418d11bd))
+* create agents from the xyne-claw CLI plugin via the existing approval flow ([#3202](https://github.com/juspay/xyne-spaces/issues/3202)) ([a5ef687](https://github.com/juspay/xyne-spaces/commit/a5ef68725db9fb7fb6c7ec2e0aecdb79186ae4fe))
+* customize the message hover bar by dragging, or in Preferences ([#3186](https://github.com/juspay/xyne-spaces/issues/3186)) ([fdf987b](https://github.com/juspay/xyne-spaces/commit/fdf987b7b03c9211dcb93bd09b4099707320f8fd))
+* rebuild claw metrics on per-run and per-tool stats tables ([#3124](https://github.com/juspay/xyne-spaces/issues/3124)) ([5b0cd7f](https://github.com/juspay/xyne-spaces/commit/5b0cd7f8a4e4a0cfc179f0ffc90a8df26cf697d3))
+* show loading skeleton in cmd+K search ([#1871](https://github.com/juspay/xyne-spaces/issues/1871)) ([0a12850](https://github.com/juspay/xyne-spaces/commit/0a12850a346d5fda953f8f90fe44eceabdde6f21))
+* Show message history in voice mode and make default transcript screen in voice mode ([#3198](https://github.com/juspay/xyne-spaces/issues/3198)) ([93cafa2](https://github.com/juspay/xyne-spaces/commit/93cafa24e3ecef82f4ae6e8277506df1b93a66c8))
+
+
+### Bug Fixes
+
+* closing bitbucket project getting apis ([#3187](https://github.com/juspay/xyne-spaces/issues/3187)) ([b7994ab](https://github.com/juspay/xyne-spaces/commit/b7994abb49b0d9958362e5b73e0fd36605f69ab6))
+* ISSUE-2449 disable Create New Canvas while the canvas is being created ([#2472](https://github.com/juspay/xyne-spaces/issues/2472)) ([f4c7b07](https://github.com/juspay/xyne-spaces/commit/f4c7b0761823b46a51689c123b87767cefebe03b))
+* keep MCP tool lists for the life of the pod and add an admin restart ([#3193](https://github.com/juspay/xyne-spaces/issues/3193)) ([8457e5f](https://github.com/juspay/xyne-spaces/commit/8457e5fa860389086457810589c503551cc038c6))
+* remove the server-side mode router so runs stop waiting on it ([#3191](https://github.com/juspay/xyne-spaces/issues/3191)) ([c1232b6](https://github.com/juspay/xyne-spaces/commit/c1232b62a97af58e4aee96ef6e408f311be9430b))
+* scope resource_access ACL writes to the caller's workspace ([#2969](https://github.com/juspay/xyne-spaces/issues/2969)) ([16d0365](https://github.com/juspay/xyne-spaces/commit/16d0365a1ea229247b937a6685ef4f7433b2e4a5))
+* send the run's user as x-claw-user on claw-auth MCP calls ([#3196](https://github.com/juspay/xyne-spaces/issues/3196)) ([4b67cde](https://github.com/juspay/xyne-spaces/commit/4b67cde8bd12cf755045683d2bf8f8ed0ada8db6))
+* unified form editor for both board and form pages ([#2801](https://github.com/juspay/xyne-spaces/issues/2801)) ([8d86e3b](https://github.com/juspay/xyne-spaces/commit/8d86e3b98990b6f43c48e98677b57af69c2c12d9))
+
 ## [1.507.0](https://github.com/juspay/xyne-spaces/compare/v1.506.0...v1.507.0) (2026-10-19)
 
 

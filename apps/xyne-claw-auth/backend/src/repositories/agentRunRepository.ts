@@ -254,6 +254,7 @@ export interface FinalizeRunInput {
   };
   /** Per-LLM-call series from claw, stored as-is (shape owned by xyne-claw's llm-turn-stats.ts). */
   llmCalls?: unknown;
+  judge?: { backend?: string | null; calls?: number; failed?: number; compactionCalls?: number };
 }
 
 /** The metrics half of a claw terminal callback; `clawMetricsFields` is the single reader every finalize caller spreads. */
@@ -266,11 +267,12 @@ export interface ClawMetricsPayload {
   provider?: unknown;
   model?: unknown;
   toolsUsed?: unknown;
+  judge?: FinalizeRunInput["judge"];
 }
 
 type ClawMetricsFields = Pick<
   FinalizeRunInput,
-  "toolInvocations" | "tokenUsage" | "latency" | "citationReflection" | "llmCalls" | "provider" | "model" | "toolsUsed"
+  "toolInvocations" | "tokenUsage" | "latency" | "citationReflection" | "llmCalls" | "provider" | "model" | "toolsUsed" | "judge"
 >;
 
 const nonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
@@ -291,6 +293,7 @@ export function clawMetricsFields(payload: ClawMetricsPayload | Record<string, u
     ...(nonEmptyString(p.provider) ? { provider: p.provider } : {}),
     ...(nonEmptyString(p.model) ? { model: p.model } : {}),
     ...(stringArray(p.toolsUsed) ? { toolsUsed: p.toolsUsed } : {}),
+    ...(p.judge && typeof p.judge === "object" ? { judge: p.judge } : {}),
   };
 }
 
@@ -692,6 +695,12 @@ export const agentRunRepository = {
           tokensOut: input.tokenUsage.output ?? null,
           tokensCacheRead: input.tokenUsage.cacheRead ?? null,
           tokensCacheWrite: input.tokenUsage.cacheWrite ?? null,
+        } : {}),
+        ...(input.judge ? {
+          judgeBackend: input.judge.backend ?? null,
+          judgeCalls: input.judge.calls ?? null,
+          judgeFailed: input.judge.failed ?? null,
+          compactionCalls: input.judge.compactionCalls ?? null,
         } : {}),
         ...(input.latency ? {
           totalMs: input.latency.totalMs ?? null,

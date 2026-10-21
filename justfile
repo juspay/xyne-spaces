@@ -73,8 +73,3 @@ fresh-start: cleanup
 [group('nix')]
 reset:
     rm -rf ./data
-
-#one-click-setup
-[group('nix')]
-setup:
-    chmod +x setup.sh && ./setup.sh
