@@ -70,6 +70,9 @@ interface ChannelSectionDnd {
   sectionUnreadCounts: Record<string, number>;
   /** Per section: every unread channel id, including ones hidden by the section filter. */
   sectionUnreadChannelIds: Record<string, string[]>;
+  defaultUnreadChannelIds: string[];
+  dmUnreadChannelIds: string[];
+  starredUnreadChannelIds: string[];
   defaultUnreadCount: number;
   dmUnreadCount: number;
   starredUnreadCount: number;
@@ -229,6 +232,13 @@ export const useChannelSectionDnd = ({
       statusByChannelId,
     );
   }
+  const defaultUnreadChannelIds = selectChannelIdsToMarkRead(
+    defaultChannels,
+    unreadCounts,
+    statusByChannelId,
+  );
+  const dmUnreadChannelIds = selectChannelIdsToMarkRead(dmChannels, unreadCounts, statusByChannelId);
+  const starredUnreadChannelIds = selectChannelIdsToMarkRead(starred, unreadCounts, statusByChannelId);
   const defaultUnreadCount = sumSectionUnread(defaultChannels, unreadCounts, activeChannelId);
   const dmUnreadCount = sumSectionUnread(dmChannels, unreadCounts, activeChannelId);
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
@@ -497,6 +507,9 @@ export const useChannelSectionDnd = ({
     starredDisplayChannels,
     sectionUnreadCounts,
     sectionUnreadChannelIds,
+    defaultUnreadChannelIds,
+    dmUnreadChannelIds,
+    starredUnreadChannelIds,
     defaultUnreadCount,
     dmUnreadCount,
     starredUnreadCount,

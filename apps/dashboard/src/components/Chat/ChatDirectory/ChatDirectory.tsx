@@ -26,6 +26,7 @@ import {
   ChatDefault,
   ThreeDotsMenuVertical,
   type PikaIconProps,
+  MarkAsRead,
 } from '@xyne/icons';
 import {
   DropdownMenu,
@@ -176,6 +177,7 @@ const GroupSettingsMenu = ({
     icon: ComponentType<PikaIconProps>;
     trackName: string;
     onSelect: () => void;
+    disabled?: boolean;
   }[];
 }): ReactElement => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -219,6 +221,7 @@ const GroupSettingsMenu = ({
             <DropdownMenuItem
               key={action.label}
               className={MENU_ROW}
+              disabled={action.disabled ?? false}
               onClick={e => {
                 e.stopPropagation();
                 action.onSelect();
@@ -317,6 +320,7 @@ const ChatDirectory = ({
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
   const unreadCounts = useAllUnreadCount();
   const markChannelsAsRead = useMarkChannelsAsRead();
+  const [dmIdsToMarkRead, setDmIdsToMarkRead] = useState<string[] | null>(null);
   const mentionCounts = useAllMentionCount();
   const { starred, channels, directMessages, groupPreferences, setGroupPreference } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
@@ -331,6 +335,9 @@ const ChatDirectory = ({
     starredDisplayChannels,
     sectionUnreadCounts,
     sectionUnreadChannelIds,
+    defaultUnreadChannelIds,
+    dmUnreadChannelIds,
+    starredUnreadChannelIds,
     defaultUnreadCount,
     dmUnreadCount,
     starredUnreadCount,
@@ -1191,6 +1198,15 @@ const ChatDirectory = ({
                           trackName='STARRED_SECTION_OPTIONS'
                           groupPreferences={groupPreferences}
                           setGroupPreference={setGroupPreference}
+                          actions={[
+                            {
+                              label: 'Mark all as read',
+                              icon: MarkAsRead,
+                              trackName: 'MARK_STARRED_AS_READ',
+                              disabled: starredUnreadChannelIds.length === 0,
+                              onSelect: () => void markChannelsAsRead(starredUnreadChannelIds),
+                            },
+                          ]}
                         />
                       </div>
                     </Accordion.Header>
@@ -1392,6 +1408,13 @@ const ChatDirectory = ({
                               setShowAddSectionForm(true);
                             },
                           },
+                          {
+                            label: 'Mark all as read',
+                            icon: MarkAsRead,
+                            trackName: 'MARK_CHANNELS_AS_READ',
+                            disabled: defaultUnreadChannelIds.length === 0,
+                            onSelect: () => void markChannelsAsRead(defaultUnreadChannelIds),
+                          },
                         ]}
                       />
                     </div>
@@ -1489,6 +1512,14 @@ const ChatDirectory = ({
                             setAddSectionSource('dms');
                             setShowAddSectionForm(true);
                           },
+                        },
+                        {
+                          label: 'Mark all as read',
+                          icon: MarkAsRead,
+                          trackName: 'MARK_DMS_AS_READ',
+                          disabled: dmUnreadChannelIds.length === 0,
+                          // DM unreads are usually addressed to the user directly, so confirm first.
+                          onSelect: () => setDmIdsToMarkRead(dmUnreadChannelIds),
                         },
                       ]}
                     />
@@ -1609,6 +1640,58 @@ const ChatDirectory = ({
               />
             </div>
           )}
+        </Dialog>
+
+        <Dialog
+          open={!!dmIdsToMarkRead}
+          onOpenChange={open => {
+            if (!open) setDmIdsToMarkRead(null);
+          }}
+          testId='mark-dms-read-dialog'
+        >
+          <div className='p-4 space-y-4'>
+            <div className='flex items-start justify-between gap-2'>
+              <div className='text-xl font-medium text-foreground'>
+                Mark {dmIdsToMarkRead?.length ?? 0}{' '}
+                {dmIdsToMarkRead?.length === 1 ? 'conversation' : 'conversations'} as read?
+              </div>
+              <button
+                type='button'
+                onClick={() => setDmIdsToMarkRead(null)}
+                aria-label='Close'
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CLOSE_MARK_DMS_READ'
+                className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+              >
+                <MultipleCrossCancelDefault size={20} />
+              </button>
+            </div>
+            <p className='text-sm text-foreground'>
+              Unread direct messages will no longer show as new. The messages stay in each
+              conversation.
+            </p>
+            <div className='flex justify-end gap-3 pt-2'>
+              <button
+                onClick={() => setDmIdsToMarkRead(null)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CANCEL_MARK_DMS_READ'
+                className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors'
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (dmIdsToMarkRead) void markChannelsAsRead(dmIdsToMarkRead);
+                  setDmIdsToMarkRead(null);
+                }}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='CONFIRM_MARK_DMS_READ'
+                className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors'
+              >
+                Mark as read
+              </button>
+            </div>
+          </div>
         </Dialog>
 
         <Dialog
