@@ -1,23 +1,12 @@
 /**
- * Renewing the saved session, safely shared between processes.
+ * Renewing the saved session, shared between processes.
  *
- * Every MCP client starts its own server, and they all read one
- * `~/.xyne/agent/spaces.json`. Each renewal replaces the refresh token, and
- * Spaces ends the whole sign-in if a replaced token is presented again — so a
- * process renewing with a token another process already spent would sign
- * everyone out. Two guards prevent that:
- *
- * - A lock file around the renewal, and a re-read of the saved session inside
- *   it: a process that finds the session already renewed by another takes that
- *   one instead of renewing again, or renews with that one's refresh token if
- *   its cookie has run out too. A process never renews with its own token once
- *   the file holds a newer one, however long it has been idle.
- * - The server's grace window: for 30 seconds the old token still answers with
- *   the renewed session, which covers a process that does not take the lock in
- *   time and renews anyway.
- *
- * The SDK client calls `renewSharedSession` (as `refreshSession`) shortly
- * before the cookie expires, and once on a 401.
+ * Every MCP client runs its own server, and they all read one
+ * `~/.xyne/agent/spaces.json`. A renewal replaces the refresh token, and
+ * Spaces ends the sign-in if a replaced token is used again. So renewal runs
+ * under a lock file and re-reads the file first, and never uses this process's
+ * token once the file holds a newer one. The server's 30s grace window covers
+ * a process that renews without the lock.
  */
 
 import { closeSync, openSync, statSync, unlinkSync } from "node:fs";
@@ -35,13 +24,9 @@ const RETRY_MS = 100;
 /** A saved session with less than this left is not worth taking over. */
 const MIN_REMAINING_MS = 60_000;
 
-/**
- * Renew `current`, or take over the session another process already renewed
- * it to. Saves what it renews, so other processes pick it up too.
- */
+/** Renew `current`, or use what another process renewed it to. Saves the result. */
 export async function renewSharedSession(baseUrl: string, current: SpacesSession): Promise<SsoSession> {
-	const release = await acquireLock(`${configPath()}.lock`);
-	try {
+	return withSessionLock(async () => {
 		const saved = loadSavedSession();
 		const newer =
 			saved?.refreshToken &&
@@ -49,11 +34,20 @@ export async function renewSharedSession(baseUrl: string, current: SpacesSession
 			saved.workspaceId === current.workspaceId
 				? saved
 				: undefined;
+		// A newer token in the file means ours is spent: use it, never ours.
 		if (newer && newer.expiresAt - Date.now() > MIN_REMAINING_MS) return newer;
 
 		const renewed = await refreshOnce(baseUrl, newer?.refreshToken ?? current.refreshToken!);
 		saveSession(renewed);
 		return renewed;
+	});
+}
+
+/** Run `fn` holding `spaces.json.lock`. Renewal and sign-in both take it. */
+export async function withSessionLock<T>(fn: () => Promise<T>): Promise<T> {
+	const release = await acquireLock(`${configPath()}.lock`);
+	try {
+		return await fn();
 	} finally {
 		release();
 	}
@@ -70,11 +64,7 @@ async function refreshOnce(baseUrl: string, refreshToken: string): Promise<SsoSe
 	}
 }
 
-/**
- * Take the lock file, waiting for another holder. Returns its release. After
- * `LOCK_WAIT_MS` without it, renews unlocked rather than fail the request: the
- * server's grace window still covers a race.
- */
+/** Take the lock file and return its release; after `LOCK_WAIT_MS`, go on without it. */
 async function acquireLock(path: string): Promise<() => void> {
 	const deadline = Date.now() + LOCK_WAIT_MS;
 	for (;;) {

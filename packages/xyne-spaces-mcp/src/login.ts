@@ -18,6 +18,7 @@
 
 import { xyneSsoLoginAndWait, xyneSsoLogout, type SsoSession } from "@xyne/spaces-sdk";
 import { loadSavedSession, saveSession } from "./config.js";
+import { withSessionLock } from "./refresh.js";
 
 export interface LoginAttempt {
 	/** The approval page, with the request's code filled in. */
@@ -28,7 +29,7 @@ export interface LoginAttempt {
 	readonly done: Promise<SsoSession>;
 }
 
-/** Longest a new sign-in waits for the one it replaces to be signed out. */
+/** Longest a sign-in waits for the one it replaces to be signed out. */
 const SIGN_OUT_WAIT_MS = 5_000;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,18 +75,22 @@ async function begin(baseUrl: string, onSession: (session: SsoSession) => void):
 		baseUrl,
 		openBrowser: true,
 		onUserCode: (userCode, _verificationUrl, link) => resolveLink({ link, userCode }),
-	}).then(async (session) => {
-		const replaced = loadSavedSession();
-		saveSession(session);
-		onSession(session);
-		if (replaced?.refreshToken && replaced.refreshToken !== session.refreshToken) {
-			await Promise.race([
-				xyneSsoLogout({ baseUrl, refreshToken: replaced.refreshToken }).catch(() => {}),
-				sleep(SIGN_OUT_WAIT_MS),
-			]);
-		}
-		return session;
-	});
+	}).then((session) =>
+		// Locked, so a renewal of the old session cannot overwrite this one.
+		withSessionLock(async () => {
+			const replaced = loadSavedSession();
+			saveSession(session);
+			onSession(session);
+			// Sign out the replaced sign-in. Awaited so `login` does not exit first.
+			if (replaced?.refreshToken && replaced.refreshToken !== session.refreshToken) {
+				await Promise.race([
+					xyneSsoLogout({ baseUrl, refreshToken: replaced.refreshToken }).catch(() => {}),
+					sleep(SIGN_OUT_WAIT_MS),
+				]);
+			}
+			return session;
+		}),
+	);
 
 	// If init itself fails, the link never arrives: fail the caller with it.
 	// Rejecting after the link resolved is a no-op.
