@@ -19,6 +19,8 @@ export type CacheOptions<K extends {}, V extends {}> = {
 
 export type Cache<K extends {}, V extends {}> = {
   get(key: K): Promise<V | undefined>;
+  /** The cached entry (stale included) without fetching or touching recency; `undefined` on a miss. */
+  peek(key: K): V | undefined;
   delete(key: K): boolean;
   clear(): void;
 };
@@ -38,6 +40,7 @@ export function createCache<K extends {}, V extends {}>(options: CacheOptions<K,
       options.onStatus?.(status);
       return value;
     },
+    peek: (key) => cache.peek(key, { allowStale: true }),
     delete: (key) => cache.delete(key),
     clear: () => cache.clear(),
   };

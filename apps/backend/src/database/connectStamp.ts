@@ -18,7 +18,9 @@
  *
  * The parent is read with one pk lookup per stamped row, on the SAME connection as the write (the
  * interactive-transaction client, or the Zero mutation's db transaction), so a parent created earlier
- * in the same transaction is visible. No cache: every lookup reads the parent's current value.
+ * in the same transaction is visible. Handles that never change after they are written
+ * (`CACHED_HANDLES`) are also kept in a per-pod LRU, so repeat writes under the same channel / canvas
+ * skip the lookup — see `handleCache` for why only the committed base client fills it.
  *
  * Not covered here (by design): nested relation creates (`parent: { children: { create } }`) and raw
  * SQL — those few sites pass the handle explicitly; `$use` middlewares that write on the raw client copy
@@ -28,8 +30,10 @@
  * below must match schema.prisma (and the Zero schema for Zero tables).
  */
 import { Prisma, PrismaClient } from '@prisma/client';
+import { createCache } from '@xyne/cache';
 import { schema as zeroSchema } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { getConnectStampCache } from '@/services/otel';
 
 const CHANNEL_HANDLE = 'channelConnectId';
 
@@ -253,11 +257,48 @@ const zeroLookup =
 
 // Base (unextended) client for lookups on writes outside a transaction (their parent is already
 // committed) — set once at client init. Using the base avoids re-entering the ACL/stamp extensions.
-let base: PrismaClient | null = null;
+let baseLookupFn: Lookup | null = null;
 export function setConnectStampBase(client: PrismaClient): void {
-  base = client;
+  baseLookupFn = prismaLookup(client);
 }
-const baseLookup = (): Lookup | null => (base ? prismaLookup(base) : null);
+const baseLookup = (): Lookup | null => baseLookupFn;
+
+// ── parent-handle cache ───────────────────────────────────────────────────────────────────────────
+/**
+ * `table.column` handles that never change once written: a channel's / canvas's own connectId is
+ * minted at create (or filled once by the backfill) and never updated. Only these are cached —
+ * a parent's `channelConnectId` is re-stamped when the parent moves channel, and a per-pod cache
+ * cannot see a move made on another pod.
+ */
+const CACHED_HANDLES = new Set(['channels.connectId', 'canvases.connectId']);
+
+// Keys and values are fixed-size ids (~300 B per entry with overhead) → ~6 MB at the cap.
+const HANDLE_CACHE_MAX_ENTRIES = 20_000;
+// The values never change, so the ttl only bounds how long a deleted parent's entry lingers.
+const HANDLE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+const cacheKey = (table: string, col: string, id: string): string | null =>
+  CACHED_HANDLES.has(`${table}.${col}`) ? `${table}.${col}:${id}` : null;
+
+/**
+ * Per-pod LRU of committed parent handles. Only the base client fills it (a miss fetches through it),
+ * so every entry is committed data. A lookup inside a transaction (interactive Prisma or a Zero
+ * mutation) only reads it: on a miss it reads on its own connection and does NOT publish — the
+ * transaction can roll back, and a retry can recreate the same parent id with a new handle, so an
+ * uncommitted value must never reach the shared cache. Empty handles are never cached (an
+ * un-backfilled parent is re-read until it has one).
+ */
+const handleCache = createCache<string, string>({
+  max: HANDLE_CACHE_MAX_ENTRIES,
+  ttlMs: HANDLE_CACHE_TTL_MS,
+  fetch: async (key) => {
+    const sep = key.indexOf(':');
+    const [table, col] = key.slice(0, sep).split('.');
+    const handle = baseLookupFn ? await baseLookupFn(table, key.slice(sep + 1), col) : undefined;
+    return typeof handle === 'string' && handle ? handle : undefined;
+  },
+  onStatus: (status) => getConnectStampCache().add(1, { path: 'committed', result: status.fetch ?? 'unknown' }),
+});
 
 /** A parent row's handle column, or null (no lookup available / not found / parent has no handle). */
 async function parentHandle(lookup: Lookup | null, table: string, id: string, col: string): Promise<string | null> {
@@ -267,6 +308,13 @@ async function parentHandle(lookup: Lookup | null, table: string, id: string, co
     return null;
   }
   try {
+    const key = cacheKey(table, col, id);
+    if (key) {
+      if (lookup === baseLookupFn) return (await handleCache.get(key)) ?? null;
+      const cached = handleCache.peek(key);
+      getConnectStampCache().add(1, { path: 'tx', result: cached ? 'hit' : 'miss' });
+      if (cached) return cached;
+    }
     const handle = await lookup(table, id, col);
     return typeof handle === 'string' && handle ? handle : null;
   } catch (error) {
