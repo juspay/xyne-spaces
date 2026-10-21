@@ -463,7 +463,7 @@ const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
 const EXPANDED_HEADER_HEIGHT = 56;
 
-// Debounce window for title/description auto-save while the user is typing.
+// Debounce window for title auto-save while the user is typing.
 const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
 
 interface TicketDetailsProps {
@@ -2236,22 +2236,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
-
-  // Debounced auto-save while editing the description (no subject side effect, so
-  // it applies to all ticket types).
-  useEffect(() => {
-    if (!ticket || !editingDescription) return;
-    const next = descriptionValue.trim();
-    if (next === resolveTicketDescription(ticket)) return;
-    const ticketId = ticket.id;
-    const timeoutId = setTimeout(() => {
-      void applyTicketUpdate(
-        { id: ticketId, description: next, updatedAt: Date.now() },
-        'Failed to update description',
-      );
-    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
-    return (): void => clearTimeout(timeoutId);
-  }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
 
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
