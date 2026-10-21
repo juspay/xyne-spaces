@@ -86,6 +86,8 @@ const Contact = memo(({ className }: ContactProps): ReactElement | null => {
   const zero = useZero();
   const employeeLocation = useEmployeeDetails(user?.email);
   const mutedIconColor = useCSSVariable('--color-muted') as string;
+  // Same token CopyableValue uses for its copy icon, so copy and call match in both themes.
+  const actionIconColor = useCSSVariable('--color-secondary-foreground') as string;
   const primaryColor = useCSSVariable('--color-action-primary') as string;
   const labelColor = useCSSVariable('--color-settings-label') as string;
   const descriptionColor = useCSSVariable('--color-settings-description') as string;
@@ -203,7 +205,7 @@ const Contact = memo(({ className }: ContactProps): ReactElement | null => {
                 accessibilityRole='button'
                 accessibilityLabel='Call phone number'
               >
-                <PhoneCall size={14} color={mutedIconColor} />
+                <PhoneCall size={14} color={actionIconColor} />
               </Pressable>
             }
           />
