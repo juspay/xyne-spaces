@@ -34,19 +34,28 @@ export interface AddChannelParticipantsResult {
   alreadyMembers: string[];
 }
 
+/** What a call will do, worked out by planChannelParticipants and carried out by applyChannelParticipants. */
+export interface ChannelParticipantsPlan {
+  channelId: string;
+  workspaceId: string;
+  userIds: string[];
+  roleOf: Map<string, ChannelRole>;
+  existingRole: Map<string, string>;
+  toAdd: string[];
+  toUpdate: string[];
+  names: Map<string, string>;
+}
+
 /**
- * Adds users to an existing channel on behalf of `actorId` with the role given for each. People already
- * in it keep their role, unless `updateRoles` is set, which sets their role to the one given.
- * Every target must be an active, non-guest user of the channel's own workspace, so no
+ * Works out, and fully validates, adding users to an existing channel on behalf of `actorId` with the role
+ * given for each. People already in it keep their role, unless `updateRoles` is set, which sets their role to
+ * the one given. Every target must be an active, non-guest user of the channel's own workspace, so no
  * cross-workspace participant can ever be created through this path.
- * Every validation runs before the first write, so a refused call changes nothing. The writes are
- * idempotent statements rather than one transaction: a repeated or concurrent identical call changes
- * nothing twice, and a call that died partway is repaired by the next one. Announcements are the
- * caller's job and run afterwards.
+ * Writes nothing: a refused call changes nothing. Carry the plan out with applyChannelParticipants.
  */
-export async function addChannelParticipants(
+export async function planChannelParticipants(
   params: AddChannelParticipantsParams
-): Promise<AddChannelParticipantsResult> {
+): Promise<ChannelParticipantsPlan> {
   const { channelId, actorId, actorWorkspaceRole, workspaceId, updateRoles = false } = params;
   const roleOf = new Map<string, ChannelRole>();
   for (const { userId, role } of params.targets) {
@@ -148,8 +157,27 @@ export async function addChannelParticipants(
     }
   }
 
-  // No transaction: every statement below is safe to repeat, so a retry or a concurrent identical call
-  // converges on the same state, and what is reported (and announced) is only what this call really did.
+  return {
+    channelId,
+    workspaceId: channel.workspaceId,
+    userIds,
+    roleOf,
+    existingRole,
+    toAdd,
+    toUpdate,
+    names: new Map(users.map((user) => [user.id, user.displayName || user.name])),
+  };
+}
+
+/**
+ * Carries out a validated plan. The writes are idempotent statements rather than one transaction: a repeated
+ * or concurrent identical call changes nothing twice, and a call that died partway is repaired by the next
+ * one. What is returned (and so announced) is only what this call really did. Announcements are the
+ * caller's job and run afterwards.
+ */
+export async function applyChannelParticipants(plan: ChannelParticipantsPlan): Promise<AddChannelParticipantsResult> {
+  const { channelId, userIds, roleOf, existingRole, toAdd, toUpdate, names } = plan;
+  const channel = { workspaceId: plan.workspaceId };
 
   // 1. New participants. One statement: INSERT ... ON CONFLICT DO NOTHING on (channelId, userId), returning
   //    only the rows it created. A user a concurrent call got in first comes back empty here.
@@ -221,10 +249,7 @@ export async function addChannelParticipants(
     if (count > 0) changedRoles.push({ userId, oldRole, role });
   }
 
-  const nameOf = (userId: string): string => {
-    const user = byId.get(userId)!;
-    return user.displayName || user.name;
-  };
+  const nameOf = (userId: string): string => names.get(userId)!;
   const added = inserted.map((participant) => ({
     userId: participant.userId,
     userName: nameOf(participant.userId),
