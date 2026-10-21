@@ -47,11 +47,16 @@ function mergeById<T>(existing: T[], incoming: T[]): T[] {
  *
  * Phase 1 (runs once after queryCacheActor is hydrated from IDB):
  *   - If cache already has data with a watermark → use it, skip fetch.
- *   - Otherwise → call the fallback REST endpoint, seed the cache.
+ *   - Otherwise, when `restHydration` is on (default) → call the fallback REST
+ *     endpoint and seed the cache.
+ *   - Otherwise (`restHydration: false`, or no executor) → skip REST and run the
+ *     full Zero query directly.
  *
  * Phase 2 (runs after Phase 1 sets a watermark):
  *   - Subscribe to a Zero useQuery with updatedAt = watermark.
- *   - Merge deltas into cache by id.
+ *   - Merge deltas into cache by id. A full (un-watermarked) Zero result
+ *     replaces the cache instead, so rows that left the set are dropped — the
+ *     same semantics the REST seed had.
  */
 export function useFallbackHydratedQuery<
   TTable extends keyof TSchema['tables'] & string,
@@ -62,9 +67,17 @@ export function useFallbackHydratedQuery<
   TContext extends BaseDefaultContext = DefaultContext,
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
-  options?: { enabled?: boolean },
+  options?: {
+    enabled?: boolean;
+    /**
+     * When false, never call the `/zero/query-fallback` REST endpoint to seed a
+     * cold/stale cache — hydrate from the full Zero query instead. Default true.
+     */
+    restHydration?: boolean;
+  },
 ): QueryResult<TReturn> {
   const enabled = options?.enabled ?? true;
+  const restHydration = options?.restHydration ?? true;
   const zero = useZero();
   const executeFallback = useFallbackExecutor();
 
@@ -164,7 +177,12 @@ export function useFallbackHydratedQuery<
   useEffect(() => {
     if (!enabled || !isHydrated || watermark > 0 || fetchStartedRef.current) return;
     if (cacheDecisionRef.current === 'fresh') return;
-    if (!executeFallback) return;
+    if (!restHydration || !executeFallback) {
+      // No REST seed: enable the full Zero query (watermark 1 = no updatedAt filter).
+      fetchStartedRef.current = true;
+      setWatermark(1);
+      return;
+    }
 
     fetchStartedRef.current = true;
     const queryName = query.query.queryName;
@@ -187,7 +205,7 @@ export function useFallbackHydratedQuery<
         // Let delta query run without watermark filter as fallback
         setWatermark(1);
       });
-  }, [enabled, isHydrated, watermark, hasCachedData, cachedLastUpdatedAt, hash, query, executeFallback]);
+  }, [enabled, isHydrated, watermark, hasCachedData, cachedLastUpdatedAt, hash, query, executeFallback, restHydration]);
 
   // Phase 2: Delta subscription — only after watermark is set
   const deltaEnabled = enabled && watermark > 0;
@@ -215,12 +233,17 @@ export function useFallbackHydratedQuery<
     prevDeltaRef.current = deltaData;
     if (!hash) return;
 
+    // watermark === 1 means the delta query ran without an updatedAt filter,
+    // i.e. it returned the full set. Replace rather than merge so a stale cache
+    // can't keep rows that have since left the set (left channels, removed users).
+    const isFullResult = watermark === 1;
+
     const hasNewData = Array.isArray(deltaData) ? deltaData.length > 0 : deltaData != null;
-    if (!hasNewData) return;
+    if (!hasNewData && !isFullResult) return;
 
     const existing = cachedData;
     const merged =
-      Array.isArray(existing) && Array.isArray(deltaData)
+      !isFullResult && Array.isArray(existing) && Array.isArray(deltaData)
         ? mergeById(existing, deltaData)
         : deltaData;
 
@@ -238,7 +261,7 @@ export function useFallbackHydratedQuery<
       data: [merged as any, { type: 'complete' as const }],
       lastUpdatedAt: nextLastUpdatedAt,
     });
-  }, [deltaData, deltaDetails.type, deltaEnabled, hash, cachedData, effectiveEntry?.lastUpdatedAt]);
+  }, [deltaData, deltaDetails.type, deltaEnabled, hash, cachedData, effectiveEntry?.lastUpdatedAt, watermark]);
 
   // Return cached data if available (from actor or lazy-loaded IDB entry),
   // otherwise fall through to the live delta query result.

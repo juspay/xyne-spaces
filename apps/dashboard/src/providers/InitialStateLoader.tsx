@@ -340,11 +340,16 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
     };
   }, [state.name]);
 
-  // Users: fallback-hydrated query (REST initial + Zero delta)
-  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2());
+  // Users / channels: cached snapshot + Zero delta. Cold or stale (>12h) cache
+  // hydrates from the full Zero query; the `/zero/query-fallback` REST seed is
+  // disabled here because it was the slowest step of the initial load.
+  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2(), {
+    restHydration: false,
+  });
 
-  // Channels: fallback-hydrated query (REST initial + Zero delta)
-  const [allChannels, allChannelsDetails] = useFallbackHydratedQuery(queries.userAllChannels());
+  const [allChannels, allChannelsDetails] = useFallbackHydratedQuery(queries.userAllChannels(), {
+    restHydration: false,
+  });
 
   const setLoggerEmail = (usersList: User[]): void => {
     if (context.userID) {
