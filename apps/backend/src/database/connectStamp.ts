@@ -2,8 +2,9 @@
  * Slack Connect — connect-handle stamper (the "write-once" chokepoint).
  *
  * Every table in a channel's subtree carries its channel's connect_group handle in `channelConnectId`
- * (the root `channels` row keeps it in `connectId`). Instead of editing every insert site, the handle
- * is filled in the two places every insert already flows through:
+ * (the root `channels` row keeps it in `connectId`); every canvas child carries its canvas's handle in
+ * `canvasConnectId` (the canvas keeps its own in `connectId`, minted by each canvas create path). Instead of
+ * editing every insert site, the handles are filled in the two places every insert already flows through:
  *   - Prisma writes (plain + interactive-transaction) → `withConnectStamp`
  *   - Zero writes                                     → `stampConnectIdForZero` (in wrapMutateWithACL)
  * Both resolve the value through ONE registry (`STAMP_TABLES`). Covering a table = one entry.
@@ -18,9 +19,8 @@
  *
  * The parent is read with one pk lookup per stamped row, on the SAME connection as the write (the
  * interactive-transaction client, or the Zero mutation's db transaction), so a parent created earlier
- * in the same transaction is visible. Handles that never change after they are written
- * (`CACHED_HANDLES`) are also kept in a per-pod LRU, so repeat writes under the same channel / canvas
- * skip the lookup — see `handleCache` for why only the committed base client fills it.
+ * in the same transaction is visible. Parent handles never change once written, so they are also kept
+ * in a per-pod LRU and repeat writes under the same parent skip the lookup — see `handleCache`.
  *
  * Not covered here (by design): nested relation creates (`parent: { children: { create } }`) and raw
  * SQL — those few sites pass the handle explicitly; `$use` middlewares that write on the raw client copy
@@ -36,6 +36,7 @@ import { logger } from '@/utils/logger';
 import { getConnectStampCache } from '@/services/otel';
 
 const CHANNEL_HANDLE = 'channelConnectId';
+const CANVAS_HANDLE = 'canvasConnectId';
 
 /**
  * One way to resolve a handle: walk to a row of `via` whose id is in the child's `field`, and copy the
@@ -58,6 +59,10 @@ const fromChannel = (field = 'channelId'): Stamp[] => [
 ];
 const fromParent = (via: string, field: string): Stamp[] => [
   { col: CHANNEL_HANDLE, strategies: [{ via, field }] },
+];
+/** The parent canvas's own handle → the row's `canvasConnectId`. */
+const fromCanvas = (field = 'canvasId'): Stamp[] => [
+  { col: CANVAS_HANDLE, strategies: [{ via: 'canvases', field, from: 'connectId' }] },
 ];
 const externalEntity = (entityType: string, via: string): ParentStrategy => ({
   via,
@@ -109,8 +114,9 @@ const STAMP_TABLES: Record<string, Stamp[]> = {
   entity_access: fromChannel(),
   activities: fromChannel(),
   surface_nudge_counts: fromChannel(),
-  canvases: fromChannel(), // the canvas's own `connectId` is minted by canvasService, not here
-  canvas_participants: fromChannel(), // the participant row's OWN channel (the channel it is shared into)
+  canvases: fromChannel(), // the canvas's own `connectId` is minted by its create path, not here
+  // the participant row's OWN channel (the channel it is shared into) + its canvas's handle
+  canvas_participants: [...fromChannel(), ...fromCanvas()],
   canvas_folders: fromChannel(),
   invitations: fromChannel(),
   external_sources: fromChannel(),
@@ -183,9 +189,14 @@ const STAMP_TABLES: Record<string, Stamp[]> = {
       ],
     },
   ],
+  // ── canvas children: the parent canvas's own handle (canvasId required → strong) ──────────────
+  canvas_versions: fromCanvas(),
+  canvas_comment_threads: fromCanvas(),
+  canvas_comments: fromCanvas(),
+  canvas_user_status: fromCanvas(),
   // artifactId IS the canvas id: carries both the canvas's own handle and the canvas's channel handle
   sdlc_artifacts: [
-    { col: 'canvasConnectId', strategies: [{ via: 'canvases', field: 'artifactId', from: 'connectId' }] },
+    ...fromCanvas('artifactId'),
     { col: CHANNEL_HANDLE, strategies: [{ via: 'canvases', field: 'artifactId' }] },
   ],
   // sdlc_tracks: no FK to its channel — the track's creators pass the handle of the channel its
@@ -265,15 +276,22 @@ const baseLookup = (): Lookup | null => baseLookupFn;
 
 // ── parent-handle cache ───────────────────────────────────────────────────────────────────────────
 /**
- * `table.column` handles that never change once written: a channel's / canvas's own connectId is
- * minted at create (or filled once by the backfill) and never updated. Only these are cached —
- * a parent's `channelConnectId` is re-stamped when the parent moves channel, and a per-pod cache
- * cannot see a move made on another pod.
+ * Every `table.column` a stamp strategy reads from (channels.connectId, canvases.connectId,
+ * conversations.channelConnectId, messages.channelConnectId, tickets.channelConnectId, …), derived
+ * from STAMP_TABLES so a new parent is cached automatically.
+ *
+ * All of them are write-once: a handle is set when the row is created (or filled once by the backfill)
+ * and never rewritten — no live flow moves a row to another channel. That is what makes caching them
+ * safe. If a flow that rewrites a parent's handle is ever added, it must also handle this cache.
  */
-const CACHED_HANDLES = new Set(['channels.connectId', 'canvases.connectId']);
+const CACHED_HANDLES = new Set(
+  Object.values(STAMP_TABLES).flatMap((stamps) =>
+    stamps.flatMap((s) => s.strategies.map((st) => `${st.via}.${handleColumn(st)}`)),
+  ),
+);
 
-// Keys and values are fixed-size ids (~300 B per entry with overhead) → ~6 MB at the cap.
-const HANDLE_CACHE_MAX_ENTRIES = 20_000;
+// Keys and values are fixed-size ids (~300 B per entry with overhead) → ~15 MB at the cap.
+const HANDLE_CACHE_MAX_ENTRIES = 50_000;
 // The values never change, so the ttl only bounds how long a deleted parent's entry lingers.
 const HANDLE_CACHE_TTL_MS = 60 * 60 * 1000;
 
@@ -281,12 +299,12 @@ const cacheKey = (table: string, col: string, id: string): string | null =>
   CACHED_HANDLES.has(`${table}.${col}`) ? `${table}.${col}:${id}` : null;
 
 /**
- * Per-pod LRU of committed parent handles. Only the base client fills it (a miss fetches through it),
- * so every entry is committed data. A lookup inside a transaction (interactive Prisma or a Zero
- * mutation) only reads it: on a miss it reads on its own connection and does NOT publish — the
- * transaction can roll back, and a retry can recreate the same parent id with a new handle, so an
- * uncommitted value must never reach the shared cache. Empty handles are never cached (an
- * un-backfilled parent is re-read until it has one).
+ * Per-pod LRU of committed parent handles, keyed `table.column:parentId`. Only the base client fills
+ * it (a miss fetches through it), so every entry is committed data. A lookup inside a transaction
+ * (interactive Prisma or a Zero mutation) only reads it: on a miss it reads on its own connection and
+ * does NOT publish — the transaction can roll back, and a retry can recreate the same parent id with a
+ * new handle, so an uncommitted value must never reach the shared cache. Empty handles are never
+ * cached (an un-backfilled parent is re-read until it has one).
  */
 const handleCache = createCache<string, string>({
   max: HANDLE_CACHE_MAX_ENTRIES,

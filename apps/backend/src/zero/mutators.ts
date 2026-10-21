@@ -177,6 +177,7 @@ import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { channelConnectIdFor } from '@/database/connectStamp';
+import { newConnectId } from '@/database/connectGroup';
 import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
@@ -9815,7 +9816,8 @@ export function createMutators(
           content: z.any().optional(),
           timestamp: z.number(),
           participantId: z.string(),
-          // Slack Connect: caller-generated connectId (id == connectId for the private row).
+          // Slack Connect: caller-generated connectId (id == connectId for the private row). Minted
+          // here when absent (SDK / old clients) so no canvas is ever created without one.
           connectId: z.string().optional(),
           // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
           // Zod validation errors during a rolling deploy; intentionally
@@ -9823,8 +9825,9 @@ export function createMutators(
           viewAccessId: z.string().optional(),
           editAccessId: z.string().optional(),
         }),
-        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId } }) => {
+        async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId: clientConnectId } }) => {
           const now = timestamp;
+          const connectId = clientConnectId || newConnectId();
           const {
             projectId: resolvedProjectId,
             channelId: resolvedChannelId,
@@ -9861,18 +9864,16 @@ export function createMutators(
           });
 
           // Slack Connect: create this canvas's private connect_group row (id == connectId).
-          if (connectId) {
-            await tx.mutate.connect_group.insert({
-              id: connectId,
-              entityType: ConnectEntityType.CANVAS,
-              entityId: id,
-              hostWorkspaceId: authData.workspaceId,
-              connectId,
-              status: 'ACTIVE',
-              createdAt: now,
-              updatedAt: now,
-            });
-          }
+          await tx.mutate.connect_group.insert({
+            id: connectId,
+            entityType: ConnectEntityType.CANVAS,
+            entityId: id,
+            hostWorkspaceId: authData.workspaceId,
+            connectId,
+            status: 'ACTIVE',
+            createdAt: now,
+            updatedAt: now,
+          });
 
           // Add creator as participant with OWNER role
           await tx.mutate.canvas_participants.insert({
@@ -9883,7 +9884,7 @@ export function createMutators(
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
-            ...(connectId ? { canvasConnectId: connectId } : {}),
+            canvasConnectId: connectId,
           });
           asyncTasks.push(async () => {
             try {
