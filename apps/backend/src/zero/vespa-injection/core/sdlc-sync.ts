@@ -13,7 +13,7 @@ import {
   channelSchema,
   fileSchema,
   messageSchema,
-  SDLC_DISCUSSION_FIELDS,
+  SDLC_CONVERSATION_FIELDS,
   SDLC_FILE_FIELDS,
   SDLC_TICKET_FIELDS,
   sdlcContainerSchema,
@@ -182,7 +182,7 @@ async function jobsFor(hubId: string, change: SdlcSearchChange): Promise<VespaJo
   const conversation = async (id: string) => {
     const messages = await db.message.findMany({ where: { conversationId: id, isDeleted: false }, select: { messageId: true } });
     for (const m of messages) {
-      add({ schema: messageSchema, jobType: 'update', docId: m.messageId, fields: [...SDLC_DISCUSSION_FIELDS] });
+      add({ schema: messageSchema, jobType: 'update', docId: m.messageId, fields: [...SDLC_CONVERSATION_FIELDS] });
     }
   };
   // A document or upload; with its dependents when its place changed: the tickets linked to it

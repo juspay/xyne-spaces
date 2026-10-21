@@ -17,7 +17,7 @@ import {
   VespaDocType,
   type SdlcBranch,
   type SdlcContainerType,
-  type SdlcDiscussionFields,
+  type SdlcConversationFields,
   type SdlcFieldValues,
   type SdlcFileFields,
   type SdlcTicketFields,
@@ -56,6 +56,19 @@ function once<K, V>(load: (key: K) => Promise<V>): (key: K) => Promise<V> {
     if (!cache.has(key)) cache.set(key, load(key));
     return cache.get(key)!;
   };
+}
+
+/**
+ * A link between a ticket and an item of a hub: X -> TICKET [TICKET] (raised or linked there),
+ * X <-> TICKET [CONTEXT], or TRACK -> TICKET [TRACK_ITEM] (the tracks whose board holds it).
+ */
+interface TicketLink {
+  channelId: string;
+  sourceType: string;
+  sourceId: string;
+  targetType: string;
+  targetId: string;
+  relationType: string;
 }
 
 /** How an id is placed in the hub. */
@@ -271,25 +284,11 @@ function sdlcHub(hubId: string) {
   };
 
   /**
-   * Where a ticket sits in this hub; null when it sits nowhere in it. Every item it is linked to
-   * is one of its places: X -> TICKET [TICKET] (raised or linked there), X <-> TICKET [CONTEXT],
-   * and TRACK -> TICKET [TRACK_ITEM] (the tracks whose board holds it).
+   * Where a ticket sits in this hub, from its links here (oldest first); null when none of them
+   * reaches a placed item. Every item it is linked to is one of its places.
    */
-  const ticketIn = async (ticketId: string): Promise<SdlcTicketFields | null> => {
-    // 1. Its links, oldest first.
-    const links = await db.sdlcEntityLink.findMany({
-      where: {
-        channelId: hubId,
-        OR: [
-          { targetType: 'TICKET', targetId: ticketId, sourceType: { not: 'TICKET' }, relationType: { in: ['TICKET', 'CONTEXT', SDLC_CONTAINMENT_RELATION] } },
-          { sourceType: 'TICKET', sourceId: ticketId, targetType: { not: 'TICKET' }, relationType: 'CONTEXT' },
-        ],
-      },
-      orderBy: OLDEST_FIRST,
-      select: { sourceType: true, sourceId: true, targetType: true, targetId: true, relationType: true },
-    });
-
-    // 2. Each linked item's container, the item when it is a document, the repository of its container.
+  const ticketIn = async (links: TicketLink[]): Promise<SdlcTicketFields | null> => {
+    // Each linked item's container, the item when it is a document, the repository of its container.
     const containerIds = new Set<string>();
     const documentIds = new Set<string>();
     const repoIds = new Set<string>();
@@ -349,16 +348,16 @@ export async function sdlcFieldsForAttachment(attachment: { id: string; entityTy
  * there, in the order its links were made. All null outside SDLC.
  */
 export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcFieldValues<SdlcTicketFields>> {
-  // 1. The hubs it is linked in, oldest link first.
-  const links = await db.sdlcEntityLink.findMany({
+  // 1. All its links, in every hub, oldest first.
+  const links: TicketLink[] = await db.sdlcEntityLink.findMany({
     where: {
       OR: [
-        { targetType: 'TICKET', targetId: ticketId, relationType: { in: ['TICKET', 'CONTEXT', SDLC_CONTAINMENT_RELATION] } },
-        { sourceType: 'TICKET', sourceId: ticketId, relationType: 'CONTEXT' },
+        { targetType: 'TICKET', targetId: ticketId, sourceType: { not: 'TICKET' }, relationType: { in: ['TICKET', 'CONTEXT', SDLC_CONTAINMENT_RELATION] } },
+        { sourceType: 'TICKET', sourceId: ticketId, targetType: { not: 'TICKET' }, relationType: 'CONTEXT' },
       ],
     },
     orderBy: OLDEST_FIRST,
-    select: { channelId: true },
+    select: { channelId: true, sourceType: true, sourceId: true, targetType: true, targetId: true, relationType: true },
   });
   const hubIds = new Set(links.map(link => link.channelId));
 
@@ -367,7 +366,7 @@ export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcFieldVa
   const documentIds = new Set<string>();
   const repoIds = new Set<string>();
   for (const hubId of hubIds) {
-    const inHub = await sdlcHub(hubId).ticketIn(ticketId);
+    const inHub = await sdlcHub(hubId).ticketIn(links.filter(link => link.channelId === hubId));
     inHub?.sdlcContainerIds.forEach(id => containerIds.add(id));
     inHub?.sdlcDocumentIds.forEach(id => documentIds.add(id));
     inHub?.sdlcRepoIds.forEach(id => repoIds.add(id));
@@ -384,7 +383,7 @@ export async function sdlcFieldsForTicket(ticketId: string): Promise<SdlcFieldVa
  * The SDLC fields for Vespa of a conversation's messages: the container of the item it was
  * started on, and that item when it is a document. All null when it was not started in a hub.
  */
-export async function sdlcFieldsForConversation(conversationId: string | null | undefined): Promise<SdlcFieldValues<SdlcDiscussionFields>> {
+export async function sdlcFieldsForConversation(conversationId: string | null | undefined): Promise<SdlcFieldValues<SdlcConversationFields>> {
   const notInHub = { sdlcContainerRef: null, sdlcDocumentId: null };
   if (!conversationId) return notInHub;
 

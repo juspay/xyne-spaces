@@ -232,7 +232,7 @@ export interface VespaChatContainerDocument extends VespaDocument {
   memberCount: number;
 }
 
-export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, SdlcFieldValues<SdlcDiscussionFields> {
+export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, SdlcFieldValues<SdlcConversationFields> {
   text: string;
   chunks: string[];
   links?: string[];
@@ -657,7 +657,7 @@ export interface SdlcFileFields {
  * document's container and names the document; started on a track or folder, the document
  * is ''.
  */
-export interface SdlcDiscussionFields {
+export interface SdlcConversationFields {
   /** The container it sits in: id:<namespace>:sdlc_container::<trackId|folderId>. */
   sdlcContainerRef: string;
   /** The file docId (canvas or upload) it was started on, or ''. */
@@ -682,7 +682,7 @@ export interface SdlcTicketFields {
 /** SDLC fields as fed: each may be null, which leaves it unset (and clears it on an update). */
 export type SdlcFieldValues<T> = { [K in keyof T]?: T[K] | null };
 
-export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
+export const SDLC_CONVERSATION_FIELDS: readonly (keyof SdlcConversationFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
 export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcContainerIds', 'sdlcDocumentIds', 'sdlcRepoIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
