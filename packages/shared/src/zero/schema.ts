@@ -3671,6 +3671,11 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["entityId"],
     destField: ["id"],
     destSchema: channelTable
+  }),
+  canvasComment: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: canvasCommentTable
   })
 }))
 
@@ -4275,6 +4280,11 @@ export const canvasCommentTableRelationships = relationships(
       sourceField: ['canvasConnectId'],
       destField: ['connectId'],
       destSchema: connectGroupTable,
+    }),
+    attachments: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: messageAttachmentTable,
     }),
   }),
 );
