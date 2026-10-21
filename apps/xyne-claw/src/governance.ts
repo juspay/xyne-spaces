@@ -27,6 +27,7 @@ import {
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 import { flushGovernance, queueGovernance, recordGovernanceNow, type GovernanceEvent, type GovernanceFinding } from "./governance-client.js";
+import { releaseJudgeRun } from "./governance-judge.js";
 
 const log = createLogger("governance");
 
@@ -367,7 +368,10 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       return { verdict: r.verdict, removed: check.links.length, text: componentMode("D") === "enforce" ? check.text : text };
     },
     async finish() {
-      if (opts.role !== "subagent") byRun.delete(sessionId);
+      if (opts.role !== "subagent") {
+        byRun.delete(sessionId);
+        releaseJudgeRun(sessionId);
+      }
       log.info(`[governance] session=${sessionId} risk=${state.risk} private=${state.privateData} scanned=${stats.scanned} misses=${stats.coverageMisses} findings=${stats.findings} decisions=${stats.decisions} blocks=${stats.blocks} auditFailures=${stats.auditFailures}`);
       await flushGovernance();
     },
