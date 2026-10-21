@@ -41,6 +41,7 @@ export type RecordingStoreEvent =
       notesCanvasId: string;
       startTime: number;
       defaultLayout?: RecordingLayout;
+      conversationId?: string | null;
     }
   | { type: 'pauseRecording' }
   | { type: 'resumeRecording' }

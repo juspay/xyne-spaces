@@ -29,14 +29,34 @@ export function createThreadAnchorMessageTx(self: NoteTakerCallRepository, messa
       },
     });
 
-    // Marks the conversation as having a live recording attached.
-    await tx.conversation.update({
+    // Marks the conversation as having a live recording attached — unless a
+    // regular call is already live in this thread. conversation.callId is the
+    // thread's "call in progress" slot; overwriting it would hide the live call
+    // and let someone start a second one. The recording stays reachable from its
+    // anchor message either way.
+    const conversationRow = await tx.conversation.findUnique({
       where: { conversationId },
-      data: {
-        callId: callExternalId,
-        metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
-      },
+      select: { callId: true },
     });
+    const liveCallInThread = conversationRow?.callId
+      ? await tx.call.findFirst({
+          where: {
+            externalId: conversationRow.callId,
+            status: CallStatus.ACTIVE,
+            callType: { not: CallType.HEADLESS },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!liveCallInThread) {
+      await tx.conversation.update({
+        where: { conversationId },
+        data: {
+          callId: callExternalId,
+          metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
+        },
+      });
+    }
 
 
     const currentCall = await tx.call.findUnique({ where: { id: callId }, select: { metadata: true } });
@@ -84,7 +104,7 @@ export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, message
       select: { senderId: true, msgType: true, conversationId: true, metadata: true },
     });
     if (!anchor) {
-      await self.clearConversationRecordingState(tx, conversationId);
+      await self.clearConversationRecordingState(tx, conversationId, callExternalId);
       return { removed: false, reason: 'anchor_missing' };
     }
     const anchorMetadata =
@@ -99,7 +119,7 @@ export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, message
       anchorMetadata.isHeadlessRecording === true &&
       anchorMetadata.callId === callExternalId;
     if (!isRecordingAnchor) {
-      await self.clearConversationRecordingState(tx, conversationId);
+      await self.clearConversationRecordingState(tx, conversationId, callExternalId);
       return { removed: false, reason: 'not_recording_anchor' };
     }
 
@@ -145,7 +165,7 @@ export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, message
       });
     }
 
-    await self.clearConversationRecordingState(tx, conversationId);
+    await self.clearConversationRecordingState(tx, conversationId, callExternalId);
     return { removed: true };
   });
 }
