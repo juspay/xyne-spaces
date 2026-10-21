@@ -65,6 +65,8 @@ export class ChannelsACL extends BaseQueryACL<
    * A guest may open only a DM / group DM (e.g. to start a call with someone), and only
    * with themselves plus people they can already see. A DM's name is its members' sorted
    * ids (findOrCreateDMChannel; a self-DM is the bare id), so membership is checked here.
+   * This only refuses early so no empty DM is left behind; who actually gets added is
+   * enforced per participant in ChannelParticipantRepository.assertGuestMayAdd.
    */
   private async guestCanCreateDm(data: Prisma.ChannelUncheckedCreateInput): Promise<boolean> {
     if (data.scopeType !== ChannelScopeType.DM && data.scopeType !== ChannelScopeType.GROUP_DM) {
