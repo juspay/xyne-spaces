@@ -162,7 +162,8 @@ export enum RankProfile {
   unifiedRank = 'unified',
   personalizedRank = 'personalized',
   fuzzyRank = 'default_fuzzy',
-  duplicateDetection = 'duplicate_detection'
+  duplicateDetection = 'duplicate_detection',
+  relatedDetection = 'related_detection'
 }
 
 export type User = {
@@ -281,6 +282,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   workflowType: string;
   description: string;
   description_clean?: string;
+  ticketSummary?: string;
   chunks: string[];
   ticketType: string;
   priority: TicketPriority;

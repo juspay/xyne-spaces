@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { logger } from '@/utils/logger';
-import { ActivityType, MAX_DUPLICATE_LOOKBACK_DAYS, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import { ActivityType, MAX_DUPLICATE_LOOKBACK_DAYS, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation, TicketStatusV2 } from '@xyne/shared';
 import {
   resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
@@ -18,13 +18,18 @@ import { RankProfile } from '@/vespa/src/types';
 import { z } from 'zod';
 import type { EmailChannelPreference, Prisma } from '@prisma/client';
 import { buildFormFields } from '@/zero/vespa-injection/core/form-fields';
+import { pickRelatedTicketIds } from '@/services/tickets/relatedTicketSelection';
+import { causeKeyOf, hasDistinguishingDetail, hasResolution, summaryMatchText } from '@/agents/ticket-thread-summary/summaryText';
+import { extractEmailAddress } from '@/utils/email';
 import type {
   TicketDuplicateCandidate,
   TicketDuplicateCheckAnalysis,
 } from '@/types/ticket';
 import {
   analyzeTicketDuplicates,
+  getRelatedJevConfig,
   isJevScoringEnabled,
+  scoreRelatedTickets,
   type TicketDuplicateCandidateInput,
   type TicketDuplicateContext,
 } from '@/agents/ticket-duplicate';
@@ -32,6 +37,10 @@ import {
 const prisma = DatabaseClient.getInstance();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const DUPLICATE_REFERENCE_LIMIT = 10;
+// Jev judges this many related candidates, taken from the larger search below after solved
+// tickets are moved to the front: they carry a resolution, open ones usually don't.
+const RELATED_CANDIDATE_LIMIT = 10;
+const RELATED_SEARCH_LIMIT = 20;
 // Cap on extra Vespa hits fetched to make up for excluded tickets, so a ticket with
 // many links can't blow up the search size.
 const MAX_EXCLUDED_OVERFETCH = 20;
@@ -209,6 +218,7 @@ const buildDuplicateSearchQuery = (title: string, description: string): string =
 };
 
 const DISMISSED_DUPLICATE_RELATIONS = new Set<string>(DUPLICATE_RELATIONS);
+const DISMISSED_RELATED_RELATIONS = new Set<string>([TicketReferenceRelation.RELATED_POSSIBLE]);
 
 const counterpartOf = (ticketId: string, activityTicketId: string, value: unknown): string | null => {
   if (!value || typeof value !== 'object') return null;
@@ -217,14 +227,14 @@ const counterpartOf = (ticketId: string, activityTicketId: string, value: unknow
   return activityTicketId === ticketId ? target : activityTicketId;
 };
 
-const isDismissal = (value: unknown): boolean => {
+const isDismissal = (value: unknown, dismissedRelations: Set<string> = DISMISSED_DUPLICATE_RELATIONS): boolean => {
   if (!value || typeof value !== 'object') return false;
   const { action, relationType, oldRelationType } = value as Record<string, unknown>;
-  if (action === 'removed') return DISMISSED_DUPLICATE_RELATIONS.has(String(relationType));
+  if (action === 'removed') return dismissedRelations.has(String(relationType));
   return (
     action === 'updated' &&
-    DISMISSED_DUPLICATE_RELATIONS.has(String(oldRelationType)) &&
-    !DISMISSED_DUPLICATE_RELATIONS.has(String(relationType))
+    dismissedRelations.has(String(oldRelationType)) &&
+    !dismissedRelations.has(String(relationType))
   );
 };
 
@@ -347,26 +357,39 @@ class TicketDuplicateService {
 
     // Lazy resolution: the board-form query runs only here — config enabled +
     // fields configured (checked above) + raw values present.
+    const { tokens, missing } = await this.resolveScopeTokens(scope, scopeFieldValues);
+    if (!tokens) {
+      logDetectionSkipped(missing);
+      return null;
+    }
+    return tokens;
+  }
+
+  /**
+   * `fieldId::value` tokens for every configured scope field from the ticket's raw values,
+   * or null plus the configured field ids the ticket has no value for. One token per
+   * indexed value: YqlBuilder buckets by fieldId, so tokens sharing a fieldId OR together
+   * while distinct fields AND — "matches every scope field, on at least one of its values".
+   */
+  private async resolveScopeTokens(
+    scope: { config: DuplicateScopeConfig; boardId: string },
+    scopeFieldValues: ReadonlyArray<DuplicateScopeFieldValue>,
+  ): Promise<{ tokens: string[] | null; missing: string[] }> {
     const resolvedFields = await buildDuplicateScopeFieldValues({
-      boardId,
+      boardId: scope.boardId,
       fieldValues: scopeFieldValues,
     });
     const valuesByFieldId = new Map(
       resolvedFields.map(entry => [entry.fieldId, entry.values] as const),
     );
-
-    const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
-    if (missing.length > 0) {
-      logDetectionSkipped(missing);
-      return null;
-    }
-
-    // One token per indexed value. YqlBuilder buckets by fieldId, so tokens sharing
-    // a fieldId OR together while distinct fields AND — "matches every scope field,
-    // on at least one of its values".
-    return scopeConfig.scopeFieldGlobalIds.flatMap(fieldId =>
-      valuesByFieldId.get(fieldId)!.map(value => `${fieldId}::${value}`),
-    );
+    const missing = scope.config.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
+    if (missing.length > 0) return { tokens: null, missing };
+    return {
+      tokens: scope.config.scopeFieldGlobalIds.flatMap(fieldId =>
+        valuesByFieldId.get(fieldId)!.map(value => `${fieldId}::${value}`),
+      ),
+      missing: [],
+    };
   }
 
   /**
@@ -441,7 +464,7 @@ class TicketDuplicateService {
     return prisma.ticket.findUnique({
       where: { id: ticketId },
       select: {
-        id: true, title: true, description: true,
+        id: true, title: true, description: true, conversationId: true,
         projectId: true, channelId: true, createdBy: true, createdAt: true,
       },
     });
@@ -800,8 +823,9 @@ class TicketDuplicateService {
     dynamicFieldValues?: string[];
     createdAfterTimestamp?: number;
     createdBeforeTimestamp?: number;
+    rankProfile?: RankProfile;
   }): Promise<{ candidates: TicketDuplicateCandidate[]; searchFailed: boolean }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, dynamicFieldValues, createdAfterTimestamp, createdBeforeTimestamp } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, dynamicFieldValues, createdAfterTimestamp, createdBeforeTimestamp, rankProfile = RankProfile.duplicateDetection } = params;
     const query = buildDuplicateSearchQuery(title, description);
 
     if (!query) {
@@ -833,7 +857,7 @@ class TicketDuplicateService {
           // Over-fetch by what gets filtered out below, so exclusions don't shrink the
           // candidate list the model sees.
           limit: limit + Math.min(excludeIds.size, MAX_EXCLUDED_OVERFETCH) + ACCESS_OVERFETCH,
-          rankProfile: RankProfile.duplicateDetection,
+          rankProfile,
           privateQuery: true,
           literalQuery: true,
           ticket: {
@@ -878,6 +902,204 @@ class TicketDuplicateService {
       candidates: candidates.filter(candidate => visible.has(candidate.id)).slice(0, limit),
       searchFailed: false,
     };
+  }
+
+  /**
+   * Link earlier tickets in the same project that would help resolve this one, as
+   * RELATED_POSSIBLE. Runs on each thread summary while the ticket is open: the summary's
+   * problem and details are the search query, candidates are judged by their own
+   * summaries where they have one, and `maxLinks` caps the ticket's links overall. Uses
+   * the desk's duplicate scope fields when the ticket has values for them, project-wide
+   * otherwise. A candidate whose summary names a different cause than this ticket's is
+   * dropped; the same cause, the same requester and a resolution each move a candidate
+   * forward in what Jev sees. Skips anything already linked either way, parents, and
+   * related links an agent removed. Jev-only: nothing is linked when Jev can't score.
+   */
+  async detectRelatedTickets(ticketId: string, summary: string): Promise<string[]> {
+    try {
+      if (!hasDistinguishingDetail(summary)) {
+        logger.info('[TicketDuplicateService] Related detection waiting for distinguishing detail', { ticketId });
+        return [];
+      }
+      const ticket = await this.findTicketForDetection(ticketId);
+      if (!ticket) return [];
+
+      const [parentMappings, references, referenceActivities, savedValues, preference, firstEmail] = await Promise.all([
+        prisma.ticketSubTicketMapping.findMany({
+          where: { subTicket: { mappedTicketId: ticket.id } },
+          select: { ticketId: true },
+        }),
+        prisma.ticketReferenceMapping.findMany({
+          where: { OR: [{ sourceTicketId: ticket.id }, { targetTicketId: ticket.id }] },
+          select: { sourceTicketId: true, targetTicketId: true, relationType: true },
+        }),
+        prisma.ticketActivity.findMany({
+          where: { ticketId: ticket.id, activityType: ActivityType.REFERENCE_TICKET },
+          orderBy: { timestamp: 'asc' },
+          select: { ticketId: true, value: true },
+        }),
+        prisma.formEntityValues.findMany({
+          where: { entityId: ticket.id, entityType: 'TICKET' },
+          orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
+          distinct: ['fieldId'],
+          select: { fieldId: true, actualFieldValue: true },
+        }),
+        this.findChannelPreference(ticket.channelId),
+        prisma.email.findFirst({
+          where: { conversationId: ticket.conversationId },
+          orderBy: { createdAt: 'asc' },
+          select: { from: true },
+        }),
+      ]);
+
+      const latestByCounterpart = new Map<string, unknown>();
+      for (const activity of referenceActivities) {
+        const counterpart = counterpartOf(ticket.id, activity.ticketId, activity.value);
+        if (counterpart) latestByCounterpart.set(counterpart, activity.value);
+      }
+      const excludeTicketIds = [
+        ...parentMappings.map(mapping => mapping.ticketId),
+        ...references.map(ref => (ref.sourceTicketId === ticket.id ? ref.targetTicketId : ref.sourceTicketId)),
+        ...[...latestByCounterpart]
+          .filter(([, value]) => isDismissal(value, DISMISSED_RELATED_RELATIONS))
+          .map(([counterpart]) => counterpart),
+      ];
+
+      const relatedConfig = await getRelatedJevConfig();
+      const existingRelated = references.filter(
+        ref => ref.sourceTicketId === ticket.id && ref.relationType === TicketReferenceRelation.RELATED_POSSIBLE,
+      ).length;
+      const maxLinks = relatedConfig.maxLinks - existingRelated;
+      if (maxLinks <= 0) return [];
+
+      // Unlike duplicates, a missing scope value widens to project-wide instead of skipping.
+      let dynamicFieldValues: string[] | undefined;
+      const scope = this.resolveDuplicateScopeConfig(ticket.channelId, preference);
+      if (scope) {
+        const { tokens, missing } = await this.resolveScopeTokens(
+          scope,
+          savedValues.map(value => ({ fieldId: value.fieldId, value: value.actualFieldValue })),
+        );
+        if (tokens) dynamicFieldValues = tokens;
+        else logger.info('[TicketDuplicateService] Related search unscoped, ticket lacks scope field values', { ticketId, missing });
+      }
+
+      const { candidates, searchFailed } = await this.getDuplicateCandidates({
+        title: ticket.title,
+        description: summaryMatchText(summary),
+        projectId: ticket.projectId,
+        userId: ticket.createdBy,
+        limit: RELATED_SEARCH_LIMIT,
+        excludeTicketId: ticket.id,
+        excludeTicketIds,
+        ...(dynamicFieldValues ? { dynamicFieldValues } : {}),
+        createdAfterTimestamp: lookbackCutoff(relatedConfig.lookbackDays, ticket.createdAt.getTime()),
+        createdBeforeTimestamp: ticket.createdAt.getTime(),
+        rankProfile: RankProfile.relatedDetection,
+      });
+      if (searchFailed || candidates.length === 0) return [];
+
+      const candidateRows = await prisma.ticket.findMany({
+        where: { id: { in: candidates.map(candidate => candidate.id) } },
+        select: { id: true, statusV2: true, conversationId: true, threadSummary: { select: { summary: true } } },
+      });
+      const rowById = new Map(candidateRows.map(row => [row.id, row]));
+      // "Solved" means the agent can read how: closed, and the summary states a resolution.
+      const isSolved = (id: string): boolean => {
+        const row = rowById.get(id);
+        if (row?.statusV2 !== TicketStatusV2.COMPLETED) return false;
+        return !row.threadSummary || hasResolution(row.threadSummary.summary);
+      };
+
+      // The same customer hitting the same problem again usually has the same cause.
+      const requester = extractEmailAddress(firstEmail?.from);
+      const sameRequesterConversations = new Set<string>();
+      if (requester) {
+        const candidateFirstEmails = await prisma.email.findMany({
+          where: { conversationId: { in: candidateRows.map(row => row.conversationId) } },
+          orderBy: { createdAt: 'asc' },
+          distinct: ['conversationId'],
+          select: { conversationId: true, from: true },
+        });
+        for (const email of candidateFirstEmails) {
+          if (extractEmailAddress(email.from) === requester) sameRequesterConversations.add(email.conversationId);
+        }
+      }
+      const isSameRequester = (id: string): boolean => {
+        const conversationId = rowById.get(id)?.conversationId;
+        return conversationId !== undefined && sameRequesterConversations.has(conversationId);
+      };
+
+      // A matching cause key ranks a candidate first; a different key is left to Jev, since
+      // the summariser words the same cause differently across tickets.
+      const causeKey = causeKeyOf(summary);
+      const candidateCauseKey = (id: string): string | null => {
+        const candidateSummary = rowById.get(id)?.threadSummary?.summary;
+        return candidateSummary ? causeKeyOf(candidateSummary) : null;
+      };
+      const isSameCause = (id: string): boolean => causeKey !== null && candidateCauseKey(id) === causeKey;
+
+      // Only summarised candidates are judged: on a raw email Jev sees neither cause nor
+      // resolution and over-links. An unsummarised ticket is picked up once it has one.
+      const rank = (id: string): number =>
+        Number(isSameCause(id)) * 4 + Number(isSameRequester(id)) * 2 + Number(isSolved(id));
+      const judged = candidates
+        .filter(candidate => rowById.get(candidate.id)?.threadSummary)
+        .sort((a, b) => rank(b.id) - rank(a.id))
+        .slice(0, RELATED_CANDIDATE_LIMIT);
+      if (judged.length === 0) return [];
+
+      const scores = await scoreRelatedTickets(
+        {
+          title: ticket.title,
+          description: summary,
+          candidates: judged.map(candidate => {
+            const row = rowById.get(candidate.id);
+            return {
+              id: candidate.id,
+              title: candidate.title,
+              description: row?.threadSummary?.summary ?? '',
+              ...(row?.statusV2 ? { status: row.statusV2 } : {}),
+            };
+          }),
+        },
+        { userId: ticket.createdBy, projectId: ticket.projectId, ticketId: ticket.id },
+      );
+      if (!scores) return [];
+
+      const relatedIds = pickRelatedTicketIds(scores, isSolved, { ...relatedConfig, maxLinks });
+      if (relatedIds.length === 0) return [];
+
+      const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: ticket.projectId });
+      await prisma.ticketReferenceMapping.createMany({
+        data: relatedIds.map(targetTicketId => ({
+          sourceTicketId: ticket.id,
+          targetTicketId,
+          workspaceId,
+          relationType: TicketReferenceRelation.RELATED_POSSIBLE,
+          createdBy: ticket.createdBy,
+        })),
+        skipDuplicates: true,
+      });
+
+      logger.info('[TicketDuplicateService] Linked related tickets', {
+        ticketId: ticket.id,
+        relatedIds,
+        causeKey,
+        sameCause: relatedIds.filter(isSameCause),
+        sameRequester: relatedIds.filter(isSameRequester),
+        scoped: dynamicFieldValues !== undefined,
+        sameCauseThreshold: relatedConfig.sameCauseThreshold,
+        sameSymptomThreshold: relatedConfig.sameSymptomThreshold,
+      });
+      return relatedIds;
+    } catch (error) {
+      logger.error('[TicketDuplicateService] Related ticket detection failed', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 
   async persistDuplicateReferences(params: {

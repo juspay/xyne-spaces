@@ -395,12 +395,18 @@ export class YqlBuilder {
             ? scopedLexicalClause(query, params, schemas)
             : lexicalClause(query, params);
         if (useSemantic) {
+          // Related-ticket detection also retrieves by the AI thread summary; the field
+          // exists only on the ticket schema, which is all that search selects.
+          const ticketSummaryClause =
+            rankProfile === RankProfile.relatedDetection
+              ? `\n        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(ticket_summary_embeddings, e))`
+              : '';
           // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(
           ${mainLexical}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
-        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
+        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))${ticketSummaryClause}
         )`);
         } else {
           whereConditions.push(mainLexical);

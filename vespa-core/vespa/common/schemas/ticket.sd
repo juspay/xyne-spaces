@@ -89,6 +89,13 @@ schema ticket {
       index: enable-bm25
     }
 
+    # AI summary of the ticket's whole thread (problem, details, cause, resolution), written
+    # by the backend for related-ticket matching.
+    field ticketSummary type string {
+      indexing: index | summary
+      index: enable-bm25
+    }
+
     field createdBy type string {
       indexing: index | attribute | summary
       index: enable-bm25
@@ -336,6 +343,13 @@ schema ticket {
     }
   }
 
+  field ticket_summary_embeddings type tensor<bfloat16>(v[DIMS]) {
+    indexing: input ticketSummary | embed hf-embedder | attribute | index
+    attribute {
+      distance-metric: angular
+    }
+  }
+
   fieldset default {
     fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, chunks, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, projectCode, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
   }
@@ -397,6 +411,21 @@ schema ticket {
       combined_nativeRank
       lexical_score
       vector_score
+    }
+  }
+
+  # Related-ticket detection (ticketDuplicateService.detectRelatedTickets): duplicate_detection
+  # plus the AI thread summary, which the backend queries with its own nearestNeighbor for
+  # this profile only. Tickets without a summary score 0 on that term.
+  rank-profile related_detection inherits duplicate_detection {
+    function vector_score() {
+      expression: max(max(max(max(closeness(field, combined_embeddings), closeness(field, description_embeddings)), closeness(field, description_clean_embeddings)), closeness(field, chunk_embeddings)), closeness(field, ticket_summary_embeddings))
+    }
+    match-features {
+      combined_nativeRank
+      lexical_score
+      vector_score
+      closeness(field, ticket_summary_embeddings)
     }
   }
 

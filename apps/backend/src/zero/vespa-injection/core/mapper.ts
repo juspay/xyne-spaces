@@ -611,6 +611,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedToUser,
     closedByUser,
     descriptionMentions,
+    ticketSummary,
   ] = await Promise.all([
     db.conversation.findUnique({
       where: { conversationId: args.conversationId }
@@ -650,6 +651,10 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
       select: { name: true }
     }) : Promise.resolve(null),
     extractMentionsFromContent(args.description),
+    db.ticketSummary.findUnique({
+      where: { ticketId: args.id },
+      select: { summary: true },
+    }),
   ])
 
   // Resolve parent/child ticket relationships
@@ -711,6 +716,8 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     workflowType: "",// later we should populate workflow type
     description: args.description,
     chunks: chunkPlainText(extractPlainTextFromHtml(args.description || '')),
+    // A feed replaces the whole document, so the stored summary must ride along.
+    ...(ticketSummary ? { ticketSummary: ticketSummary.summary } : {}),
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,

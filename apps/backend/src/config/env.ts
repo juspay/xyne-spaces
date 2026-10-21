@@ -299,6 +299,7 @@ const envSchema = Joi.object({
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
+  ENABLE_TICKET_THREAD_SUMMARY: Joi.boolean().default(false),
   // What the dedicated classification key serves.
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
@@ -1173,6 +1174,7 @@ export const config = {
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
+  ticketThreadSummaryEnabled: envVars.ENABLE_TICKET_THREAD_SUMMARY,
   messageClassification: {
     model: envVars.MESSAGE_CLASSIFIER_MODEL,
   },

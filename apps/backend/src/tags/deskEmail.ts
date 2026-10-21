@@ -31,7 +31,7 @@ export function deskEmailConfigKey(channelId: string): string {
 
 const emailRepository = new EmailRepository();
 
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
   // Remove Gmail attribution lines ("On Tue, Jun 23... wrote:") before blockquotes
   let text = html.replace(/<div[^>]*class="[^"]*gmail_attr[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
   // Remove blockquote blocks (quoted previous emails in replies)

@@ -16,6 +16,7 @@ import { telephonyEmailService } from '@/services/ozonetel/telephonyEmailService
 import { findCallTranscriptAttachment } from '@/services/ozonetel/callTranscript';
 import { callTranscriptionService } from '@/services/ozonetel/callTranscriptionService';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
@@ -82,6 +83,7 @@ import { BaseTicketType,
   WorkspaceRole,
   OrgRole,
   AccessType,
+  isDeskChannelType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
@@ -1586,7 +1588,15 @@ export class TicketController {
     try {
       const ticket = await prisma.ticket.findUnique({
         where: { id: ticketId },
-        select: { channelId: true, workspaceId: true, isArchived: true },
+        select: {
+          channelId: true,
+          workspaceId: true,
+          isArchived: true,
+          statusV2: true,
+          lastEmailAt: true,
+          channel: { select: { type: true } },
+          threadSummary: { select: { updatedAt: true } },
+        },
       });
       if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
         res.status(404).json({ error: 'Ticket not found' });
@@ -1605,6 +1615,15 @@ export class TicketController {
           res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
           return;
         }
+      }
+
+      // The agent is looking at this ticket now: if its thread summary is missing or older
+      // than its last email, summarise without the quiet window so related-ticket links
+      // land (through Zero) while they are still on it. Nothing to do when it is current.
+      const summaryStale =
+        !ticket.threadSummary || ticket.lastEmailAt > ticket.threadSummary.updatedAt;
+      if (isDeskChannelType(ticket.channel?.type) && ticket.statusV2 !== TicketStatusV2.COMPLETED && summaryStale) {
+        void ticketThreadSummaryQueue.enqueue(ticketId, { immediate: true });
       }
 
       // One check per ticket at a time: each runs a Vespa search plus a Jev/LLM call.

@@ -11,6 +11,7 @@ import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { radarExecutionQueue } from '@/queues/radarExecutionQueue';
 import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
@@ -235,12 +236,23 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelId: true,
         workspaceId: true,
         initialMessageId: true,
+        ticketId: true,
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
         // a second lookup.
         channel: { select: { scopeType: true, agentProactivityMode: true } },
       },
     });
+
+    // A team note on a desk ticket's thread feeds its summary. The queue no-ops when the
+    // feature is off, and the consumer skips non-desk tickets.
+    if (
+      conversation?.ticketId &&
+      conversation.initialMessageId !== message.messageId &&
+      (message.msgType ?? MessageType.USER) === MessageType.USER
+    ) {
+      void ticketThreadSummaryQueue.enqueue(conversation.ticketId);
+    }
 
     // Radar execution engine: fire-and-forget signal. enqueueThread never
     // throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can never

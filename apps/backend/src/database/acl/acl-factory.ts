@@ -355,6 +355,8 @@ export class ACLFactory {
       return new TicketsACL(ctx, prisma)
     case 'ticketDescription':
       return new TicketDescriptionsACL(ctx, prisma)
+    case 'ticketSummary':
+      return new BaseQueryACL(ctx, prisma)
     case 'ticketActivity':
       return new TicketActivitiesACL(ctx, prisma)
     case 'ticketAssignment':

@@ -48,6 +48,7 @@ import { extractEmailAddress } from '@/utils/email';
 import { emailService } from '@/services/emailService';
 import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline } from '@/tags/pipeline';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
@@ -481,6 +482,8 @@ export class EmailController {
           where: { conversationId },
           select: { id: true, workspaceId: true },
         });
+        // An agent reply is usually where the fix is written down.
+        if (ticketForActivity) void ticketThreadSummaryQueue.enqueue(ticketForActivity.id);
 
         await recordTicketTimelineEvent({
           activity: ticketForActivity

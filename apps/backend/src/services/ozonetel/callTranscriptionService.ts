@@ -1,6 +1,8 @@
 import { AttachmentEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { DatabaseClient } from '@/database/client';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { storageService } from '@/services/storage';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { telephonyEmailService } from './telephonyEmailService';
@@ -152,6 +154,8 @@ export class CallTranscriptionService {
       await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
       logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
     }
+    // With or without a call summary, the ticket summary can now use what was said on the call.
+    await this.refreshTicketSummaries(email.conversationId);
 
     return { status: 'done', attachmentId: attachment.id };
   }
@@ -189,7 +193,20 @@ export class CallTranscriptionService {
       summary,
     });
     logger.info(`${TAG} summary stored (manual) | emailId=${emailId} | chars=${summary.length}`);
+    await this.refreshTicketSummaries(email.conversationId);
     return { ok: true, summary, alreadyExisted: false };
+  }
+
+  private async refreshTicketSummaries(conversationId: string): Promise<void> {
+    try {
+      const tickets = await DatabaseClient.getInstance().ticket.findMany({
+        where: { conversationId },
+        select: { id: true },
+      });
+      for (const ticket of tickets) void ticketThreadSummaryQueue.enqueue(ticket.id);
+    } catch (error) {
+      logger.warn(`${TAG} ticket summary refresh not queued | conversationId=${conversationId}:`, error);
+    }
   }
 
   /**

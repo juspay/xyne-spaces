@@ -1276,6 +1276,9 @@ export class App {
       logger.info('Initializing decision evaluation queue (producer)...');
       await decisionEvaluationQueue.initialize();
     }
+    logger.info('Initializing ticket thread summary queue (producer)...');
+    const { ticketThreadSummaryQueue } = await import('@/queues/ticketThreadSummaryQueue');
+    await ticketThreadSummaryQueue.initialize();
 
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');

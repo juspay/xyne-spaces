@@ -14,6 +14,7 @@ import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { ExternalAttachmentService } from '@/services/externalAttachmentService';
 import { logger } from '@/utils/logger';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 import { sendSlackReplyTx } from '@/bypassAcl/transactions/slackDeskService';
 
@@ -244,6 +245,8 @@ export class SlackDeskService {
         where: { conversationId },
         select: { id: true, channelId: true },
       });
+      // An agent reply is usually where the fix is written down.
+      for (const ticket of tickets) void ticketThreadSummaryQueue.enqueue(ticket.id);
       await this.prisma.ticketActivity.createMany({
         data: tickets.map(ticket => ({
           ticketId: ticket.id,

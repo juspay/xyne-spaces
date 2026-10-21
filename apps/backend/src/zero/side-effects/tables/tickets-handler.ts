@@ -26,6 +26,7 @@ import {
   type TicketUpdatedField,
 } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const TICKET_UPDATED_FIELDS: ReadonlyArray<TicketUpdatedField> = TicketUpdatedFieldSchema.options;
@@ -61,6 +62,11 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
 
     const prev = previousValue as TicketPreviousValue;
     const actorId = this.ctx.userID;
+
+    // Closing is when the fix is final; summarise now rather than after the quiet window.
+    if (args.statusV2 === TicketStatusV2.COMPLETED && prev.statusV2 !== TicketStatusV2.COMPLETED) {
+      void ticketThreadSummaryQueue.enqueue(ticketId, { immediate: true });
+    }
 
     // Detect field changes and build activities
     const activities: TicketActivity[] = [];

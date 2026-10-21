@@ -17,6 +17,7 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, BaseAppEvent, DeskReplyEventPayload, DeskReplyAttachment } from '@/apps/types';
 import { logger } from '@/utils/logger';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { sendAppReplyTx } from '@/bypassAcl/transactions/appDeskService';
 
 const TAG = '[AppDeskService]';
@@ -182,6 +183,8 @@ export class AppDeskService {
         where: { conversationId },
         select: { id: true, channelId: true },
       });
+      // An agent reply is usually where the fix is written down.
+      for (const ticket of tickets) void ticketThreadSummaryQueue.enqueue(ticket.id);
       await this.prisma.ticketActivity.createMany({
         data: tickets.map(ticket => ({
           ticketId: ticket.id,
