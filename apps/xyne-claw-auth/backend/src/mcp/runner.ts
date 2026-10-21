@@ -471,11 +471,16 @@ const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 const userToolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const userToolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 
+const MCP_LIST_TOOLS_CUTOFF_MS = Number(process.env["MCP_LIST_TOOLS_CUTOFF_MS"] ?? 8_000);
+const MCP_LIST_TOOLS_BACKOFF_MS = Number(process.env["MCP_LIST_TOOLS_BACKOFF_MS"] ?? 300_000);
+const toolListSkipUntil = new Map<string, number>();
+
 export function clearToolListCache(): void {
   toolListCache.clear();
   toolListInflight.clear();
   userToolListCache.clear();
   userToolListInflight.clear();
+  toolListSkipUntil.clear();
 }
 
 const ROTATING_CREDENTIAL_FIELD = /token|secret|password|expires|refresh|cookie/i;
@@ -491,6 +496,7 @@ function credentialFingerprint(credentials: Record<string, unknown>): string {
 function dropUserToolLists(matches: (key: string) => boolean): void {
   for (const key of [...userToolListCache.keys()]) if (matches(key)) userToolListCache.delete(key);
   for (const key of [...userToolListInflight.keys()]) if (matches(key)) userToolListInflight.delete(key);
+  for (const key of [...toolListSkipUntil.keys()]) if (matches(key)) toolListSkipUntil.delete(key);
 }
 
 type ToolListCache = Map<string, { tools: McpToolInfo[]; at: number }>;
@@ -555,14 +561,20 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
-  options: { fresh?: boolean; lane?: SessionLane } = {},
+  options: { fresh?: boolean; lane?: SessionLane; cutoff?: boolean } = {},
 ): Promise<McpServerTools> {
   const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
-  const tools = options.fresh
-    ? await fetchTools()
-    : SHARED_TOOL_LIST_SERVER_TYPES.has(serverType)
-      ? await sharedToolList(serverType, fetchTools)
-      : await userToolList(`${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`, fetchTools);
+  let tools: McpToolInfo[];
+  if (options.fresh) {
+    tools = await fetchTools();
+  } else {
+    const shared = SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+    const key = shared
+      ? serverType
+      : `${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`;
+    const list = () => (shared ? sharedToolList(key, fetchTools) : userToolList(key, fetchTools));
+    tools = options.cutoff ? await withListCutoff(serverType, key, list) : await list();
+  }
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
@@ -570,6 +582,42 @@ export async function listToolsForUser(
     ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
     : (definition?.writeTools ?? []);
   return { serverType, serverName, tools, writeTools };
+}
+
+export class McpToolListUnavailableError extends Error {}
+
+function cachedListFor(key: string): McpToolInfo[] | undefined {
+  return (toolListCache.get(key) ?? userToolListCache.get(key))?.tools;
+}
+
+async function withListCutoff(
+  serverType: string,
+  key: string,
+  list: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const cached = cachedListFor(key);
+  if (cached) return cached;
+  const skipUntil = toolListSkipUntil.get(key);
+  if (skipUntil && skipUntil > Date.now()) {
+    throw new McpToolListUnavailableError(`${serverType} skipped: tool listing failed or timed out recently`);
+  }
+  const listing = list();
+  listing.then(
+    () => toolListSkipUntil.delete(key),
+    () => toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS);
+      reject(new McpToolListUnavailableError(`${serverType} tool listing exceeded ${MCP_LIST_TOOLS_CUTOFF_MS}ms; continuing without it`));
+    }, MCP_LIST_TOOLS_CUTOFF_MS);
+  });
+  try {
+    return await Promise.race([listing, cutoff]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchToolsFromServer(
@@ -840,6 +888,8 @@ export async function restartMcpServers(serverType?: string): Promise<{ sessions
   }
   for (const key of [...userToolListCache.keys()]) if (matches(key)) toolLists++;
   dropUserToolLists(matches);
+  if (serverType) toolListSkipUntil.delete(serverType);
+  else toolListSkipUntil.clear();
   if (!serverType) toolListInflight.clear();
   const closing: Promise<void>[] = [];
   for (const [key, session] of sessions) {
