@@ -10,6 +10,7 @@ import { MessageRepliedActivityV2 } from '../message-replied-activity-v2';
 import { ReactionAddedActivity } from '../reaction-added-activity';
 import { ReactionAddedActivityV2 } from '../reaction-added-activity-v2';
 import { ScheduledCallActivity } from '../scheduled-call-activity';
+import { RecordingSummaryActivity } from '../recording-summary-activity';
 import { TicketAssignmentActivity } from '../ticket-assignment-activity';
 import { TicketUpdateActivity } from '../ticket-update-activity';
 import { WorkflowQuestionActivity } from '../workflow-question-activity';
@@ -51,6 +52,7 @@ const ACTIVITY_RENDERERS = new Map<
   ['ticket_qa_assigned', TicketUpdateActivity],
   ['workflow_question', WorkflowQuestionActivity],
   ['scheduled_call', ScheduledCallActivity],
+  ['recording_summary_ready', RecordingSummaryActivity],
   ['call_reminder', ScheduledCallActivity],
   ['call_updated', ScheduledCallActivity],
   ['meeting_accepted', ScheduledCallActivity],
