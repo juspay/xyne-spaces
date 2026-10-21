@@ -324,7 +324,7 @@ export function MenuPanel({
           accessibilityLabel='Customize navigation'
           hitSlop={10}
           onPress={onCustomize}
-          style={[styles.configButton, { backgroundColor: palette.activeIndicator }]}
+          style={[styles.configButton, { backgroundColor: palette.menuHighlight }]}
         >
           <SlidersHorizontal size={17} color={palette.iconActive} />
         </Pressable>

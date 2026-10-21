@@ -222,9 +222,7 @@ export const TabBar = memo(function TabBar({
             pillPressed={pill.pillPressed}
             overflowX={pill.overflowX}
             overflowY={pill.overflowY}
-            touchX={pill.touchX}
-            touchY={pill.touchY}
-            glowProgress={pill.glowProgress}
+            dragSelector={pill.dragSelector}
             panGesture={pill.panGesture}
             isMenuOpen={isMenuOpen}
             menuItems={menuItems}
@@ -242,9 +240,6 @@ export const TabBar = memo(function TabBar({
             pressed={search.pressed}
             overflowX={search.overflowX}
             overflowY={search.overflowY}
-            touchX={search.touchX}
-            touchY={search.touchY}
-            glowProgress={search.glowProgress}
             composedGesture={search.composedGesture}
           />
           <CloseSearchButton
@@ -252,9 +247,6 @@ export const TabBar = memo(function TabBar({
             pressed={close.pressed}
             overflowX={close.overflowX}
             overflowY={close.overflowY}
-            touchX={close.touchX}
-            touchY={close.touchY}
-            glowProgress={close.glowProgress}
             composedGesture={close.composedGesture}
           />
         </Animated.View>

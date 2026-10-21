@@ -2,12 +2,12 @@ import { useValue, useObserve } from '@legendapp/state/react';
 import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { type LegendListRef } from '@legendapp/list/react-native';
 import { useCallback, useMemo, useRef, type ReactElement } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
-
+import { useSpacesHeaderHeight } from '@/src/components/spaces-header';
 import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
@@ -26,10 +26,19 @@ import { useDmRows } from '../hooks/use-dm-rows';
 import { dmFilter$ } from '../state/filter-store';
 import { dmRowOrder$ } from '../state/rows-store';
 import { DmRow } from './dm-row';
+import { DmListSkeleton } from './dm-row-skeleton';
 import { DmsFilterBar } from './dms-filter-bar';
+
+/** Space between the header and the first row. */
+const LIST_TOP_GAP = 12;
 
 /** Half a viewport of lead time before `onEndReached`. */
 const END_REACHED_THRESHOLD = 0.5;
+
+/** Enough placeholder rows to fill a phone screen while page 1 loads. */
+const INITIAL_SKELETON_ROWS = 10;
+/** Placeholder rows under the list while the next page loads. */
+const LOAD_MORE_SKELETON_ROWS = 2;
 
 const getFixedItemSize = (): number => DM_ROW_HEIGHT;
 const getItemType = (): string => 'dm';
@@ -40,7 +49,8 @@ type DmsListProps = {
 };
 
 export function DmsList({ onChannelSelect }: DmsListProps = {}): ReactElement {
-  const { loadMore, isLoading, hasLoadError, isEmpty, isFiltering } = useDmRows();
+  const { loadMore, hasMore, isLoading, isLoadingMore, hasLoadError, isEmpty, isFiltering } =
+    useDmRows();
 
   /**
    * Ids, not rows.
@@ -80,6 +90,8 @@ e
 
   const { theme } = useUniwind();
   const bottomInset = useFabClearance();
+  // The header floats over the list, so the first row starts below it.
+  const headerHeight = useSpacesHeaderHeight();
 
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
@@ -108,7 +120,6 @@ e
           <View className='items-end' style={{ paddingLeft: 8, paddingTop: DM_META_TOP }}>
             <DmRow.Timestamp />
             <View className='flex-row items-center gap-1' style={{ marginTop: DM_BADGE_GAP }}>
-              <DmRow.Starred />
               <DmRow.UnreadBadge />
             </View>
           </View>
@@ -121,9 +132,7 @@ e
   const empty = useMemo(() => {
     if (isLoading && isEmpty) {
       return (
-        <View className='flex-1 items-center justify-center py-16'>
-          <ActivityIndicator size='large' />
-        </View>
+        <DmListSkeleton rows={INITIAL_SKELETON_ROWS} accessibilityLabel='Loading conversations' />
       );
     }
     if (hasLoadError && isEmpty) {
@@ -155,6 +164,36 @@ e
     return null;
   }, [hasLoadError, isEmpty, isFiltering, isLoading]);
 
+  /**
+   * Below the last row: placeholders while the next page loads, and once
+   * there is nothing left to load, a quiet note pointing at the new-DM button
+   * instead of the list just stopping.
+   */
+  const footer = useMemo(() => {
+    if (order.length === 0) return null;
+    if (isLoadingMore) {
+      return (
+        <DmListSkeleton
+          rows={LOAD_MORE_SKELETON_ROWS}
+          accessibilityLabel='Loading more conversations'
+        />
+      );
+    }
+    if (hasMore) return null;
+    return (
+      <View
+        className='bg-spaces-surface justify-center'
+        style={{
+          minHeight: 48,
+          paddingLeft: DM_ROW_PADDING_LEFT,
+          paddingRight: DM_ROW_PADDING_RIGHT,
+        }}
+      >
+        <Text className='text-sm text-spaces-muted'>Tap on the button to start a new DM</Text>
+      </View>
+    );
+  }, [hasMore, isLoadingMore, order.length]);
+
   return (
     <View className='flex-1'>
       <AnimatedLegendList
@@ -175,6 +214,7 @@ e
         extraData={theme}
         ListHeaderComponent={<DmsFilterBar />}
         ListEmptyComponent={empty}
+        ListFooterComponent={footer}
         onEndReached={loadMore}
         onEndReachedThreshold={END_REACHED_THRESHOLD}
         keyboardDismissMode='on-drag'
@@ -182,13 +222,13 @@ e
         showsVerticalScrollIndicator={false}
         style={{ flex: 1 }}
         contentContainerStyle={{
+          paddingTop: headerHeight + LIST_TOP_GAP,
           paddingBottom: bottomInset,
           flexGrow: order.length === 0 ? 1 : undefined,
-          paddingBlock: 12,
         }}
         className='bg-spaces-background'
       />
-      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} topInset={headerHeight} />
     </View>
   );
 }

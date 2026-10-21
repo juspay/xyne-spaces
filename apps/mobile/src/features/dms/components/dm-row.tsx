@@ -63,7 +63,8 @@ function useRowNode(): Observable<DmListItemData> {
 }
 
 /**
- * The avatar, subscribed to the two fields that draw it and nothing else.
+ * The avatar, subscribed to the fields that draw it and nothing else — who is
+ * in it, and whether it carries the star in its corner.
  *
  * This is the slot with real work behind it — identity lookups, a cached
  * image, possibly two of each. Keeping it off `title`, `lastMessage` and
@@ -81,6 +82,7 @@ function AvatarSlot(): ReactElement {
    */
   const identities = useValue(() => row$.participantIdentities.get()) as
     readonly DmListParticipantIdentity[] | undefined;
+  const isStarred = useValue(() => row$.isStarred.get());
 
   return (
     <Avatar
@@ -90,6 +92,9 @@ function AvatarSlot(): ReactElement {
       // would read one short of the conversation's head count.
       memberCount={(userIds?.length ?? 0) + 1}
       size={DM_AVATAR_SIZE}
+      cornerBadge={
+        isStarred === true ? <StarIcon width={DM_STAR_SIZE} height={DM_STAR_SIZE} /> : undefined
+      }
     />
   );
 }
@@ -156,14 +161,6 @@ function Timestamp(): ReactElement {
       {formatDmTimestamp(activityAt ?? 0, todayStart)}
     </Text>
   );
-}
-
-/** Sits beside the unread badge, so a starred conversation reads at a glance. */
-function Starred(): ReactElement | null {
-  const row$ = useRowNode();
-  const isStarred = useValue(() => row$.isStarred.get());
-  if (isStarred !== true) return null;
-  return <StarIcon width={DM_STAR_SIZE} height={DM_STAR_SIZE} />;
 }
 
 function UnreadBadge(): ReactElement | null {
@@ -248,6 +245,5 @@ export const DmRow = Object.assign(memo(DmRowComponent), {
   Title,
   Preview,
   Timestamp,
-  Starred,
   UnreadBadge,
 });

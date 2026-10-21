@@ -1,6 +1,8 @@
 import { Dimensions, ViewStyle } from 'react-native';
 import { Easing, interpolate } from 'react-native-reanimated';
-import { useUniwind } from 'uniwind';
+import { useCSSVariable, useUniwind } from 'uniwind';
+
+import { withAlpha } from '@/src/utils/color';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -53,8 +55,15 @@ export const ICON_SPACING = 52;
  */
 export const NAV_ICON_STROKE_WIDTH = 1.6;
 export const ICON_PADDING = 4;
-/** Vertical inset of a tab's highlight inside the pill. */
-export const INDICATOR_INSET = 4;
+/**
+ * Gap between a tab's highlight and the pill's edge — the same above, below
+ * and beside the end tabs, as in Telegram — so it is the row's side padding.
+ */
+export const INDICATOR_INSET = ICON_PADDING;
+/** Concentric with the pill: its radius less the gap between them. */
+export const INDICATOR_RADIUS = PILL_BORDER_RADIUS - INDICATOR_INSET;
+/** Telegram's outline width for its floating tabs: 0.4dp. */
+export const SURFACE_OUTLINE_WIDTH = 0.4;
 
 export const SEARCH_BUTTON_SIZE = 56;
 export const SEARCH_BAR_RADIUS = PILL_BORDER_RADIUS;
@@ -129,6 +138,14 @@ export function menuItemAtY(x: number, y: number, count: number): number {
   return index;
 }
 
+/** Clamps a touch to the span between the first and last tab centres. */
+export function clampToTabCenters(x: number): number {
+  'worklet';
+  const first = TAB_CENTER_XS[0];
+  const last = TAB_CENTER_XS[PILL_TAB_COUNT - 1] ?? first;
+  return x < first ? first : x > last ? last : x;
+}
+
 export function tabCenterX(index: number): number {
   'worklet';
   return TAB_CENTER_XS[index] ?? TABS_START + TAB_ZONE_WIDTH * 0.5;
@@ -140,17 +157,26 @@ export const TAB_BAR_SHADOW =
 
 export const ACTIVE_TAB_INDICATOR = '#0000000D';
 
+/**
+ * How much of the theme's accent the active tab's highlight carries: a shade of
+ * the active Spaces theme's accent rather than a neutral grey.
+ */
+const ACTIVE_INDICATOR_ALPHA = 0.09;
+
 export type TabBarPalette = {
   background: string;
   icon: string;
   iconActive: string;
+  /** The active tab's highlight: a shade of the Spaces theme's accent. */
   activeIndicator: string;
   /**
-   * Hairline around the bar's surfaces. The drop shadow separates them from a
-   * light page on its own, but against a dark one it disappears and the panel
-   * runs into the screen behind it.
+   * The hairline around the bar's surfaces, as Telegram draws its floating
+   * tabs: lighter along the top half, darker along the bottom half.
    */
-  surfaceBorder: string;
+  outlineTop: string;
+  outlineBottom: string;
+  /** Telegram's tight shadow under the surface (`setShadowLayer`). */
+  surfaceShadow: string;
   textPrimary: string;
   textSecondary: string;
   divider: string;
@@ -159,13 +185,17 @@ export type TabBarPalette = {
 
 export function useTabBarPalette(): TabBarPalette {
   const { theme } = useUniwind();
+  const accent = useCSSVariable('--color-spaces-accent') as string | undefined;
+  const activeIndicator = withAlpha(accent, ACTIVE_INDICATOR_ALPHA);
   if (theme === 'dark') {
     return {
       background: '#181818',
       icon: '#8A8B8D',
       iconActive: '#F4F4F5',
-      activeIndicator: '#FFFFFF14',
-      surfaceBorder: 'rgba(255, 255, 255, 0.10)',
+      activeIndicator,
+      outlineTop: 'rgba(255, 255, 255, 0.024)',
+      outlineBottom: 'rgba(255, 255, 255, 0.067)',
+      surfaceShadow: '0px 0.85px 2.667px 0px rgba(255, 255, 255, 0.016)',
       textPrimary: 'rgba(255, 255, 255, 0.92)',
       textSecondary: 'rgba(255, 255, 255, 0.45)',
       divider: 'rgba(255, 255, 255, 0.12)',
@@ -177,8 +207,10 @@ export function useTabBarPalette(): TabBarPalette {
     background: '#FFFFFF',
     icon: '#A2A3A4',
     iconActive: '#17181C',
-    activeIndicator: ACTIVE_TAB_INDICATOR,
-    surfaceBorder: 'rgba(18, 20, 28, 0.06)',
+    activeIndicator,
+    outlineTop: 'rgba(0, 0, 0, 0.067)',
+    outlineBottom: 'rgba(0, 0, 0, 0.125)',
+    surfaceShadow: '0px 0.85px 2.667px 0px rgba(0, 0, 0, 0.125)',
     textPrimary: '#111111',
     textSecondary: '#8E8E93',
     divider: 'rgba(18, 20, 28, 0.08)',
@@ -212,6 +244,15 @@ export const SPRING = { damping: 24, stiffness: 170, mass: 1 } as const;
 export const SPRING_BOUNCY = { damping: 22, stiffness: 250, mass: 0.6 } as const;
 export const SPRING_MENU_OPEN = { damping: 14, stiffness: 170, mass: 0.7 } as const;
 export const SPRING_MENU_CLOSE = { damping: 22, stiffness: 120, mass: 0.9 } as const;
+
+/**
+ * The drag highlight's springs, as Telegram's tab bar runs them: Android's
+ * `STIFFNESS_MEDIUM` (1500) at `DAMPING_RATIO_LOW_BOUNCY` (0.75), mass 1 —
+ * damping 2 × 0.75 × √1500.
+ */
+export const SPRING_DRAG_SELECTOR = { stiffness: 1500, damping: 58.09, mass: 1 } as const;
+/** How long the drag highlight stays after release before the tabs' own take over. */
+export const DRAG_SELECTOR_LINGER_MS = 450;
 
 /** Highlight travel between rows. Quick enough to keep up with a fast drag. */
 export const SPRING_MENU_HOVER = { damping: 20, stiffness: 340, mass: 0.6 } as const;

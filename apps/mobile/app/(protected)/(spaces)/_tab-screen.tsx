@@ -1,12 +1,14 @@
 import { type ReactElement, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { useIsFocused } from 'expo-router/react-navigation';
+import { useCSSVariable } from 'uniwind';
 
 import { AppHeader } from '@/src/components/app-header';
 import { TabPageFocus, useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
 import { TabsHeaderChromeContext, TabsScreenHeader } from '@/src/components/tabs-screen-header';
 import { tabEntryForRoute } from '@/src/features/bottom-navigation';
 import type { TabName } from '@/src/observability/logging/navigation/tabTransition';
+import { BlurTarget, ChromeBlur } from '@/src/ui/chrome-blur';
 
 /**
  * Header for a classic screen running inside the Spaces shell.
@@ -21,9 +23,15 @@ import type { TabName } from '@/src/observability/logging/navigation/tabTransiti
  */
 function SpacesHeader({ title }: { title: string }): ReactElement {
   const scrollY = useTabHeaderScrollY();
+  const background = useCSSVariable('--color-tabs-screen') as string;
 
+  // Frosted rather than solid: the screen's list scrolls up under it.
   return (
-    <TabsScreenHeader scrollY={scrollY}>
+    <TabsScreenHeader
+      scrollY={scrollY}
+      backgroundClassName=''
+      backdrop={<ChromeBlur variant='header' color={background} />}
+    >
       <TabsScreenHeader.Leading>
         <AppHeader.WorkspaceSwitcher />
         <AppHeader.Title>{title}</AppHeader.Title>
@@ -77,8 +85,9 @@ export function SpacesTabScreen({ tab, title, children }: SpacesTabScreenProps):
     <TabsHeaderChromeContext.Provider value={NO_SEARCH_BAR}>
       <TabPageFocus tabName={tab} isFocused={isFocused}>
         <View className='flex-1 bg-tabs-screen'>
+          {/* The screen is what the header and the bottom bar blur; the header floats over it. */}
+          <BlurTarget style={{ flex: 1 }}>{children}</BlurTarget>
           <SpacesHeader title={label} />
-          {children}
         </View>
       </TabPageFocus>
     </TabsHeaderChromeContext.Provider>

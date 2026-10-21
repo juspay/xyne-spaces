@@ -11,6 +11,7 @@ import { logger, Event } from '@/src/utils/logger';
 import { buildListSyncPayload } from '@/src/utils/listSyncTelemetry';
 import { useForegroundListSyncProbe } from '@/src/hooks/useForegroundListSyncProbe';
 import { useListLiveUpdateProbe } from './useListLiveUpdateProbe';
+import { runWhenConnected } from '@/src/utils/run-when-connected';
 
 type DmStatsPageResult = QueryResultType<typeof queries.dmChannelsLatestMessagesPaginated>;
 
@@ -24,6 +25,14 @@ type DmConversation = NonNullable<
 
 const PAGE_SIZE = 20;
 const INITIAL_SYNC_TIMEOUT_MS = 15000;
+/**
+ * Upper bound on one load-more page, connection wait included. Past it the
+ * round is abandoned so the in-flight latch can never be held for good.
+ */
+const LOAD_MORE_TIMEOUT_MS = 20000;
+/** Automatic retries of a failed page while the user waits at the end of the list. */
+const LOAD_MORE_MAX_RETRIES = 2;
+const LOAD_MORE_RETRY_DELAY_MS = 2000;
 type DmListTelemetryFilterTab = 'all' | 'unread' | 'groups';
 type DmUnreadCounts = Readonly<Record<string, number | undefined>>;
 type DmListQuerySource = 'cache' | 'fresh';
@@ -154,6 +163,10 @@ export function useDmsPaginatedMessages(
     unreadCounts = {},
   } = options;
   const zero = useZero();
+  // `useZero()` wraps the client in a new proxy on every render, so the object
+  // cannot tell one Zero instance from the next. Its client id can: every
+  // instance gets its own.
+  const zeroClientID = zero.clientID;
   const schemaVersion = zero.schemaVersion;
   const hadInitialQueryCacheRef = useRef<boolean>(false);
   const [serverVerifiedPageKey, setServerVerifiedPageKey] = useState<string | null>(null);
@@ -244,6 +257,21 @@ export function useDmsPaginatedMessages(
     'idle' | 'running' | 'complete' | 'error'
   >('idle');
   const isFetchingRef = useRef(false);
+  /**
+   * Which round owns the in-flight latch. Bumped whenever the rows the round
+   * would extend stop being the current ones — a new workspace, or a new Zero
+   * instance — so a round still pending on the old one can neither commit its
+   * page nor release a latch that is no longer its own.
+   */
+  const fetchGenerationRef = useRef(0);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRetry = useCallback((): void => {
+    if (retryTimerRef.current !== null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
   const forwardCursorRef = useRef<{ lastActivityAt: number; channelId: string } | null>(null);
   const hasMoreBeforeRef = useRef(false);
   // Latches when a server-complete page confirms the forward end. Live page-1
@@ -257,13 +285,16 @@ export function useDmsPaginatedMessages(
     setInitialSyncStatus('idle');
     commitHasMore(true);
     setIsLoadingMore(false);
+    fetchGenerationRef.current += 1;
     isFetchingRef.current = false;
     pendingLoadMoreRef.current = false;
+    clearRetry();
+    retryCountRef.current = 0;
     forwardCursorRef.current = null;
     hasMoreBeforeRef.current = false;
     forwardExhaustedRef.current = false;
     didPaginateForwardRef.current = false;
-  }, [commitHasMore, initialQueryCacheKey]);
+  }, [clearRetry, commitHasMore, initialQueryCacheKey]);
   const commitHasMoreBefore = useCallback((next: boolean) => {
     hasMoreBeforeRef.current = next;
   }, []);
@@ -753,13 +784,19 @@ export function useDmsPaginatedMessages(
       start: { lastActivityAt: number; channelId: string } | null,
       direction?: 'forward' | 'backward',
     ) =>
-      zero.run(
-        queries.dmChannelsLatestMessagesPaginated({
-          limit: PAGE_SIZE,
-          start,
-          direction,
-        }),
-        { type: 'complete' },
+      // `zero.run` has no timeout and waits on the server; see runWhenConnected.
+      runWhenConnected(
+        zero.connection.state,
+        () =>
+          zero.run(
+            queries.dmChannelsLatestMessagesPaginated({
+              limit: PAGE_SIZE,
+              start,
+              direction,
+            }),
+            { type: 'complete' },
+          ),
+        LOAD_MORE_TIMEOUT_MS,
       ),
     [zero],
   );
@@ -787,7 +824,10 @@ export function useDmsPaginatedMessages(
     const cursor = forwardCursorRef.current;
     if (!cursor) return;
 
+    clearRetry();
     isFetchingRef.current = true;
+    const generation = ++fetchGenerationRef.current;
+    const isCurrentRound = (): boolean => generation === fetchGenerationRef.current;
     setIsLoadingMore(true);
 
     const loadMoreStartTime = performance.now();
@@ -805,6 +845,7 @@ export function useDmsPaginatedMessages(
 
         do {
           rawPage = await fetchPage(nextCursor, 'forward');
+          if (!isCurrentRound()) return;
           if (!rawPage || rawPage.length === 0) {
             break;
           }
@@ -824,6 +865,7 @@ export function useDmsPaginatedMessages(
             row => !existingIds.has(row.channelId),
           );
         } while (page.length === 0 && rawPage.length === PAGE_SIZE);
+        retryCountRef.current = 0;
 
         const latencyCompletedAtMs = performance.now();
         if (!rawPage || rawPage.length === 0) {
@@ -903,6 +945,7 @@ export function useDmsPaginatedMessages(
         }
         commitHasMore(!reachedEnd);
       } catch (error) {
+        if (!isCurrentRound()) return;
         const completedAtMs = performance.now();
         logger.warn(
           Event.LOTUS_LIST_SYNC,
@@ -922,23 +965,37 @@ export function useDmsPaginatedMessages(
             error: error instanceof Error ? error.message : String(error),
           }),
         );
-      } finally {
-        isFetchingRef.current = false;
-        setIsLoadingMore(false);
-
-        // Drain the single queued slot. hasMoreRef is authoritative here: a
-        // round that hit the true end has already set it false, so a queued
-        // request at the end of the list resolves to a no-op instead of
-        // another fetch.
-        if (pendingLoadMoreRef.current) {
-          pendingLoadMoreRef.current = false;
-          if (hasMoreRef.current) {
+        // The list will not ask again while the user sits at its end, so a
+        // failed page retries on its own, a bounded number of times.
+        if (retryCountRef.current < LOAD_MORE_MAX_RETRIES) {
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
             loadMoreRef.current();
+          }, LOAD_MORE_RETRY_DELAY_MS);
+        }
+      } finally {
+        // A superseded round's latch was already released by whatever
+        // superseded it, and may now belong to a newer round.
+        if (isCurrentRound()) {
+          isFetchingRef.current = false;
+          setIsLoadingMore(false);
+
+          // Drain the single queued slot. hasMoreRef is authoritative here: a
+          // round that hit the true end has already set it false, so a queued
+          // request at the end of the list resolves to a no-op instead of
+          // another fetch.
+          if (pendingLoadMoreRef.current) {
+            pendingLoadMoreRef.current = false;
+            if (hasMoreRef.current) {
+              loadMoreRef.current();
+            }
           }
         }
       }
     })();
   }, [
+    clearRetry,
     isWorkspaceReady,
     fetchPage,
     commitHasMore,
@@ -949,6 +1006,26 @@ export function useDmsPaginatedMessages(
   ]);
 
   loadMoreRef.current = loadMore;
+
+  /**
+   * A new Zero instance — a refresh, or a role or member change — takes over
+   * from one that may have been closed under a round still waiting on it.
+   * That round is superseded and its latch released; if the user was waiting
+   * on it, the page is asked for again on the new instance.
+   */
+  const lastZeroClientIDRef = useRef(zeroClientID);
+  useEffect(() => {
+    if (lastZeroClientIDRef.current === zeroClientID) return;
+    lastZeroClientIDRef.current = zeroClientID;
+    const wasWaiting = isFetchingRef.current || pendingLoadMoreRef.current;
+    fetchGenerationRef.current += 1;
+    isFetchingRef.current = false;
+    pendingLoadMoreRef.current = false;
+    setIsLoadingMore(false);
+    if (wasWaiting) loadMoreRef.current();
+  }, [zeroClientID]);
+
+  useEffect(() => clearRetry, [clearRetry]);
 
   const channels = useMemo<DmChannel[]>(
     () =>

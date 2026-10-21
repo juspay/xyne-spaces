@@ -60,7 +60,7 @@
     "@expo/ui": "57.0.9",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "5.2.14",
-    "@legendapp/list": "3.3.5",
+    "@legendapp/list": "3.6.0",
     "@legendapp/state": "3.0.0-beta.48",
     "@livekit/react-native": "^2.10.0",
     "@livekit/react-native-webrtc": "144.1.2",
@@ -196,6 +196,11 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
     "xml2js": "0.6.0"
+  },
+  "reanimated": {
+    "staticFeatureFlags": {
+      "ANDROID_SYNCHRONOUSLY_UPDATE_UI_PROPS": true
+    }
   },
   "private": true
 }

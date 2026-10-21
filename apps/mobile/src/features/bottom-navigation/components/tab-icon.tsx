@@ -1,8 +1,7 @@
-import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  cancelAnimation,
   Easing,
   interpolate,
   useAnimatedStyle,
@@ -22,8 +21,8 @@ import {
   NAV_ICON_STROKE_WIDTH,
   INDICATOR_FADE,
   INDICATOR_INSET,
+  INDICATOR_RADIUS,
   PILL_BORDER_RADIUS,
-  PILL_HEIGHT,
   PILL_WIDTH,
   BADGE_FONT_SIZE,
   BADGE_HEIGHT,
@@ -33,6 +32,7 @@ import {
   tabCenterX,
   useTabBarPalette,
 } from '../constants';
+import { BadgeCutout } from './badge-cutout';
 import { navIcon, type NavIcon } from './nav-icon';
 
 const CHEVRON_BADGE_SIZE = 13;
@@ -71,9 +71,8 @@ export type TabIconProps = {
   searchProgress: SharedValue<number>;
   menuProgress: SharedValue<number>;
   pillPressed: SharedValue<number>;
-  touchX: SharedValue<number>;
-  touchY: SharedValue<number>;
-  glowProgress: SharedValue<number>;
+  /** 1 while a drag carries the highlight; the tab's own then stands down. */
+  dragSelectorVisible: SharedValue<number>;
 };
 
 export const TabIcon = memo(function TabIcon({
@@ -91,11 +90,11 @@ export const TabIcon = memo(function TabIcon({
   searchProgress,
   menuProgress,
   pillPressed,
-  touchX,
-  touchY,
-  glowProgress,
+  dragSelectorVisible,
 }: TabIconProps): ReactElement {
   const palette = useTabBarPalette();
+  // The badge sizes to its count; the icon's cutout follows that width.
+  const [badgeWidth, setBadgeWidth] = useState(BADGE_HEIGHT);
   const destinationProgress = useSharedValue(menuDestinationIcon ? 1 : 0);
   const latchedDestination = useRef<NavIcon | null>(menuDestinationIcon);
   const DestinationIcon = menuDestinationIcon ?? latchedDestination.current;
@@ -113,18 +112,13 @@ export const TabIcon = memo(function TabIcon({
     () =>
       Gesture.Tap()
         .onBegin(() => {
-          touchX.set(tabCenterX(index));
-          touchY.set(PILL_HEIGHT / 2);
           pillPressed.set(withTiming(1, { duration: 80 }));
-          cancelAnimation(glowProgress);
-          glowProgress.set(1);
           if (searchProgress.get() < 0.5) hoveredTab.set(index);
         })
         // The pill's own gesture cancels this tap the moment it activates, so
         // the press has to be acted on here rather than in `onEnd`.
         .onFinalize(() => {
           pillPressed.set(withTiming(0, { duration: 150 }));
-          glowProgress.set(withTiming(2, { duration: 300 }));
           scheduleOnRN(triggerHaptic);
           if (isMenuTab) {
             hoveredTab.set(-1);
@@ -135,15 +129,12 @@ export const TabIcon = memo(function TabIcon({
         }),
     [
       commitTab,
-      glowProgress,
       hoveredTab,
       index,
       isMenuTab,
       onMenuPress,
       pillPressed,
       searchProgress,
-      touchX,
-      touchY,
       triggerHaptic,
     ],
   );
@@ -202,7 +193,9 @@ export const TabIcon = memo(function TabIcon({
     withTiming(activeTab.get() === index ? 1 : 0, INDICATOR_FADE),
   );
 
-  const indicatorStyle = useAnimatedStyle(() => ({ opacity: indicatorProgress.get() }));
+  const indicatorStyle = useAnimatedStyle(() => ({
+    opacity: indicatorProgress.get() * (1 - dragSelectorVisible.get()),
+  }));
 
   const restColorStyle = useAnimatedStyle(() => ({ opacity: 1 - activeProgress.get() }));
 
@@ -276,7 +269,7 @@ export const TabIcon = memo(function TabIcon({
               ) : null}
             </>
           ) : (
-            <>
+            <BadgeCutout badgeWidth={badgeLabel === null ? null : badgeWidth}>
               <Animated.View pointerEvents='none' style={[styles.stackedIcon, restColorStyle]}>
                 <Icon size={ICON_SIZE} color={palette.icon} strokeWidth={NAV_ICON_STROKE_WIDTH} />
               </Animated.View>
@@ -287,10 +280,15 @@ export const TabIcon = memo(function TabIcon({
                   strokeWidth={NAV_ICON_STROKE_WIDTH}
                 />
               </Animated.View>
-            </>
+            </BadgeCutout>
           )}
           {badgeLabel === null ? null : (
-            <View pointerEvents='none' style={styles.badge} className='bg-spaces-accent'>
+            <View
+              pointerEvents='none'
+              style={styles.badge}
+              className='bg-spaces-accent'
+              onLayout={event => setBadgeWidth(event.nativeEvent.layout.width)}
+            >
               <Text
                 numberOfLines={1}
                 allowFontScaling={false}
@@ -316,14 +314,15 @@ const styles = StyleSheet.create({
     borderRadius: PILL_BORDER_RADIUS,
   },
   // Inset vertically so the highlight sits inside the pill while the tab itself
-  // stays tappable across the pill's full height.
+  // stays tappable across the pill's full height. With the row's side padding
+  // equal to this inset, the gap around the highlight is the same on all sides.
   indicator: {
     position: 'absolute',
     top: INDICATOR_INSET,
     bottom: INDICATOR_INSET,
     left: 0,
     right: 0,
-    borderRadius: PILL_BORDER_RADIUS,
+    borderRadius: INDICATOR_RADIUS,
   },
   iconWrapper: {
     width: ICON_SIZE,

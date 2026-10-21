@@ -20,6 +20,8 @@ const ENTER_MS = 180;
 const EXIT_MS = 140;
 const HIDDEN_TRANSLATE_Y = -12;
 const HIDDEN_SCALE = 0.9;
+/** Gap between the button and whatever it sits under. */
+const TOP_GAP = 12;
 
 type ScrollToTopButtonProps = {
   /**
@@ -30,6 +32,12 @@ type ScrollToTopButtonProps = {
   onPress: () => void;
   /** Offset past which the button shows. */
   threshold?: number;
+  /**
+   * How far down the list's container the button's space starts. A screen
+   * whose header floats over its list passes the header's height, so the
+   * button lands below the header rather than behind it.
+   */
+  topInset?: number;
 };
 
 /**
@@ -48,6 +56,7 @@ export function ScrollToTopButton({
   offset,
   onPress,
   threshold = SCROLL_TO_TOP_THRESHOLD,
+  topInset = 0,
 }: ScrollToTopButtonProps): ReactElement {
   const accent = useCSSVariable('--color-spaces-accent') as string;
   const progress = useSharedValue(0);
@@ -75,7 +84,10 @@ export function ScrollToTopButton({
   }));
 
   return (
-    <Animated.View style={[styles.container, containerStyle]} animatedProps={containerProps}>
+    <Animated.View
+      style={[styles.container, { top: topInset + TOP_GAP }, containerStyle]}
+      animatedProps={containerProps}
+    >
       <Pressable
         onPress={onPress}
         hitSlop={8}
@@ -96,7 +108,6 @@ export function ScrollToTopButton({
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 12,
     left: 0,
     right: 0,
     alignItems: 'center',
