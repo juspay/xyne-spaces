@@ -66,7 +66,7 @@ export const fetchAuditLogEntities = async (
   return unwrap(response.data, 'Failed to load audited entities');
 };
 
-/** Every entry in the window (newest first, capped server-side) for CSV export. */
+/** Every entry in the window (newest first, capped server-side) for Excel export. */
 export const fetchAuditLogExport = async (filter: AuditFeedFilter): Promise<AuditLogExport> => {
   const response = await apiInstance.get<ApiEnvelope<AuditLogExport>>('/audit-logs/export', {
     params: feedParams(filter),

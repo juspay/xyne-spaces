@@ -17,7 +17,7 @@ const TAG = '[AuditLogController]';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
-/** Backstop for CSV exports; the screen's date range is capped at 90 days. */
+/** Backstop for Excel exports; the screen's date range is capped at 90 days. */
 const MAX_EXPORT_LOGS = 5000;
 
 const cursorPayloadSchema = z.object({ createdAt: z.number(), id: z.string() });
@@ -300,7 +300,7 @@ export class AuditLogController {
     }
   }
 
-  /** Every entry in the window (newest first, capped) for the screen's CSV download. */
+  /** Every entry in the window (newest first, capped) for the screen's Excel download. */
   static async exportLogs(req: Request, res: Response): Promise<void> {
     const workspaceId = req.user?.workspaceId;
     if (!workspaceId) {

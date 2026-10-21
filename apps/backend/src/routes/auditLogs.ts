@@ -17,7 +17,7 @@ router.get('/entities', authMiddleware.authenticate, analyticsAdmin, AuditLogCon
 
 /**
  * @route GET /api/audit-logs/export?entityType=BOARD&entityId=<id>&from=<ms>&to=<ms>
- * @desc Every entry in the window, newest first and capped, for CSV download.
+ * @desc Every entry in the window, newest first and capped, for Excel download.
  *       entityId is optional (omitted = every entity of the type).
  * @access ANALYTICS Admin
  */
