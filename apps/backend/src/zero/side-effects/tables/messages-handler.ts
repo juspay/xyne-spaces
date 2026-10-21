@@ -72,6 +72,7 @@ import {
   notifyMentioned,
 } from './mention-delivery';
 import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
+import { gatewayHooks } from '@/gateway';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -340,6 +341,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
+    gatewayHooks.onMessageChanged({ operation: 'insert', messageId, channelId });
 
     // Replies fan out too; only automations with `includeReplies` act on them.
     void emitMessageReceived({
@@ -2066,6 +2068,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
     const previousValue = job.previousValue as MessagePreviousValue | undefined;
+    if (previousValue?.channelId) {
+      gatewayHooks.onMessageChanged({ operation: 'delete', messageId, channelId: previousValue.channelId });
+    }
     if (!previousValue || parseSlashCommandArtifactMessage(previousValue.content)) {
       await syncMessageArtifact(db, messageId);
     }
@@ -2260,6 +2265,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     if (!previousValue || previousValue.msgType === MessageType.SYSTEM || !previousValue.channelId) {
       return;
     }
+    gatewayHooks.onMessageChanged({
+      operation: 'update',
+      messageId: previousValue.messageId,
+      channelId: previousValue.channelId,
+      previousContent: previousValue.content,
+    });
     const currentMessage = await db.message.findUnique({
       where: { messageId: previousValue.messageId },
       select: { isDeleted: true, content: true, edited: true },

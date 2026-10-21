@@ -2893,6 +2893,15 @@ model ExternalSource {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Gateway rows (Xyne Mirror first). Null on every older row; those keep working as before.
+  // Their external id (Slack team T… / channel C…) goes in externalIdentifier.
+  kind            String?                   // CONNECTION (an account, holds credentials) | PAIR (external ⇄ Spaces resource)
+  parentId        String?                   // PAIR: its CONNECTION row (no FK constraint)
+  spacesId        String?                   // PAIR: the Spaces resource, e.g. a channel id (no FK constraint)
+  statusReason    String?                   // why it was paused: PROVIDER_AUTH, CHANNEL_GONE, NOT_CONFIGURED; null when a person paused it
+  createdBy       String?                   // Spaces user id (no FK constraint)
+
+  @@unique([spacesId, sourceType]) // one PAIR per Spaces resource per integration; null spacesId (every other row) is never a clash
   @@index([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
@@ -2900,6 +2909,7 @@ model ExternalSource {
   @@index([channelId])
   @@index([externalIdentifier])
   @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([parentId])
   @@map("external_sources")
   @@schema("workflow")
 }

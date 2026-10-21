@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
 import { refreshRecordingTranscriptPermissionsForChannel } from '@/services/recordingTranscriptPermissionSync';
+import { gatewayHooks } from '@/gateway';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -21,6 +22,7 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       logger.warn(`[ChannelParticipantsHandler] No previousValue for deleted participant ID: ${job.entityId}`);
       return;
     }
+    gatewayHooks.onParticipantChanged({ type: 'removed', channelId: previousValue.channelId, userId: previousValue.userId });
     await Promise.all([
       refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
         logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
@@ -50,6 +52,7 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       }
 
       const { channelId, userId } = participant;
+      gatewayHooks.onParticipantChanged({ type: 'added', channelId, userId });
 
       // Member joined → refresh canvases shared to this channel (regardless of notification).
       await Promise.all([

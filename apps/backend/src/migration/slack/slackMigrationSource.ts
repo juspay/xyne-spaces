@@ -21,3 +21,9 @@ export const buildSlackMigrationSourceName = (
   xyneSpaceChannelId
     ? `${SLACK_MIGRATION_PREFIX}${slackChannelId}-${xyneSpaceChannelId}`
     : `${SLACK_MIGRATION_PREFIX}${slackChannelId}`;
+
+/** One message-map source per Spaces channel, shared by self-serve migration and Xyne Mirror. */
+export const buildSlackChannelSourceName = (
+  xyneChannelId: string,
+  isChannel = true,
+): string => `${isChannel ? 'channelMigration' : 'dmMigration'}-${xyneChannelId}`;
