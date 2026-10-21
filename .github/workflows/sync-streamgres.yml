@@ -3,7 +3,7 @@ name: Sync streamgres
 # Keeps ./streamgres an exact, read-only mirror of juspay/streamgres@main.
 # Pull-based: streamgres (public) needs no workflow, secret or token of its own.
 # Once a night, compare streamgres main's SHA with streamgres/.synced-from;
-# when they differ, mirror the files (rsync --delete), push the sync/streamgres
+# when they differ, mirror the files (replace the folder with `git archive`), push the sync/streamgres
 # branch and open (or update) a PR against BASE_BRANCH. No auto-merge (yet).
 #
 # The PR only ever touches streamgres/ — a guard step fails the run if anything
@@ -65,11 +65,13 @@ jobs:
           set -euo pipefail
           git clone --quiet "https://github.com/${UPSTREAM_REPO}.git" "$RUNNER_TEMP/upstream"
           git -C "$RUNNER_TEMP/upstream" checkout --quiet "$NEW"
+          # Replace the folder wholesale with the tracked files at $NEW (so files
+          # deleted upstream disappear too). git archive carries only tracked
+          # files — no .git, no build output — and needs no extra tools.
+          rm -rf "$TARGET_DIR"
           mkdir -p "$TARGET_DIR"
-          rsync -a --delete \
-            --exclude '/.git' --exclude '/.github' --exclude '/target' \
-            --exclude '/.synced-from' \
-            "$RUNNER_TEMP/upstream/" "$TARGET_DIR/"
+          git -C "$RUNNER_TEMP/upstream" archive "$NEW" | tar -x -C "$TARGET_DIR"
+          rm -rf "${TARGET_DIR}/.github"
           echo "$NEW" > "${TARGET_DIR}/.synced-from"
 
       - name: Commit, push and open PR
