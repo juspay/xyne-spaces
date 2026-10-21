@@ -536,7 +536,7 @@ describe('recording message reuse', () => {
   });
 });
 
-it('renders backend headless call messages as recording cards through both end-message formats', () => {
+it('preserves legacy headless calls and their transcript surface', () => {
   const activeMetadata = {
     isCallMessage: true,
     callId: 'headless',
@@ -553,9 +553,8 @@ it('renders backend headless call messages as recording cards through both end-m
     const model = message(
       buildRows([base({ messageType: 'SYSTEM', markdown: 'Recording started', metadata })], ctx),
     );
-    assert.equal(getRowType({ type: 'message', id: model.conversationId, model }), 'recording');
-    assert.equal(model.recordingPreview?.isActive, metadata === activeMetadata);
-    assert.equal(model.recordingPreview?.callId, 'headless');
+    assert.equal(getRowType({ type: 'message', id: model.conversationId, model }), 'call');
+    assert.equal(model.recordingPreview, null);
   }
   const normalCall = message(
     buildRows(

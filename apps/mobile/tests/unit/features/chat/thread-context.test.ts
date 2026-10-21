@@ -68,3 +68,20 @@ it('opens relative desktop context links through native message and person handl
     'https://evil.test/chat/dir/user/u',
   );
 });
+
+it('preserves apostrophes without unsupported numeric entities', () => {
+  const html = buildThreadContextMessage([
+    { id: 'person', type: 'user', title: "Mayank's team", url: '/chat/dir/user/person' },
+  ]);
+  assert.ok(html.includes("Mayank's team"));
+  assert.ok(!html.includes('&#39;'));
+});
+it('falls back to sender name for messages without a channel title', () => {
+  const item = contextItemFromResult(
+    result({
+      type: 'conversation',
+      searchContext: { channelId: 'c', conversationId: 't', senderName: 'Mayank' },
+    }),
+  );
+  assert.equal(item?.title, 'Message from Mayank');
+});

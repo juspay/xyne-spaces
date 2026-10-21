@@ -25,11 +25,12 @@ export function getThreadHeaderOverflowActions(
   isSubscribed: boolean,
   options: {
     canEdit?: boolean;
+    showThreadTags?: boolean;
     recordingActive?: boolean;
     recordingStarting?: boolean;
   } = {},
 ): ThreadHeaderOverflowAction[] {
-  return [
+  const actions: ThreadHeaderOverflowAction[] = [
     {
       id: 'start-call',
       label: 'Start thread call',
@@ -60,6 +61,9 @@ export function getThreadHeaderOverflowActions(
       disabled: options.canEdit === false,
     },
   ];
+  return actions.filter(
+    action => action.id !== 'thread-tags' || (options.showThreadTags && options.canEdit !== false),
+  );
 }
 
 export function getThreadCallBlockReason(args: {

@@ -58,7 +58,7 @@ function ContextBody({
     return (): void => clearTimeout(timer);
   }, [query]);
   const channels = useChannelsSearch(query);
-  const people = usePeopleSearch(query);
+  const people = usePeopleSearch(query, false);
   const remote = useSearchResults(
     tab === 'channels' || tab === 'people'
       ? null

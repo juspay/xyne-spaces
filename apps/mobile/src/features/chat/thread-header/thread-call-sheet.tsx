@@ -1,4 +1,6 @@
-import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { ChannelScopeType } from '@xyne/shared';
+import { useChannel } from '@/src/hooks/useChannels';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Alert, Text, View } from 'react-native';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Avatar from '@/src/components/ui/avatar';
@@ -30,11 +32,14 @@ function ThreadCallSheetBody({
   channelId,
   threadId,
   ...sheet
-}: SheetMountProps & Pick<Props, 'channelId' | 'threadId'>): ReactElement {
+}: SheetMountProps & Pick<Props, 'channelId' | 'threadId'>): ReactElement | null {
   const ref = useRef<AppBottomSheetRef>(null);
+  const { onOpenChange, onDismiss } = sheet;
   const starting = useRef(false);
   const { userID } = useAuthContextValues();
   const users = useUsers();
+  const channel = useChannel(channelId);
+  const isDM = channel?.scopeType === ChannelScopeType.DM;
   const [conversation, details] = useQuery(
     queries.getConversationById({ conversationId: threadId }),
   );
@@ -48,7 +53,11 @@ function ThreadCallSheetBody({
   const selected = draft ?? defaults;
   const selectedIds = useMemo(() => new Set(selected), [selected]);
   const ready =
-    details.type === 'complete' && memberDetails.type === 'complete' && !!conversation && !!userID;
+    details.type === 'complete' &&
+    memberDetails.type === 'complete' &&
+    !!conversation &&
+    !conversation.callId &&
+    !!userID;
   const rows = useMemo(() => {
     const memberIds = new Set(members?.map(p => p.userId));
     const normalized = query.trim().toLowerCase();
@@ -71,8 +80,8 @@ function ThreadCallSheetBody({
           a.title.localeCompare(b.title),
       );
   }, [members, users, userID, query, selectedIds]);
-  const start = (): void => {
-    if (!ready || starting.current) return;
+  const start = useCallback((): void => {
+    if (!ready || conversation?.callId || starting.current) return;
     const recording = getRecordingState().status;
     if (
       !roomActor.getSnapshot().matches('idle') ||
@@ -82,9 +91,34 @@ function ThreadCallSheetBody({
       return;
     }
     starting.current = true;
-    void startAudioCall(channelId, threadId, buildThreadCallInvitees(selected, userID));
-    ref.current?.dismiss();
-  };
+    void startAudioCall(
+      channelId,
+      threadId,
+      buildThreadCallInvitees(
+        isDM ? (members ?? []).map(member => member.userId) : selected,
+        userID,
+      ),
+    );
+    if (isDM) {
+      onOpenChange(false);
+      onDismiss();
+    } else ref.current?.dismiss();
+  }, [
+    ready,
+    conversation?.callId,
+    channelId,
+    threadId,
+    isDM,
+    members,
+    selected,
+    userID,
+    onOpenChange,
+    onDismiss,
+  ]);
+  useEffect(() => {
+    if (isDM && ready) start();
+  }, [isDM, ready, start]);
+  if (isDM && !conversation?.callId) return null;
   return (
     <AppBottomSheet ref={ref} {...sheet} mode='fullscreen' keyboardBehavior='extend'>
       <FilterSheetHeader
@@ -108,7 +142,13 @@ function ThreadCallSheetBody({
         <Text className='py-3 text-sm text-bottomsheet-text-muted'>
           {selected.length} selected · You will also join
         </Text>
-        {!ready ? <ActivityIndicator accessibilityLabel='Loading thread participants' /> : null}
+        {conversation?.callId ? (
+          <Text className='py-3 text-bottomsheet-text-muted'>
+            This thread already has a call or recording.
+          </Text>
+        ) : !ready ? (
+          <ActivityIndicator accessibilityLabel='Loading thread participants' />
+        ) : null}
         <BottomSheetFlatList
           style={{ flex: 1 }}
           data={rows}

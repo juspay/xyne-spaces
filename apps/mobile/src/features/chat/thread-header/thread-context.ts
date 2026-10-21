@@ -8,12 +8,7 @@ export type ThreadContextItem = {
   url: string;
 };
 const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const segment = encodeURIComponent;
 
 /** Dashboard routes, so context replies work on every client. */
@@ -47,7 +42,9 @@ export function contextItemFromResult(result: DisplaySearchResult): ThreadContex
   const title =
     result.type === 'conversation' && ctx?.channelTitle
       ? `Message in #${ctx.channelTitle}`
-      : decodeHtmlEntities(result.title.replace(/<[^>]*>/g, ''));
+      : result.type === 'conversation' && ctx?.senderName
+        ? `Message from ${ctx.senderName}`
+        : decodeHtmlEntities(result.title.replace(/<[^>]*>/g, ''));
   return { id: `${result.type}-${result.id}`, title, type: result.type, url };
 }
 

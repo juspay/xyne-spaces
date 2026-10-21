@@ -1,6 +1,7 @@
+import { useAuthContextValues } from '@/src/contexts/AuthContext';
 // Shared recording pill from the conversation renderer (PR #339).
 import { memo, useCallback, useEffect, useState, type ReactElement } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Mic } from 'lucide-react-native';
 import { cn } from '@/src/utils/cn';
@@ -18,8 +19,11 @@ export const RecordingMessageCard = memo(function RecordingMessageCard({
   isCurrentUser: boolean;
 }): ReactElement | null {
   const router = useRouter();
+  const { userID } = useAuthContextValues();
+  const canView = !recording.isActive || (!!userID && recording.createdBy === userID);
   const { embeddedBgUser, embeddedTitleUser, embeddedMutedUser, ambientAccentColor } = tokens;
   const openRecording = useCallback(async (): Promise<void> => {
+    if (!canView) return;
     const { getRecordingState } = await import('@/src/stores/recordingStore');
     const active = getRecordingState();
     if (
@@ -30,21 +34,16 @@ export const RecordingMessageCard = memo(function RecordingMessageCard({
       router.push('/(protected)/(shortcuts)/recordings');
       return;
     }
-    if (recording.isActive) {
-      Alert.alert(
-        'Recording in progress',
-        'Open this recording on the device that started it to pause or stop it. Playback will be available here when it finishes.',
-      );
-      return;
-    }
     router.push({
       pathname: '/recording/[recordingId]',
       params: { recordingId: recording.callId },
     });
-  }, [router, recording]);
+  }, [router, recording, canView]);
 
   return (
     <Pressable
+      disabled={!canView}
+      accessibilityState={{ disabled: !canView }}
       accessibilityRole='button'
       accessibilityLabel={`Open recording: ${recording.title || 'Recording notes'}`}
       className={cn(
@@ -74,11 +73,13 @@ export const RecordingMessageCard = memo(function RecordingMessageCard({
           style={isCurrentUser ? { color: embeddedMutedUser } : undefined}
         >
           {recording.isActive
-            ? 'Recording in progress · Tap to open'
+            ? canView
+              ? 'Recording in progress · Tap to open'
+              : 'Recording in progress'
             : formatAttachmentDuration(recording.durationMs / 1000)}
         </Text>
       </View>
-      {recording.isActive ? (
+      {recording.isActive && canView ? (
         <RecordingStopAction callId={recording.callId} color={ambientAccentColor} />
       ) : null}
     </Pressable>

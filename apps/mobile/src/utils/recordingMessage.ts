@@ -7,20 +7,13 @@ export function recordingPreviewFromMetadata(value: unknown, title = ''): Record
     if (!metadata || typeof metadata !== 'object') return null;
     const data = metadata as Record<string, unknown>;
     if (
-      (data['isRecordingMessage'] !== true &&
-        data['isHeadlessRecording'] !== true &&
-        data['callType'] !== 'HEADLESS') ||
+      data['isRecordingMessage'] !== true ||
       typeof data['callId'] !== 'string' ||
       !data['callId'].trim()
     )
       return null;
-    const isHeadless = data['isHeadlessRecording'] === true || data['callType'] === 'HEADLESS';
-    const operation = data['operation'];
-    const isExplicitlyActive = operation === 'recording_active' || operation === 'call_active';
-    const isEnded =
-      operation === 'recording_ended' ||
-      operation === 'call_ended' ||
-      (!isExplicitlyActive && typeof data['durationMs'] === 'number');
+    const isActive =
+      data['isHeadlessRecording'] === true && data['operation'] !== 'recording_ended';
     return {
       callId: data['callId'],
       durationMs:
@@ -30,7 +23,8 @@ export function recordingPreviewFromMetadata(value: unknown, title = ''): Record
           ? data['durationMs']
           : 0,
       title,
-      isActive: isHeadless && !isEnded,
+      isActive,
+      ...(typeof data['createdBy'] === 'string' ? { createdBy: data['createdBy'] } : {}),
     };
   } catch {
     return null;

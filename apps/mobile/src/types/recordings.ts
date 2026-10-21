@@ -85,4 +85,5 @@ export type RecordingPreview = {
   durationMs: number;
   title: string;
   isActive?: boolean;
+  createdBy?: string;
 };

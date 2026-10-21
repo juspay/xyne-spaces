@@ -97,7 +97,7 @@ function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePers
 }
 
 /** Includes yourself, so `from:` can filter to your own messages. */
-export function usePeopleSearch(query: string): readonly SearchPersonItem[] {
+export function usePeopleSearch(query: string, markSelf = true): readonly SearchPersonItem[] {
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? '';
   const users = useUsers();
@@ -109,12 +109,12 @@ export function usePeopleSearch(query: string): readonly SearchPersonItem[] {
 
         return {
           id: match.id,
-          title: match.id === currentUserId ? `${name} (You)` : name,
+          title: markSelf && match.id === currentUserId ? `${name} (You)` : name,
           ...(email ? { subtitle: email } : {}),
           ...(statusEmoji ? { statusEmoji } : {}),
         };
       }),
-    [currentUserId, query, users],
+    [currentUserId, query, users, markSelf],
   );
 }
 

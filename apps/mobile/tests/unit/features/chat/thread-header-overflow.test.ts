@@ -120,7 +120,10 @@ it('keeps recordings accessible while preventing another recording in an archive
   const actions = getThreadHeaderOverflowActions(false, { canEdit: false, recordingActive: true });
   assert.equal(actions.find(action => action.id === 'take-notes')?.label, 'Open recording');
   assert.equal(actions.find(action => action.id === 'take-notes')?.disabled, false);
-  assert.equal(actions.find(action => action.id === 'thread-tags')?.disabled, true);
+  assert.equal(
+    actions.find(action => action.id === 'thread-tags'),
+    undefined,
+  );
   assert.equal(
     getThreadHeaderOverflowActions(false, { canEdit: false }).find(
       action => action.id === 'take-notes',
@@ -163,5 +166,24 @@ it('offers context on editable threads without ticket creation', () => {
       action => action.id === 'add-context',
     )?.disabled,
     true,
+  );
+});
+
+it('shows tags only when opted in on an editable thread', () => {
+  assert.equal(
+    getThreadHeaderOverflowActions(false).some(a => a.id === 'thread-tags'),
+    false,
+  );
+  assert.equal(
+    getThreadHeaderOverflowActions(false, { showThreadTags: true, canEdit: true }).some(
+      a => a.id === 'thread-tags',
+    ),
+    true,
+  );
+  assert.equal(
+    getThreadHeaderOverflowActions(false, { showThreadTags: true, canEdit: false }).some(
+      a => a.id === 'thread-tags',
+    ),
+    false,
   );
 });

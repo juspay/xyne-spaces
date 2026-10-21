@@ -1,3 +1,4 @@
+import { currentCallConversation } from '@/src/utils/currentCallConversation';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -70,7 +71,7 @@ export const useConversationHeaderData = (
   const { userID: currentUserId } = useAuthContextValues();
   const isInCall = useIsInCall();
   const currentCallChannelId = useRoomSelector(state => state.channelId);
-  const currentConversationId = useRoomSelector(state => state.conversationId);
+  const currentConversationId = useRoomSelector(currentCallConversation);
 
   const { isVisibleChannelsReady, isUserDirectoryReady } = useStartupPhase();
   const channel = useVisibleChannel(channelId);

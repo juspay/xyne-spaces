@@ -1,3 +1,7 @@
+import { useSelector } from '@xstate/react';
+import { stateMachineActor } from '@/src/machines/appStateMachine';
+import { showMessageToast } from '@/src/utils/toast';
+import { currentCallConversation } from '@/src/utils/currentCallConversation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { requestRecordingPermissionsAsync } from 'expo-audio';
@@ -28,9 +32,15 @@ export function useThreadHeaderOverflow(
   canUseMemberActions: boolean,
 ): ThreadHeaderOverflow {
   const zero = useZero();
+  const showThreadTags = useSelector(
+    stateMachineActor,
+    state => state.context.userPreference?.showThreadTags ?? false,
+  );
+  const [conversation] = useQuery(queries.getConversationById({ conversationId: threadId }));
+  const hasLinkedCall = !!conversation?.callId;
   const isInCall = useIsInCall();
   const currentCallChannelId = useRoomSelector(state => state.channelId);
-  const currentConversationId = useRoomSelector(state => state.conversationId);
+  const currentConversationId = useRoomSelector(currentCallConversation);
   const channel = useChannel(channelId);
   const canEdit = Boolean(channel && !channel.isArchived && canUseMemberActions && threadId);
   const recordingStatus = useRecordingStore(state => state.status);
@@ -45,6 +55,13 @@ export function useThreadHeaderOverflow(
   const [isTagsOpen, setIsTagsOpen] = useState(false);
   const closeTags = useCallback(() => setIsTagsOpen(false), []);
   useEffect(() => {
+    if (startedRecording.current && recordingStatus === 'recording') {
+      startedRecording.current = false;
+      showMessageToast(
+        'Recording started — open Recordings anytime to manage your notes.',
+        'success',
+      );
+    }
     if (startedRecording.current && recordingStatus === 'error') {
       startedRecording.current = false;
       Alert.alert('Could not start recording', recordingError ?? 'Please try again.');
@@ -71,12 +88,15 @@ export function useThreadHeaderOverflow(
     () =>
       getThreadHeaderOverflowActions(isSubscribed, {
         canEdit,
+        showThreadTags,
         recordingActive,
         recordingStarting: recordingStatus === 'starting' || recordingStatus === 'stopping',
       }).map(action =>
-        action.id === 'start-call' ? { ...action, disabled: !canEdit || recordingActive } : action,
+        action.id === 'start-call'
+          ? { ...action, disabled: !canEdit || recordingActive || hasLinkedCall }
+          : action,
       ),
-    [isSubscribed, canEdit, recordingActive, recordingStatus],
+    [isSubscribed, canEdit, recordingActive, recordingStatus, hasLinkedCall, showThreadTags],
   );
 
   const handleTakeNotes = useCallback(async () => {
@@ -122,7 +142,7 @@ export function useThreadHeaderOverflow(
   }, [canEdit, channelId, threadId, recordingActive, isInCall]);
 
   const handleStartCall = useCallback(() => {
-    if (!canEdit || recordingActive) return;
+    if (!canEdit || recordingActive || hasLinkedCall) return;
     const blockReason = getThreadCallBlockReason({
       canUseMemberActions,
       isInCall,
@@ -147,6 +167,7 @@ export function useThreadHeaderOverflow(
     setIsCallOpen(true);
   }, [
     canEdit,
+    hasLinkedCall,
     recordingActive,
     canUseMemberActions,
     channelId,
@@ -209,7 +230,7 @@ export function useThreadHeaderOverflow(
         return;
       }
       if (id === 'thread-tags') {
-        if (canEdit) setIsTagsOpen(true);
+        if (canEdit && showThreadTags) setIsTagsOpen(true);
         return;
       }
       if (id === 'start-call') {
@@ -222,7 +243,7 @@ export function useThreadHeaderOverflow(
         return;
       }
     },
-    [handleStartCall, handleToggleSubscription, handleTakeNotes, canEdit],
+    [handleStartCall, handleToggleSubscription, handleTakeNotes, canEdit, showThreadTags],
   );
 
   return {
@@ -230,7 +251,7 @@ export function useThreadHeaderOverflow(
     closeContext,
     isCallOpen,
     closeCall,
-    isTagsOpen,
+    isTagsOpen: isTagsOpen && showThreadTags,
     closeTags,
     actions,
     isSubscribed,

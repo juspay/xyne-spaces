@@ -5,6 +5,10 @@ import { RecordingMessageCard } from '@/src/components/recordings/RecordingMessa
 import { DEFAULT_CHAT_RENDER_TOKENS } from '@/src/theme/chatRenderTokens';
 import { getRecordingState, sendRecordingAction } from '@/src/stores/recordingStore';
 
+jest.mock('@/src/contexts/AuthContext', () => ({
+  useAuthContextValues: () => ({ userID: 'creator' }),
+}));
+
 jest.mock('expo-router', () => ({
   router: { push: jest.fn() },
   useRouter: () => require('expo-router').router,
@@ -24,7 +28,13 @@ it('opens the existing controls for the matching live recording', async () => {
     >);
   const { getByLabelText } = render(
     <RecordingMessageCard
-      recording={{ callId: 'live', title: 'Notes', durationMs: 0, isActive: true }}
+      recording={{
+        callId: 'live',
+        title: 'Notes',
+        durationMs: 0,
+        isActive: true,
+        createdBy: 'creator',
+      }}
       tokens={DEFAULT_CHAT_RENDER_TOKENS}
       isCurrentUser={false}
     />,
@@ -65,7 +75,13 @@ it('stops only the matching live session without opening the recording', async (
     >);
   const view = render(
     <RecordingMessageCard
-      recording={{ callId: 'live', title: 'Notes', durationMs: 0, isActive: true }}
+      recording={{
+        callId: 'live',
+        title: 'Notes',
+        durationMs: 0,
+        isActive: true,
+        createdBy: 'creator',
+      }}
       tokens={DEFAULT_CHAT_RENDER_TOKENS}
       isCurrentUser={false}
     />,
@@ -86,7 +102,13 @@ it('does not stop a different recording if the local session changes before tapp
     >);
   const view = render(
     <RecordingMessageCard
-      recording={{ callId: 'live', title: 'Notes', durationMs: 0, isActive: true }}
+      recording={{
+        callId: 'live',
+        title: 'Notes',
+        durationMs: 0,
+        isActive: true,
+        createdBy: 'creator',
+      }}
       tokens={DEFAULT_CHAT_RENDER_TOKENS}
       isCurrentUser={false}
     />,
@@ -124,4 +146,51 @@ it('opens completed recording details even before local recording state has caug
       params: { recordingId: 'ended' },
     }),
   );
+});
+
+it('keeps another user’s live recording inert', async () => {
+  const view = render(
+    <RecordingMessageCard
+      recording={{
+        callId: 'remote',
+        title: 'Private notes',
+        durationMs: 0,
+        isActive: true,
+        createdBy: 'teammate',
+      }}
+      tokens={DEFAULT_CHAT_RENDER_TOKENS}
+      isCurrentUser={false}
+    />,
+  );
+  fireEvent.press(view.getByLabelText('Open recording: Private notes'));
+  expect(router.push).not.toHaveBeenCalled();
+  expect(view.queryByLabelText('Stop recording')).toBeNull();
+  expect(view.getByText('Recording in progress')).toBeTruthy();
+});
+
+it('lets the creator open a recording started on another device', async () => {
+  jest
+    .mocked(getRecordingState)
+    .mockReturnValue({ externalId: null, status: 'idle' } as ReturnType<typeof getRecordingState>);
+  const view = render(
+    <RecordingMessageCard
+      recording={{
+        callId: 'remote',
+        title: 'Remote notes',
+        durationMs: 0,
+        isActive: true,
+        createdBy: 'creator',
+      }}
+      tokens={DEFAULT_CHAT_RENDER_TOKENS}
+      isCurrentUser={false}
+    />,
+  );
+  fireEvent.press(view.getByLabelText('Open recording: Remote notes'));
+  await waitFor(() =>
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: '/recording/[recordingId]',
+      params: { recordingId: 'remote' },
+    }),
+  );
+  expect(view.queryByLabelText('Stop recording')).toBeNull();
 });
