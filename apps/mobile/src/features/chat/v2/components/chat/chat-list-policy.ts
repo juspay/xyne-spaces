@@ -38,6 +38,7 @@ export const deriveConversationOpenState = ({
 };
 
 export type ChatInitialScrollMode = 'tail' | 'target' | 'unread';
+export type ChatUnreadPlacement = 'pending' | 'divider' | 'none';
 
 /**
  * Direct opens keep the latest tail as viewport owner while cached and live
@@ -476,18 +477,55 @@ export const resolveChatInitialScrollMode = ({
   hasTarget,
   targetIsAtTail,
   shouldAnchorToUnreadBoundary,
+  unreadPlacement,
 }: {
   hasRows: boolean;
   hasRouteAnchor: boolean;
   hasTarget: boolean;
   targetIsAtTail: boolean;
   shouldAnchorToUnreadBoundary: boolean;
+  unreadPlacement: ChatUnreadPlacement;
 }): ChatInitialScrollMode | null => {
   if (!hasRows) return null;
-  if (shouldAnchorToUnreadBoundary) return 'unread';
+  if (shouldAnchorToUnreadBoundary) {
+    if (unreadPlacement === 'pending') return null;
+    return unreadPlacement === 'divider' ? 'unread' : 'tail';
+  }
   if (!hasRouteAnchor) return 'tail';
   if (!hasTarget) return null;
   return targetIsAtTail ? 'tail' : 'target';
+};
+
+export const resolveUnreadPlacement = ({
+  shouldAnchorToUnreadBoundary,
+  isInitialLoadComplete,
+  isLiveFresh,
+  hasDivider,
+  hasBoundaryCoverage,
+  hasMoreAfter,
+  hasExpansionTimedOut,
+  hasMaxWaitElapsed,
+  hasInitialLoadError,
+}: {
+  shouldAnchorToUnreadBoundary: boolean;
+  isInitialLoadComplete: boolean;
+  isLiveFresh: boolean;
+  hasDivider: boolean;
+  hasBoundaryCoverage: boolean;
+  hasMoreAfter: boolean;
+  hasExpansionTimedOut: boolean;
+  hasMaxWaitElapsed: boolean;
+  hasInitialLoadError: boolean;
+}): ChatUnreadPlacement => {
+  if (!shouldAnchorToUnreadBoundary) return 'pending';
+  const isLiveWindow = isInitialLoadComplete && isLiveFresh;
+  // Rows on both sides of the boundary fix the divider's position, so a revisit
+  // with a warm cache lands without waiting for the network. Only "no divider"
+  // needs the live window: unread rows may simply not be cached yet.
+  if (hasDivider && (isLiveWindow || hasBoundaryCoverage)) return 'divider';
+  if (hasInitialLoadError || hasMaxWaitElapsed) return 'none';
+  if (isLiveWindow && (!hasMoreAfter || hasExpansionTimedOut)) return 'none';
+  return 'pending';
 };
 
 export const SCROLL_TO_BOTTOM_THRESHOLD = 1000;
@@ -501,6 +539,11 @@ export const CHAT_OPEN_STABLE_WINDOW_MS = 500;
 // Empty opens get a short terminal boundary; once rows exist, the list stays
 // visible and exact-target sync continues without covering it with a loader.
 export const CHAT_OPEN_SYNC_TIMEOUT_MS = 2_000;
+// Longer than a slow first live paint (about 4.2 s measured on device); bounds an offline open.
+export const UNREAD_PLACEMENT_MAX_WAIT_MS = 6_000;
+// A warm unread open places the divider in about 0.8-1.0 s on device. Hide the
+// shimmer for that long; an offline or slow open still gets a loader after it.
+export const UNREAD_WARM_SHIMMER_GRACE_MS = 1_500;
 export const MAX_REASONABLE_ROUTE_OPEN_LATENCY_MS = 30_000;
 export const OPEN_PLACEHOLDER_ROW_COUNT = 4;
 export const OPEN_PLACEHOLDER_ROW_KEYS = Array.from(
@@ -698,3 +741,24 @@ export const getChatOpenPaintSource = (openPhase: ChatOpenPhase): ChatOpenPaintS
 
 export const getUnreadJumpViewPosition = (row: ChatRow | undefined): number =>
   row?.type === 'message' ? UNREAD_FIRST_MESSAGE_VIEW_POSITION : UNREAD_DIVIDER_VIEW_POSITION;
+
+/**
+ * Whether the open placeholder draws its shimmer rows. An unread open that
+ * began with cached rows only waits for the divider to land, so the list stays
+ * concealed without a loader until the grace period ends.
+ */
+export const shouldDrawOpenPlaceholderShimmer = ({
+  isOpenPlaceholderShown,
+  isUnreadPlacementHeld,
+  hasCachedSeedRows,
+  hasWarmShimmerGraceElapsed,
+}: {
+  isOpenPlaceholderShown: boolean;
+  isUnreadPlacementHeld: boolean;
+  hasCachedSeedRows: boolean;
+  hasWarmShimmerGraceElapsed: boolean;
+}): boolean => {
+  if (!isOpenPlaceholderShown) return false;
+  if (isUnreadPlacementHeld && hasCachedSeedRows && !hasWarmShimmerGraceElapsed) return false;
+  return true;
+};

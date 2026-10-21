@@ -45,6 +45,7 @@ function DmListRowComponent({
             surface: 'dms',
             unreadCount: item.unreadCount,
             unreadLastViewedAt: item.lastViewedAt,
+            unreadLastActivityAt: item.lastActivityAtMs,
             unreadLastViewedConversationId: item.lastViewedConversationId,
           });
         }}

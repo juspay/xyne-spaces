@@ -43,21 +43,26 @@ type OpenBaseChatRouteOptions = {
   surface: BaseConversationSurface;
   unreadCount?: number | undefined;
   unreadLastViewedAt?: number | undefined;
+  unreadLastActivityAt?: number | undefined;
   unreadLastViewedConversationId?: string | undefined;
 };
 
 const getUnreadOpenParams = ({
   unreadCount,
   unreadLastViewedAt,
+  unreadLastActivityAt,
   unreadLastViewedConversationId,
 }: OpenBaseChatRouteOptions): Record<string, string> => {
-  if (
-    typeof unreadCount !== 'number' ||
-    unreadCount <= 0 ||
-    typeof unreadLastViewedAt !== 'number' ||
-    !Number.isFinite(unreadLastViewedAt) ||
-    unreadLastViewedAt <= 0
-  ) {
+  const hasValidLastViewedAt =
+    typeof unreadLastViewedAt === 'number' &&
+    Number.isFinite(unreadLastViewedAt) &&
+    unreadLastViewedAt > 0;
+  const hasUnreadCount = typeof unreadCount === 'number' && unreadCount > 0;
+  const hasNewerActivity =
+    hasValidLastViewedAt &&
+    typeof unreadLastActivityAt === 'number' &&
+    unreadLastActivityAt > unreadLastViewedAt;
+  if (!hasValidLastViewedAt || (!hasUnreadCount && !hasNewerActivity)) {
     // The singular chat route reuses its mounted screen. Explicitly clear the
     // mode so a previous unread-open route cannot leak into a normal open.
     return { unreadOpen: '0' };
@@ -65,7 +70,7 @@ const getUnreadOpenParams = ({
 
   return {
     unreadOpen: '1',
-    unreadCount: String(unreadCount),
+    unreadCount: String(unreadCount ?? 0),
     unreadLastViewedAt: String(unreadLastViewedAt),
     ...(unreadLastViewedConversationId ? { unreadLastViewedConversationId } : {}),
   };

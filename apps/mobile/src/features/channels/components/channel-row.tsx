@@ -182,6 +182,7 @@ export const ChannelRow = memo(function ChannelRow({ id }: { id: string }): Reac
       surface: 'channels',
       unreadCount: row?.messageUnreadCount ?? 0,
       unreadLastViewedAt: row?.lastViewedAt,
+      unreadLastActivityAt: row?.lastActivityAtMs,
       unreadLastViewedConversationId: row?.lastViewedConversationId,
     });
   }, [id, router, row$]);

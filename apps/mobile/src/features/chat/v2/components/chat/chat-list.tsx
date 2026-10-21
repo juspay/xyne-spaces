@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Animated, {
+  Easing,
   type SharedValue,
   useAnimatedStyle,
   useSharedValue,
@@ -114,6 +115,10 @@ import {
   type ConversationDataState,
   type ChatOpenCase,
   type ChatInitialScrollMode,
+  resolveUnreadPlacement,
+  UNREAD_PLACEMENT_MAX_WAIT_MS,
+  UNREAD_WARM_SHIMMER_GRACE_MS,
+  shouldDrawOpenPlaceholderShimmer,
 } from '@/src/features/chat/v2/components/chat/chat-list-policy';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 
@@ -178,6 +183,7 @@ const EMPTY_SEED_ROWS: ReturnType<typeof getChannelSnapshot> = [];
 // synchronously mount an extra 250 px of message rows.
 const CHAT_LIST_DRAW_DISTANCE = 50;
 const INITIAL_LIST_LOAD_FALLBACK_MS = 1500;
+const CHAT_LIST_WARM_REVEAL_FADE_MS = 220;
 
 type ChatOpenCycleState = {
   identityKey: string;
@@ -383,31 +389,19 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     !!isUnreadOpen &&
     !hasRouteAnchor &&
     !isNotificationOpen &&
-    !!unreadBoundaryLastViewedConversationId &&
-    typeof unreadBoundaryLastViewedAt === 'number' &&
-    Number.isFinite(unreadBoundaryLastViewedAt) &&
-    unreadBoundaryLastViewedAt > 0;
-  const hasUnreadBoundaryContext =
-    !!isUnreadOpen &&
-    !hasRouteAnchor &&
-    !isNotificationOpen &&
     typeof unreadBoundaryLastViewedAt === 'number' &&
     Number.isFinite(unreadBoundaryLastViewedAt) &&
     unreadBoundaryLastViewedAt > 0;
   void unreadCount;
   const unreadBoundaryCursor = useMemo<UnreadBoundaryCursor | undefined>(() => {
-    if (!hasUnreadBoundaryContext) return undefined;
+    if (!hasUnreadOpenAnchor) return undefined;
     return {
       lastViewedAt: unreadBoundaryLastViewedAt,
       ...(unreadBoundaryLastViewedConversationId
         ? { lastViewedConversationId: unreadBoundaryLastViewedConversationId }
         : {}),
     };
-  }, [
-    hasUnreadBoundaryContext,
-    unreadBoundaryLastViewedAt,
-    unreadBoundaryLastViewedConversationId,
-  ]);
+  }, [hasUnreadOpenAnchor, unreadBoundaryLastViewedAt, unreadBoundaryLastViewedConversationId]);
   const anchorTargetKey = messageId ?? conversationId ?? 'latest';
   const anchorScrollKey = `${channelId}:${anchorTargetKey}:${createdAt ?? ''}`;
   const shouldUseStableActivityOpenIdentity = entryPoint === 'activity' && hasRouteAnchor;
@@ -420,9 +414,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   }
   const openCycleState = openCycleStateRef.current;
   const openCaseRef = useRef<{ identityKey: string; value: ChatOpenCase } | null>(null);
-  const [shouldLoadUnreadBoundary, setShouldLoadUnreadBoundary] = useState(false);
-  const shouldAnchorToUnreadBoundary =
-    hasUnreadOpenAnchor || (shouldLoadUnreadBoundary && !!unreadBoundaryLastViewedConversationId);
+  const shouldAnchorToUnreadBoundary = hasUnreadOpenAnchor;
   // Native list identity belongs to the conversation, not its landing target.
   // Re-anchoring within a channel must retain measured row sizes; a channel switch
   // still gets a new list instance and cannot expose the previous channel's offset.
@@ -458,6 +450,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     anchorConfirmationPassRef.current = { key: openIdentityKey, passes: 0 };
   }
   const chatListRevealOpacity = useSharedValue(1);
+  const wasOpenShimmerDrawnRef = useRef(false);
   const revealedChatListIdentityKeyRef = useRef<string | null>(null);
   const [revealedChatListIdentityKey, setRevealedChatListIdentityKey] = useState<string | null>(
     null,
@@ -1097,6 +1090,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     setRouteAnchorPlacementUnavailableKey(null);
     setMissingRouteAnchorTimedOutKey(null);
     wasBlockingChatListRevealRef.current = false;
+    wasOpenShimmerDrawnRef.current = false;
     chatListRevealOpacity.value = 1;
     tailTrackingStateRef.current.createdAt = null;
     appliedAnchorLayoutScrollKeyRef.current = null;
@@ -1108,7 +1102,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     anchorConfirmationPassRef.current = { key: openIdentityKey, passes: 0 };
     setAnchorScrollIssuedKey(null);
     setAnchorLandingConfirmedKey(null);
-    setShouldLoadUnreadBoundary(false);
     shouldMaintainTailRef.current = true;
     localSendOwnsTailRef.current = false;
     sessionSendIdRef.current = null;
@@ -1176,14 +1169,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     () => getUnreadJumpTargetRowIndex(displayRows, unreadDividerRowIndex),
     [displayRows, unreadDividerRowIndex],
   );
-  const hasTimestampCoveredUnreadOpenAnchor =
-    !!isUnreadOpen &&
-    (!hasUnreadOpenAnchor || linkedAnchorStatus === 'missing') &&
-    hasUnreadBoundaryContext &&
-    hasLoadedTimestampBoundaryCoverage(displayRows, unreadBoundaryLastViewedAt);
-  const hasResolvedUnreadCursorOpenAnchor = hasUnreadOpenAnchor && linkedAnchorStatus !== 'missing';
-  const hasAutoUnreadOpenAnchor =
-    hasResolvedUnreadCursorOpenAnchor || hasTimestampCoveredUnreadOpenAnchor;
   const hasUnreadInitialScrollTarget = hasUnreadOpenAnchor && unreadJumpTargetRowIndex >= 0;
   const unreadJumpTargetRowId =
     unreadJumpTargetRowIndex >= 0 ? displayRows[unreadJumpTargetRowIndex]?.id : undefined;
@@ -1208,6 +1193,66 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     }, CHAT_OPEN_SYNC_TIMEOUT_MS);
     return (): void => clearTimeout(timer);
   }, [isMissingRouteAnchor, openIdentityKey]);
+  const [unreadPlacementTimedOutKey, setUnreadPlacementTimedOutKey] = useState<string | null>(null);
+  const unreadPlacementTimedOut = unreadPlacementTimedOutKey === openIdentityKey;
+  const isUnreadWindowExpanding =
+    shouldAnchorToUnreadBoundary &&
+    isInitialLoadComplete &&
+    openPhase === 'liveFresh' &&
+    unreadDividerRowIndex < 0 &&
+    hasMoreAfter;
+  // Only starts once the live window is in and still expanding, so a slow
+  // first live paint never falls back to the tail.
+  useEffect(() => {
+    if (!isUnreadWindowExpanding) {
+      setUnreadPlacementTimedOutKey(currentKey =>
+        currentKey === openIdentityKey ? null : currentKey,
+      );
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setUnreadPlacementTimedOutKey(openIdentityKey);
+    }, CHAT_OPEN_SYNC_TIMEOUT_MS);
+    return (): void => clearTimeout(timer);
+  }, [isUnreadWindowExpanding, openIdentityKey]);
+  const [unreadPlacementMaxWaitKey, setUnreadPlacementMaxWaitKey] = useState<string | null>(null);
+  const unreadPlacementMaxWaitElapsed = unreadPlacementMaxWaitKey === openIdentityKey;
+  const hasUnreadBoundaryCoverage = useMemo(
+    () =>
+      shouldAnchorToUnreadBoundary &&
+      hasLoadedTimestampBoundaryCoverage(displayRows, unreadBoundaryLastViewedAt),
+    [displayRows, shouldAnchorToUnreadBoundary, unreadBoundaryLastViewedAt],
+  );
+  const unreadPlacementInput = {
+    shouldAnchorToUnreadBoundary,
+    isInitialLoadComplete,
+    isLiveFresh: openPhase === 'liveFresh',
+    hasDivider: unreadDividerRowIndex >= 0,
+    hasBoundaryCoverage: hasUnreadBoundaryCoverage,
+    hasMoreAfter,
+    hasExpansionTimedOut: unreadPlacementTimedOut,
+    hasInitialLoadError: initialLoadError !== null,
+  };
+  const isUnreadPlacementWaiting =
+    shouldAnchorToUnreadBoundary &&
+    displayRows.length > 0 &&
+    resolveUnreadPlacement({ ...unreadPlacementInput, hasMaxWaitElapsed: false }) === 'pending';
+  useEffect(() => {
+    if (!isUnreadPlacementWaiting) return;
+    const timer = setTimeout(() => {
+      setUnreadPlacementMaxWaitKey(openIdentityKey);
+    }, UNREAD_PLACEMENT_MAX_WAIT_MS);
+    return (): void => clearTimeout(timer);
+  }, [isUnreadPlacementWaiting, openIdentityKey]);
+  const unreadPlacement = resolveUnreadPlacement({
+    ...unreadPlacementInput,
+    hasMaxWaitElapsed: unreadPlacementMaxWaitElapsed,
+  });
+  const [unreadPlacementSettledKey, setUnreadPlacementSettledKey] = useState<string | null>(null);
+  const [unreadTailLandedKey, setUnreadTailLandedKey] = useState<string | null>(null);
+  const [revealSettleTimedOutKey, setRevealSettleTimedOutKey] = useState<string | null>(null);
+  const revealSettleTimedOut = revealSettleTimedOutKey === openIdentityKey;
   const routeAnchorExpansionPasses =
     missingRouteAnchorExpansionRef.current.key === openIdentityKey
       ? missingRouteAnchorExpansionRef.current.passes
@@ -1242,12 +1287,29 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     hasTarget: targetRowIndex !== null,
     targetIsAtTail: targetRowIndex === displayRows.length - 1 && !hasMoreAfter,
     shouldAnchorToUnreadBoundary,
+    unreadPlacement,
   });
   if (openCycleState.initialScrollMode === null && openingScrollMode !== null) {
     openCycleState.initialScrollMode = openingScrollMode;
   }
   const initialScrollMode = openCycleState.initialScrollMode ?? openingScrollMode;
   const isRouteAnchorAtTail = hasRequestedAnchor && initialScrollMode === 'tail';
+  const isAwaitingUnreadSettle = shouldAnchorToUnreadBoundary && initialScrollMode !== null;
+  useEffect(() => {
+    if (!isAwaitingUnreadSettle) return;
+    const timer = setTimeout(() => {
+      setRevealSettleTimedOutKey(openIdentityKey);
+    }, CHAT_OPEN_SYNC_TIMEOUT_MS);
+    return (): void => clearTimeout(timer);
+  }, [isAwaitingUnreadSettle, openIdentityKey]);
+  const isUnreadPlacementHeld =
+    shouldAnchorToUnreadBoundary &&
+    (initialScrollMode === null ||
+      (isAwaitingUnreadSettle &&
+        !revealSettleTimedOut &&
+        (initialScrollMode === 'unread'
+          ? unreadPlacementSettledKey !== openIdentityKey
+          : unreadTailLandedKey !== openIdentityKey)));
   const initialScrollIndex = useMemo(() => {
     if (displayRows.length === 0) return undefined;
     if (listInstanceLoadedRef.current) return undefined;
@@ -1257,7 +1319,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
         viewPosition: ANCHOR_MESSAGE_VIEW_POSITION,
       };
     }
-    if (hasUnreadInitialScrollTarget) {
+    if (hasUnreadInitialScrollTarget && initialScrollMode === 'unread') {
       return {
         index: unreadJumpTargetRowIndex,
         viewPosition: getUnreadJumpViewPosition(displayRows[unreadJumpTargetRowIndex]),
@@ -1301,6 +1363,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     isRouteAnchorUnavailable ||
     (isRouteAnchorPlacementUnavailable && !hasRevealedChatOpen && displayRows.length === 0) ||
     (isWarmAnchorPlacementPending && displayRows.length === 0) ||
+    (!hasRevealedChatOpen && isUnreadPlacementHeld) ||
     (!hasRevealedChatOpen &&
       shouldBlockChatWindowReveal({
         didUserScroll,
@@ -1326,12 +1389,23 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       });
 
     if (revealedChatListIdentityKeyRef.current !== openIdentityKey) {
+      const wasConcealed = wasBlockingChatListRevealRef.current;
       wasBlockingChatListRevealRef.current = shouldConcealChatList;
-      chatListRevealOpacity.value = shouldConcealChatList ? 0 : 1;
-      if (!shouldConcealChatList) {
-        revealedChatListIdentityKeyRef.current = openIdentityKey;
-        setRevealedChatListIdentityKey(openIdentityKey);
+      if (shouldConcealChatList) {
+        chatListRevealOpacity.value = 0;
+        return;
       }
+      // With no shimmer to swap out, ease the list in so the first landed frame
+      // appears instead of popping over the empty surface.
+      chatListRevealOpacity.value =
+        wasConcealed && !wasOpenShimmerDrawnRef.current
+          ? withTiming(1, {
+              duration: CHAT_LIST_WARM_REVEAL_FADE_MS,
+              easing: Easing.out(Easing.cubic),
+            })
+          : 1;
+      revealedChatListIdentityKeyRef.current = openIdentityKey;
+      setRevealedChatListIdentityKey(openIdentityKey);
       return;
     }
 
@@ -1641,9 +1715,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     usesInitialAnchorPlacement,
   ]);
 
+  const isUnreadAnchoredOpen = shouldAnchorToUnreadBoundary && initialScrollMode !== 'tail';
   const shouldUseInitialScrollAtEnd =
     displayRows.length > 0 &&
-    !shouldAnchorToUnreadBoundary &&
+    !isUnreadAnchoredOpen &&
     (!hasRequestedAnchor || initialScrollMode === 'tail');
   const scheduleDirectTailLanding = useCallback((): void => {
     if (
@@ -1656,27 +1731,54 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     ) {
       return;
     }
+    // Land after the latest window replaces the unread one, not on the window being swapped out.
+    if (shouldAnchorToUnreadBoundary && hasMoreAfter && !shouldPaintLatestTail) return;
 
     const list = listRef.current;
     if (!list?.scrollToEnd) return;
     directTailScrollKeyRef.current = openIdentityKey;
-    void list.scrollToEnd({ animated: false }).catch(() => {
-      if (directTailScrollKeyRef.current === openIdentityKey) {
-        directTailScrollKeyRef.current = null;
-      }
-    });
-  }, [displayRows.length, hasRequestedAnchor, openIdentityKey, shouldUseInitialScrollAtEnd]);
+    void list
+      .scrollToEnd({ animated: false })
+      .then(() => {
+        if (shouldAnchorToUnreadBoundary) setUnreadTailLandedKey(openIdentityKey);
+      })
+      .catch(() => {
+        if (directTailScrollKeyRef.current === openIdentityKey) {
+          directTailScrollKeyRef.current = null;
+        }
+      });
+  }, [
+    displayRows.length,
+    hasMoreAfter,
+    hasRequestedAnchor,
+    openIdentityKey,
+    shouldAnchorToUnreadBoundary,
+    shouldPaintLatestTail,
+    shouldUseInitialScrollAtEnd,
+  ]);
 
+  // The load flag lives in a ref, so re-run once it lands: an unread open that
+  // decided "tail" before the list loaded still needs its landing issued.
   useLayoutEffect(() => {
     scheduleDirectTailLanding();
-  }, [scheduleDirectTailLanding]);
+  }, [didListInitialLoadComplete, scheduleDirectTailLanding]);
+
+  const unreadTailExpansionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shouldAnchorToUnreadBoundary || initialScrollMode !== 'tail' || !hasMoreAfter) return;
+    if (unreadTailExpansionKeyRef.current === openIdentityKey) return;
+    if (scrollStateRef.current.didUserScroll) return;
+    unreadTailExpansionKeyRef.current = openIdentityKey;
+    setShouldMaintainTail(true);
+    setShouldPaintLatestTail(true);
+  }, [hasMoreAfter, initialScrollMode, openIdentityKey, shouldAnchorToUnreadBoundary]);
 
   const maintainScrollAtEnd = useMemo(
     () =>
       shouldFollowChatListTail({
         shouldMaintainTail,
         localSendOwnsTail,
-        shouldAnchorToUnreadBoundary,
+        shouldAnchorToUnreadBoundary: isUnreadAnchoredOpen,
         hasRequestedAnchor,
       })
         ? {
@@ -1691,15 +1793,15 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
             },
           }
         : false,
-    [hasRequestedAnchor, localSendOwnsTail, shouldAnchorToUnreadBoundary, shouldMaintainTail],
+    [hasRequestedAnchor, isUnreadAnchoredOpen, localSendOwnsTail, shouldMaintainTail],
   );
   useEffect(() => {
     const missingRouteAnchor = hasRequestedAnchor && !isLinkResolving && targetRowIndex === null;
     const missingUnreadBoundary =
       !hasRequestedAnchor &&
-      shouldAnchorToUnreadBoundary &&
-      unreadDividerRowIndex < 0 &&
-      !(linkedAnchorStatus === 'missing' && !hasTimestampCoveredUnreadOpenAnchor);
+      isUnreadAnchoredOpen &&
+      unreadPlacement === 'pending' &&
+      unreadDividerRowIndex < 0;
 
     if (!missingRouteAnchor) {
       missingRouteAnchorExpansionRef.current = { key: openIdentityKey, passes: 0 };
@@ -1747,16 +1849,15 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     hasMoreAfter,
     hasMoreBefore,
     hasRequestedAnchor,
-    hasTimestampCoveredUnreadOpenAnchor,
     isLinkResolving,
-    linkedAnchorStatus,
+    isUnreadAnchoredOpen,
     loadNewer,
     loadOlder,
     openPhase,
     openIdentityKey,
-    shouldAnchorToUnreadBoundary,
     targetRowIndex,
     unreadDividerRowIndex,
+    unreadPlacement,
   ]);
 
   useEffect(() => {
@@ -2039,10 +2140,11 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     }
     unreadLandingStateRef.current.anchorLock = null;
     scrollStateRef.current.unreadTailLocked = false;
+    setUnreadPlacementSettledKey(openIdentityKey);
     if (isRichRenderingEnabled) {
       requestAnimationFrame(promoteVisibleRows);
     }
-  }, [isRichRenderingEnabled, promoteVisibleRows]);
+  }, [isRichRenderingEnabled, openIdentityKey, promoteVisibleRows]);
 
   const maybeLoadOlderForUnreadBoundary = useCallback(
     (lock: UnreadJumpAnchorLock, rowCount: number): boolean => {
@@ -2063,6 +2165,8 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     [hasMoreBefore, loadOlder, unreadBoundaryLastViewedAt],
   );
 
+  const isInitialLoadCompleteRef = useRef(isInitialLoadComplete);
+  isInitialLoadCompleteRef.current = isInitialLoadComplete;
   const maintainUnreadDividerAnchor = useCallback((): boolean => {
     const lock = unreadLandingStateRef.current.anchorLock;
     if (!lock) return true;
@@ -2073,6 +2177,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
         lock.rowId = unreadJumpTargetRowId;
         return false;
       }
+      setUnreadPlacementSettledKey(openIdentityKey);
       clearUnreadJumpLock();
       return true;
     }
@@ -2114,14 +2219,22 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       if (!lock.settled) {
         lock.settled = true;
       }
+      setUnreadPlacementSettledKey(openIdentityKey);
 
       if (!lock.stableConfirmTimer) {
-        lock.stableConfirmTimer = setTimeout(() => {
+        // A warm-cache landing settles before the live window arrives; keep the
+        // divider locked until it does, or the rows it prepends shift the view.
+        const confirmStable = (): void => {
           const activeLock = unreadLandingStateRef.current.anchorLock;
           if (activeLock !== lock) return;
+          if (!isInitialLoadCompleteRef.current) {
+            activeLock.stableConfirmTimer = setTimeout(confirmStable, UNREAD_JUMP_STABLE_HOLD_MS);
+            return;
+          }
           activeLock.stableConfirmTimer = null;
           releaseUnreadJumpAnchorLock();
-        }, UNREAD_JUMP_STABLE_HOLD_MS);
+        };
+        lock.stableConfirmTimer = setTimeout(confirmStable, UNREAD_JUMP_STABLE_HOLD_MS);
       }
       return true;
     }
@@ -2175,6 +2288,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     getUnreadDividerSnapshot,
     clearUnreadJumpLock,
     maybeLoadOlderForUnreadBoundary,
+    openIdentityKey,
     releaseUnreadJumpAnchorLock,
     unreadJumpTargetRowId,
   ]);
@@ -2437,13 +2551,13 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     if (notifiedInitialLoadIdentityRef.current === openIdentityKey) return;
     const wasListInstanceLoaded = listInstanceLoadedRef.current;
     listInstanceLoadedRef.current = true;
-    if (!wasListInstanceLoaded) {
+    if (!wasListInstanceLoaded && !shouldAnchorToUnreadBoundary) {
       directTailScrollKeyRef.current = openIdentityKey;
     }
     notifiedInitialLoadIdentityRef.current = openIdentityKey;
     setLoadedListIdentityKey(openIdentityKey);
     onInitialLoadComplete?.();
-  }, [onInitialLoadComplete, openIdentityKey]);
+  }, [onInitialLoadComplete, openIdentityKey, shouldAnchorToUnreadBoundary]);
   const handleListLoad = useCallback((): void => {
     // The list is intentionally mounted before it has rows. Its empty-data
     // load event is not the chat's first usable paint.
@@ -2691,6 +2805,26 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           (isInitialLoading || openPhase !== 'liveFresh')) ||
           shouldBlockChatListReveal)));
 
+  // The placeholder flag still holds the composer and drives open metrics; only
+  // the shimmer drawing is skipped while a warm unread open lands its divider.
+  const hasCachedSeedRows = (openCycleState.initialSeedRows ?? 0) > 0;
+  const isWarmUnreadHold = shouldShowOpenPlaceholder && isUnreadPlacementHeld && hasCachedSeedRows;
+  const [warmShimmerGraceKey, setWarmShimmerGraceKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isWarmUnreadHold) return;
+    const timer = setTimeout(() => {
+      setWarmShimmerGraceKey(openIdentityKey);
+    }, UNREAD_WARM_SHIMMER_GRACE_MS);
+    return (): void => clearTimeout(timer);
+  }, [isWarmUnreadHold, openIdentityKey]);
+  const shouldDrawShimmer = shouldDrawOpenPlaceholderShimmer({
+    isOpenPlaceholderShown: shouldShowOpenPlaceholder,
+    isUnreadPlacementHeld,
+    hasCachedSeedRows,
+    hasWarmShimmerGraceElapsed: warmShimmerGraceKey === openIdentityKey,
+  });
+  if (shouldDrawShimmer) wasOpenShimmerDrawnRef.current = true;
+
   const initialLoadState: ChatInitialLoadState = shouldShowInitialLoadError
     ? isLinkResolving
       ? 'loading'
@@ -2873,7 +3007,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   ]);
 
   useEffect(() => {
-    if (!hasAutoUnreadOpenAnchor) return;
+    if (!hasUnreadOpenAnchor || initialScrollMode !== 'unread') return;
     if (!hasUnreadDividerTarget || !unreadJumpTargetRowId) return;
     const jumpKey = `${openIdentityKey}:${unreadJumpTargetRowId}`;
     if (unreadLandingStateRef.current.autoJumpKey === jumpKey) return;
@@ -2883,7 +3017,8 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   }, [
     didListInitialLoadComplete,
     hasUnreadDividerTarget,
-    hasAutoUnreadOpenAnchor,
+    hasUnreadOpenAnchor,
+    initialScrollMode,
     openIdentityKey,
     startUnreadBoundaryJump,
     unreadJumpTargetRowId,
@@ -2982,7 +3117,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           </Animated.View>
         ) : null}
 
-        {shouldShowOpenPlaceholder ? (
+        {shouldDrawShimmer ? (
           <Animated.View
             pointerEvents='none'
             style={[
