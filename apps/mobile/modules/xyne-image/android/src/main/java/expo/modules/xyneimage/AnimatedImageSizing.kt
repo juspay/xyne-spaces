@@ -11,19 +11,10 @@ import com.bumptech.glide.load.ResourceDecoder
 import com.bumptech.glide.load.engine.Resource
 import com.bumptech.glide.load.resource.drawable.DrawableResource
 import com.bumptech.glide.load.resource.transcode.ResourceTranscoder
-import com.github.penfeizhou.animation.FrameAnimationDrawable
-import com.github.penfeizhou.animation.apng.APNGDrawable
-import com.github.penfeizhou.animation.apng.decode.APNGDecoder
-import com.github.penfeizhou.animation.avif.AVIFDrawable
-import com.github.penfeizhou.animation.avif.decode.AVIFDecoder
 import com.github.penfeizhou.animation.decode.FrameSeqDecoder
-import com.github.penfeizhou.animation.gif.GifDrawable
-import com.github.penfeizhou.animation.gif.decode.GifDecoder
 import com.github.penfeizhou.animation.glide.AnimationDecoderOption
 import com.github.penfeizhou.animation.glide.ByteBufferAnimationDecoder
 import com.github.penfeizhou.animation.glide.StreamAnimationDecoder
-import com.github.penfeizhou.animation.webp.WebPDrawable
-import com.github.penfeizhou.animation.webp.decode.WebPDecoder
 import java.io.InputStream
 import java.nio.ByteBuffer
 
@@ -43,16 +34,18 @@ private typealias AnyFrameSeqDecoder = FrameSeqDecoder<*, *>
  * Telegram decodes its animated avatars at their rendering size for the same
  * reason (`AnimatedFileDrawable`'s `renderingWidth`/`renderingHeight`).
  *
- * Telling the decoder is not enough on its own. Its drawable re-derives the
- * sample from its bounds whenever they change, and an image view sizes a
- * drawable to its intrinsic size — the file's full size — before scaling it
- * into the view. So the drawable would ask for full size again on first layout.
- * The drawables made here report the shrunk size as their intrinsic size
- * instead: the view lays them out at that size, the decoder keeps the sample,
- * and the view's own matrix scales the result into place as it did before.
+ * The plugin's own drawable would undo that: it re-derives the sample from its
+ * bounds, and an image view sizes a drawable to its intrinsic size — the file's
+ * full size — before scaling it into the view. The drawable made here reports
+ * the shrunk size as its intrinsic size instead, so the sample holds and the
+ * view's own matrix scales the result into place as before.
+ *
+ * That drawable also stops the decoding from repeating: it plays a
+ * [SharedAnimation], which decodes each frame once and loops from the frames it
+ * kept.
  *
  * Registered in front of the plugin. The plugin's decoders still parse the
- * file; only the drawables differ. Requests for a `Bitmap` never come here.
+ * file; only the drawable differs. Requests for a `Bitmap` never come here.
  */
 internal object AnimatedImageSizing {
   private const val TAG = "XyneImage"
@@ -144,67 +137,33 @@ internal object AnimatedImageSizing {
   }
 
   /**
-   * The plugin's transcoder, but making the sized drawables below. Set up the
-   * way the plugin sets up its own: not autoplaying, since expo-image starts
-   * it, and measured unless the request opted out.
+   * Turns a decoded animation into the drawable an image view holds: a
+   * [SharedAnimationDrawable] onto the one [SharedAnimation] for that decoder,
+   * which plays it once from the decoder and then from kept frames.
+   *
+   * It reports the decoded size, the file's size divided by the sample, as its
+   * own, unless the request opted out of measuring as the plugin allows.
    */
   private object SizedDrawableTranscoder : ResourceTranscoder<SizedAnimation, Drawable> {
-    override fun transcode(toTranscode: Resource<SizedAnimation>, options: Options): Resource<Drawable>? {
+    override fun transcode(toTranscode: Resource<SizedAnimation>, options: Options): Resource<Drawable> {
       val animation = toTranscode.get()
-      val sample = animation.sample
-      val drawable: FrameAnimationDrawable<*> =
-        when (val decoder = animation.decoder) {
-          is GifDecoder -> SizedGifDrawable(decoder, sample)
-          is WebPDecoder -> SizedWebPDrawable(decoder, sample)
-          is APNGDecoder -> SizedAPNGDrawable(decoder, sample)
-          is AVIFDecoder -> SizedAVIFDrawable(decoder, sample)
-          else -> return null
-        }
-      drawable.setAutoPlay(false)
-      drawable.setNoMeasure(options.get(AnimationDecoderOption.NO_ANIMATION_BOUNDS_MEASURE) == true)
-      return AnimationDrawableResource(drawable)
+      val bounds = animation.decoder.bounds
+      val noMeasure = options.get(AnimationDecoderOption.NO_ANIMATION_BOUNDS_MEASURE) == true
+      val width = if (noMeasure) -1 else maxOf(1, bounds.width() / animation.sample)
+      val height = if (noMeasure) -1 else maxOf(1, bounds.height() / animation.sample)
+      val drawable = SharedAnimationDrawable(SharedAnimation.of(animation.decoder), width, height)
+      return AnimationDrawableResource(drawable, maxOf(1, width) * maxOf(1, height) * 4)
     }
   }
 
-  private class AnimationDrawableResource(private val animation: FrameAnimationDrawable<*>) :
-    DrawableResource<Drawable>(animation) {
+  private class AnimationDrawableResource(
+    private val animation: SharedAnimationDrawable,
+    private val size: Int,
+  ) : DrawableResource<Drawable>(animation) {
     override fun getResourceClass(): Class<Drawable> = Drawable::class.java
 
-    override fun getSize(): Int = animation.memorySize
+    override fun getSize(): Int = size
 
     override fun recycle() = animation.stop()
   }
-}
-
-/**
- * The format drawables, reporting their size divided by the sample.
- *
- * Subclasses rather than a wrapper, so they are still the plugin's own types
- * to anything that checks — expo-image pauses and resumes a `GifDrawable`
- * where it would restart any other animation.
- */
-private fun sampled(size: Int, sample: Int): Int = if (size > 0) maxOf(1, size / sample) else size
-
-private class SizedGifDrawable(decoder: GifDecoder, private val sample: Int) : GifDrawable(decoder) {
-  override fun getIntrinsicWidth() = sampled(super.getIntrinsicWidth(), sample)
-
-  override fun getIntrinsicHeight() = sampled(super.getIntrinsicHeight(), sample)
-}
-
-private class SizedWebPDrawable(decoder: WebPDecoder, private val sample: Int) : WebPDrawable(decoder) {
-  override fun getIntrinsicWidth() = sampled(super.getIntrinsicWidth(), sample)
-
-  override fun getIntrinsicHeight() = sampled(super.getIntrinsicHeight(), sample)
-}
-
-private class SizedAPNGDrawable(decoder: APNGDecoder, private val sample: Int) : APNGDrawable(decoder) {
-  override fun getIntrinsicWidth() = sampled(super.getIntrinsicWidth(), sample)
-
-  override fun getIntrinsicHeight() = sampled(super.getIntrinsicHeight(), sample)
-}
-
-private class SizedAVIFDrawable(decoder: AVIFDecoder, private val sample: Int) : AVIFDrawable(decoder) {
-  override fun getIntrinsicWidth() = sampled(super.getIntrinsicWidth(), sample)
-
-  override fun getIntrinsicHeight() = sampled(super.getIntrinsicHeight(), sample)
 }

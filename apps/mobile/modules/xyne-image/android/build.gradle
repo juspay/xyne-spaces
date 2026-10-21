@@ -20,9 +20,4 @@ dependencies {
   // pulls in a second copy or a different version.
   compileOnly "com.github.bumptech.glide:glide:5.0.5"
   compileOnly "com.github.penfeizhou.android.animation:glide-plugin:3.0.5"
-  // The format drawables, which the plugin depends on.
-  compileOnly "com.github.penfeizhou.android.animation:gif:3.0.5"
-  compileOnly "com.github.penfeizhou.android.animation:awebp:3.0.5"
-  compileOnly "com.github.penfeizhou.android.animation:apng:3.0.5"
-  compileOnly "com.github.penfeizhou.android.animation:avif:3.0.5"
 }
