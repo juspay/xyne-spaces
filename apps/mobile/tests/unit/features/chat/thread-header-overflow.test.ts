@@ -148,12 +148,14 @@ it('blocks a different thread call in the same channel, including a channel-wide
   assert.equal(getThreadCallBlockReason({ ...args, currentConversationId: 'thread' }), null);
 });
 
-it('offers context on editable threads and ticket creation only when eligible', () => {
-  const actions = getThreadHeaderOverflowActions(false, { canEdit: true, canCreateTicket: true });
+it('offers context on editable threads without ticket creation', () => {
+  const actions = getThreadHeaderOverflowActions(false, { canEdit: true });
   assert.equal(actions.find(action => action.id === 'add-context')?.disabled, false);
-  assert.ok(actions.some(action => action.id === 'create-ticket'));
+  assert.equal(actions.map(action => String(action.id)).includes('create-ticket'), false);
   assert.equal(
-    getThreadHeaderOverflowActions(false).some(action => action.id === 'create-ticket'),
+    getThreadHeaderOverflowActions(false)
+      .map(action => String(action.id))
+      .includes('create-ticket'),
     false,
   );
   assert.equal(

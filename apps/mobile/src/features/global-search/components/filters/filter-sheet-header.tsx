@@ -8,6 +8,7 @@ type FilterSheetHeaderProps = {
   /** Omit for tap-to-select sheets, which have nothing to cancel or commit. */
   onCancel?: () => void;
   onApply?: () => void;
+  applyLabel?: string;
 };
 
 /**
@@ -19,6 +20,7 @@ export function FilterSheetHeader({
   title,
   onCancel,
   onApply,
+  applyLabel = 'Apply',
 }: FilterSheetHeaderProps): ReactElement {
   const { accentText } = useBubbleAccent();
   const hasActions = Boolean(onCancel || onApply);
@@ -55,7 +57,7 @@ export function FilterSheetHeader({
             className='py-1 active:opacity-60'
           >
             <Text className='text-[15px] font-semibold' style={{ color: accentText }}>
-              Apply
+              {applyLabel}
             </Text>
           </Pressable>
         ) : null}

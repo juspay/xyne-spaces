@@ -1,3 +1,5 @@
+import { RecordingMessageCard } from '@/src/components/recordings/RecordingMessageCard';
+import { useChatRenderTokens } from '../theme/ChatRenderProvider';
 import { memo, type ReactElement } from 'react';
 import { View } from 'react-native';
 
@@ -32,6 +34,7 @@ function ChatListRowView({
   onReactionsPress,
   onToggleExpand,
 }: ChatListRowProps): ReactElement {
+  const tokens = useChatRenderTokens();
   if (row.type === 'date') {
     return <DateRow row={row} />;
   }
@@ -42,6 +45,19 @@ function ChatListRowView({
   // v2 `chat-message-list-row`: every message sits in `px-4 py-1` so bubbles
   // do not kiss the screen edge and every row surface keeps the same vertical
   // rhythm. Date / unread chrome keep their own insets.
+  if (surface === 'recording' && row.model.recordingPreview) {
+    return (
+      <View className='px-4 py-1 items-center'>
+        <View style={{ width: tokens.inlineContentMaxWidth, maxWidth: '100%' }}>
+          <RecordingMessageCard
+            recording={row.model.recordingPreview}
+            isCurrentUser={false}
+            tokens={tokens}
+          />
+        </View>
+      </View>
+    );
+  }
   if (surface === 'call') {
     return (
       <View className='px-4 py-1'>

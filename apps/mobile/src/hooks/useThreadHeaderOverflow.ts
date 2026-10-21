@@ -1,4 +1,3 @@
-import { threadHasTicket } from '@/src/features/chat/thread-header/thread-ticket-form';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { requestRecordingPermissionsAsync } from 'expo-audio';
@@ -19,7 +18,6 @@ import {
 import { useRoomSelector, useIsInCall } from '@/src/hooks/useRoomMachine';
 import { useQuery } from '@/src/hooks/useQuery';
 import { useZero } from '@/src/hooks/useZero';
-import { startAudioCall } from '@/src/utils/startAudioCall';
 import { awaitMutation } from '@/src/zero/awaitMutation';
 import { mutators } from '@/src/zero/mutators';
 import { queries } from '@/src/zero/queries';
@@ -41,21 +39,9 @@ export function useThreadHeaderOverflow(
   const startedRecording = useRef(false);
   const requestingMic = useRef(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
-  const [isTicketOpen, setIsTicketOpen] = useState(false);
+  const [isCallOpen, setIsCallOpen] = useState(false);
   const closeContext = useCallback(() => setIsContextOpen(false), []);
-  const closeTicket = useCallback(() => setIsTicketOpen(false), []);
-  const [conversation, conversationDetails] = useQuery(
-    queries.getConversationById({ conversationId: threadId }),
-    { enabled: Boolean(threadId) },
-  );
-  const canCreateTicket = Boolean(
-    canEdit &&
-    channel?.projectId &&
-    conversationDetails.type === 'complete' &&
-    conversation &&
-    conversation.initialMessage &&
-    !threadHasTicket(conversation),
-  );
+  const closeCall = useCallback(() => setIsCallOpen(false), []);
   const [isTagsOpen, setIsTagsOpen] = useState(false);
   const closeTags = useCallback(() => setIsTagsOpen(false), []);
   useEffect(() => {
@@ -85,13 +71,12 @@ export function useThreadHeaderOverflow(
     () =>
       getThreadHeaderOverflowActions(isSubscribed, {
         canEdit,
-        canCreateTicket,
         recordingActive,
         recordingStarting: recordingStatus === 'starting' || recordingStatus === 'stopping',
       }).map(action =>
         action.id === 'start-call' ? { ...action, disabled: !canEdit || recordingActive } : action,
       ),
-    [isSubscribed, canEdit, canCreateTicket, recordingActive, recordingStatus],
+    [isSubscribed, canEdit, recordingActive, recordingStatus],
   );
 
   const handleTakeNotes = useCallback(async () => {
@@ -155,7 +140,11 @@ export function useThreadHeaderOverflow(
       return;
     }
 
-    void startAudioCall(channelId, threadId);
+    if (isInCall) {
+      router.push('/(protected)/native-call');
+      return;
+    }
+    setIsCallOpen(true);
   }, [
     canEdit,
     recordingActive,
@@ -215,10 +204,6 @@ export function useThreadHeaderOverflow(
         if (canEdit) setIsContextOpen(true);
         return;
       }
-      if (id === 'create-ticket') {
-        if (canCreateTicket) setIsTicketOpen(true);
-        return;
-      }
       if (id === 'take-notes') {
         void handleTakeNotes();
         return;
@@ -237,14 +222,14 @@ export function useThreadHeaderOverflow(
         return;
       }
     },
-    [handleStartCall, handleToggleSubscription, handleTakeNotes, canEdit, canCreateTicket],
+    [handleStartCall, handleToggleSubscription, handleTakeNotes, canEdit],
   );
 
   return {
     isContextOpen,
     closeContext,
-    isTicketOpen,
-    closeTicket,
+    isCallOpen,
+    closeCall,
     isTagsOpen,
     closeTags,
     actions,

@@ -1,16 +1,11 @@
 export type ThreadHeaderOverflowActionId =
-  | 'start-call'
-  | 'toggle-subscription'
-  | 'take-notes'
-  | 'thread-tags'
-  | 'add-context'
-  | 'create-ticket';
+  'start-call' | 'toggle-subscription' | 'take-notes' | 'thread-tags' | 'add-context';
 
 export type ThreadHeaderOverflowAction = {
   id: ThreadHeaderOverflowActionId;
   label: string;
   disabled?: boolean;
-  systemImage: 'phone' | 'bell' | 'bell.slash' | 'mic' | 'tag' | 'link' | 'ticket';
+  systemImage: 'phone' | 'bell' | 'bell.slash' | 'mic' | 'tag' | 'link';
 };
 
 export type ThreadHeaderOverflow = {
@@ -20,8 +15,8 @@ export type ThreadHeaderOverflow = {
   isTagsOpen: boolean;
   isContextOpen: boolean;
   closeContext: () => void;
-  isTicketOpen: boolean;
-  closeTicket: () => void;
+  isCallOpen: boolean;
+  closeCall: () => void;
   closeTags: () => void;
   handleAction: (id: ThreadHeaderOverflowActionId) => void;
 };
@@ -32,7 +27,6 @@ export function getThreadHeaderOverflowActions(
     canEdit?: boolean;
     recordingActive?: boolean;
     recordingStarting?: boolean;
-    canCreateTicket?: boolean;
   } = {},
 ): ThreadHeaderOverflowAction[] {
   return [
@@ -59,16 +53,6 @@ export function getThreadHeaderOverflowActions(
       systemImage: 'link',
       disabled: options.canEdit === false,
     },
-    ...(options.canCreateTicket
-      ? [
-          {
-            id: 'create-ticket' as const,
-            label: 'Create ticket',
-            systemImage: 'ticket' as const,
-            disabled: options.canEdit === false,
-          },
-        ]
-      : []),
     {
       id: 'thread-tags',
       label: 'Thread tags',

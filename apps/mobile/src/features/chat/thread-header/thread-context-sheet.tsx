@@ -1,6 +1,9 @@
+import { FilterOptionRow } from '@/src/features/global-search/components/filters/filter-option-row';
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
+import { Search, Hash, UserRound, MessageSquare, Ticket, FileText } from 'lucide-react-native';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
-import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { MessageType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { AppBottomSheet, type AppBottomSheetRef } from '@/src/components/ui/app-bottom-sheet';
@@ -27,12 +30,20 @@ import {
 } from './thread-context';
 
 type Category = 'channels' | 'people' | 'messages' | 'tickets' | 'files';
+const categoryLabels: Record<Category, string> = {
+  channels: 'Channels',
+  people: 'People',
+  messages: 'Messages',
+  tickets: 'Tickets',
+  files: 'Files',
+};
 const categories: Category[] = ['channels', 'people', 'messages', 'tickets', 'files'];
 function ContextBody({
   channelId,
   threadId,
   ...sheet
 }: SheetMountProps & { channelId: string; threadId: string }): ReactElement {
+  const { accentText } = useBubbleAccent();
   const ref = useRef<AppBottomSheetRef>(null);
   const zero = useZero();
   const { channel, canUseMemberActions } = useConversationHeaderData(channelId, { enabled: false });
@@ -121,47 +132,81 @@ function ContextBody({
             }
           : {})}
       />
-      <View className='flex-1 px-4 pt-3'>
+      <View className='flex-1 px-4 pt-3' style={{ minHeight: 0 }}>
         <InputV2
           variant='bottomsheet'
           value={query}
           onChangeText={setQuery}
-          placeholder='Search context'
+          placeholder={`Search ${categoryLabels[tab].toLowerCase()}`}
+          leftIcon={<Search size={18} color={accentText} />}
+          autoCorrect={false}
           autoCapitalize='none'
         />
-        <View className='flex-row flex-wrap gap-3 py-3'>
+        <View className='flex-row flex-wrap gap-2 py-3'>
           {categories.map(category => (
             <Pressable
-              key={category}
+              key={categoryLabels[category]}
+              className='rounded-full border border-foreground/10 px-3 py-2'
+              style={tab === category ? { borderColor: accentText } : undefined}
               accessibilityRole='tab'
               accessibilityState={{ selected: tab === category }}
               onPress={() => setTab(category)}
             >
               <Text
+                style={tab === category ? { color: accentText } : undefined}
                 className={
                   tab === category
                     ? 'font-bold text-bottomsheet-container-foreground'
                     : 'text-bottomsheet-text-muted'
                 }
               >
-                {category}
+                {categoryLabels[category]}
               </Text>
             </Pressable>
           ))}
         </View>
-        <Text className='text-bottomsheet-text-muted'>{selected.length} selected</Text>
-        <View className='flex-row flex-wrap gap-2 py-2'>
-          {selected.map(item => (
+        <View className='flex-row items-center justify-between pb-2'>
+          <Text className='text-sm text-bottomsheet-text-muted'>
+            {selected.length} selected across all categories
+          </Text>
+          {selected.length ? (
             <Pressable
-              key={item.id}
               disabled={sending}
-              accessibilityLabel={`Remove ${item.title}`}
-              onPress={() => setSelected(current => current.filter(value => value.id !== item.id))}
+              onPress={() => setSelected([])}
+              accessibilityRole='button'
+              hitSlop={8}
             >
-              <Text className='text-bottomsheet-container-foreground'>{item.title} ×</Text>
+              <Text style={{ color: accentText }}>Clear</Text>
             </Pressable>
-          ))}
+          ) : null}
         </View>
+        {selected.length ? (
+          <View style={{ height: 42 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps='handled'
+              contentContainerStyle={{ gap: 8 }}
+            >
+              {selected.map(item => (
+                <Pressable
+                  key={item.id}
+                  disabled={sending}
+                  accessibilityRole='button'
+                  accessibilityLabel={`Remove ${item.title}`}
+                  onPress={() =>
+                    setSelected(current => current.filter(value => value.id !== item.id))
+                  }
+                  className='mb-2 max-w-52 rounded-full bg-foreground/5 px-3 py-2'
+                >
+                  <Text numberOfLines={1} className='text-sm text-bottomsheet-container-foreground'>
+                    {item.title} ×
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
         {sending || remote.status === 'loading' ? <ActivityIndicator /> : null}
         {remote.status === 'error' ? (
           <Pressable onPress={remote.retry}>
@@ -170,35 +215,53 @@ function ContextBody({
             </Text>
           </Pressable>
         ) : null}
-        <BottomSheetScrollView keyboardShouldPersistTaps='handled'>
-          {rows.map(item => {
+        <BottomSheetFlatList
+          style={{ flex: 1, minHeight: 0 }}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          keyboardShouldPersistTaps='handled'
+          keyboardDismissMode='on-drag'
+          data={rows}
+          keyExtractor={item => item.id}
+          extraData={selected}
+          renderItem={({ item }) => {
             const checked = selected.some(value => value.id === item.id);
+            const Icon =
+              item.type === 'channel'
+                ? Hash
+                : item.type === 'user'
+                  ? UserRound
+                  : item.type === 'ticket'
+                    ? Ticket
+                    : item.type === 'attachment'
+                      ? FileText
+                      : MessageSquare;
             return (
-              <Pressable
-                key={item.id}
-                accessibilityRole='checkbox'
-                accessibilityState={{ checked }}
-                disabled={sending}
-                className='py-3'
-                onPress={() =>
+              <FilterOptionRow
+                leading={
+                  <View className='size-9 items-center justify-center rounded-xl bg-foreground/5'>
+                    <Icon size={18} color={accentText} />
+                  </View>
+                }
+                title={item.title}
+                query={query}
+                isSelected={checked}
+                onPress={() => {
+                  if (sending) return;
                   setSelected(current =>
                     checked ? current.filter(value => value.id !== item.id) : [...current, item],
-                  )
-                }
-              >
-                <Text className='text-base text-bottomsheet-container-foreground'>
-                  {checked ? '✓ ' : ''}
-                  {item.title}
-                </Text>
-              </Pressable>
+                  );
+                }}
+              />
             );
-          })}
-          {!rows.length && remote.status !== 'loading' ? (
-            <Text className='py-3 text-bottomsheet-text-muted'>
-              {query ? 'No results' : 'Type to search'}
-            </Text>
-          ) : null}
-        </BottomSheetScrollView>
+          }}
+          ListEmptyComponent={
+            remote.status !== 'loading' ? (
+              <Text className='py-8 text-center text-bottomsheet-text-muted'>
+                {query ? 'No results found' : 'Type to search for context'}
+              </Text>
+            ) : null
+          }
+        />
       </View>
     </AppBottomSheet>
   );

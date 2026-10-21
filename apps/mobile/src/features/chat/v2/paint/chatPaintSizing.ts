@@ -137,7 +137,7 @@ export const estimateChatPaintRowHeight = ({
 }): number => {
   const normalizedText = getTextForLineEstimate(previewText, previewSegments).trim();
   const rawEstimatedTextLines = estimateWrappedLineCount(normalizedText, charsPerLine);
-  if (rowType === 'system') {
+  if (rowType === 'system' && !hasRecordingPreview) {
     return Math.max(
       SYSTEM_ROW_ESTIMATED_HEIGHT,
       SYSTEM_ROW_VERTICAL_CHROME_HEIGHT + rawEstimatedTextLines * TEXT_LINE_HEIGHT,

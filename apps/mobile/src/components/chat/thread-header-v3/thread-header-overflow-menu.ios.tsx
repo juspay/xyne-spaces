@@ -1,5 +1,5 @@
 import { ThreadContextSheet } from '@/src/features/chat/thread-header/thread-context-sheet';
-import { ThreadTicketSheet } from '@/src/features/chat/thread-header/thread-ticket-sheet';
+import { ThreadCallSheet } from '@/src/features/chat/thread-header/thread-call-sheet';
 import { ThreadTagsSheet } from '@/src/features/chat/thread-header/thread-tags-sheet';
 import { Button, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import { disabled } from '@expo/ui/swift-ui/modifiers';
@@ -28,8 +28,8 @@ export function ThreadHeaderOverflowMenu({
   const {
     isContextOpen,
     closeContext,
-    isTicketOpen,
-    closeTicket,
+    isCallOpen,
+    closeCall,
     isTagsOpen,
     closeTags,
     actions,
@@ -110,9 +110,9 @@ export function ThreadHeaderOverflowMenu({
         channelId={channelId}
         threadId={threadId}
       />
-      <ThreadTicketSheet
-        isOpen={isTicketOpen}
-        onClose={closeTicket}
+      <ThreadCallSheet
+        isOpen={isCallOpen}
+        onClose={closeCall}
         channelId={channelId}
         threadId={threadId}
       />

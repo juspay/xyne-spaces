@@ -78,3 +78,11 @@ export interface RecordingDetailResponse {
   success: boolean;
   recording: RecordingDetail;
 }
+
+/** Message payload used by the existing conversation recording pill. */
+export type RecordingPreview = {
+  callId: string;
+  durationMs: number;
+  title: string;
+  isActive?: boolean;
+};

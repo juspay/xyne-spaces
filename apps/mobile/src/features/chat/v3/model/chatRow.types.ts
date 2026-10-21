@@ -1,3 +1,4 @@
+import type { RecordingPreview } from '@/src/types/recordings';
 /**
  * v3 row model. Canonical sub-models only — no @deprecated alias fields.
  * `flowParts` is a structural type so the pure model does not import the Flow
@@ -172,6 +173,7 @@ export type MessageRowModel = {
   mediaPreview: MediaPreview | null;
   ticketPreview: TicketPreview | null;
   callPreview: CallPreview | null;
+  recordingPreview?: RecordingPreview | null;
   nonParticipantPreview: NonParticipantPreview | null;
   linkPreview: LinkPreview | null;
   parentPreview: ParentPreview | null;

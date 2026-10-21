@@ -1,3 +1,4 @@
+import { recordingPreviewFromMetadata } from '@/src/utils/recordingMessage';
 import type { ChatRow, ChatRowType, MessageRowModel, ReactionPreview } from './chatRow.types';
 import { buildBody, INLINE_EMOJI_RESERVED_WIDTH_PX } from './buildBody';
 import { applyGrouping } from './buildGrouping';
@@ -129,6 +130,10 @@ const buildMessage = (input: ConversationInput, ctx: BuildRowsContext): MessageR
     mediaPreview,
     ticketPreview,
     callPreview,
+    recordingPreview:
+      input.isDeleted || input.messageType === 'FORWARDED'
+        ? null
+        : recordingPreviewFromMetadata(meta, body.plainText),
     nonParticipantPreview,
     linkPreview: buildLinkPreview(input),
     parentPreview,

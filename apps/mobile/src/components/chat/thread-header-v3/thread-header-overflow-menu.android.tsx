@@ -1,6 +1,6 @@
 import { ThreadContextSheet } from '@/src/features/chat/thread-header/thread-context-sheet';
-import { ThreadTicketSheet } from '@/src/features/chat/thread-header/thread-ticket-sheet';
-import { Mic, Tag, Link, Ticket } from 'lucide-react-native';
+import { ThreadCallSheet } from '@/src/features/chat/thread-header/thread-call-sheet';
+import { Mic, Tag, Link } from 'lucide-react-native';
 import { ThreadTagsSheet } from '@/src/features/chat/thread-header/thread-tags-sheet';
 import { StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -25,8 +25,8 @@ export function ThreadHeaderOverflowMenu({
   const {
     isContextOpen,
     closeContext,
-    isTicketOpen,
-    closeTicket,
+    isCallOpen,
+    closeCall,
     isTagsOpen,
     closeTags,
     actions,
@@ -78,8 +78,6 @@ export function ThreadHeaderOverflowMenu({
               left={
                 action.id === 'add-context' ? (
                   <Link size={20} color={foregroundColor} />
-                ) : action.id === 'create-ticket' ? (
-                  <Ticket size={20} color={foregroundColor} />
                 ) : action.id === 'take-notes' ? (
                   <Mic size={20} color={foregroundColor} />
                 ) : action.id === 'thread-tags' ? (
@@ -101,9 +99,9 @@ export function ThreadHeaderOverflowMenu({
         channelId={channelId}
         threadId={threadId}
       />
-      <ThreadTicketSheet
-        isOpen={isTicketOpen}
-        onClose={closeTicket}
+      <ThreadCallSheet
+        isOpen={isCallOpen}
+        onClose={closeCall}
         channelId={channelId}
         threadId={threadId}
       />

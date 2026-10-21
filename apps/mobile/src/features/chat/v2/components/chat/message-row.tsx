@@ -461,7 +461,7 @@ const MessageRowComponent = ({
     [profileActions, row.senderPaintModel.displayName, row.senderPaintModel.senderId],
   );
 
-  if (row.rowKind === 'SYSTEM') {
+  if (row.rowKind === 'SYSTEM' && !isRecordingRow) {
     if (!row.plainPreviewText.trim()) {
       return <View style={{ height: 8 }} />;
     }

@@ -1,3 +1,4 @@
+import { recordingPreviewFromMetadata } from '@/src/utils/recordingMessage';
 import type { ChannelKind, ConversationInput } from './conversationInput';
 import { callPreviewFromMetadata } from './callPreview';
 import { nonParticipantPreviewFromMetadata } from './nonParticipant';
@@ -117,6 +118,7 @@ export const contentSignature = (
     forwardedStamp(input),
     input.isFlowJson ? '1' : '0',
     callStamp(input),
+    JSON.stringify(recordingPreviewFromMetadata(input.metadata)),
     nonParticipantStamp(input),
     classificationStamp(input),
     input.messageType,

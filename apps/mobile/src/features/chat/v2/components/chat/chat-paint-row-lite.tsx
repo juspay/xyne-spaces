@@ -781,7 +781,7 @@ const ChatPaintRowLiteComponent = ({
     );
   }
 
-  if (row.rowKind === 'SYSTEM') {
+  if (row.rowKind === 'SYSTEM' && !isRecordingRow) {
     if (!row.plainPreviewText.trim()) return null;
     return (
       <View className='py-1 flex-row justify-center'>
