@@ -260,6 +260,24 @@ const FeedbackRequestSchema = z.object({
 /**
  * Controller for Xyne AI v2 - delegates all claw operations to clawAgentService.
  */
+/**
+ * Upstream statuses that mean something to the caller and are safe to hand
+ * back unchanged. Everything else is an upstream problem, reported as 503.
+ *
+ * A claw-auth 401 in particular must NOT reach the dashboard: its axios
+ * interceptor treats any 401 as session expiry and fires
+ * `/auth/refresh-session` plus a retry (services/clients/apiClient.ts), so a
+ * rejected forwarded cookie would burn a refresh and leave misleading auth
+ * logs for a Spaces session that is perfectly valid.
+ */
+const PASSTHROUGH_CLAW_STATUSES = new Set([400, 404, 409]);
+
+function clawStatusFor(error: unknown): number {
+  return error instanceof ClawRequestError && PASSTHROUGH_CLAW_STATUSES.has(error.status)
+    ? error.status
+    : 503;
+}
+
 export class XyneAIControllerV2 {
   /**
    * GET /api/xyne-ai/config
@@ -901,8 +919,7 @@ export class XyneAIControllerV2 {
       logger.error('[XyneAIv2] listConversations error:', error);
       // An unknown ?projectId= is a 404 from claw-auth, not an outage. Without
       // this it would read as "claw-auth is down" and the client would retry.
-      const status = error instanceof ClawRequestError ? error.status : 503;
-      res.status(status).json({ success: false, error: message });
+      res.status(clawStatusFor(error)).json({ success: false, error: message });
     }
   };
 
@@ -1337,7 +1354,7 @@ export class XyneAIControllerV2 {
       // status rather than matching on wording.
       const status =
         error instanceof ClawRequestError
-          ? error.status
+          ? clawStatusFor(error)
           : message === 'Conversation not found'
             ? 404
             : 503;
@@ -1353,8 +1370,7 @@ export class XyneAIControllerV2 {
   private projectFailure(res: Response, label: string, error: unknown): void {
     const message = error instanceof Error ? error.message : 'Internal server error';
     logger.error(`[XyneAIv2] ${label} error:`, error);
-    const status = error instanceof ClawRequestError ? error.status : 503;
-    res.status(status).json({ success: false, error: message });
+    res.status(clawStatusFor(error)).json({ success: false, error: message });
   }
 
   listChatProjects = async (req: Request, res: Response): Promise<void> => {

@@ -1315,7 +1315,13 @@ export async function listClawConversations(
   if (!response.ok) {
     const errorText = await response.text();
     logger.error(`[ClawAgentService] listConversations failed: ${response.status} ${errorText}`);
-    throw new Error('Failed to fetch conversations');
+    // Carries the status so an unknown `?projectId=` surfaces as 404 rather
+    // than an outage. A plain Error here made the controller's ClawRequestError
+    // branch unreachable and every failure read as 503.
+    throw new ClawRequestError(
+      clawErrorMessage(errorText) ?? 'Failed to fetch conversations',
+      response.status
+    );
   }
 
   return (await response.json()) as ClawConversationListResponse;
