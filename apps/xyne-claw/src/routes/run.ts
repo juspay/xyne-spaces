@@ -1511,7 +1511,7 @@ export async function processTask(
   scheduledJobId: string | undefined,
   traceId: string | undefined,
   skills:
-    | { slug?: string; name: string; description?: string; content: string }[]
+    | { slug?: string; name: string; description?: string; content: string; versionId?: string; contentSha256?: string }[]
     | undefined,
   provider: string | undefined,
   providerOrder: string[] | undefined,

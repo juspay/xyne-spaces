@@ -1,4 +1,5 @@
 import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
+import { resolveRunSkills } from "./skill-versions.js";
 import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
@@ -311,6 +312,9 @@ async function resolveUserId(
 
 function toRunSkill(skill: Prisma.SkillGetPayload<{ include: { files: true } }>) {
   return {
+    id: skill.id,
+    orgId: skill.orgId,
+    scope: skill.scope,
     slug: skill.slug,
     name: skill.name,
     description: skill.description ?? "",
@@ -343,6 +347,9 @@ async function resolveAgent(
       spacesAppToken?: string | null;
       spacesAppUserId?: string | null;
       skills?: {
+        id: string;
+        orgId: string;
+        scope: string;
         slug: string;
         name: string;
         description: string;
@@ -1511,7 +1518,8 @@ export async function prepareRun(
           )
         : [];
     const ownSlugs = new Set((agent.skills ?? []).map((sk) => sk.slug ?? sk.name));
-    const agentSkills = [...(agent.skills ?? []), ...hubSkills.filter((sk) => !ownSlugs.has(sk.slug))];
+    // The registry pins every stored skill the run loads; in enforce mode only an approved hash serves.
+    const agentSkills = (await resolveRunSkills([...(agent.skills ?? []), ...hubSkills.filter((sk) => !ownSlugs.has(sk.slug))])).skills;
     // Agent-attached skills win a slug collision — an org's own skill must not
     // be silently shadowed by a hub-linked or caller-supplied one.
     const takenSlugs = new Set(agentSkills.map((sk) => sk.slug ?? sk.name));

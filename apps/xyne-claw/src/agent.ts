@@ -1844,7 +1844,7 @@ export interface RunTaskOptions {
   sessionId?: string | undefined;
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
-  skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
+  skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[]; versionId?: string; contentSha256?: string }[] | undefined;
   /** Trusted, package-owned skill roots for a built-in run mode. Unlike
    * session skills these are not user supplied and are not deleted at exit. */
   extraSkillPaths?: string[] | undefined;
@@ -3087,6 +3087,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     agentSlug: progressMeta?.agentSlug ?? undefined,
     role: "parent",
     toolMeta: allCustomTools.map((t) => toolMetaOf(t as unknown as { name: string } & Record<string, unknown>)),
+    loaded: (skills ?? []).flatMap((s) => (s.versionId ? [{ versionId: s.versionId, sha256: s.contentSha256 ?? "", slug: s.slug ?? s.name }] : [])),
   }).install(session.agent as unknown as GovernedAgent);
 
   // Attach the judge sink only once capture has started: it flushes every Jev
