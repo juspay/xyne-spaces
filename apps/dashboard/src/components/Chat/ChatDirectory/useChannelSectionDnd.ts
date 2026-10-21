@@ -31,6 +31,7 @@ import {
   isDMChannel,
   keyBetween,
   pinSelfDMLast,
+  selectChannelIdsToMarkRead,
   sortChannelsAlphabetically,
   suppressNextClick,
   sumSectionUnread,
@@ -67,6 +68,11 @@ interface ChannelSectionDnd {
   dmDisplayChannels: VisibleChannel[];
   starredDisplayChannels: VisibleChannel[];
   sectionUnreadCounts: Record<string, number>;
+  /** Per section: every unread channel id, including ones hidden by the section filter. */
+  sectionUnreadChannelIds: Record<string, string[]>;
+  defaultUnreadChannelIds: string[];
+  dmUnreadChannelIds: string[];
+  starredUnreadChannelIds: string[];
   defaultUnreadCount: number;
   dmUnreadCount: number;
   starredUnreadCount: number;
@@ -218,6 +224,29 @@ export const useChannelSectionDnd = ({
       activeChannelId,
     );
   }
+  const sectionUnreadChannelIds: Record<string, string[]> = {};
+  for (const bucket of sectioned) {
+    sectionUnreadChannelIds[bucket.section.id] = selectChannelIdsToMarkRead(
+      bucket.channels,
+      unreadCounts,
+      statusByChannelId,
+    );
+  }
+  const defaultUnreadChannelIds = selectChannelIdsToMarkRead(
+    defaultChannels,
+    unreadCounts,
+    statusByChannelId,
+  );
+  const dmUnreadChannelIds = selectChannelIdsToMarkRead(
+    dmChannels,
+    unreadCounts,
+    statusByChannelId,
+  );
+  const starredUnreadChannelIds = selectChannelIdsToMarkRead(
+    starred,
+    unreadCounts,
+    statusByChannelId,
+  );
   const defaultUnreadCount = sumSectionUnread(defaultChannels, unreadCounts, activeChannelId);
   const dmUnreadCount = sumSectionUnread(dmChannels, unreadCounts, activeChannelId);
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
@@ -485,6 +514,10 @@ export const useChannelSectionDnd = ({
     dmDisplayChannels,
     starredDisplayChannels,
     sectionUnreadCounts,
+    sectionUnreadChannelIds,
+    defaultUnreadChannelIds,
+    dmUnreadChannelIds,
+    starredUnreadChannelIds,
     defaultUnreadCount,
     dmUnreadCount,
     starredUnreadCount,

@@ -113,6 +113,7 @@ import {
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
   resolveTicketDescription,
+  MARK_CHANNELS_VIEWED_MAX_BATCH,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -486,6 +487,99 @@ async function getConversationSeenCutoffAt(
   );
 
   return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
+}
+
+/**
+ * Read-state half of "mark channel as viewed": moves the user's read cursor to
+ * `timestamp` and clears the unread count. Email channels keep their unreadCount
+ * (it tracks unread emails, cleared by the email read flow). Shared by the single
+ * and bulk mutators.
+ */
+async function markChannelStatusViewed(
+  tx: Transaction<Schema>,
+  {
+    channelUserStatusId,
+    channelId,
+    timestamp,
+    isEmailChannel,
+    conversationId,
+  }: {
+    channelUserStatusId: string;
+    channelId: string;
+    timestamp: number;
+    isEmailChannel: boolean;
+    conversationId?: string | undefined;
+  },
+): Promise<void> {
+  const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
+
+  const updateData: {
+    lastViewedAt: number;
+    conversationSeenCutoffAt: number;
+    unreadCount?: number;
+    lastViewedConversationId?: string;
+  } = {
+    lastViewedAt: timestamp,
+    conversationSeenCutoffAt,
+  };
+  if (!isEmailChannel) {
+    updateData.unreadCount = 0;
+  }
+  if (conversationId) {
+    updateData.lastViewedConversationId = conversationId;
+  }
+
+  await tx.mutate.channel_user_status.update({
+    id: channelUserStatusId,
+    ...updateData,
+    updatedAt: timestamp,
+  });
+}
+
+/**
+ * Activity half of "mark channel as viewed": marks the user's unread activities for
+ * the channel's top-level messages (a thread's initial message) as read.
+ */
+async function markChannelRootActivitiesRead(
+  tx: Transaction<Schema>,
+  userId: string,
+  channelId: string,
+): Promise<void> {
+  const unreadActivities = await tx.run(
+    zql.activities
+      .where('userId', userId)
+      .where('isRead', false)
+      .where('channelId', channelId),
+  );
+
+  if (unreadActivities.length === 0) {
+    return;
+  }
+
+  const activityBySourceId = new Map(
+    unreadActivities.map(a => [a.actionSourceId, a]),
+  );
+  const uniqueSourceIds = [...activityBySourceId.keys()];
+
+  const messages = await tx.run(
+    zql.messages
+      .where('messageId', 'IN', uniqueSourceIds)
+      .related('conversation'),
+  );
+
+  const messageByMessageId = new Map(
+    messages.map(m => [m.messageId, m]),
+  );
+
+  for (const [sourceId, activity] of activityBySourceId) {
+    const message = messageByMessageId.get(sourceId);
+    if (message?.conversation?.initialMessageId === message?.messageId) {
+      await tx.mutate.activities.update({
+        id: activity.id,
+        isRead: true,
+      });
+    }
+  }
 }
 
 async function decrementSurfaceNudgeCountRow(
@@ -1798,27 +1892,13 @@ export function createMutators(
             throw new Error('Not a channel participant');
           }
 
-          const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
-
-
           const channel = await tx.run(zql.channels.where('id', channelId).one());
-          const isEmailChannel = channel?.type === 'EMAIL';
-          const updateData: any = {
-            lastViewedAt: timestamp,
-            conversationSeenCutoffAt,
-          };
-          if (!isEmailChannel) {
-            updateData.unreadCount = 0;
-          }
-
-          if (conversationId) {
-            updateData.lastViewedConversationId = conversationId;
-          }
-
-          await tx.mutate.channel_user_status.update({
-            id: participant.id,
-            ...updateData,
-            updatedAt: timestamp,
+          await markChannelStatusViewed(tx, {
+            channelUserStatusId: participant.id,
+            channelId,
+            timestamp,
+            isEmailChannel: channel?.type === 'EMAIL',
+            conversationId,
           });
 
           // Draft args are only for callers that also save the channel draft. Omit them
@@ -1852,41 +1932,47 @@ export function createMutators(
             }
           }
 
-          const unreadActivities = await tx.run(
-            zql.activities
+          await markChannelRootActivitiesRead(tx, authData.sub, channelId);
+        },
+      ),
+      /**
+       * Bulk form of `markChannelAsViewed` for "Mark section as read". Same per-channel
+       * read logic in one transaction: drafts are never touched, and channels the user
+       * is no longer a member of are skipped rather than failing the whole call (a
+       * client's sidebar list can be a beat stale). Mirrors the shared client mutator.
+       */
+      markChannelsAsViewed: defineMutator(
+        z.object({
+          channelIds: z.array(z.string()).min(1).max(MARK_CHANNELS_VIEWED_MAX_BATCH),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { channelIds, timestamp } }) => {
+          const uniqueChannelIds = [...new Set(channelIds)];
+          const statuses = await tx.run(
+            zql.channel_user_status
+              .where('channelId', 'IN', uniqueChannelIds)
               .where('userId', authData.sub)
-              .where('isRead', false)
-              .where('channelId', channelId),
+              .where('isDeleted', false),
           );
-
-          if (unreadActivities.length === 0) {
+          if (statuses.length === 0) {
             return;
           }
 
-
-          const activityBySourceId = new Map(
-            unreadActivities.map(a => [a.actionSourceId, a]),
+          const channels = await tx.run(
+            zql.channels.where('id', 'IN', statuses.map(s => s.channelId)),
           );
-          const uniqueSourceIds = [...activityBySourceId.keys()];
-
-          const messages = await tx.run(
-            zql.messages
-              .where('messageId', 'IN', uniqueSourceIds)
-              .related('conversation'),
+          const emailChannelIds = new Set(
+            channels.filter(c => c.type === 'EMAIL').map(c => c.id),
           );
 
-          const messageByMessageId = new Map(
-            messages.map(m => [m.messageId, m]),
-          );
-
-          for (const [sourceId, activity] of activityBySourceId) {
-            const message = messageByMessageId.get(sourceId);
-            if (message?.conversation?.initialMessageId === message?.messageId) {
-              await tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              });
-            }
+          for (const status of statuses) {
+            await markChannelStatusViewed(tx, {
+              channelUserStatusId: status.id,
+              channelId: status.channelId,
+              timestamp,
+              isEmailChannel: emailChannelIds.has(status.channelId),
+            });
+            await markChannelRootActivitiesRead(tx, authData.sub, status.channelId);
           }
         },
       ),
