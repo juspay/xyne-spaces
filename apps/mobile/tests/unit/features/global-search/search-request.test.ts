@@ -244,10 +244,10 @@ describe('global search request', () => {
       assert.equal(sent['onlyMyChannels'], 'false');
     });
 
-    it('lets the toggle override what in: implies', () => {
+    it('lets an explicit in: win over @Ch', () => {
       const sent = params({ query: 'deploy', chips: [inside('c1')], onlyMyChannels: true });
 
-      assert.equal(sent['onlyMyChannels'], 'true');
+      assert.equal(sent['onlyMyChannels'], 'false');
     });
 
     it('sends the toggle on its own when there is text', () => {

@@ -1,7 +1,11 @@
 import { useReducer, type Dispatch } from 'react';
 
 import type { SearchFilterChip, SearchFilterPrefix } from '../types';
-import { isExactSearchQuery } from '../utils/exact-search';
+import {
+  isExactSearchQuery,
+  unwrapExactSearchQuery,
+  wrapExactSearchQuery,
+} from '../utils/exact-search';
 import {
   DEFAULT_STRUCTURED_FILTERS,
   structuredFiltersEqual,
@@ -24,8 +28,9 @@ export type SearchState = {
   /** Include BOT messageType hits. Messages tab only; default off. */
   includeBotMessages: boolean;
   /**
-   * Exact phrase mode. Folded into `q` as quotes on the way out — not shown in
-   * the input. Also turns on when the user types quotes by hand.
+   * Exact phrase mode (`"ab"`). The quotes live in `query`, same as dashboard,
+   * and are also folded into `q` on the way out. Turns on when the user types
+   * quotes by hand.
    */
   exactMatch: boolean;
   /** Page-level sort — Relevance / Newest / Oldest. Edited in Filters drawer. */
@@ -68,7 +73,8 @@ export function createSearchState(tab: GlobalSearchTab): SearchState {
     query: '',
     chips: [],
     structured: { ...DEFAULT_STRUCTURED_FILTERS },
-    onlyMyChannels: false,
+    // Dashboard `DEFAULT_SEARCH_FILTERS.onlyMyChannels` — the `@Ch` pill starts on.
+    onlyMyChannels: true,
     includeBotMessages: false,
     exactMatch: false,
     sortBy: DEFAULT_SORT_BY,
@@ -175,8 +181,13 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
     case 'includeBotMessagesToggled':
       return { ...state, includeBotMessages: !state.includeBotMessages };
 
-    case 'exactMatchToggled':
-      return { ...state, exactMatch: !state.exactMatch };
+    case 'exactMatchToggled': {
+      const exactMatch = !state.exactMatch;
+      const query = exactMatch
+        ? wrapExactSearchQuery(state.query)
+        : unwrapExactSearchQuery(state.query);
+      return query === state.query ? { ...state, exactMatch } : { ...state, exactMatch, query };
+    }
 
     case 'cleared':
       return state.query === '' &&

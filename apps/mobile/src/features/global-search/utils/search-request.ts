@@ -241,10 +241,10 @@ export function buildSearchFilters(
     ...facets,
   };
 
-  // `in:` carries an implicit `false` so the backend does not re-narrow an explicit
-  // channel list to joined channels. The toggle, when on, overrides it.
-  if (onlyMyChannels) filters.onlyMyChannels = true;
-  else if (inside) filters.onlyMyChannels = false;
+  // Dashboard: an explicit `in:` wins over `@Ch`, so a channel you are not in
+  // still returns results. Otherwise send the toggle (default on).
+  if (inside) filters.onlyMyChannels = false;
+  else if (onlyMyChannels) filters.onlyMyChannels = true;
 
   // Bot inclusion only applies to message search (dashboard `appliesTo: isMessageType`).
   if (isMessages) filters.includeBotMessages = includeBotMessages;
