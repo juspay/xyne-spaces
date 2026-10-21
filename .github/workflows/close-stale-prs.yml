@@ -4,6 +4,8 @@ name: Close Stale PRs
 # left explaining why; closed PRs can be reopened). Run manually with
 # dry_run=true to preview what would be closed.
 on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
   workflow_dispatch:
     inputs:
       dry_run:
@@ -21,7 +23,7 @@ concurrency:
 
 jobs:
   close-stale-prs:
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
@@ -30,8 +32,7 @@ jobs:
       - name: Close stale PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          STALE_DAYS: "14"
-          PR_NUMBERS: "2583 2942 3142"
+          STALE_DAYS: "30"
           # Scheduled runs have no inputs, so they actually close.
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: .github/scripts/close-stale-prs.sh
