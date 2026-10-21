@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { NoteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { type Prisma } from '@prisma/client';
-import { MessageType, CallType, CallStatus, AttachmentEntityType } from '@xyne/shared';
+import { MessageType, CallType, CallStatus } from '@xyne/shared';
 
 
 export function createThreadAnchorMessageTx(self: NoteTakerCallRepository, messageId: string, conversationId: string, workspaceId: string, initiator: any, now: Date, callExternalId: string, notesCanvasId: string, createdBy: string, existingMetadata: Record<string, unknown>, callId: string, detailedSummaryCanvasId: string, channelId: string) {
@@ -59,26 +59,37 @@ export function createThreadAnchorMessageTx(self: NoteTakerCallRepository, messa
   });
 }
 /**
- * Owner deleted a thread-linked recording. The anchor becomes the same placeholder
- * the channel-flow cascade writes, its attachments go, and the thread's
- * live-recording state is cleared — updateThreadMessageOnEnd never gets to do that
- * once the Call row is gone, because room_finished then fails on "Call not found".
+ * Owner deleted a thread-linked recording. The anchor is removed outright — a
+ * soft delete would still render a "message deleted" row in the thread — along
+ * with its attachments and reactions, the reply it added to the thread's count
+ * is taken back, and the thread's live-recording state is cleared.
+ * updateThreadMessageOnEnd never gets to do that last part once the Call row is
+ * gone, because room_finished then fails on "Call not found".
  */
-export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, messageId: string, conversationId: string, deletedAt: Date) {
-  return transaction(['Conversation', 'Message', 'MessageAttachment'], 'markThreadAnchorDeleted: anchor placeholder, its attachments and the thread live-recording flag must change atomically; tx is not ACL-wrapped', self.db, async (tx) => {
-    await tx.messageAttachment.deleteMany({
-      where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
-    });
+export function markThreadAnchorDeletedTx(self: NoteTakerCallRepository, messageId: string, conversationId: string) {
+  return transaction(['Conversation', 'Message', 'MessageAttachment', 'Reaction', 'ReactionCount'], 'markThreadAnchorDeleted: anchor removal, its attachments, the thread reply count and live-recording flag must change atomically; tx is not ACL-wrapped', self.db, async (tx) => {
+    // Same teardown order as recordingSharingService's share-message removal.
+    await Promise.all([
+      tx.messageAttachment.deleteMany({ where: { entityId: messageId } }),
+      tx.reaction.deleteMany({ where: { messageId } }),
+      tx.reactionCount.deleteMany({ where: { messageId } }),
+    ]);
+    const removed = await tx.message.deleteMany({ where: { messageId } });
 
-    // Dropping isRecordingMessage is deliberate: RecordingBubble would otherwise keep
-    // querying a Call that no longer exists. The message renders as plain system text.
-    await tx.message.update({
-      where: { messageId },
-      data: {
-        content: '<p>Transcript was deleted for this recording</p>',
-        metadata: { deleted: true, deletedAt: deletedAt.toISOString() },
-      },
-    });
+    // createThreadAnchorMessage incremented replyCount for the anchor; undo that
+    // only if the anchor was actually still there (the owner may have removed it).
+    if (removed.count > 0) {
+      const conversation = await tx.conversation.findUnique({
+        where: { conversationId },
+        select: { replyCount: true },
+      });
+      if (conversation) {
+        await tx.conversation.update({
+          where: { conversationId },
+          data: { replyCount: Math.max(0, conversation.replyCount - 1) },
+        });
+      }
+    }
 
     await self.clearConversationRecordingState(tx, conversationId);
   });

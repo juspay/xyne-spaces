@@ -132,17 +132,17 @@ export class NoteTakerCallRepository {
   /**
    * Owner deleted the recording. Thread-linked recordings keep their anchor ids on
    * call.metadata (conversationId/messageId), not on conversation.metadata.callId,
-   * so the channel-flow cascade in CallController never finds them. Returns false
-   * (no throw) for recordings that weren't started from a thread.
+   * so the channel-flow cascade in CallController never finds them. Removes the
+   * anchor message from the thread. Returns false (no throw) for recordings that
+   * weren't started from a thread.
    */
   async markThreadAnchorDeleted(
     call: { externalId: string; metadata: Prisma.JsonValue | null },
-    deletedAt: Date,
   ): Promise<boolean> {
     const metadata = (call.metadata as NoteTakerCallMetadata | null) ?? {};
     if (!metadata.conversationId || !metadata.messageId) return false;
 
-    await markThreadAnchorDeletedTx(this, metadata.messageId, metadata.conversationId, deletedAt);
+    await markThreadAnchorDeletedTx(this, metadata.messageId, metadata.conversationId);
     return true;
   }
 

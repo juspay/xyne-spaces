@@ -3380,8 +3380,8 @@ export class CallController {
     // their anchor lives in an existing discussion thread and is addressed by id from
     // call.metadata. Only that one message is touched — an updateMany on the thread
     // would overwrite the user's own messages.
-    if (await noteTakerCallRepository.markThreadAnchorDeleted(call, new Date())) {
-      logger.info(`Marked thread anchor message deleted for recording ${callId}`);
+    if (await noteTakerCallRepository.markThreadAnchorDeleted(call)) {
+      logger.info(`Removed thread anchor message for deleted recording ${callId}`);
     }
 
     // Delete activities
