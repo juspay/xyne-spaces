@@ -54,6 +54,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { conversationalFlowWorker } from '@/workers/conversationalFlowWorker';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
@@ -200,6 +201,11 @@ class WorkerService {
       if (workflowsEnabled) {
         logger.info('Starting workflows worker...');
         await workflowsWorker.start();
+      }
+
+      if (appConfig.workflows.conversationalFlow.workerEnabled) {
+        logger.info('Starting conversations worker...');
+        await conversationalFlowWorker.start();
       }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
@@ -516,6 +522,10 @@ class WorkerService {
       }
       if (appConfig.decisionEval.enabled) {
         await decisionEvaluationWorker.shutdown();
+      }
+
+      if (appConfig.workflows.conversationalFlow.workerEnabled) {
+        await conversationalFlowWorker.stop()
       }
 
       if (workflowsEnabled) {
