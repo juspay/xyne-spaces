@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
+import { authSessionService } from '../services/authSessionService';
 import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
@@ -48,7 +49,7 @@ type AutoLoginResult = {
     name: string;
     picture: string | null;
     workspaceId: string | null;
-    orgMemberId: string | null;
+    orgMemberId: string;
     providerUserId: string;
     role: string;
   };
@@ -1019,7 +1020,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`${tag()} Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -1054,6 +1055,12 @@ export class AuthV2Controller {
         res.cookie('user_session_id', sessionId, {
           ...cookieBase,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
         });
 
         logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
@@ -1395,6 +1402,12 @@ export class AuthV2Controller {
           });
         }
 
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+        });
+
         logger.info(`${tag()} Google OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
 
         // Return JSON instead of redirect (mobile expects this)
@@ -1480,6 +1493,9 @@ export class AuthV2Controller {
       if (req.user && sessionId) {
         await getEncryptionProvider().revokeSessionKey(sessionId);
       }
+
+      // Revoke the device's org-scoped auth session and clear the xs cookie.
+      await authSessionService.revokeOnLogout(req, res, { orgMemberId: req.user?.memberId });
 
       // Clear global session cookie
       res.clearCookie('user_session_id', { path: '/' });
@@ -1732,6 +1748,12 @@ export class AuthV2Controller {
         });
       }
 
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+      });
+
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -1906,11 +1928,18 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
-      
+
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', targetWorkspaceId, {
         ...cookieOptions,
         maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+      });
+
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        orgId: organization.orgId,
       });
 
       setOnboardingCookie(res, isNewUser, {
@@ -2078,6 +2107,12 @@ export class AuthV2Controller {
       if (validSessionId) {
         res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
       }
+
+      // Stamp the entered workspace on the device's auth session; never fails the switch.
+      await authSessionService.recordWorkspaceAccess(req, {
+        orgMemberId: targetUser.orgMemberId,
+        workspaceId,
+      });
 
       logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
 
@@ -2272,6 +2307,13 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+          orgId: organization.orgId,
+        });
+
         const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
 
         setOnboardingCookie(res, isNewUser, {
@@ -2403,6 +2445,13 @@ export class AuthV2Controller {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
+
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        orgId: organization.orgId,
+      });
       const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
