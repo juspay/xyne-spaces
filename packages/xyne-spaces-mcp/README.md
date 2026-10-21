@@ -154,16 +154,32 @@ Two consequences worth internalising:
 - Writes are real and immediate. `spaces_message_send` posts to a live thread that other
   people can see, and there is no undo from this server.
 
-**Read-only by default.** Every write tool is left out of the listing unless you turn
-writes on explicitly:
+**Read-only by default.** Every write tool is left out of the listing until you turn
+writes on, from a terminal:
 
 ```bash
-export XYNE_SPACES_READONLY=0   # or false / no; restart the agent afterwards
+npx -y @xyne/spaces-mcp writes on    # agents can send messages, create threads, update tickets
+npx -y @xyne/spaces-mcp writes off   # read-only again
+npx -y @xyne/spaces-mcp writes       # show the current setting
 ```
 
-Any other value, including leaving it unset, keeps the server read-only: 24 tools instead
-of 36 (`spaces_login` is always there). A tool the model cannot see is a tool it cannot decide to use, which
-is more reliable than declining after the fact.
+Inside this repository, `node packages/xyne-spaces-mcp/dist/index.js writes on` does the same.
+
+The setting is `"writes": true` in `~/.xyne/agent/spaces.json`, so one command covers
+every client on the computer — Claude Code, Cursor, VS Code — and **running servers pick
+it up without a restart**: they watch the file and tell their client the tool list
+changed, so the write tools appear or disappear on their own. Read-only means 24 tools
+instead of 36 (`spaces_login` is always there). A tool the model cannot see is a tool it
+cannot decide to use, which is more reliable than declining after the fact; a write call
+from a list made before writes were turned off is refused all the same.
+
+Only `true` turns writes on: a missing field, a typo or an unreadable file keeps the
+server read-only. There is deliberately no tool for it — an agent that could switch on its
+own writes could be talked into it by text it reads in a message or ticket.
+
+To keep one client read-only whatever the file says, set `XYNE_SPACES_READONLY` in that
+client's MCP config: `0`, `false` or `no` turns writes on for it, any other value keeps it
+read-only. It overrides the file and needs a restart of that client.
 
 ---
 
@@ -401,6 +417,8 @@ src/
   config.ts       session resolution and storage, and building the SDK client
   login.ts        the Xyne SSO flow shared by spaces_login and the login command
   login-command.ts  `xyne-spaces-mcp login`
+  writes-command.ts `xyne-spaces-mcp writes [on|off]`
+  watch.ts        follows spaces.json: the writes setting, and sign-ins made elsewhere
   errors.ts       turning a thrown SdkError into prose a model can act on
   render.ts       formatting vocabulary shared by every renderer
   tools/
