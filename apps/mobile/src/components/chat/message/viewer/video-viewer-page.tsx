@@ -21,6 +21,7 @@ import { Pause, Play } from 'lucide-react-native';
 import { GlassSurface } from '@/src/components/ui/glass-surface';
 
 import type { MessageAttachment } from '../message-attachments.utils';
+import { useCompatVideoFallback } from '@/src/hooks/useCompatVideoFallback';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
 import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
 import { safePlay } from '@/src/utils/safeVideoPlayer';
@@ -50,12 +51,13 @@ export const VideoViewerPage = memo(function VideoViewerPage({
   isActive = true,
 }: VideoViewerPageProps) {
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const compat = useCompatVideoFallback(attachment.id, isActive);
   const {
     streamUrl,
     isReady: proxyReady,
     isLoading: isStreamLoading,
     error: streamError,
-  } = useMtlsVideoStream(attachment.id, { enabled: isActive });
+  } = useMtlsVideoStream(attachment.id, { enabled: isActive, variant: compat.variant });
   const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
     surface: 'chat_viewer',
     subject: {
@@ -63,8 +65,10 @@ export const VideoViewerPage = memo(function VideoViewerPage({
       mimetype: attachment.mimetype,
       originalFilename: attachment.originalFilename,
       sizeBytes: attachment.size,
+      variant: compat.variant,
     },
-    sourceKey: attachment.id,
+    // One telemetry session per loaded source, so each compat attempt reports its own outcome.
+    sourceKey: `${attachment.id}:${compat.variant}:${compat.loadToken}`,
     active: isActive,
   });
 
@@ -96,12 +100,15 @@ export const VideoViewerPage = memo(function VideoViewerPage({
     return clampValue(value, -maxTranslate, maxTranslate);
   };
 
+  const handleCompatError = compat.handlePlayerError;
   useEffect(() => {
     if (streamError) {
       setErrorMessage(streamError.message);
       reportFailure('stream_url', streamError);
+      // The compat URL could not be prepared — give up and show the original error.
+      if (compat.variant === 'compat') handleCompatError(streamError.message);
     }
-  }, [reportFailure, streamError]);
+  }, [reportFailure, streamError, compat.variant, handleCompatError]);
 
   useEffect(
     (): (() => void) => () => {
@@ -139,10 +146,14 @@ export const VideoViewerPage = memo(function VideoViewerPage({
   useEventListener(player, 'statusChange', payload => {
     if (payload.status === 'readyToPlay') {
       setHasLoaded(true);
+      compat.handlePlayerReady();
       reportReady(Math.round(playerRef.current.duration * 1000));
     }
     if (payload.status === 'error') {
       reportFailure('player_status', payload.error ?? 'Failed to load video');
+      // A decoder the device lacks (e.g. Dolby Vision on MediaTek) → retry with
+      // the server's H.264 rendition; the error UI stays hidden while recovering.
+      compat.handlePlayerError(payload.error?.message ?? 'Failed to load video');
     }
     if (payload.status === 'readyToPlay' && isActive && shouldAutoPlayRef.current) {
       shouldAutoPlayRef.current = false;
@@ -170,14 +181,16 @@ export const VideoViewerPage = memo(function VideoViewerPage({
       return;
     }
 
-    if (loadedStreamUrlRef.current === streamUrl) {
+    // Compat retries reuse the same URL; the token forces a reload.
+    const loadKey = `${streamUrl}#${compat.loadToken}`;
+    if (loadedStreamUrlRef.current === loadKey) {
       return;
     }
 
     setErrorMessage('');
     setPositionOverrideMs(null);
     setDurationMs(0);
-    loadedStreamUrlRef.current = streamUrl;
+    loadedStreamUrlRef.current = loadKey;
     shouldAutoPlayRef.current = true;
 
     void playerRef.current
@@ -195,13 +208,14 @@ export const VideoViewerPage = memo(function VideoViewerPage({
         loadedStreamUrlRef.current = null;
         setErrorMessage(err instanceof Error ? err.message : 'Failed to load video');
         reportFailure('source_replace', err);
+        handleCompatError(err instanceof Error ? err.message : err);
       });
 
     return (): void => {
       cancelled = true;
       shouldAutoPlayRef.current = false;
     };
-  }, [streamUrl, isActive, attachment.id, reportFailure]);
+  }, [streamUrl, isActive, attachment.id, reportFailure, compat.loadToken, handleCompatError]);
 
   const hideControlsAfterDelay = useCallback((): void => {
     if (controlsTimeoutRef.current) {
@@ -257,8 +271,12 @@ export const VideoViewerPage = memo(function VideoViewerPage({
 
   const playbackPositionMs = Math.max(0, Math.round(currentTime * 1000));
   const currentPositionMs = positionOverrideMs ?? playbackPositionMs;
-  const hasError = errorMessage.length > 0;
-  const isLoading = isStreamLoading || !proxyReady || (isActive && !hasLoaded && !hasError);
+  // While the compat fallback is recovering, hide the original decoder error;
+  // once it gives up, show the ORIGINAL error exactly as before.
+  const displayedError = compat.recovering ? '' : (compat.originalError ?? errorMessage);
+  const hasError = displayedError.length > 0;
+  const isLoading =
+    compat.recovering || isStreamLoading || !proxyReady || (isActive && !hasLoaded && !hasError);
 
   const progress = durationMs > 0 ? currentPositionMs / durationMs : 0;
   const [measuredWidth, setMeasuredWidth] = useState(0);
@@ -432,7 +450,7 @@ export const VideoViewerPage = memo(function VideoViewerPage({
         <View style={styles.errorContainer}>
           <Play size={48} color='white' />
           <Text style={styles.errorText}>Failed to load video</Text>
-          <Text style={styles.errorDetails}>{errorMessage.substring(0, 100)}</Text>
+          <Text style={styles.errorDetails}>{displayedError.substring(0, 100)}</Text>
         </View>
       </View>
     );
@@ -443,7 +461,13 @@ export const VideoViewerPage = memo(function VideoViewerPage({
       {isLoading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator />
-          <Text style={styles.loadingText}>{proxyReady ? 'Loading...' : 'Initializing...'}</Text>
+          <Text style={styles.loadingText}>
+            {compat.recovering
+              ? 'Preparing video for this device…'
+              : proxyReady
+                ? 'Loading...'
+                : 'Initializing...'}
+          </Text>
         </View>
       )}
 

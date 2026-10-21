@@ -7,6 +7,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { useMtlsThumbnail } from '@/src/hooks/useMtlsThumbnail';
+import { useCompatVideoFallback } from '@/src/hooks/useCompatVideoFallback';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
 import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
 import type { AttachmentsViewerItem } from '@/src/machines/attachmentsMachine';
@@ -24,11 +25,12 @@ const DOUBLE_TAP_SCALE = 2.5;
 
 const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElement => {
   const { uri: thumbUri } = useMtlsThumbnail(attachment.id);
+  const compat = useCompatVideoFallback(attachment.id, isActive);
   const {
     streamUrl,
     isLoading: isStreamLoading,
     error: streamError,
-  } = useMtlsVideoStream(attachment.id, { enabled: isActive });
+  } = useMtlsVideoStream(attachment.id, { enabled: isActive, variant: compat.variant });
   const { reportSourceLoad, reportReady, reportFailure } = useVideoPlaybackTelemetry({
     surface: 'attachments_viewer',
     subject: {
@@ -36,8 +38,10 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
       mimetype: attachment.mimetype,
       originalFilename: attachment.originalFilename,
       sizeBytes: attachment.size,
+      variant: compat.variant,
     },
-    sourceKey: attachment.id,
+    // One telemetry session per loaded source, so each compat attempt reports its own outcome.
+    sourceKey: `${attachment.id}:${compat.variant}:${compat.loadToken}`,
     active: isActive,
   });
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
@@ -84,11 +88,29 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
     setLoadError(null);
   }, [streamUrl, attachment.id]);
 
+  // Compat retries reuse the same URL, so reload the player explicitly.
+  const lastCompatLoadRef = useRef(0);
+  useEffect(() => {
+    if (compat.variant !== 'compat' || !streamUrl || !isActive) return;
+    if (compat.loadToken <= 1 || lastCompatLoadRef.current === compat.loadToken) {
+      lastCompatLoadRef.current = compat.loadToken;
+      return;
+    }
+    lastCompatLoadRef.current = compat.loadToken;
+    setLoadError(null);
+    void playerRef.current
+      .replaceAsync({ uri: streamUrl, contentType: 'progressive' })
+      .catch(() => undefined);
+  }, [compat.loadToken, compat.variant, streamUrl, isActive]);
+
+  const handleCompatError = compat.handlePlayerError;
   useEffect(() => {
     if (streamError) {
       reportFailure('stream_url', streamError);
+      // The compat URL could not be prepared — give up and show the original error.
+      if (compat.variant === 'compat') handleCompatError(streamError.message);
     }
-  }, [reportFailure, streamError]);
+  }, [reportFailure, streamError, compat.variant, handleCompatError]);
 
   useEventListener(player, 'sourceLoad', payload => {
     reportSourceLoad(payload.availableVideoTracks);
@@ -97,14 +119,20 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
   useEventListener(player, 'statusChange', payload => {
     if (payload.status === 'readyToPlay') {
       setHasLoaded(true);
+      compat.handlePlayerReady();
       reportReady(Math.round(playerRef.current.duration * 1000));
       if (isActiveRef.current) {
         safePlay(playerRef.current);
       }
     }
     if (payload.status === 'error') {
-      setLoadError(payload.error?.message ?? 'Failed to load video');
       reportFailure('player_status', payload.error ?? 'Failed to load video');
+      // A decoder the device lacks (e.g. Dolby Vision on MediaTek) → retry with
+      // the server's H.264 rendition instead of showing the error.
+      if (compat.handlePlayerError(payload.error?.message ?? 'Failed to load video')) {
+        return;
+      }
+      setLoadError(payload.error?.message ?? 'Failed to load video');
     }
   });
 
@@ -220,10 +248,15 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
   }));
 
   const isInitialLoading =
-    isStreamLoading || (Boolean(streamUrl) && !hasLoaded && playerStatus !== 'error');
-  const showThumbnailOverlay = isActive && isInitialLoading && !streamError && !playerErrorMessage;
+    compat.recovering ||
+    isStreamLoading ||
+    (Boolean(streamUrl) && !hasLoaded && playerStatus !== 'error');
+  const showThumbnailOverlay =
+    isActive && isInitialLoading && !streamError && (compat.recovering || !playerErrorMessage);
   const showSpinner = isActive && isInitialLoading && !streamError;
-  const errorMessage = streamError?.message ?? loadError ?? playerErrorMessage ?? null;
+  const errorMessage = compat.recovering
+    ? null
+    : (compat.originalError ?? streamError?.message ?? loadError ?? playerErrorMessage ?? null);
 
   if (!isActive) {
     return (
@@ -270,6 +303,11 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
           <View className='w-16 h-16 rounded-full bg-black/50 items-center justify-center'>
             <ActivityIndicator size='large' color='#fff' />
           </View>
+          {compat.recovering ? (
+            <Text className='mt-3 text-center text-xs text-white/80'>
+              Preparing video for this device…
+            </Text>
+          ) : null}
         </View>
       ) : null}
 

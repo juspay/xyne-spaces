@@ -11,11 +11,13 @@ import { ensureProxyRunning, getProxiedUrl } from '@/src/hooks/useMtlsProxy';
 import { API_BASE_URL } from '@/src/config';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { getAuthSessionGeneration } from '@/src/services/authSessionLifecycle';
-import { buildAttachmentResourceUrl, isValidAttachmentId } from '@/src/hooks/attachmentCachePolicy';
+import { buildAttachmentStreamUrl, isValidAttachmentId } from '@/src/hooks/attachmentCachePolicy';
 
 interface UseMtlsVideoStreamOptions {
   /** When false, the proxy is not started and streamUrl stays null. */
   enabled?: boolean;
+  /** `compat` streams the server's H.264 SDR rendition. Defaults to the original. */
+  variant?: 'original' | 'compat';
 }
 
 interface UseMtlsVideoStreamResult {
@@ -27,6 +29,7 @@ interface UseMtlsVideoStreamResult {
 
 interface StreamState {
   attachmentId: string;
+  variant: 'original' | 'compat';
   sessionGeneration: number;
   streamUrl: string | null;
   isReady: boolean;
@@ -37,7 +40,7 @@ export function useMtlsVideoStream(
   attachmentId: string | undefined,
   options: UseMtlsVideoStreamOptions = {},
 ): UseMtlsVideoStreamResult {
-  const { enabled = true } = options;
+  const { enabled = true, variant = 'original' } = options;
   const { token } = useAuth();
   const [streamState, setStreamState] = useState<StreamState | null>(null);
 
@@ -49,6 +52,7 @@ export function useMtlsVideoStream(
     if (!isValidAttachmentId(attachmentId)) {
       setStreamState({
         attachmentId,
+        variant,
         sessionGeneration: getAuthSessionGeneration(),
         streamUrl: null,
         isReady: false,
@@ -60,7 +64,7 @@ export function useMtlsVideoStream(
     let mounted = true;
     setStreamState(null);
 
-    const backendUrl = buildAttachmentResourceUrl(API_BASE_URL, attachmentId, 'stream');
+    const backendUrl = buildAttachmentStreamUrl(API_BASE_URL, attachmentId, variant);
     const sessionGeneration = getAuthSessionGeneration();
     ensureProxyRunning(token ?? undefined, sessionGeneration)
       .then(async () => {
@@ -71,6 +75,7 @@ export function useMtlsVideoStream(
         if (!mounted || getAuthSessionGeneration() !== sessionGeneration) return;
         setStreamState({
           attachmentId,
+          variant,
           sessionGeneration,
           streamUrl: proxiedUrl,
           isReady: true,
@@ -82,6 +87,7 @@ export function useMtlsVideoStream(
         const normalized = err instanceof Error ? err : new Error(String(err));
         setStreamState({
           attachmentId,
+          variant,
           sessionGeneration,
           streamUrl: null,
           isReady: false,
@@ -92,13 +98,14 @@ export function useMtlsVideoStream(
     return (): void => {
       mounted = false;
     };
-  }, [attachmentId, token, enabled]);
+  }, [attachmentId, token, enabled, variant]);
 
   const currentGeneration = getAuthSessionGeneration();
   const isCurrentStream = Boolean(
     enabled &&
     streamState &&
     streamState.attachmentId === attachmentId &&
+    streamState.variant === variant &&
     streamState.sessionGeneration === currentGeneration,
   );
   const streamUrl = isCurrentStream ? (streamState?.streamUrl ?? null) : null;
