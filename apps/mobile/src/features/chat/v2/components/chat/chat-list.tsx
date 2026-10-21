@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { AppState, Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Animated, {
   type SharedValue,
   useAnimatedStyle,
@@ -137,7 +137,12 @@ import {
   type ChatOpenPaintSource,
 } from '@/src/features/chat/v2/chatOpenTimingLogger';
 import { Event, logger } from '@/src/utils/logger';
-import { describeUnreadBoundaryRows, logUnreadDiag } from '@/src/utils/unreadDiagnostics';
+import {
+  describeUnreadBoundaryRows,
+  getUnreadDiagOpenRecord,
+  logUnreadDiag,
+  resolveUnreadDiagVerdict,
+} from '@/src/utils/unreadDiagnostics';
 import {
   reportActivityChatSkeletonShown,
   reportActivityListReady,
@@ -1217,6 +1222,13 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     dividerEverPresent: boolean;
     rowCountChanges: number;
     lastRowCount: number;
+    dividerEverOnScreen: boolean;
+    dividerFirstOnScreenMs: number | null;
+    dividerLastTopPx: number | null;
+    emptyBelowStreak: number;
+    dividerShownWithoutMessageBelow: boolean;
+    emptyBelowDetailJson: string | null;
+    loggedFailure: boolean;
   } | null>(null);
   if (unreadDiagRef.current?.key !== openIdentityKey) {
     unreadDiagRef.current = {
@@ -1230,8 +1242,16 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       dividerEverPresent: false,
       rowCountChanges: 0,
       lastRowCount: 0,
+      dividerEverOnScreen: false,
+      dividerFirstOnScreenMs: null,
+      dividerLastTopPx: null,
+      emptyBelowStreak: 0,
+      dividerShownWithoutMessageBelow: false,
+      emptyBelowDetailJson: null,
+      loggedFailure: false,
     };
   }
+  const unreadDiagOpenRecord = getUnreadDiagOpenRecord(channelId, openStartedAtMs);
   const unreadDiagBase = {
     cycleId: openCycleState.cycleId,
     channelId,
@@ -1257,14 +1277,19 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     didUserScroll,
   };
   const describeUnreadRows = (): Record<string, unknown> =>
+    // A plain open has no boundary of its own; measure against the tapped
+    // row's last view so a badge without a divider still gets a breakdown.
     describeUnreadBoundaryRows(
       displayRows,
-      unreadBoundaryLastViewedAt,
+      unreadBoundaryLastViewedAt ?? unreadDiagOpenRecord?.rowLastViewedAt,
       unreadBoundaryLastViewedConversationId,
     );
   const unreadDiagSnapshotRef = useRef<() => Record<string, unknown>>(() => ({}));
   unreadDiagSnapshotRef.current = (): Record<string, unknown> => ({
     ...unreadDiagBase,
+    rowLooksUnread: unreadDiagOpenRecord?.rowLooksUnread ?? null,
+    routeUnreadOpen: unreadDiagOpenRecord?.unreadOpen,
+    routeUnreadOpenOffReason: unreadDiagOpenRecord?.unreadOpenOffReason,
     ...describeUnreadRows(),
   });
   useEffect(() => {
@@ -1308,46 +1333,120 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     }
   });
   const isUnreadDiagRevealed = revealedChatListIdentityKey === openIdentityKey;
+  // Where the divider sits in the viewport right now; on screen only when the
+  // whole row is inside the list's visible frame (not merely rendered).
+  // The row under the divider must be a message that is rendered with real
+  // height inside the viewport whenever there is room below the divider.
+  const readUnreadDividerViewport = (): {
+    index: number;
+    topPx: number | null;
+    onScreen: boolean;
+    roomBelowPx: number | null;
+    isEmptyBelow: boolean;
+    below: Record<string, unknown> | null;
+  } => {
+    const state = listRef.current?.getState?.();
+    const rows = rowsRef.current;
+    const index = rows.findIndex(row => row.type === 'unread-divider');
+    if (!state || index < 0) {
+      return {
+        index,
+        topPx: null,
+        onScreen: false,
+        roomBelowPx: null,
+        isEmptyBelow: false,
+        below: null,
+      };
+    }
+    const topPx = Math.round(state.positionAtIndex(index) - state.scroll);
+    const size = state.sizeAtIndex(index) ?? 0;
+    const onScreen = topPx >= 0 && topPx + size <= state.scrollLength;
+    const roomBelowPx = Math.round(state.scrollLength - (topPx + size));
+    const belowRow = rows[index + 1];
+    const belowTopPx = belowRow
+      ? Math.round(state.positionAtIndex(index + 1) - state.scroll)
+      : null;
+    const belowSize = belowRow ? (state.sizeAtIndex(index + 1) ?? 0) : null;
+    const belowRendered = !!belowRow && index + 1 >= state.start && index + 1 <= state.end;
+    const below = {
+      exists: !!belowRow,
+      type: belowRow?.type ?? null,
+      kind: belowRow?.type === 'message' ? belowRow.paint.rowKind : null,
+      id: belowRow?.type === 'message' ? belowRow.id : null,
+      topPx: belowTopPx,
+      sizePx: belowSize,
+      rendered: belowRendered,
+    };
+    // Room for at least a short message below the divider, yet no message
+    // there with real height: the "NEW MESSAGES over a blank" case.
+    const isEmptyBelow =
+      onScreen &&
+      roomBelowPx >= 48 &&
+      (!belowRow ||
+        belowRow.type !== 'message' ||
+        !belowRendered ||
+        (belowSize ?? 0) < 8 ||
+        (belowTopPx ?? 0) >= state.scrollLength);
+    return { index, topPx, onScreen, roomBelowPx, isEmptyBelow, below };
+  };
   useEffect(() => {
     const diag = unreadDiagRef.current;
-    if (!diag || diag.loggedResult || !isUnreadDiagRevealed) return;
-    if (!isUnreadOpen && unreadBoundaryLastViewedAt === undefined) return;
+    if (!diag || !isUnreadDiagRevealed) return;
+    const hasBoundary = !!isUnreadOpen || unreadBoundaryLastViewedAt !== undefined;
     const samples: [number, number][] = [];
-    let lastTop: number | null = null;
+    // Sampled for the whole open, so a divider the user scrolls to still counts.
     const sample = (): void => {
-      const state = listRef.current?.getState?.();
-      const index = rowsRef.current.findIndex(row => row.type === 'unread-divider');
-      if (!state || index < 0) return;
-      const top = Math.round(state.positionAtIndex(index) - state.scroll);
-      if (lastTop === null || Math.abs(top - lastTop) > 2) {
-        samples.push([getElapsedMs(openCycleState.startedAtMs), top]);
-        lastTop = top;
+      const { topPx, onScreen, roomBelowPx, isEmptyBelow, below } = readUnreadDividerViewport();
+      if (topPx === null) return;
+      diag.dividerLastTopPx = topPx;
+      // Three samples in a row (~450 ms) rules out a single frame mid-layout.
+      diag.emptyBelowStreak = isEmptyBelow ? diag.emptyBelowStreak + 1 : 0;
+      if (diag.emptyBelowStreak >= 3 && !diag.dividerShownWithoutMessageBelow) {
+        diag.dividerShownWithoutMessageBelow = true;
+        diag.emptyBelowDetailJson = JSON.stringify({
+          atMs: getElapsedMs(openCycleState.startedAtMs),
+          topPx,
+          roomBelowPx,
+          below,
+        });
+        logUnreadDiag('unread_diag_empty_below_divider', {
+          ...unreadDiagSnapshotRef.current(),
+          emptyBelowDetailJson: diag.emptyBelowDetailJson,
+        });
+      }
+      if (onScreen && !diag.dividerEverOnScreen) {
+        diag.dividerEverOnScreen = true;
+        diag.dividerFirstOnScreenMs = getElapsedMs(openCycleState.startedAtMs);
+      }
+      const lastSample = samples[samples.length - 1];
+      if (!lastSample || Math.abs(topPx - lastSample[1]) > 2) {
+        samples.push([getElapsedMs(openCycleState.startedAtMs), topPx]);
       }
     };
     sample();
-    const interval = setInterval(sample, 50);
+    const interval = setInterval(sample, 150);
     const resultTimer = setTimeout(() => {
-      if (diag.loggedResult) return;
+      if (!hasBoundary || diag.loggedResult) return;
       diag.loggedResult = true;
       const state = listRef.current?.getState?.();
-      const dividerIndex = rowsRef.current.findIndex(row => row.type === 'unread-divider');
+      const viewport = readUnreadDividerViewport();
       logUnreadDiag('unread_diag_list_result', {
         ...unreadDiagSnapshotRef.current(),
-        firstVisibleIndex: state?.start,
-        lastVisibleIndex: state?.end,
+        renderedStartIndex: state?.start,
+        renderedEndIndex: state?.end,
         isAtEnd: state?.isAtEnd,
         scroll: state?.scroll,
         scrollLength: state?.scrollLength,
         contentLength: state?.contentLength,
-        dividerVisible:
-          dividerIndex >= 0 &&
-          state !== undefined &&
-          dividerIndex >= state.start &&
-          dividerIndex <= state.end,
+        dividerTopPx: viewport.topPx,
+        dividerOnScreen: viewport.onScreen,
+        roomBelowDividerPx: viewport.roomBelowPx,
+        emptyBelowDivider: viewport.isEmptyBelow,
+        belowDividerJson: viewport.below ? JSON.stringify(viewport.below) : undefined,
       });
     }, 600);
     const motionTimer = setTimeout(() => {
-      clearInterval(interval);
+      if (!hasBoundary) return;
       logUnreadDiag('unread_diag_list_motion', {
         cycleId: openCycleState.cycleId,
         channelId,
@@ -1362,23 +1461,59 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     // Once per reveal; the snapshot ref carries the latest values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUnreadDiagRevealed, openIdentityKey]);
-  useEffect(
-    () => (): void => {
-      const diag = unreadDiagRef.current;
-      if (!diag) return;
-      logUnreadDiag('unread_diag_list_summary', {
-        ...unreadDiagSnapshotRef.current(),
-        openDurationMs: getElapsedMs(openCycleState.startedAtMs),
-        maxRows: diag.maxRows,
-        rowCountChanges: diag.rowCountChanges,
-        dividerEverPresent: diag.dividerEverPresent,
-        dividerFirstSeenMs: diag.dividerFirstSeenMs,
-      });
-    },
-    // Logs the open that is ending, on identity change or unmount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [openIdentityKey],
+  type UnreadDiagState = NonNullable<typeof unreadDiagRef.current>;
+  const logUnreadDiagSummaryRef = useRef<(trigger: string, diag: UnreadDiagState) => void>(
+    () => undefined,
   );
+  logUnreadDiagSummaryRef.current = (trigger: string, diag: UnreadDiagState): void => {
+    const snapshot = unreadDiagSnapshotRef.current();
+    const outcome = resolveUnreadDiagVerdict({
+      rowLooksUnread: (snapshot['rowLooksUnread'] as boolean | null) ?? null,
+      isUnreadOpen: snapshot['isUnreadOpen'] === true,
+      hasUnreadOpenAnchor: snapshot['hasUnreadOpenAnchor'] === true,
+      dividerEverPresent: diag.dividerEverPresent,
+      dividerEverOnScreen: diag.dividerEverOnScreen,
+      dividerShownWithoutMessageBelow: diag.dividerShownWithoutMessageBelow,
+      rowsAfterBoundary: (snapshot['rowsAfterBoundary'] as number) ?? 0,
+      rowsAfterBoundaryEligible: (snapshot['rowsAfterBoundaryEligible'] as number) ?? 0,
+    });
+    const summary = {
+      ...snapshot,
+      trigger,
+      ...outcome,
+      dividerShown: diag.dividerEverOnScreen,
+      openDurationMs: getElapsedMs(openCycleState.startedAtMs),
+      maxRows: diag.maxRows,
+      rowCountChanges: diag.rowCountChanges,
+      dividerEverPresent: diag.dividerEverPresent,
+      dividerFirstSeenMs: diag.dividerFirstSeenMs,
+      dividerEverOnScreen: diag.dividerEverOnScreen,
+      dividerFirstOnScreenMs: diag.dividerFirstOnScreenMs,
+      dividerLastTopPx: diag.dividerLastTopPx,
+      dividerShownWithoutMessageBelow: diag.dividerShownWithoutMessageBelow,
+      emptyBelowDetailJson: diag.emptyBelowDetailJson,
+    };
+    logUnreadDiag('unread_diag_list_summary', summary);
+    // One line per failed open, so Grafana can list every miss directly.
+    if (outcome.isFailure && !diag.loggedFailure) {
+      diag.loggedFailure = true;
+      logUnreadDiag('unread_diag_failure', summary);
+    }
+  };
+  // The summary also goes out when the app leaves the foreground, so an open
+  // that ends with the app killed in the chat is still traceable.
+  useEffect(() => {
+    // Captured here: by cleanup time a new open may already own the ref.
+    const openDiag = unreadDiagRef.current;
+    if (!openDiag) return;
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'background') logUnreadDiagSummaryRef.current('app_background', openDiag);
+    });
+    return (): void => {
+      subscription.remove();
+      logUnreadDiagSummaryRef.current('leave', openDiag);
+    };
+  }, [openIdentityKey]);
   const usesInitialAnchorPlacement =
     !listInstanceLoadedRef.current &&
     hasRequestedAnchor &&

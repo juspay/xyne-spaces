@@ -13,7 +13,7 @@ import {
   releaseChatOpen,
   tryBeginChatOpen,
 } from '@/src/utils/chatOpenGuard';
-import { logUnreadDiag } from '@/src/utils/unreadDiagnostics';
+import { logUnreadDiagRoute } from '@/src/utils/unreadDiagnostics';
 import {
   beginCriticalWindow,
   endCriticalWindow,
@@ -96,7 +96,7 @@ export const openBaseChatRoute = (
   const { surface } = options;
   const criticalWindowTag = getChatCriticalWindowTag(channelId);
   const diagLastViewedAt = options.unreadLastViewedAt;
-  logUnreadDiag('unread_diag_route', {
+  logUnreadDiagRoute({
     channelId,
     surface,
     openStartedAtMs,

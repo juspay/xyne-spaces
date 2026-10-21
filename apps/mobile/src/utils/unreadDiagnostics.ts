@@ -15,25 +15,160 @@ export const logUnreadDiag = (milestone: string, fields: Record<string, unknown>
   });
 };
 
+type UnreadDiagOpenRecord = {
+  openStartedAtMs: number;
+  rowLooksUnread: boolean | null;
+  rowLastViewedAt: number | undefined;
+  unreadOpen: string | undefined;
+  unreadOpenOffReason: string | undefined;
+};
+
+const ROW_PRESS_MATCH_MS = 2_000;
+const lastRowPressByChannel = new Map<
+  string,
+  { atMs: number; looksUnread: boolean; lastViewedAt: number | undefined }
+>();
+const openRecordByChannel = new Map<string, UnreadDiagOpenRecord>();
+
+const readNumber = (row: Record<string, unknown>, key: string): number | undefined => {
+  const value = row[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
+/** The list's own unread test: a count, a mention, or activity since the last view. */
+const doesRowLookUnread = (row: Record<string, unknown>): boolean => {
+  const lastViewedAt = readNumber(row, 'lastViewedAt');
+  const lastActivityAt = readNumber(row, 'lastActivityAtMs') ?? readNumber(row, 'lastActivityAt');
+  return (
+    (readNumber(row, 'unreadCount') ?? 0) > 0 ||
+    (readNumber(row, 'messageUnreadCount') ?? 0) > 0 ||
+    row['hasUnread'] === true ||
+    row['isMentioned'] === true ||
+    (lastViewedAt !== undefined &&
+      lastViewedAt > 0 &&
+      lastActivityAt !== undefined &&
+      lastActivityAt > lastViewedAt)
+  );
+};
+
 /** What the tapped row showed: only the unread/badge fields, never names. */
 export const logUnreadDiagRowPress = (
   source: string,
   channelId: string,
   row: object | null | undefined,
 ): void => {
+  const fields = (row ?? {}) as Record<string, unknown>;
   const badge: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(row ?? {})) {
+  for (const [key, value] of Object.entries(fields)) {
     if (!ROW_PRESS_FIELD.test(key)) continue;
     if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
       badge[`row_${key}`] = value;
     }
   }
+  const looksUnread = doesRowLookUnread(fields);
+  lastRowPressByChannel.set(channelId, {
+    atMs: Date.now(),
+    looksUnread,
+    lastViewedAt: readNumber(fields, 'lastViewedAt'),
+  });
   logUnreadDiag('unread_diag_row_press', {
     source,
     channelId,
     rowFound: !!row,
+    rowLooksUnread: looksUnread,
     ...badge,
   });
+};
+
+/** The route's unread decision, joined to the row tapped just before it. */
+export const logUnreadDiagRoute = (
+  fields: Record<string, unknown> & {
+    channelId: string;
+    openStartedAtMs: number;
+    unreadOpen: string | undefined;
+    unreadOpenOffReason: string | undefined;
+  },
+): void => {
+  const press = lastRowPressByChannel.get(fields.channelId);
+  const matchedPress =
+    press && fields.openStartedAtMs - press.atMs <= ROW_PRESS_MATCH_MS ? press : undefined;
+  openRecordByChannel.set(fields.channelId, {
+    openStartedAtMs: fields.openStartedAtMs,
+    rowLooksUnread: matchedPress ? matchedPress.looksUnread : null,
+    rowLastViewedAt: matchedPress?.lastViewedAt,
+    unreadOpen: fields.unreadOpen,
+    unreadOpenOffReason: fields.unreadOpenOffReason,
+  });
+  logUnreadDiag('unread_diag_route', {
+    ...fields,
+    rowLooksUnread: matchedPress ? matchedPress.looksUnread : null,
+  });
+};
+
+export const getUnreadDiagOpenRecord = (
+  channelId: string,
+  openStartedAtMs: number | null | undefined,
+): UnreadDiagOpenRecord | undefined => {
+  const record = openRecordByChannel.get(channelId);
+  return record && record.openStartedAtMs === openStartedAtMs ? record : undefined;
+};
+
+export type UnreadDiagVerdict =
+  | 'DIVIDER_SHOWN'
+  | 'NOT_UNREAD'
+  | 'BADGE_WITHOUT_NEW_MESSAGES'
+  | 'BUG_NEW_MESSAGES_BUT_NOT_UNREAD_OPEN'
+  | 'UNREAD_OPEN_WITHOUT_BOUNDARY'
+  | 'ONLY_OWN_OR_SYSTEM_MESSAGES'
+  | 'NO_NEW_MESSAGES_LOADED'
+  | 'BUG_NEW_MESSAGES_NO_DIVIDER'
+  | 'BUG_DIVIDER_NEVER_ON_SCREEN'
+  | 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW';
+
+/**
+ * One answer per open. `isFailure` means the user had reason to expect a
+ * divider (the row looked unread, or the open was an unread open) and never
+ * saw one on screen; `verdict` says why. Verdicts starting with BUG_ are ours.
+ */
+export const resolveUnreadDiagVerdict = ({
+  rowLooksUnread,
+  isUnreadOpen,
+  hasUnreadOpenAnchor,
+  dividerEverPresent,
+  dividerEverOnScreen,
+  dividerShownWithoutMessageBelow,
+  rowsAfterBoundary,
+  rowsAfterBoundaryEligible,
+}: {
+  rowLooksUnread: boolean | null;
+  isUnreadOpen: boolean;
+  hasUnreadOpenAnchor: boolean;
+  dividerEverPresent: boolean;
+  dividerEverOnScreen: boolean;
+  dividerShownWithoutMessageBelow: boolean;
+  rowsAfterBoundary: number;
+  rowsAfterBoundaryEligible: number;
+}): { verdict: UnreadDiagVerdict; expectedDivider: boolean; isFailure: boolean } => {
+  const expectedDivider = rowLooksUnread === true || isUnreadOpen;
+  const result = (
+    verdict: UnreadDiagVerdict,
+  ): { verdict: UnreadDiagVerdict; expectedDivider: boolean; isFailure: boolean } => ({
+    verdict,
+    expectedDivider,
+    isFailure:
+      verdict === 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW' ||
+      (expectedDivider && verdict !== 'DIVIDER_SHOWN'),
+  });
+  if (dividerShownWithoutMessageBelow) return result('BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW');
+  if (dividerEverOnScreen) return result('DIVIDER_SHOWN');
+  if (!isUnreadOpen) {
+    if (rowsAfterBoundaryEligible > 0) return result('BUG_NEW_MESSAGES_BUT_NOT_UNREAD_OPEN');
+    return result(rowLooksUnread === true ? 'BADGE_WITHOUT_NEW_MESSAGES' : 'NOT_UNREAD');
+  }
+  if (!hasUnreadOpenAnchor) return result('UNREAD_OPEN_WITHOUT_BOUNDARY');
+  if (dividerEverPresent) return result('BUG_DIVIDER_NEVER_ON_SCREEN');
+  if (rowsAfterBoundaryEligible > 0) return result('BUG_NEW_MESSAGES_NO_DIVIDER');
+  return result(rowsAfterBoundary > 0 ? 'ONLY_OWN_OR_SYSTEM_MESSAGES' : 'NO_NEW_MESSAGES_LOADED');
 };
 
 type RowSample = {
@@ -41,6 +176,7 @@ type RowSample = {
   id: string;
   at: number;
   kind: string;
+  type: string;
   ticket: boolean;
   replies: number;
 };
@@ -52,6 +188,7 @@ const sampleRow = (row: ChatRow, index: number): RowSample | null => {
     id: row.id,
     at: row.paint.createdAt,
     kind: row.paint.rowKind,
+    type: row.paint.rowType,
     ticket: !!row.paint.ticketPreview,
     replies: row.paint.replyPreview?.count ?? row.paint.replyCount ?? 0,
   };
