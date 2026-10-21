@@ -10,6 +10,7 @@ import {
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
+import { activityTrackingService } from '@/services/activityTrackingService';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -49,6 +50,7 @@ import {
   NotificationType,
   RecordingType,
   AttachmentEntityType,
+  Platform,
   SUPPORTED_TRANSCRIPT_LANGUAGES,
   ORIGINAL_TRANSCRIPT_LANGUAGE,
 } from '@xyne/shared';
@@ -3325,7 +3327,7 @@ export class CallController {
   };
 
   private deleteHeadlessRecordingCascade = async (
-    call: { id: string; externalId: string; metadata: Prisma.JsonValue | null },
+    call: { id: string; externalId: string; metadata: Prisma.JsonValue | null; createdByUserId: string },
   ): Promise<void> => {
     const db = DatabaseClient.getInstance();
     const callId = call.externalId;
@@ -3380,8 +3382,28 @@ export class CallController {
     // their anchor lives in an existing discussion thread and is addressed by id from
     // call.metadata. Only that one message is touched — an updateMany on the thread
     // would overwrite the user's own messages.
-    if (await noteTakerCallRepository.markThreadAnchorDeleted(call)) {
+    const anchor = await noteTakerCallRepository.markThreadAnchorDeleted(call);
+    if (anchor?.removed) {
       logger.info(`Removed thread anchor message for deleted recording ${callId}`);
+      // Same MESSAGE.DELETED event MessagesSideEffectHandler.onDelete emits for a user
+      // delete, so surface-link and nudge cleanup see this removal too. Best-effort.
+      void activityTrackingService.saveActivityEvent({
+        user_id: call.createdByUserId,
+        session_id: `recording-delete-${callId}`,
+        event_category: 'MESSAGE',
+        event_name: 'DELETED',
+        url: '',
+        trigger_type: 'SYSTEM',
+        platform: Platform.WEB,
+        timestamp: Date.now(),
+        context_metadata: { messageId: anchor.messageId, conversationId: anchor.conversationId },
+      });
+    } else if (anchor) {
+      logger.warn(`Thread anchor left in place for deleted recording ${callId}`, {
+        reason: anchor.reason,
+        messageId: anchor.messageId,
+        conversationId: anchor.conversationId,
+      });
     }
 
     // Delete activities
@@ -3450,7 +3472,7 @@ export class CallController {
           createdByUserId: userId,
           callType: CallType.HEADLESS,
         },
-        select: { id: true, externalId: true, status: true, metadata: true },
+        select: { id: true, externalId: true, status: true, metadata: true, createdByUserId: true },
       });
 
       const ownedByExternalId = new Map(owned.map(c => [c.externalId, c]));

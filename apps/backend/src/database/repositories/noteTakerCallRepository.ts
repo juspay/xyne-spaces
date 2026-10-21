@@ -5,7 +5,7 @@ import { repositories } from './index';
 import { createThreadAnchorMessageTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleParticipantLeaveTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleRoomFinishedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
-import { markThreadAnchorDeletedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
+import { markThreadAnchorDeletedTx, type ThreadAnchorRemoval } from '@/bypassAcl/transactions/noteTakerCallRepository';
 
 export interface CreateNoteTakerCallParams {
   callId: string;
@@ -133,17 +133,18 @@ export class NoteTakerCallRepository {
    * Owner deleted the recording. Thread-linked recordings keep their anchor ids on
    * call.metadata (conversationId/messageId), not on conversation.metadata.callId,
    * so the channel-flow cascade in CallController never finds them. Removes the
-   * anchor message from the thread. Returns false (no throw) for recordings that
-   * weren't started from a thread.
+   * anchor message from the thread. Returns null (no throw) for recordings that
+   * weren't started from a thread; otherwise reports whether the anchor was removed
+   * and, if not, why (already gone, or the id no longer points at our bot anchor).
    */
   async markThreadAnchorDeleted(
     call: { externalId: string; metadata: Prisma.JsonValue | null },
-  ): Promise<boolean> {
+  ): Promise<(ThreadAnchorRemoval & { conversationId: string; messageId: string }) | null> {
     const metadata = (call.metadata as NoteTakerCallMetadata | null) ?? {};
-    if (!metadata.conversationId || !metadata.messageId) return false;
+    if (!metadata.conversationId || !metadata.messageId) return null;
 
-    await markThreadAnchorDeletedTx(this, metadata.messageId, metadata.conversationId);
-    return true;
+    const result = await markThreadAnchorDeletedTx(this, metadata.messageId, metadata.conversationId, call.externalId);
+    return { ...result, conversationId: metadata.conversationId, messageId: metadata.messageId };
   }
 
   /** Update activity when the creator reconnects to an existing headless room. */
