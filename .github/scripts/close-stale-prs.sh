@@ -8,16 +8,19 @@
 #   REPO         owner/name (default: $GITHUB_REPOSITORY)
 #   STALE_DAYS   age threshold in days (default: 30)
 #   DRY_RUN      "true" to only list what would be closed (default: false)
+#   PR_NUMBERS   optional space/comma-separated PR numbers; when set, only
+#                these PRs are considered (default: all open PRs)
 set -euo pipefail
 
 REPO="${REPO:-${GITHUB_REPOSITORY:?REPO or GITHUB_REPOSITORY must be set}}"
 STALE_DAYS="${STALE_DAYS:-30}"
 DRY_RUN="${DRY_RUN:-false}"
+PR_NUMBERS="${PR_NUMBERS:-}"
 
 OWNER="${REPO%%/*}"
 NAME="${REPO##*/}"
 cutoff=$(date -u -d "-${STALE_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
-echo "Repo: $REPO | cutoff: $cutoff | dry-run: $DRY_RUN"
+echo "Repo: $REPO | cutoff: $cutoff | dry-run: $DRY_RUN | only: ${PR_NUMBERS:-all}"
 
 query='
 query($owner: String!, $name: String!, $after: String) {
@@ -41,8 +44,10 @@ while :; do
   page=$(gh api graphql "${args[@]}")
 
   # ISO-8601 UTC timestamps compare correctly as strings.
-  stale=$(jq -r --arg cutoff "$cutoff" '
-    .data.repository.pullRequests.nodes[]
+  stale=$(jq -r --arg cutoff "$cutoff" --arg only "$PR_NUMBERS" '
+    ($only | [scan("[0-9]+") | tonumber]) as $list
+    | .data.repository.pullRequests.nodes[]
+    | select(($list | length) == 0 or (.number as $n | $list | index($n)))
     | select(.commits.nodes[0].commit.committedDate < $cutoff)
     | "\(.number)\t\(.commits.nodes[0].commit.committedDate)"' <<<"$page")
 
