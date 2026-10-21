@@ -10,7 +10,7 @@ import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { keyBetween, isDMChannel, getDMSearchableName } from '../ChatDirectory/ChatDirectory.utils';
-import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { settleMutation, surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { SectionEmojiPicker } from '../SectionEmojiPicker';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -165,32 +165,44 @@ export const CreateSectionDialog = ({
     const sectionId = crypto.randomUUID();
     const timestamp = Date.now();
 
-    void (async (): Promise<void> => {
-      const sectionCreated = await surfaceMutationError(
-        zero.mutate(
-          mutators.channelSection.create({
-            id: sectionId,
-            name: trimmedName,
-            emoji: emoji.trim() || null,
-            position: keyBetween(lastSectionPosition, null),
-            timestamp,
-          }),
+    // Fired in call order and awaited together: Zero applies a client's mutations in the
+    // order they were called, so the moves land after the create without waiting for its
+    // server round trip. Awaiting here only reports failures.
+    const sectionCreated = surfaceMutationError(
+      zero.mutate(
+        mutators.channelSection.create({
+          id: sectionId,
+          name: trimmedName,
+          emoji: emoji.trim() || null,
+          position: keyBetween(lastSectionPosition, null),
+          timestamp,
+        }),
+      ),
+    );
+
+    const channelIds = [...selected];
+    let prevKey: string | null = null;
+    const moves = [];
+    for (let i = 0; i < channelIds.length; i += MOVE_CHUNK_SIZE) {
+      const items = channelIds.slice(i, i + MOVE_CHUNK_SIZE).map(channelId => {
+        const position = keyBetween(prevKey, null);
+        prevKey = position;
+        return { channelId, position };
+      });
+      moves.push(
+        settleMutation(
+          zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
         ),
       );
-      if (!sectionCreated) return;
+    }
 
-      const channelIds = [...selected];
-      let prevKey: string | null = null;
-      for (let i = 0; i < channelIds.length; i += MOVE_CHUNK_SIZE) {
-        const items = channelIds.slice(i, i + MOVE_CHUNK_SIZE).map(channelId => {
-          const position = keyBetween(prevKey, null);
-          prevKey = position;
-          return { channelId, position };
-        });
-        const moved = await surfaceMutationError(
-          zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
-        );
-        if (!moved) break;
+    void (async (): Promise<void> => {
+      const [created, ...moved] = await Promise.all([sectionCreated, ...moves]);
+      if (!created) return;
+
+      const failedChunks = moved.filter(ok => !ok).length;
+      if (failedChunks > 0) {
+        toast.error("Couldn't add some channels to the section. Try adding them again.");
       }
     })();
 

@@ -191,9 +191,11 @@ export const SectionOrganizerDialog = ({
       return rebuilt.map(group => {
         const existing = prevById.get(group.id);
         if (!existing) return group;
+        const renamed = existing.name.trim().toLowerCase() !== group.name.trim().toLowerCase();
         return {
           ...group,
           name: existing.name,
+          mergeIntoSectionId: renamed ? null : group.mergeIntoSectionId,
           expanded: existing.expanded,
           excludedChannelIds: existing.excludedChannelIds.filter(id =>
             group.channelIds.includes(id),

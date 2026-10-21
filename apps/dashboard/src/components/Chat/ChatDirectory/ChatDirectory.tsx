@@ -688,14 +688,18 @@ const ChatDirectory = ({
 
       const requestedChannelCount = groups.reduce((sum, g) => sum + g.channelIds.length, 0);
 
-      for (const group of groups) {
+      // Every mutation is fired in call order and awaited together. Zero applies a client's
+      // mutations in the order they were called, so a move lands after the create it depends
+      // on without waiting for the create's server round trip.
+      const runs = groups.map(group => {
         const sectionId = group.mergeIntoSectionId ?? crypto.randomUUID();
 
+        let sectionCreated: Promise<boolean> = Promise.resolve(true);
         if (!group.mergeIntoSectionId) {
           const position = keyBetween(prevSectionKey, null);
           prevSectionKey = position;
 
-          const sectionCreated = await surfaceMutationError(
+          sectionCreated = surfaceMutationError(
             zero.mutate(
               mutators.channelSection.create({
                 id: sectionId,
@@ -707,10 +711,8 @@ const ChatDirectory = ({
               }),
             ),
           );
-          if (!sectionCreated) break;
         }
 
-        const movedChannelIds: string[] = [];
         let prevChannelKey: string | null = group.mergeIntoSectionId
           ? ((statusesRef.current ?? [])
               .filter(status => status.sectionId === group.mergeIntoSectionId)
@@ -719,31 +721,53 @@ const ChatDirectory = ({
               .sort()
               .pop() ?? null)
           : null;
-        let groupFailed = false;
+        const chunks = [];
         for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
-          const chunk = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
-          const items = chunk.map(channelId => {
+          const channelIds = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const items = channelIds.map(channelId => {
             const channelPosition = keyBetween(prevChannelKey, null);
             prevChannelKey = channelPosition;
             return { channelId, position: channelPosition };
           });
-          const moved = await settleMutation(
-            zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
-          );
-          if (!moved) {
-            groupFailed = true;
-            break;
-          }
-          movedChannelIds.push(...chunk);
+          chunks.push({
+            channelIds,
+            moved: settleMutation(
+              zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
+            ),
+          });
+        }
+
+        return { group, sectionId, sectionCreated, chunks };
+      });
+
+      // Recorded before the results are in, so closing the tab mid-run still leaves
+      // something for Undo to clean up. Trimmed to what actually landed below.
+      const requested: OrganizeRecord['sections'] = runs.map(run => ({
+        id: run.sectionId,
+        name: run.group.name.trim(),
+        channelIds: run.group.channelIds,
+        isNew: !run.group.mergeIntoSectionId,
+      }));
+      writeOrganizeRecord({ at: timestamp, sections: requested });
+
+      await Promise.all(runs.flatMap(run => [run.sectionCreated, ...run.chunks.map(c => c.moved)]));
+
+      for (const run of runs) {
+        // The section was never created, so its moves failed with "Section not found"
+        // and there is nothing to undo for this group.
+        if (!(await run.sectionCreated)) continue;
+
+        const movedChannelIds: string[] = [];
+        for (const chunk of run.chunks) {
+          if (await chunk.moved) movedChannelIds.push(...chunk.channelIds);
         }
 
         created.push({
-          id: sectionId,
-          name: group.name.trim(),
+          id: run.sectionId,
+          name: run.group.name.trim(),
           channelIds: movedChannelIds,
-          isNew: !group.mergeIntoSectionId,
+          isNew: !run.group.mergeIntoSectionId,
         });
-        if (groupFailed) break;
       }
 
       const sectionCount = created.length;
@@ -752,15 +776,16 @@ const ChatDirectory = ({
 
       if (skippedChannelCount > 0) {
         toast.error(
-          `Couldn't add ${skippedChannelCount} channel${skippedChannelCount === 1 ? '' : 's'}. Try again in a minute.`,
+          `Couldn't add ${skippedChannelCount} channel${skippedChannelCount === 1 ? '' : 's'}. You can try those again from New section.`,
         );
       }
 
-      if (created.length === 0) return;
-
-      const record: OrganizeRecord = { at: timestamp, sections: created };
+      const record: OrganizeRecord | null =
+        created.length > 0 ? { at: timestamp, sections: created } : null;
       writeOrganizeRecord(record);
       setOrganizeRecord(record);
+
+      if (!record) return;
 
       // Sections exist but nothing landed in them: the run failed, so don't
       // claim success over the error, and don't spend the one-shot card on it.
