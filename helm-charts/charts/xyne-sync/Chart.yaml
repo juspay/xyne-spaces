@@ -1,0 +1,18 @@
+apiVersion: v2
+name: xyne-sync
+description: Streamgres sync engine for Xyne Spaces - streams Postgres logical replication to clients, replacing the Zero view-syncer
+type: application
+version: 0.1.0
+appVersion: "cd0df8b"
+keywords:
+  - xyne
+  - sync
+  - streamgres
+  - postgres
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/streamgres
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

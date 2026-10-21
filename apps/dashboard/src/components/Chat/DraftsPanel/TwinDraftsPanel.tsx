@@ -9,7 +9,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { MessageCard, RecipientAvatar, useRecipientName } from '../MessageCard';
 import { rowToTwinReplyDraftView } from '../TwinReplyDraft/twinReplyDraftApi';
 
-interface TwinDraftItem {
+export interface TwinDraftItem {
   id: string;
   channelId: string;
   conversationId?: string | null;
@@ -17,7 +17,7 @@ interface TwinDraftItem {
   metadata?: unknown;
 }
 
-const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
+export const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
   const navigate = useNavigate();
   const view = rowToTwinReplyDraftView(draft);
 
@@ -34,7 +34,7 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
   const handleClick = (): void => {
     void navigate(
       draft.conversationId
-        ? `/chat/dir/${draft.channelId}/${draft.conversationId}#origin=${draft.conversationId}`
+        ? `/chat/dir/${draft.channelId}/${draft.conversationId}#origin=${draft.conversationId}&twinDraft=${draft.id}`
         : `/chat/dir/${draft.channelId}`,
     );
   };

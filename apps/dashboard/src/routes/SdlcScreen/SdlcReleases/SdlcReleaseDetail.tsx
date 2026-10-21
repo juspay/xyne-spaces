@@ -18,7 +18,6 @@ import {
 } from '@xyne/shared';
 import { Button } from '../../../components/ui/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
-import { ThreadMessages } from '../../../components/Chat/ThreadPannel';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../components/UserAvatar/UserAvatar';
 import { ReleaseStagePicker } from '../../../components/Release/ReleaseStagePicker';
 import { ReleaseTimeline } from '../../../components/Release/ReleaseTimeline';
@@ -53,7 +52,6 @@ import type {
   SdlcReleaseBreadcrumbProps,
   SdlcReleaseDetailProps,
   SdlcReleaseRepo,
-  SdlcReleaseThreadProps,
 } from './SdlcReleases.types';
 import { TRACK_CATEGORY, formatReleaseDate, releaseTitle, repoPath } from './SdlcReleases.utils';
 import {
@@ -307,31 +305,6 @@ export function SdlcReleaseBreadcrumb({
           <span className='truncate font-semibold text-foreground'>{title}</span>
         )}
       </div>
-    </div>
-  );
-}
-
-const noopUserClick = (): void => {};
-
-export function SdlcReleaseThread({
-  releaseId,
-  onClose,
-}: SdlcReleaseThreadProps): ReactElement | null {
-  const [release] = useCachedQuery(queries.ticketRowById({ ticketId: releaseId }));
-  if (!release) return null;
-
-  return (
-    <div className='flex h-full min-h-0 min-w-0 flex-col bg-background [&_.relative.min-h-0.max-h-full]:flex-1'>
-      <ThreadMessages
-        key={release.id}
-        channelId={release.channelId}
-        conversationId={release.conversationId}
-        ticketId={release.id}
-        defaultTab='thread'
-        onClose={onClose}
-        onUserClick={noopUserClick}
-        skipInputAutoFocus
-      />
     </div>
   );
 }

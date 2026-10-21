@@ -43,6 +43,10 @@ export function isFlowStepBacklogged(ticket?: { stageName?: string | null } | nu
   return ticket?.stageName === FLOW_STAGE_NAMES.BACKLOG;
 }
 
+export function isFlowStepSkipped(ticket?: { stageName?: string | null } | null): boolean {
+  return ticket?.stageName === FLOW_STAGE_NAMES.SKIPPED;
+}
+
 export function flowRuntimeStatusOf(ticket: FlowRunTicket): TicketStatusV2 {
   return isFlowStepBacklogged(ticket) ? TicketStatusV2.COMPLETED : ticket.statusV2;
 }

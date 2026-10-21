@@ -284,7 +284,9 @@ function installFrontendCsp(): void {
   const sandpackBundler = 'https://*.codesandbox.io';
   const cspDirectives = [
     `default-src 'self' ${xyneHosts}`,
-    `script-src 'self' ${xyneHosts} ${googleApis}`,
+    // 'wasm-unsafe-eval' lets WebAssembly compile (call background effects run MediaPipe
+    // as Wasm); it does not permit JS eval.
+    `script-src 'self' 'wasm-unsafe-eval' ${xyneHosts} ${googleApis}`,
     `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
     `img-src 'self' data: blob: https:`,
     `media-src 'self' blob: ${xyneHosts}`,

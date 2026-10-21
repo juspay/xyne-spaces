@@ -22,6 +22,10 @@ import { InputBox } from '../../ui/InputBox';
 import type { MentionResult } from '../../ui/InputBox';
 import Button from '../../ui/Button';
 import { formatRelativeCommentTime } from '../canvasCommentTime';
+import { CanvasCommentDeleteDialog } from '../CanvasCommentDeleteDialog';
+import { CanvasCommentActions } from '../CanvasCommentActions';
+import { useCanvasCommentMutations } from '../useCanvasCommentMutations';
+import { CanvasCommentComposer } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import type { CanvasCommentAnchor } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import { OverlayZIndexContext } from '../../../contexts/OverlayZIndexContext';
 import type { CanvasCommentHighlightThread } from '../useCanvasCommentHighlights';
@@ -41,6 +45,7 @@ type CanvasComment = {
   mentionedUserIds?: string | null;
   isInitial?: boolean;
   createdBy: string;
+  editedAt?: number | null;
   deletedAt?: number | null;
   createdAt: number;
   createdByUser?: UserLite | null;
@@ -189,6 +194,7 @@ export function CanvasInlineCommentThread({
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
+  const commentMutations = useCanvasCommentMutations(editable);
   const selectedMentionIdsRef = useRef<Set<string>>(new Set());
   const commentsScrollRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -197,6 +203,8 @@ export function CanvasInlineCommentThread({
   const [hasEntered, setHasEntered] = useState(false);
   const [createdThread, setCreatedThread] = useState<CanvasCommentHighlightThread | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentToDelete, setCommentToDelete] = useState<CanvasComment | null>(null);
   const {
     results,
     allUsers: mentionUsers,
@@ -221,6 +229,10 @@ export function CanvasInlineCommentThread({
       !comment.deletedAt,
   );
   const visibleComments = initialComment ? [initialComment, ...replies] : replies;
+
+  useEffect(() => {
+    setEditingCommentId(null);
+  }, [currentThreadId]);
 
   useEffect(() => {
     const scrollElement = commentsScrollRef.current;
@@ -423,6 +435,19 @@ export function CanvasInlineCommentThread({
     });
   };
 
+  const updateComment = async (
+    comment: CanvasComment,
+    payload: { body: string; mentionedUserIds: string[] },
+  ): Promise<boolean> => {
+    const succeeded = await commentMutations.updateComment(comment, payload);
+    if (succeeded) {
+      const previousMentions = new Set(parseMentionedUserIds(comment.mentionedUserIds));
+      sendMentionNotifications(payload.mentionedUserIds.filter(id => !previousMentions.has(id)));
+      setEditingCommentId(current => (current === comment.id ? null : current));
+    }
+    return succeeded;
+  };
+
   const setThreadStatus = (status: CanvasCommentThreadStatus): void => {
     if (!currentThread) return;
     zero.mutate(
@@ -516,6 +541,8 @@ export function CanvasInlineCommentThread({
           {visibleComments.map((comment, index) => {
             const isInitialComment = comment.id === initialComment?.id;
             const commentAuthor = getCommentAuthor(comment, allUsers);
+            const isDeleted = Boolean(comment.deletedAt);
+            const isEditing = editingCommentId === comment.id && !isDeleted;
             return (
               <div key={comment.id} className='mb-2.5'>
                 <div className='flex min-w-0 items-center gap-2'>
@@ -531,18 +558,64 @@ export function CanvasInlineCommentThread({
                   </span>
                   <span className='shrink-0 text-[11.5px] leading-none text-muted-foreground'>
                     {formatRelativeCommentTime(comment.createdAt)}
+                    {comment.editedAt && !isDeleted ? ' · edited' : ''}
                   </span>
                   <span className='flex-1' />
+                  {editable && comment.createdBy === user?.id && !isDeleted && !isEditing && (
+                    <CanvasCommentActions
+                      onEdit={() => setEditingCommentId(comment.id)}
+                      onDelete={() => setCommentToDelete(comment)}
+                      disabled={commentMutations.pendingCommentId !== null}
+                    />
+                  )}
                   {index === 0 && threadActions}
                 </div>
                 {isInitialComment && anchorQuote && renderAnchorQuote()}
-                <p className='ml-[33px] mt-[3px] whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] text-foreground [text-wrap:pretty]'>
-                  {renderCommentBody(
-                    comment.body,
-                    parseMentionedUserIds(comment.mentionedUserIds),
-                    allUsers,
-                  )}
-                </p>
+                {isEditing ? (
+                  <div className='ml-[33px] mt-2'>
+                    <OverlayZIndexContext.Provider value='z-[100]'>
+                      <CanvasCommentComposer
+                        id={`canvas-inline-comment-edit-${comment.id}`}
+                        channelId={channelId}
+                        currentUserId={user?.id}
+                        placeholder='Edit comment'
+                        value={comment.body}
+                        preserveOnSubmit
+                        disabled={commentMutations.pendingCommentId !== null}
+                        fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
+                        minHeightClassName='min-h-[38px]'
+                        onSubmit={payload => updateComment(comment, payload)}
+                        actions={
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            disabled={commentMutations.pendingCommentId !== null}
+                            onClick={() => setEditingCommentId(null)}
+                            data-track-category='CANVAS'
+                            data-track-name='CANCEL_EDIT_INLINE_COMMENT'
+                          >
+                            Cancel
+                          </Button>
+                        }
+                      />
+                    </OverlayZIndexContext.Provider>
+                  </div>
+                ) : (
+                  <p
+                    className={cn(
+                      'ml-[33px] mt-[3px] whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] text-foreground [text-wrap:pretty]',
+                      isDeleted && 'italic text-muted-foreground',
+                    )}
+                  >
+                    {isDeleted
+                      ? 'Comment deleted'
+                      : renderCommentBody(
+                          comment.body,
+                          parseMentionedUserIds(comment.mentionedUserIds),
+                          allUsers,
+                        )}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -568,6 +641,14 @@ export function CanvasInlineCommentThread({
         </div>
       )}
 
+      <CanvasCommentDeleteDialog
+        open={commentToDelete !== null}
+        onCancel={() => setCommentToDelete(null)}
+        onConfirm={() => {
+          if (commentToDelete) void commentMutations.deleteComment(commentToDelete);
+          setCommentToDelete(null);
+        }}
+      />
       {editable && (
         <div
           className={cn(

@@ -20,6 +20,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
+import { CallTranscriptPanel } from '../CallTranscriptPanel';
 import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
@@ -51,6 +52,25 @@ import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
 
+/**
+ * Reports whether the call is a one-on-one DM. The channel lookup goes through
+ * Zero, so this is only mounted where a ZeroProvider exists — external guests
+ * (dashboard-external) have none and would crash on it.
+ */
+function DmCallProbe({
+  channelId,
+  onChange,
+}: {
+  channelId: string | null;
+  onChange: (isDmCall: boolean) => void;
+}): null {
+  const isDmCall = useIsDmCall(channelId);
+  useEffect(() => {
+    onChange(isDmCall);
+  }, [isDmCall, onChange]);
+  return null;
+}
+
 /** Wall-clock time for the bottom-left of the bar. Polled every 10s so the minute flips promptly. */
 function useClockLabel(): string {
   const format = (): string =>
@@ -63,7 +83,7 @@ function useClockLabel(): string {
   return label;
 }
 
-type SidePanel = 'participants' | 'notes' | 'callChat' | 'thread';
+type SidePanel = 'participants' | 'notes' | 'transcript' | 'callChat' | 'thread';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -200,6 +220,7 @@ export function FullCallView({
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
@@ -394,6 +415,7 @@ export function FullCallView({
     (keep: SidePanel): void => {
       if (keep !== 'participants') setIsParticipantsSidebarOpen(false);
       if (keep !== 'notes') setIsNotesOpen(false);
+      if (keep !== 'transcript') setIsTranscriptOpen(false);
       if (keep !== 'thread' && isChatOpen) onToggleThread();
       if (keep !== 'callChat' && isCallChatOpen && onToggleCallChat) onToggleCallChat();
     },
@@ -411,6 +433,12 @@ export function FullCallView({
     setIsNotesOpen(!isNotesOpen);
   }, [isNotesOpen, closePanelsExcept]);
 
+  // Live transcript panel (always available; shows an off-state hint when transcription is off).
+  const handleToggleTranscript = useCallback((): void => {
+    if (!isTranscriptOpen) closePanelsExcept('transcript');
+    setIsTranscriptOpen(!isTranscriptOpen);
+  }, [isTranscriptOpen, closePanelsExcept]);
+
   const handleToggleThread = useCallback((): void => {
     if (!isChatOpen) closePanelsExcept('thread');
     onToggleThread();
@@ -427,6 +455,7 @@ export function FullCallView({
     if (isChatOpen || isCallChatOpen) {
       setIsParticipantsSidebarOpen(false);
       setIsNotesOpen(false);
+      setIsTranscriptOpen(false);
     }
   }, [isChatOpen, isCallChatOpen]);
 
@@ -438,7 +467,7 @@ export function FullCallView({
   }, [callParticipants]);
 
   // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
-  const isDmCall = useIsDmCall(channelId);
+  const [isDmCall, setIsDmCall] = useState(false);
   const ringingInvitees = useMemo(
     () =>
       isExternalUser || !isDmCall
@@ -469,11 +498,13 @@ export function FullCallView({
     ? 'participants'
     : isNotesOpen && !isExternalUser
       ? 'notes'
-      : isCallChatVisible && onToggleCallChat
-        ? 'callChat'
-        : isChatOpen && channelId && conversationId
-          ? 'thread'
-          : null;
+      : isTranscriptOpen
+        ? 'transcript'
+        : isCallChatVisible && onToggleCallChat
+          ? 'callChat'
+          : isChatOpen && channelId && conversationId
+            ? 'thread'
+            : null;
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
   const currentCall = useMemo(
@@ -573,6 +604,14 @@ export function FullCallView({
             <LazyCallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
           </PanelBoundary>
         );
+      case 'transcript':
+        return (
+          <CallTranscriptPanel
+            callId={callId}
+            isTranscriptionEnabled={isTranscriptionEnabled}
+            onClose={handleToggleTranscript}
+          />
+        );
       case 'callChat':
         return (
           <PanelBoundary key='callChat' fallback={<PanelLoading />}>
@@ -607,6 +646,7 @@ export function FullCallView({
       className='relative flex h-screen flex-col overflow-hidden bg-[#131314]'
       data-testid='call-window'
     >
+      {!isExternalUser && <DmCallProbe channelId={channelId} onChange={setIsDmCall} />}
       {/* Floating reactions overlay */}
       <ReactionsOverlay reactions={reactions} />
 
@@ -744,6 +784,8 @@ export function FullCallView({
             isParticipantsSidebarOpen={activePanel === 'participants'}
             isNotesOpen={activePanel === 'notes'}
             onToggleNotes={isExternalUser ? undefined : handleToggleNotes}
+            isTranscriptOpen={activePanel === 'transcript'}
+            onToggleTranscript={handleToggleTranscript}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
             localParticipantId={localParticipantId}

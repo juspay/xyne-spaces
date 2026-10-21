@@ -37,7 +37,7 @@ locals {
       auto_create       = true
       empty_timeout     = 120
       departure_timeout = 10
-      max_participants  = 100
+      max_participants  = 500
     }
     webhook = {
       api_key = var.api_key

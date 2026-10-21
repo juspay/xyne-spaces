@@ -31,6 +31,7 @@ import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
+import { prefixWorkspacePath } from '../../lib/workspacePath';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -92,10 +93,8 @@ interface NotificationData {
 
 // Router is /:workspaceId/... so cross-workspace deep links need the prefix.
 const withWorkspacePrefix = (url: string, workspaceId?: string): string => {
-  if (!workspaceId) return url;
-  if (!url.startsWith('/')) return url;
-  if (url.startsWith(`/${workspaceId}/`) || url === `/${workspaceId}`) return url;
-  return `/${workspaceId}${url}`;
+  const prefixed = prefixWorkspacePath(url, workspaceId);
+  return typeof prefixed === 'string' ? prefixed : url;
 };
 
 const buildChatActionUrl = (notification: NotificationData['notification']): string | undefined => {
@@ -215,20 +214,18 @@ export const NotificationHandler: React.FC = () => {
         }
 
         // For canvas notifications, construct actionUrl from data if not provided
-        const canvasRedirectUrl =
+        const canvasActionUrl =
           !data.notification.actionUrl && data.notification.data?.canvasId
             ? (() => {
-                const canvasParams = new URLSearchParams({
-                  type: 'canvas',
-                  canvasId: data.notification.data.canvasId,
-                });
+                const canvasParams = new URLSearchParams();
                 if (data.notification.data.blockId) {
                   canvasParams.set('blockId', data.notification.data.blockId);
                 }
                 if (data.notification.data.commentThreadId) {
                   canvasParams.set('commentThreadId', data.notification.data.commentThreadId);
                 }
-                return `/redirected?${canvasParams.toString()}`;
+                const queryString = canvasParams.toString();
+                return `/chat/canvas/${encodeURIComponent(data.notification.data.canvasId)}${queryString ? `?${queryString}` : ''}`;
               })()
             : undefined;
         const fallbackChatActionUrl = buildChatActionUrl(data.notification);
@@ -248,10 +245,7 @@ export const NotificationHandler: React.FC = () => {
         const sdlcTarget = parseSdlcNavTarget(ids.sdlcTarget);
         const sdlcActionUrl = sdlcTarget ? buildSdlcPath(sdlcTarget) : undefined;
         const resolvedRawActionUrl =
-          sdlcActionUrl ||
-          data.notification.actionUrl ||
-          canvasRedirectUrl ||
-          fallbackChatActionUrl;
+          sdlcActionUrl || data.notification.actionUrl || canvasActionUrl || fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
           ? withWorkspacePrefix(
               resolvedRawActionUrl,

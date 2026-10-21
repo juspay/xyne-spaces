@@ -68,10 +68,11 @@ import { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasMatchesSharedByFilter } from '../canvasListFilters';
 import {
+  getAvailableLabelCounts,
   getCanvasLabelDotClassName,
   getCanvasLabelKey,
   getCanvasLabels,
-  type CanvasLabelChip,
+  type CanvasLabelCount,
 } from '../canvasLabelUtils';
 import {
   mergeCanvasRestLabels,
@@ -85,7 +86,6 @@ type CanvasCursor = { id: string; updatedAt: number };
 type CanvasSearchScope = 'direct' | 'via_channel' | 'all';
 type CanvasSearchScopeMenuView = 'main' | 'channels';
 type CanvasFolderGroup = { folder: CanvasFolder };
-type CanvasLabelCount = { label: CanvasLabelChip; count: number };
 type CanvasEmptyStateCopy = {
   title: string;
   description: string;
@@ -466,23 +466,6 @@ const areCanvasItemsEqual = (left: Canvas, right: Canvas | undefined): boolean =
 const areCanvasItemListsEqual = (left: Canvas[], right: Canvas[]): boolean =>
   left.length === right.length &&
   left.every((canvas, index) => areCanvasItemsEqual(canvas, right[index]));
-
-const getAvailableLabelCounts = (labels: CanvasLabelChip[]): CanvasLabelCount[] => {
-  const labelCounts = new Map<string, CanvasLabelCount>();
-  for (const label of labels) {
-    const key = getCanvasLabelKey(label.name);
-    if (!key) continue;
-
-    const existing = labelCounts.get(key);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      labelCounts.set(key, { label, count: 1 });
-    }
-  }
-
-  return Array.from(labelCounts.values()).sort((a, b) => a.label.name.localeCompare(b.label.name));
-};
 
 const getAvailableCanvasLabelsFromMap = (
   canvases: Canvas[],

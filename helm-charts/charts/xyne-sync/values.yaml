@@ -1,0 +1,255 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/streamgres
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 25%
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 4848
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-app
+      port: 3001
+      targetPort: http
+    - name: http-sync
+      port: 4848
+      targetPort: http
+
+env:
+  STREAMGRES_ADDR: 0.0.0.0:4848
+  STREAMGRES_BASE_PATH: /zero
+  STREAMGRES_APP_ID: zero
+  STREAMGRES_SHARD: "0"
+  STREAMGRES_SCHEMAS: public,zero_0
+  STREAMGRES_SLOT: xyne_sync2
+  STREAMGRES_PUBLICATION: xyne_sync2_pub
+  STREAMGRES_DDL_TRIGGER: zero_ddl_end_0
+  STREAMGRES_DDL_PREFIX: zero/0/ddl
+  STREAMGRES_QUERY_URL: http://xyne-backend:3001/api/zero/query
+  STREAMGRES_MUTATE_URL: http://xyne-backend:3001/api/zero/push
+  STREAMGRES_FORWARD_COOKIES: "true"
+  STREAMGRES_LOG: info
+  STREAMGRES_LOG_FORMAT: json
+  STREAMGRES_READ_ROW_LIMIT: "100000"
+  STREAMGRES_READ_THREADS: "4"
+  STREAMGRES_READ_CONNECTIONS: "32"
+  STREAMGRES_GROUP_THREADS: "2"
+  STREAMGRES_GROUP_TTL_MS: "3600000"
+  STREAMGRES_JOIN_LIMIT: "100000"
+  STREAMGRES_JOIN_PREFERRED_SIDE: parent
+  STREAMGRES_PLAN_CACHE: "10000"
+  STREAMGRES_PLAN_TTL_MS: "600000"
+  STREAMGRES_TRANSFORM_CACHE: "20000"
+  STREAMGRES_TRANSFORM_TTL_MS: "60000"
+  STREAMGRES_SLOW_QUERY_MS: "250"
+  STREAMGRES_WARM_START_MS: "20000"
+  STREAMGRES_HEARTBEAT_MS: "1000"
+  STREAMGRES_SNAPSHOT_ROTATION_MS: "1000"
+  STREAMGRES_PING_INTERVAL_MS: "30000"
+  STREAMGRES_PONG_INTERVAL_MS: "3000"
+  STREAMGRES_CLIENT_TIMEOUT_MS: "45000"
+  STREAMGRES_MAX_MESSAGE_BYTES: "16777216"
+  STREAMGRES_ROWS_PER_PART: "500"
+  STREAMGRES_METRICS_INTERVAL_MS: "10000"
+  STREAMGRES_SLOT_CLEANUP_AGE_MS: "600000"
+  OTEL_SERVICE_NAME: xyne-sync
+  OTEL_RESOURCE_ATTRIBUTES: service.name=xyne-sync
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-opentelemetry-collector.monitoring.svc.cluster.local:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/json
+  OTEL_METRICS_EXPORTER: otlp
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_TRACES_EXPORTER: none
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+
+secretEnv:
+  STREAMGRES_PG_DSN:
+    name: xyne-sync-secrets
+    key: STREAMGRES_PG_DSN
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 3Gi
+  limits:
+    cpu: "4"
+    memory: 7Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 30
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes: []
+volumeMounts: []
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /var/lib/streamgres
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 300
+
+pdb:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: sync.spaces.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 0s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy:
+      loadBalancer:
+        consistentHash:
+          httpQueryParameterName: clientGroupID
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

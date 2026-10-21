@@ -1,6 +1,8 @@
 import type { JsonValue } from '@openfeature/server-sdk';
 import { superpositionClient } from '@/services/superpositionClient';
-import { askJevNoul, isJevConfigured, type JevNoulQuestion } from './jevClient';
+import { askDecisionNouls } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
+import type { YesNoQuestion } from '@/services/decision/types';
 
 /** How the cmd+K palette should treat a query. */
 export type QueryMode = 'lexical' | 'ai';
@@ -35,7 +37,7 @@ const TIMEOUT_MS = 5000;
 // Plain wording beats search jargon: "meaning search vs lexical search" caught 0-5 of 12
 // questions, while "carries a meaning" with one example per side caught 11-12. Naming
 // "asking for some information" lifted lookups like "what is pragati link" from 0.77 to 0.93.
-const NEEDS_AI: JevNoulQuestion = {
+const NEEDS_AI: YesNoQuestion = {
   type: 'noul',
   instructions:
     'Does this search query carry a meaning to understand (a question, a request, or asking ' +
@@ -67,7 +69,7 @@ const isClearlyLexical = (query: string): boolean => {
 interface IntentConfig {
   /** Turns classification (and so the cmd+K AI overview) on or off. */
   enabled: boolean;
-  question: JevNoulQuestion;
+  question: YesNoQuestion;
   threshold: number;
 }
 
@@ -95,11 +97,12 @@ export const classifyQueryIntent = async (
   query: string,
   ctx: QueryIntentContext
 ): Promise<QueryIntent | null> => {
-  if (!isJevConfigured() || isClearlyLexical(query)) return null;
+  if (!isDecisionEngineConfigured() || isClearlyLexical(query)) return null;
   const config = await getIntentConfig(ctx);
   if (!config.enabled) return null;
 
-  const pAI = await askJevNoul(query.trim(), config.question, TIMEOUT_MS);
-  if (pAI === null) return null;
+  const answers = await askDecisionNouls('search_intent', query.trim(), { pAI: config.question }, TIMEOUT_MS);
+  if (!answers) return null;
+  const { pAI } = answers;
   return { mode: pAI > config.threshold ? 'ai' : 'lexical', pAI };
 };

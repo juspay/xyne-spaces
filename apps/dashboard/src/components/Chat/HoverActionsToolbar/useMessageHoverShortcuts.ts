@@ -2,6 +2,7 @@ import { type RefObject, useEffect, useRef } from 'react';
 import { useShortcutById } from '../../../shortcuts';
 import type { ShortcutId } from '../../../shortcuts';
 import { hoveredMessage, messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
+import { usePageCoverage, type PageCoverage } from '../../../hooks/usePageCoverage';
 import {
   getMessageHoverActions,
   getMessageHoverActionsByMessageId,
@@ -46,8 +47,14 @@ const resolveActiveEntry = (
  * thread panel). Pointer-driven shortcuts keep the existing first-mounted
  * owner. When no pointer target exists, the list with a keyboard selection owns
  * the shortcut instead, so a selected row in a secondary panel still works.
+ *
+ * A list under full-page search owns nothing: its shortcuts are quiet there, so
+ * the first-mounted of the lists on screen is the owner (the conversation in
+ * full page's side panel).
  */
-const owners: symbol[] = [];
+const owners: Array<{ id: symbol; coverage: PageCoverage }> = [];
+const pointerOwner = (): symbol | undefined =>
+  owners.find(owner => !owner.coverage.isCovered())?.id;
 
 /** One catalog shortcut driven by the hovered message's registry entry. */
 const useHoverShortcut = (
@@ -90,25 +97,27 @@ export const useMessageHoverShortcuts = (
 ): void => {
   const instanceIdRef = useRef<symbol | null>(null);
   instanceIdRef.current ??= Symbol('messageHoverShortcuts');
+  const coverage = usePageCoverage();
 
   useEffect(() => {
     const id = instanceIdRef.current;
     if (id === null) return;
-    owners.push(id);
+    const owner = { id, coverage };
+    owners.push(owner);
     return (): void => {
-      const index = owners.indexOf(id);
+      const index = owners.indexOf(owner);
       if (index !== -1) owners.splice(index, 1);
     };
-  }, []);
+  }, [coverage]);
 
   const isOwner = (): boolean => {
     // Mirrors resolveHoveredEntry: a hover that no longer owns the shortcuts
     // must not decide ownership either.
     const pointerOwns =
       messageInteractionModality.current === 'pointer' && hoveredMessage.current !== null;
-    if (pointerOwns) return owners[0] === instanceIdRef.current;
+    if (pointerOwns) return pointerOwner() === instanceIdRef.current;
     if (keyboardSelectedMessageId) return true;
-    return owners[0] === instanceIdRef.current;
+    return pointerOwner() === instanceIdRef.current;
   };
   const resolveEntry = (): MessageHoverToolbarActions | undefined =>
     resolveActiveEntry(containerRef, keyboardSelectedMessageId);

@@ -44,10 +44,19 @@ export class BullQueueAdapter implements QueueAdapter {
     const queue = workflowsQueue.getQueue();
     const jobData: WorkflowsJobData = { executionId: data.executionId };
     const jobId = data.singletonKey ?? data.executionId;
+    const delay = data.delay !== undefined && data.delay > 0 ? data.delay : undefined;
+    if (delay === undefined) {
+      const pending = await queue.getJob(jobId);
+      if (pending && (await pending.isDelayed())) {
+        await pending.promote();
+        logger.debug(`[WORKFLOWS-QUEUE] promoted delayed pass for ${data.executionId}`);
+        return;
+      }
+    }
 
     await queue.add(WORKFLOWS_JOB_NAME, jobData, {
       jobId,
-      ...(data.delay !== undefined && data.delay > 0 ? { delay: data.delay } : {}),
+      ...(delay !== undefined ? { delay } : {}),
     });
 
     logger.debug(

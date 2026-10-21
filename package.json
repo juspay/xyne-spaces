@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.500.0",
+  "version": "1.513.0",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -18,7 +18,7 @@
     "services:win": "bash scripts/start-services-win.sh",
     "secrets": "node scripts/generate-local-secrets.mjs",
     "env:setup": "node scripts/setup-env-files.mjs",
-    "services:stop": "docker info > /dev/null 2>&1 && docker compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down || (command -v podman-compose > /dev/null && podman-compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down || podman compose -f docker-compose.local.yml --profile transcription --profile egress --profile search down)",
+    "services:stop": "bash scripts/start-services.sh --stop",
     "dev": "node scripts/dev-interactive.mjs",
     "dev:all": "node scripts/dev-interactive.mjs",
     "dev:all:raw": "node scripts/dev-interactive.mjs",
@@ -35,6 +35,7 @@
     "reset": "chmod +x scripts/reset-local.sh && ./scripts/reset-local.sh",
     "yama": "node node_modules/@juspay/yama/dist/cli/v2.cli.js",
     "test": "./tools/xyne-automation/scripts/run-test.sh",
+    "release:check": "pnpm --filter xyne-automation run release:check",
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh",

@@ -817,15 +817,16 @@ export class CallService {
   /**
    * Fetch the list of Pulse organisations.
    * Used to let users reassign a merchant in the Pulse actionables UI.
+   * The backend only returns the list to members of a Pulse-enabled channel.
    */
-  async fetchPulseOrgs(): Promise<
-    Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>
-  > {
+  async fetchPulseOrgs(
+    channelId: string,
+  ): Promise<Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>> {
     try {
       const response = await apiInstance.get<{
         success: boolean;
         orgs: Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>;
-      }>('/calls/pulse-orgs');
+      }>('/calls/pulse-orgs', { params: { channelId } });
       return response.data.orgs;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {

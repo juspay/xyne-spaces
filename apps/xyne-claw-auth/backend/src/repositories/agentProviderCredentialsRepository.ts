@@ -13,6 +13,7 @@
  */
 
 import { prisma } from "../db.js";
+import { applySharedCredentialOverride } from "../lib/shared-credential-override.js";
 import type { AgentProviderCredentials, SharedProviderCredential } from "@prisma/client";
 
 /** An agent cred row with shared-credential material already substituted in.
@@ -47,7 +48,7 @@ export const agentProviderCredentialsRepository = {
       where: { agentId_provider: { agentId, provider } },
       include: { sharedCredential: true },
     });
-    return row ? materialize(row) : null;
+    return row ? materialize(await applySharedCredentialOverride(row, { agentId })) : null;
   },
 
   listByAgent: async (agentId: string): Promise<EffectiveAgentCredRow[]> => {
@@ -55,7 +56,7 @@ export const agentProviderCredentialsRepository = {
       where: { agentId },
       include: { sharedCredential: true },
     });
-    return rows.map(materialize);
+    return (await Promise.all(rows.map((row) => applySharedCredentialOverride(row, { agentId })))).map(materialize);
   },
 
   upsert: (agentId: string, provider: string, data: Record<string, unknown>) =>

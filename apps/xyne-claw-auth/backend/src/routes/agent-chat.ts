@@ -21,6 +21,7 @@ import {
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import { NOTE_TEXT_MAX_CHARS, NOTE_TURNS_MAX, noteParentId, noteTurnsOf, replyRunning } from "../lib/chat-notes.js";
 import {
   agentFacets,
   buildAgentHandoff,
@@ -49,6 +50,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { chatProjectsRouter } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -59,6 +61,7 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -809,6 +812,11 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
     ...(workspaceId ? { workspaceId } : {}),
   };
 }
+
+// Chat projects (routes/chat-projects.ts). Mounted here, ahead of every
+// `/:slug/...` route below, so `/chat/projects*` is resolved before any
+// slug pattern gets a chance at it.
+router.use(chatProjectsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({
@@ -2603,7 +2611,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, attachments, llmCitations, provider, model, fastMode } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -2676,8 +2684,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(model ? { model } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
-        ...(tokenUsage ? { tokenUsage } : {}),
+        ...clawMetricsFields(req.body as Record<string, unknown>),
         ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {
@@ -2941,6 +2948,70 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
       ...(turn.parts ? { parts: turn.parts } : {}),
     });
+  }
+});
+
+// POST /agents/:slug/chat/:convId/notes — append turns the dashboard answered
+// itself (Buddy acting on screen) as finished messages, so they show in the
+// history like any other turn. No run: the agent's session never sees them, and
+// the rows are chained after the reply the user is on (`parentId`, else the
+// latest), so the next turn continues that path and resumes the same session.
+router.post("/:slug/chat/:convId/notes", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    // Direct chats only: a Spaces thread id is shared with other users' turns.
+    if (!isDirectChatConversation(convId)) {
+      res.status(400).json({ success: false, error: "Only direct chats take notes" });
+      return;
+    }
+    const turns = noteTurnsOf(req.body);
+    if (!turns) {
+      res.status(400).json({
+        success: false,
+        error: `turns must be 1-${NOTE_TURNS_MAX} non-empty request/reply pairs of up to ${NOTE_TEXT_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const existing = await chatMessageRepository.findByConversation(convId);
+    const aliases = new Set(getRequesterAliases(req));
+    if (existing.length > 0 && !existing.some((m) => aliases.has(m.userId))) {
+      res.status(404).json({ success: false, error: "Conversation not found" });
+      return;
+    }
+    if (replyRunning(existing)) {
+      res.status(409).json({ success: false, error: "A reply is still running" });
+      return;
+    }
+
+    // The caller's own rows only: someone else's reply in the thread is no parent for these.
+    const parentId = noteParentId(
+      existing.filter((m) => aliases.has(m.userId)),
+      (req.body as { parentId?: unknown }).parentId,
+    );
+    const ids = await chatMessageRepository.appendTurns({
+      conversationId: convId,
+      agentSlug: slug,
+      userId,
+      orgId: agent.orgId,
+      parentId,
+      turns,
+    });
+    log.info(`[agent-chat/notes] conv=${convId} slug=${slug} rows=${ids.length}`);
+    res.json({ success: true, conversationId: convId, parentId, messageIds: ids });
+  } catch (err) {
+    log.error(`[agent-chat/notes] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to save notes" });
   }
 });
 

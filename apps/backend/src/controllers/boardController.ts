@@ -94,8 +94,9 @@ export class BoardController {
           { name: FLOW_STAGE_NAMES.STARTED, sequenceNumber: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
           { name: FLOW_STAGE_NAMES.PAUSED, sequenceNumber: 3, defaultTicketStatusV2: TicketStatusV2.PAUSED },
           { name: FLOW_STAGE_NAMES.BACKLOG, sequenceNumber: 4, defaultTicketStatusV2: TicketStatusV2.PAUSED },
-          { name: FLOW_STAGE_NAMES.COMPLETED, sequenceNumber: 5, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
-          { name: FLOW_STAGE_NAMES.CANCELLED, sequenceNumber: 6, defaultTicketStatusV2: TicketStatusV2.CANCELLED },
+          { name: FLOW_STAGE_NAMES.SKIPPED, sequenceNumber: 5, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
+          { name: FLOW_STAGE_NAMES.COMPLETED, sequenceNumber: 6, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
+          { name: FLOW_STAGE_NAMES.CANCELLED, sequenceNumber: 7, defaultTicketStatusV2: TicketStatusV2.CANCELLED },
         ];
       }
 

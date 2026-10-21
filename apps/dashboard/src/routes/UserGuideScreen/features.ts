@@ -18,7 +18,7 @@ import {
   ListChecks,
   MessageCircle,
   MessagesSquare,
-  Mic,
+  AudioLines,
   Phone,
   Search,
   ShieldUser,
@@ -396,7 +396,7 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     findIn: 'Sidebar -> Recordings',
     actions: ['Browse recordings', 'Open recording details', 'Share or delete recording'],
     steps: [
-      'Click Recordings [[Mic]] in the left sidebar.',
+      'Click Recordings [[AudioLines]] in the left sidebar.',
       'Browse the list of recorded calls — each entry shows the title, date, and duration.',
       'Click a recording row to open recording details.',
       'Use View Thread to jump back to the related chat context.',
@@ -405,7 +405,7 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     ],
     keywords: ['recordings', 'meeting notes', 'view thread', 'share recording', 'delete recording'],
     category: 'calls',
-    icon: Mic,
+    icon: AudioLines,
     visualKey: 'recordings',
   },
   {

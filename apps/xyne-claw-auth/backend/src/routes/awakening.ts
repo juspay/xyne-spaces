@@ -15,7 +15,7 @@ import { prisma } from "../db.js";
 import { requireAuth, requireNoAccessToken, requireStrictS2S } from "../middleware/require-auth.js";
 import { requireClawAdmin } from "../middleware/agent-acl.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
-import type { FinalizeRunInput } from "../repositories/agentRunRepository.js";
+import { clawMetricsFields, type FinalizeRunInput } from "../repositories/agentRunRepository.js";
 import { releaseAgentLock } from "../awakening/lock.js";
 import { clearInbox, drainInbox } from "../awakening/inbox.js";
 import { createLogger } from "../logger.js";
@@ -40,6 +40,8 @@ interface ResultBody {
   toolInvocations?: unknown;
   tokenUsage?: FinalizeRunInput["tokenUsage"];
   latency?: FinalizeRunInput["latency"];
+  citationReflection?: FinalizeRunInput["citationReflection"];
+  llmCalls?: unknown;
 }
 
 /**
@@ -165,9 +167,7 @@ awakeningRouter.post("/awakening/:idempotencyKey/result", requireStrictS2S, asyn
         ...(body.provider ? { provider: body.provider } : {}),
         ...(body.model ? { model: body.model } : {}),
         ...(toolNames(body.toolsUsed) ? { toolsUsed: toolNames(body.toolsUsed)! } : {}),
-        ...(body.toolInvocations !== undefined ? { toolInvocations: body.toolInvocations } : {}),
-        ...(body.tokenUsage ? { tokenUsage: body.tokenUsage } : {}),
-        ...(body.latency ? { latency: body.latency } : {}),
+        ...clawMetricsFields(body),
       })
       .catch((err: unknown) =>
         log.warn(`[awakening] AgentRun.finalize failed: ${err instanceof Error ? err.message : err}`),

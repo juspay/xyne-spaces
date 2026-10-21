@@ -95,6 +95,7 @@ import { Dialog } from '../ui/Dialog/Dialog';
 import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
@@ -542,6 +543,9 @@ const RadarPanel = (): ReactElement => {
     othersMode,
   ]);
 
+  // Under full-page search the feed is out of sight: not reloaded there, and reloaded on return, as
+  // coming back to the page did.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!radarEnabled) return;
     void load();
@@ -555,14 +559,16 @@ const RadarPanel = (): ReactElement => {
     // feed request. visibilitychange alone covers tab switches and app
     // switches; the sequence guard in load() handles anything that still
     // overlaps.
+    const watch = watchShown(pageCoverage, () => void load(true));
     const refresh = (): void => {
-      if (document.visibilityState === 'visible') void load(true);
+      if (document.visibilityState === 'visible' && watch.shown()) void load(true);
     };
     document.addEventListener('visibilitychange', refresh);
     return () => {
       document.removeEventListener('visibilitychange', refresh);
+      watch.stop();
     };
-  }, [load, radarEnabled]);
+  }, [load, radarEnabled, pageCoverage]);
 
   // The header tabs are exclusive; a stored "both" (or "neither") from the old
   // checkboxes opens on Pending me rather than a merged list the paged Pending
