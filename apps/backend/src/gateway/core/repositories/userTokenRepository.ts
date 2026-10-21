@@ -9,10 +9,7 @@ export interface SaveUserTokenInput {
   encryptedToken: string;
 }
 
-/**
- * People's own provider tokens, in the repo's UserExternalToken table. A Spaces user row belongs to one
- * workspace, so one row per (user, provider) is one token per person per workspace.
- */
+/** People's own provider tokens in UserExternalToken: one per person per workspace. */
 export class UserTokenRepository {
   async findByUser(userId: string, provider: string): Promise<UserExternalToken | null> {
     return await db.userExternalToken.findUnique({

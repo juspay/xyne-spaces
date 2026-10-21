@@ -4,10 +4,7 @@ import { GatewayError } from '../errors';
 import { asyncRoute } from '../middleware/errorHandler';
 import type { GatewayHandler, ProviderServices } from '../types';
 
-/**
- * Provider webhooks: parse → find config → verify → hand to each handler → respond, inside the request
- * like desk. 200 when done or nothing to do; 5xx makes the provider retry.
- */
+/** Provider webhooks: parse → find config → verify → hand to each handler → respond. */
 export class EventsController {
   constructor(
     private readonly services: ProviderServices,

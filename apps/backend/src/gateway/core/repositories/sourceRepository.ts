@@ -2,10 +2,7 @@ import type { ExternalSource } from '@prisma/client';
 import { ExternalSourceRepository, db, encrypt } from '../../re-exports';
 import type { MessageSource, Pair } from '../types';
 
-/**
- * ExternalSource rows the gateway uses: one CONNECTION row per provider workspace (the config), and the
- * message-map rows Mirror links share with self-serve migration. Pair rows are in PairRepository.
- */
+/** ExternalSource CONNECTION rows and the message-map rows shared with self-serve migration. */
 export class SourceRepository {
   private readonly sources = new ExternalSourceRepository();
 

@@ -97,11 +97,7 @@ export class UserAuthService {
     };
   }
 
-  /**
-   * Runs a call with a person's token. Null means the bot should do it instead: the token was rejected
-   * (and is dropped), it lacks a permission, the person can't reach the channel, or they didn't post
-   * that message. Never a failure the call may have half-done, so nothing is sent twice.
-   */
+  /** Runs a call with a person's token; null means the bot should do it instead. */
   async callAsUser<T>(
     user: UserApi,
     fn: (api: BaseApi) => Promise<T>
