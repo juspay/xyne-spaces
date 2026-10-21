@@ -89,8 +89,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
               </div>
             ) : !hasPreviewItems ? (
               <div className='flex h-full items-center justify-center text-center text-sm text-muted-foreground'>
-                No threads were active in this period, so no conversation history will be
-                included.
+                No threads were active in this period, so no conversation history will be included.
               </div>
             ) : (
               <div className='space-y-4'>
