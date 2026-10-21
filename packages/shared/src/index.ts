@@ -3,6 +3,7 @@ export * from './zero/schema';
 export * from './zero/audit';
 export { defineQuery, connectReach, connectColumnForTable, CONNECT_SCOPED_TABLES } from './zero/acl';
 export { setConnectQueryEnabledCanvas, getConnectQueryEnabledCanvas } from './zero/connect-flags';
+export { MARK_CHANNELS_VIEWED_MAX_BATCH } from './zero/channelReadConstants';
 export {
   EncryptedFieldQueryError,
   validateQueryWhereClause,

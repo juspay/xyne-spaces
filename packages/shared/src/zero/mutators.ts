@@ -290,6 +290,7 @@ function buildParentMessageMd(msg: {
   });
 }
 import { zql } from './builder.js';
+import { MARK_CHANNELS_VIEWED_MAX_BATCH } from './channelReadConstants.js';
 import {
   addReplyToData,
   buildRepliesMdFromMessages,
@@ -327,6 +328,112 @@ async function getConversationSeenCutoffAt(
 
   return seenConversations[seenConversations.length - 1]?.createdAt ?? null;
 }
+
+/**
+ * Read-state half of "mark channel as viewed": moves the user's read cursor to
+ * `timestamp` and clears the unread count. Shared by the single and bulk mutators.
+ */
+async function markChannelStatusViewed(
+  tx: Transaction<Schema>,
+  channelUserStatusId: string,
+  channelId: string,
+  timestamp: number,
+  conversationId?: string,
+): Promise<void> {
+  const conversationSeenCutoffAt = await getConversationSeenCutoffAt(tx, channelId, timestamp);
+
+  const updateData: {
+    lastViewedAt: number;
+    unreadCount: number;
+    lastViewedConversationId?: string;
+    conversationSeenCutoffAt?: number;
+  } = {
+    lastViewedAt: timestamp,
+    unreadCount: 0,
+    conversationSeenCutoffAt,
+  };
+
+  if (conversationId) {
+    updateData.lastViewedConversationId = conversationId;
+  }
+
+  await tx.mutate.channel_user_status.update({
+    id: channelUserStatusId,
+    ...updateData,
+    updatedAt: timestamp,
+  });
+}
+
+/**
+ * Activity half of "mark channel as viewed": marks the user's unread activities for
+ * the channel's top-level messages (a thread's initial message) as read. Thread-reply
+ * activities are left alone; they clear when the thread itself is read.
+ */
+async function markChannelRootActivitiesRead(
+  tx: Transaction<Schema>,
+  userId: string,
+  channelId: string,
+): Promise<void> {
+  const unreadActivities = await tx.run(
+    zql.activities
+      .where('userId', userId)
+      .where('isRead', false)
+      .where('channelId', channelId),
+  );
+
+  if (unreadActivities.length === 0) {
+    return;
+  }
+
+  const activityBySourceId = new Map(
+    unreadActivities.map(a => [a.actionSourceId, a]),
+  );
+  const uniqueSourceIds = [...activityBySourceId.keys()];
+
+  // Batch fetch messages
+  const foundMessages = await tx.run(
+    zql.messages.where('messageId', 'IN', uniqueSourceIds),
+  );
+  const messageByMessageId = new Map(
+    foundMessages.map(m => [m.messageId, m]),
+  );
+
+  // For messages not found, try resolveMessage fallback individually
+  const missingIds = uniqueSourceIds.filter(id => !messageByMessageId.has(id));
+  for (const id of missingIds) {
+    const resolved = await resolveMessage(tx, id);
+    if (resolved) {
+      messageByMessageId.set(resolved.messageId, resolved);
+    }
+  }
+
+  // Batch fetch conversations for all found messages
+  const conversationIds = [...new Set(
+    [...messageByMessageId.values()].map(m => m.conversationId),
+  )];
+  const conversations = await tx.run(
+    zql.conversations.where('conversationId', 'IN', conversationIds),
+  );
+  const convByConversationId = new Map(
+    conversations.map(c => [c.conversationId, c]),
+  );
+
+  for (const [sourceId, activity] of activityBySourceId) {
+    const message = messageByMessageId.get(sourceId);
+    if (!message) {
+      continue;
+    }
+    const conv = convByConversationId.get(message.conversationId);
+    if (conv?.initialMessageId === message.messageId) {
+      await tx.mutate.activities.update({
+        id: activity.id,
+        isRead: true,
+      });
+    }
+  }
+}
+
+export { MARK_CHANNELS_VIEWED_MAX_BATCH };
 
 export type AuthData = {
   sub: string;
@@ -1107,32 +1214,7 @@ export const mutators = defineMutators({
           throw new Error('Not a channel participant');
         }
 
-        const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
-          tx,
-          channelId,
-          timestamp,
-        );
-
-        const updateData: {
-          lastViewedAt: number;
-          unreadCount: number;
-          lastViewedConversationId?: string;
-          conversationSeenCutoffAt?: number;
-        } = {
-          lastViewedAt: timestamp,
-          unreadCount: 0,
-          conversationSeenCutoffAt,
-        };
-
-        if (conversationId) {
-          updateData.lastViewedConversationId = conversationId;
-        }
-
-        await tx.mutate.channel_user_status.update({
-          id: participant.id,
-          ...updateData,
-          updatedAt: timestamp,
-        });
+        await markChannelStatusViewed(tx, participant.id, channelId, timestamp, conversationId);
 
         // Draft args are only for callers that also save the channel draft. Omit them
         // to just mark the channel read and leave the draft untouched.
@@ -1166,62 +1248,36 @@ export const mutators = defineMutators({
           }
         }
 
-        const unreadActivities = await tx.run(
-          zql.activities
+        await markChannelRootActivitiesRead(tx, ctx.userID, channelId);
+      },
+    ),
+    /**
+     * Bulk form of `markChannelAsViewed` for "Mark section as read". Applies the same
+     * per-channel read logic to every channel in one transaction, so the sidebar
+     * clears atomically and costs one mutation instead of one per channel.
+     *
+     * Differences from the single-channel mutator, on purpose:
+     * - Drafts are never touched.
+     * - Channels the user is no longer a member of are skipped instead of failing the
+     *   whole call. The sidebar list a client sends can be a beat stale (the user just
+     *   left a channel), and that must not roll back the rest of the section.
+     */
+    markChannelsAsViewed: defineMutator(
+      z.object({
+        channelIds: z.array(z.string()).min(1).max(MARK_CHANNELS_VIEWED_MAX_BATCH),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelIds, timestamp } }) => {
+        const statuses = await tx.run(
+          zql.channel_user_status
+            .where('channelId', 'IN', [...new Set(channelIds)])
             .where('userId', ctx.userID)
-            .where('isRead', false)
-            .where('channelId', channelId),
+            .where('isDeleted', false),
         );
 
-        if (unreadActivities.length === 0) {
-          return;
-        }
-
-        const activityBySourceId = new Map(
-          unreadActivities.map(a => [a.actionSourceId, a]),
-        );
-        const uniqueSourceIds = [...activityBySourceId.keys()];
-
-        // Batch fetch messages
-        const foundMessages = await tx.run(
-          zql.messages.where('messageId', 'IN', uniqueSourceIds),
-        );
-        const messageByMessageId = new Map(
-          foundMessages.map(m => [m.messageId, m]),
-        );
-
-        // For messages not found, try resolveMessage fallback individually
-        const missingIds = uniqueSourceIds.filter(id => !messageByMessageId.has(id));
-        for (const id of missingIds) {
-          const resolved = await resolveMessage(tx, id);
-          if (resolved) {
-            messageByMessageId.set(resolved.messageId, resolved);
-          }
-        }
-
-        // Batch fetch conversations for all found messages
-        const conversationIds = [...new Set(
-          [...messageByMessageId.values()].map(m => m.conversationId),
-        )];
-        const conversations = await tx.run(
-          zql.conversations.where('conversationId', 'IN', conversationIds),
-        );
-        const convByConversationId = new Map(
-          conversations.map(c => [c.conversationId, c]),
-        );
-
-        for (const [sourceId, activity] of activityBySourceId) {
-          const message = messageByMessageId.get(sourceId);
-          if (!message) {
-            continue;
-          }
-          const conv = convByConversationId.get(message.conversationId);
-          if (conv?.initialMessageId === message.messageId) {
-            await tx.mutate.activities.update({
-              id: activity.id,
-              isRead: true,
-            });
-          }
+        for (const status of statuses) {
+          await markChannelStatusViewed(tx, status.id, status.channelId, timestamp);
+          await markChannelRootActivitiesRead(tx, ctx.userID, status.channelId);
         }
       },
     ),

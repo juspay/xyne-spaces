@@ -39,6 +39,7 @@ import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { keyBetween, parseDMParticipantIds } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
+import { useMarkChannelsAsRead } from '../../../hooks/useMarkChannelsAsRead';
 import { useAllMentionCount } from '../../../hooks/useMentionCount';
 import UnreadMentionsPill, { useOffscreenUnreadSections } from './UnreadMentionsPill';
 import { useMutation } from '@tanstack/react-query';
@@ -262,6 +263,7 @@ const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
 };
 
 const NO_SECTIONS: ChannelSection[] = [];
+const NO_CHANNEL_IDS: string[] = [];
 
 const ChatDirectory = ({
   channelData,
@@ -314,6 +316,7 @@ const ChatDirectory = ({
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
   const unreadCounts = useAllUnreadCount();
+  const markChannelsAsRead = useMarkChannelsAsRead();
   const mentionCounts = useAllMentionCount();
   const { starred, channels, directMessages, groupPreferences, setGroupPreference } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
@@ -327,6 +330,7 @@ const ChatDirectory = ({
     dmDisplayChannels,
     starredDisplayChannels,
     sectionUnreadCounts,
+    sectionUnreadChannelIds,
     defaultUnreadCount,
     dmUnreadCount,
     starredUnreadCount,
@@ -1227,9 +1231,11 @@ const ChatDirectory = ({
                     sections={channelSections ?? NO_SECTIONS}
                     unreadCounts={unreadCounts}
                     sectionUnreadCount={sectionUnreadCounts[section.id] ?? 0}
+                    unreadChannelIds={sectionUnreadChannelIds[section.id] ?? NO_CHANNEL_IDS}
                     activeChannelId={activeChannelId}
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
+                    onMarkAsRead={(_section, channelIds) => void markChannelsAsRead(channelIds)}
                     onManageChannels={setSectionToManage}
                     onCreateSection={() => {
                       setAddSectionSource('channels');

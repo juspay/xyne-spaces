@@ -11,6 +11,7 @@ import {
   ThreeDotsMenuVertical,
   PencilEdit,
   DeleteDustbin02,
+  MarkAsRead,
 } from '@xyne/icons';
 import { ChannelFilterMode, ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import type { VisibleChannel } from '../../../machines/stateMachine';
@@ -34,9 +35,12 @@ interface SortableSectionProps {
   sections: ChannelSection[];
   unreadCounts: Record<string, number>;
   sectionUnreadCount: number;
+  /** Ids of every unread channel in the section, including ones hidden by its filter. */
+  unreadChannelIds: string[];
   activeChannelId?: string | undefined;
   onRename: (section: ChannelSection) => void;
   onDelete: (section: ChannelSection) => void;
+  onMarkAsRead: (section: ChannelSection, channelIds: string[]) => void;
   onCreateSection: () => void;
   onManageChannels: (section: ChannelSection) => void;
   onMoveChannelToSection: (channelId: string, sectionId: string | null) => void;
@@ -50,9 +54,11 @@ const SortableSection = ({
   sections,
   unreadCounts,
   sectionUnreadCount,
+  unreadChannelIds,
   activeChannelId,
   onRename,
   onDelete,
+  onMarkAsRead,
   onCreateSection,
   onManageChannels,
   onMoveChannelToSection,
@@ -193,6 +199,22 @@ const SortableSection = ({
               onSetSort={order => onSetSortOrder(section.id, order)}
               showManualSort
             />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className={MENU_ROW}
+              disabled={unreadChannelIds.length === 0}
+              onClick={e => {
+                e.stopPropagation();
+                onMarkAsRead(section, unreadChannelIds);
+              }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='MARK_SECTION_AS_READ'
+            >
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <MarkAsRead size={16} />
+              </span>
+              <span className='flex-1'>Mark section as read</span>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className={cn(MENU_ROW, 'text-destructive focus:text-destructive')}
