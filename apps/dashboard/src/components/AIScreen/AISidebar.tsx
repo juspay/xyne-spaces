@@ -22,6 +22,9 @@ import {
   UserShield,
   UserTwo,
   File02Ai,
+  FolderArrowRight,
+  FolderRemove,
+  CheckTickSingle,
   SidebarLeftClose,
 } from '@xyne/icons';
 import { Server, X } from 'lucide-react';
@@ -36,14 +39,16 @@ import {
   useV2SessionsList,
   useV2SessionInvalidator,
   useV2SessionPatcher,
+  useV2ChatProjects,
+  useV2ChatProjectActions,
 } from '../../hooks/useAskAISessionsV2';
 import {
   MANUAL_CHAT_TITLE_MAX_CHARS,
   deleteV2Conversation,
   updateV2Conversation,
+  type ChatProject,
 } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
-import { Popover } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button';
 import AppNavigator from '../AppNavigator/AppNavigator';
@@ -61,6 +66,19 @@ import {
   groupByRecency,
   splitAutoReplies,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
+import { renderEmoji } from '../../utils/customEmojiUtils';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from '../ui/dropdown-menu';
+import { SidebarProjects } from './SidebarProjects/SidebarProjects';
+import { DEFAULT_PROJECT_ICON } from './SidebarProjects/SidebarProjects.utils';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -192,7 +210,7 @@ export const NAV_ITEMS: AINavItem[] = [
 
 interface AISidebarProps {
   activeSessionId?: string | undefined;
-  onCreateChat: () => void;
+  onCreateChat: (projectId?: string) => void;
   onSelectSession: (sessionId: string) => void;
   onAccount?: (() => void) | undefined;
   /** External control for mobile drawer */
@@ -288,6 +306,9 @@ interface SessionHistoryProps {
   onDelete: (session: ConversationHistoryType) => Promise<void>;
   onRename: (session: ConversationHistoryType, title: string) => Promise<void>;
   onTogglePin: (session: ConversationHistoryType, pinned: boolean) => Promise<void>;
+  /** Projects offered by the row menu's "Move to project". */
+  projects: ChatProject[];
+  onMoveToProject: (session: ConversationHistoryType, projectId: string | null) => Promise<void>;
   showEmpty?: boolean;
 }
 
@@ -298,6 +319,8 @@ function SessionHistory({
   onDelete,
   onRename,
   onTogglePin,
+  projects,
+  onMoveToProject,
   showEmpty = true,
 }: SessionHistoryProps): ReactElement | null {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -439,13 +462,14 @@ function SessionHistory({
                       <PinSlant size={14} className='shrink-0' aria-hidden />
                     )}
                   </button>
-                  <Popover
+                  {/* DropdownMenu rather than Popover, so "Move to project" is a
+                      hover submenu — the same interaction as "Move to section"
+                      on a channel row. */}
+                  <DropdownMenu
                     open={openDropdownId === session.id}
                     onOpenChange={(open: boolean) => setOpenDropdownId(open ? session.id : null)}
-                    side='right'
-                    align='start'
-                    sideOffset={4}
-                    trigger={
+                  >
+                    <DropdownMenuTrigger asChild>
                       <button
                         type='button'
                         className={cn(
@@ -458,70 +482,110 @@ function SessionHistory({
                       >
                         <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
                       </button>
-                    }
-                    className='w-48 rounded-lg border border-border bg-popover p-1.5 shadow-lg'
-                  >
-                    <button
-                      type='button'
-                      onClick={e => {
-                        e.stopPropagation();
-                        setOpenDropdownId(null);
-                        setRenameDraft(session.title);
-                        setRenamingId(session.id);
-                      }}
-                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
-                      data-track-category='XyneAI'
-                      data-track-name='RENAME_SESSION'
-                      data-track-metadata={JSON.stringify({
-                        surface: 'page',
-                        conversationId: session.sessionId,
-                      })}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align='end'
+                      onCloseAutoFocus={e => e.preventDefault()}
+                      className='min-w-[180px]'
                     >
-                      <PencilEdit size={14} className='shrink-0' aria-hidden />
-                      <span>Rename</span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={e => {
-                        e.stopPropagation();
-                        setOpenDropdownId(null);
-                        void onTogglePin(session, !session.isStarred);
-                      }}
-                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
-                      data-track-category='XyneAI'
-                      data-track-name='PIN_SESSION'
-                      data-track-metadata={JSON.stringify({
-                        surface: 'page',
-                        conversationId: session.sessionId,
-                        pinned: !session.isStarred,
-                      })}
-                    >
-                      {session.isStarred ? (
-                        <UnpinIcon className='h-3.5 w-3.5 shrink-0' />
-                      ) : (
-                        <PinSlant size={14} className='shrink-0' aria-hidden />
+                      <DropdownMenuItem
+                        className='gap-2'
+                        onClick={() => {
+                          setRenameDraft(session.title);
+                          setRenamingId(session.id);
+                        }}
+                        data-track-category='XyneAI'
+                        data-track-name='RENAME_SESSION'
+                        data-track-metadata={JSON.stringify({
+                          surface: 'page',
+                          conversationId: session.sessionId,
+                        })}
+                      >
+                        <PencilEdit size={14} className='shrink-0' aria-hidden />
+                        <span className='flex-1'>Rename</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className='gap-2'
+                        onClick={() => void onTogglePin(session, !session.isStarred)}
+                        data-track-category='XyneAI'
+                        data-track-name='PIN_SESSION'
+                        data-track-metadata={JSON.stringify({
+                          surface: 'page',
+                          conversationId: session.sessionId,
+                          pinned: !session.isStarred,
+                        })}
+                      >
+                        {session.isStarred ? (
+                          <UnpinIcon className='h-3.5 w-3.5 shrink-0' />
+                        ) : (
+                          <PinSlant size={14} className='shrink-0' aria-hidden />
+                        )}
+                        <span className='flex-1'>{session.isStarred ? 'Unpin' : 'Pin'}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className='gap-2'>
+                          <FolderArrowRight size={14} className='shrink-0' aria-hidden />
+                          <span className='flex-1'>Move to project</span>
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          {projects.length === 0 ? (
+                            <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
+                          ) : (
+                            projects.map(project => (
+                              <DropdownMenuItem
+                                key={project.id}
+                                className='gap-2'
+                                onClick={() => void onMoveToProject(session, project.id)}
+                                data-track-category='XyneAI'
+                                data-track-name='MOVE_TO_PROJECT'
+                                data-track-metadata={JSON.stringify({
+                                  surface: 'page',
+                                  projectId: project.id,
+                                })}
+                              >
+                                <span className='shrink-0' aria-hidden>
+                                  {renderEmoji(
+                                    project.icon ?? DEFAULT_PROJECT_ICON,
+                                    'w-4 h-4',
+                                    'text-sm',
+                                  )}
+                                </span>
+                                <span className='flex-1 truncate'>{project.name}</span>
+                                {session.projectId === project.id && (
+                                  <CheckTickSingle size={14} className='shrink-0' aria-hidden />
+                                )}
+                              </DropdownMenuItem>
+                            ))
+                          )}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                      {session.projectId && (
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={() => void onMoveToProject(session, null)}
+                          data-track-category='XyneAI'
+                          data-track-name='REMOVE_FROM_PROJECT'
+                        >
+                          <FolderRemove size={14} className='shrink-0' aria-hidden />
+                          <span className='flex-1'>Remove from project</span>
+                        </DropdownMenuItem>
                       )}
-                      <span>{session.isStarred ? 'Unpin' : 'Pin'}</span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={e => {
-                        e.stopPropagation();
-                        setOpenDropdownId(null);
-                        setPendingDeleteId(session.id);
-                      }}
-                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-accent'
-                      data-track-category='XyneAI'
-                      data-track-name='DELETE_SESSION'
-                      data-track-metadata={JSON.stringify({
-                        surface: 'page',
-                        conversationId: session.sessionId,
-                      })}
-                    >
-                      <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
-                      <span>Delete</span>
-                    </button>
-                  </Popover>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className='gap-2 text-destructive focus:text-destructive'
+                        onClick={() => setPendingDeleteId(session.id)}
+                        data-track-category='XyneAI'
+                        data-track-name='DELETE_SESSION'
+                        data-track-metadata={JSON.stringify({
+                          surface: 'page',
+                          conversationId: session.sessionId,
+                        })}
+                      >
+                        <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
+                        <span className='flex-1'>Delete</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </span>
               </div>
             </li>
@@ -608,6 +672,7 @@ export function AISidebar({
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
 
   const [recentsOpen, setRecentsOpen] = useState(true);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
 
   const routedActiveItem = NAV_ITEMS.find(item => pathname.includes(item.matchPath ?? item.to));
 
@@ -618,20 +683,39 @@ export function AISidebar({
   // narrows it to one agent on the server, so it reaches unloaded chats too.
   const { setSelectedAgentSlug } = useSelectedAgent();
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  // Recents holds the unfiled chats; a filed one lives under its project
+  // instead, so `'none'` keeps a chat from appearing in both places at once.
   const {
     conversations: sessions,
     agents,
     hasMore,
     isLoadingMore,
     loadMore,
-  } = useV2SessionsList({ agentSlug: agentFilter });
+  } = useV2SessionsList({ agentSlug: agentFilter, projectId: 'none' });
+  // Pinned stays unfiltered. A pin is a shortcut to a chat wherever it lives,
+  // so filing a pinned chat into a project must not drop it out of Pinned.
+  const { conversations: allSessions } = useV2SessionsList({ agentSlug: agentFilter });
   const directory = useAgentDirectory();
-  const pinnedSessions = sessions.filter(session => session.isStarred);
+  const pinnedSessions = allSessions.filter(session => session.isStarred);
   const { own: ownSessions } = splitAutoReplies(sessions.filter(session => !session.isStarred));
   const recentGroups = groupByRecency(ownSessions);
   const visibleCount = pinnedSessions.length + ownSessions.length;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
   const { patchSession } = useV2SessionPatcher();
+  const { projects } = useV2ChatProjects();
+  const { moveChatToProject } = useV2ChatProjectActions();
+  // Scopes the remembered expanded-projects set to whoever is signed in.
+  const { user } = useAuth();
+  const handleMoveToProject = async (
+    session: ConversationHistoryType,
+    projectId: string | null,
+  ): Promise<void> => {
+    try {
+      await moveChatToProject(session.id, session.sessionId, projectId, rowAgentSlug(session));
+    } catch {
+      toast.error(projectId ? 'Could not move chat' : 'Could not remove chat from project');
+    }
+  };
 
   // Every action names the row's own agent: a Spaces thread is listed once per
   // agent and its rename/pin/delete are per agent; for a direct chat the server
@@ -755,23 +839,61 @@ export function AISidebar({
             {pinnedSessions.length > 0 && (
               <div className='flex max-h-[40%] shrink-0 flex-col'>
                 <div className='flex h-7 shrink-0 items-center px-3'>
-                  <span className='block truncate text-left text-xs font-medium capitalize tracking-[0.48px] text-sidebar-foreground'>
-                    Pinned
-                  </span>
+                  <button
+                    type='button'
+                    onClick={() => setPinnedOpen(prev => !prev)}
+                    aria-expanded={pinnedOpen}
+                    className='flex min-w-0 flex-1 items-center gap-1 text-xs font-medium capitalize tracking-[0.48px] text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground'
+                    data-track-category='XyneAI'
+                    data-track-name='TOGGLE_PINNED'
+                  >
+                    <span className='block truncate text-left'>Pinned</span>
+                    <ChevronBigDown
+                      size={12}
+                      className={cn(
+                        'shrink-0 transition-transform duration-200',
+                        !pinnedOpen && '-rotate-90',
+                      )}
+                      aria-hidden
+                    />
+                  </button>
                 </div>
-                <div className='min-h-0 overflow-y-auto no-scrollbar'>
-                  <SessionHistory
-                    sessions={pinnedSessions}
-                    activeSessionId={activeSessionId}
-                    onSelect={handleSelectSession}
-                    onDelete={handleDeleteSession}
-                    onRename={handleRenameSession}
-                    onTogglePin={handleTogglePinSession}
-                    showEmpty={false}
-                  />
-                </div>
+                {pinnedOpen && (
+                  <div className='min-h-0 overflow-y-auto no-scrollbar'>
+                    <SessionHistory
+                      sessions={pinnedSessions}
+                      activeSessionId={activeSessionId}
+                      onSelect={handleSelectSession}
+                      onDelete={handleDeleteSession}
+                      onRename={handleRenameSession}
+                      onTogglePin={handleTogglePinSession}
+                      projects={projects}
+                      onMoveToProject={handleMoveToProject}
+                      showEmpty={false}
+                    />
+                  </div>
+                )}
               </div>
             )}
+
+            <SidebarProjects
+              agentFilter={agentFilter}
+              userId={user?.id}
+              onCreateChatInProject={projectId => onCreateChat(projectId)}
+              renderSessions={projectSessions => (
+                <SessionHistory
+                  sessions={projectSessions}
+                  activeSessionId={activeSessionId}
+                  onSelect={handleSelectSession}
+                  onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                  onTogglePin={handleTogglePinSession}
+                  projects={projects}
+                  onMoveToProject={handleMoveToProject}
+                  showEmpty={false}
+                />
+              )}
+            />
 
             <div className='group flex h-7 shrink-0 items-center justify-between gap-2 rounded-[10px] px-3'>
               <button
@@ -824,6 +946,8 @@ export function AISidebar({
                     onDelete={handleDeleteSession}
                     onRename={handleRenameSession}
                     onTogglePin={handleTogglePinSession}
+                    projects={projects}
+                    onMoveToProject={handleMoveToProject}
                     showEmpty={visibleCount === 0}
                   />
                 ) : (
@@ -839,6 +963,8 @@ export function AISidebar({
                         onDelete={handleDeleteSession}
                         onRename={handleRenameSession}
                         onTogglePin={handleTogglePinSession}
+                        projects={projects}
+                        onMoveToProject={handleMoveToProject}
                         showEmpty={false}
                       />
                     </section>
