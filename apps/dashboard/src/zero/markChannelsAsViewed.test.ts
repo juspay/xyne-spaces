@@ -68,18 +68,18 @@ const createFakeTx = (
           const write =
             (op: string) =>
             (row: Row): Promise<void> => {
-            writes.push({ table, op, row });
-            const rows = (tables[table] ??= []);
-            const existing = rows.find(r => r[key] === row[key]);
-            if (op === 'delete') {
-              tables[table] = rows.filter(r => r !== existing);
-            } else if (existing) {
-              Object.assign(existing, row);
-            } else {
-              rows.push({ ...row });
-            }
-            return Promise.resolve();
-          };
+              writes.push({ table, op, row });
+              const rows = (tables[table] ??= []);
+              const existing = rows.find(r => r[key] === row[key]);
+              if (op === 'delete') {
+                tables[table] = rows.filter(r => r !== existing);
+              } else if (existing) {
+                Object.assign(existing, row);
+              } else {
+                rows.push({ ...row });
+              }
+              return Promise.resolve();
+            };
           return {
             update: write('update'),
             upsert: write('upsert'),

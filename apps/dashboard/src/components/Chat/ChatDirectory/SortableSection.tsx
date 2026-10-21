@@ -191,15 +191,8 @@ const SortableSection = ({
               </span>
               <span className='flex-1'>New section</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <SectionSettingsMenu
-              filterMode={section.filterMode ?? DEFAULT_FILTER_MODE}
-              sortOrder={currentSortOrder}
-              onSetFilter={mode => onSetFilterMode(section.id, mode)}
-              onSetSort={order => onSetSortOrder(section.id, order)}
-              showManualSort
-            />
-            <DropdownMenuSeparator />
+            {/* Last in the group, directly above the separator — the same slot "Mark all
+                as read" occupies in the Channels / Starred / DM menus. */}
             <DropdownMenuItem
               className={MENU_ROW}
               disabled={unreadChannelIds.length === 0}
@@ -215,6 +208,14 @@ const SortableSection = ({
               </span>
               <span className='flex-1'>Mark section as read</span>
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <SectionSettingsMenu
+              filterMode={section.filterMode ?? DEFAULT_FILTER_MODE}
+              sortOrder={currentSortOrder}
+              onSetFilter={mode => onSetFilterMode(section.id, mode)}
+              onSetSort={order => onSetSortOrder(section.id, order)}
+              showManualSort
+            />
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className={cn(MENU_ROW, 'text-destructive focus:text-destructive')}

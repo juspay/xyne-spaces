@@ -237,8 +237,16 @@ export const useChannelSectionDnd = ({
     unreadCounts,
     statusByChannelId,
   );
-  const dmUnreadChannelIds = selectChannelIdsToMarkRead(dmChannels, unreadCounts, statusByChannelId);
-  const starredUnreadChannelIds = selectChannelIdsToMarkRead(starred, unreadCounts, statusByChannelId);
+  const dmUnreadChannelIds = selectChannelIdsToMarkRead(
+    dmChannels,
+    unreadCounts,
+    statusByChannelId,
+  );
+  const starredUnreadChannelIds = selectChannelIdsToMarkRead(
+    starred,
+    unreadCounts,
+    statusByChannelId,
+  );
   const defaultUnreadCount = sumSectionUnread(defaultChannels, unreadCounts, activeChannelId);
   const dmUnreadCount = sumSectionUnread(dmChannels, unreadCounts, activeChannelId);
   const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);

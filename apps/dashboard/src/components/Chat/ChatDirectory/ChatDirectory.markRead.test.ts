@@ -4,8 +4,11 @@ import { chunk, selectChannelIdsToMarkRead } from './ChatDirectory.utils';
 
 type Channel = Parameters<typeof selectChannelIdsToMarkRead>[0][number];
 
-const channel = (id: string, lastActivityAt: number, scopeType = ChannelScopeType.DEFAULT): Channel =>
-  ({ id, scopeType, channelStats: { lastActivityAt } }) as unknown as Channel;
+const channel = (
+  id: string,
+  lastActivityAt: number,
+  scopeType = ChannelScopeType.DEFAULT,
+): Channel => ({ id, scopeType, channelStats: { lastActivityAt } }) as unknown as Channel;
 
 describe('selectChannelIdsToMarkRead', () => {
   const statuses = new Map([
@@ -52,9 +55,12 @@ describe('selectChannelIdsToMarkRead', () => {
 describe('chunk', () => {
   it('splits into chunks of at most the given size', () => {
     expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
-    expect(chunk(Array.from({ length: 60 }, (_, i) => i), 25).map(c => c.length)).toEqual([
-      25, 25, 10,
-    ]);
+    expect(
+      chunk(
+        Array.from({ length: 60 }, (_, i) => i),
+        25,
+      ).map(c => c.length),
+    ).toEqual([25, 25, 10]);
   });
 
   it('returns no chunks for an empty list', () => {

@@ -28,15 +28,15 @@ export function useMarkChannelsAsRead(): (channelIds: readonly string[]) => Prom
       const timestamp = Date.now();
       const results = await Promise.allSettled(
         chunk(uniqueIds, MARK_CHANNELS_VIEWED_MAX_BATCH).map(
-          ids => zero.mutate(mutators.channel.markChannelsAsViewed({ channelIds: ids, timestamp })).server,
+          ids =>
+            zero.mutate(mutators.channel.markChannelsAsViewed({ channelIds: ids, timestamp }))
+              .server,
         ),
       );
 
       // `.server` resolves (not rejects) with `{ type: 'error' }` for application
       // errors, so both shapes count as a failure.
-      const failed = results.some(
-        r => r.status === 'rejected' || r.value?.type === 'error',
-      );
+      const failed = results.some(r => r.status === 'rejected' || r.value?.type === 'error');
       if (failed) {
         toast.error(FAILURE_MESSAGE);
         return false;
