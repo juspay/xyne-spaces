@@ -4,12 +4,12 @@ import type { OpenIntent } from '../intent/openIntent.types';
 
 export const surfaceRemountKey = (intent: OpenIntent): string => intent.intentKey;
 
-export const conversationRefFor = (intent: OpenIntent): ConversationRef => {
+export const conversationRefFor = (intent: OpenIntent, isMember = true): ConversationRef => {
   if (intent.surface.kind === 'channel') {
     const ref: ChannelRef = {
       kind: 'channel',
       channelId: intent.surface.channelId,
-      isMember: true,
+      isMember,
     };
     return ref;
   }
@@ -17,7 +17,7 @@ export const conversationRefFor = (intent: OpenIntent): ConversationRef => {
     kind: 'thread',
     channelId: intent.surface.channelId,
     conversationId: intent.surface.threadId,
-    isMember: true,
+    isMember,
   };
   return ref;
 };

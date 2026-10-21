@@ -9,6 +9,21 @@ type ChannelById = ReturnType<typeof useChannelById>;
 type ChannelUserStatusById = ReturnType<typeof useGetChannelUserStatus>;
 type ChannelMembershipState = 'unknown' | 'member' | 'non-member';
 
+/** ACL `isMember`. Unknown channels and DMs stay members; a public channel with no status row does not. */
+export function isChannelQueryMember(
+  channel: { scopeType?: string | null | undefined } | null | undefined,
+  membership: unknown,
+): boolean {
+  if (!channel) return true;
+  if (
+    channel.scopeType === ChannelScopeType.DM ||
+    channel.scopeType === ChannelScopeType.GROUP_DM
+  ) {
+    return true;
+  }
+  return membership != null;
+}
+
 export type JoinableChannelState = {
   channel: ChannelById;
   channelUserStatus: ChannelUserStatusById;

@@ -1,7 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 
-import { useJoinDeskChannel } from '@/src/features/xyne-desks/list/hooks/use-join-desk-channel';
-
 import {
   useChannelsSearch,
   useGroupDmsSearch,
@@ -104,7 +102,6 @@ export function ChannelResults({
   ...chrome
 }: LocalProps): ReactElement {
   const { openChannel } = useSearchNavigation(onLeave);
-  const { joiningIds, joinDesk } = useJoinDeskChannel();
   const found = useChannelsSearch(query);
   const channels = browse ? found : NO_CHANNELS;
   const [expanded, setExpanded] = useState(false);
@@ -129,26 +126,11 @@ export function ChannelResults({
     ];
   }, [channels, expanded, query.length]);
 
-  const joinChannel = useCallback(
-    (item: SearchChannelItem) => {
-      void joinDesk(item.id, item.name).then(joined => {
-        if (joined) openChannel(item);
-      });
-    },
-    [joinDesk, openChannel],
-  );
-
   const renderItem = useCallback(
     (item: SearchChannelItem) => (
-      <SearchChannelRow
-        item={item}
-        query={query}
-        onPress={openChannel}
-        onJoin={joinChannel}
-        joining={joiningIds.has(item.id)}
-      />
+      <SearchChannelRow item={item} query={query} onPress={openChannel} />
     ),
-    [joinChannel, joiningIds, openChannel, query],
+    [openChannel, query],
   );
 
   return (

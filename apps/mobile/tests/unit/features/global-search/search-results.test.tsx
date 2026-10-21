@@ -34,13 +34,6 @@ jest.mock('@/src/features/global-search/hooks/use-search-navigation', () => ({
   }),
 }));
 
-jest.mock('@/src/features/xyne-desks/list/hooks/use-join-desk-channel', () => ({
-  useJoinDeskChannel: () => ({
-    joiningIds: new Set<string>(),
-    joinDesk: jest.fn(() => Promise.resolve(true)),
-  }),
-}));
-
 jest.mock('@/src/features/global-search/hooks/use-call-results', () => ({
   useCallResults: (raw: { id: string; title: string }[]) =>
     raw.map(hit => ({ call: { id: hit.id, title: hit.title } })),

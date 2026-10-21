@@ -130,7 +130,6 @@ type SearchableChannel = {
   visibility?: string;
   unreadCount?: number;
   isStarred?: boolean;
-  isJoined?: boolean;
 };
 
 export function useChannelsSearch(
@@ -164,13 +163,10 @@ export function useChannelsSearch(
       if (record.visibility !== ChannelVisibility.PUBLIC) continue;
       if (record.isArchived) continue;
 
-      const status = byStatus.get(channel.id);
-      const joined = status !== undefined && !status.isDeleted && !status.isClosed;
       byId.set(channel.id, {
         id: channel.id,
         name: channel.name,
         visibility: String(record.visibility),
-        ...(joined ? {} : { isJoined: false }),
       });
     }
 
@@ -210,7 +206,6 @@ export function useChannelsSearch(
         ? { unreadCount: channel.unreadCount }
         : {}),
       ...(channel.isStarred ? { isStarred: true } : {}),
-      ...(channel.isJoined === false ? { isJoined: false } : {}),
     }));
   }, [channels, limit, query, search]);
 }

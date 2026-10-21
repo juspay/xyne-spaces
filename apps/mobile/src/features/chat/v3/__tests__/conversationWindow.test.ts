@@ -70,6 +70,14 @@ describe('conversationRefFor', (): void => {
     });
   });
 
+  it('forwards a non-member flag so a public channel uses the public read path', (): void => {
+    const channel = mustParse({ channelId: 'ch-1', source: 'tap' });
+    assert.equal(conversationRefFor(channel, false).isMember, false);
+
+    const thread = mustParse({ channelId: 'ch-1', threadId: 'thread-9', source: 'tap' });
+    assert.equal(conversationRefFor(thread, false).isMember, false);
+  });
+
   it('maps a ticket-thread surface to the same ThreadRef as a plain thread', (): void => {
     const intent = mustParse({
       channelId: 'ch-1',
