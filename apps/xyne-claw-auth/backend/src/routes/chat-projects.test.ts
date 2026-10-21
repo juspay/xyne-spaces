@@ -447,7 +447,24 @@ describe("chat project routes", () => {
 const ALIASES = [CANONICAL, SPACES_ALIAS];
 const load = () => import("./chat-projects.js");
 
-describe("applyProjectMove", () => {
+describe("prepareProjectMove", () => {
+  /** Validate then perform — the order the route now uses, so a rejected
+   *  project never reaches a write. */
+  const runMove = async (args: {
+    conversationId: string;
+    ownerUserId: string;
+    ownerOrgId: string;
+    aliases: string[];
+    projectId: string | null;
+  }) => {
+    const { prepareProjectMove } = await load();
+    const move = await prepareProjectMove(args);
+    if (move.status === "ok") {
+      await move.apply();
+    }
+    return move;
+  };
+
   beforeEach(() => {
     state.projects = [
       { id: "proj-mine", ownerUserId: CANONICAL, orgId: ORG, name: "Mine", sortOrder: 0 },
@@ -459,22 +476,39 @@ describe("applyProjectMove", () => {
   });
 
   it("files a chat into a project the caller owns", async () => {
-    const { applyProjectMove } = await load();
-    const result = await applyProjectMove({
+    const result = await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-mine",
     });
 
-    expect(result).toEqual({ status: "ok", projectId: "proj-mine" });
+    expect(result).toMatchObject({ status: "ok", projectId: "proj-mine" });
     expect(state.items).toHaveLength(1);
     expect(state.items[0]).toMatchObject({
       conversationId: "conv-1", userId: CANONICAL, projectId: "proj-mine",
     });
   });
 
+  it("writes nothing until apply is called", async () => {
+    const { prepareProjectMove } = await load();
+    const move = await prepareProjectMove({
+      conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
+      aliases: ALIASES, projectId: "proj-mine",
+    });
+
+    expect(move.status).toBe("ok");
+    // The route runs the title and pin writes between prepare and apply. If
+    // validating also wrote, a later rejection would leave a half-applied
+    // PATCH — which is what let a bad project id save a title and then 404.
+    expect(state.items).toHaveLength(0);
+
+    if (move.status === "ok") {
+      await move.apply();
+    }
+    expect(state.items).toHaveLength(1);
+  });
+
   it("stamps the item's orgId from the project row", async () => {
-    const { applyProjectMove } = await load();
-    await applyProjectMove({
+    await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-mine",
     });
@@ -483,8 +517,7 @@ describe("applyProjectMove", () => {
   });
 
   it("writes membership under the conversation's own id, not the first alias", async () => {
-    const { applyProjectMove } = await load();
-    await applyProjectMove({
+    await runMove({
       conversationId: "conv-1", ownerUserId: SPACES_ALIAS, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-mine",
     });
@@ -493,8 +526,7 @@ describe("applyProjectMove", () => {
 
   it("sweeps a row filed earlier under the other alias, leaving one", async () => {
     state.items = [{ conversationId: "conv-1", userId: SPACES_ALIAS, projectId: "proj-mine", orgId: ORG }];
-    const { applyProjectMove } = await load();
-    await applyProjectMove({
+    await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-mine",
     });
@@ -503,19 +535,17 @@ describe("applyProjectMove", () => {
 
   it("unfiles on null and writes nothing", async () => {
     state.items = [{ conversationId: "conv-1", userId: CANONICAL, projectId: "proj-mine", orgId: ORG }];
-    const { applyProjectMove } = await load();
-    const result = await applyProjectMove({
+    const result = await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: null,
     });
 
-    expect(result).toEqual({ status: "ok", projectId: null });
+    expect(result).toMatchObject({ status: "ok", projectId: null });
     expect(state.items).toHaveLength(0);
   });
 
   it("refuses a project owned by someone else and files nothing", async () => {
-    const { applyProjectMove } = await load();
-    const result = await applyProjectMove({
+    const result = await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-theirs",
     });
@@ -525,8 +555,7 @@ describe("applyProjectMove", () => {
   });
 
   it("refuses a project in another org", async () => {
-    const { applyProjectMove } = await load();
-    const result = await applyProjectMove({
+    const result = await runMove({
       conversationId: "conv-1", ownerUserId: CANONICAL, ownerOrgId: ORG,
       aliases: ALIASES, projectId: "proj-otherorg",
     });

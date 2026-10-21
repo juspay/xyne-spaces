@@ -37,27 +37,38 @@ export const chatProjectsRouter: Router = Router();
  * graph, while this module can.
  */
 
-export type ProjectMoveResult =
-  | { status: "ok"; projectId: string | null }
+export type PreparedProjectMove =
+  | { status: "ok"; projectId: string | null; apply: () => Promise<void> }
   | { status: "project-not-found" };
 
 /**
- * Move one chat into a project, or unfile it when `projectId` is null.
+ * Validate a move and hand back the write, without performing it.
+ *
+ * Split in two on purpose. The conversation PATCH can carry a title and a pin
+ * alongside `projectId`, and it used to write those first — so a bad project
+ * id saved the title and THEN answered 404. The dashboard's optimistic update
+ * rolls back on that 404, reverting a title the server had actually kept.
+ * Resolving everything before the first write removes the half-applied state.
  *
  * `ownerUserId` must be the id the conversation's own chat rows use, so the
  * membership is found again on read; `aliases` lets the repository sweep a row
  * filed earlier under the caller's other verified id.
  */
-export async function applyProjectMove(args: {
+export async function prepareProjectMove(args: {
   conversationId: string;
   ownerUserId: string;
   ownerOrgId: string;
   aliases: string[];
   projectId: string | null;
-}): Promise<ProjectMoveResult> {
+}): Promise<PreparedProjectMove> {
   if (args.projectId === null) {
-    await chatProjectRepository.removeConversation(args.conversationId, args.aliases);
-    return { status: "ok", projectId: null };
+    return {
+      status: "ok",
+      projectId: null,
+      apply: async () => {
+        await chatProjectRepository.removeConversation(args.conversationId, args.aliases);
+      },
+    };
   }
 
   const project = await chatProjectRepository.findOwned(
@@ -69,18 +80,23 @@ export async function applyProjectMove(args: {
   // project" alike, so the caller answers 404 either way.
   if (!project) return { status: "project-not-found" };
 
-  await chatProjectRepository.moveConversation(
-    {
-      conversationId: args.conversationId,
-      userId: args.ownerUserId,
-      projectId: project.id,
-      // Taken from the project row, never the request: nothing in the schema
-      // enforces item.orgId == project.orgId.
-      orgId: project.orgId,
+  return {
+    status: "ok",
+    projectId: project.id,
+    apply: async () => {
+      await chatProjectRepository.moveConversation(
+        {
+          conversationId: args.conversationId,
+          userId: args.ownerUserId,
+          projectId: project.id,
+          // Taken from the project row, never the request: nothing in the
+          // schema enforces item.orgId == project.orgId.
+          orgId: project.orgId,
+        },
+        args.aliases,
+      );
     },
-    args.aliases,
-  );
-  return { status: "ok", projectId: project.id };
+  };
 }
 
 /** conversationId sets for `?projectId=`. `only` narrows to a project (and

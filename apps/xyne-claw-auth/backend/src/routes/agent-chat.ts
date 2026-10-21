@@ -50,7 +50,12 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
-import { chatProjectsRouter, applyProjectMove, resolveProjectScope } from "./chat-projects.js";
+import {
+  chatProjectsRouter,
+  prepareProjectMove,
+  resolveProjectScope,
+  type PreparedProjectMove,
+} from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -4029,6 +4034,38 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       return;
     }
 
+    // Everything is resolved BEFORE the first write. A move used to run after
+    // setTitle/setPinned, so a bad project id saved the title and then answered
+    // 404 — and the dashboard's optimistic update rolls back on that 404,
+    // reverting a title the server had actually kept.
+    const movingProject = projectId === null || typeof projectId === "string";
+    let move: PreparedProjectMove | undefined;
+    if (movingProject) {
+      // Only a direct chat can be filed. A Spaces thread lists one row PER
+      // AGENT while membership is keyed by conversation alone, so filing one
+      // row would silently file every agent's row in that thread — and once
+      // XYNE-66810 injects project instructions, they would reach runs inside
+      // a channel thread rather than the user's own chats.
+      if (!directChat) {
+        res.status(400).json({
+          success: false,
+          error: "Only direct chats can be moved into a project",
+        });
+        return;
+      }
+      move = await prepareProjectMove({
+        conversationId: req.params.convId,
+        ownerUserId: owned.userId,
+        ownerOrgId: owned.orgId,
+        aliases: userAliases,
+        projectId,
+      });
+      if (move.status === "project-not-found") {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+    }
+
     const target = {
       conversationId: req.params.convId,
       userId: owned.userId,
@@ -4044,21 +4081,10 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     if (typeof pinned === "boolean") {
       await chatConversationMetaRepository.setPinned({ ...target, pinned });
     }
-
     // Membership is written under `owned.userId` — the id this conversation's
     // own rows use — so the move is found again on read.
-    if (projectId === null || typeof projectId === "string") {
-      const moved = await applyProjectMove({
-        conversationId: req.params.convId,
-        ownerUserId: owned.userId,
-        ownerOrgId: owned.orgId,
-        aliases: userAliases,
-        projectId,
-      });
-      if (moved.status === "project-not-found") {
-        res.status(404).json({ success: false, error: "Project not found" });
-        return;
-      }
+    if (move?.status === "ok") {
+      await move.apply();
     }
 
     const meta = await chatConversationMetaRepository.find({

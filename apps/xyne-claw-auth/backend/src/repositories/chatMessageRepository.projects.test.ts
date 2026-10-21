@@ -28,8 +28,8 @@ const messageWhere = (where: Record<string, any> = {}) => (row: typeof state.mes
   matches(where["conversationId"], row.conversationId) &&
   (where["agentSlug"] === undefined || where["agentSlug"] === row.agentSlug);
 
-vi.mock("../db.js", () => ({
-  prisma: {
+vi.mock("../db.js", () => {
+  const client = {
     chatMessage: {
       groupBy: vi.fn(async (args: any) => {
         state.lastGroupByWhere = args.where;
@@ -75,8 +75,17 @@ vi.mock("../db.js", () => ({
         return { count: hits.length };
       }),
     },
-  },
-}));
+  };
+  // Interactive transaction: the callback is handed the same client, so the
+  // message delete and the membership sweep act on one in-memory store — and
+  // the assertions below still see the very same mock functions.
+  return {
+    prisma: {
+      ...client,
+      $transaction: vi.fn(async (fn: (tx: typeof client) => Promise<unknown>) => fn(client)),
+    },
+  };
+});
 
 import { prisma } from "../db.js";
 import { chatMessageRepository } from "./chatMessageRepository.js";
