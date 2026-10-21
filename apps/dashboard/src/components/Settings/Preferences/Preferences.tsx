@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   Inbox,
   PanelTop,
+  MessageSquareMore,
   Shield,
   Eye,
   EyeOff,
@@ -59,6 +60,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
+import { CallWindowToggle } from '../CallWindowToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
@@ -82,6 +84,7 @@ import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaun
 import {
   toolbarItemsStore,
   inboxItemsStore,
+  messageActionsStore,
   useChannelTabsStore,
   useEnsureAppSnapshots,
   type BarItemsStore,
@@ -105,6 +108,9 @@ import {
   useChannelAppPublishing,
 } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
+import { MessageBarPreview } from './MessageBarPreview';
+import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarActions';
+import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
@@ -137,6 +143,12 @@ const NAV_ITEMS: NavItem[] = [
     id: 'channelTabs',
     label: 'Channel tabs',
     icon: <PanelTop className='size-4' />,
+    desktopOnly: true,
+  },
+  {
+    id: 'messageActions',
+    label: 'Message actions',
+    icon: <MessageSquareMore className='size-4' />,
     desktopOnly: true,
   },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
@@ -683,6 +695,8 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           onCheckedChange={checked => state.setCallsVersion(checked ? 'v2' : 'v1')}
         />
       </div>
+
+      <CallWindowToggle />
 
       <MenuBarIconToggle />
 
@@ -1537,6 +1551,20 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   );
 };
 
+const MessageActionsSection: FC<{ state: PreferencesState }> = () => (
+  <BarCustomizer
+    title='Message actions'
+    subtitle='The bar that appears when you hover a message. In chat you can also drag actions between the bar and its More menu.'
+    store={messageActionsStore}
+    builtIns={MESSAGE_BAR_ACTIONS}
+    trackCategory='PREFERENCES_MESSAGE_ACTIONS'
+    headerSlot={<MessageBarPreview />}
+    resetLabel='Reset to default'
+    maxShown={MAX_MESSAGE_BAR_ACTIONS}
+    apps={false}
+  />
+);
+
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
@@ -1551,6 +1579,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   toolbar: ToolbarSection,
   inbox: InboxSection,
   channelTabs: ChannelTabsSection,
+  messageActions: MessageActionsSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,

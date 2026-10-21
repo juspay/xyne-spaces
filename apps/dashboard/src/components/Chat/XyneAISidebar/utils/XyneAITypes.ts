@@ -499,6 +499,14 @@ const hasFlowToken = (flow: FlowDefinition): boolean => {
   return typeof token === 'string' && token.length > 0;
 };
 
+export function flowPhaseKey(flows: FlowDefinition[] | undefined): string {
+  if (!flows?.length) return '';
+  const phases = flows.map(
+    flow => (flow.components?.[0]?.props as { phase?: string } | undefined)?.phase ?? '',
+  );
+  return phases.some(Boolean) ? `#${phases.join('|')}` : '';
+}
+
 /**
  * Add a card to a message's list, keyed by `screenId`. Last write wins (pending
  * → answered), except that an untokenized copy never overwrites a tokenized one

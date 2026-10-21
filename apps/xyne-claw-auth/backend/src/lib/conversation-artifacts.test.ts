@@ -353,8 +353,42 @@ describe("ingestArtifactSignals", () => {
   });
 
   it("skips sandbox previews with no sandbox id", async () => {
-    await ingestSandboxPreviewSignals(CTX, { sandboxPreviewUrl: "https://p.example/x" });
+    const result = await ingestSandboxPreviewSignals(CTX, { sandboxPreviewUrl: "https://p.example/x" });
     expect(state.upserts).toHaveLength(0);
+    expect(result).toEqual({ recorded: false, reason: "missing-input" });
+  });
+
+  it("reports recorded when the ownership row is written (XYNE-66341)", async () => {
+    const result = await ingestSandboxPreviewSignals(CTX, {
+      sandboxId: "sbx_4",
+      sandboxPreviewUrl: "https://p.example/claw-preview/sbx_4/",
+    });
+    expect(result).toEqual({ recorded: true });
+  });
+
+  it("reports record-failed when no row is written without throwing (XYNE-66341)", async () => {
+    const prev = state.fallbackOrgId;
+    state.fallbackOrgId = undefined;
+    try {
+      const result = await ingestSandboxPreviewSignals(
+        { ...CTX, orgId: null },
+        { sandboxId: "sbx_5", sandboxPreviewUrl: "https://p.example/claw-preview/sbx_5/" },
+      );
+      expect(state.upserts).toHaveLength(0);
+      expect(result).toEqual({ recorded: false, reason: "record-failed" });
+    } finally {
+      state.fallbackOrgId = prev;
+    }
+  });
+
+  it("reports record-failed when the upsert throws (XYNE-66341)", async () => {
+    const { prisma } = await import("../db.js");
+    vi.mocked(prisma.conversationArtifact.upsert).mockRejectedValueOnce(new Error("db down"));
+    const result = await ingestSandboxPreviewSignals(CTX, {
+      sandboxId: "sbx_6",
+      sandboxPreviewUrl: "https://p.example/claw-preview/sbx_6/",
+    });
+    expect(result).toEqual({ recorded: false, reason: "record-failed" });
   });
 });
 

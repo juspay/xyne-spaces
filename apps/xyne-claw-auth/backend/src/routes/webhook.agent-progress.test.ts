@@ -150,7 +150,7 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
   const previewBranch = (() => {
     const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
     expect(start).toBeGreaterThan(-1);
-    return webhook.slice(start, start + 2500);
+    return webhook.slice(start, start + 6000);
   })();
 
   it("writes the ConversationArtifact owner row the sandbox router's access check reads", () => {
@@ -210,5 +210,37 @@ describe("hideLivePreview survives a claw-minted sessionId (XYNE-66127)", () => 
   it("the opt-out check gets the whole ctx so it can fall back to org+slug", () => {
     expect(webhook).toContain("isLivePreviewMessageHidden(ctx, log)");
     expect(webhook).toMatch(/orgId_slug:\s*\{\s*orgId:\s*agentOrgId!/);
+  });
+});
+
+describe("/webhook/progress sandbox preview failures are not silent (XYNE-66341)", () => {
+  const previewBranch = (() => {
+    const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
+    expect(start).toBeGreaterThan(-1);
+    return webhook.slice(start, start + 6000);
+  })();
+
+  it("marks the run announced only after the session context resolves", () => {
+    const resolve = previewBranch.indexOf("resolveSessionContext(");
+    const noCtx = previewBranch.indexOf("if (!ctx) {");
+    const remember = previewBranch.indexOf("rememberAnnouncedPreview(sessionId)");
+    expect(resolve).toBeGreaterThan(-1);
+    expect(remember).toBeGreaterThan(noCtx);
+    expect(noCtx).toBeGreaterThan(resolve);
+  });
+
+  it("logs when the session context is missing instead of returning silently", () => {
+    const noCtx = previewBranch.slice(previewBranch.indexOf("if (!ctx) {"));
+    expect(noCtx.slice(0, noCtx.indexOf("return;"))).toMatch(/clog\.warn\(/);
+  });
+
+  it("does not post the preview link when the ownership row was not recorded", () => {
+    const guard = previewBranch.indexOf("if (!ingest.recorded) {");
+    const link = previewBranch.indexOf('systemNote("**Live preview**")');
+    expect(guard).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(guard);
+    // the failure branch returns before the link is built
+    const failureBranch = previewBranch.slice(previewBranch.lastIndexOf("if (!ingest.recorded) {", link), link);
+    expect(failureBranch).toContain("return;");
   });
 });

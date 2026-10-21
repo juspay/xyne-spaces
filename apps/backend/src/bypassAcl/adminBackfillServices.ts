@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { ChannelType } from '@xyne/shared';
-import { rawQuery } from './base';
+import { asSystem, rawQuery } from './base';
 
 /**
  * Resets updatedAt back to createdAt for a batch of activity rows, so activities untouched
@@ -79,6 +79,30 @@ export function vespaBackfillEmailTicketsPage(
       LIMIT ${batchSize}
       OFFSET ${skip};
     `),
+  );
+}
+
+/**
+ * One page of calls for the Vespa transcripts backfill, across every workspace. An admin's
+ * request would otherwise narrow it to the calls that admin can read.
+ */
+export function vespaBackfillTranscriptCallsPage(
+  where: Prisma.CallWhereInput,
+  take: number,
+  skip: number,
+  orderBy: Prisma.CallOrderByWithRelationInput,
+): Promise<Array<{ id: string; transcript: string | null; workspaceId: string | null }>> {
+  return asSystem(
+    ['Call'],
+    'admin backfill: vespa reindex page of call transcripts, across every workspace',
+    async () =>
+      db.call.findMany({
+        where,
+        take,
+        skip,
+        orderBy,
+        select: { id: true, transcript: true, workspaceId: true },
+      }),
   );
 }
 

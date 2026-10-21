@@ -2,33 +2,59 @@ import { CanvasVisibility, CallOrigin, CanvasRole } from '@xyne/shared';
 import {  INITIAL_DETAILED_SUMMARY_CANVAS_VERSION } from '@/services/callDocumentService';
 import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PrismaClient } from '@prisma/client';
-import { transaction } from '../base';
+import { transaction, type TableName } from '../base';
 import { v4 as uuidv4 } from 'uuid';
-import type { Prisma } from '@prisma/client';
-import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
-export function updateCallMessageMetadataTx(prisma: PrismaClient, callMessage: any, canvasUrl: string | null, metadataKey: string) {
-  return transaction(['Message'], 'updateCallMessageMetadata: locked message metadata merge and update must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
-    // Title generation and first-chunk Canvas publication can now update
-    // this message concurrently. Lock the row and merge from the latest
-    // metadata so neither write erases the other's key.
-    const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
-    if (!lockedMessage) {
-      return;
-    }
+import { Prisma } from '@prisma/client';
 
-    // Set the canvas URL, or drop the key entirely when clearing (null).
-    const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
-    const nextMetadata = { ...currentMetadata };
-    if (canvasUrl === null) {
-      delete nextMetadata[metadataKey];
-    } else {
-      nextMetadata[metadataKey] = canvasUrl;
+/**
+ * Serializable transaction retried on a write conflict (P2034), same pattern as the sharing
+ * services. Private so only the named operations in this file use it, each passing its own tables.
+ */
+async function runTransaction<T>(
+  prisma: PrismaClient,
+  tables: TableName[],
+  reason: string,
+  operation: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<T> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await transaction(tables, reason, prisma, operation, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
+      if (!isWriteConflict || attempt === 3) throw error;
     }
-    await tx.message.update({
-      where: { messageId: callMessage.messageId },
-      data: { metadata: nextMetadata },
+  }
+  throw new Error('Call message metadata transaction retry limit exceeded');
+}
+
+export function updateCallMessageMetadataTx(prisma: PrismaClient, callMessage: any, canvasUrl: string | null, metadataKey: string) {
+  // Title generation and first-chunk Canvas publication can update this message concurrently.
+  // Serializable + retry so the merge always starts from the latest metadata and neither write
+  // erases the other's key. No raw SQL / FOR UPDATE needed.
+  return runTransaction(prisma, ['Message'], 'updateCallMessageMetadata: message metadata merge and update must commit atomically; tx is not ACL-wrapped', async (tx) => {
+      const lockedMessage = await tx.message.findUnique({
+        where: { messageId: callMessage.messageId },
+        select: { metadata: true },
+      });
+      if (!lockedMessage) {
+        return;
+      }
+
+      // Set the canvas URL, or drop the key entirely when clearing (null).
+      const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
+      const nextMetadata = { ...currentMetadata };
+      if (canvasUrl === null) {
+        delete nextMetadata[metadataKey];
+      } else {
+        nextMetadata[metadataKey] = canvasUrl;
+      }
+      await tx.message.update({
+        where: { messageId: callMessage.messageId },
+        data: { metadata: nextMetadata },
+      });
     });
-  });
 }
 
 export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string, accessMode: string, callCreatorUserId: string) {

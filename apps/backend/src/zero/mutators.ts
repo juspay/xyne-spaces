@@ -98,6 +98,7 @@ import {
   Platform,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
@@ -133,6 +134,7 @@ import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } 
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APP_ID_LENGTH,
   MAX_PUBLISHED_APPS,
@@ -203,7 +205,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
-import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
+import { reconcileUserPermissions, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
@@ -227,10 +229,13 @@ import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
 import { fileSchema } from '@/vespa/src/types';
 import {
+  assertFlowStepSkippable,
   onFlowPlanUpdated,
   onFlowStepBacklogged,
   onFlowTicketStatusChanged,
 } from '@/services/flowCascadeService';
+import { ensureFlowSkippedStage } from '@/services/flowStageTransitionRecovery';
+import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 import { escapeHtml } from '@/utils/htmlEscape';
@@ -1373,8 +1378,12 @@ export function createMutators(
           }
 
           if (projectId) {
+            // Release boards are linked by the hub whose release config owns them.
             const projectBoards = await tx.run(
-              zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),
+              zql.boards
+                .where('projectId', projectId)
+                .where('boardType', '!=', BoardType.RELEASE)
+                .orderBy('createdAt', 'asc'),
             );
             const existingMappings = await tx.run(
               zql.channel_board_mappings.where('channelId', channelId),
@@ -2254,6 +2263,18 @@ export function createMutators(
         // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
         // transaction wrapper runs on every insert below — same as every other table.
         async ({ tx, args: { channelId, boards, timestamp } }) => {
+          // Release boards are linked only by the release config of the hub that owns them.
+          const releaseBoard = await tx.run(
+            zql.boards
+              .where('id', 'IN', boards.map(board => board.boardId))
+              .where('boardType', BoardType.RELEASE)
+              .one(),
+          );
+          if (releaseBoard) {
+            throw new Error(
+              `"${releaseBoard.name}" is a release board; it is linked through its SDLC hub's release config`,
+            );
+          }
           const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
           const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
           // At most one row per channel may carry isDefault (enforced by a partial
@@ -5554,9 +5575,10 @@ export function createMutators(
         z.object({
           actorAction: z.string().optional(),
           classification: z.nativeEnum(ActivityClassification).optional(),
+          channelIds: z.array(z.string()).optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { actorAction, classification, timestamp } }) => {
+        async ({ tx, args: { actorAction, classification, channelIds, timestamp } }) => {
           let query = zql.activities
             .where('userId', authData.sub)
             .where('isRead', false);
@@ -5566,6 +5588,9 @@ export function createMutators(
           }
           if (classification) {
             query = query.where('classification', classification);
+          }
+          if (channelIds && channelIds.length > 0) {
+            query = query.where('channelId', 'IN', channelIds);
           }
 
           const unreadActivities = await tx.run(query);
@@ -6185,7 +6210,7 @@ export function createMutators(
             if (!params.stageName) {
               throw new Error('Flow ticket status must change through a stage transition');
             }
-            const [currentStage, targetStage, transitions] = await Promise.all([
+            const [currentStage, targetStageRow, transitionRows] = await Promise.all([
               tx.run(
                 zql.stages.where('boardId', ticket.boardId).where('name', ticket.stageName).one(),
               ),
@@ -6194,22 +6219,66 @@ export function createMutators(
               ),
               tx.run(zql.stage_transitions.where('boardId', ticket.boardId)),
             ]);
-            if (!currentStage || !targetStage) {
+            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
+            const skipping = params.stageName === FLOW_STAGE_NAMES.SKIPPED;
+            // Skip guards and the write-access check run BEFORE the lazy
+            // SKIPPED stage write below: a rejected or unauthorized skip must
+            // leave the board untouched.
+            if (skipping) {
+              await assertFlowStepSkippable({
+                metadata: ticket.metadata,
+                flowPlan: currentBoard.flowPlan,
+              });
+              await assertTicketUpdateAccess(
+                {
+                  userID: authData.sub,
+                  workspaceId: authData.workspaceId,
+                  role: authData.role,
+                  orgRole: authData.orgRole,
+                  memberId: authData.memberId,
+                },
+                tx,
+                ticket,
+              );
+            }
+            let targetStageId = targetStageRow?.id;
+            let targetDefaultStatusV2 = targetStageRow?.defaultTicketStatusV2;
+            let transitionAllowed =
+              currentStage !== undefined &&
+              targetStageRow !== undefined &&
+              transitionRows.some(
+                transition =>
+                  transition.fromStageId === currentStage.id &&
+                  transition.toStageId === targetStageRow.id,
+              );
+            if (skipping && currentStage && !transitionAllowed) {
+              // Boards created before SKIPPED (or its transitions are
+              // missing): create/repair on first use instead of a migration.
+              // Done via prisma (not tx.mutate): a concurrent first skip
+              // would make both zero transactions insert the same
+              // deterministic id and the loser's whole mutation would abort;
+              // the prisma path is P2002-safe and uses skipDuplicates, and
+              // zero picks the rows up via its normal replication moment
+              // later.
+              const ensured = await ensureFlowSkippedStage(
+                ticket.boardId,
+                ticket.workspaceId,
+                authData.sub,
+              );
+              targetStageId = ensured.stageId;
+              targetDefaultStatusV2 = TicketStatusV2.COMPLETED;
+              transitionAllowed = ensured.fromStageIds.includes(currentStage.id);
+            }
+            if (!currentStage || !targetStageId) {
               throw new Error('Flow ticket stage not found');
             }
-            const allowed = transitions.some(
-              transition =>
-                transition.fromStageId === currentStage.id &&
-                transition.toStageId === targetStage.id,
-            );
-            if (!allowed) throw new Error('This Flow stage transition is not allowed');
+            if (!transitionAllowed) throw new Error('This Flow stage transition is not allowed');
             if (
               params.statusV2 !== undefined &&
-              params.statusV2 !== targetStage.defaultTicketStatusV2
+              params.statusV2 !== targetDefaultStatusV2
             ) {
               throw new Error('Flow ticket status must match its target stage');
             }
-            const flow = (ticket.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null)?.flow;
             if (params.stageName === FLOW_STAGE_NAMES.BACKLOG && !flow?.planNodeId) {
               throw new Error('The main Flow ticket cannot be moved to backlog');
             }
@@ -6612,6 +6681,9 @@ export function createMutators(
           if (
             params.statusV2 === TicketStatusV2.COMPLETED &&
             ticket.statusV2 !== TicketStatusV2.COMPLETED &&
+            // A skipped step completes, but it was not "confirmed" — the
+            // confirmation activity drives the event-log wording.
+            params.stageName !== FLOW_STAGE_NAMES.SKIPPED &&
             flowSnapshot?.gate?.type === 'confirmation'
           ) {
             activities.push({
@@ -7805,13 +7877,16 @@ export function createMutators(
       ),
       // Creates or updates one main release board and only the applications
       // explicitly owned by that board through Application.mainReleaseBoardId.
+      // The config belongs to an SDLC hub (hubChannelId) and releases one of the hub's
+      // repositories; release tickets are created in the chosen release channel (channelId).
       saveReleaseBoardConfig: defineMutator(
         z.object({
-          projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
+          hubChannelId: z.string(),
+          repoId: z.string(),
           applications: z.array(
             z.object({
               id: z.string(),
@@ -7819,7 +7894,6 @@ export function createMutators(
               boardName: z.string(),
               name: z.string(),
               regex: z.string(),
-              repoUrl: z.string(),
               ownerTeam: z.string(),
               envPaths: z.array(z.string()),
               migrationPaths: z.array(z.string()),
@@ -7829,17 +7903,27 @@ export function createMutators(
         async ({
           tx,
           args: {
-            projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
             channelId,
+            hubChannelId,
+            repoId,
             applications: rawApplications,
           },
         }) => {
           await assertReleaseManageAccess();
 
-          // Validate project exists
+          const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+          if (!hub || hub.type !== ChannelType.SDLC) {
+            throw new Error('Release configs belong to an SDLC hub');
+          }
+          // Boards and their tickets live in a project, so the hub's project is the
+          // only one its release boards can be created in.
+          const projectId = hub.projectId;
+          if (!projectId) {
+            throw new Error('This SDLC hub is not linked to a project');
+          }
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
@@ -7850,6 +7934,24 @@ export function createMutators(
           if (!channel) {
             throw new Error('Channel not found');
           }
+
+          const repo = await tx.run(
+            zql.repos.where('id', repoId).where('workspaceId', authData.workspaceId).one(),
+          );
+          if (!repo) {
+            throw new Error('Repository not found');
+          }
+          const hubRepository = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetId', repoId)
+              .one(),
+          );
+          if (!hubRepository) {
+            throw new Error('Add the repository to this SDLC hub before configuring its releases');
+          }
+          const repoUrl = (repo.canonicalUrl || repo.url).trim().replace(/\/+$/, '');
 
           if (rawApplications.length === 0) {
             throw new Error('At least one application is required');
@@ -7880,7 +7982,6 @@ export function createMutators(
               ...app,
               name: trimmedName,
               boardName: app.boardName.trim(),
-              repoUrl: app.repoUrl.trim().replace(/\/+$/, ''),
               regex: trimmedRegex,
               ownerTeam: app.ownerTeam.trim(),
               envPaths: app.envPaths.map(p => p.trim()).filter(Boolean),
@@ -7904,16 +8005,9 @@ export function createMutators(
             throw new Error('Application names must be unique within a release group');
           }
 
-          // One main release board represents one repository. A project can use
-          // multiple repositories by creating multiple main release boards.
-          const normalizedRepoUrls = new Set(
-            applications.map(app => app.repoUrl.trim().replace(/\/+$/, '')),
-          );
-          if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
-            throw new Error('All applications in a release group must use the same repository URL');
-          }
-
-          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          // One main release board represents one repository; every application in
+          // the group is released from the hub repository passed as repoId.
+          const vcsProvider = detectVcsProvider(repoUrl);
           if (!vcsProvider) {
             throw new Error(
               'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
@@ -7946,6 +8040,48 @@ export function createMutators(
           }
           if (new Set(requestedBoardNames).size !== requestedBoardNames.length) {
             throw new Error('Release board names must be unique within the project');
+          }
+          // Board names are unique per project; two hubs releasing the same repository
+          // would otherwise collide on the defaults and fail on the raw constraint. The
+          // config's current boards count as its own: boards of removed services are
+          // deleted before new ones are inserted, so their names can be reused.
+          const currentConfigApps = await tx.run(
+            zql.applications.where('mainReleaseBoardId', mainBoardId),
+          );
+          const ownBoardIds = new Set([
+            mainBoardId,
+            ...appBoardIds,
+            ...currentConfigApps.map(app => app.boardId),
+          ]);
+          const sameNamedBoards = await tx.run(
+            zql.boards.where('projectId', projectId).where('name', 'IN', requestedBoardNames),
+          );
+          const takenBoard = sameNamedBoards.find(board => !ownBoardIds.has(board.id));
+          if (takenBoard) {
+            throw new Error(`A board named "${takenBoard.name}" already exists in this project`);
+          }
+
+          // One release config per hub and repository, and one hub per main release
+          // board. The partial unique indexes enforce the same; checking first gives a
+          // readable error.
+          const hubReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', hubChannelId)
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('sourceId', repoId)
+              .one(),
+          );
+          if (hubReleaseConfig && hubReleaseConfig.targetId !== mainBoardId) {
+            throw new Error('This hub already has a release config for this repository');
+          }
+          const boardReleaseConfig = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', mainBoardId)
+              .one(),
+          );
+          if (boardReleaseConfig && boardReleaseConfig.channelId !== hubChannelId) {
+            throw new Error('This release board belongs to another SDLC hub');
           }
 
           // Seed the GENERIC default stages on each new release board. This is
@@ -8084,6 +8220,13 @@ export function createMutators(
               await tx.mutate.forms_context_mapping.delete({ id: mapping.id });
             }
 
+            const boardChannelMappings = await tx.run(
+              zql.channel_board_mappings.where('boardId', application.boardId),
+            );
+            for (const mapping of boardChannelMappings) {
+              await tx.mutate.channel_board_mappings.delete({ id: mapping.id });
+            }
+
             await tx.mutate.applications.delete({ id: application.id });
             await tx.mutate.boards.delete({ id: application.boardId });
           };
@@ -8129,23 +8272,23 @@ export function createMutators(
             await ensureBoardFormMapping(mainBoardId);
           }
 
-          // Create Release lists the boards linked to the chosen channel, so the release
-          // channel gets its main board linked here. Additive only, and never as the
-          // channel's default: everyday tickets in that channel must not land on it.
-          const channelMappings = await tx.run(
-            zql.channel_board_mappings.where('channelId', channelId),
-          );
-          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
-            const linkedAt = Date.now();
-            await tx.mutate.channel_board_mappings.insert({
+          // The hub -> repository -> main board edge that owns this config. Links are
+          // never updated, so a board moved to another repository gets a new edge.
+          if (boardReleaseConfig && boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.delete({ id: boardReleaseConfig.id });
+          }
+          if (!boardReleaseConfig || boardReleaseConfig.sourceId !== repoId) {
+            await tx.mutate.sdlc_entity_links.insert({
               id: uuidv4(),
-              channelId,
-              boardId: mainBoardId,
               workspaceId: authData.workspaceId,
-              isDefault: false,
+              channelId: hubChannelId,
+              sourceType: 'REPOSITORY',
+              sourceId: repoId,
+              targetType: 'BOARD',
+              targetId: mainBoardId,
+              relationType: SDLC_RELEASE_CONFIG_RELATION,
               createdBy: authData.sub,
-              createdAt: linkedAt,
-              updatedAt: linkedAt,
+              createdAt: Date.now(),
             });
           }
 
@@ -8212,7 +8355,7 @@ export function createMutators(
                 mainReleaseBoardId: mainBoardId,
                 channelId,
                 regex: appConfig.regex,
-                repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+                repoId,
                 ownerTeam: appConfig.ownerTeam,
                 envPaths: appConfig.envPaths,
                 migrationPaths: appConfig.migrationPaths,
@@ -8252,12 +8395,32 @@ export function createMutators(
               mainReleaseBoardId: mainBoardId,
               channelId,
               regex: appConfig.regex,
-              repoUrl: appConfig.repoUrl.trim().replace(/\/+$/, ''),
+              repoId,
               ownerTeam: appConfig.ownerTeam,
               envPaths: appConfig.envPaths,
               migrationPaths: appConfig.migrationPaths,
               createdAt: Date.now(),
               updatedAt: Date.now(),
+            });
+          }
+
+          // Create Release lists the boards linked to the chosen channel, so the release
+          // channel gets its main board linked here. Additive only, and never as the
+          // channel's default: everyday tickets in that channel must not land on it.
+          const channelMappings = await tx.run(
+            zql.channel_board_mappings.where('channelId', channelId),
+          );
+          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+            const linkedAt = Date.now();
+            await tx.mutate.channel_board_mappings.insert({
+              id: uuidv4(),
+              channelId,
+              boardId: mainBoardId,
+              workspaceId: authData.workspaceId,
+              isDefault: false,
+              createdBy: authData.sub,
+              createdAt: linkedAt,
+              updatedAt: linkedAt,
             });
           }
         },
@@ -9136,6 +9299,16 @@ export function createMutators(
             throw new Error(
               'Cannot delete a release board while application ownership references it',
             );
+          }
+
+          // The hub's release config edge goes with its main release board.
+          const releaseConfigLinks = await tx.run(
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_RELEASE_CONFIG_RELATION)
+              .where('targetId', boardId),
+          );
+          for (const link of releaseConfigLinks) {
+            await tx.mutate.sdlc_entity_links.delete({ id: link.id });
           }
 
           // Check if board has tickets with terminal statuses (CANCELLED, COMPLETED)
@@ -11880,6 +12053,10 @@ export function createMutators(
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
             throw new Error('Repository not found');
+          }
+          const releaseApplication = await tx.run(zql.applications.where('repoId', id).one());
+          if (releaseApplication) {
+            throw new Error('Repository is used by a release config and cannot be deleted');
           }
           await tx.mutate.repos.delete({ id });
         },
@@ -16315,7 +16492,7 @@ export function createMutators(
           }),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { userId, workspaceId, updates, timestamp } }) => {
+        async ({ tx, args: { userId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
             id: userId,
@@ -16324,25 +16501,9 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
-            if (updates.role === WorkspaceRole.ADMIN) {
-              // Promote: grant the full ADMIN permission matrix, same as invite-accept
-              // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
-              // of whether the user was invited straight in as ADMIN or promoted later.
-              const user = await tx.run(zql.users.where('id', userId).one());
-              if (user) {
-                const { email } = user;
-                asyncTasks.push(() =>
-                  grantPermissionsForRole(userId, email, WorkspaceRole.ADMIN, workspaceId),
-                );
-              }
-            } else {
-              // Demote: only revoke WORKSPACE. Deliberately not a full matrix revoke —
-              // avoids stripping resource access that may have been granted independently
-              // via the Roles screen (no provenance tracking exists to tell them apart).
-              asyncTasks.push(() =>
-                syncResourceAdminAccess(userId, 'WORKSPACE', false, authData.sub, workspaceId),
-              );
-            }
+            // Promote or demote: reconcile the full resource set against the new role
+            // (and the user's org role), granting missing and revoking excess ADMIN access.
+            asyncTasks.push(() => reconcileUserPermissions(userId, authData.sub));
           }
         }
       ),
@@ -16425,6 +16586,9 @@ export function createMutators(
             joinedAt: timestamp,
             userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
+
+          const ownerEmail = admin.email;
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, ownerEmail, authData.sub));
         },
       ),
     },
@@ -16581,6 +16745,9 @@ export function createMutators(
               userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
+
+          // The added/reactivated member may already have workspace user rows (matched by email)
+          asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
       updateRole: defineMutator(
@@ -16599,10 +16766,9 @@ export function createMutators(
           if (updates.role !== undefined) {
             const member = await tx.run(zql.org_members.where('memberId', memberId).one());
             if (member) {
-              const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
               const { orgId, email } = member;
               asyncTasks.push(() =>
-                syncOrgResourceAdminAccess(orgId, email, shouldHaveAccess, authData.sub),
+                syncOrgResourceAdminAccess(orgId, email, authData.sub),
               );
             }
           }
@@ -16983,6 +17149,7 @@ export function createMutators(
             .object({
               enabled: z.boolean(),
               scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+              lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
             })
             .nullable()
             .optional(),

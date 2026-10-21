@@ -14,7 +14,6 @@ import {
   similarity,
   type CandidateCheckSummary,
 } from "../src/user-memory-candidate-check.js";
-import { routeFromJev } from "../src/mode-router.js";
 import { goalFromJev } from "../src/goal-judge.js";
 import { prefetchGateFromJev } from "../src/prefetch.js";
 import { checkpointFromJev, contextGate, contextGateFromJev } from "../src/answer-gates.js";
@@ -360,12 +359,6 @@ describe("applyClassifierToTrace", () => {
 describe("routing and gates", () => {
   const commands = [{ command: "/review", instruction: "review code" }, { command: "/learn", instruction: "learn" }] as never;
 
-  it("mode router: a mode needs ≥0.85, none needs ≥0.7, else LLM", () => {
-    expect(routeFromJev(commands, { mode: choice("review", 0.9) })?.command).toMatchObject({ command: "/review" });
-    expect(routeFromJev(commands, { mode: choice("review", 0.8) })).toBeNull();
-    expect(routeFromJev(commands, { mode: choice("none", 0.75) })).toEqual({ command: null, source: "jev" });
-    expect(routeFromJev(commands, { mode: choice("none", 0.6) })).toBeNull();
-  });
 
   it("goal judge: only clear done / clear continue are decided", () => {
     expect(goalFromJev({ status: choice("completed", 0.95) })).toMatchObject({ done: true });

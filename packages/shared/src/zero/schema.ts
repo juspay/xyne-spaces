@@ -2079,7 +2079,7 @@ export const applicationTable = table('applications')
     channelId: string().optional(),
     channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     regex: string(),
-    repoUrl: string(),
+    repoId: string().optional(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
@@ -4829,6 +4829,12 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['entityId'],
     destSchema: messageAttachmentTable,
   }),
+  // The channel a CHANNEL row describes (entityId = channels.id); other rows match none.
+  channel: one({
+    sourceField: ['entityId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
@@ -4902,6 +4908,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     sourceField: ['mainReleaseBoardId'],
     destField: ['id'],
     destSchema: boardTable,
+  }),
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
   }),
 }));
 

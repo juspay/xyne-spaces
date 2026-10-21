@@ -36,6 +36,7 @@ import {
   type WhatsAppMigrationJobProgress,
   type WhatsAppPurgeImportResponse,
 } from '../../services/WhatsAppMigration/whatsAppMigrationService';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 type MappingEntry = {
   whatsappName: string;
@@ -199,6 +200,9 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
     (parseMappings(mappingsInput).length > 0 || Boolean(mappingCsvFile)) &&
     !isPreviewing;
 
+  // Job status isn't polled under full-page search, out of sight there, as leaving the page stopped
+  // it; polled again once the collapse back to it is over, while jobs are still running.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (startedJobs.length === 0) return undefined;
 
@@ -238,8 +242,11 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
     };
 
     void poll();
+    const watch = watchShown(pageCoverage, () => {
+      if (intervalId !== null) void poll();
+    });
     intervalId = window.setInterval(() => {
-      void poll();
+      if (watch.shown()) void poll();
     }, 2000);
 
     return (): void => {
@@ -247,8 +254,9 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
       if (intervalId !== null) {
         window.clearInterval(intervalId);
       }
+      watch.stop();
     };
-  }, [startedJobs]);
+  }, [startedJobs, pageCoverage]);
 
   useEffect(() => {
     setImportSources([]);

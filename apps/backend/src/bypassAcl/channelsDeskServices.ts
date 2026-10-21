@@ -9,6 +9,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { db } from '@/database/client';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { createChannelsDeskTicket } from '@/channelsDesk/desk';
+import { copyChannelFieldsToTicket } from '@/services/channelFieldService';
 import { generateTicketId } from './transactions/ticketIdService';
 import { asService, transaction } from './base';
 
@@ -26,6 +27,10 @@ const CHANNELS_DESK_TABLES = [
   'ChannelUserStatus',
   'Channel',
   'User',
+  'FormContextMapping',
+  'FormFields',
+  'FormEntityValues',
+  'GlobalField',
 ] as const;
 
 /** Called after a new top-level thread is created; a no-op unless its channel feeds a Channels desk. */
@@ -52,7 +57,7 @@ export async function insertChannelsDeskTicket(args: {
   workspaceId: string;
   conversationId: string;
   messageId: string;
-  sourceChannelName: string;
+  sourceChannelId: string;
   deskId: string;
   projectId: string;
   boardId: string;
@@ -66,7 +71,7 @@ export async function insertChannelsDeskTicket(args: {
   userGroupId: string | null;
 }): Promise<Ticket | null> {
   return transaction(
-    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel'],
+    ['Conversation', 'Message', 'Ticket', 'ChannelUserStatus', 'Project', 'Email', 'Channel', 'FormContextMapping', 'FormFields', 'FormEntityValues', 'GlobalField'],
     'Channels desk ticket: stub thread and ticket must commit together',
     db,
     async (tx) => {
@@ -91,7 +96,8 @@ export async function insertChannelsDeskTicket(args: {
           conversationId: stub.conversationId,
           senderId: args.createdBy,
           workspaceId: args.workspaceId,
-          content: `Conversation in #${args.sourceChannelName}`,
+          // Empty, like the email desk's: the ticket header names the channel.
+          content: '',
           msgType: MessageType.SYSTEM,
         },
       });
@@ -133,6 +139,13 @@ export async function insertChannelsDeskTicket(args: {
         },
         tx
       );
+      // The source channel's fields (e.g. its merchant) go onto the ticket in the same write.
+      await copyChannelFieldsToTicket(tx, {
+        workspaceId: args.workspaceId,
+        channelId: args.sourceChannelId,
+        ticketId: ticket.id,
+        boardId: args.boardId,
+      });
       await syncConversationTicketMdFromPrismaTicket(tx, ticket);
       await tx.channelUserStatus.updateMany({
         where: { channelId: args.deskId, isDeleted: false },

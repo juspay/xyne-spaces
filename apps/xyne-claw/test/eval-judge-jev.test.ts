@@ -116,7 +116,7 @@ describe("judgeSemanticMatch via xor", () => {
     fetchMock.mockResolvedValue(systemOneReply({ same: 0.95, minor: 0.1, misses: 0, contradicts: 0, empty: 0 }));
     const result = await judgeSemanticMatch({ expected: "a", generated: "a", model: "JEV " });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://grid.example/v1/systemone");
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://grid.example/v1/decisions");
     expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
     expect(result.score).toBeGreaterThanOrEqual(90);
     expect(result.reasoning).toContain("xor:");
@@ -134,7 +134,7 @@ describe("judgeSemanticMatch via xor", () => {
     }
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [url, init] of fetchMock.mock.calls as Array<[string, RequestInit]>) {
-      expect(url).toBe("https://xor.internal/v1/systemone");
+      expect(url).toBe("https://xor.internal/v1/decisions");
       expect(init.headers).toMatchObject({ Authorization: "Bearer k-xor" });
       expect(JSON.parse(String(init.body)).model).toBe("xor-ft-v3");
     }
@@ -145,7 +145,7 @@ describe("judgeSemanticMatch via xor", () => {
     process.env["XOR_API_KEY"] = "k-xor";
     fetchMock.mockResolvedValue(new Response("nope", { status: 500 }));
     await judgeSemanticMatch({ expected: "a", generated: "b", model: "ourtrainedjev" });
-    expect(fetchMock.mock.calls.some((c) => String(c[0]) === "https://xor.internal/v1/systemone")).toBe(false);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]) === "https://xor.internal/v1/decisions")).toBe(false);
   });
 
   it("fails open when the backend is not configured", async () => {

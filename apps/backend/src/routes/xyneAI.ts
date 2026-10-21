@@ -95,6 +95,9 @@ router.post('/v2/messages/:messageId/rate', authMiddleware.authenticate, xyneAIC
 // to an in-flight run and stream the answer instead of waiting for `done`.
 router.get('/v2/conversations/:convId/live', authMiddleware.authenticate, xyneAIControllerV2.streamConversationLive);
 
+// POST /api/xyne-ai/v2/conversations/:convId/notes - Save Buddy's on-screen turns to the history
+router.post('/v2/conversations/:convId/notes', authMiddleware.authenticate, xyneAIControllerV2.saveConversationNotes);
+
 // PATCH /api/xyne-ai/v2/conversations/:convId - Rename and/or pin a conversation
 router.patch('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.updateConversation);
 
@@ -117,6 +120,8 @@ router.get(
   authMiddleware.authenticate,
   xyneAIControllerV2.listAgentModels,
 );
+
+router.post('/agents/:slug/warm', authMiddleware.authenticate, xyneAIControllerV2.warmAgent);
 
 // GET /api/xyne-ai/channel-agents/:channelId - List claw agents in a channel
 router.get('/channel-agents/:channelId', authMiddleware.authenticate, async (req, res) => {

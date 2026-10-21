@@ -47,5 +47,24 @@ export const getCanvasLabels = (canvas: Canvas): CanvasLabelChip[] => {
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
+export type CanvasLabelCount = { label: CanvasLabelChip; count: number };
+
+export const getAvailableLabelCounts = (labels: CanvasLabelChip[]): CanvasLabelCount[] => {
+  const labelCounts = new Map<string, CanvasLabelCount>();
+  for (const label of labels) {
+    const key = getCanvasLabelKey(label.name);
+    if (!key) continue;
+
+    const existing = labelCounts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      labelCounts.set(key, { label, count: 1 });
+    }
+  }
+
+  return Array.from(labelCounts.values()).sort((a, b) => a.label.name.localeCompare(b.label.name));
+};
+
 export const getCanvasLabelDotClassName = (labelName: string): string =>
   getAvatarColorClassNames(labelName).bg;

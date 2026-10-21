@@ -22,7 +22,6 @@ import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
-import jiraCompatRoutes, { JIRA_COMPAT_MOUNT } from '@/routes/jiraCompat';
 import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
@@ -108,7 +107,10 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import vespaSearchRoutes, {
+  discussionTitleRouter,
+  relatedContextRouter,
+} from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
@@ -137,6 +139,7 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
@@ -153,6 +156,7 @@ import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
 import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
+import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -176,6 +180,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -185,6 +190,7 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -333,26 +339,6 @@ export class App {
 
     this.app.use('/migrate/api/migration', migrationRoutes);
 
-    // JIRA-compatibility facade (public, read-only): lets Bitbucket linkify
-    // Spaces ticket keys (e.g. TTS-0001) and route /browse/<KEY> to the Spaces
-    // ticket instead of Atlassian JIRA. Mounted UNDER the existing per-workspace
-    // Bitbucket webhook path (the only path the ingress forwards), so the
-    // Application Link base URL is <host>/api/webhooks/bitbucket/<workspaceId>
-    // and Bitbucket appends /rest/* and /browse/*.
-    //
-    // Ordering matters: this must stay BEFORE the /api/webhooks raw-body mount.
-    // The shim defines only GET routes, so the webhook POST /bitbucket/:workspaceId
-    // matches no route here (Express matches method AND path) and falls through to
-    // the HMAC-verified handler below. Deliberately NO express.raw — buffering the
-    // body here would leave the webhook's raw parser with an empty stream and break
-    // its HMAC check. Endpoints are unauthenticated (Bitbucket is external, no
-    // client cert) and workspace-scoped; restrict to Bitbucket egress IPs at the
-    // ingress if the project-code / ticket-title exposure is a concern.
-    this.app.use(JIRA_COMPAT_MOUNT,
-      webhookLimiter,
-
-      jiraCompatRoutes);
-
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
       express.raw({ type: 'application/json' }),
@@ -411,6 +397,7 @@ export class App {
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -704,6 +691,11 @@ export class App {
       validateS2SKey,
       handleClawCallAiCallback,
     );
+    this.app.post(
+      '/api/internal/desk-canvas/callback/:canvasId',
+      validateS2SKey,
+      handleDeskThreadCanvasCallback,
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
@@ -836,6 +828,11 @@ export class App {
     // Vespa search routes (auth required)
     // Ahead of the general mount, so a lookup is answered here and nothing else runs.
     this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
+    this.app.use(
+      '/api/vespaSearch/discussion-title',
+      authMiddleware.authenticate,
+      discussionTitleRouter
+    );
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
@@ -967,6 +964,9 @@ export class App {
         (async () => {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
+          // A sweep job does nothing but enqueue classification jobs.
+          logger.info('Initializing auto-assign sweep queue...');
+          await autoAssignSweepQueue.initialize();
         })(),
       ]);
 
@@ -1013,6 +1013,9 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      logger.info('Initializing auto-assign sweep queue...');
+      await autoAssignSweepQueue.initialize();
 
       // Call transcription is producer-only here (lazy queue on enqueue); the consumer
       // runs in the worker process — see ENABLE_CALL_TRANSCRIPTION_WORKER.
@@ -1189,6 +1192,11 @@ export class App {
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
 
+    if (config.decisionEval.enabled) {
+      logger.info('Initializing decision evaluation queue (producer)...');
+      await decisionEvaluationQueue.initialize();
+    }
+
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
     await heicRenditionQueue.initialize();
@@ -1248,6 +1256,9 @@ export class App {
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();
+
+      // Close auto-assign sweep queue
+      await autoAssignSweepQueue.close();
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();

@@ -57,6 +57,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -247,17 +248,19 @@ const ConversationHeader = ({
     setEditSnapshot(null);
     discardPublishing();
   }, [channelId, discardPublishing]);
+  // Not while full-page search covers the channel: its Esc is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!isEditingTabs) return undefined;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || coverage.isCovered()) return;
       // Esc that closes the "+" menu or the app picker is theirs, not a cancel.
       if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]')) return;
       cancelTabs();
     };
     window.addEventListener('keydown', onKey);
     return (): void => window.removeEventListener('keydown', onKey);
-  }, [isEditingTabs, cancelTabs]);
+  }, [isEditingTabs, cancelTabs, coverage]);
   const handleTabSelect = useCallback(
     (value: string, e?: React.MouseEvent) => setActiveTab?.(value, e),
     [setActiveTab],

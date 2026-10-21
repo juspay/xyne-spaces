@@ -10,7 +10,7 @@
 #                            from concurrent CI runs don't bleed in.
 #
 # Reads compose files from the current working directory (expects to be invoked from the
-# monorepo root containing docker-compose.dev.yml and docker-compose.test.yml).
+# monorepo root containing pnpm-workspace.yaml and docker-compose.test.yml).
 set -e
 
 OUTPUT_DIR="${1:-xyne-automation/reports/docker-logs}"
@@ -18,7 +18,7 @@ COMPOSE_PROJECT_NAME="${2:-}"
 
 # Compose files live at the monorepo root, three levels above this script; don't depend on cwd.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-COMPOSE_ARGS="-f $REPO_ROOT/docker-compose.dev.yml -f $REPO_ROOT/docker-compose.test.yml"
+COMPOSE_ARGS="-f $REPO_ROOT/docker-compose.test.yml"
 if [ -n "$COMPOSE_PROJECT_NAME" ]; then
   COMPOSE_ARGS="$COMPOSE_ARGS -p $COMPOSE_PROJECT_NAME"
 fi

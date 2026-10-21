@@ -73,7 +73,12 @@ project_output
 .xyne/features.json
 .xyne/mprocs.yaml
 
-.claude/
+# Claude Code: personal files stay local at any depth. Only skill folders
+# committed at the root are tracked; installer symlinks there stay ignored.
+**/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/*/
 venv/
 migration_output/
 
@@ -245,3 +250,5 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+apps/xyne-claw-auth/backend/src/extensions/
+apps/xyne-claw-auth/frontend/src/v3/extensions/

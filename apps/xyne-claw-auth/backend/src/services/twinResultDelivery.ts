@@ -22,7 +22,7 @@ import { deleteSession, type SessionContext } from "../lib/session-context.js";
 import { createLogger } from "../logger.js";
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
-import type { FinalizeRunInput } from "../repositories/agentRunRepository.js";
+import { clawMetricsFields, type FinalizeRunInput } from "../repositories/agentRunRepository.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../surfaces/spaces/client.js";
 import { recordTwinApprovalPending } from "./twinResponseFeedback.js";
 import { buildTwinApprovalFlow, isTwinDelivery, withSpacesAppId, type TwinDelivery } from "xyne-claw-shared";
@@ -354,9 +354,7 @@ export async function handleTwinApprovalResult(
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-      ...(payload.latency ? { latency: payload.latency } : {}),
+      ...clawMetricsFields(payload),
       ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
     await handleRunCompletion(sessionId, "completed").catch((err) => {
