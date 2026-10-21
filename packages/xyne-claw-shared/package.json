@@ -10,7 +10,8 @@
     "./tools": "./src/tools/index.ts",
     "./tools/pgm": "./src/tools/pgm/index.ts",
     "./tools/google": "./src/tools/google/index.ts",
-    "./tools/react-artifact": "./src/tools/react-artifact/index.ts"
+    "./tools/react-artifact": "./src/tools/react-artifact/index.ts",
+    "./governance": "./src/governance/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -38,6 +39,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.13.9",
     "@types/sanitize-html": "^2.16.1",
+    "recheck": "4.5.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   }

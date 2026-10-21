@@ -1,0 +1,4 @@
+{
+  "local": { "prose-2kb": 0.5, "prose-20kb": 3, "prose-100kb": 15, "prose-1mb": 120, "near-miss-100kb": 15, "nfkc-expanding-128kb": 40, "curl-flood-128kb": 70 },
+  "ubuntu-latest": { "prose-2kb": 1, "prose-20kb": 6, "prose-100kb": 30, "prose-1mb": 240, "near-miss-100kb": 30, "nfkc-expanding-128kb": 80, "curl-flood-128kb": 140 }
+}
