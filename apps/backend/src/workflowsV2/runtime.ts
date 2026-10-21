@@ -12,6 +12,7 @@ import {
 } from '@xyne/workflow-sdk';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
 import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { JenkinsConnector } from '@xyne/connector-sdk/jenkins';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -25,7 +26,7 @@ import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
-import { WorkflowStorageAdapter } from './adapters/storage';
+import { workflowStorage } from './adapters/storage';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
 import type { XyneCtx, XyneFilter } from './types';
@@ -42,13 +43,16 @@ const BASE_URL = config.workflows.baseUrl;
 export const persistence = new PrismaPersistenceAdapter();
 export const eventBus = new RedisEventBus();
 
-const storage = new WorkflowStorageAdapter();
+const storage = workflowStorage;
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
 connectors.register(new XyneSpacesConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
+if (config.jenkins.baseUrl) {
+  connectors.register(new JenkinsConnector({ baseUrl: config.jenkins.baseUrl }));
+}
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.

@@ -29,6 +29,11 @@
       "alias": "user-4",
       "role": "user",
       "email": "test-user-email-4@xyne-test.local"
+    },
+    {
+      "alias": "user-5",
+      "role": "user",
+      "email": "test-user-email-5@xyne-test.local"
     }
   ]
 }

@@ -1,7 +1,9 @@
-import { type ReactElement } from 'react';
+import { type ReactElement, useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Button from '../../components/ui/Button';
+import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
+import { MAX_EMAIL_PARTICIPANTS } from '../../components/Call/callEmailNotify';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -11,7 +13,7 @@ import type { PendingCallChange } from './useDragReschedule';
 
 export interface RecurringRescheduleDialogProps {
   isOpen: boolean;
-  onConfirm: () => void;
+  onConfirm: (notifyParticipantsByEmail: boolean) => void;
   onCancel: () => void;
   pendingChange: PendingCallChange | null;
   isRecurring: boolean;
@@ -39,6 +41,11 @@ const RecurringRescheduleDialog = ({
   confirmLabel,
 }: RecurringRescheduleDialogProps): ReactElement => {
   const call = pendingChange?.call ?? null;
+  const [notifyByEmail, setNotifyByEmail] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) setNotifyByEmail(false);
+  }, [isOpen]);
 
   const [participantRows] = useCachedQuery(
     queries.callParticipantsByCallId({ callId: call?.id ?? '' }),
@@ -130,6 +137,18 @@ const RecurringRescheduleDialog = ({
             </div>
           </div>
 
+          {(call?.participantCount ?? 0) <= MAX_EMAIL_PARTICIPANTS && (
+            <div className='mt-4'>
+              <Checkbox
+                checked={notifyByEmail}
+                onChange={setNotifyByEmail}
+                label='Email details to all participants'
+                data-track-category='CALLS'
+                data-track-name='reschedule-email-participants'
+              />
+            </div>
+          )}
+
           <div className='mt-4 flex justify-end gap-2'>
             <Button
               variant='outline'
@@ -140,7 +159,7 @@ const RecurringRescheduleDialog = ({
               Keep original
             </Button>
             <Button
-              onClick={onConfirm}
+              onClick={() => onConfirm(notifyByEmail)}
               data-track-category='CALLS'
               data-track-name='recurring-reschedule-confirm'
             >

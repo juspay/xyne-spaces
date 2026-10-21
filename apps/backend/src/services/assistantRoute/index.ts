@@ -2,21 +2,23 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
-import {
-  askJev,
-  isJevConfigured,
-  type JevChoiceQuestion,
-  type JevFailure,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
+import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 
 export interface AssistantRouteAction {
   id: string;
   description: string;
 }
 
+interface JevPick {
+  chosen: string;
+  probability: number;
+}
+
 type AssistantRouteResult =
-  | { route: 'actions'; actionIds: string[]; confidence: number }
-  | { route: 'ask_ai'; reason: 'none' | 'low_confidence' }
+  | ({ route: 'actions'; actionIds: string[]; confidence: number } & JevPick)
+  | ({ route: 'ask_ai'; reason: 'none' | 'low_confidence' } & JevPick)
   | { route: 'unavailable' };
 
 // Why a route was unavailable. Logged, not returned: the client treats every cause the same way.
@@ -59,6 +61,42 @@ const INSTRUCTIONS =
   'Which of these is the user asking to do, or asking how to do? Pick none when the ' +
   'message is about something else or is a general question.';
 
+const SCREEN_INSTRUCTIONS =
+  'If the user asked a question (what, why, who, which, explain), made small talk, or asked ' +
+  'for something to be written, summarized or found, pick none. Otherwise they want something ' +
+  'done in the app: pick the control on the screen they named, or that does it, or that leads to ' +
+  'where it is done.';
+
+const SCREEN_NONE_DESCRIPTION =
+  'None: a question, small talk, or a request to write, summarize or find something, for the ' +
+  'AI assistant to answer.';
+
+const CHECK_INSTRUCTIONS =
+  '`text` holds what the user asked and the control the assistant is about to use. Pick ' +
+  'whether that control is what they asked for, a way to reach it, or something else.';
+
+const CHECK_NONE_DESCRIPTION = 'None: it cannot be told from this.';
+
+export type AssistantRouteMode = 'actions' | 'screen' | 'check';
+
+// Catalog actions are shuffled against position bias; screen controls keep screen order.
+const PROMPTS: Record<
+  AssistantRouteMode,
+  { instructions: string; none: string; order: <T>(items: T[]) => T[] }
+> = {
+  actions: { instructions: INSTRUCTIONS, none: NONE_DESCRIPTION, order: (items) => shuffle(items) },
+  screen: {
+    instructions: SCREEN_INSTRUCTIONS,
+    none: SCREEN_NONE_DESCRIPTION,
+    order: (items) => items,
+  },
+  check: {
+    instructions: CHECK_INSTRUCTIONS,
+    none: CHECK_NONE_DESCRIPTION,
+    order: (items) => items,
+  },
+};
+
 interface AssistantRouteConfig {
   enabled: boolean;
   actionThreshold: number;
@@ -96,7 +134,7 @@ const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConf
 };
 
 const failureReason = (
-  failure: JevFailure | undefined,
+  failure: AskFailure | undefined,
   signal?: AbortSignal
 ): UnavailableReason => {
   switch (failure?.kind) {
@@ -124,8 +162,10 @@ export const routeAssistantMessage = async (
   text: string,
   actions: AssistantRouteAction[],
   ctx: AssistantRouteContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  mode: AssistantRouteMode = 'actions'
 ): Promise<AssistantRouteResult> => {
+  const prompt = PROMPTS[mode];
   const started = Date.now();
   // Never the text or the action descriptions: they are user content.
   const log = (level: 'info' | 'warn', fields: Record<string, unknown>) =>
@@ -148,21 +188,25 @@ export const routeAssistantMessage = async (
     return { route: 'unavailable' };
   };
 
-  if (!isJevConfigured()) return unavailable('classifier_not_configured');
+  if (!isDecisionEngineConfigured()) return unavailable('classifier_not_configured');
   const config = await getConfig(ctx);
   if (!config) return unavailable('config_unavailable');
   if (!config.enabled) return unavailable('disabled');
 
-  // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
-  // the request, and fromEntries defines own keys without going through prototype setters.
+  // Ordered as the mode wants (see PROMPTS). Built with fromEntries, not `criteria[id] =`: ids come
+  // from the request, and fromEntries defines own keys without going through prototype setters.
   const criteria: Record<string, string> = Object.fromEntries([
-    ...shuffle(actions).map((action) => [action.id, action.description]),
-    [NONE_ID, NONE_DESCRIPTION],
+    ...prompt.order(actions).map((action) => [action.id, action.description]),
+    [NONE_ID, prompt.none],
   ]);
-  const question: JevChoiceQuestion = { type: 'choice', instructions: INSTRUCTIONS, criteria };
+  const question: ChoiceQuestion = {
+    type: 'choice',
+    instructions: prompt.instructions,
+    criteria,
+  };
 
-  let failure: JevFailure | undefined;
-  const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
+  let failure: AskFailure | undefined;
+  const answers = await askDecision('assistant_route', { text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
     onFailure: (f) => {
       failure = f;
     },
@@ -170,7 +214,12 @@ export const routeAssistantMessage = async (
   const answer = answers?.action;
   if (!answer || answer.type !== 'choice') return unavailable(failureReason(failure, signal));
 
-  if (answer.choice === NONE_ID) return finish({ route: 'ask_ai', reason: 'none' }, NONE_ID);
+  const pick: JevPick = {
+    chosen: answer.choice,
+    probability: answer.probabilities[answer.choice] ?? answer.confidence ?? 0,
+  };
+  if (answer.choice === NONE_ID)
+    return finish({ route: 'ask_ai', reason: 'none', ...pick }, NONE_ID);
 
   const scored = Object.entries(answer.probabilities)
     .filter(([id]) => id !== NONE_ID && Object.prototype.hasOwnProperty.call(criteria, id))
@@ -183,11 +232,15 @@ export const routeAssistantMessage = async (
         )
       : answer.confidence;
   if (confidence === undefined || confidence < config.actionThreshold) {
-    return finish({ route: 'ask_ai', reason: 'low_confidence' }, answer.choice, confidence);
+    return finish(
+      { route: 'ask_ai', reason: 'low_confidence', ...pick },
+      answer.choice,
+      confidence
+    );
   }
 
   const offered = scored.filter(([, p]) => p >= config.alsoThreshold).map(([id]) => id);
   const actionIds = offered.length > 0 ? offered : [answer.choice];
 
-  return finish({ route: 'actions', actionIds, confidence }, actionIds[0], confidence);
+  return finish({ route: 'actions', actionIds, confidence, ...pick }, pick.chosen, confidence);
 };

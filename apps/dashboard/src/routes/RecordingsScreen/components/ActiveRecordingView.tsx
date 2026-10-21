@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { useTextSearch } from '../../../hooks/useTextSearch';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import type { TranscriptEntry } from '../../../stores/recordingStore';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { HighlightedText } from './HighlightedText';
@@ -299,11 +300,14 @@ export function ActiveRecordingView({
     hasInitialScrollRef.current = true;
   }, [transcripts, search.isOpen]);
 
-  // Cmd+F / Ctrl+F keyboard shortcut to open search
+  // Cmd+F / Ctrl+F keyboard shortcut to open search. Not while full-page search covers the page:
+  // Cmd+F there is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (transcripts.length === 0) return;
 
     const handleKeyDown = (e: KeyboardEvent): void => {
+      if (coverage.isCovered()) return;
       // non blocking default behavior for and contenteditable elements
       const target = e.target as HTMLElement;
       if (
@@ -325,7 +329,7 @@ export function ActiveRecordingView({
 
     document.addEventListener('keydown', handleKeyDown);
     return (): void => document.removeEventListener('keydown', handleKeyDown);
-  }, [transcripts.length, search]);
+  }, [transcripts.length, search, coverage]);
 
   return (
     <div className='flex flex-col h-full relative overflow-hidden'>

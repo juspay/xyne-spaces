@@ -25,6 +25,8 @@ import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
+import { NoTranscriptError, recordingService } from '../../services/Recording/recordingService';
+import { copyFetchedTextToClipboard } from '../../utils/clipboardUtils';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
@@ -58,6 +60,7 @@ interface UseCallHistoryReturn {
   handleGotoTranscript: (call: Call) => void;
   getGotoTranscriptHandler: (call: Call) => (() => void) | undefined;
   handleDownloadTranscript: (call: Call) => void;
+  handleCopyTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
     title: string;
@@ -74,7 +77,7 @@ interface UseCallHistoryReturn {
   handleDeleteClick: (call: ScheduledCall) => void;
   deleteModalOpen: boolean;
   deleteModalCall: ScheduledCall | null;
-  handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
+  handleDeleteConfirm: (cancelEntireSeries: boolean, notifyParticipantsByEmail: boolean) => void;
   closeDeleteModal: () => void;
   /** Hide a call (participant-only, irreversible) */
   handleHideClick: (call: ScheduledCall, options?: { isSeries?: boolean }) => void;
@@ -632,7 +635,10 @@ export function useCallHistory(
     setFullParticipantAction(null);
   }, [actionParticipants, actionParticipantsDetails.type, fullParticipantAction]);
 
-  const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
+  const handleDeleteConfirm = (
+    cancelEntireSeries: boolean,
+    notifyParticipantsByEmail: boolean,
+  ): void => {
     if (!deleteModalCall) return;
 
     const isCancelSeries = cancelEntireSeries && !!deleteModalCall.recurringSeriesId;
@@ -642,7 +648,7 @@ export function useCallHistory(
       // as CANCELLED and removes their Bull jobs. The Zero mutator only updates two
       // records (the clicked call + the series) and never touches the other future instances.
       void callService
-        .cancelRecurringSeries(deleteModalCall.recurringSeriesId)
+        .cancelRecurringSeries(deleteModalCall.recurringSeriesId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Recurring series cancelled');
         })
@@ -654,7 +660,7 @@ export function useCallHistory(
       // Cancel a single instance via backend API — this also triggers buffer replenishment
       // so the 60-day buffer is maintained for the recurring series.
       void callService
-        .cancelScheduledCall(deleteModalCall.externalId)
+        .cancelScheduledCall(deleteModalCall.externalId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Call cancelled successfully');
         })
@@ -776,6 +782,27 @@ export function useCallHistory(
     })();
   };
 
+  const handleCopyTranscript = (call: Call): void => {
+    void (async () => {
+      try {
+        await copyFetchedTextToClipboard(() =>
+          recordingService.getCopyableTranscript(call.externalId),
+        );
+        toast.success('Transcript copied', { id: 'copy-transcript' });
+      } catch (error) {
+        if (error instanceof NoTranscriptError) {
+          toast.error('No transcript to copy', { id: 'copy-transcript' });
+          return;
+        }
+        logger.error(Logger.API_CALL_FAILED, {
+          message: 'Failed to copy transcript',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        toast.error('Could not copy the transcript', { id: 'copy-transcript' });
+      }
+    })();
+  };
+
   return {
     calls: recentCalls,
     scheduledCalls,
@@ -795,6 +822,7 @@ export function useCallHistory(
     handleGotoTranscript,
     getGotoTranscriptHandler,
     handleDownloadTranscript,
+    handleCopyTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,

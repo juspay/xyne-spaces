@@ -32,6 +32,7 @@ import {
   userAgentInstructionRepository,
   DAILY_BRIEF_KIND,
 } from "../repositories/index.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import {
   recordDailyBriefGenerated,
   recordScheduledDeliveryDelay,
@@ -200,11 +201,13 @@ export async function generateDailyBrief(
    * machinery that normally writes the assistant row and finalizes the AgentRun
    * never fires. Without this the conversation holds only the user message and
    * the run sits at "running" forever.
+   *
+   * `donePayload` is the stream's `done` frame (claw's terminal callback body).
    */
   const closeBriefTurn = async (
     status: "completed" | "failed",
     content: string,
-    toolInvocations?: unknown,
+    donePayload?: Record<string, unknown>,
   ): Promise<void> => {
     let assistantMessageId: string | undefined;
     try {
@@ -227,7 +230,7 @@ export async function generateDailyBrief(
       await agentRunRepository.finalize(sessionId, {
         status,
         ...(status === "completed" ? { result: content } : { error: content }),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
+        ...(donePayload ? clawMetricsFields(donePayload) : {}),
         ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
       });
     } catch (runErr) {
@@ -284,7 +287,7 @@ export async function generateDailyBrief(
       await closeBriefTurn(
         "failed",
         "The brief run finished without producing a brief. Please try regenerating it.",
-        done?.toolInvocations,
+        done,
       );
       recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt, attempt);
       return null;
@@ -307,7 +310,7 @@ export async function generateDailyBrief(
       sessionId: sessionId ?? null,
       generatedAt,
     });
-    await closeBriefTurn("completed", content, done?.toolInvocations);
+    await closeBriefTurn("completed", content, done);
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
     recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt, attempt);
     if (trigger === "scheduled") recordScheduledDeliveryDelay(dateBucket, generatedAt);

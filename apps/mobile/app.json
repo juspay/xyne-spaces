@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/Xyne_Spaces-Default-1024x1024.png"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "57f24195-a923-4739-ad71-dcf5d43f9e20"
+      }
+    }
+  }
+}

@@ -49,6 +49,7 @@ const EXCLUDED_FIRST_SEGMENTS = new Set([
   'logout',
   'auth',
   'oauth',
+  'sdk-sso',
   'signup',
   'invite',
   'v2',

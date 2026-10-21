@@ -114,6 +114,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     onClick={handleClearStatus}
                     className='flex-shrink-0 p-1 h-auto'
                     title='Clear status'
+                    aria-label='Clear status'
                     data-track-category='App_Sidebar_Avatar_Popover'
                     data-track-name='Clear_Status'
                     data-track-metadata={JSON.stringify({ statusContent })}

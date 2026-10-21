@@ -13,6 +13,7 @@ import type { QueryRequest } from '@rocicorp/zero';
 import {
   queryCacheActor,
   loadCacheEntryFromStorage,
+  retainCacheKey,
   type CacheEntry,
 } from '../machines/queryCacheMachine.js';
 import { consumeShadow } from '../utils/warmShadow.js';
@@ -78,6 +79,13 @@ export function useFallbackHydratedQuery<
   }, [query, zero.context]);
 
   const isHydrated = useSelector(queryCacheActor, (s) => s.context.isHydrated);
+
+  // The cache entry is the only full copy of the list; if eviction drops it,
+  // this hook falls back to the bare delta and callers replace their state with it.
+  useEffect(() => {
+    if (!hash) return;
+    return retainCacheKey(hash);
+  }, [hash]);
 
   const cacheEntry = useSelector(queryCacheActor, (s) =>
     hash ? s.context.cache.get(hash) : undefined,

@@ -4,6 +4,7 @@ import type { Ticket } from '@xyne/shared';
 import * as Dialog from '@radix-ui/react-dialog';
 import { CompactTicketBadge } from '../CompactTicketBadge';
 import type { DayTicketsModalProps } from './types';
+import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
 export function DayTicketsModal({
   isOpen,
@@ -12,6 +13,7 @@ export function DayTicketsModal({
   tickets,
   onTicketClick,
 }: DayTicketsModalProps) {
+  const noun = useTicketNoun();
   const handleTicketClick = (ticket: Ticket) => {
     onTicketClick(ticket);
     onClose();
@@ -62,7 +64,7 @@ export function DayTicketsModal({
               </div>
             ) : (
               <div className='flex flex-col items-center justify-center py-12 text-muted-foreground bg-background rounded-xl border border-dashed border-border'>
-                <p className='text-sm'>No tickets created on this day</p>
+                <p className='text-sm'>No {noun.plural} created on this day</p>
               </div>
             )}
           </div>

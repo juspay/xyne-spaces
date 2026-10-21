@@ -124,6 +124,7 @@ import {
 } from '../utils/channel.js';
 import {
   ChannelPublishedEntityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
   MAX_PUBLISHED_APPS,
 } from './types.js';
@@ -741,7 +742,9 @@ export const mutators = defineMutators({
           throw new Error('You are not a participant of this channel');
         }
 
-        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        const existingChannel = await tx.run(
+          zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+        );
         if (existingChannel && existingChannel.id !== channelId) {
           throw new Error('A channel with this name already exists');
         }
@@ -1838,7 +1841,9 @@ export const mutators = defineMutators({
         }
 
         // Check for duplicate name
-        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        const existingChannel = await tx.run(
+          zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+        );
         if (existingChannel && existingChannel.id !== channelId) {
           throw new Error('A channel with this name already exists');
         }
@@ -3919,9 +3924,10 @@ export const mutators = defineMutators({
       z.object({
         actorAction: z.string().optional(),
         classification: z.nativeEnum(ActivityClassification).optional(),
+        channelIds: z.array(z.string()).optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { actorAction, classification, timestamp } }) => {
+      async ({ tx, ctx, args: { actorAction, classification, channelIds, timestamp } }) => {
         let query = zql.activities.where('userId', ctx.userID).where('isRead', false);
 
         if (actorAction) {
@@ -3929,6 +3935,9 @@ export const mutators = defineMutators({
         }
         if (classification) {
           query = query.where('classification', classification);
+        }
+        if (channelIds && channelIds.length > 0) {
+          query = query.where('channelId', 'IN', channelIds);
         }
 
         const unreadActivities = await tx.run(query);
@@ -4791,11 +4800,12 @@ export const mutators = defineMutators({
     // can continue directly into board editing after the server save succeeds.
     saveReleaseBoardConfig: defineMutator(
       z.object({
-        projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
+        hubChannelId: z.string(),
+        repoId: z.string(),
         applications: z.array(
           z.object({
             id: z.string(),
@@ -4803,27 +4813,20 @@ export const mutators = defineMutators({
             boardName: z.string(),
             name: z.string(),
             regex: z.string(),
-            repoUrl: z.string(),
             ownerTeam: z.string(),
             envPaths: z.array(z.string()),
             migrationPaths: z.array(z.string()),
           }),
         ),
       }),
-      async ({ tx, args: { projectId } }) => {
-        // Validate only against tables that are guaranteed-synced into the
-        // client's Zero replica. `projects` is; `channels` is NOT — the
-        // dashboard loads channels through a managed/fallback-hydrated query
-        // (queries.userAllChannels via InitialStateLoader) into app state for
-        // performance, so they are not reliably present in the replica that
-        // this optimistic mutator reads. A `zql.channels` lookup here would
-        // return undefined for a perfectly valid channel and make the
-        // optimistic mutator throw "Channel not found", blocking the save
-        // before the server ever runs. Channel existence and project ownership
-        // are validated authoritatively in the backend mutator instead.
-        const project = await tx.run(zql.projects.where('id', projectId).one());
-        if (!project) {
-          throw new Error('Project not found');
+      async ({ tx, args: { hubChannelId } }) => {
+        // Reject only what a row in the client replica contradicts. Rows can be missing
+        // there (the hub screen renders from its query cache before Zero syncs), so a
+        // lookup that misses would block a valid save before the server runs. The
+        // backend mutator validates hub, project, repository and channel.
+        const hub = await tx.run(zql.channels.where('id', hubChannelId).one());
+        if (hub && hub.type !== ChannelType.SDLC) {
+          throw new Error('Release configs belong to an SDLC hub');
         }
       },
     ),
@@ -10717,6 +10720,44 @@ export const mutators = defineMutators({
         }
       },
     ),
+    setRecordingDefaultSummaryTemplate: defineMutator(
+      z.object({
+        id: z.string(),
+        // `null` clears the default so recordings go back to the automatic pick.
+        recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            recordingDefaultSummaryTemplateId,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            recordingDefaultSummaryTemplateId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
   },
 
   emailChannelPreference: {
@@ -10744,6 +10785,7 @@ export const mutators = defineMutators({
           .object({
             enabled: z.boolean(),
             scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
           })
           .nullable()
           .optional(),

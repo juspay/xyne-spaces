@@ -111,6 +111,23 @@ describe("MCP agent tool allow-set matcher", () => {
   });
 });
 
+describe("agent metrics System Tools (claw-builtin)", () => {
+  const builtin = (): McpServerTools => ({
+    serverType: "claw-builtin", serverName: "Built-in", writeTools: [],
+    tools: ["webfetch", "get_agent_metrics", "find_metric_sessions"].map((name) => ({ name, description: "", inputSchema: {}, selectionKey: name, readOnly: true })),
+  });
+  const names = (config: object) => filterMcpServerToolsForAgentConfig(builtin(), config as AgentToolsConfig, parseGatewayServerType)?.tools.map((t) => t.name);
+
+  it("a grant allows only its tool, in either spelling", () => {
+    expect(allowed({ custom: ["get-agent-metrics"] }, "claw-builtin", "Built-in", { name: "get_agent_metrics", selectionKey: "get_agent_metrics" })).toBe(true);
+    expect(names({ custom: ["get_agent_metrics"] })).toEqual(["get_agent_metrics"]);
+  });
+
+  it("a read open palette admits both without a grant", () => {
+    expect(names({ custom: [], openPalette: "read" })).toEqual(expect.arrayContaining(["get_agent_metrics", "find_metric_sessions"]));
+  });
+});
+
 describe("custom subagent tool references surviving enforcement", () => {
   // Mirrors prod: the subagent NAME (grafana-hyperswitch-india) differs from
   // the server type/name (grafana/Grafana), so the name-as-server allow key

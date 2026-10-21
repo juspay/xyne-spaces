@@ -41,6 +41,7 @@ export const ThreadCallButton = ({
           variant='ghost'
           size='sm'
           className='group h-7 w-auto gap-0 rounded-lg bg-transparent px-0 text-muted-foreground group-hover:bg-muted hover:text-foreground group-focus-visible:bg-muted group-active:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground'
+          aria-label='Call about this thread'
           data-testid={testId}
           {...(trackCategory && { 'data-track-category': trackCategory })}
           {...(trackName && { 'data-track-name': trackName })}

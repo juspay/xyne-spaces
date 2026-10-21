@@ -49,6 +49,9 @@ export function ItemView({
   browserOverlay,
 }: ItemViewProps): ReactElement {
   if (item.stale) {
+    if (item.kind === 'preview' || (item.kind === 'diff' && !item.refId.startsWith('local:'))) {
+      return <Centered>This sandbox has ended.</Centered>;
+    }
     return <Centered>This item is no longer available where it was stored.</Centered>;
   }
 

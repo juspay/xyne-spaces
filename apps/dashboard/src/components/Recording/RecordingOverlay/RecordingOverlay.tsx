@@ -7,7 +7,7 @@
 
 import { createPortal } from 'react-dom';
 import { useEffect, useState, useRef } from 'react';
-import { Square, Pause, Play, Mic, ArrowUpRight } from 'lucide-react';
+import { Square, Pause, Play, AudioLines, ArrowUpRight } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   useRecordingStore,
@@ -266,6 +266,7 @@ export function RecordingOverlay(): React.ReactElement | null {
 
             <div className='flex items-center gap-2 shrink-0'>
               <button
+                aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
                 onClick={handlePauseResume}
                 disabled={isStarting}
                 className='flex items-center justify-center w-9 h-9 rounded-full border border-border bg-foreground/15 hover:bg-foreground/25 transition-colors'
@@ -280,6 +281,7 @@ export function RecordingOverlay(): React.ReactElement | null {
               </button>
 
               <button
+                aria-label='Stop recording'
                 onClick={handleStop}
                 disabled={isStarting}
                 className='flex items-center justify-center w-10 h-10 rounded-full bg-destructive hover:bg-destructive/85 transition-colors'
@@ -325,10 +327,11 @@ export function RecordingOverlay(): React.ReactElement | null {
               data-track-category='RecordingOverlay'
               data-track-name='toggle_live_transcript'
             >
-              <Mic className='size-3.5' />
+              <AudioLines className='size-3.5' />
               {showTranscript ? 'Hide Live Transcript' : 'View Live Transcript'}
             </Button>
             <Button
+              aria-label='Go to recordings'
               className='w-8 bg-action-primary hover:bg-action-primary/80 text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
               variant='outline'
               size='sm'

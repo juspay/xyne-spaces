@@ -6,7 +6,7 @@
 #   pnpm run reset -y       # no prompt
 #
 # Removes, scoped to this checkout's compose project only:
-#   - every container compose started here (all profiles, all four compose
+#   - every container compose started here (all profiles, all three compose
 #     files — including docker-compose.sandbox.yml, whose shared infra runs
 #     under this same project name; per-sandbox stacks under .sandboxes/ are a
 #     separate project and are only warned about, never touched)
@@ -83,7 +83,7 @@ PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 
 COMPOSE_FILES=()
-for f in docker-compose.dev.yml docker-compose.local.yml docker-compose.sandbox.yml vespa-core/deployment/docker-compose.dev.yml; do
+for f in docker-compose.dev.yml docker-compose.sandbox.yml vespa-core/deployment/docker-compose.dev.yml; do
     [ -f "$f" ] && COMPOSE_FILES+=("$f")
 done
 

@@ -53,16 +53,6 @@ export interface ScheduleCallFormData {
   endsAt: Date;
   participants: string[];
   externalEmails: string[];
-  /** Organizer's free-form invitation message body as HTML (written via TipTap). */
-  invitationMessageHtml: string;
-  /** Editable display-title for the invitation (falls back to `title`). */
-  invitationTitle: string;
-  /** Editable organizer name for the invitation header. */
-  invitationOrganizerName: string;
-  /** Editable organizer email for the invitation header. */
-  invitationOrganizerEmail: string;
-  /** Optional org/team name for the header band. */
-  invitationOrgName: string;
 }
 
 export interface PreviousRecurrenceState {

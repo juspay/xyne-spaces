@@ -28,6 +28,12 @@ import {
   createDriveFolder,
   uploadDriveFile,
   shareDriveFile,
+  updateDriveFileDescription,
+  listDriveFileLabels,
+  listDriveLabelDefinitions,
+  getDriveLabelDefinition,
+  modifyDriveFileLabels,
+  type DriveLabelChange,
 } from "./drive.js";
 import { createSpreadsheetWithValues, updateValues, appendValues } from "./sheets.js";
 import { createDocument, appendToDocument, readDocument, replaceAllText, insertTextAt, deleteRange, replaceRange, updateTextStyle, updateParagraphStyle } from "./docs.js";
@@ -821,6 +827,148 @@ export const googleDriveShare: ToolDefinition = {
       args["type"] as "user" | "group" | "domain" | "anyone",
       args["emailAddress"] as string | undefined,
     );
+  },
+};
+
+// ─── Drive Metadata & Labels Tools ──────────────────────────────────────────
+
+export const googleDriveUpdateDescription: ToolDefinition = {
+  slug: "google-drive-update-description",
+  name: "Drive Update Description",
+  description:
+    "Set or clear the description of a Google Drive file or folder (files.update). " +
+    "Pass an empty string to clear it. Accepts a Drive/Docs/Sheets URL or a file ID.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      fileUrl: { type: "string", description: "Drive file URL or file ID" },
+      description: { type: "string", description: "New description text. Empty string clears it." },
+    },
+    required: ["fileUrl", "description"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return updateDriveFileDescription(token, args["fileUrl"] as string, (args["description"] as string) ?? "");
+  },
+};
+
+export const googleDriveListFileLabels: ToolDefinition = {
+  slug: "google-drive-list-file-labels",
+  name: "Drive List File Labels",
+  description:
+    "List the Drive labels currently applied to a file, with each field's value (files.listLabels). " +
+    "Returns label/field/choice IDs; use google-drive-labels-get to resolve them to names.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      fileUrl: { type: "string", description: "Drive file URL or file ID" },
+    },
+    required: ["fileUrl"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return listDriveFileLabels(token, args["fileUrl"] as string);
+  },
+};
+
+export const googleDriveLabelsList: ToolDefinition = {
+  slug: "google-drive-labels-list",
+  name: "Drive Labels List",
+  description:
+    "List the published Drive label definitions available to the user (Drive Labels API labels.list), " +
+    "including field IDs, field types and selection choice IDs. Call this before google-drive-modify-labels " +
+    "to resolve label, field and choice names to IDs.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      includeFields: { type: "boolean", description: "Include fields and choices (default true)" },
+      maxResults: { type: "number", description: "Max labels to return (1-200, default 50)" },
+    },
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return listDriveLabelDefinitions(token, {
+      includeFields: args["includeFields"] as boolean | undefined,
+      maxResults: args["maxResults"] as number | undefined,
+    });
+  },
+};
+
+export const googleDriveLabelsGet: ToolDefinition = {
+  slug: "google-drive-labels-get",
+  name: "Drive Labels Get",
+  description:
+    "Get one Drive label definition by ID (Drive Labels API labels.get): title, fields, field types and choices.",
+  source: "custom:google",
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      labelId: { type: "string", description: "Label ID (with or without the 'labels/' prefix)" },
+    },
+    required: ["labelId"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return getDriveLabelDefinition(token, args["labelId"] as string);
+  },
+};
+
+export const googleDriveModifyLabels: ToolDefinition = {
+  slug: "google-drive-modify-labels",
+  name: "Drive Modify Labels",
+  description:
+    "Apply, change or remove Drive labels on a file (files.modifyLabels). All IDs must be real label/field/choice IDs " +
+    "from google-drive-labels-list or google-drive-labels-get. To remove a label set removeLabel=true. " +
+    "For each field give exactly one of selectionChoiceIds, text, integer, date (YYYY-MM-DD), userEmails, or unset=true.",
+  source: "custom:google",
+  isWriteTool: true,
+  configSchema: GOOGLE_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      fileUrl: { type: "string", description: "Drive file URL or file ID" },
+      changes: {
+        type: "array",
+        description: "One entry per label to apply, change or remove",
+        items: {
+          type: "object",
+          properties: {
+            labelId: { type: "string", description: "Label ID" },
+            removeLabel: { type: "boolean", description: "Remove this label from the file" },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  fieldId: { type: "string" },
+                  selectionChoiceIds: { type: "array", items: { type: "string" } },
+                  text: { type: "array", items: { type: "string" } },
+                  integer: { type: "array", items: { type: "number" } },
+                  date: { type: "array", items: { type: "string" }, description: "YYYY-MM-DD" },
+                  userEmails: { type: "array", items: { type: "string" } },
+                  unset: { type: "boolean", description: "Clear this field's value" },
+                },
+                required: ["fieldId"],
+              },
+            },
+          },
+          required: ["labelId"],
+        },
+      },
+    },
+    required: ["fileUrl", "changes"],
+  },
+  async execute(args, ctx) {
+    const token = getToken(ctx);
+    return modifyDriveFileLabels(token, args["fileUrl"] as string, args["changes"] as DriveLabelChange[]);
   },
 };
 

@@ -106,10 +106,19 @@ export default class ProjectSteps {
       },
       { userId: user.id, userEmail: user.email, skipOnboarding: !setAsNewUser }
     );
-    await page.goto(`${config.dashboard.baseUrl}/`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+    try {
+      await page.goto(`${config.dashboard.baseUrl}/`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+    } catch (error) {
+      // The app can start its own redirect before this load commits, which aborts
+      // the goto; the redirect still lands in the app, so wait for it instead.
+      if (!String(error).includes('net::ERR_ABORTED')) {
+        throw error;
+      }
+      await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+    }
 
     const previous = testContext.storedUsers.get(userAlias);
     const storedUser: StoredUser = {
@@ -125,6 +134,7 @@ export default class ProjectSteps {
       channels: previous?.channels ?? {},
       dms: previous?.dms ?? {},
       tickets: previous?.tickets ?? {},
+      userGroups: previous?.userGroups ?? {},
     };
 
     testContext.storedUsers.set(userAlias, storedUser);

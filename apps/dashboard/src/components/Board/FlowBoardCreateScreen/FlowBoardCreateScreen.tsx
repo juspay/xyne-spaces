@@ -223,6 +223,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
         <header className='flex items-center justify-between px-[18px] py-4 border-b border-border'>
           <div className='flex items-center gap-2'>
             <Button
+              aria-label='Go back'
               onClick={onClose}
               variant='ghost'
               size='iconSm'

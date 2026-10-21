@@ -8,7 +8,12 @@ export interface AssistantTurn {
   at: Date;
   actions?: ActionDefinition[];
   opened?: string[];
+  /** A reply still being worked out (Buddy on screen): shown as the chat's loader. */
+  pending?: boolean;
 }
+
+/** The loader's label while Buddy works on the screen. */
+export const BUDDY_WORKING = 'Working on it';
 
 const MESSAGE_ID_PREFIX = 'assistant-';
 
@@ -70,6 +75,7 @@ export const toChatMessages = (turns: readonly AssistantTurn[]): Message[] =>
     type: turn.role === 'user' ? 'user' : 'bot',
     content: turn.text,
     timestamp: turn.at,
+    ...(turn.pending ? { isStreaming: true, statusMessage: BUDDY_WORKING } : {}),
     ...(turn.actions?.length
       ? {
           followUpSuggestions: turn.actions.map(action =>

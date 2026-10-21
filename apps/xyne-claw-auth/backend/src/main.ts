@@ -12,7 +12,7 @@ import { bootWorkers, shutdownWorkers } from "./boot/workers.js";
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
 import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 import { redisService } from "./redis.js";
-import { agentRunRepository } from "./repositories/agentRunRepository.js";
+import { agentRunRepository, settleRunStatsWrites } from "./repositories/agentRunRepository.js";
 import { closeMessagingAccountManager } from "./surfaces/messaging/bootstrap.js";
 import { startEventLoopMonitor } from "./lib/event-loop-monitor.js";
 
@@ -31,9 +31,7 @@ registerDailyBriefGauges();
 
 startEventLoopMonitor();
 
-/** How long shutdown waits on the tool-invocation flush. Each write may take
- *  up to its 30s transaction timeout, which outlasts the pod's grace period,
- *  so an unbounded wait meant nothing after it ever ran. */
+/** Bounded wait on the tool-invocation flush and post-commit metrics writes; they can outlast the pod's grace period. */
 const SHUTDOWN_FLUSH_MS = 5_000;
 
 const server = app.
@@ -50,15 +48,20 @@ async function shutdown(signal: string): Promise<void> {
   // for the full lease TTL after this process dies.
   await closeMessagingAccountManager().catch(() => {});
   const flushed = await Promise.race([
-    agentRunRepository.flushAllToolInvocations().then(() => true, () => true),
+    Promise.all([
+      agentRunRepository.flushAllToolInvocations().catch(() => undefined),
+      settleRunStatsWrites(),
+    ]).then(() => true),
     new Promise<false>((resolve) => setTimeout(() => resolve(false), SHUTDOWN_FLUSH_MS).unref()),
   ]);
-  if (!flushed) log.warn(`[xyne-claw-auth] tool invocation flush still running after ${SHUTDOWN_FLUSH_MS}ms; continuing shutdown`);
+  if (!flushed) log.warn(`[xyne-claw-auth] tool invocation flush or metrics writes still running after ${SHUTDOWN_FLUSH_MS}ms; continuing shutdown`);
   await shutdownWorkers();
   await redisService.disconnect().catch(() => {});
   await shutdownOpenTelemetry().catch(() => {});
   server.close(() => {
-    void agentRunRepository.flushAllToolInvocations().finally(() => process.exit(0));
+    void agentRunRepository.flushAllToolInvocations()
+      .finally(() => settleRunStatsWrites())
+      .finally(() => process.exit(0));
   });
   setTimeout(() => process.exit(1), 10_000).unref();
 }

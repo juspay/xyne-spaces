@@ -455,6 +455,25 @@ export function conversationAgents(conversation: ConversationHistory): string[] 
   return conversation.agentSlug ? [conversation.agentSlug] : [];
 }
 
+const AUTO_REPLY_AGENT_SLUGS = new Set(['digital-twin']);
+
+export function isAutoReplyConversation(conversation: ConversationHistory): boolean {
+  if (conversation.sessionId.startsWith('chat-')) return false;
+  return conversationAgents(conversation).some(slug => AUTO_REPLY_AGENT_SLUGS.has(slug));
+}
+
+export function splitAutoReplies(conversations: ConversationHistory[]): {
+  own: ConversationHistory[];
+  autoReplies: ConversationHistory[];
+} {
+  const own: ConversationHistory[] = [];
+  const autoReplies: ConversationHistory[] = [];
+  for (const conversation of conversations) {
+    (isAutoReplyConversation(conversation) ? autoReplies : own).push(conversation);
+  }
+  return { own, autoReplies };
+}
+
 /** "Alpha", "Alpha & Beta", "Alpha, Beta +2". */
 export function agentNamesLabel(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';

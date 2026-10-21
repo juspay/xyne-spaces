@@ -189,6 +189,7 @@ export const GeneratedTagsSubmenu = ({
                 const tagValue = tagKey.slice(activeCategory.length + 1);
                 return (
                   <button
+                    aria-pressed={isSelected}
                     key={tagKey}
                     type='button'
                     onClick={() => handleToggle(tagKey)}

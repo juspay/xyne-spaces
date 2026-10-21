@@ -370,6 +370,7 @@ export interface VespaFileDocument extends VespaDocument {
   updatedAt: number;
   ownerId: string;
   permissions: string[]
+  labels?: string[];
   urlInternal: string,
   urlOriginal: string,
   fileSize: number,

@@ -31,6 +31,14 @@ async function clearSessionCookies(sess: Electron.Session): Promise<number> {
  *   process where no frontend telemetry exists, and an unattributed cookie
  *   wipe is indistinguishable from an expired session in production logs.
  */
+// Told when the session is torn down (logout), after the cookies are gone.
+const sessionClearedListeners = new Set<() => void>();
+
+export function onSessionCleared(listener: () => void): () => void {
+  sessionClearedListeners.add(listener);
+  return () => sessionClearedListeners.delete(listener);
+}
+
 export async function clearAllCookies(reason: string = 'unspecified'): Promise<void> {
   try {
     const defaultCount = await clearSessionCookies(session.defaultSession);
@@ -46,6 +54,13 @@ export async function clearAllCookies(reason: string = 'unspecified'): Promise<v
     });
   } catch (error) {
     Logger.logError(ElectronEvent.COOKIES_CLEAR_FAILED, error, { reason });
+  }
+  for (const listener of sessionClearedListeners) {
+    try {
+      listener();
+    } catch (error) {
+      log.error('[Cookies] Session-cleared listener failed:', error);
+    }
   }
 }
 

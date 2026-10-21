@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   Inbox,
   PanelTop,
+  MessageSquareMore,
   Shield,
   Eye,
   EyeOff,
@@ -59,6 +60,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
+import { CallWindowToggle } from '../CallWindowToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
@@ -69,6 +71,7 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -81,6 +84,7 @@ import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaun
 import {
   toolbarItemsStore,
   inboxItemsStore,
+  messageActionsStore,
   useChannelTabsStore,
   useEnsureAppSnapshots,
   type BarItemsStore,
@@ -104,6 +108,9 @@ import {
   useChannelAppPublishing,
 } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
+import { MessageBarPreview } from './MessageBarPreview';
+import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarActions';
+import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
@@ -136,6 +143,12 @@ const NAV_ITEMS: NavItem[] = [
     id: 'channelTabs',
     label: 'Channel tabs',
     icon: <PanelTop className='size-4' />,
+    desktopOnly: true,
+  },
+  {
+    id: 'messageActions',
+    label: 'Message actions',
+    icon: <MessageSquareMore className='size-4' />,
     desktopOnly: true,
   },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
@@ -509,6 +522,7 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
               size='lg'
               className='flex-shrink-0 p-1 h-auto hover:bg-accent'
               title='Resume assignment'
+              aria-label='Resume assignment'
               onClick={state.resumeAssignment}
               data-track-category='PREFERENCES'
               data-track-name='ResumeAssignment'
@@ -682,6 +696,8 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
         />
       </div>
 
+      <CallWindowToggle />
+
       <MenuBarIconToggle />
 
       <RecordingPillToggle />
@@ -759,8 +775,85 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
       </RadioGroup>
     </div>
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Default summary template</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          The template every new recording summary uses. Pick automatically lets Xyne match a
+          template to each meeting from its context.
+        </p>
+      </div>
+      <DefaultSummaryTemplateSelect
+        value={state.defaultSummaryTemplateId}
+        onChange={state.setDefaultSummaryTemplateId}
+      />
+    </div>
   </div>
 );
+
+const AUTO_SUMMARY_TEMPLATE_OPTION = { id: null, label: 'Pick automatically' } as const;
+const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary' } as const;
+
+const DefaultSummaryTemplateSelect: FC<{
+  value: string | null;
+  onChange: (templateId: string | null) => void;
+}> = ({ value, onChange }) => {
+  // Queried here, not in usePreferencesState, so the template list only syncs
+  // while the Recordings section is actually on screen.
+  const { templates, isLoading } = useSummaryTemplates(true);
+  const options: { id: string | null; label: string }[] = [
+    AUTO_SUMMARY_TEMPLATE_OPTION,
+    DEFAULT_SUMMARY_TEMPLATE_OPTION,
+    ...templates
+      .filter(template => template.id !== DEFAULT_SUMMARY_TEMPLATE_OPTION.id)
+      .map(template => ({ id: template.id, label: template.name })),
+  ];
+  // A default the user can no longer read (deleted, or the share was revoked);
+  // not to be confused with the list simply not having arrived yet.
+  const selectedLabel = isLoading
+    ? 'Loading templates…'
+    : (options.find(option => option.id === value)?.label ?? 'Unavailable template');
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id='default-summary-template-label' className='text-sm font-medium text-foreground'>
+        Template
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            id='default-summary-template'
+            type='button'
+            disabled={isLoading}
+            aria-labelledby='default-summary-template-label default-summary-template'
+            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            data-track-category='PREFERENCES'
+            data-track-name='default-summary-template'
+          >
+            <span className='truncate'>{selectedLabel}</span>
+            <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end' className='max-h-80 min-w-48 overflow-y-auto'>
+          {options.map(option => (
+            <DropdownMenuItem
+              key={option.id ?? 'auto'}
+              onClick={() => onChange(option.id)}
+              className='flex items-center justify-between gap-3'
+              data-track-category='PREFERENCES'
+              data-track-name={`default-summary-template-${option.id ?? 'auto'}`}
+            >
+              <span className='truncate'>{option.label}</span>
+              {option.id === value && (
+                <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -1058,6 +1151,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showCurrent ? 'Hide current password' : 'Show current password'}
               onClick={() => setShowCurrent(!showCurrent)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1079,6 +1173,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showNew ? 'Hide new password' : 'Show new password'}
               onClick={() => setShowNew(!showNew)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1100,6 +1195,7 @@ const PasswordSection: FC = () => {
             />
             <button
               type='button'
+              aria-label={showConfirm ? 'Hide password confirmation' : 'Show password confirmation'}
               onClick={() => setShowConfirm(!showConfirm)}
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
@@ -1129,6 +1225,28 @@ const PasswordSection: FC = () => {
 };
 
 // ─── Developer ──────────────────────────────────────────────────────────────
+/** Kept on this device (userPreferencesMachine) and off while it is tried. */
+const ScreenActionsToggle: FC = () => {
+  const enabled = useUserPreference('screenActionsEnabled');
+  return (
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Screen actions</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
+          like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
+          anything that changes data. Off while it is new.
+        </p>
+      </div>
+      <Switch
+        id='screen-actions-enabled'
+        checked={enabled}
+        onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
+      />
+    </div>
+  );
+};
+
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   return (
     <div className='space-y-4'>
@@ -1160,6 +1278,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
             onCheckedChange={state.setShowStreams}
           />
         </div>
+
+        <ScreenActionsToggle />
 
         {detectReactNativeWebView() && (
           <Button
@@ -1328,6 +1448,7 @@ const ChannelSelect: FC<{
                 const isSelected = channel.id === selected.id;
                 return (
                   <button
+                    aria-current={isSelected ? 'true' : undefined}
                     key={channel.id}
                     type='button'
                     onClick={() => {
@@ -1430,6 +1551,20 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   );
 };
 
+const MessageActionsSection: FC<{ state: PreferencesState }> = () => (
+  <BarCustomizer
+    title='Message actions'
+    subtitle='The bar that appears when you hover a message. In chat you can also drag actions between the bar and its More menu.'
+    store={messageActionsStore}
+    builtIns={MESSAGE_BAR_ACTIONS}
+    trackCategory='PREFERENCES_MESSAGE_ACTIONS'
+    headerSlot={<MessageBarPreview />}
+    resetLabel='Reset to default'
+    maxShown={MAX_MESSAGE_BAR_ACTIONS}
+    apps={false}
+  />
+);
+
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
@@ -1444,6 +1579,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   toolbar: ToolbarSection,
   inbox: InboxSection,
   channelTabs: ChannelTabsSection,
+  messageActions: MessageActionsSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
@@ -1527,6 +1663,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 onClick={onClose}
                 className='!p-2 border border-border rounded-md hover:bg-accent'
                 title='Close'
+                aria-label='Close'
                 data-track-category='PREFERENCES'
                 data-track-name='Close'
               >

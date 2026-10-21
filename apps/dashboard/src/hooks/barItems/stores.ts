@@ -1,6 +1,7 @@
 import { createBarItemsStore } from './barItemsStore';
 import { setAppSnapshot } from './appSnapshotsStore';
 import { appItemId } from './appItemId';
+import { DEFAULT_MESSAGE_BAR_ACTIONS, MESSAGE_BAR_STORAGE_KEY } from '../../constants/settings';
 import {
   DEFAULT_TOOLBAR_PATHS,
   LEGACY_TOOLBAR_PATH_ALIASES,
@@ -78,4 +79,9 @@ export const inboxItemsStore = createBarItemsStore({
   storageKey: 'xyne:inbox-items',
   defaults: ['new-message', 'threads', 'unreads', 'bookmarks', 'drafts-sent', 'recap', 'radar'],
   locked: ['new-message', 'threads'],
+});
+
+export const messageActionsStore = createBarItemsStore({
+  storageKey: MESSAGE_BAR_STORAGE_KEY,
+  defaults: DEFAULT_MESSAGE_BAR_ACTIONS,
 });

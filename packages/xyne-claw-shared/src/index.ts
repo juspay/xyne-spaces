@@ -6,7 +6,7 @@ export { publishUiWidget } from "./tools/ui-widget.js";
 export { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "./tools/workflow-tool-names.js";
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
-export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, resolveAgentToolsConfig, isEmptyToolsSelection, type SubagentDefinition, type AgentToolsConfig, type AgentDelegationTier } from "./tools/subagents/index.js";
+export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, resolveAgentToolsConfig, isEmptyToolsSelection, grantMatchesToolName, findUnusedGrants, type SubagentDefinition, type AgentToolsConfig, type AgentDelegationTier } from "./tools/subagents/index.js";
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
 export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_AGENT_PRIVACY, type AgentPrivacy, type AgentPrivacyMode } from "./agent-privacy.js";
 export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, type OptimizationSpec, type OptimizationKey, type OptimizationGroup } from "./optimizations.js";
@@ -70,7 +70,7 @@ export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, 
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
-export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
+export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, buildAgentUpdateApprovalFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
 export { validateMcpProposal } from "./flow/mcp-proposal.js";
 export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
@@ -87,6 +87,10 @@ export type {
   AgentProviderStatus,
   AgentDraftPhase,
   AgentToolSelection,
+  AgentChange,
+  AgentChangeField,
+  AgentUpdateCardProps,
+  AgentUpdateApprovalAction,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
@@ -161,6 +165,7 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export { AGENT_TOOL_DEFS } from "./tools/agent-tools/index.js";
 export {
   TASK_COMMAND_NAMES,
   IMMEDIATE_TASK_COMMAND_RE,
