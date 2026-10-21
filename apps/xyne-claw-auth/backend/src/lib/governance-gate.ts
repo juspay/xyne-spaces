@@ -15,6 +15,7 @@ import {
   type Grant,
   type KillSwitch,
   type RiskLevel,
+  type CriticVerdict,
   type ToolAnnotations,
 } from "xyne-claw-shared/governance";
 import { prisma } from "../db.js";
@@ -26,6 +27,13 @@ const log = createLogger("governance-gate");
 
 export type GateSite = "mcp_call" | "actions_sign" | "approval_executor" | "write_action" | "app_callback";
 
+/** A deny grant stays a deny; a forced ask (a write tool) only tightens an allow. */
+export function effectiveGrant(permission: string | undefined, forceAsk: boolean): "allow" | "ask" | "deny" {
+  if (permission === "deny") return "deny";
+  if (forceAsk) return "ask";
+  return permission === "ask" ? "ask" : "allow";
+}
+
 /** What claw's C1 sends along with an MCP call. */
 export interface C1Handoff {
   decisionId?: string | undefined;
@@ -35,6 +43,8 @@ export interface C1Handoff {
   privateData?: boolean | undefined;
   pendingVerdicts?: number | undefined;
   toolCallId?: string | undefined;
+  criticStatus?: string | undefined;
+  criticLevel?: string | undefined;
 }
 
 export interface GateInput {
@@ -48,6 +58,8 @@ export interface GateInput {
   serverType: string;
   tool: string;
   params?: Record<string, unknown> | undefined;
+  /** The agent's own grant for the tool, before any forced ask; a deny here always blocks. */
+  grant?: string | undefined;
   /** The permission the caller sent; it can only tighten. */
   permissionHint?: string | undefined;
   writeTool?: boolean | undefined;
@@ -128,13 +140,17 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");
     const conversation = conversationFrom(input.c1);
     const hint = grantOf(input.permissionHint);
+    const own = grantOf(input.grant);
+    const grant = own === "deny" ? "deny" : input.writeTool ? "ask" : own;
+    const level = input.c1?.criticLevel;
+    const critic: CriticVerdict = level === "low" || level === "medium" || level === "high" || level === "critical" ? { status: "decided", level } : input.c1?.criticStatus === "unavailable" ? { status: "unavailable" } : { status: "not_needed" };
     const nowMs = Date.now();
     const verdict = decide({
       call: { toolName: input.tool, mcpServerId: input.serverType, effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
       kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { user: input.userId, mcp_server: input.serverType, tool: input.tool, ...(input.agentSlug ? { agent: input.agentSlug } : {}), ...(input.sessionId ? { run: input.sessionId } : {}) }, nowMs },
       conversation,
-      critic: { status: "not_needed" },
-      policy: { ...(input.writeTool ? { grant: "ask" as const } : {}), ...(hint ? { permissionHint: hint } : {}), judgeAvailable: false, auditAvailable: true },
+      critic,
+      policy: { ...(grant ? { grant } : {}), ...(hint ? { permissionHint: hint } : {}), judgeAvailable: Boolean(input.c1), auditAvailable: true },
     });
 
     const run = await runContextForSession(input.sessionId);
@@ -168,6 +184,7 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
       destinationKind: descriptor.destination.kind,
       destinationHost: descriptor.destination.host ?? null,
       riskLevelAtCall: conversation.risk,
+      ...(critic.status === "decided" ? { matchedRuleIds: [`critic.${critic.level}`] } : {}),
       carriedPrivateData: conversation.privateData,
       argumentsRedacted: secretInArguments ? "[redacted: secret in arguments]" : argsText.slice(0, 2_048),
       gateMs: Date.now() - nowMs,

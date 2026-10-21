@@ -15,7 +15,7 @@ const log = createLogger("governance-audit");
 export const GOVERNANCE_EVENT_TYPES = [
   "content_scan", "content_finding", "tool_call", "approval_requested", "approval_decided", "approval_expired",
   "kill_switch_set", "kill_switch_enforced", "kill_switch_cleared", "admin_override", "version_status_changed",
-  "config_changed", "run_started",
+  "config_changed", "run_started", "tool_outcome",
 ] as const;
 export type GovernanceEventType = (typeof GOVERNANCE_EVENT_TYPES)[number];
 export const ACTOR_KINDS = ["user", "agent", "system", "admin"] as const;
@@ -64,7 +64,14 @@ function toRow(e: GovernanceEventInput): Prisma.GovernanceAuditEventCreateManyIn
 
 /** Writes before the side effect runs; a throw means the caller must refuse with "audit unavailable". */
 export async function recordGovernanceEvent(e: GovernanceEventInput): Promise<GovernanceAuditEvent> {
-  return repo.create(toRow(e));
+  try {
+    return await repo.create(toRow(e));
+  } catch (err) {
+    // A retried write of the same tool call finds the row it already wrote: every call appears once.
+    const existing = (err as { code?: string })?.code === "P2002" && e.eventType === "tool_call" && e.runId && e.toolCallId ? await repo.findToolCall(e.orgId, e.runId, e.toolCallId) : null;
+    if (existing) return existing;
+    throw err;
+  }
 }
 
 const queue: GovernanceEventInput[] = [];

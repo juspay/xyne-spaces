@@ -3087,6 +3087,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     agentSlug: progressMeta?.agentSlug ?? undefined,
     role: "parent",
     toolMeta: allCustomTools.map((t) => toolMetaOf(t as unknown as { name: string } & Record<string, unknown>)),
+    request: { text: opts.task, typedByPerson: !opts.automationRun },
   }).install(session.agent as unknown as GovernedAgent);
 
   // Attach the judge sink only once capture has started: it flushes every Jev

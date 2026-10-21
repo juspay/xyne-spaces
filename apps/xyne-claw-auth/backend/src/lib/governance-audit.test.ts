@@ -15,7 +15,12 @@ const make = (data: Record<string, unknown>): Row =>
 const chainedOf = (orgId: string) => rows.filter((r) => r.orgId === orgId && r.orgSequence !== null).sort((a, b) => a.orgSequence! - b.orgSequence!);
 
 const repo = {
-  create: vi.fn(async (data: Record<string, unknown>) => { const r = make(data); rows.push(r); return r; }),
+  create: vi.fn(async (data: Record<string, unknown>) => {
+    // The partial unique index: one tool_call row per (org, run, tool call id).
+    if (data["eventType"] === "tool_call" && rows.some((r) => r.eventType === "tool_call" && r.orgId === data["orgId"] && r.runId === data["runId"] && r.toolCallId === data["toolCallId"])) throw Object.assign(new Error("unique"), { code: "P2002" });
+    const r = make(data); rows.push(r); return r;
+  }),
+  findToolCall: vi.fn(async (orgId: string, runId: string, toolCallId: string) => rows.find((r) => r.eventType === "tool_call" && r.orgId === orgId && r.runId === runId && r.toolCallId === toolCallId) ?? null),
   createMany: vi.fn(async (data: Record<string, unknown>[]) => { for (const d of data) rows.push(make(d)); return { count: data.length }; }),
   orgsWithUnchained: vi.fn(async () => [...new Set(rows.filter((r) => r.orgSequence === null).map((r) => r.orgId))].map((orgId) => ({ orgId }))),
   unchained: vi.fn(async (orgId: string, take: number) =>
@@ -120,5 +125,14 @@ describe("governance audit stream", () => {
     expect(auditLogCreate).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", targetId: "agent-1" }));
     await audit.flushGovernanceEvents();
     expect(rows[0]).toMatchObject({ orgId: "org-1", eventType: "config_changed", actorKind: "user", actorId: "u1", subjectKind: "AGENT_UPDATED", subjectId: "agent-1", reasonText: "renamed" });
+  });
+});
+
+describe("exactly once", () => {
+  it("writes one row for a tool call however many times it is recorded at once", async () => {
+    const e = { orgId: "org-1", eventType: "tool_call" as const, runId: "run-1", toolCallId: "call-1", toolName: "send", toolEffect: "send", decision: "allow" };
+    const results = await Promise.all(Array.from({ length: 50 }, () => audit.recordGovernanceEvent(e)));
+    expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect(rows.filter((r) => r.eventType === "tool_call" && r.toolCallId === "call-1")).toHaveLength(1);
   });
 });

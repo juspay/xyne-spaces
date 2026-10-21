@@ -11,22 +11,28 @@ import type { AfterToolCallContext, AfterToolCallResult, BeforeToolCallContext, 
 import {
   checkAnswer,
   componentMode,
+  criticNeeded,
   decide,
+  JUDGE_LIMITS,
   resolveToolDescriptor,
   scanText,
   sha256Hex,
   type Channel,
   type ConversationState,
   type ContentKind,
+  type CriticLevel,
+  type CriticVerdict,
   type DecisionKind,
   type Grant,
   type ParserResult,
   type RiskLevel,
+  type ToolRisk,
   type Verdict,
 } from "xyne-claw-shared/governance";
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 import { flushGovernance, queueGovernance, recordGovernanceNow, type GovernanceEvent, type GovernanceFinding } from "./governance-client.js";
+import { criticEnabled, criticFor, dropCritic, preclassify, type CriticCallInput, type CriticDeps } from "./governance-critic.js";
 
 const log = createLogger("governance");
 
@@ -61,6 +67,9 @@ export interface RunGovernanceOptions {
   /** "parent" registers the run for D; a subagent shares its parent's conversation state. */
   role?: "parent" | "subagent" | undefined;
   parent?: RunGovernance | undefined;
+  /** The run's request and whether a person typed it; the critic treats anything else as authorising nothing. */
+  request?: { text: string; typedByPerson: boolean } | undefined;
+  critic?: CriticDeps | undefined;
 }
 
 type BeforeHook = (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
@@ -82,6 +91,8 @@ export interface C1Decision {
   privateData: boolean;
   pendingVerdicts: number;
   toolCallId: string;
+  criticStatus?: CriticVerdict["status"] | undefined;
+  criticLevel?: CriticLevel | undefined;
 }
 
 export interface RunGovernanceStats {
@@ -106,6 +117,7 @@ const SCAN_BUDGET_MS = 200;
 const ARGS_BUDGET_MS = 50;
 const SCANNED_CAP = 5_000;
 const decisions = new Map<string, C1Decision>();
+const started = new Map<string, number>();
 const byRun = new Map<string, RunGovernance>();
 
 export const governanceDecisionFor = (toolCallId: string): C1Decision | undefined => decisions.get(toolCallId);
@@ -232,8 +244,13 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   const afterTool = (ctx: AfterToolCallContext, override: AfterToolCallResult | undefined): void => {
     const text = textOf(override?.content ?? (ctx.result as { content?: unknown } | undefined)?.content);
     decisions.delete(ctx.toolCall.id);
-    if (!text || seen(text)) return;
+    dropCritic(ctx.toolCall.id);
     const meta = toolMeta.get(ctx.toolCall.name);
+    const t0 = started.get(ctx.toolCall.id);
+    started.delete(ctx.toolCall.id);
+    const outcome = override?.isError ?? ctx.isError ? "error" : "executed";
+    queueGovernance({ ...base(), eventType: "tool_outcome", toolCallId: ctx.toolCall.id, toolName: meta?.mcpToolName ?? ctx.toolCall.name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), outcome, reasonText: t0 ? `${outcome} in ${Date.now() - t0} ms` : outcome });
+    if (!text || seen(text)) return;
     const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? ctx.toolCall.name, serverType: meta?.serverType });
     state.readUntypedContent = true;
     if (descriptor.returnsPrivateData) {
@@ -244,14 +261,41 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   };
 
   // C1: one decision per call, recorded before a side effect runs.
+  const criticCall = (id: string, toolName: string, args: unknown): CriticCallInput | null => {
+    const meta = toolMeta.get(toolName);
+    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args });
+    if (!criticNeeded(d.effect, state.readUntypedContent)) return null;
+    const argsText = safeJson(args, 65_536);
+    const scan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
+    return { toolCallId: id, toolName, effect: d.effect, destination: d.destination, argsText, judgeAddressedInArgs: scan.findings.some((f) => f.family === "judge_addressing") };
+  };
+  /** Every tool call in the assistant message starts its critic together; this call then waits for its own. */
+  const criticVerdict = async (ctx: BeforeToolCallContext, current: CriticCallInput): Promise<{ verdict: CriticVerdict; risk?: ToolRisk; ms?: number }> => {
+    const blocks = Array.isArray((ctx.assistantMessage as { content?: unknown })?.content) ? ((ctx.assistantMessage as { content: unknown[] }).content) : [];
+    const siblings = blocks
+      .map((b) => b as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown })
+      .filter((b) => b?.type === "toolCall" && typeof b.id === "string" && typeof b.name === "string" && b.id !== current.toolCallId)
+      .map((b) => criticCall(b.id as string, b.name as string, b.arguments))
+      .filter((c): c is CriticCallInput => c !== null);
+    preclassify([current, ...siblings], { request: opts.request?.text, typedByPerson: opts.request?.typedByPerson ?? false, risk: state.risk }, opts.critic);
+    const r = await criticFor(current.toolCallId, JUDGE_LIMITS.gateWaitMs);
+    if (!r) return { verdict: { status: "not_needed" } };
+    return { verdict: r.status === "decided" ? { status: "decided", level: r.risk.level } : { status: "unavailable" }, risk: r.risk, ms: r.ms };
+  };
+
   const gate = async (ctx: BeforeToolCallContext, mode: "shadow" | "enforce"): Promise<BeforeToolCallResult | undefined> => {
     const t0 = performance.now();
+    started.set(ctx.toolCall.id, Date.now());
     const name = ctx.toolCall.name;
     const meta = toolMeta.get(name);
     const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? name, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args: ctx.args });
     const argsText = safeJson(ctx.args, 65_536);
     const argScan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");
+    const current = criticNeeded(descriptor.effect, state.readUntypedContent)
+      ? { toolCallId: ctx.toolCall.id, toolName: name, effect: descriptor.effect, destination: descriptor.destination, argsText, judgeAddressedInArgs: argScan.findings.some((f) => f.family === "judge_addressing") }
+      : null;
+    const critic = current ? await criticVerdict(ctx, current) : { verdict: { status: "not_needed" } as CriticVerdict };
     const nowMs = Date.now();
     const hint = grantOf(meta?.permission);
     const verdict = decide({
@@ -259,10 +303,10 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       // Kill switches arrive with PR-12; until then every snapshot is fresh and empty.
       kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
       conversation: state,
-      critic: { status: "not_needed" },
-      policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: false, auditAvailable: true },
+      critic: critic.verdict,
+      policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
     });
-    const decision: C1Decision = { decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id };
+    const decision: C1Decision = { decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id, criticStatus: critic.verdict.status, ...(critic.verdict.level ? { criticLevel: critic.verdict.level } : {}) };
     decisions.set(ctx.toolCall.id, decision);
     stats.decisions++;
     const event: GovernanceEvent = {
@@ -282,7 +326,10 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       riskLevelAtCall: state.risk,
       carriedPrivateData: state.privateData,
       argumentsRedacted: secretInArguments ? "[redacted: secret in arguments]" : argsText.slice(0, 2_048),
-      checkTierReached: "parser",
+      checkTierReached: critic.risk?.source === "xor" ? "xor_judge" : "parser",
+      ...(critic.ms !== undefined ? { judgeMs: critic.ms } : {}),
+      ...(critic.risk ? { matchedRuleIds: [`critic.${critic.risk.source}.${critic.risk.level}`, ...critic.risk.categories.map((c) => `critic.${c}`)] } : {}),
+      ...(critic.risk && critic.risk.reasons.length > 0 ? { reasonText: `${verdict.reasonText} Critic: ${critic.risk.reasons.join("; ")}`.slice(0, 1_900) } : {}),
       gateMs: Math.round(performance.now() - t0),
       subjectKind: "c1",
       subjectId: decision.decisionId,

@@ -3,7 +3,9 @@ import { governancePrisma as db } from "../db.js";
 
 export const governanceAuditEventRepository = {
   create: (data: Prisma.GovernanceAuditEventCreateInput) => db.governanceAuditEvent.create({ data }),
-  createMany: (data: Prisma.GovernanceAuditEventCreateManyInput[]) => db.governanceAuditEvent.createMany({ data }),
+  createMany: (data: Prisma.GovernanceAuditEventCreateManyInput[]) => db.governanceAuditEvent.createMany({ data, skipDuplicates: true }),
+  findToolCall: (orgId: string, runId: string, toolCallId: string) =>
+    db.governanceAuditEvent.findFirst({ where: { orgId, runId, toolCallId, eventType: "tool_call" } }),
   orgsWithUnchained: () =>
     db.governanceAuditEvent.findMany({ where: { orgSequence: null }, distinct: ["orgId"], select: { orgId: true }, take: 100 }),
   unchained: (orgId: string, take: number) =>

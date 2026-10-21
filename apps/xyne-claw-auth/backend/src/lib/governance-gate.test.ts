@@ -9,7 +9,7 @@ vi.mock("./audit.js", () => ({ orgIdForUser: vi.fn(async (id: string) => (id ===
 vi.mock("../db.js", () => ({ prisma: { agentRun: { findUnique: findRun } } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 
-const { gateCall, runContextForSession } = await import("./governance-gate.js");
+const { effectiveGrant, gateCall, runContextForSession } = await import("./governance-gate.js");
 const { resetComponentModes } = await import("xyne-claw-shared/governance");
 
 const base = { site: "mcp_call" as const, userId: "u1", agentSlug: "helper", sessionId: "sess-1", serverType: "slack", tool: "send_message", params: { text: "hi" }, writeTool: true };
@@ -55,6 +55,14 @@ describe("gateCall", () => {
     resetComponentModes();
     findRun.mockRejectedValueOnce(new Error("db down"));
     expect(await gateCall({ ...base, sessionId: "sess-2" })).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW", recorded: false });
+  });
+
+  it("lets a deny grant beat the forced ask, and honours the critic level C1 handed over", async () => {
+    expect([effectiveGrant("deny", true), effectiveGrant("allow", true), effectiveGrant("ask", false), effectiveGrant(undefined, false)]).toEqual(["deny", "ask", "ask", "allow"]);
+    expect(await gateCall({ ...base, grant: "deny", permissionHint: "ask" })).toMatchObject({ decision: "block", reasonCode: "GOV-GRANT-DENY" });
+    const c1 = { decisionId: "d2", decision: "ask", risk: "none", privateData: false, pendingVerdicts: 0, toolCallId: "c9", criticStatus: "decided", criticLevel: "high" };
+    expect(await gateCall({ ...base, c1 })).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH" });
+    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ toolCallId: "c9", matchedRuleIds: ["critic.high"] }));
   });
 
   it("caches the run behind a session id", async () => {

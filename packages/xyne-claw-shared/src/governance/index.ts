@@ -26,3 +26,4 @@ export { buildJudgeBatch, checkJudgeAnswer, parseJudgeAnswer, planSplit, escapeJ
 export { GOVERNANCE_COMPONENTS, parseComponentModes, componentMode, resetComponentModes, type GovernanceComponent, type ComponentModes } from "./modes.js";
 export { resolveToolDescriptor, externalHostInArgs, type ToolDescriptor, type ToolDescriptorInput, type ToolAnnotations } from "./tool-descriptor.js";
 export { checkAnswer, type AnswerCheck, type AnswerLink } from "./output-check.js";
+export { CRITIC_CATEGORIES, CRITIC_QUESTIONS, CRITIC_THRESHOLDS, criticLevelFromAnswers, criticNeeded, toolRiskRules, type CriticCategory, type CriticQuestionId, type CriticThresholds, type ToolRisk, type ToolRiskInput } from "./tool-risk.js";
