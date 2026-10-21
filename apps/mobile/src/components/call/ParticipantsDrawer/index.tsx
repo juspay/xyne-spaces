@@ -129,7 +129,7 @@ export function ParticipantsDrawer({
     const call = currentCall as
       { channelId?: string | null; callOrigin?: string | null } | undefined;
     const channel = call?.channelId ? allChannels.find(c => c.id === call.channelId) : undefined;
-    return isBroadcastChannelCall(channel?.scopeType, call?.callOrigin);
+    return isBroadcastChannelCall(channel, call?.callOrigin);
   }, [allChannels, currentCall]);
 
   const internalCallId = (currentCall as unknown as { id?: string } | undefined)?.id;

@@ -1,6 +1,7 @@
 import {
   CallOrigin,
   ChannelScopeType,
+  ChannelType,
   InvitationResponse,
   type Channel,
   type CallParticipant,
@@ -32,7 +33,7 @@ export interface IncomingCallRow {
   participants?: readonly CallParticipant[] | undefined;
 }
 
-type ChannelLike = Pick<Channel, 'id' | 'name' | 'scopeType'>;
+type ChannelLike = Pick<Channel, 'id' | 'name' | 'scopeType' | 'type'>;
 
 // ---------------------------------------------------------------------------
 // Ring policy
@@ -69,7 +70,12 @@ export function isRingableCall(input: {
   // suppressed. Note this also swallows calls you were *personally* invited to
   // on a channel call — `invitedBy` distinguishes the two and is carried on the
   // view model, but acting on it is a product change, not a rendering one.
-  if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
+  // SDLC hubs are the exception: their channel calls always ring.
+  if (
+    channel?.scopeType === ChannelScopeType.DEFAULT &&
+    channel.type !== ChannelType.SDLC &&
+    call.callOrigin === CallOrigin.CHANNEL
+  ) {
     return false;
   }
 

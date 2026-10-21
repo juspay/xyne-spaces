@@ -1,4 +1,10 @@
-import { CallOrigin, ChannelScopeType, InvitationResponse, RingStatus } from '@xyne/shared';
+import {
+  CallOrigin,
+  ChannelScopeType,
+  ChannelType,
+  InvitationResponse,
+  RingStatus,
+} from '@xyne/shared';
 import { useChannel } from '../../hooks/useChannels';
 
 export interface RingableParticipantRow {
@@ -58,13 +64,18 @@ export function getRingingInvitees(
     .map(p => ({ userId: p.userId, ringStatus: toRingStatus(p.ringStatus) }));
 }
 
-// Mirrors the backend's ring-suppression check: nobody rings in a channel broadcast call.
+// Mirrors the backend's ring-suppression check: nobody rings in a channel broadcast call,
+// except in an SDLC hub.
 export function useIsBroadcastChannelCall(
   channelId: string | null | undefined,
   callOrigin: string | null | undefined,
 ): boolean {
   const channel = useChannel(channelId ?? '');
-  return channel?.scopeType === ChannelScopeType.DEFAULT && callOrigin === CallOrigin.CHANNEL;
+  return (
+    channel?.scopeType === ChannelScopeType.DEFAULT &&
+    channel.type !== ChannelType.SDLC &&
+    callOrigin === CallOrigin.CHANNEL
+  );
 }
 
 // True only for a one-on-one DM call, not a group DM or a channel call.

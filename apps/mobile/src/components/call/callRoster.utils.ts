@@ -7,7 +7,7 @@
  * Pure so it can be tested in node.
  */
 
-import { CallOrigin, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, ChannelScopeType, ChannelType } from '@xyne/shared';
 
 import { isAiAgentIdentity } from './callIdentity';
 
@@ -128,11 +128,15 @@ export function resolveCallTitle(params: {
 
 /**
  * A call started from a public channel: it rings nobody and never pops the incoming-call screen,
- * so its invitees read "Invited" rather than a ring status (dashboard rule).
+ * so its invitees read "Invited" rather than a ring status (dashboard rule). SDLC hubs always ring.
  */
 export function isBroadcastChannelCall(
-  channelScope: string | null | undefined,
+  channel: { scopeType?: string | null; type?: string | null } | null | undefined,
   callOrigin: string | null | undefined,
 ): boolean {
-  return channelScope === ChannelScopeType.DEFAULT && callOrigin === CallOrigin.CHANNEL;
+  return (
+    channel?.scopeType === ChannelScopeType.DEFAULT &&
+    channel?.type !== ChannelType.SDLC &&
+    callOrigin === CallOrigin.CHANNEL
+  );
 }
