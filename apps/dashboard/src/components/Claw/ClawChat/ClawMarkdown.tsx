@@ -56,9 +56,9 @@ function ClawMarkdownLink({
 }
 
 const components: Components = {
-  img: (props: ImgHTMLAttributes<HTMLImageElement> & { node?: Element | undefined }): ReactElement => (
-    <GuardedMarkdownImage {...props} />
-  ),
+  img: (
+    props: ImgHTMLAttributes<HTMLImageElement> & { node?: Element | undefined },
+  ): ReactElement => <GuardedMarkdownImage {...props} />,
   p: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <p className='mb-2 whitespace-pre-wrap break-words last:mb-0'>{children}</p>
   ),

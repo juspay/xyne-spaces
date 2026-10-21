@@ -537,7 +537,10 @@ export default function RecordingDetailScreen(): ReactElement {
               <h2 className='text-lg font-semibold text-foreground'>AI Summary</h2>
             </div>
             <div className='bot-markdown-content-call-summary' style={{ marginLeft: '10px' }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={GUARDED_IMAGE_MARKDOWN_COMPONENTS}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={GUARDED_IMAGE_MARKDOWN_COMPONENTS}
+              >
                 {recording.aiSummary}
               </ReactMarkdown>
             </div>

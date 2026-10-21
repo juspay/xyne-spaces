@@ -112,7 +112,11 @@ export const GuardedMarkdownImage = ({
 }: GuardedMarkdownImageProps): React.ReactElement => {
   const [loadAnyway, setLoadAnyway] = useState(false);
   if (loadAnyway || isAllowedAnswerImageSrc(props.src, getAnswerImagePolicy())) {
-    return renderAllowed ? renderAllowed(props) : <img {...props} alt={props.alt ?? ''} loading='lazy' />;
+    return renderAllowed ? (
+      renderAllowed(props)
+    ) : (
+      <img {...props} alt={props.alt ?? ''} loading='lazy' />
+    );
   }
   return (
     <span className='inline-flex max-w-full items-center gap-2 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground'>
