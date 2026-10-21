@@ -74,10 +74,10 @@ jobs:
           rm -rf "${TARGET_DIR}/.github"
           echo "$NEW" > "${TARGET_DIR}/.synced-from"
 
-      - name: Commit, push and open PR
+      - name: Commit and push ${{ env.SYNC_BRANCH }}
+        id: push
         if: steps.check.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           NEW: ${{ steps.check.outputs.new }}
           OLD: ${{ steps.check.outputs.old }}
         run: |
@@ -103,15 +103,16 @@ jobs:
 
           git commit --quiet -m "$title" -m "Mirrors https://github.com/${UPSTREAM_REPO}/commit/${NEW}"
 
-          # Already pushed this exact state? Then the PR is up to date.
+          # Skip the push if the branch already holds this exact state; the PR
+          # step below still runs, so a branch pushed without a PR gets one.
           if git fetch --quiet origin "$SYNC_BRANCH" 2>/dev/null \
              && git diff --quiet HEAD "origin/${SYNC_BRANCH}"; then
             echo "Branch ${SYNC_BRANCH} already has this state."
-            exit 0
+          else
+            git push --force origin "$SYNC_BRANCH"
           fi
-          git push --force origin "$SYNC_BRANCH"
 
-          # Body: upstream commits since the last sync.
+          # PR body: upstream commits since the last sync.
           if [ -n "$OLD" ] && git -C "$RUNNER_TEMP/upstream" cat-file -e "${OLD}^{commit}" 2>/dev/null; then
             log=$(git -C "$RUNNER_TEMP/upstream" log --no-merges --format='- `%h` %s (%an)' "${OLD}..${NEW}")
             range="https://github.com/${UPSTREAM_REPO}/compare/${OLD::7}...${short}"
@@ -122,11 +123,37 @@ jobs:
           body=$(printf 'Automated mirror of [%s@%s](%s).\n\n%s\n\n`%s/` is read-only: it is overwritten from upstream on every sync. Change streamgres instead.' \
             "$UPSTREAM_REPO" "$short" "$range" "$log" "$TARGET_DIR")
 
-          pr=$(gh pr list --head "$SYNC_BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty')
-          if [ -n "$pr" ]; then
-            gh pr edit "$pr" --title "$title" --body "$body"
-            echo "Updated PR #$pr"
-          else
-            pr=$(gh pr create --head "$SYNC_BRANCH" --base "$BASE_BRANCH" --title "$title" --body "$body" | grep -oE '[0-9]+$')
-            echo "Opened PR #$pr"
-          fi
+          {
+            echo "open_pr=true"
+            echo "title=$title"
+            echo "body<<PR_BODY_EOF"
+            echo "$body"
+            echo "PR_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # actions/github-script instead of the gh CLI: the self-hosted runner image
+      # has neither gh nor jq.
+      - name: Open or update PR
+        if: steps.push.outputs.open_pr == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_TITLE: ${{ steps.push.outputs.title }}
+          PR_BODY: ${{ steps.push.outputs.body }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const head = process.env.SYNC_BRANCH;
+            const base = process.env.BASE_BRANCH;
+            const title = process.env.PR_TITLE;
+            const body = process.env.PR_BODY;
+
+            const { data: open } = await github.rest.pulls.list({
+              owner, repo, state: 'open', base, head: `${owner}:${head}`,
+            });
+            if (open.length > 0) {
+              await github.rest.pulls.update({ owner, repo, pull_number: open[0].number, title, body });
+              core.info(`Updated PR #${open[0].number}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({ owner, repo, head, base, title, body });
+              core.info(`Opened PR #${pr.number}: ${pr.html_url}`);
+            }
