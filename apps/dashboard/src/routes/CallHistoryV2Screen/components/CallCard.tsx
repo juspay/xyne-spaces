@@ -47,6 +47,7 @@ interface CallHistoryItemProps {
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
   handleDownloadTranscript?: (() => void) | undefined;
+  handleCopyTranscript?: (() => void) | undefined;
   onViewExternalChat?: (() => void) | undefined;
   onDetailClick?: (() => void) | undefined;
   /** Confirmed labels on this call, shown as chips under the meta line. */
@@ -65,6 +66,7 @@ export const CallCard = ({
   onParticipantsClick,
   handleGotoTranscript,
   handleDownloadTranscript,
+  handleCopyTranscript,
   onViewExternalChat,
   onDetailClick,
   labels = [],
@@ -388,6 +390,18 @@ export const CallCard = ({
                       className='text-sm rounded-lg'
                     >
                       Download Transcript
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleCopyTranscript?.();
+                      }}
+                      data-track-category='CALLS'
+                      data-track-name='COPY_TRANSCRIPT'
+                      disabled={!hasTranscript || !handleCopyTranscript}
+                      className='text-sm rounded-lg'
+                    >
+                      Copy Transcript
                     </DropdownMenuItem>
                     {!isMissedCall && (
                       <DropdownMenuItem
