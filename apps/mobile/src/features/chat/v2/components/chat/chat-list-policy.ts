@@ -502,29 +502,25 @@ export const resolveUnreadPlacement = ({
   isLiveFresh,
   hasDivider,
   hasBoundaryCoverage,
-  hasMoreAfter,
-  hasExpansionTimedOut,
-  hasMaxWaitElapsed,
   hasInitialLoadError,
+  hasHoldExpired,
 }: {
   shouldAnchorToUnreadBoundary: boolean;
   isInitialLoadComplete: boolean;
   isLiveFresh: boolean;
   hasDivider: boolean;
   hasBoundaryCoverage: boolean;
-  hasMoreAfter: boolean;
-  hasExpansionTimedOut: boolean;
-  hasMaxWaitElapsed: boolean;
   hasInitialLoadError: boolean;
+  hasHoldExpired: boolean;
 }): ChatUnreadPlacement => {
   if (!shouldAnchorToUnreadBoundary) return 'pending';
   const isLiveWindow = isInitialLoadComplete && isLiveFresh;
   // Rows on both sides of the boundary fix the divider's position, so a revisit
   // with a warm cache lands without waiting for the network. Only "no divider"
-  // needs the live window: unread rows may simply not be cached yet.
-  if (hasDivider && (isLiveWindow || hasBoundaryCoverage)) return 'divider';
-  if (hasInitialLoadError || hasMaxWaitElapsed) return 'none';
-  if (isLiveWindow && (!hasMoreAfter || hasExpansionTimedOut)) return 'none';
+  // needs the live window: unread rows may simply not be cached yet. Once the
+  // hold expires, land on whatever divider the loaded rows have.
+  if (hasDivider && (isLiveWindow || hasBoundaryCoverage || hasHoldExpired)) return 'divider';
+  if (isLiveWindow || hasInitialLoadError || hasHoldExpired) return 'none';
   return 'pending';
 };
 
@@ -539,11 +535,9 @@ export const CHAT_OPEN_STABLE_WINDOW_MS = 500;
 // Empty opens get a short terminal boundary; once rows exist, the list stays
 // visible and exact-target sync continues without covering it with a loader.
 export const CHAT_OPEN_SYNC_TIMEOUT_MS = 2_000;
-// Longer than a slow first live paint (about 4.2 s measured on device); bounds an offline open.
-export const UNREAD_PLACEMENT_MAX_WAIT_MS = 6_000;
-// A warm unread open places the divider in about 0.8-1.0 s on device. Hide the
-// shimmer for that long; an offline or slow open still gets a loader after it.
-export const UNREAD_WARM_SHIMMER_GRACE_MS = 1_500;
+// A revisit lands on the divider in about 0.8-1.0 s on device. Past this, an
+// unread open lands with the rows it has instead of keeping the shimmer up.
+export const UNREAD_OPEN_MAX_HOLD_MS = 3_000;
 export const MAX_REASONABLE_ROUTE_OPEN_LATENCY_MS = 30_000;
 export const OPEN_PLACEHOLDER_ROW_COUNT = 4;
 export const OPEN_PLACEHOLDER_ROW_KEYS = Array.from(
@@ -551,19 +545,14 @@ export const OPEN_PLACEHOLDER_ROW_KEYS = Array.from(
   (_, index) => `open-placeholder-${index}`,
 );
 export const ROW_PROMOTION_NEAR_VISIBLE_BUFFER = 3;
-export const UNREAD_JUMP_PREFETCH_BEFORE = 4;
-export const UNREAD_JUMP_PREFETCH_AFTER = 16;
 export const FALLBACK_ROW_PROMOTION_BOTTOM_WINDOW = 12;
 export const ANCHOR_TOP_GAP = 12;
 export const ANCHOR_MESSAGE_VIEW_POSITION = 0.5;
-export const UNREAD_DIVIDER_VIEW_POSITION = 0.38;
-export const UNREAD_FIRST_MESSAGE_VIEW_POSITION = 0.44;
-export const UNREAD_JUMP_MAX_CORRECTION_PASSES = 24;
-export const UNREAD_JUMP_POSITION_TOLERANCE_PX = 32;
-export const UNREAD_JUMP_STABLE_HOLD_MS = 720;
+// The divider lands just below the floating date pill (8 pt margin + 25 pt pill),
+// so the pill never covers it and message heights cannot move it.
+export const UNREAD_DIVIDER_TOP_OFFSET = 40;
 export const CONTENT_EXPANSION_ANCHOR_RELEASE_MS = 220;
 export const MAX_ROUTE_ANCHOR_EXPANSION_PASSES = 4;
-export const MAX_UNREAD_BOUNDARY_EXPANSION_PASSES = 4;
 export const ANCHOR_LANDING_CONFIRMATION_PASSES = 8;
 
 /**
@@ -738,27 +727,3 @@ export const getRouteOpenLatencyMs = (
 
 export const getChatOpenPaintSource = (openPhase: ChatOpenPhase): ChatOpenPaintSource =>
   openPhase === 'liveFresh' ? 'backend' : openPhase === 'liveHydrating' ? 'local' : 'cache';
-
-export const getUnreadJumpViewPosition = (row: ChatRow | undefined): number =>
-  row?.type === 'message' ? UNREAD_FIRST_MESSAGE_VIEW_POSITION : UNREAD_DIVIDER_VIEW_POSITION;
-
-/**
- * Whether the open placeholder draws its shimmer rows. An unread open that
- * began with cached rows only waits for the divider to land, so the list stays
- * concealed without a loader until the grace period ends.
- */
-export const shouldDrawOpenPlaceholderShimmer = ({
-  isOpenPlaceholderShown,
-  isUnreadPlacementHeld,
-  hasCachedSeedRows,
-  hasWarmShimmerGraceElapsed,
-}: {
-  isOpenPlaceholderShown: boolean;
-  isUnreadPlacementHeld: boolean;
-  hasCachedSeedRows: boolean;
-  hasWarmShimmerGraceElapsed: boolean;
-}): boolean => {
-  if (!isOpenPlaceholderShown) return false;
-  if (isUnreadPlacementHeld && hasCachedSeedRows && !hasWarmShimmerGraceElapsed) return false;
-  return true;
-};
