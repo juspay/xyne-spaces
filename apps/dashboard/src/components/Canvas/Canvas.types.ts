@@ -178,4 +178,6 @@ export interface CanvasListProps {
   includeArchived?: boolean;
   onlyArchived?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
+  onCreateCanvasInFolder?: (folder: CanvasFolder) => void | Promise<void>;
+  onMoveCanvas?: (canvas: Canvas, folderId: string | null) => void | Promise<void>;
 }
