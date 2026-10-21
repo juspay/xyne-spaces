@@ -44,8 +44,12 @@ interface AttachmentUploadState {
   startBatch: (batch: Omit<AttachmentUploadBatch, 'loadedBytes' | 'startedAt' | 'status'>) => void;
   setProgress: (batchId: string, loadedBytes: number, totalBytes?: number) => void;
   failBatch: (batchId: string) => void;
-  /** Back to zero for a retry of the same batch. */
-  restartBatch: (batchId: string) => void;
+  /**
+   * Forget any batch covering these attachments. A retry starts a fresh batch, so without
+   * this the attempt it replaces lingers in the store and shows a second toast for the
+   * same file — one stuck mid-upload or failed, one genuinely running.
+   */
+  dropBatchesFor: (attachmentIds: readonly string[]) => void;
   endBatch: (batchId: string) => void;
 }
 
@@ -67,17 +71,18 @@ export const useAttachmentUpload = create<AttachmentUploadState>((set, get) => (
       return { batches: { ...state.batches, [batchId]: { ...batch, status: 'failed' } } };
     }),
 
-  restartBatch: batchId =>
+  dropBatchesFor: attachmentIds => {
+    const ids = new Set(attachmentIds);
     set(state => {
-      const batch = state.batches[batchId];
-      if (!batch) return state;
-      return {
-        batches: {
-          ...state.batches,
-          [batchId]: { ...batch, status: 'uploading', loadedBytes: 0, startedAt: Date.now() },
-        },
-      };
-    }),
+      const remaining = Object.fromEntries(
+        Object.entries(state.batches).filter(([, b]) => !b.attachmentIds.some(id => ids.has(id))),
+      );
+      // Same object when nothing matched, so subscribers do not re-render for no reason.
+      return Object.keys(remaining).length === Object.keys(state.batches).length
+        ? state
+        : { batches: remaining };
+    });
+  },
 
   setProgress: (batchId, loadedBytes, totalBytes) =>
     set(state => {

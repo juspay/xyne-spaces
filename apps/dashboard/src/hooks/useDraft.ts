@@ -335,8 +335,12 @@ export function useDraftAttachments() {
         const uploadStartTime = Date.now();
         const totalSizeBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
 
+        // A retry supersedes the attempt it replaces: drop that batch first, or its toast
+        // stays on screen beside the new one — the same file reported twice.
+        if (isRetry) useAttachmentUpload.getState().dropBatchesFor(attachmentIds);
+
         // Byte progress lives only here — the DB tracks PENDING/FAILED, never a percentage.
-        // Registered before the request so the pill appears the moment the upload starts,
+        // Registered before the request so the toast appears the moment the upload starts,
         // and carries the channel so it can route back once the user navigates away.
         useAttachmentUpload.getState().startBatch({
           batchId,
@@ -509,7 +513,6 @@ export function useDraftAttachments() {
         if (files.length !== batch.attachmentIds.length) return;
       }
 
-      useAttachmentUpload.getState().restartBatch(batchId);
       try {
         await addDroppedFiles(
           files,
