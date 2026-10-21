@@ -676,10 +676,34 @@ const CalendarWeekView = ({
 
                         const otherMeta = otherSlotMap.get(event.id);
                         if (otherMeta) {
-                          const { color, title, startsAt, endsAt } = otherMeta;
+                          const { color, title, startsAt, endsAt, details } = otherMeta;
                           const timeLabel = endsAt
                             ? `${formatTime(startsAt)} – ${formatTime(endsAt)}`
                             : formatTime(startsAt);
+                          const block = (
+                            <OtherUserEventBlock
+                              key={event.id}
+                              top={top}
+                              height={height}
+                              leftPct={leftPct}
+                              widthPct={widthPct}
+                              color={color}
+                              title={title}
+                              startsAt={startsAt}
+                              endsAt={endsAt}
+                              details={details}
+                              open={openCallId === event.id}
+                              onOpenChange={open => setOpenCallId(open ? event.id : null)}
+                              gutterPx={1}
+                              zClass='z-[3]'
+                              interactive
+                              onClick={e => e.stopPropagation()}
+                              onPointerDown={e => e.stopPropagation()}
+                            />
+                          );
+                          // A slot with a title opens its details on click, which covers
+                          // everything this hover tooltip would show.
+                          if (title !== undefined) return block;
                           return (
                             <Tooltip
                               key={event.id}
@@ -695,21 +719,7 @@ const CalendarWeekView = ({
                                 </div>
                               }
                             >
-                              <OtherUserEventBlock
-                                top={top}
-                                height={height}
-                                leftPct={leftPct}
-                                widthPct={widthPct}
-                                color={color}
-                                title={title}
-                                startsAt={startsAt}
-                                endsAt={endsAt}
-                                gutterPx={1}
-                                zClass='z-[3]'
-                                interactive
-                                onClick={e => e.stopPropagation()}
-                                onPointerDown={e => e.stopPropagation()}
-                              />
+                              {block}
                             </Tooltip>
                           );
                         }

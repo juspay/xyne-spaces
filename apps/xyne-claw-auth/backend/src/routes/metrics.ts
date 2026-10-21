@@ -19,6 +19,7 @@ import {
   fetchActiveAgents,
   fetchAgentLeaderboard,
   fetchRouteTable,
+  fetchJudgeSummary,
   fetchRunDaily,
   fetchRunSummary,
   fetchSentiment,
@@ -77,6 +78,7 @@ const KEY = {
   agentsTop: "agents/top",
   agentsActive: "agents/active",
   routes: "routes",
+  judge: "judge",
   sentiment: "sentiment",
   toolRollup: "tools/rollup",
   legacySlow: "legacy/slow-sessions",
@@ -101,6 +103,7 @@ const dailyBlock = (w: AnalyticsWindow, tz: string) =>
 const agentsTopBlock = (w: AnalyticsWindow, limit: number) =>
   cachedMetric({ endpoint: KEY.agentsTop, window: w, params: { limit } }, METRIC_TTL.current, () => fetchAgentLeaderboard(w, limit));
 const routesBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.routes, window: w }, METRIC_TTL.current, () => fetchRouteTable(w));
+const judgeBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.judge, window: w }, METRIC_TTL.current, () => fetchJudgeSummary(w));
 const sentimentBlock = (w: AnalyticsWindow) => cachedMetric({ endpoint: KEY.sentiment, window: w }, METRIC_TTL.current, () => fetchSentiment(w));
 
 /** GET /summary — headline figures for the window and the previous window of equal length. */
@@ -162,6 +165,16 @@ metricsRouter.get("/routes", async (req: Request, res: Response) => {
     res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), rows: value });
   } catch (err) {
     sendError(res, "/routes", err);
+  }
+});
+
+metricsRouter.get("/judge", async (req: Request, res: Response) => {
+  try {
+    const { window, scope, days, agentSlugs } = await resolveRequestWindow(req, "/metrics/judge");
+    const { value, cached } = await judgeBlock(window);
+    res.set("Cache-Control", CACHE_CONTROL).json({ window: windowInfo(window, scope, days, agentSlugs, cached), rows: value });
+  } catch (err) {
+    sendError(res, "/judge", err);
   }
 });
 

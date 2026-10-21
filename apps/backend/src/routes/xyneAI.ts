@@ -121,6 +121,8 @@ router.get(
   xyneAIControllerV2.listAgentModels,
 );
 
+router.post('/agents/:slug/warm', authMiddleware.authenticate, xyneAIControllerV2.warmAgent);
+
 // GET /api/xyne-ai/channel-agents/:channelId - List claw agents in a channel
 router.get('/channel-agents/:channelId', authMiddleware.authenticate, async (req, res) => {
   try {

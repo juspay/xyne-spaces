@@ -50,6 +50,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { chatProjectsRouter } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -811,6 +812,11 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
     ...(workspaceId ? { workspaceId } : {}),
   };
 }
+
+// Chat projects (routes/chat-projects.ts). Mounted here, ahead of every
+// `/:slug/...` route below, so `/chat/projects*` is resolved before any
+// slug pattern gets a chance at it.
+router.use(chatProjectsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({

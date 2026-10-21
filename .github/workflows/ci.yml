@@ -188,11 +188,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      # No host-side `playwright install`: Gauge runs inside the xyne-automation
+      # container (mcr.microsoft.com/playwright base image, Chromium pre-baked),
+      # and the runner's egress proxy blocks cdn.playwright.dev anyway.
       - name: Install dependencies
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
-
-      - name: Install Playwright browser
-        run: pnpm --filter xyne-automation exec playwright install chromium
 
       - name: Run automation tests
         run: pnpm run test

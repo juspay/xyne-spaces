@@ -1,4 +1,4 @@
-import { MicOn } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 
@@ -41,7 +41,7 @@ export const ThreadRecordingButton = ({
           'data-track-metadata': JSON.stringify(trackMetadata),
         })}
       >
-        <MicOn size={16} />
+        <AudioLines size={16} />
       </Button>
     </Tooltip>
   );

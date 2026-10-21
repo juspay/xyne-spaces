@@ -113,6 +113,10 @@ export interface RouteRow {
   tokensPerSec: number | null;
   failed: number;
   errorRate: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
 export interface SentimentComment {
@@ -577,6 +581,7 @@ interface RouteSqlRow {
   timed: number; llm_p50: number | null; llm_p95: number | null;
   ttft_n: number; ttft_p50: number | null; ttft_p95: number | null;
   tps_n: number; tps_out: number | null; tps_decode_ms: number | null;
+  tokens_in: bigint | null; tokens_out: bigint | null; cache_read: bigint | null; cache_write: bigint | null;
 }
 
 /** Index-only. */
@@ -592,6 +597,10 @@ export function routeTableSql(w: AnalyticsWindow): Prisma.Sql {
       count(r."ttftMs")::int                                       AS ttft_n,
       percentile_cont(0.5)  WITHIN GROUP (ORDER BY r."ttftMs")     AS ttft_p50,
       percentile_cont(0.95) WITHIN GROUP (ORDER BY r."ttftMs")     AS ttft_p95,
+      SUM(r."tokensIn")                                            AS tokens_in,
+      SUM(r."tokensOut")                                           AS tokens_out,
+      SUM(r."tokensCacheRead")                                     AS cache_read,
+      SUM(r."tokensCacheWrite")                                    AS cache_write,
       ${TPS_SUMS}
     FROM "agent_runs" r
     WHERE ${windowPredicate(w)}
@@ -615,8 +624,55 @@ export async function fetchRouteTable(w: AnalyticsWindow): Promise<RouteRow[]> {
       tokensPerSec: weightedTps(r.tps_out, r.tps_decode_ms),
       failed: n0(r.failed),
       errorRate: rate(runs - n0(r.completed), runs),
+      tokensIn: n0(Number(r.tokens_in ?? 0)),
+      tokensOut: n0(Number(r.tokens_out ?? 0)),
+      cacheRead: n0(Number(r.cache_read ?? 0)),
+      cacheWrite: n0(Number(r.cache_write ?? 0)),
     };
   });
+}
+
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+interface JudgeSummarySqlRow {
+  backend: string;
+  runs: number;
+  calls: bigint | null;
+  failed: bigint | null;
+  compactions: bigint | null;
+}
+
+export function judgeSummarySql(w: AnalyticsWindow): Prisma.Sql {
+  return Prisma.sql`
+    SELECT
+      r."judgeBackend"         AS backend,
+      count(*)::int            AS runs,
+      SUM(r."judgeCalls")      AS calls,
+      SUM(r."judgeFailed")     AS failed,
+      SUM(r."compactionCalls") AS compactions
+    FROM "agent_runs" r
+    WHERE ${windowPredicate(w)}
+      AND r."judgeBackend" IS NOT NULL
+    GROUP BY r."judgeBackend"
+    ORDER BY runs DESC
+  `;
+}
+
+export async function fetchJudgeSummary(w: AnalyticsWindow): Promise<JudgeSummaryRow[]> {
+  const rows = await runAnalytics<JudgeSummarySqlRow>(judgeSummarySql(w));
+  return rows.map((r) => ({
+    backend: r.backend,
+    runs: n0(r.runs),
+    calls: n0(Number(r.calls ?? 0)),
+    failed: n0(Number(r.failed ?? 0)),
+    compactions: n0(Number(r.compactions ?? 0)),
+  }));
 }
 
 

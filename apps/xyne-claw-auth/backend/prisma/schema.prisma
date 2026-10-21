@@ -1258,6 +1258,10 @@ model AgentRun {
   /// The `call-agent` tool call that spawned this run, lining a child row up
   /// with its row in the caller's trace.
   parentToolCallId String?
+  judgeBackend     String?
+  judgeCalls       Int?
+  judgeFailed      Int?
+  compactionCalls  Int?
   stats            AgentRunStats?
 
   @@index([userId, status, startedAt])
@@ -1821,6 +1825,12 @@ enum AgentAuditEvent {
   MCP_SERVER_CREATED
   SUBAGENT_MCP_UPDATED
   SUBAGENT_MCP_DELETED
+  // Org-level design systems. Added by migration
+  // 20261019120100_design_system_audit_events (ALTER TYPE ADD VALUE) — kept
+  // here so a fresh `prisma generate` accepts them.
+  DESIGN_SYSTEM_CREATED
+  DESIGN_SYSTEM_UPDATED
+  DESIGN_SYSTEM_DELETED
 }
 
 model AgentAuditLog {
@@ -3320,4 +3330,127 @@ model ProactivePrefs {
   updatedAt       DateTime @updatedAt
 
   @@map("proactive_prefs")
+}
+
+/// A folder of Xyne AI chats that carries shared instructions and knowledge,
+/// in the shape of Claude/Codex projects. Owned by one user, scoped to an org.
+///
+/// `ownerUserId` carries no foreign key to User on purpose: chat-side rows may
+/// be keyed by EITHER the caller's canonical Claw id or their raw Spaces id
+/// (see repositories/userIdFilter.ts), and a constraint would reject the
+/// latter. ChatConversationMeta omits it for the same reason.
+model ChatProject {
+  id          String  @id @default(cuid())
+  ownerUserId String
+  orgId       String
+  name        String
+  icon        String?
+
+  /// Shared instructions applied to every chat in this project.
+  /// Length-capped in the app layer.
+  instructions        String  @default("") @db.Text
+  /// When false the text is retained but NOT injected — a soft toggle rather
+  /// than a delete, mirroring UserAgentInstruction.enabled.
+  instructionsEnabled Boolean @default(true)
+
+  /// Optional link to a Spaces `Project`, read-only. No foreign key: Spaces
+  /// lives in another database that claw-auth reads through a read-only
+  /// Postgres grant, so a dangling id is tolerated.
+  ///
+  /// Stored as given — access is NOT checked on write, so a user can link a
+  /// project they cannot see. Access is checked when the project's context is
+  /// used (XYNE-66811); anything pulling its tickets or channels into a run
+  /// must re-check against the caller every time.
+  spacesProjectId  String?
+  defaultAgentSlug String?
+  sortOrder        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items ChatProjectItem[]
+
+  @@index([ownerUserId, sortOrder])
+  @@index([orgId])
+  @@map("chat_projects")
+}
+
+/// Which project a chat sits in, for one user.
+///
+/// Keyed by [conversationId, userId] with NO agentSlug. A chat can be answered
+/// by several agents, so membership must follow the CHAT; keying it per agent
+/// the way ChatConversationMeta does would let the same chat sit in a project
+/// under one agent and outside it under another.
+///
+/// Deleting a project cascades these rows and nothing else — chat_messages are
+/// untouched, so its chats simply fall back to the main list.
+model ChatProjectItem {
+  conversationId String
+  userId         String
+  projectId      String
+  /// Denormalized tenant key so a query that forgets to join the parent still
+  /// cannot cross orgs.
+  orgId          String
+  createdAt      DateTime @default(now())
+
+  project ChatProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@index([orgId])
+  @@map("chat_project_items")
+}
+
+/// An org's brand as its own record. Supersedes the free-text
+/// `agent.config.designSystem`, which is still read as a fallback until every
+/// org is migrated — resolution order lives in designSystemRepository.
+model DesignSystem {
+  id        String @id @default(cuid())
+  orgId     String
+  name      String
+  designMd  String @default("") @db.Text
+  tokensCss String @default("") @db.Text
+
+  /// Descriptors only — { logo: { storagePath, mimeType, width, height }, fonts: [...] }.
+  /// Bytes ride GCS. Deliberately not a ChatAttachment reference: those
+  /// cascade-delete with their chat message and carry no org scope.
+  assets Json?
+
+  /// "manual" | "url" | "screenshot" | "repo" | "file" | "library". Plain string
+  /// rather than a Postgres enum, following the Canvas.visibility convention.
+  source       String  @default("manual")
+  sourceUrl    String?
+  sourceRepo   String?
+  sourceCommit String?
+
+  version   Int      @default(1)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversationPins ChatConversationDesignSystem[]
+
+  @@index([orgId])
+  @@index([orgId, name])
+  @@map("design_systems")
+}
+
+/// A single chat pinned to a design system, overriding its agent's default.
+/// Keyed by conversation alone — not by [conversationId, userId, agentSlug]
+/// like ChatConversationMeta — because a chat can switch agents mid-conversation
+/// and the brand its artifacts are built against must not change when it does.
+model ChatConversationDesignSystem {
+  conversationId String   @id
+  designSystemId String
+  orgId          String
+  setByUserId    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  designSystem DesignSystem @relation(fields: [designSystemId], references: [id], onDelete: Cascade)
+
+  @@index([designSystemId])
+  @@index([orgId])
+  @@map("chat_conversation_design_systems")
 }

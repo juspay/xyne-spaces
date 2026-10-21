@@ -6447,11 +6447,28 @@ export interface RouteRow {
   tokensPerSec: number | null;
   failed: number;
   errorRate: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
 export interface RoutesResponse {
   window: WindowInfo;
   rows: RouteRow[];
+}
+
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+export interface JudgeResponse {
+  window: WindowInfo;
+  rows: JudgeSummaryRow[];
 }
 
 export interface MetricsSentiment extends AgentSentiment {
@@ -6922,6 +6939,10 @@ export function fetchMetricsActiveAgents(scope: MetricsQueryScope, signal?: Abor
 
 export function fetchMetricsRoutes(scope: MetricsQueryScope, signal?: AbortSignal): Promise<RoutesResponse> {
   return metricsGet(scope.userId, metricsUrl("/routes", scope), signal);
+}
+
+export function fetchMetricsJudge(scope: MetricsQueryScope, signal?: AbortSignal): Promise<JudgeResponse> {
+  return metricsGet(scope.userId, metricsUrl("/judge", scope), signal);
 }
 
 /** Exactly one agent must be selected — the server answers 400 otherwise. */

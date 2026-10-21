@@ -14,6 +14,7 @@ import {
   fetchMetricsErrorClasses,
   fetchMetricsLlmCalls,
   fetchMetricsRoutes,
+  fetchMetricsJudge,
   fetchMetricsRunDaily,
   fetchMetricsSentiment,
   fetchMetricsSummary,
@@ -32,6 +33,7 @@ import {
   type MetricSessionsRequest,
   type MetricSessionsResponse,
   type RoutesResponse,
+  type JudgeResponse,
   type RunDailyResponse,
   type SentimentResponse,
   type SummaryResponse,
@@ -374,6 +376,15 @@ export function useRoutes(
 ): MetricState<RoutesResponse> {
   const url = metricsUrl("/routes", scope);
   return v2Hook(scope, url, opts.enabled ?? true, (signal) => fetchMetricsRoutes(scope, signal));
+}
+
+export function useJudge(
+  scope: MetricsScopeParams,
+  _params?: NoParams,
+  opts: MetricsHookOptions = {},
+): MetricState<JudgeResponse> {
+  const url = metricsUrl("/judge", scope);
+  return v2Hook(scope, url, opts.enabled ?? true, (signal) => fetchMetricsJudge(scope, signal));
 }
 
 /** Disabled unless exactly one agent is selected — the endpoint is per-agent. */

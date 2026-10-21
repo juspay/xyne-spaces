@@ -12,9 +12,10 @@ import {
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
+import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository, designSystemRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
+import { draftSpecFromCreateAgentParams, createAgentQueueError, createAgentNotGranted } from "../lib/agent-draft-card.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
@@ -519,6 +520,95 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   });
 }));
 
+// ── Plugin / CLI agent authoring (draft → approval) ──────────────────────────
+// Let an external client (the xyne-claw CLI plugin for Codex / Claude Code)
+// submit a NEW agent for creation WITHOUT minting a live agent. A submission
+// lands in the SAME pipeline the in-thread agent-authoring flow uses: a pending
+// `agent_create` AgentRequest whose `proposedContent` holds the full spec.
+// Nothing is created until the requester approves it (the decision route below,
+// or the Spaces draft card) — so "created only on approval" holds for CLI
+// drafts too, and the plugin can never create a live agent on its own.
+// Registered BEFORE GET "/:slug" so GET "/draft-requests" is not shadowed by it.
+
+/** Submit an agent draft for approval. Returns the pending request id. */
+router.post("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+
+  const params = (req.body ?? {}) as Record<string, unknown>;
+  const spec = draftSpecFromCreateAgentParams(params);
+  if (!spec) throw badRequest("A draft needs at least a name and a systemPrompt.");
+
+  // Slug validity + duplicate check, reusing the SAME guard the in-thread flow
+  // uses so a CLI draft can't persist a row the card flow would have rejected.
+  const queueError = await createAgentQueueError(params, orgId);
+  if (queueError) throw badRequest(queueError);
+
+  // Unresolved capabilities are reported (not fatal): the approver still
+  // decides, and unmatched tools are dropped when the agent is created.
+  const unmatchedCapabilities = await createAgentNotGranted(params, orgId, requesterId);
+
+  const proposedContent = JSON.stringify(spec);
+  const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
+    agentSlug: spec.slug,
+    requesterId,
+    orgId,
+    proposedContent,
+    proposedContentHash: hashSkillContent(proposedContent),
+  });
+
+  log.info(`[agents/draft-requests] queued agent_create slug=${spec.slug} request=${outcome.request.id} requester=${requesterId} org=${orgId}`);
+  res.status(201);
+  ok(
+    res,
+    { requestId: outcome.request.id, slug: spec.slug, status: "pending" },
+    {
+      ...(outcome.supersededCount > 0 ? { supersededCount: outcome.supersededCount } : {}),
+      ...(unmatchedCapabilities.length > 0 ? { unmatchedCapabilities } : {}),
+    },
+  );
+}));
+
+/** List the caller's own pending agent drafts awaiting approval. */
+router.get("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+  const rows = await agentRequestRepository.listPendingAgentCreates(requesterId, orgId);
+  ok(
+    res,
+    rows.map((r) => ({ requestId: r.id, slug: r.agentSlug, status: r.status, createdAt: r.createdAt })),
+  );
+}));
+
+/** Approve or reject one of the caller's own drafts. Approval MATERIALIZES the
+ *  agent through the exact resolver the Spaces draft card uses, so the
+ *  self-approval boundary ("only the requester can decide") and every capability
+ *  gate are enforced identically — this route grants no new authority. */
+router.post("/draft-requests/:requestId/decision", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  const body = (req.body ?? {}) as { decision?: unknown; keptCapabilityIds?: unknown };
+  const decision = body.decision === "approve" ? "approve" : body.decision === "reject" ? "reject" : null;
+  if (!decision) throw badRequest('decision must be "approve" or "reject"');
+  const keptCapabilityIds = Array.isArray(body.keptCapabilityIds)
+    ? body.keptCapabilityIds.filter((v): v is string => typeof v === "string")
+    : undefined;
+
+  const { resolveAgentDraft } = await import("../lib/agent-card.js");
+  const result = await resolveAgentDraft(req.params.requestId, requesterId, decision, keptCapabilityIds);
+  if (!result.ok) throw new HttpError(result.code, result.error);
+  ok(res, {
+    status: result.status,
+    slug: result.identity.slug,
+    alreadyResolved: result.alreadyResolved,
+    ...("note" in result && result.note ? { note: result.note } : {}),
+  });
+}));
+
 router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Response, next) => {
   // Phase-2: org-scope this un-ACL'd read so agent metadata can't be read
   // across orgs by slug. For S2S callers with no derivable org (Spaces'
@@ -711,13 +801,32 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     throw forbidden("Only the agent owner, contributors, or admins can edit its design system");
   }
 
-  const supplied = (req.body as { designSystem?: unknown }).designSystem;
-  if (supplied !== null && typeof supplied !== "string") {
+  // Two shapes share this route: `designSystem` is the pre-migration free text,
+  // `designSystemId` points at a DesignSystem row. A body carrying only the
+  // former behaves exactly as it did before.
+  const body = (req.body ?? {}) as { designSystem?: unknown; designSystemId?: unknown };
+  const hasText = "designSystem" in body;
+  const hasId = "designSystemId" in body;
+  if (!hasText && !hasId) {
+    throw badRequest("designSystem or designSystemId is required");
+  }
+
+  const supplied = body.designSystem;
+  if (hasText && supplied !== null && typeof supplied !== "string") {
     throw badRequest("designSystem must be a string or null");
   }
   const designSystem = typeof supplied === "string" ? supplied.trim() : "";
   if (designSystem.length > 32_000) {
     throw badRequest("designSystem must be at most 32,000 characters");
+  }
+
+  const suppliedId = body.designSystemId;
+  if (hasId && suppliedId !== null && typeof suppliedId !== "string") {
+    throw badRequest("designSystemId must be a string or null");
+  }
+  const designSystemId = typeof suppliedId === "string" ? suppliedId.trim() : "";
+  if (designSystemId && !(await designSystemRepository.findById(designSystemId, existing.orgId))) {
+    throw notFound("Design system not found");
   }
 
   // Optimistic retry prevents this narrow edit from replacing a concurrent
@@ -729,8 +838,14 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
       throw notFound("Agent not found");
     }
     const nextConfig = { ...(asRecord(fresh.config) ?? {}) };
-    if (designSystem) nextConfig["designSystem"] = designSystem;
-    else delete nextConfig["designSystem"];
+    if (hasText) {
+      if (designSystem) nextConfig["designSystem"] = designSystem;
+      else delete nextConfig["designSystem"];
+    }
+    if (hasId) {
+      if (designSystemId) nextConfig["designSystemId"] = designSystemId;
+      else delete nextConfig["designSystemId"];
+    }
 
     const configCheck = validateAgentModelConfig(nextConfig);
     if (!configCheck.ok) {
@@ -755,7 +870,10 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     eventType: "AGENT_UPDATED",
     targetId: existing.id,
     description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
-    metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    metadata: {
+      changed: [...(hasText ? ["designSystem"] : []), ...(hasId ? ["designSystemId"] : [])],
+      orgId: existing.orgId,
+    },
   });
   ok(res, sanitizeAgent(updated as unknown as Record<string, unknown>));
 }));

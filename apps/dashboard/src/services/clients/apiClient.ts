@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosE
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
-import { logger, Logger } from '../../utils/logger';
+import { logger, Logger, getWebDeviceKey, WEB_DEVICE_KEY_STORAGE_KEY } from '../../utils/logger';
 import {
   httpRequestDuration,
   httpRequestTotal,
@@ -124,9 +124,19 @@ apiConfig.interceptors.request.use(
       if (userEmail) {
         config.headers['x-user-email'] = userEmail;
       }
-      const clientSessionId = logger.clientSessionId;
+      // The persistent device key must exist in localStorage (`xd`) before any API
+      // call: seed it from the logger's id (Electron/native id when available) so a
+      // cleared storage mid-session is restored and header + storage always agree.
+      const clientSessionId = logger.clientSessionId || getWebDeviceKey();
       if (clientSessionId) {
-        config.headers['x-client-session-id'] = clientSessionId;
+        try {
+          if (!localStorage.getItem(WEB_DEVICE_KEY_STORAGE_KEY)) {
+            localStorage.setItem(WEB_DEVICE_KEY_STORAGE_KEY, clientSessionId);
+          }
+        } catch {
+          /* Storage unavailable — the header still carries the id. */
+        }
+        config.headers['x-device-id'] = clientSessionId;
       }
       for (const [name, value] of Object.entries(getDynamicHeaders())) {
         config.headers[name] = value;
