@@ -22,6 +22,8 @@ import { notifyUserStep } from './steps/notify-user.step';
 import { notifyUserSosStep } from './steps/notify-user-sos.step';
 import { createTicketStep } from './steps/create-ticket.step';
 import { createSubTicketStep } from './steps/create-sub-ticket.step';
+import { linkSubTicketStep } from './steps/link-sub-ticket.step';
+import { sendAppReplyStep } from './steps/send-app-reply.step';
 import { updateTicketStep } from './steps/update-ticket.step';
 import { assignTicketStep } from './steps/assign-ticket.step';
 import { closeTicketStep } from './steps/close-ticket.step';
@@ -74,6 +76,8 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(notifyUserSosStep);
   stepRegistry.register(createTicketStep);
   stepRegistry.register(createSubTicketStep);
+  stepRegistry.register(linkSubTicketStep);
+  stepRegistry.register(sendAppReplyStep);
   stepRegistry.register(updateTicketStep);
   stepRegistry.register(assignTicketStep);
   stepRegistry.register(closeTicketStep);

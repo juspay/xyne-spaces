@@ -104,7 +104,7 @@ type AuthEvent =
   | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'EMAIL_SIGNIN' }
   | { type: 'EMAIL_REGISTER' }
-  | { type: 'LOGOUT' }
+  | { type: 'LOGOUT'; skipApi?: boolean }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
   | { type: 'AUTH_ERROR'; message: string }
@@ -831,6 +831,9 @@ export const authMachine = createMachine(
       loggingOut: {
         invoke: {
           src: 'performLogout',
+          input: ({ event }) => ({
+            skipApi: event.type === 'LOGOUT' && event.skipApi === true,
+          }),
           onDone: {
             target: 'unauthenticated',
             actions: [
@@ -1429,31 +1432,35 @@ export const authMachine = createMachine(
       },
     },
     actors: {
-      performLogout: fromPromise(async () => {
+      performLogout: fromPromise(async ({ input }: { input: { skipApi?: boolean } }) => {
         // A 401 here is itself a signal: cookies were already gone before this
         // POST — the signature of an externally-triggered (phantom) logout
         // rather than a user-initiated one. Force-flush: the log buffer is
         // in-memory only and the page is about to be torn down.
-        logger.info(LoggerEvent.LOGOUT_STARTED, {});
+        logger.info(LoggerEvent.LOGOUT_STARTED, { skipApi: input?.skipApi === true });
         logger.pushlogs();
-        try {
-          const response = await axios.post(
-            `${API_BASE_URL}/auth/logout`,
-            {},
-            {
-              withCredentials: true,
-              headers: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention
-                'Content-Type': 'application/json',
+        // A logout triggered by a 401 skips the POST: the session is already
+        // dead, so /auth/logout would only fail with another 401.
+        if (input?.skipApi !== true) {
+          try {
+            const response = await axios.post(
+              `${API_BASE_URL}/auth/logout`,
+              {},
+              {
+                withCredentials: true,
+                headers: {
+                  // eslint-disable-next-line @typescript-eslint/naming-convention
+                  'Content-Type': 'application/json',
+                },
               },
-            },
-          );
-          logger.info(LoggerEvent.LOGOUT_REQUEST_COMPLETED, { status: response.status });
-        } catch (error) {
-          logger.warn(LoggerEvent.LOGOUT_REQUEST_FAILED, {
-            status: axios.isAxiosError(error) ? error.response?.status : undefined,
-            error: error instanceof Error ? error.message : String(error),
-          });
+            );
+            logger.info(LoggerEvent.LOGOUT_REQUEST_COMPLETED, { status: response.status });
+          } catch (error) {
+            logger.warn(LoggerEvent.LOGOUT_REQUEST_FAILED, {
+              status: axios.isAxiosError(error) ? error.response?.status : undefined,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
         logger.pushlogs();
 

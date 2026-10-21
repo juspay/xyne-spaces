@@ -5,6 +5,7 @@ import { AxiosError } from 'axios';
 import { ArrowRight, Building2, Loader2, LogOut, Plus, Users, X } from 'lucide-react';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
+import { preserveWebDeviceKey } from '../../utils/logger';
 import type { Workspace } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -156,7 +157,8 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     Cookies.remove('user_name');
     Cookies.remove('user_email');
     Cookies.remove('user_session_id');
-    localStorage.clear();
+    // The device key (`xd`) must survive logout.
+    preserveWebDeviceKey(() => localStorage.clear());
     logout();
     window.location.href = '/auth';
   };
