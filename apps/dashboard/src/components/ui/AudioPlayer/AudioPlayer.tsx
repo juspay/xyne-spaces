@@ -1,4 +1,4 @@
-import { Play, Pause, Loader2 } from 'lucide-react';
+import { Play, Pause, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useAudioPlayback } from './useAudioPlayback';
 
@@ -31,7 +31,7 @@ interface AudioPlayerProps {
  *
  * State machine:
  *   idle → (click) → loading → playing ↔ paused
- *                  → idle (on error)
+ *                  → idle (on error / timeout, marked unavailable)
  */
 export function AudioPlayer({
   onLoad,
@@ -41,7 +41,7 @@ export function AudioPlayer({
   className,
   showToastOnError = false,
 }: AudioPlayerProps): React.ReactElement {
-  const { state, currentTime, duration, canSeek, toggle, seek } = useAudioPlayback({
+  const { state, currentTime, duration, canSeek, isUnavailable, toggle, seek } = useAudioPlayback({
     onLoad,
     initialDurationSec,
     showToastOnError,
@@ -69,7 +69,14 @@ export function AudioPlayer({
       {/* Play / Pause / Loading button */}
       <button
         type='button'
-        aria-label={state === 'playing' ? 'Pause audio' : 'Play audio'}
+        aria-label={
+          state === 'playing'
+            ? 'Pause audio'
+            : isUnavailable
+              ? 'Recording not available'
+              : 'Play audio'
+        }
+        title={isUnavailable ? 'Recording not available' : undefined}
         onClick={e => void handleToggle(e)}
         disabled={state === 'loading'}
         data-track-category={trackCategory}
@@ -80,6 +87,8 @@ export function AudioPlayer({
           <Loader2 className='w-4 h-4 animate-spin' />
         ) : state === 'playing' ? (
           <Pause className='w-4 h-4' />
+        ) : isUnavailable ? (
+          <AlertTriangle className='w-4 h-4' />
         ) : (
           <Play className='w-4 h-4 translate-x-[0.5px]' />
         )}
