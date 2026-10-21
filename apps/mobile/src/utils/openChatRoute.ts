@@ -74,6 +74,9 @@ const getUnreadOpenParams = ({
     unreadCount: String(unreadCount ?? 0),
     unreadLastViewedAt: String(unreadLastViewedAt),
     ...(unreadLastViewedConversationId ? { unreadLastViewedConversationId } : {}),
+    ...(typeof unreadLastActivityAt === 'number'
+      ? { unreadLastActivityAt: String(unreadLastActivityAt) }
+      : {}),
   };
 };
 

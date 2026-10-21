@@ -265,6 +265,7 @@ type ChatListProps = {
   isUnreadOpen?: boolean | undefined;
   unreadBoundaryLastViewedAt?: number | undefined;
   unreadBoundaryLastViewedConversationId?: string | undefined;
+  unreadLastActivityAt?: number | undefined;
   unreadCount?: number | undefined;
   composerGeometry: ChatComposerGeometry;
   freeze?: SharedValue<boolean> | undefined;
@@ -340,6 +341,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     isUnreadOpen,
     unreadBoundaryLastViewedAt,
     unreadBoundaryLastViewedConversationId,
+    unreadLastActivityAt,
     unreadCount,
     composerGeometry,
     freeze,
@@ -1111,12 +1113,23 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       hasLoadedTimestampBoundaryCoverage(displayRows, unreadBoundaryLastViewedAt),
     [displayRows, shouldAnchorToUnreadBoundary, unreadBoundaryLastViewedAt],
   );
+  // Rows reaching the channel's last activity mean the cache already holds
+  // everything new, so its answer (divider or not) needs no network wait.
+  const isUnreadCacheCurrent = useMemo(() => {
+    if (!shouldAnchorToUnreadBoundary || unreadLastActivityAt === undefined) return false;
+    for (let index = displayRows.length - 1; index >= 0; index -= 1) {
+      const row = displayRows[index];
+      if (row?.type === 'message') return row.paint.createdAt >= unreadLastActivityAt;
+    }
+    return false;
+  }, [displayRows, shouldAnchorToUnreadBoundary, unreadLastActivityAt]);
   const unreadPlacement = resolveUnreadPlacement({
     shouldAnchorToUnreadBoundary,
     isInitialLoadComplete,
     isLiveFresh: openPhase === 'liveFresh',
     hasDivider: unreadDividerRowIndex >= 0,
     hasBoundaryCoverage: hasUnreadBoundaryCoverage,
+    isCacheCurrent: isUnreadCacheCurrent,
     hasInitialLoadError: initialLoadError !== null,
     hasHoldExpired: hasUnreadHoldExpired,
   });

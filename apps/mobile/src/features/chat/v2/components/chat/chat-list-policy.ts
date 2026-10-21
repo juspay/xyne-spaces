@@ -502,6 +502,7 @@ export const resolveUnreadPlacement = ({
   isLiveFresh,
   hasDivider,
   hasBoundaryCoverage,
+  isCacheCurrent,
   hasInitialLoadError,
   hasHoldExpired,
 }: {
@@ -510,18 +511,24 @@ export const resolveUnreadPlacement = ({
   isLiveFresh: boolean;
   hasDivider: boolean;
   hasBoundaryCoverage: boolean;
+  isCacheCurrent: boolean;
   hasInitialLoadError: boolean;
   hasHoldExpired: boolean;
 }): ChatUnreadPlacement => {
   if (!shouldAnchorToUnreadBoundary) return 'pending';
   const isLiveWindow = isInitialLoadComplete && isLiveFresh;
   // Rows on both sides of the boundary fix the divider's position, so a revisit
-  // with a warm cache lands without waiting for the network. Only "no divider"
-  // needs the live window: unread rows may simply not be cached yet. Once the
-  // hold expires, land on whatever divider the loaded rows have.
-  if (hasDivider && (isLiveWindow || hasBoundaryCoverage || hasHoldExpired)) return 'divider';
-  if (isLiveWindow || hasInitialLoadError || hasHoldExpired) return 'none';
-  return 'pending';
+  // with a warm cache lands without waiting for the network.
+  if (hasDivider) {
+    return isLiveWindow || hasBoundaryCoverage || hasInitialLoadError || hasHoldExpired
+      ? 'divider'
+      : 'pending';
+  }
+  // No divider is final once the rows reach the channel's last activity:
+  // nothing new is missing from them, so there is nothing to wait for.
+  return isLiveWindow || isCacheCurrent || hasInitialLoadError || hasHoldExpired
+    ? 'none'
+    : 'pending';
 };
 
 export const SCROLL_TO_BOTTOM_THRESHOLD = 1000;

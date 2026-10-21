@@ -307,6 +307,7 @@ const ChatChannelScreen = (): ReactElement => {
     unreadCount: unreadCountParam,
     unreadLastViewedAt: unreadLastViewedAtParam,
     unreadLastViewedConversationId: unreadLastViewedConversationIdParam,
+    unreadLastActivityAt: unreadLastActivityAtParam,
   } = useLocalSearchParams<{
     channelId: string;
     conversationId?: string;
@@ -324,6 +325,7 @@ const ChatChannelScreen = (): ReactElement => {
     unreadCount?: string;
     unreadLastViewedAt?: string;
     unreadLastViewedConversationId?: string;
+    unreadLastActivityAt?: string;
   }>();
 
   const router = useRouter();
@@ -543,6 +545,11 @@ const ChatChannelScreen = (): ReactElement => {
     ? (unreadLastViewedConversationIdParam ??
       (hasUnreadMessages ? (channelUserStatus?.lastViewedConversationId ?? undefined) : undefined))
     : undefined;
+  const parsedUnreadLastActivityAt = Number(unreadLastActivityAtParam);
+  const frozenUnreadLastActivityAt =
+    isUnreadOpen && Number.isFinite(parsedUnreadLastActivityAt) && parsedUnreadLastActivityAt > 0
+      ? parsedUnreadLastActivityAt
+      : undefined;
   const frozenUnreadCount = isUnreadOpen
     ? (requestedUnreadCount ?? channelUserStatus?.unreadCount ?? undefined)
     : undefined;
@@ -1125,6 +1132,7 @@ const ChatChannelScreen = (): ReactElement => {
               isUnreadOpen={isUnreadOpen}
               unreadBoundaryLastViewedAt={frozenUnreadBoundaryLastViewedAt}
               unreadBoundaryLastViewedConversationId={frozenUnreadBoundaryLastViewedConversationId}
+              unreadLastActivityAt={frozenUnreadLastActivityAt}
               unreadCount={frozenUnreadCount}
               composerGeometry={composerGeometry}
               freeze={freeze}
