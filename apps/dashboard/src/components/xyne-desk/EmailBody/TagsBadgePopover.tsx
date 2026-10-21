@@ -3,10 +3,13 @@
  * All logic lives in dashboard/src/components/tags/TagsBadge.tsx and
  * dashboard/src/hooks/useSourceTags.ts.
  */
-import { JSX, useState, useMemo } from 'react';
+import { Fragment, JSX, useState, useMemo } from 'react';
+import type { TicketPriority } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Frown, Meh, Smile, Sparkles, type LucideIcon } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
+import { HoverCard } from '../../ui/HoverCard';
+import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { useEntityTags, useTicketLatestEmailTags } from '../../../hooks/useSourceTags';
 import {
   EntityTagsBadge,
@@ -22,9 +25,167 @@ const DESK_EMAIL = 'desk-email';
 
 // ─── Desk-email specific badges ───────────────────────────────────────────────
 
-export const EmailTagsBadge = ({ emailId }: { emailId: string }): JSX.Element => (
-  <EntityTagsBadge sourceType={DESK_EMAIL} sourceId={emailId} />
-);
+export const EmailTagsBadge = ({
+  emailId,
+  onClose,
+}: {
+  emailId: string;
+  onClose?: () => void;
+}): JSX.Element => <EntityTagsBadge sourceType={DESK_EMAIL} sourceId={emailId} onClose={onClose} />;
+
+// Built-in priority / sentiment values in scale order (backend DEFAULT_DESK_EMAIL_CONFIG).
+type Level = { text: string; tint: string };
+const GREEN: Level = {
+  text: 'text-emerald-600 dark:text-emerald-300',
+  tint: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900',
+};
+const PRIORITY: Record<string, Level> = {
+  low: GREEN,
+  medium: {
+    text: 'text-amber-600 dark:text-amber-300',
+    tint: 'bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:border-amber-900',
+  },
+  high: {
+    text: 'text-orange-600 dark:text-orange-300',
+    tint: 'bg-orange-50 border-orange-200 dark:bg-orange-950/40 dark:border-orange-900',
+  },
+  critical: {
+    text: 'text-red-600 dark:text-red-300',
+    tint: 'bg-red-50 border-red-200 dark:bg-red-950/40 dark:border-red-900',
+  },
+};
+const SENTIMENT: Record<string, Level & { icon: LucideIcon }> = {
+  negative: {
+    icon: Frown,
+    text: 'text-rose-600 dark:text-rose-300',
+    tint: 'bg-rose-50 border-rose-200 dark:bg-rose-950/40 dark:border-rose-900',
+  },
+  neutral: {
+    icon: Meh,
+    text: 'text-slate-600 dark:text-slate-300',
+    tint: 'bg-slate-100 border-slate-200 dark:bg-slate-800/60 dark:border-slate-700',
+  },
+  positive: { icon: Smile, ...GREEN },
+};
+const SCALES: Record<string, Record<string, Level>> = { priority: PRIORITY, sentiment: SENTIMENT };
+
+/** Priority reuses the ticket priority bars; sentiment is a face. */
+const SignalIcon = ({
+  category,
+  value,
+  size,
+}: {
+  category: string;
+  value: string;
+  size: number;
+}): JSX.Element | null => {
+  if (category === 'priority') {
+    return PRIORITY[value] ? <>{getPriorityIcon(value.toUpperCase() as TicketPriority)}</> : null;
+  }
+  const Face = SENTIMENT[value]?.icon;
+  return Face ? <Face size={size} aria-hidden='true' /> : null;
+};
+
+/**
+ * Insight capsule (priority + sentiment) for one email, fetched on mount so every email in an
+ * opened thread loads in parallel; hover shows each scale and the tag's reason.
+ */
+export const EmailSignalTags = ({ emailId }: { emailId: string }): JSX.Element | null => {
+  const { groups } = useEntityTags(DESK_EMAIL, emailId, true);
+  const signals = Object.keys(SCALES).flatMap(category => {
+    const tag = groups.find(g => g.category === category)?.tags[0];
+    return tag ? [{ category, ...tag, level: SCALES[category]?.[tag.tag] }] : [];
+  });
+  if (!signals.length) return null;
+
+  const trigger = (
+    <button
+      type='button'
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
+      className='inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-background pl-1.5 pr-2 text-[11px] font-medium capitalize leading-none whitespace-nowrap hover:bg-muted/60'
+      data-track-category='Support'
+      data-track-name='HoverEmailInsights'
+    >
+      <Sparkles size={11} className='shrink-0 text-violet-500' aria-hidden='true' />
+      {signals.map(({ category, tag, level }, i) => (
+        <Fragment key={category}>
+          {i > 0 && <span className='h-3 w-px bg-border' aria-hidden='true' />}
+          <span
+            className={cn('inline-flex items-center gap-1', level?.text ?? 'text-muted-foreground')}
+          >
+            <SignalIcon category={category} value={tag} size={12} />
+            {tag}
+          </span>
+        </Fragment>
+      ))}
+    </button>
+  );
+
+  return (
+    <HoverCard
+      trigger={trigger}
+      openDelay={150}
+      side='bottom'
+      align='start'
+      sideOffset={6}
+      className='w-72 p-0 overflow-hidden'
+    >
+      <div className='flex items-center gap-1.5 border-b border-border bg-muted/40 px-3 py-2'>
+        <Sparkles size={12} className='text-violet-500' aria-hidden='true' />
+        <span className='text-xs font-semibold text-foreground'>Insights</span>
+        <span className='ml-auto text-[10px] text-muted-foreground'>this email</span>
+      </div>
+      <div className='divide-y divide-border'>
+        {signals.map(({ category, tag, reason, level }) => (
+          <div key={category} className='px-3 py-2.5'>
+            <div className='flex items-center justify-between'>
+              <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>
+                {category}
+              </span>
+              <span
+                className={cn(
+                  'text-xs font-semibold capitalize',
+                  level?.text ?? 'text-muted-foreground',
+                )}
+              >
+                {tag}
+              </span>
+            </div>
+            {level && (
+              <div
+                className={cn(
+                  'mt-2 grid gap-1',
+                  category === 'priority' ? 'grid-cols-4' : 'grid-cols-3',
+                )}
+              >
+                {Object.entries(SCALES[category] ?? {}).map(([name, t]) => (
+                  <span
+                    key={name}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 rounded-md border py-1.5 text-[10px] capitalize',
+                      name === tag
+                        ? cn(t.tint, t.text, 'font-semibold')
+                        : 'border-transparent text-muted-foreground opacity-50',
+                    )}
+                  >
+                    <SignalIcon category={category} value={name} size={14} />
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className='mt-2 text-xs leading-relaxed text-muted-foreground'>
+              {reason || <span className='italic'>No reason given</span>}
+            </p>
+          </div>
+        ))}
+      </div>
+    </HoverCard>
+  );
+};
 
 export const EmailTagsRow = ({ emailId }: { emailId: string }): JSX.Element | null => {
   const { groups, isLoading } = useEntityTags('desk-email', emailId, true);

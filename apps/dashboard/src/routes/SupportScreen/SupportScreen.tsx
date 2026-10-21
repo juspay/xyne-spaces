@@ -7404,12 +7404,21 @@ const EmailThreadItem = ({
         data-track-category='Support'
         data-track-name={isCollapsed ? 'ExpandEmail' : 'CollapseEmail'}
         data-track-metadata={JSON.stringify({ ticketId: ticketId ?? null, emailIndex, emailCount })}
-        onClick={headerClickable ? onToggleCollapse : undefined}
+        // Popovers (tags, recipient details) portal out of this div but still bubble here
+        // through React; only toggle for events that happened inside the header itself.
+        onClick={
+          headerClickable
+            ? e => {
+                if (e.currentTarget.contains(e.target as Node)) onToggleCollapse?.();
+              }
+            : undefined
+        }
         role={headerClickable ? 'button' : undefined}
         tabIndex={headerClickable ? 0 : undefined}
         onKeyDown={
           headerClickable
             ? e => {
+                if (!e.currentTarget.contains(e.target as Node)) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   onToggleCollapse?.();

@@ -3,7 +3,7 @@ import { JSX, ReactNode, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
 import { Popover } from '../../ui/Popover/Popover';
-import { EmailTagsBadge } from './TagsBadgePopover';
+import { EmailSignalTags, EmailTagsBadge } from './TagsBadgePopover';
 import {
   avatarColorFor,
   avatarInitial,
@@ -84,6 +84,8 @@ export const EmailThreadHeader = ({
   const { user } = useAuth();
   const meEmail = deskEmail ?? user?.email ?? null;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Remounts the signal capsule (refetch) after the Tags editor closes.
+  const [tagsVersion, setTagsVersion] = useState(0);
 
   const recipientSummary = summarizeRecipients(to, cc, meEmail);
   const date = formatEmailHeaderDate(createdAt);
@@ -134,6 +136,7 @@ export const EmailThreadHeader = ({
                   {`<${fromEmail}>`}
                 </span>
               )}
+              {emailId && <EmailSignalTags key={tagsVersion} emailId={emailId} />}
               {extras}
             </div>
             {isCollapsed ? (
@@ -157,7 +160,9 @@ export const EmailThreadHeader = ({
             )}
           </div>
           <div className='flex items-center gap-1.5 shrink-0'>
-            {emailId && <EmailTagsBadge emailId={emailId} />}
+            {emailId && (
+              <EmailTagsBadge emailId={emailId} onClose={() => setTagsVersion(v => v + 1)} />
+            )}
             <div className='text-xs text-muted-foreground whitespace-nowrap' title={date.full}>
               {date.short}
             </div>
