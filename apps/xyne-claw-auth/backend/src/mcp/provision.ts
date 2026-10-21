@@ -9,6 +9,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { execFile } from "node:child_process";
+import { buildChildEnv } from "xyne-claw-shared";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -198,7 +199,8 @@ async function install(name: string, version: string | undefined, dir: string): 
       ],
       {
         timeout: INSTALL_TIMEOUT_MS,
-        env: { ...process.env, npm_config_update_notifier: "false" },
+        // npm runs the package's install scripts: no claw-auth secrets in its env.
+        env: buildChildEnv(process.env, { npm_config_update_notifier: "false" }, { inheritPrefixes: ["npm_config_", "NPM_CONFIG_"] }),
       },
     );
 

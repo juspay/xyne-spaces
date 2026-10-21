@@ -24,6 +24,8 @@ const SERVER_PATH = resolve(
  */
 export const jenkinsAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  // Imports claw-auth's config at startup, so it needs this service's env (XYNE-66849).
+  inheritParentEnv: true,
   type: "jenkins",
   healthCheck: { name: "jenkins_check_connection", params: {} },
   writeTools: ["jenkins_trigger_build"],

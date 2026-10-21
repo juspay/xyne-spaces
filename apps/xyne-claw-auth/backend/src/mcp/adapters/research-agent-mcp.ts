@@ -10,6 +10,7 @@ const SERVER_PATH = resolve(
 
 export const researchAgentMcpAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  inheritEnv: ["RESEARCH_AGENT_BASE_URL", "research_agent_mcp_api_key"],
   type: "research-agent-mcp",
   healthCheck: { name: "ping", params: {} },
   writeTools: [],

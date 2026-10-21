@@ -16,6 +16,7 @@ const SERVER_PATH = resolve(
 // server IPs (429/403); for reliable access switch to an approved OAuth app.
 export const redditAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  inheritEnv: ["REDDIT_USER_AGENT"],
   type: "reddit",
   healthCheck: { name: "get_subreddit_posts", params: { subreddit: "announcements", limit: 1 } },
   writeTools: [],

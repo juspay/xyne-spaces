@@ -1,3 +1,4 @@
+export { buildChildEnv, type ChildEnvOptions } from "./child-env.js";
 export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
 export { isUiWidget, userQuestionOptionLabel } from "./types/ui-widget.js";
 export type { UiWidget, UiWidgetType, UserQuestionOption } from "./types/ui-widget.js";

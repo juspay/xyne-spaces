@@ -135,6 +135,8 @@ function buildDynamicDefinition(row: McpServer): ResolvedConnectorDefinition {
     writePolicy,
     staticTools: [],
     forwardFiles: row.forwardFiles === true,
+    inheritEnv: [],
+    inheritParentEnv: false,
     buildStdioCommand(credentials) {
       const envTemplate = asRecord(launch["env"]);
       const args = Array.isArray(launch["args"]) ? launch["args"].map((a) => applyTemplate(String(a), credentials)) : [];
@@ -170,6 +172,8 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     writeTools: adapter.writeTools ?? [],
     staticTools: adapter.staticTools ?? [],
     forwardFiles: adapter.forwardFiles ?? false,
+    inheritEnv: adapter.transport === "stdio" ? (adapter.inheritEnv ?? []) : [],
+    inheritParentEnv: adapter.transport === "stdio" && adapter.inheritParentEnv === true,
     buildStdioCommand(credentials): StdioLaunchConfig {
       if (adapter.transport !== "stdio") return { cmd: "", args: [], env: {} };
       const cmd = adapter.buildCommand(credentials);

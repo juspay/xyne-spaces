@@ -105,6 +105,10 @@ export interface StdioMcpAdapter {
    */
   readonly staticTools?: readonly string[];
   readonly forwardFiles?: boolean;
+  /** Parent env vars the server reads beyond its launch env and the base allowlist (see buildChildEnv). */
+  readonly inheritEnv?: readonly string[];
+  /** Copy claw-auth's whole environment. Only for in-repo servers that import this service's own libs and config. */
+  readonly inheritParentEnv?: boolean;
   buildCommand(credentials: Record<string, unknown>): { cmd: string; args: string[]; env: Record<string, string> };
 }
 
@@ -142,6 +146,9 @@ export interface ResolvedConnectorDefinition {
   /** When true, binary content (EmbeddedResource blob / image / audio) returned
    *  by this server's tools is forwarded to the user as a file attachment. */
   readonly forwardFiles: boolean;
+  /** See StdioMcpAdapter. Dynamic (DB) connectors get the base allowlist only. */
+  readonly inheritEnv: readonly string[];
+  readonly inheritParentEnv: boolean;
   buildStdioCommand(credentials: Record<string, unknown>): StdioLaunchConfig;
   buildHttpConfig(credentials: Record<string, unknown>): HttpLaunchConfig;
 }

@@ -18,6 +18,7 @@ const SERVER_PATH = resolve(
 // listener is. Same tool surface as the official `mcp-neo4j-cypher`.
 export const neo4jHttpAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  inheritEnv: ["NEO4J_HTTP_TIMEOUT_MS"],
   type: "neo4j-http",
   credentialFields: [
     {

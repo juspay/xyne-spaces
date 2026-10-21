@@ -9,6 +9,8 @@ const SERVER_PATH = resolve(
 
 export const xyneSpacesAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  // Runs claw-auth's own libs, which read this service's config (XYNE-66849).
+  inheritParentEnv: true,
   type: "xyne-spaces",
   healthCheck: { name: "spaces-channels", params: { limit: 1 } },
   // Tools listed here are gated by the HITL (write-action) approval flow —
