@@ -1,20 +1,24 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Badge } from '../../ui/Badge';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { X, Hash, Lock, Users, Loader2 } from 'lucide-react';
-import { useUser, useUsers } from '../../../hooks/useUsers';
-import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
+import { useActiveUsers, useUser, useUsers } from '../../../hooks/useUsers';
+import { useDmContactRecency } from '../../../hooks/useRankedPeopleSearch';
 import {
   rankChannelsByAffinity,
+  rankUsersWithMfu,
   filterChannelsBySearchableNames,
 } from '../../../utils/rankingUtils';
+import { searchUsers } from '@xyne/shared/utils';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useForwardTargetSearch } from './useForwardTargetSearch';
 import {
-  useChannelSearch,
+  searchChannelsWithScores,
   useChannelMentionSearch,
   useAllChannels,
   useAllVisibleChannels,
@@ -30,7 +34,7 @@ import {
 import { PhoneDefault } from '@xyne/icons';
 import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -82,6 +86,17 @@ import {
   type ForwardMode,
 } from './forwardMode';
 
+// The optional-message editor must not re-render while the recipient search is typed in:
+// a TipTap re-render rebuilds its extensions and calls editor.setOptions + a view update.
+// Wrapped on first render, not at import: InputBox's imports lead back to this module,
+// so InputBox is still uninitialized while this file evaluates.
+type MemoizedInputBoxType = React.NamedExoticComponent<React.ComponentProps<typeof InputBox>>;
+let memoizedInputBox: MemoizedInputBoxType | undefined;
+const getMemoizedInputBox = (): MemoizedInputBoxType => (memoizedInputBox ??= memo(InputBox));
+const noop = (): void => {};
+// Searches run in web workers, so this only coalesces a burst of keystrokes into one search.
+const FORWARD_SEARCH_DEBOUNCE_MS = 50;
+
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
  * It provides search functionality for finding recipients and an optional message field.
@@ -97,6 +112,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   onSuccess,
 }) => {
   const { isMobile } = usePlatform();
+  const MemoizedInputBox = getMemoizedInputBox();
   const [selectedTargets, setSelectedTargets] = useState<ForwardTarget[]>([]);
   const [isInitialOpen, setIsInitialOpen] = useState(!isMobile); // Don't show initial suggestions on mobile
   const [comboboxOpen, setComboboxOpen] = useState(!isMobile); // Don't auto-open dropdown on mobile
@@ -407,9 +423,23 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }));
   }, [channelMentionResults]);
 
-  const handleChannelMentionSearch = (query: string): void => {
-    setChannelMentionQuery(query);
-  };
+  const handleContentChange = useCallback(
+    (html: string, text: string) => {
+      form.setFieldValue('optionalMessageHtml', html);
+      form.setFieldValue('optionalMessageText', text);
+    },
+    [form],
+  );
+  const inputBoxFeatures = useMemo(
+    () => ({
+      richText: true,
+      mentions: forwardMode === 'message',
+      commands: false,
+      fileAttachments: false,
+      emojiPicker: true,
+    }),
+    [forwardMode],
+  );
 
   // Check if this is a forwarded message being re-forwarded
   const isReForwarding = message.msgType === MessageType.FORWARDED;
@@ -447,9 +477,13 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const recordingShare = useRecordingShareMessage(previewContent);
 
   const allVisibleChannels = useAllVisibleChannels();
-  const allChannels = useAllChannels().map(
-    c => allVisibleChannels.find(vc => vc.id === c.id) || ({ ...c } as VisibleChannel),
-  ); // Merge visible channel data with all channels
+  const combinedChannels = useAllChannels();
+  // Merge visible channel data with all channels. Memoized so the list keeps its identity
+  // across keystrokes; otherwise every memo that depends on it recomputes on each render.
+  const allChannels = useMemo(() => {
+    const visibleById = new Map(allVisibleChannels.map(vc => [vc.id, vc]));
+    return combinedChannels.map(c => visibleById.get(c.id) ?? (c as VisibleChannel));
+  }, [combinedChannels, allVisibleChannels]);
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
   const selectedConversationChannel =
@@ -575,7 +609,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const getGroupDMParticipants = (channel: { name: string; scopeType: ChannelScopeType }) => {
     const otherIds = parseDMParticipantIds(channel).filter(id => id !== currentUser?.id);
     return otherIds
-      .map(id => allUsers.find(u => u.id === id))
+      .map(id => usersById.get(id))
       .filter((user): user is (typeof allUsers)[number] => user !== undefined);
   };
 
@@ -651,15 +685,84 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const [inputValue, setInputValue] = useState<string>('');
   const trimmedInputValue = inputValue.trim();
-  // Active people ranked by matchesAllTokens + MFU affinity + DM recency (same trio as cmd+K).
-  const rankedUsers = useRankedActivePeople(trimmedInputValue, 20);
-  const channelsSuggestions = useChannelSearch(trimmedInputValue, 5);
+  // Only regular channels are searched by name: DMs and group DMs are named by their
+  // participant ids (group DMs are matched on participant names below), and they make up
+  // most of the channel list.
+  const searchableChannels = useMemo(
+    () =>
+      allChannels.filter(
+        channel => channel.scopeType === ChannelScopeType.DEFAULT && isShareableTarget(channel),
+      ),
+    [allChannels],
+  );
+  // Built once per channel/user set, not per search: filterChannelsBySearchableNames caches its
+  // participant-name index by this array's identity.
+  const groupDmSearchItems = useMemo(
+    () =>
+      allChannels
+        .filter(
+          channel =>
+            channel.scopeType === ChannelScopeType.GROUP_DM &&
+            (forwardMode === 'message' || isShareableTarget(channel)),
+        )
+        .map(channel => ({
+          channel,
+          searchNames: getDMNames(channel, currentUser?.id ?? '', usersById).search,
+        })),
+    [allChannels, forwardMode, currentUser?.id, usersById],
+  );
+  // The search box is controlled, so each keystroke waits for this component to render. The fuzzy
+  // matching (100ms+ per query in a large workspace) runs in web workers so it never blocks
+  // typing; the short debounce only keeps a burst of keystrokes from queueing stale searches.
+  const workerQuery = useDebouncedValue(
+    trimmedInputValue,
+    trimmedInputValue ? FORWARD_SEARCH_DEBOUNCE_MS : 0,
+  );
+  const activeUsers = useActiveUsers();
+  const targetMatches = useForwardTargetSearch(workerQuery, activeUsers, searchableChannels);
+  // The query the matches answer; the previous results stay up until the workers finish.
+  const searchQuery = targetMatches.query;
+  // Leave the initial suggestions up until the first search result replaces them.
+  useEffect(() => {
+    if (searchQuery) setIsInitialOpen(false);
+  }, [searchQuery]);
+  const dmContactRecency = useDmContactRecency();
   const affinityVersion = useAffinityCallback();
+  // Active people ranked by matchesAllTokens + MFU affinity + DM recency (same trio as cmd+K).
+  // Mirrors useRankedActivePeople for a non-empty query, with the Fuse match from the workers.
+  const rankedUsers = useMemo(() => {
+    // Re-rank once affinity weights load (rankUsersWithMfu reads getUserWeight imperatively).
+    void affinityVersion;
+    if (!searchQuery) return [];
+    const activeById = new Map(activeUsers.map(user => [user.id, user]));
+    const fuseMatches = targetMatches.users?.flatMap(({ id, score }) => {
+      const user = activeById.get(id);
+      return user ? [{ item: user, score }] : [];
+    });
+    const searched = searchUsers(activeUsers, searchQuery, 20, fuseMatches);
+    // Fuse ignores <2-char and single-token queries; fall back to the pickers' substring matcher
+    // so short keystrokes still match.
+    const candidates =
+      searched.length > 0
+        ? searched
+        : activeUsers.filter(user => matchesUserQuery(user, searchQuery)).slice(0, 20);
+    return rankUsersWithMfu(candidates, activeUsers, searchQuery, dmContactRecency);
+  }, [searchQuery, targetMatches.users, activeUsers, dmContactRecency, affinityVersion]);
+  const channelsSuggestions = useMemo(() => {
+    const byId = new Map(searchableChannels.map(channel => [channel.id, channel]));
+    const fuseMatches = targetMatches.channels?.flatMap(({ id, score }) => {
+      const channel = byId.get(id);
+      return channel ? [{ item: channel, score }] : [];
+    });
+    return searchChannelsWithScores(searchableChannels, searchQuery, 5, fuseMatches).map(
+      ({ item }) => item,
+    );
+  }, [searchableChannels, searchQuery, targetMatches.channels]);
   const dropdownListItems = useMemo(() => {
     // Re-read affinity once weights load (channel weights read imperatively by the rankers below).
     void affinityVersion;
     // Show default suggestions on initial modal open with empty input
-    if (!inputValue.trim()) {
+    if (!searchQuery) {
       if (isInitialOpen) {
         const defaults: DropdownListItemType[] = [];
 
@@ -774,7 +877,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             }));
 
     const suggestedChannels: DropdownListItemType[] = rankChannelsByAffinity(
-      channelsSuggestions.filter(currChannel => isShareableTarget(currChannel)),
+      channelsSuggestions,
     ).map(currChannel => ({
       leftSlot:
         currChannel.visibility === ChannelVisibility.PUBLIC ? (
@@ -788,17 +891,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
     // Full-name participant matching + MFU affinity via the shared cmd+K group-DM matcher
     // (getDMNames(...).search feeds both displayName and raw name per participant).
-    const groupDmChannels = allChannels.filter(
-      channel =>
-        channel.scopeType === ChannelScopeType.GROUP_DM &&
-        (forwardMode === 'message' || isShareableTarget(channel)),
-    );
     const suggestedGroupDMs: DropdownListItemType[] = filterChannelsBySearchableNames(
-      groupDmChannels.map(channel => ({
-        channel,
-        searchNames: getDMNames(channel, currentUser?.id ?? '', usersById).search,
-      })),
-      trimmedInputValue,
+      groupDmSearchItems,
+      searchQuery,
     )
       .slice(0, 5)
       .map(({ channel }) => ({
@@ -818,12 +913,12 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }
     return suggestedUsers;
   }, [
-    inputValue,
-    trimmedInputValue,
+    searchQuery,
     selectedUserIds,
     isInitialOpen,
     rankedUsers,
     channelsSuggestions,
+    groupDmSearchItems,
     selectionMode,
     selectedTargets,
     allChannels,
@@ -836,9 +931,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   const onInputValueChangeHandler = (queryString: string) => {
     setInputValue(queryString);
-    if (queryString.trim().length > 0 && isInitialOpen) {
-      setIsInitialOpen(false);
-    }
   };
 
   const onValueChangeHandler = (selectedValue: string | null) => {
@@ -1118,7 +1210,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           >
             Add a message (optional)
           </label>
-          <InputBox
+          <MemoizedInputBox
             ref={inputBoxRef}
             id='forward-message-optional'
             placeholder={
@@ -1126,28 +1218,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                 ? 'Add a note for the people you are sharing with...'
                 : 'Add a note to the forwarded message...'
             }
-            onSendMessage={() => {
-              // Handled by the wrapper div's onKeyDown
-            }}
-            onContentChange={(html: string, text: string) => {
-              form.setFieldValue('optionalMessageHtml', html);
-              form.setFieldValue('optionalMessageText', text);
-            }}
+            // Sending is handled by the wrapper div's onKeyDown
+            onSendMessage={noop}
+            onContentChange={handleContentChange}
             {...(forwardMode === 'message'
               ? {
                   mentionItems: mentionResults,
                   onMentionSearch: searchMentions,
                   channelItems: channelMentionItems,
-                  onChannelSearch: handleChannelMentionSearch,
+                  onChannelSearch: setChannelMentionQuery,
                 }
               : {})}
-            features={{
-              richText: true,
-              mentions: forwardMode === 'message',
-              commands: false,
-              fileAttachments: false,
-              emojiPicker: true,
-            }}
+            features={inputBoxFeatures}
             showTypingIndicator={false}
             disabled={form.state.isSubmitting}
             hideSendButton
