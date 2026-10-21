@@ -41,7 +41,7 @@ jobs:
       # main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
-        uses: juspay/xyne-spaces/.github/actions/ci-affected@feature/build-optimization
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
         with:
           package: xyne-spaces-backend
           extra-paths: apps/backend/eslint-rules scripts/validate-zero-column-parity.mjs
@@ -133,7 +133,7 @@ jobs:
       # main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
-        uses: juspay/xyne-spaces/.github/actions/ci-affected@feature/build-optimization
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
         with:
           package: xyne-spaces-dashboard
 
@@ -310,7 +310,7 @@ jobs:
       # main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
-        uses: juspay/xyne-spaces/.github/actions/ci-affected@feature/build-optimization
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
         with:
           package: agentic-framework
 
@@ -364,7 +364,7 @@ jobs:
       # main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
-        uses: juspay/xyne-spaces/.github/actions/ci-affected@feature/build-optimization
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
         with:
           package: xyne-claw
 
