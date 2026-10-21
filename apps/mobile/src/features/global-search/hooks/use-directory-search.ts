@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useAllChannels } from '@/src/hooks/useChannels';
+import { useHydrateWorkspaceChannels } from '@/src/hooks/useHydrateWorkspaceChannels';
 import { useUsers } from '@/src/hooks/useUsers';
 import { stateMachineActor } from '@/src/machines/appStateMachine';
 import {
@@ -129,6 +130,7 @@ type SearchableChannel = {
   visibility?: string;
   unreadCount?: number;
   isStarred?: boolean;
+  isJoined?: boolean;
 };
 
 export function useChannelsSearch(
@@ -138,6 +140,7 @@ export function useChannelsSearch(
   const allChannels = useAllChannels();
   const visibleChannels = useSelector(stateMachineActor, selectVisibleChannels);
   const statuses = useSelector(stateMachineActor, selectChannelStatuses);
+  useHydrateWorkspaceChannels();
 
   const channels = useMemo(() => {
     const byStatus = statusMap(statuses);
@@ -151,15 +154,23 @@ export function useChannelsSearch(
         visibility?: unknown;
         isArchived?: boolean;
       };
-      if (record.type !== ChannelType.DEFAULT) continue;
+      if (
+        record.type !== ChannelType.DEFAULT &&
+        !isDeskChannelType(record.type as string | undefined)
+      ) {
+        continue;
+      }
       if (record.scopeType !== ChannelScopeType.DEFAULT) continue;
       if (record.visibility !== ChannelVisibility.PUBLIC) continue;
       if (record.isArchived) continue;
 
+      const status = byStatus.get(channel.id);
+      const joined = status !== undefined && !status.isDeleted && !status.isClosed;
       byId.set(channel.id, {
         id: channel.id,
         name: channel.name,
         visibility: String(record.visibility),
+        ...(joined ? {} : { isJoined: false }),
       });
     }
 
@@ -199,6 +210,7 @@ export function useChannelsSearch(
         ? { unreadCount: channel.unreadCount }
         : {}),
       ...(channel.isStarred ? { isStarred: true } : {}),
+      ...(channel.isJoined === false ? { isJoined: false } : {}),
     }));
   }, [channels, limit, query, search]);
 }

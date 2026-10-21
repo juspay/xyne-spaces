@@ -22,6 +22,8 @@ export type SearchChannelItem = {
   visibility?: string;
   unreadCount?: number;
   isStarred?: boolean;
+  /** False when the user has not joined. Missing means already a member. */
+  isJoined?: boolean;
 };
 
 /** Local Group DM conversation row for DMs tab. */
