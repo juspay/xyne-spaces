@@ -6,19 +6,17 @@ import { Badge } from '../../ui/Badge';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { X, Hash, Lock, Users, Loader2 } from 'lucide-react';
 import { useActiveUsers, useUser, useUsers } from '../../../hooks/useUsers';
-import { useDmContactRecency } from '../../../hooks/useRankedPeopleSearch';
+import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
+import { useWorkerUserSearch } from '../../../hooks/useWorkerUserSearch';
+import { useWorkerChannelSearch } from '../../../hooks/useWorkerChannelSearch';
 import {
   rankChannelsByAffinity,
-  rankUsersWithMfu,
   filterChannelsBySearchableNames,
 } from '../../../utils/rankingUtils';
-import { searchUsers } from '@xyne/shared/utils';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useAuth } from '../../../hooks/useAuth';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
-import { useForwardTargetSearch } from './useForwardTargetSearch';
 import {
-  searchChannelsWithScores,
   useChannelMentionSearch,
   useAllChannels,
   useAllVisibleChannels,
@@ -34,7 +32,7 @@ import {
 import { PhoneDefault } from '@xyne/icons';
 import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
-import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -719,45 +717,43 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     trimmedInputValue ? FORWARD_SEARCH_DEBOUNCE_MS : 0,
   );
   const activeUsers = useActiveUsers();
-  const targetMatches = useForwardTargetSearch(workerQuery, activeUsers, searchableChannels);
-  // The query the matches answer; the previous results stay up until the workers finish.
-  const searchQuery = targetMatches.query;
-  // Leave the initial suggestions up until the first search result replaces them.
+  const userSearch = useWorkerUserSearch(workerQuery, 20, activeUsers);
+  const channelSearchItems = useMemo(
+    () => searchableChannels.map(channel => ({ channel })),
+    [searchableChannels],
+  );
+  const channelSearch = useWorkerChannelSearch(channelSearchItems, workerQuery);
+  // Show a search only once the people and channel workers have both answered it, so the dropdown
+  // changes once per query; until then the previous results stay. '' until the first answer.
+  const [shownSearch, setShownSearch] = useState({
+    query: '',
+    users: userSearch.users,
+    channels: channelSearch.channels,
+  });
+  if (
+    userSearch.query === channelSearch.query &&
+    (shownSearch.query !== userSearch.query ||
+      shownSearch.users !== userSearch.users ||
+      shownSearch.channels !== channelSearch.channels)
+  ) {
+    setShownSearch({
+      query: userSearch.query,
+      users: userSearch.users,
+      channels: channelSearch.channels,
+    });
+  }
+  const searchQuery = shownSearch.query;
   useEffect(() => {
     if (searchQuery) setIsInitialOpen(false);
   }, [searchQuery]);
-  const dmContactRecency = useDmContactRecency();
   const affinityVersion = useAffinityCallback();
-  // Active people ranked by matchesAllTokens + MFU affinity + DM recency (same trio as cmd+K).
-  // Mirrors useRankedActivePeople for a non-empty query, with the Fuse match from the workers.
-  const rankedUsers = useMemo(() => {
-    // Re-rank once affinity weights load (rankUsersWithMfu reads getUserWeight imperatively).
-    void affinityVersion;
-    if (!searchQuery) return [];
-    const activeById = new Map(activeUsers.map(user => [user.id, user]));
-    const fuseMatches = targetMatches.users?.flatMap(({ id, score }) => {
-      const user = activeById.get(id);
-      return user ? [{ item: user, score }] : [];
-    });
-    const searched = searchUsers(activeUsers, searchQuery, 20, fuseMatches);
-    // Fuse ignores <2-char and single-token queries; fall back to the pickers' substring matcher
-    // so short keystrokes still match.
-    const candidates =
-      searched.length > 0
-        ? searched
-        : activeUsers.filter(user => matchesUserQuery(user, searchQuery)).slice(0, 20);
-    return rankUsersWithMfu(candidates, activeUsers, searchQuery, dmContactRecency);
-  }, [searchQuery, targetMatches.users, activeUsers, dmContactRecency, affinityVersion]);
-  const channelsSuggestions = useMemo(() => {
-    const byId = new Map(searchableChannels.map(channel => [channel.id, channel]));
-    const fuseMatches = targetMatches.channels?.flatMap(({ id, score }) => {
-      const channel = byId.get(id);
-      return channel ? [{ item: channel, score }] : [];
-    });
-    return searchChannelsWithScores(searchableChannels, searchQuery, 5, fuseMatches).map(
-      ({ item }) => item,
-    );
-  }, [searchableChannels, searchQuery, targetMatches.channels]);
+  const rankedUsers = useRankedActivePeople(searchQuery, 20, {
+    searchCandidates: shownSearch.users,
+  });
+  const channelsSuggestions = useMemo(
+    () => shownSearch.channels.slice(0, 5).map(({ channel }) => channel),
+    [shownSearch.channels],
+  );
   const dropdownListItems = useMemo(() => {
     // Re-read affinity once weights load (channel weights read imperatively by the rankers below).
     void affinityVersion;
