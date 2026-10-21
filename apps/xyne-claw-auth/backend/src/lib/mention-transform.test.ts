@@ -66,6 +66,10 @@ function lookups(): MentionLookups {
       );
       return hits.map((g) => ({ id: g.id, name: g.name, alias: g.alias }));
     },
+    byId: async (id) => {
+      const hits = Object.values(USERS).filter((u) => u.id === id);
+      return hits.map((u) => ({ id: u.id, name: u.name }));
+    },
   };
 }
 
@@ -266,5 +270,54 @@ describe("mentionShorthandToText", () => {
     expect(
       mentionShorthandToText("cc @xyne-Doctor[cmnnn2zdk1lmoma4flzkwh4k1], @Anurag Dwivedi[usr_anurag000000000] and @spaces[group:grp_x0000000:xyne-spaces]; mail a@b.com"),
     ).toBe("cc @xyne-Doctor, @Anurag Dwivedi and @spaces; mail a@b.com");
+  });
+});
+
+describe("resolveUnboundMentions — Slack-style <@userId> tokens", () => {
+  // Agents carrying a stale "Slack chip-mention convention" memory emit
+  // `<@userId>`. Spaces never parsed that form — it rendered as literal text
+  // with no chip and no notification. The id is the authoritative selector:
+  // when byId returns exactly one active human, the token becomes a real
+  // mention; anything else stays raw text (no false pings).
+
+  it("rewrites a resolvable Slack-style token into a notifying span", async () => {
+    const resolved = await resolveUnboundMentions(
+      "on-call is <@usr_bowmitha00000000> tonight",
+      lookups(),
+    );
+    expect(resolved).toBe(
+      `on-call is @Bowmitha C[${USERS["bowmitha.c"]!.id}] tonight`,
+    );
+    const html = expandSpacesMentions(resolved);
+    expect(html).toBe(
+      `on-call is <span data-mention="" data-mention-type="user" data-user-id="${USERS["bowmitha.c"]!.id}" data-username="Bowmitha C" class="chat-input-mention">@Bowmitha C</span> tonight`,
+    );
+  });
+
+  it("leaves an unknown Slack-style token untouched (no false ping)", async () => {
+    const input = "paging <@usr_nobody000000000> — no such user";
+    expect(await resolveUnboundMentions(input, lookups())).toBe(input);
+    expect(expandSpacesMentions(input)).toBe(input);
+  });
+
+  it("skips Slack-style tokens when byId lookup is not provided", async () => {
+    const { byId: _omit, ...rest } = lookups();
+    const input = "paging <@usr_bowmitha00000000> without byId";
+    expect(await resolveUnboundMentions(input, rest)).toBe(input);
+  });
+
+  it("does not rewrite Slack-style tokens inside code fences", async () => {
+    const input = "```\n<@usr_bowmitha00000000>\n```";
+    expect(await resolveUnboundMentions(input, lookups())).toBe(input);
+  });
+
+  it("resolves a Slack token and a plain @Name in the same message", async () => {
+    const out = await resolveUnboundMentions(
+      "<@usr_utkarsh000000000> cc @Deepak Kushwaha",
+      lookups(),
+    );
+    expect(out).toBe(
+      `@Utkarsh Kumar[${USERS["utkarsh.kumar"]!.id}] cc @Deepak Kushwaha[${USERS["deepak.kushwaha"]!.id}]`,
+    );
   });
 });

@@ -132,6 +132,17 @@ const UNBOUND_HANDLE_MENTION_RE =
 const UNBOUND_GROUP_MENTION_RE =
   /(^|[^A-Za-z0-9_>])@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|<\/|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])/g;
 
+// Slack-style user token — `<@userId>`. Agents trained on Slack (or carrying
+// a stale "Slack chip-mention convention" memory) emit this form; Spaces
+// never parsed it, so it rendered as literal `<@u3a13b5...>` text — no chip,
+// no notification. The token carries the AUTHORITATIVE selector (the user id
+// itself): when `byId` resolves it to exactly one active human, the token is
+// rewritten to the bracketed form that `expandSpacesMentions` lifts into a
+// real span, with the user's real display name as the chip label. Unresolved
+// ids (guessed ids, bot/app rows, departed users, Slack-native U… ids) are
+// left as-is — never a false ping.
+const SLACK_USER_TOKEN_RE = /<@([A-Za-z0-9_-]{4,64})>/g;
+
 const SPECIAL_NAMES = new Set(["channel", "here"]);
 
 export interface MentionLookups {
@@ -153,6 +164,12 @@ export interface MentionLookups {
   byGroupAlias?: (
     alias: string,
   ) => Promise<Array<{ id: string; name: string; alias?: string | null }>>;
+  /** Resolve a `<@userId>` Slack-style token → the active human with that
+   *  exact id. The id is authoritative (a primary key — no name matching,
+   *  no cross-workspace duplication). Same ≥2 ⇒ ambiguous rule. Optional
+   *  for backward compatibility — when absent, Slack-style tokens are left
+   *  as-is. */
+  byId?: (id: string) => Promise<Array<{ id: string; name: string }>>;
 }
 
 /**
@@ -196,8 +213,16 @@ export async function resolveUnboundMentions(
   const emailsToResolve = new Set<string>();
   const handlesToResolve = new Set<string>();
   const groupAliasesToResolve = new Set<string>();
+  const slackIdsToResolve = new Set<string>();
   parts.forEach((p, i) => {
     if (i % 2 !== 0) return; // code fence
+    // Slack-style tokens carry the authoritative id — collect them before the
+    // name/email/handle guesses (the id form wins over any text-shape match).
+    if (lookups.byId) {
+      for (const m of p.matchAll(SLACK_USER_TOKEN_RE)) {
+        slackIdsToResolve.add(m[1]!.trim());
+      }
+    }
     // Emails first — they're strictly more specific than the name pattern,
     // so if a token matches both we treat it as an email.
     for (const m of p.matchAll(UNBOUND_EMAIL_MENTION_RE)) {
@@ -231,14 +256,15 @@ export async function resolveUnboundMentions(
   // it IS here but later byEmail logs 0 matches, the lookup (DB reader / scope)
   // is the failure point.
   log.info(
-    `[mention] collected emails=[${[...emailsToResolve].join(",")}] names=[${[...namesToResolve].join(",")}] handles=[${[...handlesToResolve].join(",")}] groups=[${[...groupAliasesToResolve].join(",")}]`,
+    `[mention] collected emails=[${[...emailsToResolve].join(",")}] names=[${[...namesToResolve].join(",")}] handles=[${[...handlesToResolve].join(",")}] groups=[${[...groupAliasesToResolve].join(",")}] slack=[${[...slackIdsToResolve].join(",")}]`,
   );
 
   if (
     namesToResolve.size === 0 &&
     emailsToResolve.size === 0 &&
     handlesToResolve.size === 0 &&
-    groupAliasesToResolve.size === 0
+    groupAliasesToResolve.size === 0 &&
+    slackIdsToResolve.size === 0
   ) {
     log.info("[mention] no unbound mention candidates matched");
     return input;
@@ -259,6 +285,10 @@ export async function resolveUnboundMentions(
   const resolvedByGroupAlias = new Map<
     string,
     { id: string; name: string; alias: string }
+  >();
+  const resolvedBySlackId = new Map<
+    string,
+    { id: string; displayName: string }
   >();
   await Promise.all([
     ...[...namesToResolve].map(async (name) => {
@@ -324,10 +354,25 @@ export async function resolveUnboundMentions(
         // Same fallthrough as above.
       }
     }),
+    ...[...slackIdsToResolve].map(async (uid) => {
+      try {
+        const matches = await lookups.byId!(uid);
+        log.info(`[mention] byId "${uid}" -> ${matches.length} match(es)${matches.length === 1 ? ` name=${matches[0]?.name}` : ""}`);
+        if (matches.length === 1 && matches[0]?.id) {
+          resolvedBySlackId.set(uid, {
+            id: matches[0].id,
+            displayName: matches[0].name || uid,
+          });
+        }
+      } catch (err) {
+        log.warn(`[mention] byId "${uid}" threw: ${errMsg(err)}`);
+        // Same fallthrough as above — one bad lookup doesn't kill the post.
+      }
+    }),
   ]);
 
   log.info(
-    `[mention] resolved names=${resolvedByName.size}/${namesToResolve.size} emails=${resolvedByEmail.size}/${emailsToResolve.size} handles=${resolvedByHandle.size}/${handlesToResolve.size} groups=${resolvedByGroupAlias.size}/${groupAliasesToResolve.size}`,
+    `[mention] resolved names=${resolvedByName.size}/${namesToResolve.size} emails=${resolvedByEmail.size}/${emailsToResolve.size} handles=${resolvedByHandle.size}/${handlesToResolve.size} groups=${resolvedByGroupAlias.size}/${groupAliasesToResolve.size} slack=${resolvedBySlackId.size}/${slackIdsToResolve.size}`,
   );
 
   // Second pass: rewrite non-code segments. Apply email rewrites BEFORE
@@ -336,7 +381,20 @@ export async function resolveUnboundMentions(
   return parts
     .map((p, i) => {
       if (i % 2 !== 0) return p;
+      // Slack-style tokens FIRST — the rewrite emits `@Name[id]`, whose
+      // trailing `[` is excluded by every unbound pattern below, so none of
+      // them can re-process (and mangle) the freshly resolved mention.
+      // Boundary note: the rewritten `@` needs a non-word char (or start of
+      // string) on its left for the expander's `pre` group; agent output
+      // separates the `<@id>` token with whitespace, which is preserved.
       let out = p.replace(
+        SLACK_USER_TOKEN_RE,
+        (_match, uid: string) => {
+          const hit = resolvedBySlackId.get(uid.trim());
+          return hit ? `@${hit.displayName}[${hit.id}]` : _match;
+        },
+      );
+      out = out.replace(
         UNBOUND_EMAIL_MENTION_RE,
         (_match, pre: string, email: string) => {
           const lower = email.trim().toLowerCase();
