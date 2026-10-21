@@ -92,7 +92,16 @@ export function extractBlock(source: string, key: string): string | null {
   return null;
 }
 
-/** `key: "value"` pairs at any nesting depth, as dotted paths. */
+/**
+ * `key: "value"` pairs at any nesting depth, as dotted paths.
+ *
+ * After recursing into a nested object the scanner MUST skip past it. Letting
+ * the outer regex continue inside re-emits every nested key under a shorter
+ * path, so `brand: { dark: { bg } }` also yielded `brand-bg`, `dark-bg` and
+ * `bg` — token names the repository never had. Worse, `parseTailwindConfig`
+ * keeps the first name it sees, so an invented `primary` could take
+ * `brand.primary`'s value and become the brand colour of every later artifact.
+ */
 export function flattenStringEntries(block: string, prefix = ""): Array<[string, string]> {
   const entries: Array<[string, string]> = [];
   const keyRe = /(?:^|[,{\s])['"]?([A-Za-z0-9_-]+)['"]?\s*:\s*/g;
@@ -100,12 +109,17 @@ export function flattenStringEntries(block: string, prefix = ""): Array<[string,
   let match: RegExpExecArray | null;
   while ((match = keyRe.exec(block))) {
     const key = match[1]!;
-    const rest = block.slice(match.index + match[0].length);
+    const valueStart = match.index + match[0].length;
+    const rest = block.slice(valueStart);
     const path = prefix ? `${prefix}-${key}` : key;
 
     if (rest.startsWith("{")) {
       const nested = extractBlock(`x:${rest}`, "x");
-      if (nested) entries.push(...flattenStringEntries(nested, path));
+      if (nested) {
+        entries.push(...flattenStringEntries(nested, path));
+        // +2 for the `x:` prefix extractBlock was given, +2 for the braces.
+        keyRe.lastIndex = valueStart + nested.length + 2;
+      }
       continue;
     }
     const literal = /^(['"])((?:\\.|(?!\1).)*)\1/.exec(rest);
@@ -191,25 +205,70 @@ export interface CssTokens {
   unresolved: string[];
 }
 
-/** Custom properties from `:root` (and, for Tailwind v4, `@theme`). */
+/**
+ * Custom properties from `:root` (and, for Tailwind v4, `@theme`).
+ *
+ * Blocks are brace-matched, not matched with a non-greedy regex: a nested rule
+ * such as `@keyframes` inside `@theme` ended the block at the first `}`, so
+ * every declaration after it was lost — silently, without even a gap.
+ *
+ * A declaration may also end at `}` rather than `;`. The last one in a block
+ * legally omits its semicolon and minifiers always do, so requiring `;` threw
+ * away `:root{--primary:#111}` entirely.
+ */
 export function parseCssCustomProperties(css: string): CssTokens {
   const out: CssTokens = { variables: [], unresolved: [] };
   // Comments first: a commented-out token must not look live.
   const cleaned = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-  const blockRe = /(?::root[^{]*|@theme[^{]*)\{([\s\S]*?)\}/g;
   const seen = new Set<string>();
-  let block: RegExpExecArray | null;
-  while ((block = blockRe.exec(cleaned))) {
-    const declRe = /--([A-Za-z0-9_-]+)\s*:\s*([^;]+);/g;
+  const selectorRe = /(?::root|@theme)[^{]*\{/g;
+  let selector: RegExpExecArray | null;
+  while ((selector = selectorRe.exec(cleaned))) {
+    const openIndex = selector.index + selector[0].length - 1;
+    const body = matchBraces(cleaned, openIndex);
+    if (body === null) continue;
+
+    // Only top-level declarations: a value inside a nested rule (keyframe
+    // stops, media queries) is not a theme token.
+    const topLevel = stripNestedBlocks(body);
+    const declRe = /--([A-Za-z0-9_-]+)\s*:\s*([^;}]+)/g;
     let decl: RegExpExecArray | null;
-    while ((decl = declRe.exec(block[1]!))) {
+    while ((decl = declRe.exec(topLevel))) {
       const name = decl[1]!;
       const value = decl[2]!.trim();
-      if (seen.has(name)) continue;
+      if (!value || seen.has(name)) continue;
       seen.add(name);
       out.variables.push({ name, value });
     }
+    selectorRe.lastIndex = openIndex + body.length + 2;
+  }
+  return out;
+}
+
+/** Contents between `source[openIndex]` and its matching brace, or null when
+ *  the block never closes. */
+function matchBraces(source: string, openIndex: number): string | null {
+  let depth = 0;
+  for (let i = openIndex; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIndex + 1, i);
+    }
+  }
+  return null;
+}
+
+/** Drop nested `{ ... }` rules so only a block's own declarations remain. */
+function stripNestedBlocks(body: string): string {
+  let out = "";
+  let depth = 0;
+  for (const char of body) {
+    if (char === "{") depth += 1;
+    else if (char === "}") depth -= 1;
+    else if (depth === 0) out += char;
   }
   return out;
 }

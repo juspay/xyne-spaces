@@ -379,3 +379,58 @@ describe("analyzeRepoTokens — the tool's entry point", () => {
     expect(isBrandSummary(summary)).toBe(true);
   });
 });
+
+describe("regressions from the PR 3265 review", () => {
+  it("does not invent token names when recursing into a nested object", () => {
+    // Letting the outer scanner continue inside a nested block re-emitted its
+    // keys under shorter paths, so `brand.dark.bg` also produced `brand-bg`,
+    // `dark-bg` and `bg` — names the repo never had. Because the first name
+    // seen wins, an invented `primary` could take `brand.primary`'s value.
+    const names = flattenStringEntries(
+      `brand: { primary: "#111111", dark: { bg: "#222222" } }, accent: "#333333"`,
+    ).map(([name]) => name);
+
+    expect(names).toEqual(["brand-primary", "brand-dark-bg", "accent"]);
+    for (const invented of ["brand-bg", "primary", "dark-bg", "bg"]) {
+      expect(names).not.toContain(invented);
+    }
+  });
+
+  it("keeps values correct for the same input", () => {
+    expect(flattenStringEntries(`brand: { primary: "#111111", dark: { bg: "#222222" } }, accent: "#333333"`)).toEqual([
+      ["brand-primary", "#111111"],
+      ["brand-dark-bg", "#222222"],
+      ["accent", "#333333"],
+    ]);
+  });
+
+  it("reads past a nested rule inside @theme instead of stopping at it", () => {
+    // A non-greedy block match ended at @keyframes' first `}`, silently losing
+    // every declaration after it.
+    const tokens = parseCssCustomProperties(
+      `@theme { --color-primary: #f00; @keyframes spin { to { opacity: 1 } } --color-accent: #0f0; }`,
+    );
+    expect(tokens.variables.map((v) => v.name)).toEqual(["color-primary", "color-accent"]);
+  });
+
+  it("does not treat a nested rule's declarations as theme tokens", () => {
+    const tokens = parseCssCustomProperties(
+      `:root { --primary: #f00; @media (min-width: 40rem) { --primary: #00f; } }`,
+    );
+    expect(tokens.variables).toEqual([{ name: "primary", value: "#f00" }]);
+  });
+
+  it("reads a final declaration with no trailing semicolon", () => {
+    // Legal CSS, and what every minifier emits.
+    expect(parseCssCustomProperties(`:root{--primary:#111111}`).variables).toEqual([
+      { name: "primary", value: "#111111" },
+    ]);
+  });
+
+  it("still reads a block that does close its last declaration", () => {
+    expect(parseCssCustomProperties(`:root{--a:#111111;--b:#222222;}`).variables.map((v) => v.name)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+});
