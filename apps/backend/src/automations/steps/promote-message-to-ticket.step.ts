@@ -78,7 +78,7 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
     const fakeReq = {
       body: reqBody,
       headers: {},
-      user: { id: createdBy },
+      user: { id: createdBy, workspaceId: context.automation.workspaceId },
       files: {},
     } as unknown as Request;
 
