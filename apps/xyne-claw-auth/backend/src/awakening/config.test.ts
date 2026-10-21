@@ -98,3 +98,22 @@ describe("participatesIn", () => {
     expect(participatesIn(cfg("both"), "reflex")).toBe(true);
   });
 });
+
+describe("withAwakeningDisabled", () => {
+  it("switches an enabled block off and keeps every other setting", async () => {
+    const { withAwakeningDisabled } = await import("./config.js");
+    const src = { tools: { direct: ["x"] }, awakening: { enabled: true, kind: "both", periodMs: 600_000 } };
+    const out = withAwakeningDisabled(src);
+    expect(out).toEqual({ tools: { direct: ["x"] }, awakening: { enabled: false, kind: "both", periodMs: 600_000 } });
+    expect(src.awakening.enabled).toBe(true); // source config untouched
+  });
+
+  it("leaves configs without an enabled awakening block as-is", async () => {
+    const { withAwakeningDisabled } = await import("./config.js");
+    const plain = { tools: {} };
+    expect(withAwakeningDisabled(plain)).toBe(plain);
+    expect(withAwakeningDisabled(null)).toBe(null);
+    const off = { awakening: { enabled: false } };
+    expect(withAwakeningDisabled(off)).toBe(off);
+  });
+});

@@ -20,6 +20,7 @@ import { prisma } from "../db.js";
 import { resolveAwakeningConfig, participatesIn } from "../awakening/config.js";
 import { computeNextDueAt } from "../awakening/cursor.js";
 import { enqueueWindow, enqueueReflexCheck, TICK_QUEUE_NAME } from "./awakening-queue.js";
+import { refreshInFlightAwakeningLocks } from "../awakening/lock-keepalive.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("awakening-tick");
@@ -103,6 +104,10 @@ async function processTick(_job: Job): Promise<void> {
   if (killed()) return;
 
   const claimedAtMs = Date.now();
+
+  // Extend the lock of every run still in flight BEFORE claiming new work, so
+  // a long run cannot lose its lock and be double-dispatched by this tick.
+  await refreshInFlightAwakeningLocks();
 
   // Reflex checks run on their own, much faster cadence and are claimed
   // independently. They MUST be fanned out before any early return below —

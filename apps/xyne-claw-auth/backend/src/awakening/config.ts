@@ -332,3 +332,22 @@ export function hashChannelRules(rules: AwakeningChannelRules): string {
 export function participatesIn(config: AwakeningConfig, kind: "heartbeat" | "reflex"): boolean {
   return config.kind === "both" || config.kind === kind;
 }
+
+/**
+ * Returns a copy of an agent config with awakening switched OFF (all other
+ * awakening settings kept). Used when an agent is cloned.
+ *
+ * A clone is a new personal agent for a different owner. Copying
+ * `awakening.enabled: true` verbatim made it look enabled while no scheduler
+ * row existed, and — had one existed — would have had the clone wake in the
+ * SOURCE agent's channels without its new owner choosing that. The owner
+ * turns it on from the Awakening tab, which goes through PUT and seeds state.
+ */
+export function withAwakeningDisabled<T>(agentConfig: T): T {
+  if (!agentConfig || typeof agentConfig !== "object" || Array.isArray(agentConfig)) return agentConfig;
+  const cfg = agentConfig as Record<string, unknown>;
+  const block = cfg["awakening"];
+  if (!block || typeof block !== "object" || Array.isArray(block)) return agentConfig;
+  if ((block as Record<string, unknown>)["enabled"] !== true) return agentConfig;
+  return { ...cfg, awakening: { ...(block as Record<string, unknown>), enabled: false } } as T;
+}

@@ -126,3 +126,38 @@ export async function refreshAgentLock(
     return false;
   }
 }
+
+const REKEY_SCRIPT = `
+if redis.call("GET", KEYS[1]) == false then return 0 end
+local holder = cjson.decode(redis.call("GET", KEYS[1]))
+if holder["sessionId"] == ARGV[1] then
+  redis.call("SET", KEYS[1], ARGV[2], "PX", tonumber(ARGV[3]))
+  return 1
+end
+return 0
+`;
+
+/**
+ * Atomically hand the lock from the pre-dispatch placeholder (the idempotency
+ * key) to the real session id. Replaces a DEL-then-SET NX pair, which left the
+ * agent unlocked for a moment — long enough for a second pod to claim it and
+ * dispatch a concurrent run. Returns false if `fromSessionId` no longer holds
+ * the lock (it expired or someone else owns it); the caller must not assume it
+ * owns the lock in that case.
+ */
+export async function rekeyAgentLock(
+  agentId: string,
+  fromSessionId: string,
+  holder: LockHolder,
+  ttlMs: number = AWAKENING_LOCK_TTL_MS,
+): Promise<boolean> {
+  try {
+    const ok = await redisService
+      .getConnection()
+      .eval(REKEY_SCRIPT, 1, lockKey(agentId), fromSessionId, JSON.stringify(holder), String(ttlMs));
+    return ok === 1;
+  } catch (err) {
+    log.warn(`[awakening] lock rekey failed agent=${agentId}: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+}

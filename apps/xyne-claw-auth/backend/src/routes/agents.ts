@@ -684,6 +684,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (!configCheck.ok) {
     throw badRequest(configCheck.error);
   }
+  // Same awakening check PUT runs — without it an agent CREATED with an
+  // awakening block skipped validation entirely (incl. the ReDoS pattern check).
+  const awakeningCheck = validateAwakeningConfig(normalizedConfig as Record<string, unknown> | undefined);
+  if (!awakeningCheck.ok) {
+    throw badRequest(awakeningCheck.error);
+  }
 
   // Determine scope: only admins can create global agents
   const requesterId = getRequesterId(req);
@@ -775,6 +781,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     if (accepted.length > 0) {
       await agentRepository.replaceCollections(agent.id, accepted);
     }
+  }
+
+  // Seed the awakening scheduler row. Previously only PUT did this, so an
+  // agent created with awakening.enabled=true rendered as enabled and never
+  // woke. Best-effort, same contract as PUT: a failure must not fail the create.
+  if (normalizedConfig) {
+    await syncAwakeningState(agent.id, agent.orgId ?? createOrgId, normalizedConfig).catch((e) =>
+      log.warn(`[agents] syncAwakeningState failed for ${agent.slug}:`, e instanceof Error ? e.message : e),
+    );
   }
 
   res.status(201);

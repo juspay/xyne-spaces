@@ -22,7 +22,7 @@ import { resolveAwakeningChannels } from "../awakening/channel-resolver.js";
 import { collectWindow } from "../awakening/collector.js";
 import { computeSignals } from "../awakening/signals.js";
 import { countEventsSince, decideReflex, renderInjection, logDecision } from "../awakening/reflex.js";
-import { acquireAgentLock, readAgentLock, releaseAgentLock } from "../awakening/lock.js";
+import { acquireAgentLock, readAgentLock, rekeyAgentLock, releaseAgentLock } from "../awakening/lock.js";
 import { pushInjection, readInjectionStats } from "../awakening/inbox.js";
 import { dispatchAwakening, resolveAgentIdentity, AwakeningIdentityError } from "../awakening/dispatch.js";
 import { resolveWorkspaceId, WorkspaceResolutionError } from "../awakening/workspace.js";
@@ -167,12 +167,12 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
       // Re-key the lock to the real session so the result callback and the
       // injection path can both find it.
       if (result.sessionId) {
-        await releaseAgentLock(agentId, idempotencyKey);
-        await acquireAgentLock(agentId, {
+        const rekeyed = await rekeyAgentLock(agentId, idempotencyKey, {
           sessionId: result.sessionId,
           kind: "reflex",
           acquiredAtMs: Date.now(),
         });
+        if (!rekeyed) log.warn(`[awakening] reflex lock rekey lost agent=${agentId} session=${result.sessionId}`);
       }
 
       await consumeRunRate(agentId);

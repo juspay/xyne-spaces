@@ -93,3 +93,30 @@ describe("validateAwakeningConfig — rejects with a reason", () => {
     expect(ok({ workspaceId: 42 }).ok).toBe(false);
   });
 });
+
+describe("validateAwakeningConfig — reflex", () => {
+  it("accepts in-range reflex knobs", () => {
+    expect(
+      ok({
+        kind: "reflex",
+        reflex: {
+          checkIntervalMs: 60_000,
+          threshold: 25,
+          minIntervalMs: 300_000,
+          injectEnabled: true,
+          injectThreshold: 10,
+          maxInjectionsPerSession: 3,
+          injectMinIntervalMs: 60_000,
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects out-of-range or mistyped reflex knobs with a reason", () => {
+    expect(ok({ reflex: "fast" }).ok).toBe(false);
+    expect(ok({ reflex: { checkIntervalMs: 1_000 } })).toMatchObject({ ok: false });
+    expect(ok({ reflex: { threshold: 0 } })).toMatchObject({ ok: false });
+    expect(ok({ reflex: { maxInjectionsPerSession: 21 } })).toMatchObject({ ok: false });
+    expect(ok({ reflex: { injectEnabled: "yes" } })).toMatchObject({ ok: false });
+  });
+});

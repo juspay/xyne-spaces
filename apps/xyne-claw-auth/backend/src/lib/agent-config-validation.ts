@@ -351,6 +351,28 @@ export function validateAwakeningConfig(config: Record<string, unknown> | undefi
     }
   }
 
+  if (raw["reflex"] !== undefined) {
+    const reflex = raw["reflex"];
+    if (!isPlainObject(reflex)) return fail("awakening.reflex must be an object");
+    if (reflex["injectEnabled"] !== undefined && typeof reflex["injectEnabled"] !== "boolean") {
+      return fail("awakening.reflex.injectEnabled must be a boolean");
+    }
+    // Mirrors AWAKENING_BOUNDS.reflex* / inject* in awakening/config.ts — the
+    // runtime clamp. Rejecting here gives the admin a 400 with a reason instead
+    // of a silent clamp at wake time.
+    for (const [key, min, max] of [
+      ["checkIntervalMs", 15_000, 3_600_000],
+      ["threshold", 1, 1_000],
+      ["minIntervalMs", 0, 24 * 60 * 60_000],
+      ["injectThreshold", 1, 1_000],
+      ["maxInjectionsPerSession", 0, 20],
+      ["injectMinIntervalMs", 0, 3_600_000],
+    ] as const) {
+      const r = validateIntRange(reflex[key], `awakening.reflex.${key}`, min, max);
+      if (!r.ok) return r;
+    }
+  }
+
   if (raw["workspaceId"] !== undefined && typeof raw["workspaceId"] !== "string") {
     return fail("awakening.workspaceId must be a string");
   }

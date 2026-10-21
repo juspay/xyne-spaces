@@ -3,6 +3,7 @@ import { prisma } from "../db.js";
 import { randomBytes } from "node:crypto";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { createLogger } from "../logger.js";
+import { withAwakeningDisabled } from "../awakening/config.js";
 
 const log = createLogger("agent-repository");
 
@@ -279,7 +280,7 @@ export const agentRepository = {
           modelId: source.modelId,
           enabled: source.enabled,
           kbScope: source.kbScope,
-          config: source.config as Prisma.InputJsonValue,
+          config: withAwakeningDisabled(source.config) as Prisma.InputJsonValue,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
           ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),

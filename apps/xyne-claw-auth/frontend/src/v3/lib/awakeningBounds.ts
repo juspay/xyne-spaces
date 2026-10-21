@@ -53,8 +53,14 @@ export const PERIOD_OPTIONS: readonly number[] = [
   4 * 60 * 60_000, 8 * 60 * 60_000, 24 * 60 * 60_000,
 ];
 
+/**
+ * Reflex checks are claimed by the fleet tick (AWAKENING_TICK_MS, 60s by
+ * default), so the effective cadence is max(checkIntervalMs, tick). Values
+ * below one minute could never be honoured and are not offered; a stored
+ * sub-minute value still renders (IntervalSelect keeps the current value).
+ */
 export const REFLEX_CHECK_OPTIONS: readonly number[] = [
-  15_000, 30_000, 60_000, 120_000, 300_000, 600_000,
+  60_000, 120_000, 300_000, 600_000,
 ];
 
 export const REFLEX_MIN_INTERVAL_OPTIONS: readonly number[] = [

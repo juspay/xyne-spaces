@@ -29,7 +29,7 @@ import { loadOverlappingRuns, markCoverage } from "../awakening/prior-runs.js";
 import { dispatchAwakening, resolveAgentIdentity, AwakeningIdentityError } from "../awakening/dispatch.js";
 import { resolveWorkspaceId, WorkspaceResolutionError } from "../awakening/workspace.js";
 import { peekRunRate, consumeRunRate } from "../awakening/rate-limit.js";
-import { acquireAgentLock, releaseAgentLock } from "../awakening/lock.js";
+import { acquireAgentLock, rekeyAgentLock, releaseAgentLock } from "../awakening/lock.js";
 import { WINDOW_QUEUE_NAME, type AwakeningWindowJobData } from "./awakening-queue.js";
 import type { AwakeningWindow } from "../awakening/types.js";
 import { createLogger } from "../logger.js";
@@ -62,12 +62,33 @@ async function recordRun(
         ...(outcome !== "ran" ? { completedAt: new Date() } : {}),
       },
     })
-    .catch((err) => {
-      // P2002 = another pod already recorded this exact wake. That is the
-      // idempotency guard doing its job, not an error.
+    .catch(async (err) => {
       if ((err as { code?: string })?.code !== "P2002") {
         log.warn(`[awakening] recordRun failed agent=${window.agentId}: ${err?.message ?? err}`);
+        return;
       }
+      // P2002 = this idempotency key already has a row. Two legitimate cases:
+      //  - another pod recorded this exact wake → leave it alone;
+      //  - THIS window was retried (BullMQ after a failed dispatch) or
+      //    deferred (rate-limited, watermark not advanced) and has now moved
+      //    on. Only those non-final rows are overwritten, so a retry that
+      //    succeeds no longer stays "failed" with a NULL sessionId.
+      await prisma.agentAwakeningRun
+        .updateMany({
+          where: { idempotencyKey, OR: [{ outcome: "failed" }, { skipReason: "rate_limited" }] },
+          data: {
+            windowEndMs: BigInt(window.endMs),
+            outcome,
+            eventCount: window.events.length,
+            signals: window.signals as unknown as object,
+            skipReason: extra.skipReason ?? null,
+            sessionId: extra.sessionId ?? null,
+            completedAt: outcome !== "ran" ? new Date() : null,
+          },
+        })
+        .catch((e: unknown) =>
+          log.warn(`[awakening] recordRun repair failed agent=${window.agentId}: ${e instanceof Error ? e.message : String(e)}`),
+        );
     });
 }
 
@@ -145,8 +166,11 @@ async function processWindow(job: Job<AwakeningWindowJobData>): Promise<void> {
 
     const rate = await peekRunRate(agentId, config.limits.maxRunsPerHour);
     if (!rate.allowed) {
+      // Defer, do not drop: the watermark stays put so the next beat re-reads
+      // these events. Only a genuinely boring window may advance the cursor
+      // (cursor.ts invariant 3); a rate-limited one was never looked at. The
+      // backlog stays bounded by sealWindow's maxCatchupWindows gap guard.
       await recordRun(emptyWindow, idempotencyKey, "skipped", { skipReason: "rate_limited" });
-      await advanceWatermark(agentId, bounds.endMs, null);
       await markSuccess(agentId, true);
       return;
     }
@@ -213,8 +237,12 @@ async function processWindow(job: Job<AwakeningWindowJobData>): Promise<void> {
     // Re-key the lock from the idempotency key to the real session id, so the
     // result callback and the injection path can both find it.
     if (result.sessionId) {
-      await releaseAgentLock(agentId, idempotencyKey);
-      await acquireAgentLock(agentId, { sessionId: result.sessionId, kind, acquiredAtMs: Date.now() });
+      const rekeyed = await rekeyAgentLock(agentId, idempotencyKey, {
+        sessionId: result.sessionId,
+        kind,
+        acquiredAtMs: Date.now(),
+      });
+      if (!rekeyed) log.warn(`[awakening] lock rekey lost agent=${agent.slug} session=${result.sessionId}`);
     }
 
     // Budget is consumed only once a run is genuinely in flight.
