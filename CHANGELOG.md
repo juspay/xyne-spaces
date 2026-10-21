@@ -1,3 +1,10 @@
+## [1.515.0](https://github.com/juspay/xyne-spaces/compare/v1.514.0...v1.515.0) (2026-10-21)
+
+
+### Features
+
+* spaces-vespa-search uses the default_native fieldset and claw summaries ([#3292](https://github.com/juspay/xyne-spaces/issues/3292)) ([72e387e](https://github.com/juspay/xyne-spaces/commit/72e387e0be2817633f8582faa0548e4559866866))
+
 ## [1.514.0](https://github.com/juspay/xyne-spaces/compare/v1.513.1...v1.514.0) (2026-10-21)
 
 
