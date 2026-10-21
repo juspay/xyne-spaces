@@ -16,9 +16,9 @@ const analyticsAdmin = authorize('ANALYTICS', AccessType.ADMIN, false);
 router.get('/entities', authMiddleware.authenticate, analyticsAdmin, AuditLogController.entities);
 
 /**
- * @route GET /api/audit-logs/export?entityType=BOARD&entityId=<id>&from=<ms>&to=<ms>
- * @desc Every entry in the window, newest first and capped, for Excel download.
- *       entityId is optional (omitted = every entity of the type).
+ * @route GET /api/audit-logs/export?entityType=BOARD&entityId=<id>&from=<ms>&to=<ms>&timeZone=<iana>
+ * @desc Every entry in the window, newest first, streamed as an .xlsx download;
+ *       404 when nothing matches. entityId is optional (omitted = every entity of the type).
  * @access ANALYTICS Admin
  */
 router.get('/export', authMiddleware.authenticate, analyticsAdmin, AuditLogController.exportLogs);

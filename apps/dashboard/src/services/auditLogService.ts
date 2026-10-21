@@ -1,10 +1,6 @@
 import { apiInstance } from './clients/apiClient';
-import type {
-  AuditEntityType,
-  AuditLogEntityOption,
-  AuditLogExport,
-  AuditLogPage,
-} from '@xyne/shared';
+import { downloadFile } from './clients/fileFetchService';
+import type { AuditEntityType, AuditLogEntityOption, AuditLogPage } from '@xyne/shared';
 
 interface ApiEnvelope<T> {
   success?: boolean;
@@ -23,11 +19,11 @@ export interface AuditFeedFilter {
   tables?: string[] | undefined;
 }
 
-const feedParams = (filter: AuditFeedFilter): Record<string, string | number> => ({
+const feedParams = (filter: AuditFeedFilter): Record<string, string> => ({
   entityType: filter.entityType,
   ...(filter.entityId && { entityId: filter.entityId }),
-  ...(filter.from !== undefined && { from: filter.from }),
-  ...(filter.to !== undefined && { to: filter.to }),
+  ...(filter.from !== undefined && { from: String(filter.from) }),
+  ...(filter.to !== undefined && { to: String(filter.to) }),
   ...(filter.tables && filter.tables.length > 0 && { tables: filter.tables.join(',') }),
 });
 
@@ -66,10 +62,17 @@ export const fetchAuditLogEntities = async (
   return unwrap(response.data, 'Failed to load audited entities');
 };
 
-/** Every entry in the window (newest first, capped server-side) for Excel export. */
-export const fetchAuditLogExport = async (filter: AuditFeedFilter): Promise<AuditLogExport> => {
-  const response = await apiInstance.get<ApiEnvelope<AuditLogExport>>('/audit-logs/export', {
-    params: feedParams(filter),
+/**
+ * Download every entry in the window as an .xlsx the backend streams, timed in the
+ * viewer's time zone. Rejects with status 404 when nothing matches.
+ */
+export const downloadAuditLogXlsx = async (
+  filter: AuditFeedFilter,
+  fileName: string,
+): Promise<void> => {
+  const params = new URLSearchParams({
+    ...feedParams(filter),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
-  return unwrap(response.data, 'Failed to export audit logs');
+  await downloadFile(`/audit-logs/export?${params.toString()}`, fileName);
 };

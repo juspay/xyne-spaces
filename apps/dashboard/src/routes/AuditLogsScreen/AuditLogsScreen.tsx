@@ -17,16 +17,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/Select';
-import { fetchAuditLogEntities, fetchAuditLogExport } from '../../services/auditLogService';
-import { downloadAuditLogXlsx } from '../../utils/auditLogExport';
+import { downloadAuditLogXlsx, fetchAuditLogEntities } from '../../services/auditLogService';
 import { showDownloadCompleteToast } from '../../utils/downloadToast';
 import { cn } from '../../utils/classNames';
 
 interface AuditSource {
   type: AuditEntityType;
   label: string;
-  /** Singular noun for the entity column / export header. */
-  entityLabel: string;
   allLabel: string;
   slug: string;
 }
@@ -35,21 +32,18 @@ const AUDIT_SOURCES: AuditSource[] = [
   {
     type: AuditEntityType.BOARD,
     label: 'Boards',
-    entityLabel: 'Board',
     allLabel: 'All boards',
     slug: 'boards',
   },
   {
     type: AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG,
     label: 'User groups',
-    entityLabel: 'User group',
     allLabel: 'All user groups',
     slug: 'user-groups',
   },
   {
     type: AuditEntityType.DESK,
     label: 'Desks',
-    entityLabel: 'Desk',
     allLabel: 'All desks',
     slug: 'desks',
   },
@@ -238,27 +232,19 @@ const AuditLogsScreen = (): ReactElement => {
   const handleDownload = async (): Promise<void> => {
     if (isExporting) return;
     setIsExporting(true);
+    const filename = `audit-logs-${source.slug}-${format(from, 'yyyy-MM-dd')}-to-${format(to, 'yyyy-MM-dd')}.xlsx`;
     try {
-      const { logs, truncated } = await fetchAuditLogExport({
-        entityType: source.type,
-        entityId: entityId ?? undefined,
-        from,
-        to,
-      });
-      if (logs.length === 0) {
-        toast.info('No changes in this period to download');
-        return;
-      }
-      const filename = `audit-logs-${source.slug}-${format(from, 'yyyy-MM-dd')}-to-${format(to, 'yyyy-MM-dd')}.xlsx`;
-      await downloadAuditLogXlsx(filename, logs, source.entityLabel);
+      await downloadAuditLogXlsx(
+        { entityType: source.type, entityId: entityId ?? undefined, from, to },
+        filename,
+      );
       showDownloadCompleteToast(filename);
-      if (truncated) {
-        toast.warning(
-          `Only the latest ${logs.length} entries were included. Narrow the date range to export the rest.`,
-        );
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) {
+        toast.info('No changes in this period to download');
+      } else {
+        toast.error("Couldn't download audit logs");
       }
-    } catch {
-      toast.error("Couldn't download audit logs");
     } finally {
       setIsExporting(false);
     }

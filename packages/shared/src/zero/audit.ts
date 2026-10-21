@@ -53,12 +53,6 @@ export interface AuditLogEntityOption {
   name: string;
 }
 
-/** GET /api/audit-logs/export — every entry in the window, newest first, capped. */
-export interface AuditLogExport {
-  logs: AuditLogEntry[];
-  truncated: boolean;
-}
-
 export interface AuditChangeDraft {
   /** Action performed on the record (INSERT / UPDATE / DELETE). */
   action: AuditAction;

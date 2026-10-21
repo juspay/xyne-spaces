@@ -7,10 +7,12 @@ import { Button } from '../../ui/Button/Button';
 import { HoverCard } from '../../ui/HoverCard';
 import { cn } from '../../../utils/classNames';
 import { fetchAuditLogPage } from '../../../services/auditLogService';
-import { fieldLabel, formatAuditValue, humanizeField } from '../../../utils/auditLogLabels';
 import {
   AuditAction,
   AuditEntityType,
+  fieldLabel,
+  formatAuditValue,
+  humanizeField,
   type AuditLogChange,
   type AuditLogEntry,
 } from '@xyne/shared';

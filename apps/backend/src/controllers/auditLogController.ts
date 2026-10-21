@@ -1,24 +1,25 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { AUDIT_TABLE_CONFIG } from '@/zero/audit';
 import {
-  AuditEntityType,
-  type AuditLogEntityOption,
-  type AuditLogEntry,
-  type AuditLogExport,
-  type AuditLogPage,
-} from '@xyne/shared';
+  AuditLogXlsxWriter,
+  XLSX_MIME_TYPE,
+  auditLogBatches,
+  feedWhere,
+  isValidTimeZone,
+  logInclude,
+  resolveEntityNames,
+  toEntries,
+} from '@/services/auditLogService';
+import { AuditEntityType, type AuditLogEntityOption, type AuditLogPage } from '@xyne/shared';
 
 const TAG = '[AuditLogController]';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
-/** Backstop for Excel exports; the screen's date range is capped at 90 days. */
-const MAX_EXPORT_LOGS = 5000;
 
 const cursorPayloadSchema = z.object({ createdAt: z.number(), id: z.string() });
 
@@ -46,8 +47,12 @@ type FeedFilter = z.infer<z.ZodObject<typeof feedFilterShape>>;
 const isValidRange = (filter: FeedFilter): boolean =>
   filter.from === undefined || filter.to === undefined || filter.from <= filter.to;
 
-const feedFilterSchema = z
-  .object(feedFilterShape)
+const exportQuerySchema = z
+  .object({
+    ...feedFilterShape,
+    // IANA zone for the Time column, so it matches what the viewer saw on screen.
+    timeZone: z.string().default('UTC').refine(isValidTimeZone, { message: 'Unknown time zone' }),
+  })
   .refine(isValidRange, { message: '`from` must not be after `to`' });
 
 const listQuerySchema = z
@@ -59,29 +64,6 @@ const listQuerySchema = z
   .refine(isValidRange, { message: '`from` must not be after `to`' });
 
 const entitiesQuerySchema = z.object({ entityType: z.nativeEnum(AuditEntityType) });
-
-const LOG_INCLUDE = {
-  actorUser: { select: { id: true, name: true, email: true, picture: true } },
-  changes: { orderBy: { createdAt: 'asc' } },
-} as const satisfies Prisma.AuditLogInclude;
-
-type AuditLogRow = Prisma.AuditLogGetPayload<{ include: typeof LOG_INCLUDE }>;
-
-/** LOG_INCLUDE, narrowed to the requested tables' change rows when filtering. */
-const logInclude = (tables: string[] | undefined) =>
-  ({
-    actorUser: LOG_INCLUDE.actorUser,
-    changes: {
-      orderBy: LOG_INCLUDE.changes.orderBy,
-      where: tables ? { tableName: { in: tables } } : {},
-    },
-  }) satisfies Prisma.AuditLogInclude;
-
-const ENTITY_NOUNS: Record<AuditEntityType, string> = {
-  [AuditEntityType.BOARD]: 'board',
-  [AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG]: 'user group',
-  [AuditEntityType.DESK]: 'desk',
-};
 
 const encodeCursor = (createdAt: number, id: string): string =>
   Buffer.from(JSON.stringify({ createdAt, id })).toString('base64url');
@@ -95,91 +77,6 @@ const decodeCursor = (value: string): { createdAt: number; id: string } | null =
   } catch {
     return null;
   }
-};
-
-const feedWhere = (workspaceId: string, filter: FeedFilter): Prisma.AuditLogWhereInput => ({
-  workspaceId,
-  entityType: filter.entityType,
-  ...(filter.entityId && { entityId: filter.entityId }),
-  ...(filter.tables && { changes: { some: { tableName: { in: filter.tables } } } }),
-  ...((filter.from !== undefined || filter.to !== undefined) && {
-    createdAt: {
-      ...(filter.from !== undefined && { gte: new Date(filter.from) }),
-      ...(filter.to !== undefined && { lte: new Date(filter.to) }),
-    },
-  }),
-});
-
-/**
- * Entity display names. Reads run under the caller's ACL, so a private desk the
- * caller isn't in, or a deleted entity, falls back to a labelled short id.
- */
-async function resolveEntityNames(
-  entityType: AuditEntityType,
-  entityIds: string[]
-): Promise<Map<string, string>> {
-  const ids = [...new Set(entityIds)];
-  if (ids.length === 0) return new Map();
-
-  const args = { where: { id: { in: ids } }, select: { id: true, name: true } };
-  let rows: { id: string; name: string }[];
-  switch (entityType) {
-    case AuditEntityType.BOARD:
-      rows = await db.board.findMany(args);
-      break;
-    case AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG:
-      rows = await db.userGroup.findMany(args);
-      break;
-    case AuditEntityType.DESK:
-      rows = await db.channel.findMany(args);
-      break;
-  }
-
-  const nameById = new Map(rows.map((row) => [row.id, row.name.trim()]));
-  return new Map(
-    ids.map((id) => [
-      id,
-      nameById.get(id) || `Unknown ${ENTITY_NOUNS[entityType]} (${id.slice(0, 8)})`,
-    ])
-  );
-}
-
-const toEntry = (log: AuditLogRow, entityName: string): AuditLogEntry => ({
-  id: log.id,
-  entityType: log.entityType,
-  entityId: log.entityId,
-  entityName,
-  createdAt: log.createdAt.getTime(),
-  actor: log.actorUser
-    ? {
-        id: log.actorUser.id,
-        name: log.actorUser.name,
-        email: log.actorUser.email,
-        picture: log.actorUser.picture,
-      }
-    : null,
-  changes: log.changes.map((change) => ({
-    id: change.id,
-    action: change.action as AuditLogEntry['changes'][number]['action'],
-    tableName: change.tableName,
-    recordId: change.recordId,
-    targetName: change.targetName,
-    field: change.field,
-    oldValue: change.oldValue,
-    newValue: change.newValue,
-    createdAt: change.createdAt.getTime(),
-  })),
-});
-
-const toEntries = async (
-  entityType: AuditEntityType,
-  logs: AuditLogRow[]
-): Promise<AuditLogEntry[]> => {
-  const names = await resolveEntityNames(
-    entityType,
-    logs.map((log) => log.entityId)
-  );
-  return logs.map((log) => toEntry(log, names.get(log.entityId) ?? log.entityId));
 };
 
 export class AuditLogController {
@@ -300,7 +197,7 @@ export class AuditLogController {
     }
   }
 
-  /** Every entry in the window (newest first, capped) for the screen's Excel download. */
+  /** Streams every entry in the window (newest first) as an .xlsx; 404 when nothing matches. */
   static async exportLogs(req: Request, res: Response): Promise<void> {
     const workspaceId = req.user?.workspaceId;
     if (!workspaceId) {
@@ -308,7 +205,7 @@ export class AuditLogController {
       return;
     }
 
-    const parsed = feedFilterSchema.safeParse(req.query);
+    const parsed = exportQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       res
         .status(400)
@@ -316,25 +213,25 @@ export class AuditLogController {
       return;
     }
 
-    const { entityType, entityId } = parsed.data;
+    const { entityType, entityId, timeZone } = parsed.data;
     try {
-      const rows = await db.auditLog.findMany({
-        where: feedWhere(workspaceId, parsed.data),
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: MAX_EXPORT_LOGS + 1,
-        include: logInclude(parsed.data.tables),
-      });
-      const truncated = rows.length > MAX_EXPORT_LOGS;
+      let writer: AuditLogXlsxWriter | null = null;
+      for await (const logs of auditLogBatches(workspaceId, parsed.data)) {
+        // The client went away; stop reading.
+        if (res.destroyed) return;
+        if (!writer) {
+          res.setHeader('Content-Type', XLSX_MIME_TYPE);
+          res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.xlsx"');
+          writer = new AuditLogXlsxWriter(res, entityType, timeZone);
+        }
+        await writer.addLogs(logs);
+      }
 
-      const body: ApiResponse<AuditLogExport> = {
-        success: true,
-        timestamp: new Date().toISOString(),
-        data: {
-          logs: await toEntries(entityType, truncated ? rows.slice(0, MAX_EXPORT_LOGS) : rows),
-          truncated,
-        },
-      };
-      res.json(body);
+      if (!writer) {
+        res.status(404).json({ success: false, error: 'No changes in this period' });
+        return;
+      }
+      await writer.finish();
     } catch (error) {
       logger.error(`${TAG} failed to export audit logs`, {
         workspaceId,
@@ -342,7 +239,12 @@ export class AuditLogController {
         entityId,
         error: error instanceof Error ? error.message : error,
       });
-      res.status(500).json({ success: false, error: 'Failed to export audit logs' });
+      // Once the file has started, cutting the connection is the only way to signal failure.
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Failed to export audit logs' });
+      } else {
+        res.destroy();
+      }
     }
   }
 }

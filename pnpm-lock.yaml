@@ -334,6 +334,9 @@ importers:
       eventsource:
         specifier: ^4.1.0
         version: 4.1.0
+      exceljs:
+        specifier: ^4.4.0
+        version: 4.4.0
       express:
         specifier: ^4.18.2
         version: 4.22.2
