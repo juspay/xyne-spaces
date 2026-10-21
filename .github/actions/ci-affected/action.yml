@@ -1,0 +1,58 @@
+name: CI affected check
+description: >-
+  Decides whether a CI job needs to run for the current pull request. Runs the
+  job only if the given pnpm workspace package changed since the PR base, or
+  depends (transitively, via `workspace:` deps) on one that changed. Always runs
+  on non-PR events, and on any failure to decide.
+
+# Referenced from ci.yml as juspay/xyne-spaces/.github/actions/ci-affected@main
+# (not ./), so a pull request cannot alter it and skip its own checks.
+# Needs a checkout with fetch-depth >= 2 and pnpm on PATH.
+
+inputs:
+  package:
+    description: pnpm workspace package name this job builds
+    required: true
+  extra-paths:
+    description: >-
+      Space-separated paths used by the job that are outside that package's own
+      workspace dir (e.g. a script it runs). A change there also runs the job.
+    required: false
+    default: ""
+
+outputs:
+  run:
+    description: "'true' if the job should run, 'false' to skip its steps"
+    value: ${{ steps.check.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        EXTRA_PATHS: ${{ inputs.extra-paths }}
+      run: |
+        set -uo pipefail
+        emit() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "ci-affected: $PKG run=$1 ($2)"; exit 0; }
+
+        [ "$GITHUB_EVENT_NAME" = "pull_request" ] || emit true "not a pull_request"
+
+        # On pull_request the checkout is a merge commit; HEAD^1 is the base tip.
+        base=$(git rev-parse --verify -q HEAD^1) || emit true "no base commit"
+
+        if affected=$(pnpm ls --filter "...[$base]" --depth -1 --json 2>/dev/null \
+          | node -e 'const l=JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(l.map(p=>p.name).join("\n"))'); then
+          echo "Changed packages + dependents:"; echo "$affected" | sed 's/^/  /'
+          echo "$affected" | grep -qxF "$PKG" && emit true "package or a dependency changed"
+        else
+          emit true "could not compute affected packages"
+        fi
+
+        if [ -n "$EXTRA_PATHS" ]; then
+          # shellcheck disable=SC2086
+          [ -n "$(git diff --name-only "$base" HEAD -- $EXTRA_PATHS)" ] && emit true "extra path changed"
+        fi
+
+        emit false "nothing this job builds changed"
