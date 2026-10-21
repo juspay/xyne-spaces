@@ -1050,6 +1050,8 @@ export const mutators = defineMutators({
         await tx.mutate.channels.update({
           id: channelId,
           expandChannelEmailsByDefault: expand,
+          // Bump updatedAt so clients' incremental channel sync (updatedAt > watermark) picks it up.
+          updatedAt: Date.now(),
         });
       },
     ),
