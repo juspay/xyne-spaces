@@ -1,7 +1,8 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { ensureInstalled } from '@/bypassAcl/appInstallService';
+import { AppError } from '@/middleware/errorHandler';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ const EnsureInstalledBodySchema = z.object({
  *
  * Returns { appId, signingSecret, jwtToken, appCreated }.
  */
-router.post('/ensure-installed', async (req: Request, res: Response): Promise<void> => {
+router.post('/ensure-installed', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const bodyResult = EnsureInstalledBodySchema.safeParse(req.body);
   if (!bodyResult.success) {
     res.status(400).json({ error: 'Validation error', details: bodyResult.error.errors });
@@ -56,13 +57,10 @@ router.post('/ensure-installed', async (req: Request, res: Response): Promise<vo
     });
     res.status(200).json(result);
   } catch (error) {
-    logger.error('[ensure-installed] failed', {
-      orgId,
-      name,
-      workspaceId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    res.status(500).json({ error: 'Internal server error' });
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('[ensure-installed] failed', { orgId, name, workspaceId, error: message });
+    const isNotFound = /not found|does not belong/i.test(message);
+    next(new AppError(isNotFound ? message.replace(/^\[ENSURE-INSTALLED\] /, '') : 'Internal server error', isNotFound ? 404 : 500));
   }
 });
 
