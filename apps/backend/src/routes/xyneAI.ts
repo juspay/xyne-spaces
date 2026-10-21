@@ -101,6 +101,15 @@ router.post('/v2/conversations/:convId/notes', authMiddleware.authenticate, xyne
 // PATCH /api/xyne-ai/v2/conversations/:convId - Rename and/or pin a conversation
 router.patch('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.updateConversation);
 
+// Chat projects. `reorder` is declared before `/:projectId` so it is never
+// read as an id.
+router.get('/v2/chat-projects', authMiddleware.authenticate, xyneAIControllerV2.listChatProjects);
+router.post('/v2/chat-projects', authMiddleware.authenticate, xyneAIControllerV2.createChatProject);
+router.put('/v2/chat-projects/reorder', authMiddleware.authenticate, xyneAIControllerV2.reorderChatProjects);
+router.get('/v2/chat-projects/:projectId', authMiddleware.authenticate, xyneAIControllerV2.getChatProject);
+router.patch('/v2/chat-projects/:projectId', authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
+router.delete('/v2/chat-projects/:projectId', authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
+
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);
 
