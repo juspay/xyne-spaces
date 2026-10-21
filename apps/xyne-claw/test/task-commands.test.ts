@@ -337,3 +337,45 @@ describe("/learn", () => {
     expect(command?.nudge).toContain("lesson.html");
   });
 });
+
+describe("/brand task command", () => {
+  it("parses only as a leading token, like the other task commands", () => {
+    expect(parseTaskCommand("/brand https://stripe.com")?.command).toBe("/brand");
+    expect(parseTaskCommand("  /BRAND\nuse the attached screenshot")?.command).toBe("/brand");
+    expect(parseTaskCommand("please /brand this site")).toBeNull();
+    expect(parseTaskCommand("/branding guidelines")).toBeNull();
+  });
+
+  it("runs immediately rather than waiting for plan approval", () => {
+    expect(resolveTaskCommandMode("/brand https://stripe.com", "plan")).toBe("auto");
+  });
+
+  it("claims the browser sandbox and the Playwright tools extraction needs", () => {
+    const command = parseTaskCommand("/brand https://stripe.com");
+    expect(command?.sandboxProfile).toBe("browser");
+    expect(command?.skillPaths).toEqual(["design-skills"]);
+    expect(command?.requiredTool).toBe("sandbox-deliver-files");
+    // Computed styles are read through evaluate; screenshots and navigation
+    // are what makes this a browser run rather than a fetch.
+    for (const tool of ["sandbox-pw-navigate", "sandbox-pw-evaluate", "sandbox-pw-screenshot"]) {
+      expect(command?.autoTools).toContain(tool);
+    }
+  });
+
+  it("does NOT inject an existing design system into the run", () => {
+    // /brand PRODUCES a system. Injecting the agent's current one would let it
+    // leak into the extraction and describe the old brand as the new one.
+    const command = parseTaskCommand("/brand https://stripe.com");
+    const injection = buildDesignSystemPromptInjection(command, {
+      designSystem: "# Previous brand\nPrimary is red.",
+    });
+    expect(injection.status).toBe("absent");
+  });
+
+  it("still injects for /design, so the gate was narrowed and not broken", () => {
+    const injection = buildDesignSystemPromptInjection(parseTaskCommand("/design a page"), {
+      designSystem: "# Brand",
+    });
+    expect(injection.status).toBe("injected");
+  });
+});

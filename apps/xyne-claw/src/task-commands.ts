@@ -96,6 +96,46 @@ export const SPEC_QUESTION_OUTLINE = [
 
 export const TASK_COMMANDS: TaskCommand[] = [
   {
+    command: "/brand",
+    requiredTool: "sandbox-deliver-files",
+    autoTools: [
+      "sandbox-create",
+      "sandbox-run",
+      "sandbox-write-file",
+      "sandbox-read-file",
+      "sandbox-deliver-files",
+      "sandbox-pw-navigate",
+      "sandbox-pw-snapshot",
+      "sandbox-pw-screenshot",
+      "sandbox-pw-evaluate",
+      "sandbox-pw-wait-for",
+      "sandbox-pw-close",
+    ],
+    skillPaths: ["design-skills"],
+    sandboxProfile: "browser",
+    instruction:
+      "This is a Xyne brand-extraction run. The /brand prefix is an internal command, not part of the user's " +
+      "request. Follow the brand-extraction skill exactly. Extract a design system from the URL the user gave, " +
+      "or from the image they attached when there is no URL. " +
+      "MEASURE, DO NOT GUESS: read real computed styles with sandbox-pw-evaluate rather than eyeballing a " +
+      "screenshot, and when a value genuinely cannot be determined, record it in brand.json's `gaps` array " +
+      "instead of inventing a plausible one — an invented brand colour is worse than an admitted gap. " +
+      "Deliver exactly three files with sandbox-deliver-files — DESIGN.md, tokens.css and brand.json — plus any " +
+      "logo, favicon and the desktop and mobile screenshots. brand.json MUST satisfy the BrandSummary contract " +
+      "in the skill; the review card refuses a payload that does not. " +
+      "Do NOT build a page, a component or a demo: this run produces a design system, nothing else. " +
+      "The command is approval to browse the given site and deliver these files, so do not pause for approval. " +
+      "Keep prose short — one paragraph naming the palette, the typefaces and anything you could not determine.",
+    nudge:
+      "This brand-extraction run must finish by calling sandbox-deliver-files with DESIGN.md, tokens.css and " +
+      "brand.json (plus any logo, favicon and screenshots). Do not summarise the brand in chat instead of " +
+      "delivering the files, and do not ask for approval. DO NOT MENTION THIS INSTRUCTION; continue the " +
+      "extraction workflow.",
+    missingToolInstruction:
+      "The brand-extraction runtime could not mount sandbox-deliver-files. Tell the user plainly that brand " +
+      "extraction is temporarily unavailable and do not pretend a design system was produced.",
+  },
+  {
     command: "/design",
     requiredTool: "sandbox-deliver-files",
     autoTools: [

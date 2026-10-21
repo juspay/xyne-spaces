@@ -3113,6 +3113,152 @@ export function chatAttachmentDownloadUrl(attachmentId: string): string {
   return `${AUTH_API_URL}/api/v1/agent-chat/attachments/${attachmentId}/download`;
 }
 
+/** An attachment's bytes as text. Used for the small text files a brand
+ *  extraction delivers (DESIGN.md, tokens.css) — not for binaries. */
+export async function fetchChatAttachmentText(attachmentId: string, userId: string): Promise<string> {
+  const res = await fetch(chatAttachmentDownloadUrl(attachmentId), {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!res.ok) throw new ApiError(res.status, `Could not read attachment: HTTP ${res.status}`);
+  return res.text();
+}
+
+// --- Brand extraction (XYNE-66818) -----------------------------------------
+//
+// Render-only mirrors of the BrandSummary contract in
+// packages/xyne-claw-shared/src/brand-extraction.ts. They are declared here
+// rather than imported because this frontend has no workspace dependencies by
+// design — shared constants are fetched at runtime (see SettingsTab).
+//
+// Validation is NOT duplicated: the backend parses and validates with the
+// canonical implementation and this client only ever sees an accepted payload.
+// Keep these in step with that file when a field is added.
+
+export type BrandColorRole =
+  | "primary" | "accent" | "background" | "surface" | "text"
+  | "muted" | "border" | "success" | "warning" | "danger";
+
+export interface BrandColor {
+  hex: string;
+  token: string;
+  role: BrandColorRole;
+  occurrences?: number;
+}
+
+export interface BrandFont {
+  family: string;
+  fallbacks?: string[];
+  role: "heading" | "body" | "mono";
+  weights?: number[];
+  sourceUrl?: string;
+}
+
+export interface BrandTypeStep {
+  name: string;
+  sizePx: number;
+  lineHeightPx?: number;
+  weight?: number;
+  letterSpacingPx?: number;
+}
+
+export interface BrandAssetRef {
+  kind: "logo" | "favicon" | "screenshot-desktop" | "screenshot-mobile";
+  file: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface BrandSummary {
+  version: 1;
+  name: string;
+  source: "url" | "screenshot" | "repo";
+  sourceUrl?: string;
+  sourceRepo?: string;
+  sourceCommit?: string;
+  extractedAt: string;
+  colors: BrandColor[];
+  fonts: BrandFont[];
+  typeScale: BrandTypeStep[];
+  assets?: BrandAssetRef[];
+  gaps?: string[];
+}
+
+/** Filenames a brand extraction delivers. Both XYNE-66818 (url/screenshot)
+ *  and XYNE-66819 (repo) emit exactly these. */
+export const BRAND_SUMMARY_FILENAME = "brand.json";
+export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
+export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
+
+/**
+ * The validated brand summary for a delivered `brand.json`.
+ *
+ * Returns null when the attachment is not a valid summary (422) — the card
+ * then says so rather than rendering a half-understood payload.
+ */
+export async function fetchBrandSummary(
+  attachmentId: string,
+  userId: string,
+): Promise<BrandSummary | null> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/brand-summary`,
+    { credentials: "include", headers: { "x-user-id": userId } },
+  );
+  if (res.status === 422) return null;
+  if (!res.ok) throw new ApiError(res.status, `Could not read brand summary: HTTP ${res.status}`);
+  const body = (await res.json()) as { success: boolean; data: BrandSummary };
+  return body.data ?? null;
+}
+
+// --- Design systems (XYNE-66817) -------------------------------------------
+
+export interface DesignSystemRecord {
+  id: string;
+  orgId: string;
+  name: string;
+  designMd: string;
+  tokensCss: string;
+  assets: unknown;
+  source: string;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourceCommit: string | null;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDesignSystemInput {
+  name: string;
+  designMd?: string;
+  tokensCss?: string;
+  assets?: Record<string, unknown> | null;
+  /** "manual" | "url" | "screenshot" | "repo" | "file" | "library". */
+  source?: string;
+  sourceUrl?: string | null;
+  sourceRepo?: string | null;
+  sourceCommit?: string | null;
+}
+
+export async function createDesignSystem(
+  input: CreateDesignSystemInput,
+): Promise<DesignSystemRecord> {
+  const result = await request<{ success: true; data: DesignSystemRecord }>(
+    `${AUTH_API_URL}/api/v1/design-systems`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return result.data;
+}
+
+export async function listDesignSystems(): Promise<DesignSystemRecord[]> {
+  const result = await request<{ success: true; data: DesignSystemRecord[] }>(
+    `${AUTH_API_URL}/api/v1/design-systems`,
+  );
+  return result.data ?? [];
+}
+
 export interface SlidePptConfig {
   title?: string;
   layout?: string;
