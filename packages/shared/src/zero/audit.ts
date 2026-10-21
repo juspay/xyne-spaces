@@ -28,6 +28,8 @@ export interface AuditLogEntry {
   id: string;
   entityType: string;
   entityId: string;
+  /** Display name of the audited entity (board / user group / desk), resolved at read time. */
+  entityName: string;
   createdAt: number;
   actor: {
     id: string;
@@ -43,6 +45,12 @@ export interface AuditLogPage {
   logs: AuditLogEntry[];
   nextCursor: string | null;
   hasMore: boolean;
+}
+
+/** GET /api/audit-logs/entities — one entity that has audit history. */
+export interface AuditLogEntityOption {
+  id: string;
+  name: string;
 }
 
 export interface AuditChangeDraft {
