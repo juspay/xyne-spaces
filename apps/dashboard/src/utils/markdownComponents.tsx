@@ -4,6 +4,7 @@ import { openLink } from './openLink';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
+import { GuardedMarkdownImage } from './markdownImageGuard';
 import { copyTextToClipboard } from './clipboardUtils';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
@@ -246,6 +247,12 @@ export const createMarkdownComponents = (
       <table {...props}>{children}</table>
     </div>
   ),
+
+  // Override <img> — an image the browser fetches on its own can carry data
+  // out of the answer, so only allowlisted hosts load without a click.
+  img: (
+    props: React.ImgHTMLAttributes<HTMLImageElement> & { node?: Element | undefined },
+  ): React.ReactElement => <GuardedMarkdownImage {...props} />,
 
   a: ({
     href,

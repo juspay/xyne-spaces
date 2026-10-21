@@ -31,6 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import Markdown from "react-markdown";
+import { GUARDED_IMAGE_COMPONENTS } from "../lib/markdownImageGuard";
 import remarkGfm from "remark-gfm";
 import { fetchConversationDebugArtifacts, type DebugArtifactBundle, type DebugEventRecord } from "../lib/api";
 import { deepParseJson } from "../lib/toolFormat";
@@ -382,7 +383,9 @@ function JsonViewer({
 function MarkdownBody({ text }: { text: string }) {
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-table:my-2 prose-hr:my-2 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-xyne-border prose-td:border-xyne-border">
-      <Markdown remarkPlugins={[remarkGfm]}>{text || "_(empty)_"}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={GUARDED_IMAGE_COMPONENTS}>
+        {text || "_(empty)_"}
+      </Markdown>
     </div>
   );
 }

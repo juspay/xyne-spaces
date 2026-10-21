@@ -14,6 +14,7 @@ import { SpinnerGapIcon, PencilSimpleIcon, TrashIcon, CopySimpleIcon, CheckIcon,
 import { useAdminStatus } from "../hooks/useAdminStatus";
 import { useAuth } from "../../hooks/useAuth";
 import Markdown from "react-markdown";
+import { GuardedMarkdownImage } from "../../lib/markdownImageGuard";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "./ui/Dialog";
 import { SidePanel } from "./ui/SidePanel";
@@ -93,6 +94,7 @@ function AgentResponse({ children }: { children: string }) {
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
+          img: (props) => <GuardedMarkdownImage {...props} />,
           // Links in the RCA (Grafana, PRs, dashboards) open in a new tab so
           // the reader never loses the pipeline page.
           a: ({ href, children: linkChildren, ...rest }) => (

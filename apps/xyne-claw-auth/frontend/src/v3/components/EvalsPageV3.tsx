@@ -13,6 +13,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
+import { GUARDED_IMAGE_COMPONENTS } from "../../lib/markdownImageGuard";
 import remarkGfm from "remark-gfm";
 import {
   FolderIcon,
@@ -320,7 +321,7 @@ function EvalMarkdown({ children, tone = "primary", invocations, onOpenCitation,
             filterUnknownCitations={false}
           />
         )
-        : <Markdown remarkPlugins={[remarkGfm]}>{children}</Markdown>}
+        : <Markdown remarkPlugins={[remarkGfm]} components={GUARDED_IMAGE_COMPONENTS}>{children}</Markdown>}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   Link2,
 } from "lucide-react";
 import Markdown from "react-markdown";
+import { GUARDED_IMAGE_COMPONENTS } from "../lib/markdownImageGuard";
 import remarkGfm from "remark-gfm";
 import type { ToolInvocation, PendingAction, SlidePptConfig } from "../lib/api";
 import { fetchChatAttachmentSlideJson } from "../lib/api";
@@ -235,7 +236,7 @@ export function MessageBubble({
                     On done, the caret just disappears; the text itself is unchanged so no jitter. */}
                   {hasText && (
                     <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-table:my-2 prose-hr:my-2 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-zinc-700 prose-td:border-zinc-700">
-                      <Markdown remarkPlugins={[remarkGfm]}>
+                      <Markdown remarkPlugins={[remarkGfm]} components={GUARDED_IMAGE_COMPONENTS}>
                         {stripCitationBlock(content)}
                       </Markdown>
                       {streaming && (
@@ -540,7 +541,9 @@ function InvocationBlocks({ invocations }: { invocations: ToolInvocation[] }) {
               key={inv.toolCallId ?? `respond-${i}`}
               className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-table:my-2 prose-hr:my-2 prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-zinc-700 prose-td:border-zinc-700"
             >
-              <Markdown remarkPlugins={[remarkGfm]}>{message}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} components={GUARDED_IMAGE_COMPONENTS}>
+                {message}
+              </Markdown>
             </div>
           );
         }

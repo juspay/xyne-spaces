@@ -30,7 +30,7 @@ export type AnchorTargetProps = Pick<
   'target' | 'rel'
 >;
 
-const INTERNAL_XYNE_HOSTS = new Set([
+export const INTERNAL_XYNE_HOSTS = new Set([
   'spaces.xyne.juspay.net',
   'app.spaces.xyne.juspay.net',
   'spaces.sandbox.xyne.juspay.net',

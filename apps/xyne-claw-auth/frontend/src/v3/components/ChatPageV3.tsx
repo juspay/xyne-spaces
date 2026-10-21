@@ -1,6 +1,7 @@
 import { Fragment, forwardRef, useImperativeHandle, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
+import { GuardedMarkdownImage } from "../../lib/markdownImageGuard";
 import remarkGfm from "remark-gfm";
 import {
   LightningIcon,
@@ -918,6 +919,7 @@ export function CitationMarkdown({
       remarkPlugins={[remarkGfm]}
       urlTransform={(url) => url}
       components={{
+        img: (props) => <GuardedMarkdownImage {...props} />,
         a: ({ href, children, ...props }) => {
           if (href?.startsWith("cite:")) {
             const ref = parseClawCitationRef(href);
