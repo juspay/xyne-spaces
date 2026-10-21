@@ -1,10 +1,4 @@
-import {
-  acquireLock,
-  logger,
-  releaseLock,
-  runAsServiceActor,
-  runWithContext,
-} from '../../re-exports';
+import { acquireLock, logger, releaseLock, runWithContext } from '../../re-exports';
 import { gatewayConfig } from '../../config';
 import { GatewayError, isPausingError } from '../../core/errors';
 import { inlineJobContext } from '../../core/queue/gatewayQueue';
@@ -99,7 +93,8 @@ export class MirrorHandler implements GatewayHandler {
       ) {
         throw new GatewayError('LOCK_HELD', 'The message is still being sent');
       }
-      await runAsServiceActor(link.createdBy, link.workspaceId, () =>
+      const principal = { userId: link.createdBy, workspaceId: link.workspaceId };
+      await runWithContext(principal, () =>
         this.pausingOnError(link, () =>
           this.mirror.outbound.sendMessageChange(link, config, change, context)
         )

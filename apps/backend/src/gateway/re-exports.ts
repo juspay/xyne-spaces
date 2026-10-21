@@ -4,7 +4,7 @@ export { db } from '@/database/client';
 export { repositories } from '@/database/repositories';
 export { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 export { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
-export { runAsServiceActor, runWithContext, withWorkspaceScope } from '@/database/tenant/context';
+export { runWithContext, withWorkspaceScope } from '@/database/tenant/context';
 
 export { logger } from '@/utils/logger';
 export { AppError } from '@/middleware/errorHandler';
