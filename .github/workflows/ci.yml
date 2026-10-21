@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
   NODE_VERSION: "22"
@@ -18,12 +19,59 @@ env:
   PNPM_FLAGS: "--frozen-lockfile --prod=false"
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.backend == 'true' }}
+      dashboard: ${{ github.event_name != 'pull_request' || steps.filter.outputs.dashboard == 'true' }}
+      claw: ${{ github.event_name != 'pull_request' || steps.filter.outputs.claw == 'true' }}
+      framework: ${{ github.event_name != 'pull_request' || steps.filter.outputs.framework == 'true' }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            global: &global
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'package.json'
+              - '.npmrc'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/CI-pr.yml'
+            backend:
+              - *global
+              - 'apps/backend/**'
+              - 'packages/**'
+              - 'scripts/validate-zero-column-parity.mjs'
+            dashboard:
+              - *global
+              - 'apps/dashboard/**'
+              - 'packages/**'
+            claw:
+              - *global
+              - 'apps/xyne-claw/**'
+              - 'packages/xyne-claw-shared/**'
+              - 'packages/kata-sdk/**'
+              - 'packages/litellm-client/**'
+              - 'packages/storage/**'
+              - 'packages/icons/**'
+            framework:
+              - *global
+              - 'packages/framework/**'
+
   # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -94,6 +142,8 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true'
     # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
     # Each leg used to run its own Install dependencies in parallel — 3
     # concurrent installs against the mirror per PR. Trades wall-clock time
@@ -263,6 +313,8 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
+    needs: changes
+    if: needs.changes.outputs.framework == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
@@ -304,6 +356,8 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
+    needs: changes
+    if: needs.changes.outputs.claw == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5

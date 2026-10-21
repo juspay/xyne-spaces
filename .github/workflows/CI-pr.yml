@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 # Cancel superseded runs on ordinary feature branches when a new commit is
 # pushed. Do NOT cancel for protected branches (main/master/staging/release*)
@@ -27,3 +28,4 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+      pull-requests: read
