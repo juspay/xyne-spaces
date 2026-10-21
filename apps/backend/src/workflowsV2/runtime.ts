@@ -18,6 +18,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
+import { conversationalFlowQueue } from '@/queues/conversationalFlowQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
 import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
 import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
@@ -155,6 +156,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
 export const initWorkflows = async (): Promise<void> => {
   await workflowsQueue.initialize();
   await workflowsCronQueue.initialize();
+  await conversationalFlowQueue.initialize();
   logger.info('[workflows] runtime ready');
 };
 
