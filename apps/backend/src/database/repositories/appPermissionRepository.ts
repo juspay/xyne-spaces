@@ -29,6 +29,25 @@ export type AvailablePermissionIdNameType = Prisma.AvailableAppPermissionGetPayl
 }>;
 
 
+/**
+ * The registry holds two kinds of rows, told apart by `type`:
+ *  - 'api'   — API permissions (READ / WRITE / DELETE / START), checked by requirePermission.
+ *  - 'event' — event subscriptions (SUBSCRIBE), which gate the outbound app events an install
+ *              receives. No SUBSCRIBE rows at all means "every event" (legacy behaviour).
+ * Every read/write below is scoped to one kind so the two modals never touch each other's rows.
+ */
+export type PermissionKind = 'api' | 'event';
+
+export function permissionTypeWhere(kind: PermissionKind): Prisma.AvailableAppPermissionWhereInput {
+  return kind === 'event'
+    ? { type: AppPermissionType.SUBSCRIBE }
+    : { type: { not: AppPermissionType.SUBSCRIBE } };
+}
+
+export function scopeKind(type: AppPermissionType): PermissionKind {
+  return type === AppPermissionType.SUBSCRIBE ? 'event' : 'api';
+}
+
 export function toScope(name: string, type: AppPermissionType): string {
   return `${name}:${type.toLowerCase()}`;
 }
@@ -46,6 +65,12 @@ function parseScope(scope: string): { name: string; type: AppPermissionType } {
     );
   }
   return { name, type: typeRaw as AppPermissionType };
+}
+
+/** Reject scopes of the other kind (e.g. an event scope saved through the API modal). */
+function assertScopesOfKind(parsed: { type: AppPermissionType }[], scopes: string[], kind: PermissionKind): void {
+  const wrong = scopes.filter((_, i) => scopeKind(parsed[i].type) !== kind);
+  if (wrong.length > 0) throw new Error(`Unknown permissions: ${wrong.join(', ')}`);
 }
 
 export class AppPermissionRepository extends BaseRepository<
@@ -89,9 +114,10 @@ export class AppPermissionRepository extends BaseRepository<
     return this.db.availableAppPermission.findUnique({ where: { name_type: { name, type } } });
   }
 
-  /** All registry entries, sorted by name then type. */
-  async findAll() {
+  /** All registry entries of one kind, sorted by name then type. */
+  async findAll(kind: PermissionKind = 'api') {
     return this.db.availableAppPermission.findMany({
+      where: permissionTypeWhere(kind),
       orderBy: [{ name: 'asc' }, { type: 'asc' }],
     });
   }
@@ -106,25 +132,28 @@ export class AppPermissionRepository extends BaseRepository<
     });
   }
 
-  async getAppPermissions(appId: string): Promise<string[]> {
+  async getAppPermissions(appId: string, kind: PermissionKind = 'api'): Promise<string[]> {
     const rows: AppPermissionWithPerm[] = await this.db.appPermission.findMany({
-      where: { appId },
+      where: { appId, permission: permissionTypeWhere(kind) },
       include: { permission: { select: { name: true, type: true } } },
     });
     return rows.map((r) => toScope(r.permission.name, r.permission.type as AppPermissionType));
   }
 
-  async setAppPermissions(appId: string, scopes: string[]): Promise<void> {
+  async setAppPermissions(appId: string, scopes: string[], kind: PermissionKind = 'api'): Promise<void> {
     const parsed = scopes.map(parseScope);
-    await setAppPermissionsTx(this, appId, parsed, scopes);
+    assertScopesOfKind(parsed, scopes, kind);
+    await setAppPermissionsTx(this, appId, parsed, scopes, kind);
   }
 
 
   async getGrantedPermissionsWithMeta(
     installedAppId: string,
   ): Promise<{ effectiveNames: string[]; hasPendingChanges: boolean }> {
+    // API permissions only: event subscriptions must not leak into the app's granted
+    // scopes or mark its API permissions stale.
     const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
-      where: { installedAppId },
+      where: { installedAppId, permission: permissionTypeWhere('api') },
       include: { permission: { select: { name: true, type: true } } },
     });
     if (rows.length === 0) return { effectiveNames: [], hasPendingChanges: false };
@@ -141,19 +170,20 @@ export class AppPermissionRepository extends BaseRepository<
   }
 
   /** True when any installed permission needs a reinstall to take effect. */
-  async hasPermissionsPendingReinstall(installedAppId: string): Promise<boolean> {
+  async hasPermissionsPendingReinstall(installedAppId: string, kind: PermissionKind = 'api'): Promise<boolean> {
     const count = await this.db.installedAppPermission.count({
       where: {
         installedAppId,
+        permission: permissionTypeWhere(kind),
         status: { in: [AppPermissionStatus.UNAPPROVED, AppPermissionStatus.PENDINGDELETE] },
       },
     });
     return count > 0;
   }
 
-  async getInstalledPermissions(installedAppId: string): Promise<string[]> {
+  async getInstalledPermissions(installedAppId: string, kind: PermissionKind = 'api'): Promise<string[]> {
     const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
-      where: { installedAppId },
+      where: { installedAppId, permission: permissionTypeWhere(kind) },
       include: { permission: { select: { name: true, type: true } } },
     });
     return rows
@@ -164,18 +194,20 @@ export class AppPermissionRepository extends BaseRepository<
   /** All installed permissions with their current status (for status-badge UI). */
   async getInstalledPermissionsWithStatus(
     installedAppId: string,
+    kind: PermissionKind = 'api',
   ): Promise<{ scope: string; status: AppPermissionStatus }[]> {
     const rows: InstalledAppPermissionWithPerm[] = await this.db.installedAppPermission.findMany({
-      where: { installedAppId },
+      where: { installedAppId, permission: permissionTypeWhere(kind) },
       include: { permission: { select: { name: true, type: true } } },
     });
     return rows.map((r) => ({ scope: toScope(r.permission.name, r.permission.type as AppPermissionType), status: r.status as AppPermissionStatus }));
   }
 
 
-  async setInstalledPermissions(installedAppId: string, scopes: string[]): Promise<void> {
+  async setInstalledPermissions(installedAppId: string, scopes: string[], kind: PermissionKind = 'api'): Promise<void> {
     const parsed = scopes.map(parseScope);
-    await setInstalledPermissionsTx(this, parsed, scopes, installedAppId);
+    assertScopesOfKind(parsed, scopes, kind);
+    await setInstalledPermissionsTx(this, parsed, scopes, installedAppId, kind);
   }
 
 
@@ -185,8 +217,8 @@ export class AppPermissionRepository extends BaseRepository<
    * exactly what the admin edited on the Installed screen: UNAPPROVED → APPROVED (newly granted)
    * and hard-deletes PENDINGDELETE rows (revoked). Already-APPROVED rows are left untouched.
    */
-  async activateInstalledPermissions(installedAppId: string): Promise<void> {
-    await activateInstalledPermissionsTx(this, installedAppId);
+  async activateInstalledPermissions(installedAppId: string, kind: PermissionKind = 'api'): Promise<void> {
+    await activateInstalledPermissionsTx(this, installedAppId, kind);
   }
 
 

@@ -28,6 +28,14 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
   { scope: 'users:read', description: 'Read user profile information from apps' },
   { scope: 'workflows:start', description: 'Start attached workflows from apps' },
+  // Event subscriptions (outbound webhooks). Name = AppEventType value, lowercased.
+  { scope: 'app_mentioned:subscribe', description: 'Receive an event when the app is @mentioned' },
+  { scope: 'direct_message:subscribe', description: 'Receive direct messages sent to the app' },
+  { scope: 'user_mentioned:subscribe', description: 'Receive an event when a user is mentioned in a channel the app is in' },
+  { scope: 'email:subscribe', description: 'Receive inbound emails in channels the app is in' },
+  { scope: 'additional_form_field_updated:subscribe', description: "Receive an event when a ticket form field changes in a channel the app is in" },
+  { scope: 'desk_reply:subscribe', description: 'Receive agent replies on App Desk tickets backed by the app' },
+  { scope: 'call_summary_ready:subscribe', description: 'Receive the summary of a call the app scheduled' },
 ];
 
 async function main() {

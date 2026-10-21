@@ -9,7 +9,8 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
-import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { isEventSubscribed, sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { eventGrantsSelect } from '@/database/repositories/installedAppsRepository';
 import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
@@ -2116,7 +2117,7 @@ export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispa
           webhookUrl: { contains: '/claw/api/v1/webhook/' },
         },
         // Signing secret is app-level now (apps.signingSecret); the per-install column is deprecated.
-        select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+        select: { webhookUrl: true, app: { select: { signingSecret: true } }, installedAppPermissions: eventGrantsSelect },
       })
     : null;
 
@@ -2127,7 +2128,7 @@ export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispa
         user: { workspaceId: req.workspaceId },
         webhookUrl: { endsWith: `/webhook/${req.agentSlug}` },
       },
-      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+      select: { webhookUrl: true, app: { select: { signingSecret: true } }, installedAppPermissions: eventGrantsSelect },
     });
   }
 
@@ -2143,6 +2144,15 @@ export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispa
   const signingSecretEnc = installedApp.app?.signingSecret;
   if (!signingSecretEnc) {
     logger.warn('[ClawAgentService] runClawAgent: app has no signing secret', {
+      agentSlug: req.agentSlug,
+      channelId: req.channelId,
+      workspaceId: req.workspaceId,
+    });
+    return { dispatched: false };
+  }
+
+  if (!isEventSubscribed(installedApp.installedAppPermissions, AppEventType.APP_MENTION)) {
+    logger.warn('[ClawAgentService] runClawAgent: install is not subscribed to APP_MENTIONED', {
       agentSlug: req.agentSlug,
       channelId: req.channelId,
       workspaceId: req.workspaceId,
@@ -2168,7 +2178,7 @@ export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispa
     },
     timestamp: new Date().toISOString(),
   };
-  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
+  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc), installedApp.installedAppPermissions);
   return { dispatched: true };
 }
 

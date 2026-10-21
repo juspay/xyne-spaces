@@ -14,7 +14,8 @@ import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { resolveAppDeskInstalledAppId, scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
-import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { isEventSubscribed, sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { eventGrantsSelect } from '@/database/repositories/installedAppsRepository';
 import { AppEventType, BaseAppEvent, DeskReplyEventPayload, DeskReplyAttachment } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { sendAppReplyTx } from '@/bypassAcl/transactions/appDeskService';
@@ -58,7 +59,12 @@ export class AppDeskService {
     }
     const installedApp = await this.prisma.installedApps.findUnique({
       where: { id: installedAppId },
-      select: { webhookUrl: true, app: { select: { signingSecret: true } }, user: { select: { workspaceId: true } } },
+      select: {
+        webhookUrl: true,
+        app: { select: { signingSecret: true } },
+        user: { select: { workspaceId: true } },
+        installedAppPermissions: eventGrantsSelect,
+      },
     });
     if (!installedApp) {
       throw new Error(`The app backing this desk no longer exists (install ${installedAppId})`);
@@ -74,6 +80,13 @@ export class AppDeskService {
     if (outboundConfigured && !webhookConfigured) {
       throw new Error(
         'This desk delivers replies to the app webhook, but the app has no webhook URL configured. Add one, or turn off "Send replies to app webhook" in Desk Settings.',
+      );
+    }
+    // The reply is delivered through the app, so an unsubscribed install must fail loudly —
+    // silently recording it would leave the customer without the agent's reply.
+    if (outboundConfigured && !isEventSubscribed(installedApp.installedAppPermissions, AppEventType.DESK_REPLY)) {
+      throw new Error(
+        'This app is not subscribed to Desk replies. Enable "desk_reply" in the app\'s Events settings, or turn off "Send replies to app webhook" in Desk Settings.',
       );
     }
     const signingSecret = installedApp.app?.signingSecret ?? null;
@@ -139,7 +152,7 @@ export class AppDeskService {
     });
 
     const ack = outboundConfigured
-      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!))
+      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!), installedApp.installedAppPermissions)
       : null;
 
     const ackExternalId =

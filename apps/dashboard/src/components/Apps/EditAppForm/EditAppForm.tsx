@@ -28,6 +28,7 @@ import {
   Boxes,
   Link2,
   DownloadCloud,
+  Bell,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
@@ -43,6 +44,7 @@ import {
   type UpsertShortcutRequest,
   type ShortcutType,
   type AppPermission,
+  type PermissionKind,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
 import { AppIncomingWebhookAction, CommandAccessibility, CommandType } from '@xyne/shared';
@@ -506,6 +508,9 @@ interface PermissionsSectionProps {
   installedAppId: string | null;
   // true -> render the section but lock every control (app creator on the Installed screen).
   readOnly?: boolean;
+  // 'api' (default) -> API permissions. 'event' -> event subscriptions: same endpoints and
+  // approval flow, scoped to SUBSCRIBE rows. No event rows = the app receives every event.
+  kind?: PermissionKind;
 }
 
 const PermissionsSection = ({
@@ -514,8 +519,12 @@ const PermissionsSection = ({
   editMode,
   installedAppId,
   readOnly = false,
+  kind = 'api',
 }: PermissionsSectionProps): ReactElement => {
   const isInstallMode = editMode === 'install' && !!installedAppId;
+  const isEvents = kind === 'event';
+  // Events only: false = nothing saved yet, so every event is delivered (shown all ticked).
+  const [eventsConfigured, setEventsConfigured] = useState(true);
   const [available, setAvailable] = useState<AppPermission[]>([]);
   // Local selection — always editable regardless of install state
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -529,18 +538,19 @@ const PermissionsSection = ({
   // Always load the full registry
   useEffect(() => {
     void appsService
-      .getAvailablePermissions()
+      .getAvailablePermissions(kind)
       .then(setAvailable)
       .catch(() => setAvailable([]));
-  }, []);
+  }, [kind]);
 
   const loadGranted = useCallback(() => {
     const fetcher =
       isInstallMode && installedAppId
-        ? appsService.getInstalledPermissions(installedAppId)
-        : appsService.getGrantedPermissions(appId);
+        ? appsService.getInstalledPermissions(installedAppId, kind)
+        : appsService.getGrantedPermissions(appId, kind);
     void fetcher
-      .then(({ permissions, statuses }) => {
+      .then(({ permissions, statuses, configured }) => {
+        if (isEvents) setEventsConfigured(configured !== false);
         // Checked = APPROVED or UNAPPROVED (not PENDINGDELETE)
         const checkedScopes = new Set(
           statuses
@@ -560,7 +570,7 @@ const PermissionsSection = ({
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
-  }, [appId, isInstallMode, installedAppId]);
+  }, [appId, isInstallMode, installedAppId, kind, isEvents]);
 
   // Pre-fill selection from already-granted permissions
   useEffect(() => {
@@ -610,23 +620,38 @@ const PermissionsSection = ({
     [available],
   );
   const allSelected = allScopes.length > 0 && allScopes.every(scope => selected.has(scope));
+
+  // Events not configured yet = every event is delivered, so show them all ticked.
+  useEffect(() => {
+    if (isEvents && loaded && !eventsConfigured) setSelected(new Set(allScopes));
+  }, [isEvents, loaded, eventsConfigured, allScopes]);
   const handleToggleSelectAll = () => {
     setSelected(allSelected ? new Set() : new Set(allScopes));
   };
 
   const handleSave = async () => {
+    if (isEvents && selected.size === 0) {
+      toast.error('Select at least one event', {
+        description: 'To stop all events, clear the webhook URL instead.',
+      });
+      return;
+    }
     setSaving(true);
     try {
       if (isInstallMode && installedAppId) {
-        await appsService.setInstalledPermissions(installedAppId, Array.from(selected));
+        await appsService.setInstalledPermissions(installedAppId, Array.from(selected), kind);
       } else {
-        await appsService.setPermissions(appId, Array.from(selected));
+        await appsService.setPermissions(appId, Array.from(selected), kind);
       }
-      toast.success(`Permissions saved (${selected.size} granted)`);
+      toast.success(
+        isEvents
+          ? `Events saved (${selected.size} subscribed)`
+          : `Permissions saved (${selected.size} granted)`,
+      );
       // Refresh statuses after save so badges update
       loadGranted();
     } catch (e) {
-      toast.error('Failed to save permissions', {
+      toast.error(isEvents ? 'Failed to save events' : 'Failed to save permissions', {
         description: e instanceof Error ? e.message : 'Unknown error',
       });
     } finally {
@@ -646,11 +671,11 @@ const PermissionsSection = ({
     if (!installedAppId) return;
     setActivating(true);
     try {
-      await appsService.activateInstalledPermissions(installedAppId);
-      toast.success('Permission changes applied');
+      await appsService.activateInstalledPermissions(installedAppId, kind);
+      toast.success(isEvents ? 'Event changes applied' : 'Permission changes applied');
       loadGranted();
     } catch (e) {
-      toast.error('Failed to apply permission changes', {
+      toast.error(isEvents ? 'Failed to apply event changes' : 'Failed to apply permission changes', {
         description: e instanceof Error ? e.message : 'Unknown error',
       });
     } finally {
@@ -661,7 +686,9 @@ const PermissionsSection = ({
   return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between'>
-        <span className='block text-sm font-medium text-foreground'>Permissions</span>
+        <span className='block text-sm font-medium text-foreground'>
+          {isEvents ? 'Events' : 'Permissions'}
+        </span>
         <div className='flex items-center gap-2'>
           {!isInstalled && (
             <span className='text-xs text-amber-600 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded'>
@@ -670,7 +697,7 @@ const PermissionsSection = ({
           )}
           {isInstalled && (
             <span className='text-xs text-muted-foreground'>
-              {selected.size} / {available.length} granted
+              {selected.size} / {available.length} {isEvents ? 'subscribed' : 'granted'}
             </span>
           )}
           <Button
@@ -695,7 +722,7 @@ const PermissionsSection = ({
             data-track-name='SAVE_APP'
             disabled={locked || !loaded}
           >
-            {saving ? 'Saving…' : 'Save Permissions'}
+            {saving ? 'Saving…' : isEvents ? 'Save Events' : 'Save Permissions'}
           </Button>
           {isInstallMode && hasPendingChanges && (
             <Button
@@ -715,12 +742,24 @@ const PermissionsSection = ({
         </div>
       </div>
       <p className='text-[11px] leading-snug text-muted-foreground bg-muted/40 border border-border rounded-md px-2.5 py-2'>
-        {isInstallMode
-          ? 'Permission changes only affect this app in your workspace. Use “Apply & activate” after saving to re-install with the updated permissions.'
-          : 'These permission changes need workspace admin approval before they take effect in the workspace.'}
+        {isEvents
+          ? isInstallMode
+            ? 'Choose which events this app receives in your workspace. Use “Apply & activate” after saving: added events start, and removed events stop, only once activated.'
+            : 'Choose which events this app receives. Installs pick up the change when a workspace admin updates the app.'
+          : isInstallMode
+            ? 'Permission changes only affect this app in your workspace. Use “Apply & activate” after saving to re-install with the updated permissions.'
+            : 'These permission changes need workspace admin approval before they take effect in the workspace.'}
       </p>
+      {isEvents && loaded && !eventsConfigured && (
+        <p className='text-[11px] leading-snug text-muted-foreground'>
+          Not configured yet — this app receives every event. Untick the ones it doesn’t need and
+          save.
+        </p>
+      )}
       {!loaded || available.length === 0 ? (
-        <p className='text-xs text-muted-foreground py-2'>Loading permissions…</p>
+        <p className='text-xs text-muted-foreground py-2'>
+          {isEvents ? 'Loading events…' : 'Loading permissions…'}
+        </p>
       ) : (
         <div className='border border-border rounded-md divide-y divide-border'>
           {available.map(perm => {
@@ -873,6 +912,7 @@ type EditAppSection =
   | 'commands'
   | 'shortcuts'
   | 'permissions'
+  | 'events'
   | 'resources'
   | 'incoming'
   | 'fetch';
@@ -1275,6 +1315,7 @@ export const EditAppForm = ({
     { id: 'commands', label: 'Commands', icon: <Command className='size-4' /> },
     { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
     { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
+    { id: 'events', label: 'Events', icon: <Bell className='size-4' /> },
     // Attachments are per-install, like incoming webhooks — meaningless on the template.
     ...(isInstallMode
       ? [
@@ -2031,6 +2072,18 @@ export const EditAppForm = ({
               editMode={editMode}
               installedAppId={installedAppId}
               readOnly={!canEditInstallSettings}
+            />
+          )}
+
+          {/* Events — same flow as Permissions, scoped to event subscriptions */}
+          {activeSection === 'events' && (
+            <PermissionsSection
+              appId={appId}
+              isInstalled={isInstallMode || isAppInstalled}
+              editMode={editMode}
+              installedAppId={installedAppId}
+              readOnly={!canEditInstallSettings}
+              kind='event'
             />
           )}
         </div>

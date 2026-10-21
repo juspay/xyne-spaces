@@ -1,6 +1,7 @@
-import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
+import { InstalledAppsRepository, type InstalledAppEventGrant } from '@/database/repositories/installedAppsRepository';
 import { isValidUrl } from '@/utils/urlUtils';
-import { BaseAppEvent } from '@/apps/types';
+import { AppEventType, BaseAppEvent } from '@/apps/types';
+import { AppPermissionStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
@@ -18,11 +19,40 @@ export function signWebhookPayload(payload: string, signingSecret: string): stri
         .digest('hex');
 }
 
+/** Thrown by sendWebhookNotification when the install has not subscribed to the event. */
+export class EventNotSubscribedError extends Error {
+    constructor(public readonly eventType: AppEventType) {
+        super(`Installed app is not subscribed to ${eventType}`);
+        this.name = 'EventNotSubscribedError';
+    }
+}
+
+/**
+ * Whether an install should receive an event, from its SUBSCRIBE rows (see eventGrantsSelect).
+ * No rows at all = never configured = every event (legacy behaviour, so no backfill is needed).
+ * Otherwise, same "effective" rule as API permissions: APPROVED or PENDINGDELETE (removal not
+ * yet activated) count; UNAPPROVED (addition not yet activated) does not.
+ */
+export function isEventSubscribed(grants: InstalledAppEventGrant[], eventType: AppEventType): boolean {
+    if (grants.length === 0) return true;
+    const name = eventType.toLowerCase();
+    return grants.some(
+        g => g.permission.name === name
+            && (g.status === AppPermissionStatus.APPROVED || g.status === AppPermissionStatus.PENDINGDELETE),
+    );
+}
+
 export async function sendWebhookNotification(
     webhookUrl: string,
     event: BaseAppEvent,
     signingSecret: string,
+    // Required so every sender passes the install's subscriptions; callers check
+    // isEventSubscribed first to choose their own skip behaviour — this is the backstop.
+    eventGrants: InstalledAppEventGrant[],
 ): Promise<{ status: number; body: unknown }> {
+    if (!isEventSubscribed(eventGrants, event.eventType)) {
+        throw new EventNotSubscribedError(event.eventType);
+    }
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
@@ -78,6 +108,7 @@ export async function handleEventSubscriptionsForUsers(
 
     const appsWithValidWebhooks = installedAppsWithWebhooks.filter(
         app => app.webhookUrl && isValidUrl(app.webhookUrl)
+            && isEventSubscribed(app.installedAppPermissions, event.eventType)
     );
 
     const senderId = 'userId' in event.payload ? event.payload.userId : undefined;
@@ -101,7 +132,7 @@ export async function handleEventSubscriptionsForUsers(
                 return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
             }
             const decryptedSigningSecret = decrypt(secretEnc);
-            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
+            await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret, app.installedAppPermissions);
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {
             logger.error(`Failed to send webhook notification`, {

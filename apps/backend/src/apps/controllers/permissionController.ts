@@ -1,15 +1,28 @@
 import { type Request, type Response } from 'express';
 import { AppPermissionStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import type { PermissionKind } from '@/database/repositories/appPermissionRepository';
+
+/**
+ * `?kind=event` switches every endpoint below to event subscriptions (SUBSCRIBE rows) — the
+ * Events modal. Omitted = API permissions, exactly as before.
+ */
+function kindFrom(req: Request): PermissionKind {
+  return req.query.kind === 'event' ? 'event' : 'api';
+}
+
+// Zero event rows means "every event", so an empty event selection would silently re-enable
+// everything. Require at least one; to stop all events, clear the webhook URL instead.
+const EMPTY_EVENTS_ERROR = 'Select at least one event. To stop all events, clear the webhook URL.';
 
 export class PermissionController {
   /**
    * GET /apps/permissions
    * List all available permissions in the registry.
    */
-  listAvailable = async (_req: Request, res: Response): Promise<void> => {
+  listAvailable = async (req: Request, res: Response): Promise<void> => {
     try {
-      const permissions = await repositories.appPermissions.findAll();
+      const permissions = await repositories.appPermissions.findAll(kindFrom(req));
       res.status(200).json({ permissions });
     } catch {
       res.status(500).json({ error: 'Internal server error' });
@@ -24,7 +37,14 @@ export class PermissionController {
   getGranted = async (req: Request, res: Response): Promise<void> => {
     try {
       const { appId } = req.params;
-      const permissions = await repositories.appPermissions.getAppPermissions(appId);
+      const kind = kindFrom(req);
+      const permissions = await repositories.appPermissions.getAppPermissions(appId, kind);
+
+      // Events: no rows is the normal "receives every event" state, not an error.
+      if (kind === 'event') {
+        res.status(200).json({ permissions, permissionsPending: false, statuses: [], configured: permissions.length > 0 });
+        return;
+      }
 
       // 403 if no permissions are granted at all
       if (permissions.length === 0) {
@@ -58,6 +78,11 @@ export class PermissionController {
         res.status(400).json({ error: 'permissions must be an array of strings' });
         return;
       }
+      const kind = kindFrom(req);
+      if (kind === 'event' && permissions.length === 0) {
+        res.status(400).json({ error: EMPTY_EVENTS_ERROR });
+        return;
+      }
       // Only the creator may edit the template (matches the apps.update mutator ACL).
       const app = await repositories.apps.findById(appId);
       if (!app) {
@@ -68,7 +93,7 @@ export class PermissionController {
         res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
         return;
       }
-      await repositories.appPermissions.setAppPermissions(appId, permissions);
+      await repositories.appPermissions.setAppPermissions(appId, permissions, kind);
       // Template permissions changed -> bump version so installs surface the Update prompt.
       await repositories.apps.bumpVersion(appId);
       res.status(200).json({ ok: true });
@@ -108,9 +133,16 @@ export class PermissionController {
         return;
       }
 
-      const permissions = await repositories.appPermissions.getInstalledPermissions(install.id);
-      const permissionsPending = await repositories.appPermissions.hasPermissionsPendingReinstall(install.id);
-      const statuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(install.id);
+      const kind = kindFrom(req);
+      const permissions = await repositories.appPermissions.getInstalledPermissions(install.id, kind);
+      const permissionsPending = await repositories.appPermissions.hasPermissionsPendingReinstall(install.id, kind);
+      const statuses = await repositories.appPermissions.getInstalledPermissionsWithStatus(install.id, kind);
+
+      // Events: no rows is the normal "receives every event" state, not an error.
+      if (kind === 'event') {
+        res.status(200).json({ permissions, permissionsPending, statuses, configured: statuses.length > 0 });
+        return;
+      }
 
       const hasApproved = statuses.some((p) => p.status === AppPermissionStatus.APPROVED);
       if (statuses.length > 0 && !hasApproved) {
@@ -159,12 +191,17 @@ export class PermissionController {
         res.status(400).json({ error: 'permissions must be an array of strings' });
         return;
       }
+      const kind = kindFrom(req);
+      if (kind === 'event' && permissions.length === 0) {
+        res.status(400).json({ error: EMPTY_EVENTS_ERROR });
+        return;
+      }
       const install = await this.findOwnInstall(installedAppId, workspaceId);
       if (!install) {
         res.status(404).json({ error: 'Installed app not found in this workspace' });
         return;
       }
-      await repositories.appPermissions.setInstalledPermissions(install.id, permissions);
+      await repositories.appPermissions.setInstalledPermissions(install.id, permissions, kind);
       res.status(200).json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Internal server error';
@@ -192,7 +229,7 @@ export class PermissionController {
         res.status(404).json({ error: 'Installed app not found in this workspace' });
         return;
       }
-      await repositories.appPermissions.activateInstalledPermissions(install.id);
+      await repositories.appPermissions.activateInstalledPermissions(install.id, kindFrom(req));
       res.status(200).json({ ok: true });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Internal server error';

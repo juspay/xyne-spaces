@@ -1165,6 +1165,8 @@ export enum AppPermissionType {
   WRITE = 'WRITE',
   DELETE = 'DELETE',
   START = 'START',
+  // Event subscription (outbound webhook), not an API permission — e.g. "app_mentioned:subscribe".
+  SUBSCRIBE = 'SUBSCRIBE',
 }
 
 // @ts-ignore TS1294

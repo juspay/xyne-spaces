@@ -3,7 +3,7 @@ import { repositories } from '@/database/repositories';
 import { decrypt } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweetStrict } from '@/utils/ysweetUtils.js';
-import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
+import { isEventSubscribed, sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import {
   AppEventType,
   type BaseAppEvent,
@@ -74,6 +74,11 @@ export async function emitCallSummaryReadyToApp(
       logger.info(`${TAG} [${callExternalId}] skipped | reason=webhook_not_configured`, { installedAppId });
       return;
     }
+    const eventGrants = await repositories.installedApps.getEventGrants(installedAppId);
+    if (!isEventSubscribed(eventGrants, AppEventType.CALL_SUMMARY_READY)) {
+      logger.info(`${TAG} [${callExternalId}] skipped | reason=event_not_subscribed`, { installedAppId });
+      return;
+    }
 
     // A bot-created call's summary is in its template's own format, so the model output is
     // delivered untouched: the canvas round trip would re-render it as Markdown.
@@ -95,7 +100,7 @@ export async function emitCallSummaryReadyToApp(
       timestamp: new Date().toISOString(),
     };
 
-    await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecret));
+    await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecret), eventGrants);
 
     logger.info(`${TAG} [${callExternalId}] delivered`, {
       installedAppId,

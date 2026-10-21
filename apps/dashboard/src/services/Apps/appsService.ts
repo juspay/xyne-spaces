@@ -225,7 +225,16 @@ interface GrantedPermissionsResponse {
   permissions: string[];
   permissionsPending: boolean;
   statuses: { scope: string; status: string }[];
+  // Event kind only: false = no event rows, i.e. the app/install receives every event.
+  configured?: boolean;
 }
+
+/**
+ * 'api' = API permissions (the default, unchanged). 'event' = event subscriptions — the same
+ * endpoints and approval flow, scoped to SUBSCRIBE rows via `?kind=event`.
+ */
+export type PermissionKind = 'api' | 'event';
+const kindQuery = (kind: PermissionKind): string => (kind === 'event' ? '?kind=event' : '');
 function extractGrantedFrom403(err: unknown): GrantedPermissionsResponse | null {
   const e = err as {
     status?: number;
@@ -500,16 +509,21 @@ export class AppsService {
   // ─── Permission management ──────────────────────────────────────────────────
 
   /** List every permission in the registry (for the selection UI). */
-  async getAvailablePermissions(): Promise<AppPermission[]> {
-    const response = await apiInstance.get<{ permissions: AppPermission[] }>('/apps/permissions');
+  async getAvailablePermissions(kind: PermissionKind = 'api'): Promise<AppPermission[]> {
+    const response = await apiInstance.get<{ permissions: AppPermission[] }>(
+      `/apps/permissions${kindQuery(kind)}`,
+    );
     return response.data.permissions;
   }
 
   /** Get the permission names currently granted to an app, along with per-permission statuses. */
-  async getGrantedPermissions(appId: string): Promise<GrantedPermissionsResponse> {
+  async getGrantedPermissions(
+    appId: string,
+    kind: PermissionKind = 'api',
+  ): Promise<GrantedPermissionsResponse> {
     try {
       const response = await apiInstance.get<GrantedPermissionsResponse>(
-        `/apps/permissions/${appId}`,
+        `/apps/permissions/${appId}${kindQuery(kind)}`,
       );
       return response.data;
     } catch (err: unknown) {
@@ -520,8 +534,12 @@ export class AppsService {
   }
 
   /** Replace the TEMPLATE permissions for an app (Org/Marketplace edit, creator). */
-  async setPermissions(appId: string, permissions: string[]): Promise<void> {
-    await apiInstance.post(`/apps/permissions/${appId}`, { permissions });
+  async setPermissions(
+    appId: string,
+    permissions: string[],
+    kind: PermissionKind = 'api',
+  ): Promise<void> {
+    await apiInstance.post(`/apps/permissions/${appId}${kindQuery(kind)}`, { permissions });
   }
 
   // ─── Per-install edits (Installed screen, workspace admin) ───────────────────
@@ -586,10 +604,13 @@ export class AppsService {
   }
 
   /** Read the INSTALL's scoped permissions (installed_app_permissions) with statuses. */
-  async getInstalledPermissions(installedAppId: string): Promise<GrantedPermissionsResponse> {
+  async getInstalledPermissions(
+    installedAppId: string,
+    kind: PermissionKind = 'api',
+  ): Promise<GrantedPermissionsResponse> {
     try {
       const response = await apiInstance.get<GrantedPermissionsResponse>(
-        `/apps/installed/${installedAppId}/permissions`,
+        `/apps/installed/${installedAppId}/permissions${kindQuery(kind)}`,
       );
       return response.data;
     } catch (err: unknown) {
@@ -600,16 +621,27 @@ export class AppsService {
   }
 
   /** Replace the INSTALL's scoped permissions (installed_app_permissions). */
-  async setInstalledPermissions(installedAppId: string, permissions: string[]): Promise<void> {
-    await apiInstance.post(`/apps/installed/${installedAppId}/permissions`, { permissions });
+  async setInstalledPermissions(
+    installedAppId: string,
+    permissions: string[],
+    kind: PermissionKind = 'api',
+  ): Promise<void> {
+    await apiInstance.post(`/apps/installed/${installedAppId}/permissions${kindQuery(kind)}`, {
+      permissions,
+    });
   }
 
   /**
    * Activate the INSTALL's pending permission edits in place (UNAPPROVED → APPROVED, drop
    * PENDINGDELETE) without resetting to the app template. Backs "Apply & activate".
    */
-  async activateInstalledPermissions(installedAppId: string): Promise<void> {
-    await apiInstance.post(`/apps/installed/${installedAppId}/permissions/activate`);
+  async activateInstalledPermissions(
+    installedAppId: string,
+    kind: PermissionKind = 'api',
+  ): Promise<void> {
+    await apiInstance.post(
+      `/apps/installed/${installedAppId}/permissions/activate${kindQuery(kind)}`,
+    );
   }
 
   /**

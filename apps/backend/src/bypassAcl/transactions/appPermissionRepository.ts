@@ -1,12 +1,13 @@
 import { transaction } from '../base';
-import { AppPermissionRepository, Tx, AvailablePermissionIdNameType, toScope, InstalledAppPermissionBase } from '@/database/repositories/appPermissionRepository';
+import { AppPermissionRepository, Tx, AvailablePermissionIdNameType, toScope, InstalledAppPermissionBase, type PermissionKind, permissionTypeWhere } from '@/database/repositories/appPermissionRepository';
 import { currentWorkspaceId } from '@/database/tenant/context';
 import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 
 
-export function setAppPermissionsTx(self: AppPermissionRepository, appId: string, parsed: { name: string; type: AppPermissionType; }[], scopes: string[]) {
+export function setAppPermissionsTx(self: AppPermissionRepository, appId: string, parsed: { name: string; type: AppPermissionType; }[], scopes: string[], kind: PermissionKind = 'api') {
   return transaction(['AppPermission', 'AvailableAppPermission'], 'setAppPermissions: app permission wipe and recreate from the permission catalog must commit atomically; tx is not ACL-wrapped', self.db, async (tx: Tx) => {
-    await tx.appPermission.deleteMany({ where: { appId } });
+    // Only wipe rows of this kind — the API and Events modals each own their own rows.
+    await tx.appPermission.deleteMany({ where: { appId, permission: permissionTypeWhere(kind) } });
     if (parsed.length === 0) return;
 
     const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
@@ -26,7 +27,7 @@ export function setAppPermissionsTx(self: AppPermissionRepository, appId: string
     });
   });
 }
-export function setInstalledPermissionsTx(self: AppPermissionRepository, parsed: { name: string; type: AppPermissionType; }[], scopes: string[], installedAppId: string) {
+export function setInstalledPermissionsTx(self: AppPermissionRepository, parsed: { name: string; type: AppPermissionType; }[], scopes: string[], installedAppId: string, kind: PermissionKind = 'api') {
   return transaction(['AvailableAppPermission', 'InstalledAppPermission'], 'setInstalledPermissions: installed permission diff, restore and insert must commit atomically; tx is not ACL-wrapped', self.db, async (tx: Tx) => {
     const permissions: AvailablePermissionIdNameType[] = await tx.availableAppPermission.findMany({
       where: { OR: parsed.map(({ name, type }) => ({ name, type })) },
@@ -39,10 +40,37 @@ export function setInstalledPermissionsTx(self: AppPermissionRepository, parsed:
 
     const wantedIds = new Set(permissions.map((p) => p.id));
 
-    const existing: InstalledAppPermissionBase[] = await tx.installedAppPermission.findMany({
-      where: { installedAppId },
+    // Only diff rows of this kind — the API and Events modals each own their own rows.
+    const kindWhere = { installedAppId, permission: permissionTypeWhere(kind) };
+    let existing: InstalledAppPermissionBase[] = await tx.installedAppPermission.findMany({
+      where: kindWhere,
       select: { id: true, permissionId: true, status: true },
     });
+
+    // An install with no event rows receives every event. Materialize that as every event
+    // APPROVED before diffing, so the first save follows the normal flow (kept = still
+    // active, removed = PENDINGDELETE until activated) instead of stopping all delivery.
+    if (kind === 'event' && existing.length === 0) {
+      const allEvents = await tx.availableAppPermission.findMany({
+        where: permissionTypeWhere('event'),
+        select: { id: true },
+      });
+      const workspaceId = currentWorkspaceId();
+      if (!workspaceId) throw new Error('workspaceId required: no tenant context');
+      await tx.installedAppPermission.createMany({
+        data: allEvents.map((p) => ({
+          installedAppId,
+          permissionId: p.id,
+          workspaceId,
+          status: AppPermissionStatus.APPROVED,
+        })),
+        skipDuplicates: true,
+      });
+      existing = await tx.installedAppPermission.findMany({
+        where: kindWhere,
+        select: { id: true, permissionId: true, status: true },
+      });
+    }
     const existingMap = new Map<string, InstalledAppPermissionBase>(
       existing.map((r) => [r.permissionId, r]),
     );
@@ -87,13 +115,14 @@ export function setInstalledPermissionsTx(self: AppPermissionRepository, parsed:
     }
   });
 }
-export function activateInstalledPermissionsTx(self: AppPermissionRepository, installedAppId: string) {
-  return transaction(['InstalledAppPermission'], 'activateInstalledPermissions: pending-delete removal and unapproved approval must commit atomically; tx is not ACL-wrapped', self.db, async (tx: Tx) => {
+export function activateInstalledPermissionsTx(self: AppPermissionRepository, installedAppId: string, kind: PermissionKind = 'api') {
+  return transaction(['AvailableAppPermission', 'InstalledAppPermission'], 'activateInstalledPermissions: pending-delete removal and unapproved approval must commit atomically; tx is not ACL-wrapped', self.db, async (tx: Tx) => {
+    const kindWhere = { installedAppId, permission: permissionTypeWhere(kind) };
     await tx.installedAppPermission.deleteMany({
-      where: { installedAppId, status: AppPermissionStatus.PENDINGDELETE },
+      where: { ...kindWhere, status: AppPermissionStatus.PENDINGDELETE },
     });
     await tx.installedAppPermission.updateMany({
-      where: { installedAppId, status: AppPermissionStatus.UNAPPROVED },
+      where: { ...kindWhere, status: AppPermissionStatus.UNAPPROVED },
       data: { status: AppPermissionStatus.APPROVED },
     });
   });

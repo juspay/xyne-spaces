@@ -1,5 +1,17 @@
 import { BaseRepository } from './base';
 import { Prisma } from '@prisma/client';
+import { AppPermissionType } from '@xyne/shared';
+
+/**
+ * The install's event-subscription rows (type SUBSCRIBE), selected alongside the install so the
+ * dispatcher can apply isEventSubscribed without another query. Empty = every event.
+ */
+export const eventGrantsSelect = {
+  where: { permission: { type: AppPermissionType.SUBSCRIBE } },
+  select: { status: true, permission: { select: { name: true } } },
+} satisfies Prisma.InstalledApps$installedAppPermissionsArgs;
+
+export type InstalledAppEventGrant = { status: string; permission: { name: string } };
 
 export class InstalledAppsRepository extends BaseRepository<
   Prisma.InstalledAppsGetPayload<{}>,
@@ -64,8 +76,18 @@ export class InstalledAppsRepository extends BaseRepository<
         webhookUrl: true,
         // signingSecret is app-level now — pulled via the relation.
         app: { select: { signingSecret: true } },
+        installedAppPermissions: eventGrantsSelect,
       },
     });
+  }
+
+  /** The install's event-subscription rows (empty = every event). Used by single-install senders. */
+  async getEventGrants(installedAppId: string): Promise<InstalledAppEventGrant[]> {
+    const install = await this.db.installedApps.findUnique({
+      where: { id: installedAppId },
+      select: { installedAppPermissions: eventGrantsSelect },
+    });
+    return install?.installedAppPermissions ?? [];
   }
 
   /**
