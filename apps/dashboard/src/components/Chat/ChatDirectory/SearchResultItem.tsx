@@ -1,6 +1,6 @@
 import { ReactElement, Fragment, MouseEvent as ReactMouseEvent } from 'react';
 import { Command } from 'cmdk';
-import { Eye } from 'lucide-react';
+import { Eye, AudioLines } from 'lucide-react';
 import {
   Hashtag,
   UserTwo,
@@ -9,7 +9,6 @@ import {
   TicketToken,
   File02Text,
   File02Default,
-  MicOn,
   CheckTickSingle,
 } from '@xyne/icons';
 import { DisplaySearchResult } from '../../../types/search';
@@ -71,7 +70,7 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
         return <File02Text size={16} className='text-muted-foreground' />;
       }
       if (searchContext?.subApp?.toUpperCase() === 'TRANSCRIPT') {
-        return <MicOn size={16} className='text-muted-foreground' />;
+        return <AudioLines size={16} className='text-muted-foreground' />;
       }
       return <File02Default size={16} className='text-muted-foreground' />;
     default:

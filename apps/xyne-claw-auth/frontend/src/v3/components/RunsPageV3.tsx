@@ -13,7 +13,7 @@
  *                  affordance, not the access control.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClockCounterClockwiseIcon, ClockIcon, ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { useAdminStatus } from "../hooks/useAdminStatus";
 import { PageLayout } from "./ui/PageLayout";
@@ -71,7 +71,9 @@ export function RunsPageV3({ userId }: { userId: string }) {
   const [userOptions, setUserOptions] = useState<RunUserFacet[]>([]);
   const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map());
 
-  const [query, setQuery] = useState("");
+  // ?session=<id> (metrics drill-down) seeds the search box.
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("session") ?? "");
 
   // A role flip (or an admin check that resolves to false after first paint)
   // must not leave an elevated request in flight: without this reset, `allUsers`
@@ -109,7 +111,7 @@ export function RunsPageV3({ userId }: { userId: string }) {
   // client-side (the product decision was UI-only search for now); only a
   // session id round-trips, because that is the one query the loaded page
   // genuinely cannot answer.
-  const [idSearch, setIdSearch] = useState("");
+  const [idSearch, setIdSearch] = useState(() => (looksLikeSessionId(query) ? query.trim() : ""));
   useEffect(() => {
     const next = looksLikeSessionId(query) ? query.trim() : "";
     if (next === idSearch) return;

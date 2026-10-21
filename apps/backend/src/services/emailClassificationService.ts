@@ -10,7 +10,7 @@ import { EmailClassificationRepository } from '../database/repositories/emailCla
 import { DatabaseClient } from '../database/client.js';
 import { LLMClient, createUserMessage } from 'agentic-framework';
 import { AgentsConfig } from '../agents/config.js';
-import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agents/agentLogger.js';
+import { logLLMCallStart, logLLMError } from '../agents/agentLogger.js';
 import type {
   ClassificationRawOutput,
   ClassificationResult,
@@ -21,18 +21,52 @@ import type {
 } from '../types/classification.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
-import { askJev, isPrivateJevConfigured } from '@/services/queryIntent/jevClient';
+import { decide } from '@/services/decision/decide';
+import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
 const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
 const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 'confidence', 'reasoning']);
 
-const XOR_TIMEOUT_MS = 10_000;
-const XOR_OTHER_OPTION = 'other';
-/** Lowest first, as XOR's score question wants. */
-const XOR_PRIORITY_LEVELS = [TicketPriority.LOW, TicketPriority.MEDIUM, TicketPriority.HIGH, TicketPriority.CRITICAL];
+const OTHER_CATEGORY = 'other';
+/** Lowest first, as a score question wants. */
+const PRIORITY_LEVELS = [TicketPriority.LOW, TicketPriority.MEDIUM, TicketPriority.HIGH, TicketPriority.CRITICAL];
 const PRIORITY_USER_MESSAGE = 'Analyze email and determine priority.';
+const ENGINE_NAMES: Record<DecisionEngine, string> = { xor: 'XOR', jev: 'Jev', llm: 'LLM' };
+
+type ClassificationConfig = NonNullable<Awaited<ReturnType<EmailClassificationRepository['findConfigByChannelId']>>>;
+type CategoryMapping = Pick<ClassificationConfig['mappings'][number], 'id' | 'category' | 'subCategory'>;
+
+interface LlmOutput {
+  output: ClassificationRawOutput;
+  model: string;
+  usage: { promptTokens: number; completionTokens: number };
+}
+
+/**
+ * The mapping a category resolves to, by id as the classifiers' choices are, else 'other':
+ * the comparable label for a category, whichever engine gave it.
+ */
+function categoryLabel(mappings: CategoryMapping[], category: string | null, subCategory: string | null): string {
+  const sameCategory = mappings.filter(m => m.category.toLowerCase() === category?.toLowerCase());
+  const exact = sameCategory.find(m => (m.subCategory ?? '').toLowerCase() === (subCategory ?? '').toLowerCase());
+  return (exact ?? sameCategory.find(m => !m.subCategory))?.id ?? OTHER_CATEGORY;
+}
+
+/** The email as the category prompt's user message: its headers, then the body. */
+function buildUserMessage({ emailSubject, emailBody, emailMetadata }: TaskInput): string {
+  const headers = [
+    emailMetadata?.fromEmail ? `From: ${emailMetadata.fromEmail}` : null,
+    emailMetadata?.toEmails?.length ? `To: ${emailMetadata.toEmails.join(', ')}` : null,
+    emailMetadata?.ccEmails?.length ? `CC: ${emailMetadata.ccEmails.join(', ')}` : null,
+    emailMetadata?.bccEmails?.length ? `BCC: ${emailMetadata.bccEmails.join(', ')}` : null,
+    emailMetadata?.replyTo?.length ? `Reply-To: ${emailMetadata.replyTo.join(', ')}` : null,
+    emailMetadata?.receivedAt ? `Date: ${emailMetadata.receivedAt}` : null,
+    `Subject: ${emailSubject}`,
+  ].filter(Boolean).join('\n');
+  return `${headers}\n\n${emailBody}`;
+}
 
 /** Default prompt for priority classification */
 const DEFAULT_PRIORITY_PROMPT = `You are an expert support ticket prioritizer for a customer support desk.
@@ -77,10 +111,13 @@ export class EmailClassificationService {
       ignoreEnabled = false,
       agentsConfig,
       emailMetadata,
+      evaluate,
     }: {
       ignoreEnabled?: boolean;
       agentsConfig?: AgentsConfig;
       emailMetadata?: EmailMetadata;
+      /** Queue the decisions for the other engines to compare, while DECISION_EVAL_ENABLED is on. */
+      evaluate?: boolean;
     } = {}
   ): Promise<{
     result: ClassificationResult & { priority?: PriorityClassificationResult };
@@ -94,45 +131,26 @@ export class EmailClassificationService {
     const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
     const modelName = cacConfig.classificationModelName;
 
-    const metadataLines = [
-      emailMetadata?.fromEmail ? `From: ${emailMetadata.fromEmail}` : null,
-      emailMetadata?.toEmails?.length ? `To: ${emailMetadata.toEmails.join(', ')}` : null,
-      emailMetadata?.ccEmails?.length ? `CC: ${emailMetadata.ccEmails.join(', ')}` : null,
-      emailMetadata?.bccEmails?.length ? `BCC: ${emailMetadata.bccEmails.join(', ')}` : null,
-      emailMetadata?.replyTo?.length ? `Reply-To: ${emailMetadata.replyTo.join(', ')}` : null,
-      emailMetadata?.receivedAt ? `Date: ${emailMetadata.receivedAt}` : null,
-      `Subject: ${emailSubject}`,
-    ].filter(Boolean).join('\n');
-
-    const userMessage = `${metadataLines}\n\n${emailBody}`;
+    const input: TaskInput = { channelId, emailSubject, emailBody, emailMetadata, modelName };
 
     try {
-      const xor = await this.classifyWithXor(config, cacConfig, userMessage, emailSubject, emailBody);
+      const decideOptions = { agentsConfig: cacConfig, evaluate };
 
-      // Run category and priority classification in PARALLEL; the LLM only for what XOR didn't answer
-      const categoryPromise = !config.classificationEnabled
-        ? Promise.resolve(null)
-        : xor.rawOutput
-          ? Promise.resolve(xor.rawOutput)
-          : this.runClassificationAgent(
-              config.classificationPrompt,
-              userMessage,
-              modelName,
-              config.ownerUserId,
-            );
+      // Category and priority in parallel. A category failure fails classification; a
+      // priority failure only leaves priority unset, as classifyPriority does.
+      const categoryPromise = config.classificationEnabled
+        ? decide(this.categoryTask(config, input), decideOptions)
+        : Promise.resolve(null);
 
-      const priorityPromise = !config.priorityClassificationEnabled
-        ? Promise.resolve(null)
-        : xor.priority
-          ? Promise.resolve(xor.priority)
-          : this.classifyPriority(
+      const priorityPromise = config.priorityClassificationEnabled
+        ? decide(this.priorityTask(config, input), decideOptions).catch((error) => {
+            logger.error('[PriorityClassification] Priority classification failed', {
               channelId,
-              emailSubject,
-              emailBody,
-              config.priorityClassificationPrompt,
-              modelName,
-              config.ownerUserId,
-            );
+              error: error instanceof Error ? error.message : error,
+            });
+            return null;
+          })
+        : Promise.resolve(null);
 
       const [rawOutput, priorityResult] = await Promise.all([
         categoryPromise,
@@ -192,8 +210,8 @@ export class EmailClassificationService {
     });
 
     try {
-      const rawOutput = await this.runPriorityClassificationAgent(prompt, modelName, ownerUserId);
-      const result = this.parsePriorityOutput(rawOutput);
+      const { output } = await this.runPriorityClassificationAgent(prompt, modelName, ownerUserId);
+      const result = this.parsePriorityOutput(output);
       logger.info('[PriorityClassification] parsePriorityOutput completed', {
         hasResult: !!result,
         result: result ? {
@@ -212,7 +230,7 @@ export class EmailClassificationService {
     }
   }
 
-  /** The priority prompt with the email filled in; the LLM and XOR both get exactly this. */
+  /** The priority prompt with the email filled in; every engine gets exactly this. */
   private buildPriorityPrompt(customPrompt: string | null | undefined, emailSubject: string, emailBody: string): string {
     return customPrompt?.trim()
       ? this.prepareCustomPrompt(customPrompt, emailSubject, emailBody)
@@ -543,73 +561,88 @@ export class EmailClassificationService {
 
   // ─── Private helpers ──────────────────────────────────────────────────────
 
+  /** The task `classify` decided, rebuilt by the evaluation worker; null once the desk has no config. */
+  async evaluationTask(feature: TaskFeature, input: TaskInput): Promise<DecisionTask<unknown> | null> {
+    const config = await this.repo.findConfigByChannelId(input.channelId);
+    if (!config) return null;
+    return feature === 'email_category' ? this.categoryTask(config, input) : this.priorityTask(config, input);
+  }
+
   /**
-   * Category and priority from XOR, each behind its own CAC switch, given exactly what the
-   * LLM gets: the same prompt and the same message. The only addition is the answer list XOR
-   * needs: the desk's mapping rows (plus other) for category, LOW..CRITICAL for priority.
-   * A part left undefined goes to the LLM as before.
+   * Category as one decision. The LLM gets the desk's classification prompt as system and the
+   * email as user; XOR and Jev get the same two, plus the answer list they need: the desk's
+   * mapping rows and other. Not put to them when the desk has no mappings or no prompt.
    */
-  private async classifyWithXor(
-    config: NonNullable<Awaited<ReturnType<EmailClassificationRepository['findConfigByChannelId']>>>,
-    cacConfig: AgentsConfig,
-    userMessage: string,
-    emailSubject: string,
-    emailBody: string,
-  ): Promise<{ rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult }> {
-    if (!isPrivateJevConfigured()) return {};
+  private categoryTask(config: ClassificationConfig, input: TaskInput): DecisionTask<ClassificationRawOutput> {
+    const { mappings, categoryField, subCategoryField, classificationPrompt } = config;
+    const userMessage = buildUserMessage(input);
+    const criteria = {
+      ...Object.fromEntries(mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category])),
+      [OTHER_CATEGORY]: 'Other',
+    };
+    const askable = mappings.length > 0 && classificationPrompt.trim().length > 0;
 
-    // LLM: system = the desk's classification prompt, user = the email.
-    const askCategory =
-      config.classificationEnabled && cacConfig.classificationXorEnabled && config.mappings.length > 0 && config.classificationPrompt.trim()
-        ? askJev(userMessage, {
-            category: {
-              type: 'choice',
-              instructions: config.classificationPrompt,
-              criteria: {
-                ...Object.fromEntries(
-                  config.mappings.map(m => [m.id, m.subCategory ? `${m.category}: ${m.subCategory}` : m.category]),
-                ),
-                [XOR_OTHER_OPTION]: 'Other',
-              },
-            },
-          }, XOR_TIMEOUT_MS)
-        : Promise.resolve(null);
-    // LLM: system = the priority prompt with the email filled in, user = PRIORITY_USER_MESSAGE.
-    const askPriority =
-      config.priorityClassificationEnabled && cacConfig.priorityClassificationXorEnabled
-        ? askJev(this.buildPriorityPrompt(config.priorityClassificationPrompt, emailSubject, emailBody), {
-            priority: { type: 'score', instructions: PRIORITY_USER_MESSAGE, criteria: XOR_PRIORITY_LEVELS },
-          }, XOR_TIMEOUT_MS)
-        : Promise.resolve(null);
-    const [categoryAnswers, priorityAnswers] = await Promise.all([askCategory, askPriority]);
-    const result: { rawOutput?: ClassificationRawOutput; priority?: PriorityClassificationResult } = {};
+    return {
+      feature: 'email_category',
+      input,
+      question: askable
+        ? { state: userMessage, questions: { category: { type: 'choice', instructions: classificationPrompt, criteria } } }
+        : null,
+      readAnswers: ({ category }) => {
+        if (category?.type !== 'choice') return null;
+        const mapping = mappings.find(m => m.id === category.choice);
+        return {
+          [categoryField]: mapping?.category ?? 'Other',
+          ...(subCategoryField && mapping?.subCategory ? { [subCategoryField]: mapping.subCategory } : {}),
+        };
+      },
+      askLlm: async () => {
+        const { output, model, usage } = await this.runClassificationAgent(
+          classificationPrompt,
+          userMessage,
+          input.modelName,
+          config.ownerUserId,
+        );
+        return { answer: output, model, usage };
+      },
+      toLabel: output =>
+        categoryLabel(
+          mappings,
+          this.extractField(output, categoryField),
+          subCategoryField ? this.extractField(output, subCategoryField) : null,
+        ),
+    };
+  }
 
-    const category = categoryAnswers?.category;
-    if (category?.type === 'choice') {
-      const mapping = config.mappings.find(m => m.id === category.choice);
-      result.rawOutput = {
-        [config.categoryField]: mapping?.category ?? 'Other',
-        ...(config.subCategoryField && mapping?.subCategory ? { [config.subCategoryField]: mapping.subCategory } : {}),
-      };
-    }
-    const priority = priorityAnswers?.priority;
-    if (priority?.type === 'score') {
-      result.priority = {
-        priority: XOR_PRIORITY_LEVELS[priority.level],
-        confidence: priority.confidence ?? 0.5,
-        reasoning: 'Scored by XOR',
-      };
-    }
+  /**
+   * Priority as one decision. The LLM gets the priority prompt with the email filled in as
+   * system and PRIORITY_USER_MESSAGE as user; XOR and Jev get the same two as a score over
+   * LOW..CRITICAL.
+   */
+  private priorityTask(config: ClassificationConfig, input: TaskInput): DecisionTask<PriorityClassificationResult> {
+    const prompt = this.buildPriorityPrompt(config.priorityClassificationPrompt, input.emailSubject, input.emailBody);
 
-    if (result.rawOutput || result.priority) {
-      logger.info('[Classification] XOR answered', {
-        channelId: config.channelId,
-        category: result.rawOutput?.[config.categoryField] ?? null,
-        priority: result.priority?.priority ?? null,
-        priorityConfidence: result.priority?.confidence ?? null,
-      });
-    }
-    return result;
+    return {
+      feature: 'email_priority',
+      input,
+      question: {
+        state: prompt,
+        questions: { priority: { type: 'score', instructions: PRIORITY_USER_MESSAGE, criteria: PRIORITY_LEVELS } },
+      },
+      readAnswers: ({ priority }, engine) =>
+        priority?.type === 'score'
+          ? {
+              priority: PRIORITY_LEVELS[priority.level],
+              confidence: priority.confidence ?? 0.5,
+              reasoning: `Scored by ${ENGINE_NAMES[engine]}`,
+            }
+          : null,
+      askLlm: async () => {
+        const { output, model, usage } = await this.runPriorityClassificationAgent(prompt, input.modelName, config.ownerUserId);
+        return { answer: this.parsePriorityOutput(output), model, usage };
+      },
+      toLabel: result => result.priority,
+    };
   }
 
   private async runClassificationAgent(
@@ -617,7 +650,7 @@ export class EmailClassificationService {
     userMessage: string,
     modelName: string,
     ownerUserId?: string | null,
-  ): Promise<ClassificationRawOutput> {
+  ): Promise<LlmOutput> {
     const credential = await orgLLMCredentialService.getCredentialByUserId(
       ownerUserId,
       OrgLLMServiceAccountPurpose.DEFAULT,
@@ -658,8 +691,8 @@ export class EmailClassificationService {
         },
       });
 
-      logLLMSuccess(AGENT_NAME, response.content);
-      return this.parseClassificationOutput(response.content);
+      logger.info(`[${AGENT_NAME}] Success`, { chars: response.content.length });
+      return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
     } catch (error) {
       logLLMError(AGENT_NAME, error);
       throw error;
@@ -677,7 +710,7 @@ export class EmailClassificationService {
     // Extract JSON object
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.warn('[Classification] Could not find JSON in AI output', { content: cleaned.slice(0, 200) });
+      logger.warn('[Classification] Could not find JSON in AI output', { chars: cleaned.length });
       return {};
     }
 
@@ -701,7 +734,7 @@ export class EmailClassificationService {
     systemPrompt: string,
     modelName: string,
     ownerUserId?: string | null,
-  ): Promise<ClassificationRawOutput> {
+  ): Promise<LlmOutput> {
     const credential = await orgLLMCredentialService.getCredentialByUserId(
       ownerUserId,
       OrgLLMServiceAccountPurpose.DEFAULT,
@@ -750,7 +783,7 @@ export class EmailClassificationService {
       logger.info('[PriorityClassification] LLM call successful', {
         hasContent: !!response.content,
       });
-      return this.parseClassificationOutput(response.content);
+      return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
     } catch (error) {
       logLLMError(PRIORITY_AGENT_NAME, error);
       logger.error('[PriorityClassification] LLM call failed', {

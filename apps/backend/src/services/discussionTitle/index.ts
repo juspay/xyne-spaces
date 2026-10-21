@@ -2,12 +2,9 @@ import type { JsonValue } from '@openfeature/server-sdk';
 import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
-import {
-  askJev,
-  isPrivateJevConfigured,
-  type JevFailure,
-  type JevNoulQuestion,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
+import type { AskFailure, YesNoQuestion } from '@/services/decision/types';
 
 export interface DiscussionTitleVerdict {
   offer: boolean;
@@ -33,7 +30,7 @@ const DEFAULT_CONFIG: DiscussionTitleConfig = {
   timeoutMs: 3000,
 };
 
-const STARTS_DISCUSSION: JevNoulQuestion = {
+const STARTS_DISCUSSION: YesNoQuestion = {
   type: 'noul',
   instructions:
     'Is `draft` the opening post of a discussion, something several people will reply to ' +
@@ -51,7 +48,7 @@ const STARTS_DISCUSSION: JevNoulQuestion = {
 
 const JEV_COOLDOWN_MS = 30_000;
 let jevDownUntil = 0;
-const isOutage = (failure: JevFailure): boolean =>
+const isOutage = (failure: AskFailure): boolean =>
   failure.kind === 'timeout' ||
   failure.kind === 'network' ||
   (failure.kind === 'status' && failure.status >= 500);
@@ -63,7 +60,7 @@ export async function checkDiscussionTitle(
   auth: { userId: string; workspaceId: string },
   signal?: AbortSignal
 ): Promise<DiscussionTitleVerdict | null> {
-  if (!isPrivateJevConfigured()) return null;
+  if (!isPrivateDecisionEngineConfigured()) return null;
   let config: DiscussionTitleConfig;
   try {
     const remote = (await superpositionClient.getObjectValue(CONFIG_KEY, {} as JsonValue, {
@@ -84,7 +81,8 @@ export async function checkDiscussionTitle(
   if (Date.now() < jevDownUntil) return KEEP_SHOWING;
 
   const started = Date.now();
-  const answers = await askJev(
+  const answers = await askDecision(
+    'discussion_title',
     { draft },
     { starts_discussion: STARTS_DISCUSSION },
     config.timeoutMs,

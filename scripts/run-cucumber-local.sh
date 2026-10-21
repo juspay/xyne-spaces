@@ -38,7 +38,7 @@ esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE=(docker compose --profile cucumber -f docker-compose.dev.yml -f docker-compose.test.yml)
+COMPOSE=(docker compose --profile cucumber -f docker-compose.test.yml)
 
 # Bind every host port to 0 so this run doesn't collide with a dev stack.
 export POSTGRES_BIND_PORT=0

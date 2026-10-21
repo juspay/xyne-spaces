@@ -5087,6 +5087,9 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     [urlAllRuns, urlConversation],
   );
   const consumedDeepLinkRef = useRef<string | null>(null);
+  // ?debug=<sessionId> from the metrics drill-down; consumed once.
+  const urlDebug = searchParams.get("debug");
+  const consumedDebugRef = useRef<string | null>(null);
   const activeAgentSlug = urlAgent ?? ctxAgentSlug;
   // ?agent= outranks the context, so a pick made after arriving by a deep link
   // must move the URL too — otherwise the picker changes and nothing else does.
@@ -5374,6 +5377,18 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     setSelectedCitation(null);
   }, [conversationId, activeAgentSlug]);
 
+  // Open the debugger only once the deep-linked conversation is active.
+  useEffect(() => {
+    if (!urlDebug || consumedDebugRef.current === urlDebug || !conversationId) return;
+    if (urlConversation && conversationId !== urlConversation) return;
+    consumedDebugRef.current = urlDebug;
+    setDebugTurnIndex(null);
+    setDebugTurnLive(false);
+    setDebugSessionId(urlDebug);
+    setSelectedCitation(null);
+    setShowDebugger(true);
+  }, [urlDebug, urlConversation, conversationId]);
+
   // Refresh the debugger's msg→sessionId map after a turn finishes. Triggered
   // by `sending` going false on a known conversation: the new AgentRun row
   // gets a chatMessageId on finalize, and that's what the debugger keys by.
@@ -5465,10 +5480,13 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     }
 
     if (activeAgentSlug) {
+      // Drop results of a superseded run (StrictMode double invoke) so it can't overwrite the deep-linked conversation.
+      let cancelled = false;
       setConvLoading(true);
       setConversationsCursor(null);
       listChatConversations(userId, { agentSlug: activeAgentSlug })
         .then(({ conversations: convs, nextCursor }) => {
+          if (cancelled) return;
           setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug })));
           setConversationsCursor(nextCursor);
           // Deep-link via ?conversation=<id> — load that specific conv
@@ -5500,13 +5518,15 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             (deepLinkTarget !== null ||
               (!conversationId && !sending && messages.length === 0));
           if (shouldLoad && targetConvId) {
-            if (deepLinkTarget) consumedDeepLinkRef.current = deepLinkTarget;
             pollChatMessages(activeAgentSlug, targetConvId, allRunsActive(targetConvId), "conversation")
               .then(({ messages: msgs, invocationsByMsgId, reasoningByMsgId }) => {
+                if (cancelled) return;
                 // Skip auto-load if the user started sending while we were
                 // fetching — the draft session is already the active one.
                 // Deep-links always go through (user explicitly asked for it).
                 if (!deepLinkTarget && sendingRef.current) return;
+                // Consumed only once on screen.
+                if (deepLinkTarget) consumedDeepLinkRef.current = deepLinkTarget;
                 loadConversation(msgs, targetConvId, invocationsByMsgId, reasoningByMsgId);
               })
               .catch(() => {});
@@ -5516,13 +5536,21 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             // the chat thread, so failure here is silent.
             listRuns(userId, { conversationId: targetConvId, limit: 200 })
               .then((runs) => {
+                if (cancelled) return;
                 setRunByMsgId(buildRunByMsgId(runs));
               })
               .catch(() => {});
           }
         })
-        .catch(() => setConversations([]))
-        .finally(() => setConvLoading(false));
+        .catch(() => {
+          if (!cancelled) setConversations([]);
+        })
+        .finally(() => {
+          if (!cancelled) setConvLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     } else {
       // All-agents view: every agent's chats, newest first, a switched chat
       // once (the endpoint the Spaces AI screen uses too).

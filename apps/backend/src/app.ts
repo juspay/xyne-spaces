@@ -22,7 +22,6 @@ import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
-import jiraCompatRoutes, { JIRA_COMPAT_MOUNT } from '@/routes/jiraCompat';
 import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
@@ -181,6 +180,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -338,26 +338,6 @@ export class App {
     this.app.use('/api/migration', migrationRoutes);
 
     this.app.use('/migrate/api/migration', migrationRoutes);
-
-    // JIRA-compatibility facade (public, read-only): lets Bitbucket linkify
-    // Spaces ticket keys (e.g. TTS-0001) and route /browse/<KEY> to the Spaces
-    // ticket instead of Atlassian JIRA. Mounted UNDER the existing per-workspace
-    // Bitbucket webhook path (the only path the ingress forwards), so the
-    // Application Link base URL is <host>/api/webhooks/bitbucket/<workspaceId>
-    // and Bitbucket appends /rest/* and /browse/*.
-    //
-    // Ordering matters: this must stay BEFORE the /api/webhooks raw-body mount.
-    // The shim defines only GET routes, so the webhook POST /bitbucket/:workspaceId
-    // matches no route here (Express matches method AND path) and falls through to
-    // the HMAC-verified handler below. Deliberately NO express.raw — buffering the
-    // body here would leave the webhook's raw parser with an empty stream and break
-    // its HMAC check. Endpoints are unauthenticated (Bitbucket is external, no
-    // client cert) and workspace-scoped; restrict to Bitbucket egress IPs at the
-    // ingress if the project-code / ticket-title exposure is a concern.
-    this.app.use(JIRA_COMPAT_MOUNT,
-      webhookLimiter,
-
-      jiraCompatRoutes);
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
@@ -1211,6 +1191,11 @@ export class App {
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
+
+    if (config.decisionEval.enabled) {
+      logger.info('Initializing decision evaluation queue (producer)...');
+      await decisionEvaluationQueue.initialize();
+    }
 
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');

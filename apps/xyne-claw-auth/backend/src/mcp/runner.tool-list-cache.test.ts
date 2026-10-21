@@ -67,7 +67,7 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const { listToolsForUser, clearToolListCache, evictAllSessionsForUser, callTool } = await import("./runner.js");
+const { listToolsForUser, clearToolListCache, evictAllSessionsForUser, callTool, restartMcpServers } = await import("./runner.js");
 
 let run = 0;
 const user = (name: string) => `${name}-${run}`;
@@ -123,19 +123,15 @@ describe("listToolsForUser shared tool-list cache", () => {
     expect(state.listCalls).toBe(1);
   });
 
-  it("serves a stale per-user listing at once and refreshes it in the background", async () => {
+  it("keeps a per-user listing with no expiry", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
-    vi.setSystemTime(new Date("2026-09-25T00:11:00Z"));
-    const stale = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
-    expect(stale.tools.map((t) => t.name)).toEqual(["t1"]);
-    await vi.waitFor(() => expect(state.listCalls).toBe(2));
-    await new Promise((r) => setTimeout(r, 0));
-    const fresh = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
-    expect(fresh.tools.map((t) => t.name)).toEqual(["t2"]);
-    expect(state.listCalls).toBe(2);
+    vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
+    const later = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(later.tools.map((t) => t.name)).toEqual(["t1"]);
+    expect(state.listCalls).toBe(1);
   });
 
   it("lists again after the user's sessions are evicted", async () => {
@@ -161,31 +157,45 @@ describe("listToolsForUser shared tool-list cache", () => {
     expect(state.listCalls).toBe(2);
   });
 
-  it("serves a stale shared listing at once and refreshes it in the background", async () => {
+  it("keeps the shared listing for the life of the pod", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
     await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
-    vi.setSystemTime(new Date("2026-09-25T00:09:00Z"));
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
-    expect(state.listCalls).toBe(1);
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
-    vi.setSystemTime(new Date("2026-09-25T00:11:00Z"));
-    const stale = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
-    expect(stale.tools.map((t) => t.name)).toEqual(["t1"]);
-    await vi.waitFor(() => expect(state.listCalls).toBe(2));
-    await new Promise((r) => setTimeout(r, 0));
-    const fresh = await listToolsForUser(user("u3"), "heisenberg", "Heisenberg", {});
-    expect(fresh.tools.map((t) => t.name)).toEqual(["t2"]);
+    vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
+    const later = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    expect(later.tools.map((t) => t.name)).toEqual(["t1"]);
+    expect(state.listCalls).toBe(1);
   });
 
-  it("waits for a live listing once the shared copy passes the max age", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
+  it("shares built-in servers with fixed tool lists across users", async () => {
+    for (const name of ["u1", "u2", "u3"]) {
+      await listToolsForUser(user(name), "xyne-workflows", "Workflows", { token: name, workspaceId: name });
+      await listToolsForUser(user(name), "google", "Google", { token: name });
+    }
+    expect(state.listCalls).toBe(2);
+  });
+
+  it("restart drops every tool list and closes every session", async () => {
     await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    const result = await restartMcpServers();
+    expect(result.toolLists).toBe(2);
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
-    vi.setSystemTime(new Date("2026-09-25T07:00:00Z"));
-    const result = await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
-    expect(result.tools.map((t) => t.name)).toEqual(["t2"]);
+    const shared = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    const own = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(shared.tools.map((t) => t.name)).toEqual(["t2"]);
+    expect(own.tools.map((t) => t.name)).toEqual(["t2"]);
+    expect(state.listCalls).toBe(4);
+  });
+
+  it("restart of one server type leaves the others cached", async () => {
+    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    await restartMcpServers("bitbucket");
+    await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
+    expect(state.listCalls).toBe(3);
   });
 
   it("drops cached listings when a call names a tool the server no longer has", async () => {

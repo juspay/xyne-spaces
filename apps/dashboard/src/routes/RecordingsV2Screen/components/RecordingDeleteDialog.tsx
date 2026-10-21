@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
-import { MicOn, MultipleCrossCancelDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { Button } from '../../../components/ui/Button/Button';
 import { Dialog } from '../../../components/ui/Dialog';
 import { formatRecordingDuration } from '../../../utils/recordingUtils';
@@ -49,7 +50,7 @@ export const RecordingDeleteDialog = ({
 
       <div className='flex flex-col gap-3 p-4'>
         <div className='flex items-center gap-2 rounded-lg border border-border bg-muted px-2.5 py-2'>
-          <MicOn size={13} className='shrink-0 text-muted-foreground' />
+          <AudioLines size={13} className='shrink-0 text-muted-foreground' />
           <span className='min-w-0 flex-1 truncate text-xs font-semibold text-foreground'>
             {title}
           </span>

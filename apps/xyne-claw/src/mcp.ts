@@ -277,6 +277,12 @@ export async function injectForwardedFiles(
   return { params: rewritten, forwarded };
 }
 
+export const CLAW_USER_HEADER = "x-claw-user";
+
+function clawUserHeaders(clawUserId: string | undefined): Record<string, string> {
+  return clawUserId ? { [CLAW_USER_HEADER]: clawUserId } : {};
+}
+
 async function callMcpWithBlockedCapture<T>(
   path: string,
   sessionToken: string,
@@ -309,6 +315,7 @@ export async function searchDeploymentTools(
   sessionId: string,
   sessionToken: string,
   params: { query: string; integration?: string; maxRisk?: string; limit: number },
+  clawUserId?: string,
 ): Promise<DeploymentSearchResult> {
   const qs = new URLSearchParams();
   if (params.query) qs.set("q", params.query);
@@ -323,6 +330,7 @@ export async function searchDeploymentTools(
   }>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools/search?${qs.toString()}`,
     sessionToken,
+    { headers: clawUserHeaders(clawUserId) },
   );
   return { matches: matches ?? [], connectors: connectors ?? [] };
 }
@@ -348,6 +356,7 @@ export async function loadMcpToolsForUser(
   trustedToolBindings?: TrustedMcpToolBindings,
   onConnectorBlocked?: (serverType: string, status: number) => void,
   subagentId?: string,
+  clawUserId?: string,
 ): Promise<{
   groups: McpToolGroup[];
   /** Servers the agent's selection grants that did not resolve this run. */
@@ -360,6 +369,7 @@ export async function loadMcpToolsForUser(
   const envelope = await authFetchEnvelope<McpServerTools[], { unresolvedConfigured: UnresolvedConfiguredServer[] }>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools`,
     sessionToken,
+    { headers: clawUserHeaders(clawUserId) },
   );
   const servers = envelope.data;
   const unresolvedConfigured = Array.isArray(envelope.unresolvedConfigured) ? envelope.unresolvedConfigured : [];
@@ -451,6 +461,7 @@ export async function loadMcpToolsForUser(
             sessionToken,
             {
               method: "POST",
+              headers: clawUserHeaders(clawUserId),
               body: JSON.stringify({
                 serverType: server.serverType,
                 tool: mcpTool.name,

@@ -1,12 +1,8 @@
 import { logger } from '@/utils/logger';
-import { config as envConfig } from '@/config/env';
 import { AgentsConfig } from '@/agents/config';
-import {
-  askJev,
-  isJevConfigured,
-  type JevChoiceQuestion,
-  type JevFailure,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
+import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 import type { CategoryConfig, GeneratedTag } from '../types';
 import { validateGeneratedTags } from './validate';
 
@@ -28,8 +24,8 @@ const SHADOW_TIMEOUT_MS = 30_000;
  */
 export function buildQuestions(
   categories: Record<string, CategoryConfig>,
-): Record<string, JevChoiceQuestion> {
-  const questions: Record<string, JevChoiceQuestion> = {};
+): Record<string, ChoiceQuestion> {
+  const questions: Record<string, ChoiceQuestion> = {};
 
   for (const [name, category] of Object.entries(categories)) {
     const options = (category.tags ?? []).filter((tag) => !category.blacklist?.includes(tag));
@@ -53,7 +49,7 @@ export async function generateJevTags(
   const questions = buildQuestions(categories);
   if (Object.keys(questions).length === 0) return [];
 
-  const answers = await askJev(context, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true });
+  const answers = await askDecision('desk_tags', context, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true });
   if (!answers) return null;
   const raw = Object.entries(answers).flatMap(([category, a]) =>
     a.type === 'choice' ? [{ category, tag: a.choice, reason: 'Chosen by Jev' }] : [],
@@ -68,7 +64,7 @@ export async function runShadowTagGeneration(
   meta: { jobId: string; sourceId: string; sourceType: string },
 ): Promise<void> {
   try {
-    if (!isJevConfigured()) return;
+    if (!isDecisionEngineConfigured()) return;
 
     const cacConfig = await AgentsConfig.fetch();
     if (!cacConfig.shadowTagGenerationEnabled) return;
@@ -77,10 +73,11 @@ export async function runShadowTagGeneration(
     const questions = buildQuestions(categories);
     if (Object.keys(questions).length === 0) return;
 
-    // askJev collapses every failure into a plain null; onFailure recovers the cause.
-    let failure: JevFailure | undefined;
-    const answers = await askJev(context, questions, SHADOW_TIMEOUT_MS, undefined, {
+    // askDecision collapses every failure into a plain null; onFailure recovers the cause.
+    let failure: AskFailure | undefined;
+    const answers = await askDecision('desk_tags', context, questions, SHADOW_TIMEOUT_MS, undefined, {
       partial: true,
+      role: 'shadow',
       onFailure: (f) => {
         failure = f;
       },
@@ -125,7 +122,7 @@ export async function runShadowTagGeneration(
     });
 
     const primaryModel = cacConfig.tagGenerationModelName;
-    const shadowModel = envConfig.jev.model;
+    const shadowModel = decisionEngineModel();
     const agreedCount = comparison.filter((c) => c.agreed).length;
 
     // Reads as: priority low == low (0.35) — '==' agree, '!=' differ, Jev's confidence.
