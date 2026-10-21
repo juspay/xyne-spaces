@@ -1,5 +1,3 @@
-import { useSelector } from '@xstate/react';
-import { stateMachineActor } from '@/src/machines/appStateMachine';
 import { showMessageToast } from '@/src/utils/toast';
 import { currentCallConversation } from '@/src/utils/currentCallConversation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,10 +30,9 @@ export function useThreadHeaderOverflow(
   canUseMemberActions: boolean,
 ): ThreadHeaderOverflow {
   const zero = useZero();
-  const showThreadTags = useSelector(
-    stateMachineActor,
-    state => state.context.userPreference?.showThreadTags ?? false,
-  );
+  // Mobile does not hydrate userPreference into the app state machine.
+  const [userPreference] = useQuery(queries.getCurrentUserPreference({}));
+  const showThreadTags = userPreference?.showThreadTags ?? false;
   const [conversation] = useQuery(queries.getConversationById({ conversationId: threadId }));
   const hasLinkedCall = !!conversation?.callId;
   const isInCall = useIsInCall();
