@@ -7,8 +7,9 @@
  * session is returned in the poll body only; no cookie is set, so a poll made
  * from the Spaces origin never disturbs the dashboard's own cookies.
  *
- * The poll also returns a refresh token, which `/refresh` trades for a new
- * session (and a new refresh token) for as long as a browser login lasts.
+ * A client that sends `refresh: true` to `/init` also gets a refresh token from
+ * the poll, which `/refresh` trades for a new session (and a new refresh
+ * token) for as long as a browser login lasts.
  *
  * Endpoints:
  * - POST /api/sdk/auth/sso/init     - Initiate device flow (no auth required)
@@ -82,10 +83,11 @@ router.post('/init', sdkSsoInitLimiter, async (req: Request, res: Response) => {
     // The consent URL is served by the backend, so it is built on backendUrl.
     // Where the request came from is shown on the consent page, so the person
     // approving can tell a request of their own from one sent to them.
-    const result = await sdkSsoService.initiateDeviceFlow(config.backendUrl, {
-      ip: req.ip ?? null,
-      userAgent: req.get('user-agent') ?? null,
-    });
+    const result = await sdkSsoService.initiateDeviceFlow(
+      config.backendUrl,
+      { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null },
+      { refresh: req.body?.refresh === true },
+    );
 
     return res.status(200).json({
       device_code: result.deviceCode,
@@ -133,16 +135,16 @@ router.post('/poll', sdkSsoPollLimiter, async (req: Request, res: Response) => {
           });
         }
 
-        // Without a refresh session the client still gets a working session,
-        // just one that ends with its JWT, as before refresh existed.
         let grant = null;
-        try {
-          grant = await sdkSsoService.startRefreshSession(session, {
-            ip: req.ip ?? null,
-            userAgent: req.get('user-agent') ?? null,
-          });
-        } catch (error) {
-          logger.error('[SDK-SSO] Could not start a refresh session; issuing the session alone:', error);
+        if (result.refresh) {
+          try {
+            grant = await sdkSsoService.startRefreshSession(session, {
+              ip: req.ip ?? null,
+              userAgent: req.get('user-agent') ?? null,
+            });
+          } catch (error) {
+            logger.error('[SDK-SSO] Could not start a refresh session; issuing the session alone:', error);
+          }
         }
 
         return res.status(200).json({
@@ -292,9 +294,12 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
         ip: authRequest.origin?.ip ?? null,
         user_agent: authRequest.origin?.userAgent ?? null,
       },
-      // How long an approved sign-in lasts with refresh, so the consent page
-      // need not guess: as long as a browser login
-      session_expires_in: config.session.expiryDays * 24 * 60 * 60,
+      // How long an approved sign-in lasts, so the consent page need not
+      // guess: as long as a browser login for a client that renews sessions,
+      // otherwise as long as the session JWT
+      session_expires_in: authRequest.refresh
+        ? config.session.expiryDays * 24 * 60 * 60
+        : config.jwt.expirationSeconds,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

@@ -9,7 +9,9 @@
  *
  * - A lock file around the renewal, and a re-read of the saved session inside
  *   it: a process that finds the session already renewed by another takes that
- *   one instead of renewing again.
+ *   one instead of renewing again, or renews with that one's refresh token if
+ *   its cookie has run out too. A process never renews with its own token once
+ *   the file holds a newer one, however long it has been idle.
  * - The server's grace window: for 30 seconds the old token still answers with
  *   the renewed session, which covers a process that does not take the lock in
  *   time and renews anyway.
@@ -41,16 +43,15 @@ export async function renewSharedSession(baseUrl: string, current: SpacesSession
 	const release = await acquireLock(`${configPath()}.lock`);
 	try {
 		const saved = loadSavedSession();
-		if (
+		const newer =
 			saved?.refreshToken &&
 			saved.refreshToken !== current.refreshToken &&
-			saved.workspaceId === current.workspaceId &&
-			saved.expiresAt - Date.now() > MIN_REMAINING_MS
-		) {
-			return saved;
-		}
+			saved.workspaceId === current.workspaceId
+				? saved
+				: undefined;
+		if (newer && newer.expiresAt - Date.now() > MIN_REMAINING_MS) return newer;
 
-		const renewed = await refreshOnce(baseUrl, current.refreshToken!);
+		const renewed = await refreshOnce(baseUrl, newer?.refreshToken ?? current.refreshToken!);
 		saveSession(renewed);
 		return renewed;
 	} finally {

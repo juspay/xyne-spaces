@@ -4,7 +4,8 @@
  * `spaces_login` (the tool) and `xyne-spaces-mcp login` (the command) both call
  * `startLogin`: it asks Spaces for an approval link, opens it, and polls in the
  * background. On approval the session is saved to `~/.xyne/agent/spaces.json`
- * and handed to `onSession`, so the running server picks it up without a restart.
+ * and handed to `onSession`, so the running server picks it up without a restart;
+ * the sign-in it replaces is signed out.
  *
  * The tool cannot block for the minutes approval may take, so `startLogin`
  * resolves as soon as the link exists and exposes the rest as `done`. The
@@ -15,8 +16,8 @@
  * always is.
  */
 
-import { xyneSsoLoginAndWait, type SsoSession } from "@xyne/spaces-sdk";
-import { saveSession } from "./config.js";
+import { xyneSsoLoginAndWait, xyneSsoLogout, type SsoSession } from "@xyne/spaces-sdk";
+import { loadSavedSession, saveSession } from "./config.js";
 
 export interface LoginAttempt {
 	/** The approval page, with the request's code filled in. */
@@ -26,6 +27,11 @@ export interface LoginAttempt {
 	/** Settles when the user approves (with the saved session) or the attempt fails. */
 	readonly done: Promise<SsoSession>;
 }
+
+/** Longest a new sign-in waits for the one it replaces to be signed out. */
+const SIGN_OUT_WAIT_MS = 5_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The attempt in flight, shared so a second call reuses its link. */
 let pending: LoginAttempt | undefined;
@@ -68,9 +74,16 @@ async function begin(baseUrl: string, onSession: (session: SsoSession) => void):
 		baseUrl,
 		openBrowser: true,
 		onUserCode: (userCode, _verificationUrl, link) => resolveLink({ link, userCode }),
-	}).then((session) => {
+	}).then(async (session) => {
+		const replaced = loadSavedSession();
 		saveSession(session);
 		onSession(session);
+		if (replaced?.refreshToken && replaced.refreshToken !== session.refreshToken) {
+			await Promise.race([
+				xyneSsoLogout({ baseUrl, refreshToken: replaced.refreshToken }).catch(() => {}),
+				sleep(SIGN_OUT_WAIT_MS),
+			]);
+		}
 		return session;
 	});
 

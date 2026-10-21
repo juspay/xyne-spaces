@@ -10,8 +10,8 @@
  * dashboard runs on, so `/api/sdk` authenticates it with the ordinary
  * `authMiddleware` — there is no SDK-specific credential on ordinary calls.
  *
- * Alongside it the SDK gets a refresh token, backed by a `UserSession` of its
- * own that lives as long as a browser login. `refresh` trades it for a new JWT
+ * A client that asks for one at init also gets a refresh token, backed by a
+ * `UserSession` of its own that lives as long as a browser login. `refresh` trades it for a new JWT
  * and a new refresh token (rotation); see `refresh` for reuse detection and the
  * grace window that lets several local processes share one sign-in.
  *
@@ -145,6 +145,7 @@ export interface DeviceAuthRequest {
   status: DeviceAuthStatus;
   createdAt: number;
   origin: DeviceAuthOrigin;
+  refresh?: boolean;
   /** Populated on approval */
   session?: SdkSsoSession;
 }
@@ -163,6 +164,8 @@ export interface DeviceFlowInitResult {
 export interface DeviceFlowPollResult {
   status: 'pending' | 'approved' | 'denied' | 'expired';
   session?: SdkSsoSession;
+  /** Whether the client asked for a refresh token; see `DeviceAuthRequest.refresh` */
+  refresh?: boolean;
 }
 
 /**
@@ -214,7 +217,11 @@ class SdkSsoService {
    * Initiate the device authorization flow.
    * Returns codes for the SDK to display to the user.
    */
-  async initiateDeviceFlow(baseUrl: string, origin: DeviceAuthOrigin): Promise<DeviceFlowInitResult> {
+  async initiateDeviceFlow(
+    baseUrl: string,
+    origin: DeviceAuthOrigin,
+    options: { refresh: boolean } = { refresh: false },
+  ): Promise<DeviceFlowInitResult> {
     const deviceCode = crypto.randomUUID();
     const deviceCodeHash = this.hashDeviceCode(deviceCode);
 
@@ -240,6 +247,7 @@ class SdkSsoService {
       userCode,
       status: 'pending',
       createdAt: Date.now(),
+      refresh: options.refresh,
       origin: {
         ip: origin.ip,
         userAgent: origin.userAgent?.slice(0, MAX_USER_AGENT_LENGTH) ?? null,
@@ -370,7 +378,7 @@ class SdkSsoService {
     await redisService.del(`${USER_CODE_KEY_PREFIX}${authRequest.userCode}`);
 
     return authRequest.status === 'approved'
-      ? { status: 'approved', session: authRequest.session }
+      ? { status: 'approved', session: authRequest.session, refresh: authRequest.refresh === true }
       : { status: 'denied' };
   }
 
