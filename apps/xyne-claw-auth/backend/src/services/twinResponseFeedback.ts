@@ -15,7 +15,8 @@
 import { prisma } from "../db.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
-import type { UserMemoryRecord, TwinDelivery } from "xyne-claw-shared";
+import type { TwinResponseFeedback } from "@prisma/client";
+import { twinDeliveryParts, type UserMemoryRecord, type TwinDelivery } from "xyne-claw-shared";
 
 const log = createLogger("twin-response-feedback");
 
@@ -26,7 +27,10 @@ const IGNORE_GRACE_MS = 12 * 60 * 60 * 1000;
 /** Safety cap on rows distilled per user per daily run. */
 const MAX_FEEDBACK_PER_RUN = 200;
 
-export type TwinApprovalDecision = "accepted" | "accepted_edited" | "declined";
+type TwinApprovalDecision = "accepted" | "accepted_edited" | "declined";
+
+/** `value` clipped to `max` chars when it is a string, else null. */
+const clip = (value: unknown, max: number): string | null => (typeof value === "string" ? value.slice(0, max) : null);
 
 /**
  * Write the `pending` row when the approval DM is sent. Create-only: a retry
@@ -81,15 +85,22 @@ export async function recordTwinApprovalOutcome(
   status: TwinApprovalDecision,
   finalMessage?: string,
 ): Promise<void> {
-  const userId = typeof data["mentionedUserId"] === "string" ? (data["mentionedUserId"] as string) : "";
+  const text = (key: string): string => (typeof data[key] === "string" ? (data[key] as string) : "");
+  const userId = text("mentionedUserId");
   if (!userId) return;
-  const sourceMessageId = typeof data["sourceMessageId"] === "string" ? (data["sourceMessageId"] as string) : "";
-  const conversationId = typeof data["targetConversationId"] === "string" ? (data["targetConversationId"] as string) : "";
-  const now = new Date();
+  const sourceMessageId = text("sourceMessageId");
   const decided = {
     status,
-    decidedAt: now,
+    decidedAt: new Date(),
     ...(finalMessage ? { finalMessage: finalMessage.slice(0, 4000) } : {}),
+  };
+  // Fields present on every row, with or without a sourceMessageId.
+  const core = {
+    userId,
+    conversationId: text("targetConversationId"),
+    deliveryAction: (data["deliveryAction"] as string | undefined) ?? "reply",
+    draftMessage: clip(data["messageContent"], 4000),
+    ...decided,
   };
   try {
     if (sourceMessageId) {
@@ -97,29 +108,17 @@ export async function recordTwinApprovalOutcome(
         where: { userId_sourceMessageId: { userId, sourceMessageId } },
         update: decided,
         create: {
-          userId,
-          conversationId,
+          ...core,
           channelId: (data["targetChannelId"] as string | undefined) ?? null,
           channelName: (data["channelName"] as string | undefined) ?? null,
           sourceMessageId,
-          incomingTask: typeof data["incomingTask"] === "string" ? (data["incomingTask"] as string).slice(0, 2000) : null,
-          deliveryAction: (data["deliveryAction"] as string | undefined) ?? "reply",
+          incomingTask: clip(data["incomingTask"], 2000),
           deliveryEmoji: (data["deliveryEmoji"] as string | undefined) ?? null,
           destinationKind: (data["destinationKind"] as string | undefined) ?? null,
-          draftMessage: typeof data["messageContent"] === "string" ? (data["messageContent"] as string).slice(0, 4000) : null,
-          ...decided,
         },
       });
     } else {
-      await prisma.twinResponseFeedback.create({
-        data: {
-          userId,
-          conversationId,
-          deliveryAction: (data["deliveryAction"] as string | undefined) ?? "reply",
-          draftMessage: typeof data["messageContent"] === "string" ? (data["messageContent"] as string).slice(0, 4000) : null,
-          ...decided,
-        },
-      });
+      await prisma.twinResponseFeedback.create({ data: core });
     }
     log.info("[twin-feedback] recorded outcome", { userId, sourceMessageId: sourceMessageId || "(none)", status });
   } catch (err) {
@@ -135,23 +134,15 @@ export async function recordTwinApprovalOutcome(
 /** Render one feedback row into a curator record. The text spells out the
  *  outcome so the curator can distil "what got accepted vs edited vs declined vs
  *  ignored" without any prompt change. Exported for unit tests. */
-export function renderTwinFeedbackRecord(row: {
-  id: string;
-  channelId: string | null;
-  channelName: string | null;
-  incomingTask: string | null;
-  deliveryAction: string;
-  deliveryEmoji: string | null;
-  draftMessage: string | null;
-  finalMessage: string | null;
-  status: string;
-  decidedAt: Date | null;
-}): UserMemoryRecord {
+export function renderTwinFeedbackRecord(
+  row: Pick<
+    TwinResponseFeedback,
+    "id" | "channelId" | "channelName" | "incomingTask" | "deliveryAction" | "deliveryEmoji" | "draftMessage" | "finalMessage" | "status" | "decidedAt"
+  >,
+): UserMemoryRecord {
   const where = row.channelName ? ` in #${row.channelName}` : "";
-  const incoming = (row.incomingTask ?? "").slice(0, MAX_PART_CHARS);
-  const draft = (row.draftMessage ?? "").slice(0, MAX_PART_CHARS);
-  const final = (row.finalMessage ?? "").slice(0, MAX_PART_CHARS);
-  const reacted = row.deliveryAction === "react" || row.deliveryAction === "react_and_reply";
+  const [incoming, draft, final] = [row.incomingTask, row.draftMessage, row.finalMessage].map((s) => (s ?? "").slice(0, MAX_PART_CHARS));
+  const reacted = twinDeliveryParts(row.deliveryAction).emoji;
   const reactNote = reacted && row.deliveryEmoji ? ` (with a ${row.deliveryEmoji} reaction)` : "";
 
   const head = `Someone messaged the user${where}: "${incoming}"`;

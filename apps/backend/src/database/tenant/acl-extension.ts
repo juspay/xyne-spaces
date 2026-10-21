@@ -231,7 +231,10 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               );
 
           if (isRead) {
-            let aclWhere = acl ? ((await acl.getWhereClause()) as Record<string, unknown> | null) : null;
+            // Hand the caller's own `where` to the ACL so a single-entity read can scope by the
+            // query's connectId/canvasId (Slack Connect canvas-child gate); most ACLs ignore it.
+            const queryWhere = (args as { where?: Record<string, unknown> } | undefined)?.where;
+            let aclWhere = acl ? ((await acl.getWhereClause(queryWhere)) as Record<string, unknown> | null) : null;
             if (!aclWhere) {
               // Reached when the table's ACL expressed no opinion, or the caller is a
               // service actor: fall back to plain workspace scope.
@@ -330,7 +333,10 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             reportWorkspaceReassignment(model, operation, (args as { data?: unknown }).data, ws);
           }
 
-          let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
+          // Hand the caller's own `where` to the ACL so a single-entity write can scope by the
+          // query's connectId/canvasId (Slack Connect canvas-child gate); most ACLs ignore it.
+          const mutateQueryWhere = (args as { where?: Record<string, unknown> } | undefined)?.where;
+          let mutateWhere = acl ? ((await acl.getMutateWhere(mutateQueryWhere)) as Record<string, unknown> | null) : null;
           if (!mutateWhere) {
             // Service actors only — see the read branch.
             if (!isWorkspaceScopedModel(model)) {

@@ -103,6 +103,16 @@ variable "argocd_namespace" {
   default = "argocd"
 }
 
+variable "argocd_expose" {
+  type    = bool
+  default = false
+}
+
+variable "argocd_host" {
+  type    = string
+  default = ""
+}
+
 variable "argocd_values" {
   type    = string
   default = ""
@@ -121,6 +131,24 @@ variable "enable_monitoring" {
 variable "enable_sandbox" {
   type    = bool
   default = false
+}
+
+variable "enable_hindsight" {
+  type    = bool
+  default = false
+}
+
+variable "enable_workflows" {
+  type    = bool
+  default = false
+}
+
+variable "hindsight" {
+  type = object({
+    url    = optional(string, "")
+    tenant = optional(string, "default")
+  })
+  default = {}
 }
 
 variable "apps" {
@@ -173,6 +201,8 @@ variable "app_secrets" {
     ysweet_server_token         = string
     transcription_agent_api_key = string
     litellm_api_key             = optional(string, "")
+    hindsight_api_key           = optional(string, "")
+    hindsight_llm_api_key       = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })

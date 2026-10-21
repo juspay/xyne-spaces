@@ -20,5 +20,6 @@ module.exports = {
     // @xyne/shared ships ESM in dist/, which jest cannot parse. Point at the TS
     // source so ts-jest transforms it.
     '^@xyne/shared/(.*)$': '<rootDir>/../../packages/shared/src/$1',
+    '^@xyne/cache$': '<rootDir>/../../packages/cache/src/index.ts',
   },
 };

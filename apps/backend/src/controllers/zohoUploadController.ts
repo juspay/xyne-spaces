@@ -295,6 +295,7 @@ export class ZohoUploadController {
           createdBy: ctx.userId,
           storageProvider: config.fileStorage.provider,
           conversationId: ctx.conversationId ?? null,
+          channelId: ctx.channelId ?? null,
           workspaceId: ctx.workspaceId,
           metadata: { pending: true, pendingEntityId, ...(file.metadata ?? {}) },
         }),

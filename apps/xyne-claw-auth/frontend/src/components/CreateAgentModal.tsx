@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Sparkles, ChevronRight, ChevronLeft, Loader2, Check, AlertCircle } from "lucide-react";
 import { createAgent, checkAgentName, getAvailableTools, listSkills, type AvailableTools, type Skill } from "../lib/api";
+import { isCurrentUser } from "../lib/identity";
 
 interface Props {
   userId: string;
@@ -380,11 +381,11 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                     </div>
                   )}
                   {/* My Skills */}
-                  {w.availableSkills.filter((s) => s.ownerUserId === userId).length > 0 && (
+                  {w.availableSkills.filter((s) => isCurrentUser(s.ownerUserId)).length > 0 && (
                     <div>
                       <h3 className="mb-2 text-xs font-medium text-zinc-400">My Skills</h3>
                       <div className="flex flex-wrap gap-2">
-                        {w.availableSkills.filter((s) => s.ownerUserId === userId).map((skill) => (
+                        {w.availableSkills.filter((s) => isCurrentUser(s.ownerUserId)).map((skill) => (
                           <button key={skill.id} onClick={() => setW((p) => ({ ...p, selectedSkillIds: p.selectedSkillIds.includes(skill.id) ? p.selectedSkillIds.filter((x) => x !== skill.id) : [...p.selectedSkillIds, skill.id] }))}
                             className={`rounded-lg border px-3 py-2 text-sm transition ${w.selectedSkillIds.includes(skill.id) ? "border-amber-500 bg-amber-950/30 text-amber-300" : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"}`}
                             title={skill.description || skill.slug}>

@@ -5,6 +5,9 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
+import { buildQuestions, generateJevTags, runShadowTagGeneration } from './generators/xorShadow';
+import { AgentsConfig } from '@/agents/config';
+import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
@@ -125,8 +128,8 @@ export class TagGenerationPipeline extends EventEmitter {
         lazyConnect: false,
       },
       defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
         removeOnComplete: true,
         removeOnFail: { count: 100 },
       },
@@ -392,9 +395,25 @@ export class TagGenerationPipeline extends EventEmitter {
     }
 
     const context = await buildContext(sourceId, sourceType);
-    const byMethod = this.groupCategoriesByMethod(categories);
+    let consumeJev = false;
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE && isPrivateDecisionEngineConfigured()) {
+      const cacConfig = await AgentsConfig.fetch();
+      consumeJev = cacConfig.shadowTagGenerationEnabled && cacConfig.tagGenerationJevEnabled;
+    }
 
     const generated: GeneratedTag[] = [];
+    if (consumeJev) {
+      // Jev only, no LLM: a failed call throws so Bull retries.
+      const jevTags = await generateJevTags(context, categories);
+      if (!jevTags) throw new Error(`[TAG][PIPELINE] Jev gave no answer for ${sourceId}`);
+      generated.push(...jevTags);
+    }
+    // Categories Jev can't be asked (non-llm, fewer than 2 options) still use their generator.
+    const askable = consumeJev ? buildQuestions(categories) : {};
+    const byMethod = this.groupCategoriesByMethod(
+      Object.fromEntries(Object.entries(categories).filter(([name]) => !(name in askable))),
+    );
+
     for (const [method, group] of Object.entries(byMethod)) {
       if (method === 'manual') continue;
 
@@ -406,6 +425,9 @@ export class TagGenerationPipeline extends EventEmitter {
 
       generated.push(...(await generator(context, group, workspaceId)));
     }
+
+    // Log-only. Not awaited so a slow candidate cannot hold the job's Bull lock.
+    if (!consumeJev) void runShadowTagGeneration(context, categories, generated, { jobId, sourceId, sourceType });
 
     // If an LLM generator returned a tag outside `tags` for a category with
     // is_new_tag_allowed=true, fold that new tag back into the config's vocabulary
@@ -424,11 +446,15 @@ export class TagGenerationPipeline extends EventEmitter {
       await invalidateTagConfigCache(configKey);
     }
 
+    // Replacement clears every category passed in, so keep Jev's unanswered ones out of it.
+    const replaceable = consumeJev
+      ? Object.fromEntries(Object.entries(mergedCategories).filter(([name]) => generated.some((t) => t.category === name)))
+      : mergedCategories;
     const persisted = await tagService.replaceTagsForCategories(
       sourceId,
       sourceType,
       workspaceId,
-      mergedCategories,
+      replaceable,
       generated,
       configKey,
     );

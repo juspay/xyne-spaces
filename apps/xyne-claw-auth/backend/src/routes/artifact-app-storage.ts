@@ -46,7 +46,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("artifact-app-storage");
@@ -180,6 +180,7 @@ function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
 async function resolveApp(
   appId: string,
   requesterId: string,
+  workspaceHint?: string,
 ): Promise<{ ok: true; workspaceId: string } | { ok: false; status: number; error: string }> {
   const app = await prisma.artifactApp.findUnique({
     where: { id: appId },
@@ -188,7 +189,7 @@ async function resolveApp(
   if (!app || app.isArchived) return { ok: false, status: 404, error: "App not found" };
 
   if (app.ownerUserId !== requesterId) {
-    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-storage");
+    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-storage", workspaceHint);
     const sameWorkspace = workspaceId !== null && workspaceId === app.workspaceId;
     if (!sameWorkspace || app.visibility !== VISIBILITY_WORKSPACE) {
       return { ok: false, status: 403, error: "Forbidden" };
@@ -271,7 +272,7 @@ artifactAppStorageRouter.post("/query", async (req: Request, res: Response): Pro
     return;
   }
 
-  const resolved = await resolveApp(q.appId, requesterId);
+  const resolved = await resolveApp(q.appId, requesterId, requestWorkspaceHint(req));
   if (!resolved.ok) {
     res.status(resolved.status).json({ success: false, error: resolved.error });
     return;
@@ -355,7 +356,7 @@ artifactAppStorageRouter.post("/put", async (req: Request, res: Response): Promi
     return;
   }
 
-  const resolved = await resolveApp(body.appId, requesterId);
+  const resolved = await resolveApp(body.appId, requesterId, requestWorkspaceHint(req));
   if (!resolved.ok) {
     res.status(resolved.status).json({ success: false, error: resolved.error });
     return;
@@ -414,7 +415,7 @@ artifactAppStorageRouter.post("/delete", async (req: Request, res: Response): Pr
   if (!parsed.success) return badRequest(res, parsed);
   const body = parsed.data;
 
-  const resolved = await resolveApp(body.appId, requesterId);
+  const resolved = await resolveApp(body.appId, requesterId, requestWorkspaceHint(req));
   if (!resolved.ok) {
     res.status(resolved.status).json({ success: false, error: resolved.error });
     return;

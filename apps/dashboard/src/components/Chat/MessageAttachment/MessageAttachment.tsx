@@ -50,6 +50,8 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { InlineCsvFile } from './InlineCsvFile';
+import { isCsvFile } from './csvPreview';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
@@ -489,6 +491,7 @@ const ActionTray: React.FC<{
               }}
               className='p-2 rounded-md text-foreground hover:bg-muted transition-colors'
               title='Copy Image'
+              aria-label='Copy Image'
               data-track-category='MESSAGE_ATTACHMENT'
               data-track-name='CopyImage'
             >
@@ -659,6 +662,7 @@ const InlineTextFile: React.FC<{
             data-ph-capture-attribute-track-id='download_text_file'
             className='p-2 hover:bg-accent rounded-lg transition-colors'
             title='Download file'
+            aria-label='Download file'
             data-track-category='MESSAGE'
             data-track-name='DOWNLOAD_TEXT_FILE'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -698,6 +702,7 @@ const InlineTextFile: React.FC<{
           data-ph-capture-attribute-track-id='download_text_file_inline'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
+          aria-label='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_TEXT_FILE_INLINE'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -823,6 +828,7 @@ const InlineCodeFile: React.FC<{
           data-ph-capture-attribute-track-id='download_code_file'
           className='p-2 hover:bg-accent rounded-lg transition-colors'
           title='Download file'
+          aria-label='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_CODE_FILE'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
@@ -1029,7 +1035,7 @@ const InlineVideoPlayer: React.FC<{
           type='button'
           className='p-1.5 rounded-md bg-background/90 backdrop-blur-sm text-foreground transition-colors opacity-0 group-hover:opacity-100 border border-border'
           title='More options'
-          aria-label='More options'
+          aria-label={`More options for ${fileName}`}
         >
           <MoreVertical className='h-4 w-4' />
         </button>
@@ -1273,8 +1279,10 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     );
   }
 
+  const isCsv = isCsvFile(attachment.mimetype, attachment.originalFilename);
   const isTextFile =
-    attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
+    !isCsv &&
+    (attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt'));
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
   const isImage =
@@ -1316,6 +1324,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
       handleCardClick();
     }
   };
+
+  if (isCsv && !compact && !isMobile) {
+    return (
+      <InlineCsvFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        fileSize={attachment.size}
+        onOpen={handleCardClick}
+        {...(extraActions && { extraActions })}
+      />
+    );
+  }
 
   // Render inline text viewer for .txt files on PC only (mobile shows as regular attachment)
   if (isTextFile && !compact && !isMobile) {
@@ -1383,7 +1403,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid
@@ -1444,7 +1464,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         </div>
 
         {/* Hover overlay for better UX feedback */}
-        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-all duration-200 pointer-events-none' />
+        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition duration-200 pointer-events-none' />
       </div>
     </>
   );

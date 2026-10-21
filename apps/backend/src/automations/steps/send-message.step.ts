@@ -122,14 +122,14 @@ export class SendMessageStep extends BaseActionStep<
         select: { userType: true },
       });
       const sender = senderUsers[0];
-      // Automations may only post as a non-human (bot/app) identity. Posting as
+      // Automations may only post as a non-human (bot/app/agent) identity. Posting as
       // a human user is disallowed: it enables impersonation, and the earlier
-      // human-only rule both blocked legitimate bot/app senders (e.g. the RCA
+      // human-only rule both blocked legitimate bot/app/agent senders (e.g. the RCA
       // agent) and silently allowed deactivated humans. Blank sender falls back
       // to the Automations bot above.
       if (!sender || sender.userType === UserType.USER) {
         throw new Error(
-          `[SendMessageStep] Sender ${configuredSenderId} must be a bot or app identity in workspace ${workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`
+          `[SendMessageStep] Sender ${configuredSenderId} must be a bot, app or agent identity in workspace ${workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`
         );
       }
     }
@@ -198,7 +198,7 @@ export class SendMessageStep extends BaseActionStep<
       });
       const allowedUserIds = new Set(
         resolvedUsers
-          .filter((user) => user.userType !== UserType.BOT && user.userType !== UserType.APP)
+          .filter((user) => user.userType !== UserType.BOT && user.userType !== UserType.APP && user.userType !== UserType.AGENT)
           .map((user) => user.id)
       );
       userIds = requestedUserIds.filter((userId) => allowedUserIds.has(userId));

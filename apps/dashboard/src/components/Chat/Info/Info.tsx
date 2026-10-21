@@ -7,6 +7,7 @@ import {
   ChannelRole,
   ChannelAddUserPolicy,
   Channel,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -18,7 +19,7 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
-import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
@@ -26,6 +27,7 @@ import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
+import ScheduledMessagesTab from '../AboutChannel/ScheduledMessagesTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
 import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
@@ -51,7 +53,7 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import Popover from '../../ui/Popover';
 import { useLocation, useNavigate } from 'react-router-dom';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import Tooltip from '../../ui/Tooltip';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -62,17 +64,17 @@ import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab =
   | 'about'
   | 'members'
-  | 'agents-apps'
   | 'notifications'
   | 'settings'
-  | 'ai-features';
-
+  | 'ai-features'
+  | 'scheduled-messages'
+  | 'agents-apps';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -102,7 +104,7 @@ const Info = ({
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
 
-  // Authoritative app/bot list for this channel — server-filtered by
+  // Authoritative app/agent/bot list for this channel — server-filtered by
   // users.userType so we don't depend on the workspace users map hydrating
   // with userType before the tab-label counts render.
   const [appParticipantsForCount] = useCachedQuery(
@@ -122,6 +124,13 @@ const Info = ({
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const canManageAiPreferences =
     currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
+  const canManageScheduledMessages =
+    isDefaultChannel && currentUserParticipant?.role === ChannelRole.ADMIN;
+  // Channel fields: channel admins and workspace admins edit, others read.
+  const canEditChannelFields =
+    currentUserParticipant?.role === ChannelRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.ADMIN ||
+    (context.role as WorkspaceRole) === WorkspaceRole.OWNER;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
@@ -136,43 +145,11 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
-  // and the panel falls back to the channel's board mappings below.
+  // Only drives the project-name label. Boards no longer come from here — see below.
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: channel.id }),
-  );
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
-  );
-
-  const boards = useMemo(() => {
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'Info',
-        resolution: 'channel-board-mapping',
-        channelId: channel.id,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'Info',
-      resolution: 'project-boards-fallback',
-      channelId: channel.id,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
+  // channel_board_mappings is the only source of channel→board truth; there is no
+  // project fallback, so an empty set means the channel genuinely has no boards.
+  const { boards } = useChannelBoards(channel.id);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {
@@ -183,6 +160,9 @@ const Info = ({
   }, [channel?.scopeType, channel?.name, context.userID, isDM]);
 
   const targetUser = useUser(targetUserId || '');
+
+  // A 1:1 DM with a deactivated user must not be turned into a group DM.
+  const canAddPeople = showAddPeopleButton && !(isDM && isUserDeactivated(targetUser));
 
   const hasValidStatus = useMemo(() => {
     return (
@@ -349,6 +329,7 @@ const Info = ({
           </div>
         </div>
         <button
+          aria-label='Close channel info'
           onClick={onClose}
           className='w-7 h-7 flex items-center justify-center border border-border rounded-[8px] cursor-pointer'
           data-track-category='CHAT_INFO'
@@ -386,7 +367,7 @@ const Info = ({
             Starred
           </div>
         </button>
-        {showAddPeopleButton && (
+        {canAddPeople && (
           <button
             onClick={handleAddPeopleClick}
             className={headerLinkContainerStyle}
@@ -414,9 +395,9 @@ const Info = ({
           {isUserInCurrentChannelCall ? (
             <PhoneOff className='w-4 h-4 text-status-failure' />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           ) : (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           )}
           <div
             className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}
@@ -484,6 +465,14 @@ const Info = ({
               AI Preference
             </Tabs.Trigger>
           )}
+          {canManageScheduledMessages && (
+            <Tabs.Trigger
+              value='scheduled-messages'
+              className={tabTriggerClass('scheduled-messages')}
+            >
+              Scheduled Messages
+            </Tabs.Trigger>
+          )}
         </Tabs.List>
         <Tabs.Content
           value='about'
@@ -534,6 +523,7 @@ const Info = ({
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
+              canEditFields={canEditChannelFields}
               previousChannelId={previousChannelId}
               {...(onClose && { onClose })}
             />
@@ -567,6 +557,14 @@ const Info = ({
             className='outline-none flex-1 min-h-0 overflow-y-auto'
           >
             <NotificationsTab channel={channel} isParticipant={isParticipant} />
+          </Tabs.Content>
+        )}
+        {canManageScheduledMessages && (
+          <Tabs.Content
+            value='scheduled-messages'
+            className='outline-none flex-1 min-h-0 overflow-hidden'
+          >
+            <ScheduledMessagesTab channelId={channel.id} />
           </Tabs.Content>
         )}
       </Tabs.Root>
@@ -915,7 +913,7 @@ const ChannelMembers = ({
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
-  // Server-authoritative set of app/bot user IDs in this channel. Used to
+  // Server-authoritative set of app/agent/bot user IDs in this channel. Used to
   // bucket search results without depending on usersById.userType hydration.
   const appUserIdSet = useMemo(
     () => new Set(appParticipants.map(p => p.userId)),

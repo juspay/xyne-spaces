@@ -35,7 +35,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { errMsg } from "../lib/errors.js";
 import { join } from "node:path";
 import type { Prisma } from "@prisma/client";
-import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, buildRetainMission, getMemoryProvider, isDigitalTwinAgent } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
@@ -696,7 +696,7 @@ export async function curateApprovedTranscript(
   // conversations with their OWN user-memory pipeline (user-tagged facts, the
   // user approves). Auto-ingesting them here would retain private transcripts
   // into the twin bank tagged "shared" (2026-07-17 pre-deploy audit).
-  if (bankIdForAgent(transcript.agentSlug) === bankIdForAgent("digital-twin")) {
+  if (isDigitalTwinAgent(transcript.agentSlug)) {
     logger.info("[memory-cron] Skipping digital-twin session — twin uses the user-memory pipeline", {
       sessionId: transcript.sessionId,
     });

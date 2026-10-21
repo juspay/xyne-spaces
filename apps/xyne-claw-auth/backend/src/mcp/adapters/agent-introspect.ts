@@ -18,6 +18,9 @@ import { AGENT_INTROSPECT_TOOL_DEFS } from "xyne-claw-shared";
 import { createLogger } from "../../logger.js";
 import { findAgents, INDEX_KINDS, type IndexKind } from "../../services/agent-index/index.js";
 import { listTools, searchTools } from "../../services/tool-index/index.js";
+import { handleGetFleetStats } from "./fleet-stats.js";
+import { handleGetAgentDiagnostics } from "./agent-diagnostics.js";
+import { handleFindMetricSessions, handleGetAgentMetrics } from "./agent-metrics.js";
 const log = createLogger("agent-introspect");
 
 // Slugs MUST match the `tools` rows seeded by the add_agent_introspect_tools
@@ -32,6 +35,8 @@ export const AGENT_INTROSPECT_TOOLS: McpToolInfo[] = AGENT_INTROSPECT_TOOL_DEFS.
   description: d.description,
   inputSchema: d.inputSchema as unknown as McpToolInfo["inputSchema"],
   selectionKey: d.slug,
+  // Declared so claw's open-palette gate doesn't guess risk from tool names.
+  readOnly: true,
 }));
 
 export const AGENT_INTROSPECT_TOOL_NAMES = AGENT_INTROSPECT_TOOLS.map((t) => t.name);
@@ -237,6 +242,17 @@ function roundSeconds(value: unknown): number | null {
   return Math.round(n * 10) / 10;
 }
 
+function percentile(values: number[], fraction: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * fraction;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const lower = sorted[lowerIndex]!;
+  const upper = sorted[upperIndex]!;
+  return lower + (upper - lower) * (position - lowerIndex);
+}
+
 export async function handleGetAgentRuns(
   params: Record<string, unknown>,
   contextOrgId?: string,
@@ -263,7 +279,8 @@ export async function handleGetAgentRuns(
     return JSON.stringify({ error: `No agent with slug "${agentSlug}"` });
   }
 
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const windowDays = Math.min(Math.max(Math.trunc(Number(params["days"]) || 30), 1), 90);
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   const aggregateRows = await prisma.$queryRaw<Array<{
     total_runs: bigint;
@@ -272,6 +289,8 @@ export async function handleGetAgentRuns(
     cancelled_runs: bigint;
     p50_duration_s: number | null;
     p95_duration_s: number | null;
+    p50_llm_ms: number | null;
+    p50_tool_ms: number | null;
   }>>`
     SELECT
       COUNT(*) AS total_runs,
@@ -283,7 +302,11 @@ export async function handleGetAgentRuns(
       ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p50_duration_s,
       PERCENTILE_CONT(0.95) WITHIN GROUP (
         ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt"))
-      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p95_duration_s
+      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p95_duration_s,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "llmTotalMs")
+        FILTER (WHERE "llmTotalMs" IS NOT NULL) AS p50_llm_ms,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "toolMs")
+        FILTER (WHERE "toolMs" IS NOT NULL) AS p50_tool_ms
     FROM "agent_runs"
     WHERE "agentSlug" = ${agentSlug}
       AND "orgId" = ${contextOrgId}
@@ -306,6 +329,43 @@ export async function handleGetAgentRuns(
     GROUP BY "triggerSource"
     ORDER BY count DESC, "triggerSource" ASC
   `;
+
+  // Daily series so a dashboard can show drift; the aggregate above hides a
+  // steady climb inside one number. Fetch through Prisma so the org boundary is
+  // explicit in the query-builder contract rather than bypassing it with raw SQL.
+  const perDaySourceRows = await prisma.agentRun.findMany({
+    where: {
+      agentSlug,
+      orgId: contextOrgId,
+      startedAt: { gte: since },
+      OR: [
+        { error: null },
+        { error: { not: "interrupted (orphaned run)" } },
+      ],
+    },
+    select: {
+      startedAt: true,
+      completedAt: true,
+      status: true,
+    },
+    orderBy: { startedAt: "asc" },
+  });
+
+  const perDayBuckets = new Map<string, {
+    runs: number;
+    failed: number;
+    completedDurationsS: number[];
+  }>();
+  for (const run of perDaySourceRows) {
+    const day = run.startedAt.toISOString().slice(0, 10);
+    const bucket = perDayBuckets.get(day) ?? { runs: 0, failed: 0, completedDurationsS: [] };
+    bucket.runs += 1;
+    if (run.status === "failed" || run.status === "cancelled") bucket.failed += 1;
+    if (run.status === "completed" && run.completedAt) {
+      bucket.completedDurationsS.push((run.completedAt.getTime() - run.startedAt.getTime()) / 1000);
+    }
+    perDayBuckets.set(day, bucket);
+  }
 
   const sampleRows = await prisma.$queryRaw<Array<{
     task: string;
@@ -337,7 +397,7 @@ export async function handleGetAgentRuns(
   return JSON.stringify({
     agentSlug: agent.slug,
     agentName: agent.name,
-    windowDays: 30,
+    windowDays,
     aggregates: {
       totalRuns,
       completedPct: pct(completedRuns, totalRuns),
@@ -345,8 +405,17 @@ export async function handleGetAgentRuns(
       cancelledPct: pct(cancelledRuns, totalRuns),
       p50DurationS: roundSeconds(aggregate?.p50_duration_s),
       p95DurationS: roundSeconds(aggregate?.p95_duration_s),
+      p50LlmMs: aggregate?.p50_llm_ms == null ? null : Math.round(aggregate.p50_llm_ms),
+      p50ToolMs: aggregate?.p50_tool_ms == null ? null : Math.round(aggregate.p50_tool_ms),
       byTriggerSource: triggerRows.map((r) => ({ triggerSource: r.trigger_source, count: Number(r.count) })),
     },
+    perDay: Array.from(perDayBuckets, ([day, bucket]) => ({
+      day,
+      runs: bucket.runs,
+      failed: bucket.failed,
+      p50DurationS: roundSeconds(percentile(bucket.completedDurationsS, 0.5)),
+      p95DurationS: roundSeconds(percentile(bucket.completedDurationsS, 0.95)),
+    })),
     samples: sampleRows.map((r) => ({
       task: r.task,
       status: r.status,
@@ -422,6 +491,14 @@ export async function handleAgentIntrospect(
       return handleGetAgentRuns(params, contextOrgId, requestingUserId);
     case "find_agents":
       return handleFindAgents(params, contextOrgId);
+    case "get_fleet_stats":
+      return handleGetFleetStats(params, contextOrgId, requestingUserId);
+    case "get_agent_diagnostics":
+      return handleGetAgentDiagnostics(params, contextOrgId, requestingUserId);
+    case "get_agent_metrics":
+      return handleGetAgentMetrics(params, contextOrgId, requestingUserId);
+    case "find_metric_sessions":
+      return handleFindMetricSessions(params, contextOrgId, requestingUserId);
     default:
       log.warn(`[agent-introspect] unknown tool ${tool}`);
       throw new Error(`Unknown agent-introspect tool: ${tool}`);

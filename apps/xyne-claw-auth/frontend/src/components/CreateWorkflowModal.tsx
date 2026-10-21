@@ -611,7 +611,7 @@ function CommandsPresetEditor({
 
       {advancedOpen && (
         <>
-          <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">commands must match (csv)</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">continue if any command matches (csv)</label>
           <input
             value={commandsMustMatch}
             onChange={(e) => onChange({ commandsMustMatch: e.target.value })}

@@ -41,9 +41,14 @@ output "identities" {
     worker = merge(module.iam.identities.worker, {
       ksa_names = local.worker_ksa_names
     })
-    lb_controller = local.lb_controller_identity
-    external_dns  = local.external_dns_identity
+    lb_controller      = local.lb_controller_identity
+    cluster_autoscaler = local.cluster_autoscaler_identity
+    external_dns       = local.external_dns_identity
   })
+}
+
+output "zero_backup_url" {
+  value = var.zero_backup_enabled ? "s3://${module.zero_backup[0].bucket_names.zero}/replica" : ""
 }
 
 output "node_pools" {

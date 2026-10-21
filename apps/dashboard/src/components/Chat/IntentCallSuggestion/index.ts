@@ -1,0 +1,1 @@
+export { IntentCallSuggestionCard } from './IntentCallSuggestionCard';

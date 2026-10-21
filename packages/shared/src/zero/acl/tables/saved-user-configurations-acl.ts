@@ -15,10 +15,19 @@ export class SavedUserConfigurationsACL extends BaseQueryACL<'saved_user_configu
       or(
         cmp('userId', '=', this.ctx.userID),
         cmp('visibility', '=', SavedConfigVisibility.PUBLIC),
+        // Shared directly with me
         exists('viewAccess', (va) =>
           va
             .where('entityType', ViewAccessEntityType.USER)
             .where('entityId', this.ctx.userID),
+        ),
+        // Shared with a channel I'm a member of
+        exists('viewAccess', (va) =>
+          va
+            .where('entityType', ViewAccessEntityType.CHANNEL)
+            .whereExists('channel', (ch: any) =>
+              ch.whereExists('participants', (p: any) => p.where('userId', this.ctx.userID)),
+            ),
         ),
       ),
     );

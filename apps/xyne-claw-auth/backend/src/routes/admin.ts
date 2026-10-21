@@ -6,9 +6,11 @@ import { windowFromDays } from "../lib/time-window.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository, sharedProviderCredentialRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
+import { findUserByAnyId } from "../lib/users-jit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
+import { broadcastMcpRestart } from "../lib/mcp-restart-signal.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
@@ -61,7 +63,9 @@ router.post("/roles", requireClawAdmin, asyncHandler(async (req: Request, res: R
   const role = parseRole(body.role);
   if (!role) throw badRequest(`role must be one of: ${GRANTABLE_ROLES.join(", ")}`);
 
-  let targetUser = await userRepository.findById(raw);
+  // `raw` may be a canonical Claw id, a Spaces workspace-scoped alias, or an
+  // email — resolve through all three ladders before giving up.
+  let targetUser = await findUserByAnyId(raw);
   const requesterOrgId = getOrgId(req);
   if (!targetUser && requesterOrgId) {
     targetUser = await prisma.user.findFirst({ where: { email: raw, orgId: requesterOrgId } });
@@ -91,11 +95,13 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
     }
     if (userId === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
 
-    const targetUser = await userRepository.findById(userId);
+    // Accept either a canonical Claw id or a Spaces alias for the target.
+    const targetUser = await findUserByAnyId(userId);
     if (!targetUser) { res.status(404).json({ success: false, error: "User not found" }); return; }
+    if (targetUser.id === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
 
-    await userRoleRepository.delete(userId, role);
-    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
+    await userRoleRepository.delete(targetUser.id, role);
+    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: targetUser.id, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
     log.info(`[admin] ${role} revoked from user=${targetUser.id} by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {
@@ -283,6 +289,17 @@ router.get("/scheduled-jobs", requireClawAdmin, asyncHandler(async (req: Request
 }));
 
 // ── Global MCP credentials (admin-only fallback creds) ──────────────────────
+
+router.post("/mcp-servers/restart", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const raw = (req.body as { serverType?: unknown } | undefined)?.serverType;
+  if (raw !== undefined && (typeof raw !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(raw))) {
+    throw badRequest("serverType must be a server type such as xyne-spaces");
+  }
+  const serverType = typeof raw === "string" ? raw : undefined;
+  const podsNotified = await broadcastMcpRestart(serverType);
+  log.info(`[admin] MCP restart (${serverType ?? "all servers"}) requested by ${getRequesterId(req)}; ${podsNotified} pod(s) notified`);
+  ok(res, { serverType: serverType ?? null, podsNotified });
+}));
 
 router.get("/mcp-servers", requireClawAdmin, asyncHandler(async (_req: Request, res: Response) => {
   // Platform-global by design: the Global MCP tab manages shared fallback registry/credentials.

@@ -8,6 +8,7 @@ export {
   setupQueryCachePersistence,
   flushQueryCachePersistence,
   hydrateQueryCacheFromStorage,
+  retainCacheKey,
   FINGERPRINT_FIELD,
   THREAD_FINGERPRINT_FIELD,
   THREAD_CONVERSATIONS_KEY,
@@ -44,6 +45,8 @@ export {
 export type {
   DraftMessage,
   DraftMessages,
+  DraftRelatedContext,
+  DraftRelatedContexts,
   TwinDraftDB,
   User,
   Bookmarks,

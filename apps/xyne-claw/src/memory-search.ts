@@ -7,10 +7,10 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, getMemoryProvider, isDigitalTwinAgent } from "xyne-claw-shared";
 import type { RecalledMemory } from "xyne-claw-shared";
 import { HINDSIGHT, SERVER } from "./config.js";
-import { isDigitalTwinAgent } from "./memory.js";
+import { jaccard, wordSet } from "./text-similarity.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("memory-search");
@@ -28,11 +28,14 @@ export function buildMemorySearchTool(
   // the subsystem param is ignored for it (see execute below) — so only the
   // shared-agent description needs to warn that session-ingested facts carry no
   // subsystem tags (twin facts still do, via user-memory-curator's taxonomy).
-  const twin = isDigitalTwinAgent(agentSlug);
+  // Keyed on the bank id (not the raw slug) so sanitization collisions like
+  // "digital--twin" can't reach the twin bank ungated — see isDigitalTwinAgent
+  // in xyne-claw-shared (memory/types.ts).
+  const isDigitalTwin = isDigitalTwinAgent(agentSlug);
   return {
     name: "memory-search",
     label: "Search Agent Memory",
-    description: twin
+    description: isDigitalTwin
       ? [
           "Search this user's personal memory bank for facts relevant to a query.",
           "Use it to understand the user's communication style, preferences,",
@@ -70,7 +73,7 @@ export function buildMemorySearchTool(
         },
         subsystem: {
           type: "string",
-          description: twin
+          description: isDigitalTwin
             ? "Ignored for personal memory — recall always searches your whole personal bank."
             : "Restrict to one subsystem from the system-prompt list (e.g. 'spaces', 'ticket-creation'). " +
               "Prefer this when the query fits — scoped recall is much faster than unscoped.",
@@ -125,17 +128,9 @@ export function buildMemorySearchTool(
       // is the default-everywhere agent and does NOT get personal memory —
       // routing every assistant call through user recall would be wasteful
       // and noisy for the many quick general queries it handles.
-      // Keyed on the bank id (not the raw slug) so sanitization collisions
-      // like "digital--twin" can't reach the twin bank ungated — see
-      // isDigitalTwinAgent in memory.ts.
-      const isDigitalTwin = isDigitalTwinAgent(agentSlug);
-      const tags = isDigitalTwin
-        ? subsystem
-          ? [`user:${userId}`, `subsystem:${subsystem}`]
-          : [`user:${userId}`]
-        : subsystem
-          ? [`subsystem:${subsystem}`]
-          : ["shared"];
+      const userTag = `user:${userId}`;
+      const subTag = subsystem ? `subsystem:${subsystem}` : "";
+      const tags = isDigitalTwin ? [userTag, ...(subTag ? [subTag] : [])] : [subTag || "shared"];
       try {
         const provider = getMemoryProvider();
         const bankId = isDigitalTwin
@@ -152,7 +147,6 @@ export function buildMemorySearchTool(
           // unscoped with the rrf reranker.
           budget: "mid",
           tags,
-          // Over-fetch 2× so dedupeSimilar still returns `limit` distinct facts.
           maxTokens: limit * 2 * 250,
           // Twin recall is temporal: anchor relative time expressions in the
           // query to "now", and prefer evolution-aware observation memories
@@ -174,9 +168,7 @@ export function buildMemorySearchTool(
           ? hits.filter((m) => {
               const t = m.tags ?? [];
               // user gate is authoritative; the optional subsystem narrows within it.
-              if (!t.includes(`user:${userId}`)) return false;
-              if (subsystem && !t.includes(`subsystem:${subsystem}`)) return false;
-              return true;
+              return t.includes(userTag) && (!subTag || t.includes(subTag));
             })
           : hits;
         const trimmed = dedupeSimilar(scoped).slice(0, limit);
@@ -186,6 +178,7 @@ export function buildMemorySearchTool(
           // hot-memory + 7d recall counters update in real-time. The old
           // append-to-disk + nightly cron path didn't work because claw and
           // claw-auth are separate pods with separate filesystems.
+          // Non-fatal — recall log is for analytics, not correctness.
           logRecallHits(agentSlug, userId, sessionId, trimmed, isDigitalTwin).catch(() => {});
         }
 
@@ -230,20 +223,8 @@ export function buildMemorySearchTool(
 function dedupeSimilar(hits: RecalledMemory[]): RecalledMemory[] {
   const kept: { hit: RecalledMemory; tokens: Set<string> }[] = [];
   for (const hit of hits) {
-    const tokens = new Set(
-      hit.text
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter((t) => t.length > 2),
-    );
-    const isDup = kept.some((k) => {
-      let overlap = 0;
-      for (const t of tokens) if (k.tokens.has(t)) overlap++;
-      const union = k.tokens.size + tokens.size - overlap;
-      return union > 0 && overlap / union >= 0.6;
-    });
-    if (!isDup) kept.push({ hit, tokens });
+    const tokens = wordSet(hit.text);
+    if (!kept.some((k) => jaccard(tokens, k.tokens) >= 0.6)) kept.push({ hit, tokens });
   }
   return kept.map((k) => k.hit);
 }
@@ -270,17 +251,13 @@ async function logRecallHits(
       recalledAt,
     }));
   if (payload.length === 0) return;
-  try {
-    await fetch(`${SERVER.authServiceUrl}/claw/api/v1/memory/recall-hits`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
-      },
-      body: JSON.stringify({ hits: payload }),
-      signal: AbortSignal.timeout(5_000),
-    });
-  } catch {
-    // Non-fatal — recall log is for analytics, not correctness.
-  }
+  await fetch(`${SERVER.authServiceUrl}/claw/api/v1/memory/recall-hits`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({ hits: payload }),
+    signal: AbortSignal.timeout(5_000),
+  });
 }

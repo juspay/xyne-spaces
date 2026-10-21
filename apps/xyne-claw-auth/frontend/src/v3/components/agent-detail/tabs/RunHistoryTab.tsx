@@ -10,6 +10,8 @@ import { RunRow } from "../../runs/RunRow";
 import { RunDateRangeFilter } from "../../runs/RunDateRangeFilter";
 import { RunListFooter } from "../../runs/RunListFooter";
 import { runOwnerLabel, rangeToIso, type RunRangePreset } from "../../../lib/runFormat";
+import { runReplayPath } from "../../../../lib/runReplay";
+import { isCurrentUser } from "../../../../lib/identity";
 
 interface Props {
   agentSlug: string;
@@ -314,16 +316,10 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
             // (backend gates on admin + this flag). Own runs open own-only, so a
             // shared twin thread never renders a confusing mix of other people's
             // turns unless explicitly inspected from here.
-            onOpen={
-              run.conversationId
-                ? () =>
-                    navigate(
-                      `/v3/chat?agent=${encodeURIComponent(run.agentSlug)}&conversation=${encodeURIComponent(run.conversationId!)}${
-                        run.userId !== userId ? "&allRuns=1" : ""
-                      }`,
-                    )
-                : undefined
-            }
+            onOpen={(() => {
+              const path = runReplayPath(run, { allRuns: !isCurrentUser(run.userId) });
+              return path ? () => navigate(path) : undefined;
+            })()}
           />
         ))}
       </div>

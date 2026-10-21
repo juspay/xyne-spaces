@@ -1,0 +1,12 @@
+{{- $dp := .Values.addons.nvidiaDevicePlugin }}
+{{- $gpu := (.Values.infra.nodePools | default dict).gpu | default dict }}
+{{- $enabled := ternary ($gpu.enabled | default false) $dp.enabled (kindIs "invalid" $dp.enabled) }}
+{{- if $enabled }}
+{{- $base := dict
+  "nodeSelector" ($gpu.nodeSelector | default dict)
+  "tolerations" ($gpu.tolerations | default list)
+  "affinity" (dict "nodeAffinity" (dict "requiredDuringSchedulingIgnoredDuringExecution" (dict "nodeSelectorTerms" (list (dict "matchExpressions" (list (dict "key" "pool" "operator" "In" "values" (list "gpu"))))))))
+}}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $dp.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "nvidia-device-plugin" "namespace" $dp.namespace "wave" -3 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://nvidia.github.io/k8s-device-plugin" "chart" "nvidia-device-plugin" "targetRevision" $dp.version "releaseName" "nvidia-device-plugin" "values" $values) | fromYaml)) }}
+{{- end }}

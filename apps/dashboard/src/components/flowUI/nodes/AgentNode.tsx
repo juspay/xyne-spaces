@@ -2,6 +2,7 @@ import React from 'react';
 import type { AgentProps, FlowComponent } from '@xyne/shared';
 import { DraftAgentCard } from './agent/DraftAgentCard';
 import { ProfileAgentCard } from './agent/ProfileAgentCard';
+import { UpdateAgentCard } from './agent/UpdateAgentCard';
 
 /**
  * Agent artifact — ONE node type for every agent surface.
@@ -46,6 +47,9 @@ export const AgentNode: React.FC<{ node: FlowComponent; children?: React.ReactNo
 
   if (props.variant === 'draft') {
     return <DraftAgentCard node={node} props={props} />;
+  }
+  if (props.variant === 'update') {
+    return <UpdateAgentCard node={node} props={props} />;
   }
   return <ProfileAgentCard node={node} props={props} />;
 };

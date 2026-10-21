@@ -1,5 +1,4 @@
 import { Readable } from 'node:stream';
-import { type Prisma } from '@prisma/client';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
@@ -9,9 +8,9 @@ import { storageService } from '@/services/storage';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '@/utils/logger';
 import type { AutomationContext } from '../types/context';
-import { AUTOMATION_WORKFLOW_TYPE } from '../types/workflow-adapter';
 import { resolveAutomationPath } from '../engine/variable-resolver';
 import { tokenize } from '../util/variable-ref';
+import { releaseAutomationTemplateTx } from '@/bypassAcl/transactions/automationTemplateService';
 
 export const AUTOMATION_TEMPLATE_MAX_FILES = 10;
 export const AUTOMATION_TEMPLATE_MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -341,7 +340,7 @@ export async function removeUnclaimedAutomationDeliveryFiles(
   );
 }
 
-function collectTemplateAttachmentIds(value: unknown, ids = new Set<string>()): Set<string> {
+export function collectTemplateAttachmentIds(value: unknown, ids = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     value.forEach((entry) => collectTemplateAttachmentIds(entry, ids));
     return ids;
@@ -359,79 +358,11 @@ function collectTemplateAttachmentIds(value: unknown, ids = new Set<string>()): 
   return ids;
 }
 
-export async function claimAutomationTemplates(
-  tx: Prisma.TransactionClient,
-  configValue: unknown,
-  workspaceId: string
-): Promise<void> {
-  const attachmentIds = [...collectTemplateAttachmentIds(configValue)];
-  if (attachmentIds.length === 0) return;
-  const result = await tx.messageAttachment.updateMany({
-    where: {
-      id: { in: attachmentIds },
-      workspaceId,
-      entityType: AttachmentEntityType.WORKFLOW_STEPS,
-      isDeleted: false,
-      metadata: { path: ['automationTemplate'], equals: true },
-    },
-    data: { uploadStatus: AttachmentUploadStatus.COMPLETED },
-  });
-  if (result.count !== attachmentIds.length) {
-    throw new AutomationTemplateInputError(
-      'One or more file templates are no longer available. Reattach them and try again.',
-      409
-    );
-  }
-}
-
-async function isTemplateReferenced(
-  tx: Prisma.TransactionClient,
-  attachmentId: string,
-  workspaceId: string
-): Promise<boolean> {
-  const workflow = await tx.workflow.findFirst({
-    where: {
-      workspaceId,
-      workflowType: AUTOMATION_WORKFLOW_TYPE,
-      context: { contains: attachmentId },
-    },
-    select: { id: true },
-  });
-  return workflow !== null;
-}
-
 export async function releaseAutomationTemplate(params: {
   attachmentId: string;
   workspaceId: string;
 }): Promise<boolean> {
-  return db.$transaction(async (tx) => {
-    const record = await tx.messageAttachment.findFirst({
-      where: {
-        id: params.attachmentId,
-        workspaceId: params.workspaceId,
-        entityType: AttachmentEntityType.WORKFLOW_STEPS,
-        isDeleted: false,
-      },
-    });
-    const metadata = record?.metadata as { automationTemplate?: unknown } | null;
-    if (!record || metadata?.automationTemplate !== true) return false;
-
-    const locked = await tx.messageAttachment.updateMany({
-      where: { id: record.id, workspaceId: params.workspaceId, isDeleted: false },
-      data: { uploadStatus: AttachmentUploadStatus.COMPLETED },
-    });
-    if (locked.count === 0) return false;
-    if (await isTemplateReferenced(tx, record.id, params.workspaceId)) return false;
-
-    const otherOwners = await tx.messageAttachment.count({
-      where: { id: { not: record.id }, url: record.url, isDeleted: false },
-    });
-    if (otherOwners === 0) {
-      await storageService.deleteFile(normalizeStoragePath(record.url));
-    }
-    await tx.messageAttachment.delete({ where: { id: record.id } });
-    return true;
-  });
+  return releaseAutomationTemplateTx(params);
 }
 
 export async function cleanupUnreferencedAutomationTemplates(): Promise<number> {

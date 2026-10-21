@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -21,6 +22,9 @@ import { Agent } from 'undici';
 // real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
+
+/** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
+export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
 export interface ClawRunRequest {
   userId: string;
@@ -59,10 +63,14 @@ export interface ClawRunRequest {
       | 'collection'
       | 'folder'
       | 'file'
+      | 'message'
+      | 'user'
+      | 'attachment'
       | string;
     id: string;
     title: string;
     threadId?: string;
+    canvasRole?: 'call-notes' | 'call-summary';
     eventName?: string;
     eventCategory?: string;
     timestamp?: string;
@@ -84,6 +92,8 @@ export interface ClawRunRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
+  answerScope?: string;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -98,6 +108,10 @@ export interface ClawRunRequest {
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
+  /** Name the conversation from its opening exchange. False for asks that
+   *  never reach the chat list — cmd+K answers and the compose subject
+   *  helper — where the title is a completion nobody can ever see. */
+  generateTitle?: boolean;
   // Per-run schema/draft context for dashboard-ai — goes out via
   // additionalInstructions so it is fresh each run instead of accumulating
   // in the conversation history.
@@ -138,7 +152,10 @@ export interface ClawRunStreamResult {
  *  the raw model id today — the picker maps it to a friendlier label. */
 export interface ClawAgentModel {
   id: string;
+  /** People-facing name ("Sonnet 4.5") — claw-auth's model catalog. */
   name: string;
+  /** What the model is good for, when claw-auth's catalog knows. */
+  description?: string;
   provider?: 'local-harness';
   harness?: string;
   deviceName?: string;
@@ -181,13 +198,33 @@ export interface AccessibleClawAgent {
    *  askAI composer shows a locked "Instant" indicator instead of its
    *  normal per-message toggle for such agents, and never for others. */
   instantAgent?: boolean;
+  /** The agent's Spaces bot user in this workspace — the user its channel
+   *  messages are posted as, so the dashboard draws the same avatar. */
+  botUserId?: string;
 }
 
+/** One row of the chat history (claw-auth lib/multi-agent-chat.ts). */
 export interface ClawConversationSummary {
+  /** Unique per row: the conversation id, or `<id>:<agent>` for a per-agent row. */
+  rowId: string;
   conversationId: string;
   title: string;
+  titleGenerated?: boolean;
+  pinned?: boolean;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the conversation with. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
+}
+
+/** `conversation` = every agent's turns in a direct chat (claw-auth opt-in);
+ *  omitted = only the requested agent's turns, as before. */
+export type ClawConversationScope = 'conversation';
+
+function scopeQuery(scope?: ClawConversationScope): string {
+  return scope === 'conversation' ? '?scope=conversation' : '';
 }
 
 export interface ClawMessagesResponse {
@@ -276,6 +313,9 @@ export interface S2SClawAgent {
   color: string;
   spacesAppId?: string | null;
   spacesAppUserId?: string | null;
+  ownerUserId?: string | null;
+  /** Set on a user-scoped list: ownerUserId is a Claw id, which Spaces cannot compare. */
+  ownedByScopeUser?: boolean;
 }
 
 export interface S2SRunAgentRequest {
@@ -580,6 +620,7 @@ export async function runClawAgentStream(
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
+      ...(request.answerScope && { answerScope: request.answerScope }),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
@@ -600,6 +641,7 @@ export async function runClawAgentStream(
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.generateFollowUpSuggestions === true && { generateFollowUpSuggestions: true }),
+    ...(request.generateTitle === false && { generateTitle: false }),
     ...(request.isRegenerate && { isRegenerate: true }),
     ...(request.isEditUserMessage && { isEditUserMessage: true }),
     ...(parentUserMessageId && { parentUserMessageId }),
@@ -702,6 +744,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'delta',
                   content: parsed.content || parsed.delta,
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -710,6 +753,9 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'reasoning_delta',
                   reasoningDelta: parsed.delta || parsed.reasoningDelta,
+                  // The thinking block it belongs to — the client builds the
+                  // turn's ordered step timeline from these.
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -735,6 +781,14 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'attachment',
                   attachment: parsed,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'ui-flow') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'ui_flow',
+                  flow: attachXyneAiFlowToken(parsed.flow, request.userId),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -783,6 +837,19 @@ export async function runClawAgentStream(
                     followUpSuggestions: parsed.followUpSuggestions,
                   }),
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
+                  // The turn as ordered thinking / text / tool parts.
+                  ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'follow-ups') {
+              // Generated after the answer; claw-auth holds the stream open
+              // past `done` and delivers them here.
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'follow_ups',
+                  followUpSuggestions: parsed.suggestions,
+                  ...(parsed.id && { messageId: parsed.id }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -899,11 +966,37 @@ interface RawClawAgent {
   /** Top-level in the light-list response (agents.ts's lightAgentProjection
    *  derives it from config.instantAgent, but doesn't expose config itself). */
   instantAgent?: boolean;
+  /** The Spaces app and the bot user claw-auth recorded when installing it. */
+  spacesAppId?: string | null;
+  spacesAppUserId?: string | null;
+}
+
+/**
+ * Each agent's bot user in this workspace, by Spaces app id. Every workspace
+ * install mints its own bot user, so claw-auth's single `spacesAppUserId` is
+ * right only for the workspace it was installed from.
+ */
+async function botUsersByAppId(
+  appIds: string[],
+  workspaceId: string | undefined
+): Promise<Map<string, string>> {
+  if (!workspaceId || appIds.length === 0) return new Map();
+  try {
+    const installs = await db.installedApps.findMany({
+      where: { appId: { in: appIds }, workspaceId },
+      select: { appId: true, userId: true },
+    });
+    return new Map(installs.map((install) => [install.appId, install.userId]));
+  } catch (err) {
+    logger.error('[ClawAgentService] bot user lookup failed:', err);
+    return new Map();
+  }
 }
 
 export async function listAccessibleClawAgents(req: {
   headers?: { cookie?: string };
   userId: string;
+  workspaceId?: string;
 }): Promise<{ success: boolean; data: AccessibleClawAgent[] }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(req.userId)}`;
   const response = await fetch(url, {
@@ -945,8 +1038,17 @@ export async function listAccessibleClawAgents(req: {
     }
   }
 
+  const botUserByAppId = await botUsersByAppId(
+    result.data.map((agent) => agent.spacesAppId).filter((id): id is string => Boolean(id)),
+    req.workspaceId
+  );
+
   // Transform raw agent data to extract tool/skill/subagent names from nested structures
   const transformedData: AccessibleClawAgent[] = result.data.map((agent) => {
+    const botUserId =
+      (agent.spacesAppId ? botUserByAppId.get(agent.spacesAppId) : undefined) ??
+      agent.spacesAppUserId ??
+      undefined;
     return {
       slug: agent.slug,
       name: agent.name,
@@ -980,6 +1082,7 @@ export async function listAccessibleClawAgents(req: {
         rootCollectionId: rootByCollectionId.get(c.collectionId) ?? c.collectionId,
       })),
       instantAgent: agent.instantAgent === true,
+      ...(botUserId ? { botUserId } : {}),
     };
   });
 
@@ -1004,6 +1107,25 @@ export async function listAccessibleClawAgents(req: {
  * be sent with — a "litellm" pin silently no-ops for agents without the
  * credential, and vice versa a "spaces" pin would bypass an agent's own key.
  */
+export async function warmClawAgent(
+  req: { headers?: { cookie?: string }; userId: string },
+  agentSlug: string
+): Promise<void> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-warm/${encodeURIComponent(agentSlug)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok && response.status !== 404) {
+    logger.warn(`[ClawAgentService] agent warm-up returned ${response.status}`);
+  }
+}
+
 export async function listClawAgentModels(
   req: { headers?: { cookie?: string }; userId: string },
   agentSlug?: string,
@@ -1014,6 +1136,8 @@ export async function listClawAgentModels(
   defaultModel: string | null;
   pinProvider: 'litellm' | 'spaces';
   recommendedId?: string;
+  /** `defaultModel`'s people-facing name. */
+  defaultModelName?: string | null;
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
@@ -1032,12 +1156,14 @@ export async function listClawAgentModels(
         defaultModel?: string | null;
         pinProvider?: 'litellm' | 'spaces';
         recommendedId?: string;
+        defaultModelName?: string | null;
       };
       if (result.success && (result.data ?? []).length > 0) {
         return {
           success: true,
           data: result.data,
           defaultModel: result.defaultModel ?? null,
+          defaultModelName: result.defaultModelName ?? null,
           // claw-auth says which provider a pick must pin: "litellm" when the
           // list came off the agent's own credential, "spaces" when it fell
           // back to the platform allowed list. Old claw-auth omits the field
@@ -1106,13 +1232,45 @@ async function listWorkspaceAllowedModels(workspaceId?: string): Promise<{
   return { success: true, data, defaultModel, pinProvider: 'spaces' };
 }
 
+export interface ClawConversationListQuery {
+  /** Keep only the conversations this agent answered in. */
+  agentSlug?: string;
+  /** Title search. */
+  q?: string;
+  /** Rows per page (claw-auth default 50, max 100). */
+  limit?: string;
+  /** `nextCursor` of the previous page. */
+  cursor?: string;
+  /** One agent's whole list, unpaged — what dashboard builds from before
+   *  allAgents=1 expect. Needs `agentSlug`. */
+  fullAgentList?: boolean;
+}
+
+export interface ClawConversationListResponse {
+  success: boolean;
+  data: ClawConversationSummary[];
+  /** Pass back as `cursor` for the next page; null on the last one. */
+  nextCursor?: string | null;
+  /** Every agent in the history with its conversation count. */
+  agents?: Array<{ slug: string; count: number }>;
+}
+
+/** The user's chat history (claw-auth lib/multi-agent-chat.ts). */
 export async function listClawConversations(
   req: { headers?: { cookie?: string }; userId: string },
-  agentSlug?: string
-): Promise<{ success: boolean; data: ClawConversationSummary[] }> {
-  const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/conversations?userId=${encodeURIComponent(req.userId)}`;
-  const response = await fetch(url, {
+  query: ClawConversationListQuery = {}
+): Promise<ClawConversationListResponse> {
+  const params = new URLSearchParams({ userId: req.userId });
+  let path = '/claw/api/v1/agent-chat/conversations';
+  if (query.fullAgentList && query.agentSlug) {
+    path = `/claw/api/v1/agent-chat/${encodeURIComponent(query.agentSlug)}/conversations`;
+  } else {
+    for (const key of ['agentSlug', 'q', 'limit', 'cursor'] as const) {
+      const value = query[key];
+      if (value) params.set(key, value);
+    }
+  }
+  const response = await fetch(`${getClawBaseUrl()}${path}?${params.toString()}`, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1125,16 +1283,17 @@ export async function listClawConversations(
     throw new Error('Failed to fetch conversations');
   }
 
-  return (await response.json()) as { success: boolean; data: ClawConversationSummary[] };
+  return (await response.json()) as ClawConversationListResponse;
 }
 
 export async function getClawConversationMessages(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string
+  agentSlug?: string,
+  scope?: ClawConversationScope
 ): Promise<ClawMessagesResponse> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages${scopeQuery(scope)}`;
   const response = await fetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
@@ -1329,9 +1488,9 @@ export async function streamClawConversationLive(
   res: Response,
   convId: string,
   agentSlug = 'ask-ai',
-  opts: { signal?: AbortSignal } = {}
+  opts: { signal?: AbortSignal; scope?: ClawConversationScope } = {}
 ): Promise<void> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live${scopeQuery(opts.scope)}`;
   const upstream = await fetch(url, {
     headers: {
       Accept: 'text/event-stream',
@@ -1389,6 +1548,87 @@ export async function deleteClawConversation(
   }
 
   return (await response.json()) as { success: boolean; data: { deleted: number } };
+}
+
+/**
+ * Saves turns the dashboard answered itself (Buddy acting on screen) into a
+ * direct chat as finished messages, so they show in the history. No run.
+ */
+export async function saveClawConversationNotes(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  turns: Array<{ request: string; reply: string }>,
+  agentSlug?: string,
+  parentId?: string
+): Promise<{
+  success: boolean;
+  conversationId: string;
+  parentId: string | null;
+  messageIds: string[];
+}> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/notes`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify({ turns, ...(parentId ? { parentId } : {}) }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] saveNotes failed: ${response.status} ${errorText}`);
+    throw new ClawNotesError(response.status);
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    conversationId: string;
+    parentId: string | null;
+    messageIds: string[];
+  };
+}
+
+/** claw-auth's status for a refused save: 409 while a reply still runs, so the caller saves again later. */
+export class ClawNotesError extends Error {
+  constructor(readonly status: number) {
+    super('Failed to save notes');
+  }
+}
+
+export async function patchClawConversation(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string
+): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] patchConversation failed: ${response.status} ${errorText}`);
+    throw new Error(
+      response.status === 404 ? 'Conversation not found' : 'Failed to update conversation'
+    );
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    data: { title: string | null; pinned: boolean };
+  };
 }
 
 /**
@@ -1593,6 +1833,70 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
     );
   }
   return json.data.filter((a) => a.enabled);
+}
+
+/** The skills a user can see: global ones and their own personal ones. */
+export async function listS2SClawSkills(
+  userId: string,
+  workspaceId?: string
+): Promise<Array<{ id: string; scope: string; ownerUserId: string | null }>> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/skills?userId=${encodeURIComponent(userId)}`;
+  const res = await fetch(url, {
+    // The pinned user scopes the list to their org.
+    headers: {
+      'Content-Type': 'application/json',
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(userId, workspaceId),
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(`[ClawAgentService] listS2SClawSkills: HTTP ${res.status} — ${await safeReadText(res)}`);
+  }
+  const json = (await res.json()) as {
+    data?: Array<{ id: string; scope: string; ownerUserId: string | null }>;
+  };
+  return json.data ?? [];
+}
+
+/**
+ * The AGENT-vs-APP lookup could not give a definite answer. installApp must fail
+ * rather than guess: a user's type is set once, so a wrong guess is permanent.
+ * (Message deliberately avoids "not found" — the install controller maps that to 404.)
+ */
+export class ClawAgentLookupError extends Error {
+  constructor(reason: string) {
+    super(`Could not determine whether this app is a Claw agent: ${reason}`);
+    this.name = 'ClawAgentLookupError';
+  }
+}
+
+/**
+ * Whether a Claw agent is published as this Spaces app. Asks claw-auth, which
+ * owns the agent↔app link, via its internal by-spaces-app lookup — unfiltered by
+ * visibility/org/enabled, unlike listS2SClawAgents (which would miss personal and
+ * disabled agents). Authenticated with INTERNAL_S2S_KEY, the key the backend
+ * shares with claw-auth (the backend is not given XYNE_CLAW_S2S_KEY).
+ * Returns true/false only on a well-formed answer; every other outcome throws
+ * ClawAgentLookupError.
+ */
+export async function isSpacesAppClawAgent(spacesAppId: string): Promise<boolean> {
+  const key = config.internalS2sKey;
+  if (!key) throw new ClawAgentLookupError('INTERNAL_S2S_KEY is not configured');
+  const url = `${getClawBaseUrl()}/claw/api/v1/internal/agents/by-spaces-app/${encodeURIComponent(spacesAppId)}`;
+  let res: globalThis.Response;
+  try {
+    // Above claw-auth's own DB retry budget, so a slow-but-healthy answer isn't cut off.
+    res = await fetch(url, { method: 'GET', headers: { 'x-s2s-key': key }, signal: AbortSignal.timeout(15_000) });
+  } catch (err) {
+    throw new ClawAgentLookupError(`claw-auth unreachable (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (!res.ok) throw new ClawAgentLookupError(`claw-auth answered HTTP ${res.status}`);
+  const json = (await res.json().catch(() => null)) as { success?: unknown; data?: { isAgent?: unknown } } | null;
+  if (!json || json.success !== true || typeof json.data?.isAgent !== 'boolean') {
+    throw new ClawAgentLookupError('claw-auth returned an unexpected response');
+  }
+  return json.data.isAgent;
 }
 
 /**

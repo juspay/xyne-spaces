@@ -86,7 +86,6 @@ export const BoardForm = ({
     todo: boardMetadata?.ticketFormConfig?.todo || DEFAULT_CONFIG.todo,
     workflows: boardMetadata?.ticketFormConfig?.workflows || DEFAULT_CONFIG.workflows,
     labels: boardMetadata?.ticketFormConfig?.labels || DEFAULT_CONFIG.labels,
-    merchantId: boardMetadata?.ticketFormConfig?.merchantId || DEFAULT_CONFIG.merchantId,
     ticketType: boardMetadata?.ticketFormConfig?.ticketType || DEFAULT_CONFIG.ticketType,
   };
   const [ticketFormConfig, setTicketFormConfig] =
@@ -837,6 +836,7 @@ export const BoardForm = ({
                   </div>
                   {stages.length > 1 && (
                     <button
+                      aria-label={`Remove stage ${stage.name || index + 1}`}
                       onClick={() => removeStage(index)}
                       disabled={isLoading}
                       className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'

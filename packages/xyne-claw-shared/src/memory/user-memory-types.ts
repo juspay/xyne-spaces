@@ -13,6 +13,8 @@
  *   - Approval is by the user themselves, not an admin.
  */
 
+import type { ClassifierExchange } from "../types/classifier-exchange.js";
+
 /** Behaviourally-distinct surfaces. Threaded conversation units carry this so
  *  the curator can tell a private DM from a public-channel post — the same
  *  words mean different things in each. */
@@ -100,30 +102,28 @@ export interface UserMemoryRecord {
 
 /**
  * Cluster labels used to group candidates for cluster-batched user review.
- * Fixed taxonomy — curator MUST pick one of these eight, never invent.
+ * Fixed taxonomy — curator MUST pick one of these nine, never invent.
  */
-export type UserMemorySubsystem =
-  | "style"          // voice + response mechanics: length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree
-  | "triage"         // respond-vs-ignore behaviour: which senders / channels / channel-types / topics / message-types they ENGAGE with vs stay SILENT on (the respond/ignore gate reads this facet directly)
-  | "expertise"      // domain knowledge, systems/files/tools they demonstrably know
-  | "projects"       // ongoing work, codenames, what they drive/own now
-  | "relationships"  // collaborators, manager, reports — AND how the tone shifts per person
-  | "preferences"    // tools, workflow, formatting conventions they prefer or reject
-  | "decisions"      // captured judgment calls + reasoning + date
-  | "context"        // identity, role, tenure, team, working hours
-  | "docs";          // references to authored canvases / uploaded .md files
-
-export const USER_MEMORY_SUBSYSTEMS: readonly UserMemorySubsystem[] = [
-  "style",
-  "triage",
-  "expertise",
-  "projects",
-  "relationships",
-  "preferences",
-  "decisions",
-  "context",
-  "docs",
+export const USER_MEMORY_SUBSYSTEMS = [
+  "style",          // voice + response mechanics: length, structure, openers, sign-offs, emoji, punctuation, register, how they ack/ask/disagree
+  "triage",         // respond-vs-ignore behaviour: which senders / channels / channel-types / topics / message-types they ENGAGE with vs stay SILENT on (the respond/ignore gate reads this facet directly)
+  "expertise",      // domain knowledge, systems/files/tools they demonstrably know
+  "projects",       // ongoing work, codenames, what they drive/own now
+  "relationships",  // collaborators, manager, reports — AND how the tone shifts per person
+  "preferences",    // tools, workflow, formatting conventions they prefer or reject
+  "decisions",      // captured judgment calls + reasoning + date
+  "context",        // identity, role, tenure, team, working hours
+  "docs",           // references to authored canvases / uploaded .md files
 ] as const;
+
+export type UserMemorySubsystem = (typeof USER_MEMORY_SUBSYSTEMS)[number];
+
+export function isUserMemorySubsystem(x: unknown): x is UserMemorySubsystem {
+  return typeof x === "string" && (USER_MEMORY_SUBSYSTEMS as readonly string[]).includes(x);
+}
+
+/** Classifier (Jev) read on how a candidate relates to the user's stored memories. */
+export type UserMemoryCandidateVerdict = "new" | "duplicate" | "update" | "noise";
 
 /**
  * One candidate fact about the user that the curator emits. Server attaches
@@ -140,6 +140,11 @@ export interface UserMemoryCandidatePayload {
   /** Record IDs from the input batch that grounded this candidate. The route
    *  handler resolves these to {type, id, channelId, ts} for sourceRefs. */
   groundedOnIds: string[];
+  /** Classifier second opinion (claw, jev_memory_candidate_check): how the
+   *  candidate relates to the user's stored memories. Absent when not checked. */
+  jevVerdict?: UserMemoryCandidateVerdict;
+  /** Classifier usefulness score 0-1. When present, auto-approve also needs it ≥ 0.5. */
+  jevScore?: number;
 }
 
 /**
@@ -151,7 +156,7 @@ export interface UserMemoryCandidatePayload {
 export interface ExistingUserMemory {
   /** Hindsight memory id (from listMemories). */
   id: string;
-  /** One of the eight fixed labels. */
+  /** One of the nine fixed labels. */
   subsystem: string;
   /** The current memory text. */
   text: string;
@@ -173,11 +178,34 @@ export interface UserMemoryCuratorEmittedCandidate {
    *  empty: blank text.
    *  empty-or-too-long: legacy value from traces created before the per-candidate
    *  length limit was removed.
-   *  bad-subsystem: not one of the eight fixed labels.
+   *  bad-subsystem: not one of the nine fixed labels.
    *  low-signal: signalScore < 0.7.
    *  ungrounded: no groundedOnIds matching an input record.
    *  malformed: not an object / unparseable entry. */
-  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed" | "classifier-duplicate" | "classifier-noise";
+  /** Classifier (Jev) second opinion, when it answered: its pick and how sure it was. */
+  jevVerdict?: UserMemoryCandidateVerdict;
+  jevConfidence?: number;
+  /** Classifier usefulness score 0-1 (kept candidates). */
+  jevScore?: number;
+}
+
+/** The classifier (Jev) second-opinion pass over one curator batch (R8). */
+export interface UserMemoryClassifierTrace {
+  checked: number;
+  kept: number;
+  dropped: number;
+  /** Candidates Jev did not answer for (timeout / down / batch cutoff) — passed through unchanged. */
+  unavailable: number;
+  ms: number;
+  /** One entry per candidate Jev was asked about, with the full call. */
+  calls: Array<{
+    text: string;
+    verdict?: UserMemoryCandidateVerdict;
+    confidence?: number;
+    worth?: number;
+    exchange: ClassifierExchange;
+  }>;
 }
 
 /**
@@ -199,7 +227,7 @@ export interface UserMemoryCuratorTrace {
   systemPrompt?: string;
   /** The full user prompt sent to the LLM (records + already-known context),
    *  capped at 120k chars. The system prompt is static — see
-   *  user-memory-curator.ts SYSTEM_PROMPT. */
+   *  user-memory-curator-prompt.ts SYSTEM_PROMPT. */
   prompt: string;
   promptChars: number;
   /** Model reasoning / "thinking" when the provider returns it (e.g. glm
@@ -230,6 +258,8 @@ export interface UserMemoryCuratorTrace {
   usage?: { promptTokens?: number; completionTokens?: number };
   /** Every candidate the LLM emitted, in order, with keep/drop verdicts. */
   emitted: UserMemoryCuratorEmittedCandidate[];
+  /** The classifier pass after the LLM (R8), stored with the LLM exchange. */
+  classifier?: UserMemoryClassifierTrace;
   /** Failure stage when the call produced no candidates for a non-content
    *  reason: "no-api-key" | "llm-http-<status>" | "no-tool-call" |
    *  "bad-json" | "malformed-candidates" | the thrown error message. */
@@ -263,4 +293,62 @@ export interface UserMemoryDistillResponse {
   /** Present when the request set includeTrace=true. */
   trace?: UserMemoryCuratorTrace;
   error?: string;
+}
+
+/** Request body for claw's POST /internal/user-memory/synthesize-file. */
+export interface SynthesizeFileRequest {
+  fileName: string;
+  description: string;
+  /** Approved fact texts in this file's subsystem(s). */
+  facts: string[];
+  /** Hard char cap for the produced file. */
+  maxChars: number;
+  /** Existing file content (folded in / preserved when preserveEdits). */
+  currentContent?: string;
+  /** True when the current file was hand-edited by the user — preserve it. */
+  preserveEdits?: boolean;
+  /** Ask claw to score the rewrite (nightly runs only, R10). */
+  check?: boolean;
+}
+
+export interface SynthesizeFileResult {
+  content: string | null;
+  error?: string;
+  trace?: SynthesizeFileTrace;
+}
+
+/** Full per-file LLM exchange returned to claw-auth for pipeline observability. */
+export interface SynthesizeFileTrace {
+  model: string;
+  durationMs: number;
+  systemPrompt: string;
+  userPrompt: string;
+  rawOutput: string;
+  promptChars: number;
+  factsAvailable: number;
+  factsUsed: number;
+  factsDropped: number;
+  factsClipped: number;
+  factInputChars: number;
+  factInputBudgetChars: number;
+  contextLimited: boolean;
+  finishReason?: string;
+  usage?: { promptTokens?: number; completionTokens?: number };
+}
+
+export type MemoryUpdateVerdict = "accept" | "review" | "reject";
+
+/** Jev's read on a nightly persona-file rewrite (R10). */
+export interface MemoryUpdateCheck {
+  verdict: MemoryUpdateVerdict;
+  /** 0..1 — keeps what the old file said that is still supported (absent for a new file). */
+  keepsOld?: number;
+  /** 0..1 — every statement in the new file is supported by the approved facts. */
+  supported?: number;
+  /** Jev's own accept/review/reject pick. */
+  choice?: string;
+  source: "jev" | "fallback";
+  ms: number;
+  /** The classifier call in full (input, questions, answers). */
+  exchange?: ClassifierExchange;
 }

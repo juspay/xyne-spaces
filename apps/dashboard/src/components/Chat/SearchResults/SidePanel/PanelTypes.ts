@@ -38,6 +38,10 @@ export type DeskTicketPanelState = {
   mailId?: string; // desk-mail only → ?mail= deep-link scroll target
 };
 
+// A call's recording — summary, transcript and audio — keyed by the call's externalId,
+// which is what the recording screen loads by.
+export type RecordingPanelState = { kind: 'recording'; externalId: string; title: string };
+
 export type SidePanelState =
   | ThreadPanelState
   | ProfilePanelState
@@ -45,6 +49,7 @@ export type SidePanelState =
   | CanvasPanelState
   | AttachmentPanelState
   | DeskTicketPanelState
+  | RecordingPanelState
   | null;
 
 export type PanelKind = NonNullable<SidePanelState>['kind'];

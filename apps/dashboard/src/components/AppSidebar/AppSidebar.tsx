@@ -1,5 +1,6 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Fragment, ReactElement, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, type Location } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { XyneAIQuickMenu } from './XyneAIQuickMenu';
 import { ChatQuickMenu } from './ChatQuickMenu';
@@ -27,6 +28,7 @@ import {
   AlertCircle,
   TicketToken,
   UserPlus,
+  DragableSixDots,
 } from '@xyne/icons';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -40,6 +42,7 @@ import { isStatusExpired, resolveUserStatus } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
+import { useHasUnreadRecordingSummaries } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -47,12 +50,23 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
-import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
+import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
-import { useToolbarItems } from '../../hooks/useToolbarItems';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
+import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
+import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
+import {
+  preventNativeDrag,
+  useMoreSlot,
+  useRailDrag,
+  type RailDrag,
+  type RailDrop,
+} from '../../hooks/useRailDrag';
 import type { NavigationItem } from './navigationConfig';
+
+/** One slot in the rail: a built-in destination or an artifact app. */
+type RailEntry =
+  | { kind: 'nav'; item: NavigationItem }
+  | { kind: 'app'; appId: string; title: string; icon: string | null };
 import {
   RAIL_SHORTCUT_LIMIT,
   railItemIndexFromEvent,
@@ -77,71 +91,85 @@ const mobileNavigationItems = [
   {
     path: '/chat/dir',
     label: 'Home',
+    description: 'The inbox: channels, threads, unreads, bookmarks, drafts and recap',
     icon: HomeDefault,
   },
   {
     path: '/chat/dm',
     label: 'DMs',
+    description: 'Direct and group conversations',
     icon: ChatDefault,
   },
   {
     path: '/calls',
     label: 'Calls',
+    description: 'Call history and upcoming calls',
     icon: PhoneDefault,
   },
   {
     path: '/chat/activity',
     label: 'Activity',
+    description: 'Notifications: mentions, replies and reactions',
     icon: NotificationBellOn,
   },
   {
     path: '/analytics',
     label: 'Analytics',
+    description: 'Workspace usage metrics',
     icon: GraphTrendLine,
   },
   {
     path: '/chat/canvas',
     label: 'Canvas',
+    description: 'Your canvas documents',
     icon: FileText,
   },
   {
     path: '/dashboards',
     label: 'Dashboards',
+    description: 'Charts and reports built from data sources',
     icon: GridDashboard01,
   },
   {
     path: '/recorder',
     label: 'Record',
+    description: 'Record a meeting or note on this phone',
     icon: MicMicrophone,
   },
   {
     path: '/chat/bookmarks',
     label: 'Bookmarks',
+    description: 'Messages you saved',
     icon: BookmarkDefault,
   },
   {
     path: '/rca',
     label: 'RCA',
+    description: 'Root cause analysis of incidents',
     icon: ClipboardCheck,
   },
   {
     path: '/chat/threads',
     label: 'Threads',
+    description: 'Threads you follow and their replies',
     icon: ChatDefault,
   },
   {
     path: '/chat/recap',
     label: 'Recap',
+    description: 'AI summary of what you missed',
     icon: SparkleAi01,
   },
   {
     path: '/error-report',
     label: 'Report Issue',
+    description: 'Report a problem with Xyne',
     icon: AlertCircle,
   },
   {
     path: '/guide',
     label: 'Guide',
+    description: 'Product docs, feature guides and keyboard shortcuts',
     icon: QuestionMarkCircle,
   },
 ];
@@ -168,44 +196,23 @@ const SUPPORT_REUSED_ROUTES = [
   '/knowledge-base',
 ];
 
-const AppSidebar = (): ReactElement => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
-  const { user } = useAuth();
-  const currentUser = useSelf();
-  const visibleNavigationItems = useVisibleNavigationItems();
-  const { toolbarPaths } = useToolbarItems();
-  const { pinnedApps } = usePinnedArtifactApps();
-  const missedCallCount = useMissedCallCount();
-  const hasOngoingCall = useRailActiveCalls().length > 0;
-  const unreadActivityCount = useUnreadActivitiesCount();
-  const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
-  const { isMobile } = usePlatform();
-  const visibleChannels = useAllVisibleChannels();
-  const unreadCounts = useAllUnreadCount();
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
+// Determine active route with early returns for special chat paths
+const getActiveRoute = (pathname: string): string => {
+  if (pathname.startsWith('/chat/dir')) return '/chat/dir';
+  if (pathname.startsWith('/chat/dm')) return '/chat/dm';
+  if (pathname.startsWith('/chat/activity')) return '/chat/activity';
+  if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
+  if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
+  if (pathname.startsWith('/chat/sent')) return '/chat/sent';
+  if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
+  if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
+  // One rail entry per app, so the active route has to carry the app id.
+  if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
+  return '/' + (pathname.split('/')[1] || '');
+};
 
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
-  // Determine active route with early returns for special chat paths
-  const getActiveRoute = (pathname: string): string => {
-    if (pathname.startsWith('/chat/dir')) return '/chat/dir';
-    if (pathname.startsWith('/chat/dm')) return '/chat/dm';
-    if (pathname.startsWith('/chat/activity')) return '/chat/activity';
-    if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
-    if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
-    if (pathname.startsWith('/chat/sent')) return '/chat/sent';
-    if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
-    if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
-    if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
-    return '/' + (pathname.split('/')[1] || '');
-  };
-
+/** The rail entry to highlight for a location. */
+const getRailRoute = (location: Location, workspaceId: string | undefined): string => {
   const relativePath =
     workspaceId && location.pathname.startsWith(`/${workspaceId}`)
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
@@ -216,7 +223,54 @@ const AppSidebar = (): ReactElement => {
     relativePath.startsWith('/listProjects/') &&
     (relativePath.includes('/releases/') ||
       (location.state as { from?: string } | null)?.from === 'releaseManager');
-  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
+  return inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
+};
+
+// Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
+const isChannelOrThreadLocation = ({ pathname, hash }: Location): boolean =>
+  (pathname.includes('/chat/dir/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/dm/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/activity/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/bookmarks/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/drafts/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/sent/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/scheduled/') && pathname.split('/').length > 3) ||
+  pathname.includes('threadId') ||
+  hash.includes('threadId');
+
+const AppSidebar = (): ReactElement => {
+  const navigate = useStableNavigate();
+  const location = useLocation();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
+  // Narrow selectors: the rail only changes with the section and whether a channel or thread
+  // is open, not on every navigation inside a section (switching channels, threads, hashes).
+  const activeRoute = useRouterSelector(({ location, params }) =>
+    getRailRoute(location, params['workspaceId']),
+  );
+  const hasChannelOrThreadId = useRouterSelector(({ location }) =>
+    isChannelOrThreadLocation(location),
+  );
+  const openChannelId = useRouterSelector(({ params }) => params['channelId']);
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
+  const { user } = useAuth();
+  const currentUser = useSelf();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
+  // Everyone except guests can invite — enterprise invites to non-org members
+  // land in the admin approval queue.
+  const canInvitePeople = !!user && user.role !== 'GUEST';
+  const visibleNavigationItems = useVisibleNavigationItems();
+  const toolbarIds = toolbarItemsStore.useItems();
+  const appSnapshots = useAppSnapshots();
+  const missedCallCount = useMissedCallCount();
+  const hasUnreadRecordingSummaries = useHasUnreadRecordingSummaries();
+  const hasOngoingCall = useRailActiveCalls().length > 0;
+  const unreadActivityCount = useUnreadActivitiesCount();
+  const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
+  const { isMobile } = usePlatform();
+  const visibleChannels = useAllVisibleChannels();
+  const unreadCounts = useAllUnreadCount();
+
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
@@ -237,6 +291,9 @@ const AppSidebar = (): ReactElement => {
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [inviteDialogInitialView, setInviteDialogInitialView] = useState<'default' | 'contacts'>(
+    'default',
+  );
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
@@ -244,6 +301,45 @@ const AppSidebar = (): ReactElement => {
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
+
+  // Contacts-import OAuth return: the backend redirects back with
+  // ?contactsImport=success (or contactsImportError=...). Strip the params and
+  // reopen the invite dialog straight into the contacts picker.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const contactsImport = params.get('contactsImport');
+    const contactsImportError = params.get('contactsImportError');
+    if (!contactsImport && !contactsImportError) return;
+
+    params.delete('contactsImport');
+    params.delete('contactsImportError');
+    const remainingSearch = params.toString();
+    void navigate(`${location.pathname}${remainingSearch ? `?${remainingSearch}` : ''}`, {
+      replace: true,
+    });
+
+    if (contactsImport === 'success') {
+      setInviteDialogInitialView('contacts');
+      setIsInviteDialogOpen(true);
+    } else {
+      toast.error('Failed to import contacts. Please try again.');
+    }
+  }, [location.pathname, location.search, navigate]);
+
+  const handleInviteDialogOpenChange = (nextOpen: boolean): void => {
+    setIsInviteDialogOpen(nextOpen);
+    if (!nextOpen) {
+      setInviteDialogInitialView('default');
+    }
+  };
+
+  // Fresh workspace: the switcher sets a one-shot sessionStorage flag before its
+  // full-page navigation. Consume it here to prompt the creator to invite people.
+  useEffect(() => {
+    if (sessionStorage.getItem('xyne-open-invite-dialog') !== 'true') return;
+    sessionStorage.removeItem('xyne-open-invite-dialog');
+    setIsInviteDialogOpen(true);
+  }, []);
 
   useEffect(() => {
     setOpenQuickMenu(null);
@@ -291,29 +387,98 @@ const AppSidebar = (): ReactElement => {
     setIsStatusModalOpen(false);
   };
 
-  // Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
-  const hasChannelOrThreadId =
-    (location.pathname.includes('/chat/dir/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/dm/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/activity/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/bookmarks/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/drafts/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/sent/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/scheduled/') && location.pathname.split('/').length > 3) ||
-    location.pathname.includes('threadId') ||
-    location.hash.includes('threadId');
-
-  // Split the visible items into the toolbar (rendered in the rail) and the
-  // "More" overflow menu, based on the user's customized toolbar selection.
-  const toolbarItems = useMemo(
-    () => visibleNavigationItems.filter(item => toolbarPaths.has(item.path)),
-    [visibleNavigationItems, toolbarPaths],
-  );
+  // The rail in the user's order: nav items and artifact apps interleaved as
+  // the toolbar list says. Ids that no longer resolve — a path the user lost
+  // permission to, an app whose snapshot is gone — are skipped, not rendered.
+  const railEntries = useMemo((): RailEntry[] => {
+    const byPath = new Map(visibleNavigationItems.map(item => [item.path, item]));
+    const entries: RailEntry[] = [];
+    for (const id of toolbarIds) {
+      const appId = appIdOf(id);
+      if (appId) {
+        const snapshot = appSnapshots.get(appId);
+        if (snapshot) {
+          entries.push({ kind: 'app', appId, title: snapshot.title, icon: snapshot.icon });
+        }
+        continue;
+      }
+      const item = byPath.get(id);
+      if (item) entries.push({ kind: 'nav', item });
+    }
+    return entries;
+  }, [visibleNavigationItems, toolbarIds, appSnapshots]);
+  // Everything permitted but not in the rail lives under "More". Apps are
+  // never there: an app is either in the rail or not on the sidebar at all.
   const moreItems = useMemo(
-    () => visibleNavigationItems.filter(item => !toolbarPaths.has(item.path)),
-    [visibleNavigationItems, toolbarPaths],
+    () => visibleNavigationItems.filter(item => !toolbarIds.includes(item.path)),
+    [visibleNavigationItems, toolbarIds],
   );
   const isMoreActive = moreItems.some(item => item.path === activeRoute);
+  const moreDescriptionId = useId();
+  const helpDescriptionId = useId();
+
+  const { setAiInToolbar } = useAiLaunchPreference();
+  const railIds = useMemo(
+    () =>
+      railEntries.map(entry => (entry.kind === 'app' ? appItemId(entry.appId) : entry.item.path)),
+    [railEntries],
+  );
+  const railDrag = useRailDrag({
+    ids: railIds,
+    canHide: id => appIdOf(id) === null,
+    moreSlotFor: id => {
+      const order = visibleNavigationItems.map(item => item.path);
+      const at = order.indexOf(id);
+      return moreItems.filter(item => order.indexOf(item.path) < at).length;
+    },
+    onDrop: (drop: RailDrop) => {
+      const stored = toolbarItemsStore.get();
+      if (drop.kind === 'move') {
+        const target = railIds[drop.to];
+        if (target) toolbarItemsStore.move(stored.indexOf(drop.id), stored.indexOf(target));
+        return;
+      }
+      if (drop.kind === 'add') {
+        const before = railIds[drop.at];
+        toolbarItemsStore.add(drop.id, before ? stored.indexOf(before) : stored.length);
+        return;
+      }
+      if (drop.id === AI_TOOLBAR_PATH) setAiInToolbar(false);
+      else toolbarItemsStore.remove(drop.id);
+    },
+  });
+
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreAnchorRect = useRef<DOMRect | null>(null);
+  const moreAnchor = useRef({
+    getBoundingClientRect: (): DOMRect => {
+      if (!moreAnchorRect.current && moreButtonRef.current) {
+        moreAnchorRect.current = moreButtonRef.current.getBoundingClientRect();
+      }
+      return moreAnchorRect.current ?? new DOMRect();
+    },
+  });
+  const morePanelRef = railDrag.panelRef;
+
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    let frame = 0;
+    const pin = (): void => {
+      const content = morePanelRef.current?.closest<HTMLElement>('[data-slot="popover-content"]');
+      const wrapper = content?.parentElement;
+      const button = moreButtonRef.current;
+      if (!content || !wrapper || !button || wrapper.style.transform.includes('-200%')) {
+        frame = requestAnimationFrame(pin);
+        return;
+      }
+      const { top } = wrapper.getBoundingClientRect();
+      const { left, width, height } = button.getBoundingClientRect();
+      moreAnchorRect.current = new DOMRect(left, top, width, height);
+      content.style.maxHeight = `${Math.min(window.innerHeight * 0.8, window.innerHeight - top - 12)}px`;
+    };
+    frame = requestAnimationFrame(pin);
+    return (): void => cancelAnimationFrame(frame);
+  }, [isMoreOpen, morePanelRef]);
 
   const permittedGlobalPaths = useMemo(
     () => new Set(visibleNavigationItems.map(item => item.path)),
@@ -328,22 +493,33 @@ const AppSidebar = (): ReactElement => {
   };
 
   const hasPendingDirectMessages = useMemo(() => {
+    // The open DM is being read, so its incoming messages shouldn't light the rail dot.
     return visibleChannels.some(
-      channel => isDMChannel(channel.scopeType) && (unreadCounts[channel.id] ?? 0) > 0,
+      channel =>
+        channel.id !== openChannelId &&
+        isDMChannel(channel.scopeType) &&
+        (unreadCounts[channel.id] ?? 0) > 0,
     );
-  }, [visibleChannels, unreadCounts]);
+  }, [visibleChannels, unreadCounts, openChannelId]);
 
-  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
+  const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {
+    setIsMoreOpen(false);
+  };
 
   const railShortcuts = railShortcutsAvailable();
 
   useShortcutById(
     'global.goToRailItem',
     event => {
-      const item = toolbarItems[railItemIndexFromEvent(event)];
-      if (!item) return;
-      handleNavigationClick(item.label);
-      void navigate(prefixWs(item.path));
+      const entry = railEntries[railItemIndexFromEvent(event)];
+      if (!entry) return;
+      if (entry.kind === 'app') {
+        handleNavigationClick(entry.title);
+        void navigate(prefixWs(`/app/${entry.appId}`));
+        return;
+      }
+      handleNavigationClick(entry.item.label);
+      void navigate(prefixWs(entry.item.path));
     },
     { enabled: railShortcuts && !isSupportContext },
   );
@@ -396,7 +572,10 @@ const AppSidebar = (): ReactElement => {
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
       <div className='app-sidenav-frame flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
         <WorkspaceSwitcher />
-        <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
+        <div
+          ref={railDrag.scrollRef}
+          className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'
+        >
           {isSupportContext ? (
             <SupportRail
               prefixWs={prefixWs}
@@ -407,14 +586,81 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
-                {toolbarItems.map((item, index) => {
+                <li
+                  ref={railDrag.gapRef}
+                  aria-hidden
+                  className='pointer-events-none absolute left-0 top-0 size-8 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                />
+                {railEntries.map((entry, index) => {
                   const shortcutIndex =
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
+
+                  if (entry.kind === 'app') {
+                    const path = `/app/${entry.appId}`;
+                    const isAppActive = activeRoute === path;
+                    const initial = entry.title.trim().charAt(0).toUpperCase() || '?';
+                    const appTooltip = shortcutIndex ? (
+                      <span className='flex items-center gap-2'>
+                        {entry.title}
+                        <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                      </span>
+                    ) : (
+                      entry.title
+                    );
+                    return (
+                      <li
+                        key={`app:${entry.appId}`}
+                        ref={railDrag.tileRef(appItemId(entry.appId))}
+                        data-rail-tile=''
+                        data-rail-label={entry.title}
+                        onPointerDown={event =>
+                          railDrag.startRailPress(appItemId(entry.appId), event)
+                        }
+                        onDragStart={preventNativeDrag}
+                        className='relative'
+                      >
+                        <span
+                          data-rail-socket
+                          aria-hidden
+                          className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                        />
+                        <Tooltip content={appTooltip} side='right' delayDuration={0}>
+                          <Link
+                            to={prefixWs(path)}
+                            draggable={false}
+                            data-rail-glyph=''
+                            onClick={() => handleNavigationClick(entry.title)}
+                            aria-label={entry.title}
+                            data-testid={`nav-artifact-app-${entry.appId}`}
+                            data-track-category='App_Sidebar'
+                            data-track-name='Sidebar_Pinned_App'
+                            data-track-metadata={JSON.stringify({ appId: entry.appId })}
+                            className={cn(
+                              'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
+                              isAppActive
+                                ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                                : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                            )}
+                          >
+                            {entry.icon ? (
+                              <AppIcon name={entry.icon} size={16} aria-hidden='true' />
+                            ) : (
+                              initial
+                            )}
+                          </Link>
+                        </Tooltip>
+                      </li>
+                    );
+                  }
+
+                  const { item } = entry;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showOngoingCallDot =
                     item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                  const showRecordingSummaryDot =
+                    item.path === '/recordings' && hasUnreadRecordingSummaries;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;
@@ -435,6 +681,8 @@ const AppSidebar = (): ReactElement => {
                   const navLink = (
                     <Link
                       to={prefixWs(item.path)}
+                      draggable={false}
+                      data-rail-glyph=''
                       onClick={event => {
                         const openedInNewWindow =
                           !!item.popout && openInAppWindow(prefixWs(item.path), event);
@@ -443,7 +691,14 @@ const AppSidebar = (): ReactElement => {
                           event.preventDefault();
                         }
                       }}
-                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-label={
+                        showPendingDmDot
+                          ? 'DMs unread'
+                          : showRecordingSummaryDot
+                            ? 'Recordings, new summaries'
+                            : item.label
+                      }
+                      aria-description={item.description}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -459,7 +714,7 @@ const AppSidebar = (): ReactElement => {
                       )}
                     >
                       <Icon size={item.iconSize ?? 16} variant={isActive ? 'Solid' : 'Stroke'} />
-                      {showPendingDmDot && (
+                      {(showPendingDmDot || showRecordingSummaryDot) && (
                         <span
                           aria-hidden='true'
                           className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
@@ -485,7 +740,20 @@ const AppSidebar = (): ReactElement => {
                   );
 
                   return (
-                    <li key={item.path} className='relative'>
+                    <li
+                      key={item.path}
+                      ref={railDrag.tileRef(item.path)}
+                      data-rail-tile=''
+                      data-rail-label={item.label}
+                      onPointerDown={event => railDrag.startRailPress(item.path, event)}
+                      onDragStart={preventNativeDrag}
+                      className='relative'
+                    >
+                      <span
+                        data-rail-socket
+                        aria-hidden
+                        className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                      />
                       {item.path === '/calls' ? (
                         <CallsRailHoverCard tooltip={tooltipContent}>{navLink}</CallsRailHoverCard>
                       ) : (
@@ -510,46 +778,27 @@ const AppSidebar = (): ReactElement => {
                   );
                 })}
 
-                {/* Pinned artifact apps — user-generated apps promoted to the
-                    rail from the AI Library. Stored per-device in localStorage. */}
-                {pinnedApps.map(app => {
-                  const path = `/ai/library/app/${app.id}`;
-                  const isActive = activeRoute === path;
-                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
-                  return (
-                    <li key={app.id} className='relative'>
-                      <Tooltip content={app.title} side='right' delayDuration={0}>
-                        <Link
-                          to={prefixWs(path)}
-                          onClick={() => handleNavigationClick(app.title)}
-                          aria-label={app.title}
-                          data-testid={`nav-artifact-app-${app.id}`}
-                          data-track-category='App_Sidebar'
-                          data-track-name='Sidebar_Pinned_App'
-                          data-track-metadata={JSON.stringify({ appId: app.id })}
-                          className={cn(
-                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
-                            isActive
-                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                          )}
-                        >
-                          {app.icon ? (
-                            <AppIcon name={app.icon} size={16} aria-hidden='true' />
-                          ) : (
-                            initial
-                          )}
-                        </Link>
-                      </Tooltip>
-                    </li>
-                  );
-                })}
-
                 {/* More menu — overflow items + customize toolbar (Slack-style) */}
-                <li className='relative'>
+                <li ref={railDrag.moreRef} className='group/more relative'>
                   <Popover
                     open={isMoreOpen}
-                    onOpenChange={setIsMoreOpen}
+                    onOpenChange={open => {
+                      if (open) moreAnchorRect.current = null;
+                      setIsMoreOpen(open);
+                    }}
+                    anchor={moreAnchor}
+                    onInteractOutside={event => {
+                      const { target } = event;
+                      if (!(target instanceof Element) || !target.closest('[data-rail-tile]')) {
+                        return;
+                      }
+                      const original = event.detail.originalEvent;
+                      const primaryPress =
+                        original instanceof PointerEvent
+                          ? original.button === 0
+                          : !target.matches(':focus-visible');
+                      if (primaryPress) event.preventDefault();
+                    }}
                     side='right'
                     align='start'
                     sideOffset={8}
@@ -558,19 +807,25 @@ const AppSidebar = (): ReactElement => {
                     className='p-1.5 w-64 max-h-[80vh] overflow-y-auto rounded-xl'
                     trigger={
                       <button
+                        ref={moreButtonRef}
                         type='button'
                         aria-label='More'
+                        aria-describedby={moreDescriptionId}
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
                         className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-[color,background-color,border-color,transform]',
+                          'group-data-[drop-target]/more:scale-105 group-data-[drop-target]/more:bg-sidebar-accent group-data-[drop-target]/more:border-sidebar-border group-data-[drop-target]/more:text-sidebar-accent-foreground',
                           isMoreActive || isMoreOpen
                             ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                             : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                         )}
                       >
                         <ThreeDotsMenuHorizontal size={16} />
+                        <span id={moreDescriptionId} className='sr-only'>
+                          {moreItems.map(item => item.label).join(', ')}
+                        </span>
                       </button>
                     }
                   >
@@ -580,6 +835,7 @@ const AppSidebar = (): ReactElement => {
                       prefixWs={prefixWs}
                       onNavigate={handleMoreNavigate}
                       onCustomize={handleCustomizeToolbar}
+                      drag={railDrag}
                     />
                   </Popover>
                 </li>
@@ -587,13 +843,14 @@ const AppSidebar = (): ReactElement => {
             </nav>
           )}
         </div>
+        {railDrag.layer}
 
         <div
           className={cn('flex flex-col items-center justify-center', !isElectronApp() && 'pb-4')}
         >
           <ZeroConnectionStatus className='mb-2' />
 
-          {isCommunityWorkspace && (
+          {canInvitePeople && (
             <Tooltip content='Invite people' side='right' delayDuration={0}>
               <button
                 type='button'
@@ -627,8 +884,9 @@ const AppSidebar = (): ReactElement => {
             trigger={
               <button
                 type='button'
-                aria-label='Support'
-                title='Support'
+                aria-label='Help and feedback'
+                aria-describedby={helpDescriptionId}
+                title='Help and feedback'
                 data-testid='nav-support'
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_Support_Toggle'
@@ -640,6 +898,9 @@ const AppSidebar = (): ReactElement => {
                 )}
               >
                 <InformationCircle size={16} />
+                <span id={helpDescriptionId} className='sr-only'>
+                  Help: report a problem with Xyne
+                </span>
               </button>
             }
           >
@@ -658,9 +919,11 @@ const AppSidebar = (): ReactElement => {
           <Popover
             trigger={
               hasDisplayStatus ? (
-                <div
+                <button
+                  type='button'
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  aria-label='Profile and settings'
                 >
                   <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
 
@@ -686,11 +949,13 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               ) : (
-                <div
+                <button
+                  type='button'
                   className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
+                  aria-label='Profile and settings'
                 >
                   {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
                   <div className='relative flex'>
@@ -702,7 +967,7 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               )
             }
             open={isSettingsPopoverOpen}
@@ -742,8 +1007,10 @@ const AppSidebar = (): ReactElement => {
 
         <WorkspaceInviteDialog
           open={isInviteDialogOpen}
-          onOpenChange={setIsInviteDialogOpen}
+          onOpenChange={handleInviteDialogOpenChange}
           workspaceId={workspaceId}
+          initialView={inviteDialogInitialView}
+          workspaceType={isCommunityWorkspace ? WorkspaceType.COMMUNITY : undefined}
         />
 
         {/* Status Update Modal */}
@@ -771,52 +1038,92 @@ const SidebarMoreMenu = ({
   prefixWs,
   onNavigate,
   onCustomize,
+  drag,
 }: {
   items: NavigationItem[];
   activeRoute: string;
   prefixWs: (path: string) => string;
   onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
+  drag: RailDrag;
 }): ReactElement => {
+  const slot = useMoreSlot(drag.session);
+  const slotRow = (
+    <li
+      data-more-slot
+      aria-hidden
+      className='relative h-0 overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]'
+    >
+      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02]' />
+    </li>
+  );
   return (
-    <div className='flex flex-col'>
-      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>More</p>
-      {items.length > 0 ? (
+    <div ref={drag.panelRef} className='flex flex-col'>
+      <div className='flex items-baseline justify-between gap-3 px-2.5 pt-1 pb-1.5'>
+        <p className='text-sm font-semibold text-popover-foreground'>More</p>
+        {items.length > 0 && <span className='text-xs text-muted-foreground'>Drag to pin</span>}
+      </div>
+      {items.length > 0 || slot !== null ? (
         <ul className='flex flex-col'>
-          {items.map(item => {
+          {items.map((item, index) => {
             const Icon = item.icon;
             const isActive = activeRoute === item.path;
             return (
-              <li key={item.path}>
-                <Link
-                  to={prefixWs(item.path)}
-                  onClick={event => {
-                    const openedInNewWindow =
-                      !!item.popout && openInAppWindow(prefixWs(item.path), event);
-                    onNavigate(item.label, openedInNewWindow);
-                    if (openedInNewWindow) {
-                      event.preventDefault();
-                    }
-                  }}
-                  data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                  data-track-category='App_Sidebar'
-                  data-track-name='Sidebar_More_Item'
-                  data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
-                  className={cn(
-                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-accent text-accent-foreground font-medium'
-                      : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
-                  )}
+              <Fragment key={item.path}>
+                {slot === index && slotRow}
+                <li
+                  ref={drag.rowRef(item.path)}
+                  data-more-row=''
+                  data-rail-label={item.label}
+                  onPointerDown={event => drag.startMorePress(item.path, event)}
+                  onDragStart={preventNativeDrag}
+                  className='group/row relative'
                 >
-                  <span className='flex size-5 shrink-0 items-center justify-center'>
-                    <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
-                  </span>
-                  <span className='truncate'>{item.label}</span>
-                </Link>
-              </li>
+                  <span
+                    data-rail-socket
+                    aria-hidden
+                    className='pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                  />
+                  <Link
+                    to={prefixWs(item.path)}
+                    draggable={false}
+                    onClick={event => {
+                      const openedInNewWindow =
+                        !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                      onNavigate(item.label, openedInNewWindow);
+                      if (openedInNewWindow) {
+                        event.preventDefault();
+                      }
+                    }}
+                    data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                    data-track-category='App_Sidebar'
+                    data-track-name='Sidebar_More_Item'
+                    data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+                    aria-description={item.description}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors',
+                      isActive
+                        ? 'bg-accent text-accent-foreground font-medium'
+                        : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    <span
+                      data-rail-glyph=''
+                      className='flex size-5 shrink-0 items-center justify-center'
+                    >
+                      <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
+                    </span>
+                    <span className='truncate'>{item.label}</span>
+                    <DragableSixDots
+                      aria-hidden
+                      className='ml-auto size-3.5 shrink-0 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-hover/row:opacity-40'
+                    />
+                  </Link>
+                </li>
+              </Fragment>
             );
           })}
+          {slot === items.length && slotRow}
         </ul>
       ) : (
         <p className='px-2.5 py-2 text-sm text-muted-foreground'>All items are in your toolbar.</p>
@@ -896,6 +1203,7 @@ const MobileNavbar = ({
   filteredNavigationItems: {
     path: string;
     label: string;
+    description: string;
     icon: React.ElementType;
   }[];
   activeRoute: string;
@@ -908,7 +1216,7 @@ const MobileNavbar = ({
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
 
@@ -987,6 +1295,7 @@ const MobileNavbar = ({
                 <Link
                   to={prefixWs(item.path)}
                   key={item.path}
+                  aria-description={item.description}
                   onClick={() => onNavigationClick(item.label)}
                   data-track-category='Mobile_Sidebar'
                   data-track-name='Mobile_Nav_Item'
@@ -1117,6 +1426,7 @@ const MobileNavbar = ({
                       <Link
                         to={prefixWs(item.path)}
                         key={item.path}
+                        aria-description={item.description}
                         className={`flex items-center gap-3 px-4 py-3 transition-colors ${
                           isActive ? 'bg-accent' : 'hover:bg-accent'
                         }`}

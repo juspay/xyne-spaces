@@ -9,6 +9,7 @@ import type { FieldEnumOption } from '@xyne/shared';
 import {
   GlobalFieldNameAutocomplete,
   type GlobalFieldSuggestion,
+  GLOBAL_FIELD_SUGGESTIONS_ATTR,
 } from '../GlobalFieldNameAutocomplete';
 import {
   MAX_FIELD_OPTIONS,
@@ -256,6 +257,9 @@ export const CustomField = ({
   // Click outside to save
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
+      // The name autocomplete's suggestion panel is portaled; clicking it is not "outside".
+      const target = event.target as Element;
+      if (target.closest?.(`[${GLOBAL_FIELD_SUGGESTIONS_ATTR}]`)) return;
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         if (supportsBranching) {
           outsideSaveTimeoutRef.current = window.setTimeout(() => {
@@ -475,6 +479,8 @@ export const CustomField = ({
               Required
             </span>
             <button
+              aria-label='Required'
+              aria-pressed={fieldRequired}
               onClick={() => setFieldRequired(!fieldRequired)}
               className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
                 fieldRequired ? 'bg-xyne-primary-500' : 'bg-gray-600'
@@ -492,6 +498,7 @@ export const CustomField = ({
           </div>
 
           <Button
+            aria-label='Delete field'
             onClick={onCancel}
             variant='ghost'
             size='iconSm'
@@ -611,6 +618,7 @@ export const CustomField = ({
                         </button>
                       )}
                       <Button
+                        aria-label={`Remove ${option.value || 'option'}`}
                         onClick={() => handleRemoveOption(option.id)}
                         variant='ghost'
                         size='iconSm'
@@ -668,6 +676,8 @@ export const CustomField = ({
                                 </span>
                                 <button
                                   type='button'
+                                  aria-label={`Required for ${childField.label}`}
+                                  aria-pressed={childField.required}
                                   onClick={e => {
                                     e.stopPropagation();
                                     const { id: _id, order: _order, ...rest } = childField;
@@ -701,6 +711,8 @@ export const CustomField = ({
                                 </span>
                                 <button
                                   type='button'
+                                  aria-label={`Show ${childField.label} in Create`}
+                                  aria-pressed={childField.visibleInCreate}
                                   onClick={e => {
                                     e.stopPropagation();
                                     const { id: _id, order: _order, ...rest } = childField;
@@ -732,6 +744,7 @@ export const CustomField = ({
                               </div>
 
                               <Button
+                                aria-label={`Delete ${childField.label}`}
                                 onClick={e => {
                                   e.stopPropagation();
                                   onDeleteBranchField?.(childField.id);
@@ -795,6 +808,7 @@ export const CustomField = ({
                     data-track-name='option-input'
                   />
                   <Button
+                    aria-label='Add option'
                     onClick={handleAddOption}
                     disabled={!optionInput.trim()}
                     variant='ghost'

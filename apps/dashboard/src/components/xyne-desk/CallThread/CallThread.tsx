@@ -1,13 +1,21 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
 import { cn } from '../../../utils/classNames';
+import {
+  CallTranscriptControls,
+  parseCallTranscriptionState,
+  type CallThreadAttachment,
+  type CallTranscriptionState,
+} from './CallTranscriptControls';
 
 interface CallThreadEmail {
   id: string;
   body: string;
   createdAt: number;
   externalMessageId?: string | null;
+  /** Zero `attachments` relation — carries the `call_transcript` attachment once transcribed. */
+  attachments?: ReadonlyArray<CallThreadAttachment> | undefined;
 }
 
 interface CallThreadProps {
@@ -41,6 +49,7 @@ interface TelephonyMetadata extends OzonetelSharedFields {
   startedAt?: string;
   endedAt?: string;
   talkTimeSec?: number;
+  transcription?: CallTranscriptionState;
 }
 
 interface TelephonyBodyPayload extends OzonetelSharedFields {
@@ -51,6 +60,8 @@ interface TelephonyBodyPayload extends OzonetelSharedFields {
   duration?: string;
   status?: string;
   recording?: string;
+  /** Written by the backend once a transcription is requested; shape validated at parse time. */
+  transcription?: unknown;
 }
 
 function formatTelephonyTimestamp(value?: string): string | null {
@@ -125,6 +136,7 @@ function parseTelephonyMetadata(body: string): TelephonyMetadata | null {
 
     const direction = inferTelephonyDirection(payload.callType);
     const talkTimeSec = parseTelephonyDuration(payload.duration);
+    const transcription = parseCallTranscriptionState(payload.transcription);
 
     return {
       provider: 'ozonetel',
@@ -147,6 +159,7 @@ function parseTelephonyMetadata(body: string): TelephonyMetadata | null {
       ...(payload.startTime ? { startedAt: payload.startTime } : {}),
       ...(payload.endTime ? { endedAt: payload.endTime } : {}),
       ...(talkTimeSec !== undefined ? { talkTimeSec } : {}),
+      ...(transcription ? { transcription } : {}),
     };
   } catch {
     return null;
@@ -199,9 +212,16 @@ function buildTelephonyFields(
 export function CallEntry({
   body,
   variant = 'full',
+  emailId,
+  ticketId,
+  attachments,
 }: {
   body: string;
   variant?: 'full' | 'compact';
+  /** Transcription controls render only when both `emailId` and `ticketId` are known. */
+  emailId?: string | undefined;
+  ticketId?: string | null | undefined;
+  attachments?: ReadonlyArray<CallThreadAttachment> | undefined;
 }): ReactElement {
   const telephonyMeta = useMemo(() => parseTelephonyMetadata(body), [body]);
 
@@ -211,6 +231,18 @@ export function CallEntry({
 
   const number =
     telephonyMeta.direction === 'OUTBOUND' ? telephonyMeta.toNumber : telephonyMeta.fromNumber;
+
+  const transcriptControls =
+    emailId && ticketId ? (
+      <CallTranscriptControls
+        emailId={emailId}
+        ticketId={ticketId}
+        attachments={attachments}
+        transcription={telephonyMeta.transcription}
+        hasRecording={!!telephonyMeta.recordingUrl}
+        variant={variant}
+      />
+    ) : null;
 
   if (variant === 'compact') {
     const summary = [
@@ -238,6 +270,7 @@ export function CallEntry({
             Recording not available yet
           </div>
         )}
+        {transcriptControls}
       </div>
     );
   }
@@ -265,19 +298,60 @@ export function CallEntry({
           <audio controls className='h-8 w-full' src={telephonyMeta.recordingUrl}>
             <track kind='captions' />
           </audio>
+          {transcriptControls}
         </div>
-      ) : null}
+      ) : (
+        transcriptControls
+      )}
+    </div>
+  );
+}
+
+/**
+ * A call record inside a non-call desk thread (email, Slack, app, social). These are
+ * outbound calls dialled from a customer ticket and linked to it, so the call email
+ * sits between ordinary messages: compact card, phone as the avatar.
+ */
+export function CallEmailRow({
+  emailId,
+  body,
+  ticketId,
+  attachments,
+  className,
+}: {
+  emailId: string;
+  body: string;
+  ticketId?: string | null | undefined;
+  attachments?: ReadonlyArray<CallThreadAttachment> | null | undefined;
+  className?: string | undefined;
+}): ReactElement {
+  return (
+    <div id={`mail-${emailId}`} className={cn('flex scroll-mt-20 gap-3', className)}>
+      <div className='flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'>
+        <Phone size={14} aria-hidden />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <CallEntry
+          body={body}
+          variant='compact'
+          emailId={emailId}
+          ticketId={ticketId}
+          attachments={attachments ?? undefined}
+        />
+      </div>
     </div>
   );
 }
 
 const CallThreadItem = ({
   email,
+  ticketId,
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
 }: {
   email: CallThreadEmail;
+  ticketId?: string | null | undefined;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
@@ -314,7 +388,12 @@ const CallThreadItem = ({
         {!isCollapsed && (
           <div>
             {email.body ? (
-              <CallEntry body={email.body} />
+              <CallEntry
+                body={email.body}
+                emailId={email.id}
+                ticketId={ticketId}
+                attachments={email.attachments}
+              />
             ) : (
               <span className='text-muted-foreground italic'>No content</span>
             )}
@@ -378,6 +457,7 @@ const CallThread = ({ emails, ticketId }: CallThreadProps): ReactElement => {
         <CallThreadItem
           key={email.id}
           email={email}
+          ticketId={ticketId}
           isCollapsed={collapsedIds.has(email.id)}
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}

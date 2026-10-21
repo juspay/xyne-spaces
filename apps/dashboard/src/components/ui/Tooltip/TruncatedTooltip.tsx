@@ -5,7 +5,7 @@ import {
   type ReactElement,
   type Ref,
   useCallback,
-  useLayoutEffect,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -72,17 +72,13 @@ export const TruncatedTooltip = ({
     }
   };
 
-  useLayoutEffect(() => {
+  // Measure only after layout: a sync read here forced a style recalc per mounted row.
+  // Re-subscribing on `content` re-measures, since `observe()` delivers an initial entry.
+  useEffect(() => {
     if (!node) return undefined;
     const observer = new ResizeObserver((): void => applyClipped(isClipped(node)));
     observer.observe(node);
     return (): void => observer.disconnect();
-  }, [node, applyClipped]);
-
-  // Deliberately not on every commit: this reads `scrollWidth`, and a forced
-  // reflow per commit is real cost on lists that re-render while scrolling.
-  useLayoutEffect(() => {
-    applyClipped(isClipped(node));
   }, [node, content, applyClipped]);
 
   // Backstop for restyling that changes the clip without resizing the box

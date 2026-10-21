@@ -1,5 +1,14 @@
 {{- $t := .Values.template }}
 {{- if and $t.enabled $t.image }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $t.serviceAccount }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
 apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxTemplate
 metadata:
@@ -8,6 +17,8 @@ metadata:
   labels:
     {{- include "sandbox.labels" . | nindent 4 }}
 spec:
+  networkPolicyManagement: {{ ternary "Unmanaged" "Managed" .Values.policy.enabled }}
+  envVarsInjectionPolicy: Disallowed
   podTemplate:
     metadata:
       annotations:
@@ -18,6 +29,8 @@ spec:
         {{- end }}
     spec:
       runtimeClassName: {{ $t.runtimeClassName }}
+      serviceAccountName: {{ $t.serviceAccount }}
+      automountServiceAccountToken: false
       {{- with .Values.scheduling.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -32,6 +45,7 @@ spec:
           imagePullPolicy: {{ $t.imagePullPolicy }}
           ports:
             - containerPort: {{ $t.port }}
+              protocol: TCP
           env:
             - name: HTTP_PROXY
               value: {{ include "sandbox.proxyUrl" . }}

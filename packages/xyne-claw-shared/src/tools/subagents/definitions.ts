@@ -54,6 +54,7 @@ export interface SubagentDefinition {
    *  the same evidence is the natural next step. Omit/false → always fresh, and
    *  no session_id parameter is exposed to the parent. */
   supportsFollowUp?: boolean;
+  delegationPreferred?: boolean;
 }
 
 export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [
@@ -847,6 +848,56 @@ Modify an existing PDF document.
     paramDescription: "The document creation or editing request. Be specific: topic, format (PPT/PDF), content requirements, audience, and style preferences.",
     serverType: "custom:create-ppt",
   },
+  {
+    name: "ui-tester",
+    progressLabels: [
+      "🧪 Planning UI variations...",
+      "🧱 Writing API fixtures...",
+      "📸 Rendering variations...",
+      "🔎 Checking screenshots...",
+      "📝 Writing the test report...",
+    ],
+    description:
+      "Test a web UI change across every variation that matters — data states (typical, empty, long text, " +
+      "many rows / pagination, server error, slow loading, malformed response), phone and desktop widths, " +
+      "light and dark theme, and the interactions you name — inside the sandbox, with mocked API responses. " +
+      "Runs on a cheap model and a visual classifier, so delegate UI verification here instead of taking " +
+      "screenshots yourself. The app must be in the sandbox you already use (same conversation). Give it: " +
+      "what changed (files/components), which routes or screens show it, how to start the app, and what " +
+      "correct looks like. It returns a PASS/FAIL/UNSURE table with evidence and the run directory holding " +
+      "screenshots, summary.json and verdicts.json.",
+    systemPrompt: `You are the UI tester. You verify a web UI change across all of its meaningful variations and report what is broken, cheaply and with evidence. You never edit the application's source.
+
+## Tools
+- sandbox-run / sandbox-run-detached / sandbox-poll-job / sandbox-read-file / sandbox-write-file: inspect the repo and start the app in the SAME sandbox the parent agent uses.
+- ui-test-variations: renders a whole variation matrix with mocked API responses in the sandbox browser, DOM-audits each screenshot and checks it with the visual classifier. One call covers many variations.
+- visual-check: extra multiple-choice questions about screenshots that are already saved.
+- sandbox-deliver-files: only if ui-test-variations reports "Not delivered yet" or "Delivery failed" — by default it delivers every video and the failing/unsure screenshots to the thread itself.
+
+## Workflow (budget: your FIRST tool call is the probe in step 2 unless the app still has to be started; at most 8 file reads in total)
+1. Start the app if it is not running: e.g. \`cd apps/xyne-claw-auth/frontend && npx vite --port 5199 --strictPort\` with sandbox-run-detached, then poll until curl to the base URL returns 200. Do not start a backend; every API call is mocked.
+2. PROBE before reading code: call ui-test-variations with spec.sourceDir set to the frontend source directory AS IT EXISTS INSIDE THE SANDBOX (check with sandbox-run pwd/ls — not a path from your own read/grep tools) and ONE variation {"id":"probe","path":"<route>"} (no mocks, or only the auth mock if you already know it). The report lists the endpoints the page called AND, under "Endpoint contracts", each endpoint's API-client function and response TypeScript types. The first probe usually only reveals auth/session endpoints (the app shows its logged-out state): mock those from their contracts and probe again until the screen's own endpoints appear (usually 2 probes). Write fixtures straight from the contracts. The report also lists "Theme storage keys found in the source" — put that key in spec.themeStorageKey so dark variations really render dark. Before building the matrix, confirm the probe shows the CHANGED text/UI with expectText (exact strings are checked in the DOM — never ask the visual classifier to read text); if it shows the old version, the dev server has not reloaded yet — wait and probe again instead of testing stale code.
+3. Read only what the contracts do not cover: the diff or the changed files (to know what to check), and a type the contracts marked missing. Never cat a whole large file, and do not read UI components to learn their markup — the screenshots and DOM audit tell you what rendered.
+4. Build the variation matrix (bounded, usually 8-20 variations). Always include, where the screen has data: typical, empty, long text / long names, many rows (pagination totals), server error (status 500), slow response (delayMs 15000 with shotAfterMs 1500 to capture loading), malformed or partial response (missing fields), phone width (390x844), dark theme. Add role variations (admin vs regular user) when the UI branches on role, and steps for the interactions the change touches (open the dialog, submit the form, switch the tab).
+5. Give every variation a human-readable title and a one-line description (e.g. title "Footer on the last page", description "230 runs, Next clicked until disabled") — they are shown on each video's opening card and caption so people watching know what is being tested. For clicks use role selectors, e.g. {"click":"role=button[name=\"Next\"]"}; if a step fails, the report lists the visible buttons/links — retry with one of those names.
+6. Write mocks with the real response shapes: auth/session first, shared mocks in spec.defaults.mocks, the screen's endpoints per variation. Set expect for each variation (content: data | empty | error | loading; background: dark for dark theme) and add checks for change-specific facts, phrased about what is visible with exhaustive options, e.g. {"id":"save_disabled","question":"Is the Save button greyed out?","options":{"yes":"Greyed out","no":"Enabled"},"expect":"yes"}.
+7. Put every exact wording/number the change must show in expectText (and old wording that must be gone in rejectText) for each variation; keep visual checks for visual state only (greyed-out, layout, colour, what the area shows). Run the WHOLE matrix in ONE ui-test-variations call — all variations render in parallel and are checked in parallel, so one call with 15 variations is about as fast as one with 2. When the parent asks for proof of testing / videos, set "video": true (on the spec, or only on the interaction variations) and keep those variations short with {"wait": 800} pauses between steps. If variations report requests served by the fallback mock or page errors caused by your fixtures (e.g. "Cannot read properties of undefined"), fix the fixture shapes from the endpoint contracts and re-run ONLY those variations (max 2 re-runs). Never write your own Playwright or screenshot scripts and never abandon ui-test-variations — it is the only way your results, videos and delivery are recorded. A harness error (navigation or screenshot failure) is an environment problem: report it, do not re-run the whole matrix for it. Never weaken expectations to make a variation pass.
+8. For UNSURE results, look closer with visual-check using sharper, concrete questions. If still unsure, report it as unsure — do not guess.
+
+## Report (ALWAYS end with this as your final message, even if a step failed — keep it short, the parent reads it; no thinking out loud)
+- The tool's summary line, copied verbatim (do not recount).
+- A table: variation | verdict | evidence (the DOM/visual finding in a few words).
+- For each FAIL: what is broken, the likely cause in the changed code if you can see it, and the screenshot path.
+- Fixture caveats (anything you could not mock faithfully).
+- The run directory path, and the video paths if any were recorded (and delivered).
+Do not paste screenshots, raw JSON or long logs into the report.`,
+    paramName: "request",
+    paramDescription:
+      "What changed (files/components/PR), the screens or routes that show it, how to run the app in the sandbox (directory, dev command, base URL) if not obvious, what correct looks like, and any variations or interactions that must be covered.",
+    serverType: "custom:ui-tester",
+    thinkingLevel: "low",
+    delegationPreferred: true,
+  },
 
   // ── BigQuery ────────────────────────────────────────────────────
   {
@@ -919,6 +970,34 @@ Return structured findings with clear summaries.`,
     serverType: "databricks",
   },
 
+  // ── WhatsApp (messaging-channel account) ────────────────────────
+  {
+    name: "whatsapp",
+    progressLabels: [
+      "💬 Composing WhatsApp message...",
+      "👥 Looking up groups...",
+      "📨 Sending on WhatsApp...",
+    ],
+    description:
+      "Act on the WhatsApp number this conversation is happening on — send a message to the current chat, to another number or group, react to a message, or list the account's groups. " +
+      "Example: 'Send the summary to the Platform group' or 'React 👍 to that message'",
+    systemPrompt: `You are the WhatsApp actions assistant for a Xyne Claw agent. The agent is being talked to on a WhatsApp number; use your tools to act on that number.
+
+Available tools:
+- whatsapp_send_message — send text. Omit "to" to reply in the CURRENT chat. Set "to" (phone number with country code, group id …@g.us, or group name) to message someone else — this is only allowed if the account admin enabled it; if the tool says it is disabled, tell the user instead of retrying.
+- whatsapp_list_groups — groups this number is in (id, name, size). Use it to find a group id before sending to a group by name.
+- whatsapp_resolve_target — check a phone number is on WhatsApp / resolve a group name to an id.
+- whatsapp_react — react with an emoji; defaults to the message that started this turn.
+
+Guidelines:
+- Never message third parties unless the user explicitly asked for it in this conversation.
+- Keep messages short. Write markdown (**bold**, _italic_, \`- \` lists); it is converted to WhatsApp's own styling when the message is sent, so do not write WhatsApp syntax yourself. There is no underline or heading — bold a line instead.
+- In groups, to @mention someone put @<number> in the text AND pass the number in "mentions".
+- Report exactly what was sent and to whom (chat id / group name).`,
+    paramName: "task",
+    paramDescription: "The WhatsApp action to perform: what to send, to which chat/number/group, or which message to react to.",
+    serverType: "whatsapp",
+  },
   // ── Slack ───────────────────────────────────────────────────────
   {
     name: "slack",
@@ -1619,7 +1698,9 @@ export function findSubagentDefinitionForServer(serverType: string): SubagentDef
  *   }
  * }
  *
- * If tools config is not set, agent gets ALL available tools (backwards compatible).
+ * What an agent gets when NOTHING is selected (no `tools` key; the agent UI
+ * shows "0 selected") depends on its delegation tier — see
+ * `resolveAgentToolsConfig` below, the one place that rule lives.
  */
 export interface AgentToolsConfig {
   /** Which subagent wrappers this agent can use (e.g. "spaces", "bitbucket", "grafana") */
@@ -1632,9 +1713,97 @@ export interface AgentToolsConfig {
   gateway?: string[];
 }
 
-/** Parse tools config from agent.config */
+/**
+ * Parse the STORED tools selection from agent.config. `undefined` means the
+ * agent has no selection at all — not "unrestricted". Anything that decides
+ * what a run may use must go through `resolveAgentToolsConfig` instead.
+ */
 export function parseToolsConfig(agentConfig: Record<string, unknown> | null | undefined): AgentToolsConfig | undefined {
   const tools = (agentConfig as Record<string, unknown> | null | undefined)?.["tools"];
   if (!tools || typeof tools !== "object") return undefined;
   return tools as AgentToolsConfig;
+}
+
+export type AgentDelegationTier = "standard" | "orchestrator";
+
+/**
+ * The tools selection a RUN enforces, given the stored config and the agent's
+ * delegation tier. Both enforcement gates call this — claw-auth's MCP
+ * listing/call routes and claw's agentConfig re-filter — so they can never
+ * disagree about what "nothing selected" means.
+ *
+ *   - A saved selection is enforced as-is, for every tier.
+ *   - No selection (the UI's "0 selected"):
+ *       standard     → `{}`: nothing is granted. The run keeps only the
+ *                      framework tools no selection gates (built-in file
+ *                      tools, plus per-run defaults such as the Spaces
+ *                      surface tools, plan tracking and mode terminal tools).
+ *       orchestrator → `undefined`: unrestricted. The run gets every tool it
+ *                      can resolve credentials for; orchestrators cap the
+ *                      always-active set to their top tools and reach the
+ *                      rest through search-tools / load-tools.
+ */
+export function resolveAgentToolsConfig(
+  agentConfig: Record<string, unknown> | null | undefined,
+  delegationTier: AgentDelegationTier | string | null | undefined,
+): AgentToolsConfig | undefined {
+  const stored = parseToolsConfig(agentConfig);
+  if (stored && !isEmptyToolsSelection(stored)) return stored;
+  return delegationTier === "orchestrator" ? undefined : (stored ?? {});
+}
+
+/**
+ * True when a stored selection selects nothing — every list empty and no open
+ * palette. Older saves wrote `{ subagents: [], direct: [], custom: [] }` for
+ * "0 selected"; the UI drops the key instead. Both must mean the same thing.
+ */
+export function isEmptyToolsSelection(config: AgentToolsConfig): boolean {
+  const raw = config as Record<string, unknown>;
+  const lists = ["subagents", "direct", "custom", "gateway", "callableAgents"];
+  const anyListed = lists.some((key) => Array.isArray(raw[key]) && (raw[key] as unknown[]).length > 0);
+  const palette = raw["openPalette"];
+  return !anyListed && palette !== "read" && palette !== "all";
+}
+
+/**
+ * Whether a grant entry matches a recorded tool name. Mirrors `matchesDirectPick` in xyne-claw's
+ * tool-resolution.ts minus its `selectionKey` convention. Analysis only, NOT an authorization check.
+ */
+export function grantMatchesToolName(grant: string, toolName: string): boolean {
+  if (!grant || !toolName) return false;
+  const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
+  return (
+    toolName === grant ||
+    toolName.endsWith(grant) ||
+    grant.endsWith(`__${toolName}`) ||
+    norm(toolName) === norm(grant)
+  );
+}
+
+/**
+ * Grant entries in `config.tools` that no observed tool exercised. `subagents` and `gateway` grants
+ * name a wrapper or server, so any observed tool carrying their `<grant>__` prefix counts.
+ */
+export function findUnusedGrants(
+  cfg: AgentToolsConfig | undefined,
+  observedToolNames: Iterable<string>,
+): Array<{ kind: keyof AgentToolsConfig; grant: string }> {
+  if (!cfg) return [];
+  const observed = [...new Set(observedToolNames)];
+  const unused: Array<{ kind: keyof AgentToolsConfig; grant: string }> = [];
+
+  const scan = (kind: keyof AgentToolsConfig, matcher: (grant: string, tool: string) => boolean): void => {
+    for (const grant of cfg[kind] ?? []) {
+      if (!observed.some((tool) => matcher(grant, tool))) unused.push({ kind, grant });
+    }
+  };
+
+  const prefixMatch = (grant: string, tool: string): boolean =>
+    grantMatchesToolName(grant, tool) || tool.toLowerCase().startsWith(`${grant.toLowerCase()}__`);
+
+  scan("subagents", prefixMatch);
+  scan("gateway", prefixMatch);
+  scan("direct", grantMatchesToolName);
+  scan("custom", grantMatchesToolName);
+  return unused;
 }

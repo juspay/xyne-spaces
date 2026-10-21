@@ -119,9 +119,6 @@ Services contain the core business logic. Located in `src/services/`.
 |---------|---------|
 | `personalization/PersonalizationSignalService.ts` | Process personalization signals |
 | `personalization/MessageSignalService.ts` | Extract signals from messages |
-| `productInsightsService.ts` | Product usage insights |
-| `productInsightsPipeline.ts` | Insights processing pipeline |
-| `productInsightsClustering/` | Cluster insights for patterns |
 
 ### Documents & Canvas
 | Service | Purpose |

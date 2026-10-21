@@ -6,6 +6,9 @@ import {
 } from '@/services/radar/radarAcl';
 import { radarScopeFor, scopeKeyFor, type RadarScope } from '@/services/radar/radarScope';
 import { explainItemMute, mutedItemIds } from '@/services/radar/radarRuleEvaluator';
+import { compile } from 'html-to-text';
+import { parseInitialMessageMd } from '@xyne/shared';
+import { replaceCustomEmojiImagesWithAltText } from '@/utils/contentUtils';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -26,6 +29,54 @@ const stripHtml = (html: string): string =>
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+/** Tags the rich editor writes. Matching only these keeps markdown such as a
+ *  `<https://…>` autolink, or prose like "use <select>", out of the converter,
+ *  which would otherwise drop it as an unknown tag. */
+const EDITOR_HTML = /<\/?(p|div|span|br|ul|ol|li|a|strong|b|em|i|u|s|code|pre|blockquote|h[1-6]|img)\b[^>]*>/i;
+/** How much of an HTML message is converted: enough to fill the preview after
+ *  markup is stripped, without parsing a long message to keep 200 characters. */
+const PREVIEW_SOURCE_CHARS = THREAD_PREVIEW_CHARS * 10;
+/** Built once — a feed read converts every card's opening message, and
+ *  rebuilding the options per call dominated the cost. Only the text matters
+ *  for a one-line preview: links keep their label, images drop out, headings
+ *  keep their case. */
+const htmlToPreviewText = compile({
+  wordwrap: false,
+  selectors: [
+    { selector: 'a', options: { ignoreHref: true } },
+    { selector: 'img', format: 'skip' },
+    ...(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const).map(selector => ({
+      selector,
+      options: { uppercase: false },
+    })),
+  ],
+});
+const previewTextOf = (html: string): string => {
+  try {
+    return htmlToPreviewText(replaceCustomEmojiImagesWithAltText(html));
+  } catch {
+    return stripHtml(html);
+  }
+};
+
+/** A thread's opening message as a one-line headline. Rich-editor messages are
+ *  stored as HTML with escaped entities, so they are converted to text before
+ *  the cut — cutting first could end mid-tag. A thread opened from a forwarded
+ *  message stores a `:::initialMessage` key:value snapshot instead, whose real
+ *  text lives under `content:`; it is unwrapped here so the preview is the
+ *  message and never the carrier block or a fragment of one. */
+const threadPreviewOf = (md: string | null | undefined): string | null => {
+  if (!md) return null;
+  const source = md.trimStart().startsWith(':::initialMessage')
+    ? parseInitialMessageMd(md)?.content || md
+    : md;
+  const isHtml = !source.trimStart().startsWith(':::initialMessage') && EDITOR_HTML.test(source);
+  const text = isHtml
+    ? previewTextOf(source.slice(0, PREVIEW_SOURCE_CHARS)).replace(/\s+/g, ' ').trim()
+    : source;
+  return text.slice(0, THREAD_PREVIEW_CHARS) || null;
+};
 
 interface AuthContext {
   userId: string;
@@ -87,7 +138,7 @@ export interface PendingOthersPage {
   mutedTotalThreads: number;
   mutedItemCount: number;
   mutedPage: number;
-  /** Unmuted open items before any filter — the tab's badge. */
+  /** Unmuted open items left after the filters — the tab's badge. */
   openItemCount: number;
   /** What the pickers offer. Holders come from the whole feed, channels from the
    *  feed after the holder filter — each ignores its own selection, so ticking
@@ -285,7 +336,7 @@ class RadarFeedService {
       mutedTotalThreads: hushed.length,
       mutedItemCount,
       mutedPage: mutedPage.at,
-      openItemCount: allowed.filter((i) => !i.muted).length,
+      openItemCount: live.reduce((n, c) => n + c.items.length, 0),
       facets: { holderIds, channelIds },
     };
   }
@@ -301,7 +352,7 @@ class RadarFeedService {
     });
     const byId = new Map(rows.map((r) => [r.conversationId, r.initial_message_md]));
     for (const card of threadCards) {
-      card.threadPreview = byId.get(card.conversationId)?.slice(0, THREAD_PREVIEW_CHARS) ?? null;
+      card.threadPreview = threadPreviewOf(byId.get(card.conversationId));
     }
   }
 
@@ -674,9 +725,7 @@ class RadarFeedService {
           // A DM card spans conversations, so one conversation's opening message
           // is not the card's subject. The channel label is, and the header
           // already renders it.
-          threadPreview: isDmCard
-            ? null
-            : (conversation?.initial_message_md?.slice(0, THREAD_PREVIEW_CHARS) ?? null),
+          threadPreview: isDmCard ? null : threadPreviewOf(conversation?.initial_message_md),
           lastActivityAt: conversation?.lastActivityAt ?? null,
           items: [],
         };

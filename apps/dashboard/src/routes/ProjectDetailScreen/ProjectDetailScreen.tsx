@@ -1,7 +1,13 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { BoardType, deserializeFlowPlan, type FlowPlan, type VCSProviderType } from '@xyne/shared';
 import { formatDateNumeric } from '../../utils/dateUtils';
+import {
+  AuditEntityType,
+  BoardType,
+  deserializeFlowPlan,
+  type FlowPlan,
+  type VCSProviderType,
+} from '@xyne/shared';
 import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
@@ -15,6 +21,8 @@ import {
 // Boxes has no @xyne/icons equivalent yet; lucide-react is still a live dep.
 import { Boxes } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
+import { AuditLogSection } from '../../components/UserGroup/AssignmentConfigScreen/AuditLogSection';
+import { Dialog } from '../../components/ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 
 import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScreen';
@@ -29,7 +37,6 @@ import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizar
 import { ReleasesSection } from './ReleasesSection';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Button } from '../../components/ui/Button';
-import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { SdlcRegisterRepositoryForm } from '../SdlcScreen/SdlcRegisterRepositoryForm';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -43,6 +50,7 @@ import {
   ProviderBadge,
   repoColor,
   repoHostPath,
+  repoWebUrl,
 } from '../../components/Release/repoVisual';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
@@ -119,6 +127,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
   const [copyConfigTargetBoard, setCopyConfigTargetBoard] = useState<BoardWithStages | null>(null);
+  const [historyBoard, setHistoryBoard] = useState<BoardWithStages | null>(null);
   const [creatingRelease, setCreatingRelease] = useState(false);
 
   // Fetch project details
@@ -237,7 +246,8 @@ const ProjectDetailScreen = (): ReactElement => {
         migrationPaths: app.migrationPaths ?? [],
       });
       servicesByBoard.set(id, services);
-      if (app.repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, app.repoUrl);
+      const repoUrl = repoWebUrl(app.repo);
+      if (repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, repoUrl);
     }
     return [...servicesByBoard.entries()].map(([mainBoardId, services]) => ({
       mainBoardId,
@@ -554,6 +564,7 @@ const ProjectDetailScreen = (): ReactElement => {
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
                   applicationBoardIds={visibleApplicationBoardIds}
                   applicationByBoardId={visibleApplicationByBoardId}
+                  onHistory={board => setHistoryBoard(board)}
                   {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {
@@ -1025,6 +1036,24 @@ const ProjectDetailScreen = (): ReactElement => {
           onClose={() => setCopyConfigTargetBoard(null)}
           onDone={() => setCopyConfigTargetBoard(null)}
         />
+      )}
+
+      {/* Board change history (audit trail) */}
+      {historyBoard && (
+        <Dialog
+          open={true}
+          onOpenChange={open => {
+            if (!open) setHistoryBoard(null);
+          }}
+          title={`Change history — ${historyBoard.name}`}
+          className='max-h-[80vh] overflow-y-auto sm:max-w-2xl'
+        >
+          <AuditLogSection
+            entityType={AuditEntityType.BOARD}
+            entityId={historyBoard.id}
+            entityName={historyBoard.name}
+          />
+        </Dialog>
       )}
 
       {/* Release-board creation begins here, then continues through the existing

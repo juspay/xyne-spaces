@@ -20,9 +20,13 @@ export enum ExternalSourcePlatform {
   MICROSOFT = 'microsoft',
   GOOGLE = 'google',
   APP_DESK = 'app-desk',
+  APP_CHANNELS_DESK = 'app-channels-desk', // Channels desk link to an installed app; not a message source
+  APP_CHANNELS_DESK_CHANNEL = 'app-channels-desk-channel', // A channel added to a Channels desk; not a message source
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
   APP_STORE = 'app-store-reviews',
+  INSTAGRAM = 'instagram',
+  FACEBOOK = 'facebook',
 }
 
 export interface IngestionOptions {
@@ -96,6 +100,7 @@ export interface NormalizedData {
     replyTo?: string[];
     type?: EmailType;
     sentByUserId?: string;
+    skipBlockingCheck?: boolean;
     rating?: number;
     clientVersionName?: string;
     clientVersionCode?: string;
@@ -208,11 +213,7 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(
-    rawPayload: unknown,
-    source?: ExternalSource,
-    options?: IngestionOptions,
-  ): Promise<unknown>;
+  preprocess?(rawPayload: unknown, source?: ExternalSource, options?: IngestionOptions): Promise<unknown>;
 
   /**
    * Optional: resume cursor to persist after a successful ingest. Return null to leave the stored
@@ -265,7 +266,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions. */
+  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs). */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 

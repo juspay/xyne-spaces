@@ -129,4 +129,5 @@ export interface LocalHarnessStatus {
   lastError: string | null;
   activeRuns?: number;
   containerRuntime?: { available: boolean; reason?: string };
+  computerConnected?: boolean;
 }

@@ -4,7 +4,8 @@ import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
-import { AttachmentEntityType, CallType, ChannelScopeType, UserType } from '@xyne/shared';
+import { CallType, ChannelScopeType, UserType } from '@xyne/shared';
+import { countChatAttachments, queryChatAttachmentCreatedAt, queryFilteredMessages } from '@/bypassAcl/analyticsServices';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
@@ -122,7 +123,7 @@ export interface TimeSeriesDataPoint {
 }
 
 // Message type for filtered messages
-type FilteredMessage = {
+export type FilteredMessage = {
   messageId: string;
   senderId: string;
   conversationId: string;
@@ -261,36 +262,7 @@ export class AnalyticsRepository {
     const gteClause = gte ? Prisma.sql`AND m."createdAt" >= ${gte}::timestamp` : Prisma.empty;
     const lteClause = lte ? Prisma.sql`AND m."createdAt" <= ${lte}::timestamp` : Prisma.empty;
 
-    const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
-      SELECT 
-        m."messageId", 
-        m."senderId", 
-        m."conversationId", 
-        c."channelId",
-        ch."scopeType" AS "channelScopeType",
-        m."createdAt"
-      FROM "public"."messages_without_content" m
-      INNER JOIN "public"."conversations" c 
-        ON c."conversationId" = m."conversationId"
-      INNER JOIN "public"."channels" ch
-        ON ch."id" = c."channelId"
-      WHERE 
-        m."msgType" = 'USER'
-        ${gteClause}
-        ${lteClause}
-        AND ch."workspaceId" = ${scopedWorkspaceId}
-        AND c."channelId" NOT IN (${Prisma.join(excludedChannels)})
-        AND NOT EXISTS (
-          SELECT 1 
-          FROM "workflow"."external_sources" es
-          WHERE es."channelId" = c."channelId"
-            AND m."createdAt" < es."createdAt"
-        )
-        AND NOT (
-          ch."type" = 'EMAIL'
-          AND (c."parentMessageId" IS NULL OR m."messageId" = c."initialMessageId")
-        )
-    `);
+    const messages = await queryFilteredMessages(this.prisma, gteClause, lteClause, scopedWorkspaceId, excludedChannels);
 
     return messages;
   }
@@ -1700,23 +1672,11 @@ export class AnalyticsRepository {
 
     if (validMessageIds.length === 0) return 0;
 
-    const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
-      SELECT COUNT(*)::int AS count
-      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
-    `);
+    const [{ count }] = await countChatAttachments(this.prisma, validMessageIds, workspaceId);
 
     return count;
   }
 
-  private chatAttachmentsFrom(messageIds: string[], workspaceId: string): Prisma.Sql {
-    return Prisma.sql`
-      FROM "public"."message_attachments" a
-      WHERE a."entityId" = ANY(${messageIds}::text[])
-        AND a."entityType" = ${AttachmentEntityType.CHAT}
-        AND a."workspaceId" = ${workspaceId}
-        AND a."createdBy" NOT IN ('Unified Alerts', 'system')
-    `;
-  }
 
   /**
    * Get messages exchanged time-series data using optimized Prisma ORM aggregation
@@ -2663,10 +2623,7 @@ export class AnalyticsRepository {
     const validMessageIds = validMessages.map(m => m.messageId);
 
     // Get file attachments for valid (non-migrated) messages only
-    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
-      SELECT a."createdAt"
-      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
-    `);
+    const attachments = validMessageIds.length === 0 ? [] : await queryChatAttachmentCreatedAt(this.prisma, validMessageIds, workspaceId);
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'

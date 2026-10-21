@@ -1,51 +1,15 @@
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
-import { clawAuthUrl } from "../claw-auth-url.js";
+import { requestSurfaceCall, surfaceResultText } from "../surface-call.js";
 
 const SOURCE = "custom:app-control";
-
-const SURFACE_TIMEOUT_MS = 20_000;
 
 async function viaSurface(
   toolName: string,
   params: Record<string, unknown>,
   context: ToolExecutionContext | undefined,
 ): Promise<string> {
-  const userId = context?.meta?.["userId"] ?? "";
-  if (!userId) {
-    return "Error: this run has no user, so there is no Xyne window to reach.";
-  }
-  const authUrl = clawAuthUrl();
-
-  try {
-    const res = await fetch(`${authUrl}/claw/api/v1/internal/surface/call`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(context?.s2sKey ? { "x-s2s-key": context.s2sKey } : {}),
-      },
-      body: JSON.stringify({
-        userId,
-        sessionId: context?.sessionId ?? null,
-        toolName,
-        params,
-      }),
-      signal: AbortSignal.timeout(SURFACE_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      return `Error: the Xyne app could not be reached (status ${res.status}).`;
-    }
-    const body = (await res.json()) as {
-      data?: { ok?: boolean; content?: string; image?: { data: string; mimeType: string } };
-    };
-    const result = body.data;
-    if (!result) return "Error: the Xyne app returned nothing.";
-    if (result.image?.data) {
-      return `${result.content ?? ""}\n\ndata:${result.image.mimeType};base64,${result.image.data}`;
-    }
-    return result.content ?? "";
-  } catch (err) {
-    return `Error: reaching the Xyne app failed — ${err instanceof Error ? err.message : String(err)}`;
-  }
+  const outcome = await requestSurfaceCall(toolName, params, context);
+  return "error" in outcome ? outcome.error : surfaceResultText(outcome.result, toolName);
 }
 
 const DESKTOP_ONLY =

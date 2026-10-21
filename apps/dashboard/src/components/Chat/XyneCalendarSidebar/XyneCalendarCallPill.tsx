@@ -34,6 +34,8 @@ export interface XyneCalendarCallPillProps {
   past?: boolean;
   compact?: boolean;
   showCompactMetadata?: boolean;
+  /** Current user RSVP'd MAYBE */
+  maybe?: boolean;
   /** Call started before the day being rendered — clipped at the top edge. */
   continuesFromPreviousDay?: boolean;
   /** Call ends after the day being rendered — clipped at the bottom edge. */
@@ -89,6 +91,7 @@ const XyneCalendarCallPillComponent = ({
   showJoinByDefault = false,
   joinDisabled = false,
   past = false,
+  maybe = false,
   compact = false,
   showCompactMetadata = false,
   continuesFromPreviousDay = false,
@@ -111,6 +114,7 @@ const XyneCalendarCallPillComponent = ({
       className={cn(
         'group relative flex w-full cursor-pointer items-center overflow-hidden rounded-xl border transition-all',
         getCallPillVariantClasses(variant),
+        maybe && 'border-foreground/50',
         isPast && variant !== 'past' && 'opacity-60 hover:opacity-90',
         'hover:shadow-sm',
         continuesFromPreviousDay && 'rounded-t-none border-t-0',
@@ -118,6 +122,13 @@ const XyneCalendarCallPillComponent = ({
         className,
       )}
     >
+      {maybe && !isPast && (
+        <span
+          aria-hidden='true'
+          className='pointer-events-none absolute inset-0'
+          style={{ backgroundImage: HATCH_BACKGROUND }}
+        />
+      )}
       {continuesFromPreviousDay && (
         <span
           aria-hidden='true'

@@ -55,8 +55,16 @@ export interface SavedArtifactRef {
   manifest: ReactArtifactManifest;
 }
 
+import type { XyneAppContext } from './artifactData.constants';
+
 export interface ReactArtifactViewProps {
   artifact: ReactArtifactRef;
+  /**
+   * Where this app is open, handed to the app itself so it can lay itself out
+   * for the rail, the Inbox, a channel tab or the Agent Hub. Defaults to the
+   * `chat` surface — an artifact rendered inline in a conversation.
+   */
+  hostContext?: XyneAppContext;
   /** Fill the available height (side panel) instead of the fixed inline height. */
   fill?: boolean;
   /** Shows an expand affordance when the artifact can also open full-screen. */
@@ -74,6 +82,16 @@ export interface ReactArtifactViewProps {
    * an app keeps its v1 title while a later build may rename itself.
    */
   titleSlot?: ReactNode;
+  /**
+   * Drops the payload title from the header entirely.
+   *
+   * For hosts that already name the app above this row — a bar (toolbar, Inbox,
+   * channel tab) renders ArtifactAppHost's own header with the app's name,
+   * visibility and publish control, so repeating `payload.title` here reads as
+   * the same app titled twice. Distinct from `titleSlot`, which REPLACES the
+   * title; this removes it and leaves the actions in place.
+   */
+  hideTitle?: boolean;
   /**
    * Contents of the Settings tab. Supplied by the caller rather than built
    * here: settings are properties of the APP (its icon, later its name and

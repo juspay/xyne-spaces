@@ -14,7 +14,6 @@ Background jobs using Bull queues with Redis. Located in `src/queues/` and `src/
 | `assignment-reactivation` | `assignmentReactivationQueue.ts` | Delayed | Reactivate user assignments |
 | `metrics-sync` | `metricsSyncQueue.ts` | Hourly/48h | Sync message/user/call counts |
 | `personalization-sync` | `workers/index.ts` | Every 6 hours | Sync user personalization |
-| `product-insights` | `workers/index.ts` | On-demand | Product insights clustering |
 
 ---
 

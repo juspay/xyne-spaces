@@ -21,10 +21,11 @@ import {
   PDFLinkService,
   PDFViewer as PdfjsViewer,
 } from 'pdfjs-dist/web/pdf_viewer.mjs';
-import 'pdfjs-dist/web/pdf_viewer.css';
+import pdfViewerCss from 'pdfjs-dist/web/pdf_viewer.css?inline';
 import { ChevronUp, ChevronDown, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useMountedStylesheet } from '../../hooks/useMountedStylesheet';
 import { useFileSearchContext } from './search';
 import { MIN_QUERY_LENGTH } from './search';
 
@@ -46,6 +47,9 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   searchable,
 }) => {
   pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+  // ~200KB of viewer CSS, most of it matched against every element in the app;
+  // attached only while a viewer is on screen.
+  useMountedStylesheet(pdfViewerCss);
 
   const { isMobile } = usePlatform();
   const search = useFileSearchContext();

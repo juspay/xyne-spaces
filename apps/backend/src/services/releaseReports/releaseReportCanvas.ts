@@ -1,6 +1,6 @@
+import { createOrUpdateTx } from '@/bypassAcl/transactions/releaseReportCanvas';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { Prisma, type User } from '@prisma/client';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReleaseReport, ReleaseReportChange } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -249,82 +249,7 @@ export class ReleaseReportCanvasService {
       throw new Error(`Failed to save release report canvas ${canvasId} to Y-Sweet`);
     }
 
-    const result = await db.$transaction(async (tx) => {
-      if (existingCanvas) {
-        await tx.canvas.update({
-          where: { id: existingCanvas.id },
-          data: {
-            title,
-            content: [],
-            channelId: report.release.channelId,
-            projectId: report.release.projectId,
-            createdBy: owner.id,
-            lastEditedBy: owner.id,
-            lastEditedAt: now,
-            visibility: CanvasVisibility.PUBLIC,
-            isCollaborative: true,
-            metadata,
-          },
-        });
-        await tx.canvasParticipant.upsert({
-          where: {
-            canvasId_userId: {
-              canvasId: existingCanvas.id,
-              userId: owner.id,
-            },
-          },
-          create: {
-            id: uuidv4(),
-            canvasId: existingCanvas.id,
-            userId: owner.id,
-            workspaceId: report.release.workspaceId,
-            role: CanvasRole.VIEWER,
-            joinedAt: now,
-            updatedAt: now,
-          },
-          update: {
-            role: CanvasRole.VIEWER,
-            updatedAt: now,
-          },
-        });
-
-        return {
-          canvasId: existingCanvas.id,
-          action: 'updated' as const,
-        };
-      }
-
-      await tx.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: [],
-          channelId: report.release.channelId,
-          projectId: report.release.projectId,
-          workspaceId: report.release.workspaceId,
-          createdBy: owner.id,
-          visibility: CanvasVisibility.PUBLIC,
-          isTemplate: false,
-          isCollaborative: true,
-          lastEditedBy: owner.id,
-          lastEditedAt: now,
-          metadata,
-        },
-      });
-      await tx.canvasParticipant.create({
-        data: {
-          id: uuidv4(),
-          canvasId,
-          userId: owner.id,
-          workspaceId: report.release.workspaceId,
-          role: CanvasRole.VIEWER,
-          joinedAt: now,
-          updatedAt: now,
-        },
-      });
-
-      return { canvasId, action: 'created' as const };
-    });
+    const result = await createOrUpdateTx(existingCanvas, title, report, owner, now, metadata, canvasId);
 
     await this.runSideEffects(result, owner);
     return result;

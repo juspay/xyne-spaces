@@ -21,6 +21,8 @@ import {
 export type UseTableTicketsPageOptions = Omit<KanbanTicketsPageBaseArgs, 'vespaTicketIds'> & {
   enabled?: boolean;
   pageSize?: number;
+  /** Restricts the list to these tickets (e.g. a release's dev tickets); search narrows within it. */
+  scopeTicketIds?: string[];
 };
 
 export interface UseTableTicketsPageResult {
@@ -84,14 +86,12 @@ export const useTableTicketsPage = (
     overdueReferenceTimeRef.current = null;
   }
 
-  const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const vespaTokens = useMemo(
     () => [...(options.dynamicFieldVespaTokens ?? [])].sort(),
     [options.dynamicFieldVespaTokens],
   );
   const vespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
-  const requiresVespaIds =
-    trimmedSearchTerm.length > 0 || vespaTokens.length > 0 || vespaDateRangeCount > 0;
+  const requiresVespaIds = vespaTokens.length > 0 || vespaDateRangeCount > 0;
 
   const parsedAssignee = options.filters?.assignee?.length
     ? parseAssigneeFilter(options.filters.assignee)
@@ -108,20 +108,9 @@ export const useTableTicketsPage = (
     options.boardId ??
     (options.filters?.boards?.length === 1 ? options.filters.boards[0] : undefined);
 
-  const groupByKey =
-    typeof options.groupBy === 'object'
-      ? `${options.groupBy.type}:${options.groupBy.fieldId}`
-      : String(options.groupBy ?? 'none');
-  const vespaSearchKey = `table:${groupByKey}:${options.groupKey ?? ''}`;
-
   const vespaTicketSearch = useVespaTicketSearch({
-    searchTerm: trimmedSearchTerm,
     dynamicFieldValues: vespaTokens,
     enabled: requiresVespaIds && enabled,
-    limit: trimmedSearchTerm ? 400 : 200,
-    fetchAllDynamicFieldMatches: true,
-    maxFetchedResults: trimmedSearchTerm ? 800 : 400,
-    searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),
@@ -131,10 +120,19 @@ export const useTableTicketsPage = (
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
   });
-  const vespaTicketIds = requiresVespaIds
+  const searchTicketIds = requiresVespaIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? null)
     : undefined;
-  const vespaIdsKey = requiresVespaIds ? (vespaTicketIds?.join(',') ?? 'pending') : 'off';
+  const scopeTicketIds = options.scopeTicketIds;
+  const vespaTicketIds = useMemo(() => {
+    if (!scopeTicketIds || searchTicketIds === null) return searchTicketIds;
+    if (searchTicketIds === undefined) return scopeTicketIds;
+    const scope = new Set(scopeTicketIds);
+    return searchTicketIds.filter(id => scope.has(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ids keyed by content
+  }, [scopeTicketIds?.join(','), searchTicketIds?.join(',')]);
+  const vespaIdsKey =
+    requiresVespaIds || scopeTicketIds ? (vespaTicketIds?.join(',') ?? 'pending') : 'off';
 
   const basePageArgs = useMemo(
     () =>
@@ -158,6 +156,7 @@ export const useTableTicketsPage = (
           formEntityValueFieldIds: options.formEntityValueFieldIds,
           showOverdueOnly: options.showOverdueOnly,
           overdueReferenceTime: overdueReferenceTimeRef.current ?? undefined,
+          ...(options.trackId ? { trackId: options.trackId } : {}),
         },
         options.channelId,
       ),
@@ -174,10 +173,26 @@ export const useTableTicketsPage = (
       options.formEntityValueFieldIds,
       options.showOverdueOnly,
       options.channelId,
+      options.trackId,
       pageSize,
       vespaIdsKey,
     ],
   );
+
+  // A track's pages come from the track query: the same page over the track's tickets,
+  // with the same rows, so it is typed as the board page for the hooks that run it.
+  const tablePageQuery = (
+    args: typeof basePageArgs,
+  ): ReturnType<typeof queries.tableTicketsPage> =>
+    options.trackId && options.channelId
+      ? (queries.trackTableTicketsPage({
+          ...args,
+          channelId: options.channelId,
+          trackId: options.trackId,
+        } as Parameters<typeof queries.trackTableTicketsPage>[0]) as unknown as ReturnType<
+          typeof queries.tableTicketsPage
+        >)
+      : queries.tableTicketsPage(args as Parameters<typeof queries.tableTicketsPage>[0]);
 
   const queryKey = useMemo(() => {
     const { start: _start, ...rest } = basePageArgs as Record<string, unknown>;
@@ -194,13 +209,10 @@ export const useTableTicketsPage = (
   const cursor = cursorState?.queryKey === queryKey ? cursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
 
-  const pageEnabled = enabled && (!requiresVespaIds || vespaTicketIds !== null);
+  const pageEnabled = enabled && vespaTicketIds !== null;
 
   const pageArgs = useMemo(() => ({ ...basePageArgs, start: cursor }), [basePageArgs, cursor]);
-  const [page, pageDetails] = useCachedQuery(
-    queries.tableTicketsPage(pageArgs as Parameters<typeof queries.tableTicketsPage>[0]),
-    { enabled: pageEnabled },
-  );
+  const [page, pageDetails] = useCachedQuery(tablePageQuery(pageArgs), { enabled: pageEnabled });
 
   const pageDetailsType = pageDetails.type;
   useEffect(() => {
@@ -230,10 +242,9 @@ export const useTableTicketsPage = (
     }
   }, [pageDetailsType, page, pageEnabled, queryKey, cursor, pageSize]);
 
-  const [headPage, headPageDetails] = useCachedQuery(
-    queries.tableTicketsPage(basePageArgs as Parameters<typeof queries.tableTicketsPage>[0]),
-    { enabled: pageEnabled && cursor !== null },
-  );
+  const [headPage, headPageDetails] = useCachedQuery(tablePageQuery(basePageArgs), {
+    enabled: pageEnabled && cursor !== null,
+  });
   useEffect(() => {
     if (cursor === null || headPageDetails.type !== 'complete' || !pageEnabled) return;
     const headRows = (headPage ?? []) as KanbanTicketsPageRow[];
@@ -327,9 +338,7 @@ export const useTableTicketsPage = (
     tickets: overlaid,
     isLoading: isFirstPageLoading,
     isLoadingMore: isLoadingMoreRef.current,
-    hasMore:
-      hasMore &&
-      !(isSearchMode && Array.isArray(vespaTicketIds) && tickets.length >= vespaTicketIds.length),
+    hasMore: hasMore && !(Array.isArray(vespaTicketIds) && tickets.length >= vespaTicketIds.length),
     loadMore,
     isSearchMode,
   };

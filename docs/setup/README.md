@@ -8,10 +8,12 @@ matches what you are doing.
 | I want to… | Go to |
 | ---------- | ----- |
 | Set up a machine that has nothing installed | [Local Setup](local-setup.md) |
+| Run native development services with Nix | [Nix setup](nix.md) |
 | Check I have the right tooling | [Prerequisites](prerequisites.md) |
 | Get a full local environment running | [Local Development](local-development.md) |
 | Make the AI features actually respond | [AI Providers](ai-providers.md) |
 | Understand what each background service does | [Services](services.md) |
+| Run the mobile app (iOS / Android) | [Mobile developer setup](../../apps/mobile/DEV_SETUP.md) |
 | Fix something that broke | [Troubleshooting](troubleshooting.md) |
 
 ## The short version

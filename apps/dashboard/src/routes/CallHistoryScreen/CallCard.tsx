@@ -10,7 +10,7 @@ import {
   ScrollText,
   MoreVertical,
 } from 'lucide-react';
-import HuddleIcon from '../../components/icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import Button from '../../components/ui/Button';
@@ -47,7 +47,6 @@ import { roomActor } from '../../machines/roomMachine';
 interface CallHistoryItemProps {
   call: Call;
   currentUserId: string | undefined;
-  isLastItem?: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
@@ -205,7 +204,7 @@ export const CallCard = ({
 
   const isHighlighted = isRecentCall && isActiveState;
   const isRecurring = Boolean(call.recurringSeriesId);
-  const CallIcon = isRecurring ? Repeat : HuddleIcon;
+  const CallIcon = isRecurring ? Repeat : PhoneDefault;
 
   return (
     <div
@@ -367,6 +366,7 @@ export const CallCard = ({
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
+                        aria-label={`More actions for ${call.title || 'call'}`}
                         className='size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         onClick={e => e.stopPropagation()}
                         data-track-category='CALLS'
@@ -435,6 +435,7 @@ export const CallCard = ({
                         }
                       >
                         <button
+                          aria-label='Go to call message'
                           onClick={e => {
                             e.stopPropagation();
                             handleGotoTranscript?.();
@@ -454,6 +455,7 @@ export const CallCard = ({
                     >
                       <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
                         <button
+                          aria-label='Download transcript'
                           onClick={e => {
                             e.stopPropagation();
                             handleDownloadTranscript?.();
@@ -470,6 +472,7 @@ export const CallCard = ({
                     {onViewExternalChat && (
                       <Tooltip content='View External Chat' delayDuration={300}>
                         <button
+                          aria-label='View external chat'
                           onClick={e => {
                             e.stopPropagation();
                             onViewExternalChat();
@@ -484,6 +487,7 @@ export const CallCard = ({
                     )}
                     <Tooltip content='Start Call' delayDuration={300}>
                       <button
+                        aria-label='Start call'
                         onClick={e => {
                           e.stopPropagation();
                           onCallClick();
@@ -497,7 +501,7 @@ export const CallCard = ({
                         })}
                         className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                       >
-                        <HuddleIcon size={16} />
+                        <PhoneDefault size={16} />
                       </button>
                     </Tooltip>
                   </div>
@@ -506,6 +510,7 @@ export const CallCard = ({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
+                      aria-label={`More actions for ${call.title || 'call'}`}
                       variant='ghost'
                       size='icon'
                       className='size-7 text-muted-foreground hover:text-foreground'
@@ -565,6 +570,7 @@ export const CallCard = ({
                       }
                     >
                       <Button
+                        aria-label='Go to call message'
                         onClick={handleGotoTranscript}
                         data-track-category='CALLS'
                         data-track-name='GOTO_TRANSCRIPT'
@@ -583,6 +589,7 @@ export const CallCard = ({
                   >
                     <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
                       <Button
+                        aria-label='Download transcript'
                         onClick={handleDownloadTranscript}
                         data-track-category='CALLS'
                         data-track-name='DOWNLOAD_TRANSCRIPT'
@@ -598,6 +605,7 @@ export const CallCard = ({
                   {onViewExternalChat && (
                     <Tooltip content='View External Chat' delayDuration={300}>
                       <Button
+                        aria-label='View external chat'
                         onClick={onViewExternalChat}
                         variant='outline'
                         size='icon'

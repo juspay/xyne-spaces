@@ -29,9 +29,15 @@ import {
   downloadClawAttachment,
   listAccessibleClawAgents,
   listClawAgentModels,
+  warmClawAgent,
   deleteClawConversation,
+  patchClawConversation,
+  saveClawConversationNotes,
+  ClawNotesError,
+  CMDK_ANSWER_AGENT_SLUG,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
+import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import {
   buildSdlcAskAiContext,
@@ -70,21 +76,31 @@ const SelectionContextSchema = z
 // Attached context item schema - for Add Context feature.
 // `collection`/`folder`/`file` items all arrive as ordinary entries in this
 // list — the dashboard already knows each one's cuid + name client-side.
+// `message`/`user`/`attachment` (a Spaces message, a person, a file shared in
+// a conversation) come from the composer's @ picker; claw-auth resolves them.
+// `app` is an artifact app from the context picker; claw-auth checks the
+// user can read it.
 const AttachedContextItemSchema = z.object({
   type: z.enum([
     'channel',
     'ticket',
     'canvas',
     'call',
+    'app',
     'activity',
     'collection',
     'file',
     'folder',
     'local-folder',
+    'message',
+    'user',
+    'attachment',
   ]),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
+  // Canvas items only — claw-auth labels a recording's notes vs its AI summary.
+  canvasRole: z.enum(['call-notes', 'call-summary']).optional(),
   // Activity-specific fields
   eventName: z.string().optional(),
   eventCategory: z.string().optional(),
@@ -129,6 +145,8 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // cmd+K: the palette tab the `cmdk-answer` agent searches before answering.
+  tab: z.string().max(40).optional(),
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
@@ -211,6 +229,21 @@ const XyneAIRequestSchemaV2 = z.object({
 });
 
 // Feedback request validation schema
+// claw-auth checks the limits again; these stop an oversized body at the edge.
+const ConversationNotesSchema = z.object({
+  turns: z
+    .array(
+      z.object({
+        request: z.string().trim().min(1).max(4000),
+        reply: z.string().trim().min(1).max(4000),
+      })
+    )
+    .min(1)
+    .max(5),
+  /** The reply the user is on, so the notes follow it; claw-auth falls back to the latest. */
+  parentId: z.string().max(64).optional(),
+});
+
 const FeedbackRequestSchema = z.object({
   traceId: z.string().min(1, 'traceId is required'),
   value: z.enum(['LIKE', 'DISLIKE'], { required_error: 'value must be LIKE or DISLIKE' }),
@@ -305,6 +338,7 @@ export class XyneAIControllerV2 {
       model,
       modelProvider,
       agentSlug,
+      tab,
     } = parseResult.data;
 
     // Use snake_case as fallback for camelCase (Web Worker sends snake_case)
@@ -530,6 +564,8 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          // cmd+K scopes the agent's own search to the tab the answer is shown on.
+          ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
           ...(thinkingLevel ? { thinkingLevel } : {}),
           ...(studioMode ? { studioMode } : {}),
           ...(sandboxMode ? { sandboxMode } : {}),
@@ -540,7 +576,11 @@ export class XyneAIControllerV2 {
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
-          generateFollowUpSuggestions: true,
+          // cmd+K shows one answer and takes no reply, so follow-up chips are never drawn.
+          generateFollowUpSuggestions: agentSlug !== CMDK_ANSWER_AGENT_SLUG,
+          // Neither cmd+K nor the compose subject helper puts its thread in the
+          // chat list, so a generated name is a completion nobody can ever see.
+          generateTitle: agentSlug !== CMDK_ANSWER_AGENT_SLUG && !draftMode,
           sessionId: effectiveSessionId,
           // Branching: forward intent + tree position to claw-auth. The
           // `parentMessageId` is the JAF/v1-shared name; here it doubles as
@@ -816,7 +856,8 @@ export class XyneAIControllerV2 {
 
   /**
    * GET /api/xyne-ai/v2/conversations
-   * Query param: agentSlug (optional, defaults to 'ask-ai')
+   * Query: allAgents=1 with agentSlug, q, limit, cursor (paged); without
+   * allAgents, agentSlug (defaults to 'ask-ai') for the whole per-agent list.
    */
   listConversations = async (req: Request, res: Response): Promise<void> => {
     const userId = (req as any).user?.id;
@@ -825,10 +866,25 @@ export class XyneAIControllerV2 {
       return;
     }
 
-    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+    // allAgents=1: every agent's chats in pages of 50 (agentSlug filters, q
+    // searches titles, cursor continues). Without it: one agent's whole list
+    // (ask-ai by default) — the shape older dashboard builds ask for.
+    const param = (name: string): string | undefined =>
+      typeof req.query[name] === 'string' && req.query[name] ? (req.query[name] as string) : undefined;
+    const allAgents = req.query.allAgents === '1';
 
     try {
-      const result = await listClawConversations({ headers: req.headers, userId }, agentSlug);
+      const result = await listClawConversations(
+        { headers: req.headers, userId },
+        allAgents
+          ? {
+              agentSlug: param('agentSlug'),
+              q: param('q'),
+              limit: param('limit'),
+              cursor: param('cursor'),
+            }
+          : { agentSlug: param('agentSlug') ?? 'ask-ai', fullAgentList: true }
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -855,15 +911,31 @@ export class XyneAIControllerV2 {
     }
 
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+    const scope = req.query.scope === 'conversation' ? 'conversation' : undefined;
 
     try {
       const result = await getClawConversationMessages(
         { headers: req.headers, userId },
         convId,
-        agentSlug
+        agentSlug,
+        scope
       );
+      const data = Array.isArray((result as { data?: unknown }).data)
+        ? ((result as { data: Array<Record<string, unknown>> }).data).map((message) =>
+            Array.isArray(message['uiFlows'])
+              ? {
+                  ...message,
+                  uiFlows: (message['uiFlows'] as unknown[]).map((flow) =>
+                    attachXyneAiFlowToken(flow, userId),
+                  ),
+                }
+              : message,
+          )
+        : (result as { data?: unknown }).data;
+
       res.json({
         ...result,
+        ...(data !== undefined && { data }),
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
         ...(result.invocationsByMsgId && { invocationsByMsgId: result.invocationsByMsgId }),
         ...(result.runByMsgId && { runByMsgId: result.runByMsgId }),
@@ -1100,12 +1172,55 @@ export class XyneAIControllerV2 {
     try {
       await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, {
         signal: upstreamAbort.signal,
+        ...(req.query.scope === 'conversation' ? { scope: 'conversation' as const } : {}),
       });
     } catch (error) {
       logger.error('[XyneAIv2] live proxy error:', error);
     } finally {
       clearInterval(pingInterval);
       if (!res.writableEnded) res.end();
+    }
+  };
+
+  /**
+   * POST /api/xyne-ai/v2/conversations/:convId/notes
+   * Body: { turns: [{ request, reply }], parentId? }. Saves turns Buddy answered on screen
+   * into the chat history without a run. 409 while a reply is still running.
+   */
+  saveConversationNotes = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId?.startsWith('chat-')) {
+      res.status(400).json({ success: false, error: 'convId must be a direct chat' });
+      return;
+    }
+
+    const parsed = ConversationNotesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'turns must be request/reply pairs' });
+      return;
+    }
+
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    try {
+      const result = await saveClawConversationNotes(
+        { headers: req.headers, userId },
+        convId,
+        parsed.data.turns,
+        agentSlug,
+        parsed.data.parentId
+      );
+      res.json(result);
+    } catch (error) {
+      const status = error instanceof ClawNotesError && error.status < 500 ? error.status : 503;
+      logger.error('[XyneAIv2] saveConversationNotes error:', error);
+      res.status(status).json({ success: false, error: 'Failed to save notes' });
     }
   };
 
@@ -1139,6 +1254,60 @@ export class XyneAIControllerV2 {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] deleteConversation error:', error);
       res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * PATCH /api/xyne-ai/v2/conversations/:convId
+   * Rename and/or pin a conversation. Ownership is enforced by claw-auth.
+   */
+  updateConversation = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+
+    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
+    if (title === undefined && pinned === undefined) {
+      res.status(400).json({ success: false, error: 'title or pinned is required' });
+      return;
+    }
+    if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
+      res.status(400).json({ success: false, error: 'title must be a non-empty string' });
+      return;
+    }
+    if (pinned !== undefined && typeof pinned !== 'boolean') {
+      res.status(400).json({ success: false, error: 'pinned must be a boolean' });
+      return;
+    }
+
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    try {
+      const result = await patchClawConversation(
+        { headers: req.headers, userId },
+        convId,
+        {
+          ...(typeof title === 'string' ? { title } : {}),
+          ...(typeof pinned === 'boolean' ? { pinned } : {}),
+        },
+        agentSlug
+      );
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] updateConversation error:', error);
+      res.status(message === 'Conversation not found' ? 404 : 503).json({
+        success: false,
+        error: message,
+      });
     }
   };
 
@@ -1229,7 +1398,11 @@ export class XyneAIControllerV2 {
     }
 
     try {
-      const result = await listAccessibleClawAgents({ headers: req.headers, userId });
+      const result = await listAccessibleClawAgents({
+        headers: req.headers,
+        userId,
+        workspaceId: (req as any).user?.workspaceId,
+      });
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -1264,6 +1437,18 @@ export class XyneAIControllerV2 {
       logger.error('[XyneAIv2] listAgentModels error:', error);
       res.status(503).json({ success: false, error: message });
     }
+  };
+
+  warmAgent = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    res.status(202).json({ success: true });
+    await warmClawAgent({ headers: req.headers, userId }, req.params['slug'] ?? 'ask-ai').catch((error) =>
+      logger.warn('[XyneAIv2] warmAgent failed:', error)
+    );
   };
 
   private handleError(res: Response, error: unknown, operation: string): void {

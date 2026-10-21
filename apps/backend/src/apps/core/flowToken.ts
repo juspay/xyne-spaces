@@ -2,9 +2,8 @@
 import crypto from 'node:crypto';
 
 /**
- * Distinguishes a flow token from the SDK keys and session tokens that share
- * `JWT_SECRET` (see API_KEY_AUDIENCE in api/sdk/auth.ts). Without it, one key
- * serving three purposes invites cross-protocol confusion.
+ * Distinguishes a flow token from the session tokens that share `JWT_SECRET`.
+ * Without it, one key serving two purposes invites cross-protocol confusion.
  */
 const AUDIENCE = 'xyne-flow';
 
@@ -37,6 +36,24 @@ export function mintFlowToken(claims: FlowTokenClaims): string {
   const payload = { v: VERSION, aud: AUDIENCE, ...claims, exp: Date.now() + TTL_MS };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${encoded}.${sign(encoded)}`;
+}
+
+/** Mints a per-fetch flow-action token for a Xyne AI artifact card. Cards
+ *  without `spacesAppId` + `chatMessageId` are returned untouched. */
+export function attachXyneAiFlowToken<T>(flow: T, userId: string): T {
+  if (!flow || typeof flow !== 'object') return flow;
+  const data = (flow as { data?: unknown }).data;
+  if (!data || typeof data !== 'object') return flow;
+  const record = data as Record<string, unknown>;
+  const appId = record['spacesAppId'];
+  const messageId = record['chatMessageId'];
+  if (typeof appId !== 'string' || !appId) return flow;
+  if (typeof messageId !== 'string' || !messageId) return flow;
+  if (!userId) return flow;
+  return {
+    ...flow,
+    data: { ...record, __xyneFlowToken: mintFlowToken({ appId, userId, messageId }) },
+  };
 }
 
 /**

@@ -1,15 +1,18 @@
 import type { XyneAiSendTrigger } from '../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
+  Fragment,
   ReactElement,
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { toast } from 'sonner';
+import { useSelector } from '@xstate/react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -26,12 +29,20 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
-import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import type {
+  ConversationHistory as ConversationHistoryType,
+  PendingAction,
+} from './utils/XyneAITypes';
+import { flowPhaseKey } from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
-import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
+import {
+  useCachedV2ConversationTitle,
+  useV2SessionInvalidator,
+} from '../../../hooks/useAskAISessionsV2';
 import {
   deleteV2Conversation,
   fetchV2ConversationMessages,
+  fetchV2Conversations,
   deskAutoDraftMessagesUrl,
   forkDeskAutoDraft,
 } from '../../../services/XyneAI/XyneAISessionsV2Service';
@@ -48,15 +59,24 @@ import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/x
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
+import { isAssistantMessage } from '../../Assistant/turns';
+import { useTranscript } from '../../Assistant/useTranscript';
+import { useAssistantActions } from '../../Assistant/useAssistantActions';
+import { useSaveBuddyTurns, type SavedBuddyTurns } from '../../Assistant/useSaveBuddyTurns';
+import { useRoutedSubmit } from '../../Assistant/useRoutedSubmit';
 import { cn } from '../../../utils/classNames';
 import { type Attachment } from './components/XyneAIInputBox';
-import { XyneAIInputSection } from './components/XyneAIInputSection';
+import { XyneAIInputBox } from './components/XyneAIInputBox';
 import {
   type SelectedChannel,
   type SelectedTicket,
   type SelectedCanvas,
   type SelectedTranscript,
   type SelectedRecording,
+  type SelectedMessage,
+  type SelectedPerson,
+  type SelectedSharedFile,
+  type SelectedApp,
   type ContextSelections,
   toAttachedContext,
   attachedContextToSelections,
@@ -75,9 +95,12 @@ import { UserActivityPanel } from './components/UserActivityPanel';
 import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { useDefaultAgent, useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
-import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
+import { fetchClawAgentModels, warmClawAgent } from '../../../services/clawAgentModelsService';
+import { collectionsForAgent } from '../../Composer/ComposerCollections';
 import {
   xyneAIActor,
   type ThreadInfo,
@@ -90,11 +113,21 @@ import {
   type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
-import { xyneAIStreamManager } from '../../../services/XyneAI';
+import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
+import { useVoiceHost } from '../../Voice/voiceSession';
+import { VoiceStage } from '../../Voice/VoiceStage';
+import { chatTitleOf } from '../../Voice/voiceTranscript';
+import { buddy } from '../../Assistant/buddy';
+import { ASSISTANT_PANEL_ATTR } from '../../Assistant/buddy/constants';
+import { tryBuddy } from '../../Assistant/buddy/tryBuddy';
+import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
   getChannelIdFromStreamThreadId,
 } from '../../../utils/xyneAIStreamThreadId';
+
+/** A request Buddy passed on waits this long at most for what answers it to show. */
+const BUDDY_HANDOFF_MAX_MS = 15_000;
 
 function newStreamSlotKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -146,6 +179,8 @@ interface XyneAISidebarProps {
   // Seed text for the input box; bump autoSendNonce to submit it as a real message.
   initialQuery?: string | undefined;
   autoSendNonce?: number;
+  // Sends the auto-sent initialQuery with web search on.
+  autoSendWebSearch?: boolean;
   researchContext?: XyneAIResearchContext | null;
   // Seed text that is *not* sent — bump seedNonce to place it in the composer and
   // leave it there to be edited. For hosts that hand the user a prepared question
@@ -159,6 +194,10 @@ interface XyneAISidebarProps {
   // Drops the tilted suggestion cards from the empty state, leaving the heading.
   // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
   hideEmptyStateSuggestions?: boolean;
+  hideBackgroundStreamNotice?: boolean;
+  showAgentHeader?: boolean;
+  hideAgentName?: boolean;
+  roomyContent?: boolean;
   // Drops the header row entirely. For hosts whose own chrome already carries a
   // title and a close, where this one is a second bar under the first however
   // little it contains.
@@ -178,6 +217,9 @@ interface XyneAISidebarProps {
   /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
    *  directly (not opened through xyneAIActor OPEN, which carries its own). */
   trackSource?: string;
+  onInterceptPendingAction?: (action: PendingAction, approved: boolean) => boolean;
+  hiddenContext?: () => string;
+  composerPlaceholder?: string;
 }
 
 const XyneAISidebar = ({
@@ -208,18 +250,30 @@ const XyneAISidebar = ({
   forcedAgentSlug,
   initialQuery,
   autoSendNonce,
+  autoSendWebSearch = false,
   researchContext,
   seedQuery,
   seedNonce,
   onStreamingChange,
   onFinalResponse,
   hideEmptyStateSuggestions = false,
+  hideBackgroundStreamNotice = false,
+  showAgentHeader = false,
+  hideAgentName = false,
+  roomyContent = false,
   hideHeader = false,
   suppressInputAutoFocus = false,
   trackSource: trackSourceProp,
+  onInterceptPendingAction,
+  hiddenContext,
+  composerPlaceholder,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
+  // The walk is awaited, so it must compare against the latest input, not the render that started it.
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+  const [buddyWorking, setBuddyWorking] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
   const [streamThreadKey, setStreamThreadKey] = useState<string>(
@@ -281,13 +335,11 @@ const XyneAISidebar = ({
   );
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
-  const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(
     !startFreshChat && !isFullscreen,
   );
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
-  const [showContextModal, setShowContextModal] = useState(false);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   // File scope(s) — multi-select. Seeded with the file Ask AI was opened from
   // (via a file viewer); users can add/remove more from the picker.
@@ -329,8 +381,12 @@ const XyneAISidebar = ({
     if (!initialQuery?.trim()) return;
     lastAutoSendNonceRef.current = autoSendNonce;
     autoSendPendingQueryRef.current = initialQuery;
+    // Batched with the seed, so the submit below already sees it.
+    if (autoSendWebSearch) {
+      setWebSearchEnabled(true);
+    }
     setInputValue(initialQuery);
-  }, [autoSendNonce, initialQuery]);
+  }, [autoSendNonce, initialQuery, autoSendWebSearch]);
   // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
   // it exists for callers that already know the whole question. A host that hands
   // over a starting point instead needs the text in the box and the cursor after
@@ -359,6 +415,11 @@ const XyneAISidebar = ({
   }, []);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
+  // Picked from the composer's @ menu.
+  const [selectedMessages, setSelectedMessages] = useState<SelectedMessage[]>([]);
+  const [selectedPeople, setSelectedPeople] = useState<SelectedPerson[]>([]);
+  const [selectedSharedFiles, setSelectedSharedFiles] = useState<SelectedSharedFile[]>([]);
+  const [selectedApps, setSelectedApps] = useState<SelectedApp[]>([]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -368,15 +429,30 @@ const XyneAISidebar = ({
     timestamp: number;
   } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
+  // Context the sidebar was OPENED with — the channel it opened on, a
+  // recording's call and notes — keyed `${kind}:${id}`. It belongs to the
+  // conversation, so a send keeps it; what the user added clears (see
+  // handleSubmit). Removing it by hand still removes it.
+  const openedWithRef = useRef(new Set<string>());
+  // Bumped after each send so the composer drops the collections the user
+  // picked (it owns those pills) and keeps the one it was opened on.
+  const [sentNonce, setSentNonce] = useState(0);
 
   // A recording page already knows the exact call and notes canvas that should
   // scope the conversation. Seed the normal picker state so its visible pills
   // and the request payload use the same source of truth.
   useEffect(() => {
     if (!initialContextSelections) return;
+    initialContextSelections.canvases.forEach(c => openedWithRef.current.add(`canvas:${c.id}`));
+    (initialContextSelections.tickets ?? []).forEach(t =>
+      openedWithRef.current.add(`ticket:${t.id}`),
+    );
+    initialContextSelections.recordings.forEach(r => openedWithRef.current.add(`call:${r.id}`));
+    (initialContextSelections.calls ?? []).forEach(c => openedWithRef.current.add(`call:${c.id}`));
     setSelectedCanvases(initialContextSelections.canvases);
     setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
+    setSelectedTranscripts(initialContextSelections.calls ?? []);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
@@ -391,6 +467,20 @@ const XyneAISidebar = ({
   const displayMessages = useMemo(
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
+  );
+  const assistant = useAssistantActions({ enabled: !isFullscreen });
+  // Starter cards only on the panel opened for a user who just finished onboarding.
+  const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
+  const {
+    messages: assistantMessages,
+    reset: resetAssistant,
+    cancel: cancelRouting,
+    startNote: startBuddyNote,
+    endNote: endBuddyNote,
+  } = assistant;
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
   );
 
   const isActiveSessionStreaming = useMemo(
@@ -540,6 +630,7 @@ const XyneAISidebar = ({
     if (newConvId && prevThreadConversationIdRef.current !== newConvId) {
       prevThreadConversationIdRef.current = newConvId;
       hasLoadedInitialConversationRef.current = false;
+      resetAssistant();
       setMessages([]);
       setConversationId('');
       setBranchSelections({});
@@ -547,7 +638,7 @@ const XyneAISidebar = ({
       setStreamThreadKey(newStreamSlotKey());
       usesDraftStreamKeyRef.current = true;
     }
-  }, [threadInfo]);
+  }, [threadInfo, resetAssistant]);
 
   // Track processed selection keys to avoid duplicates
   const processedSelectionKeysRef = useRef<Set<string>>(new Set());
@@ -632,8 +723,6 @@ const XyneAISidebar = ({
 
   const channelName = (channel?.['name'] as string) || '';
 
-  const channelDescription = (channel?.['description'] as string) || '';
-
   const scopeType = (channel?.['scopeType'] as string) || '';
 
   // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
@@ -706,13 +795,6 @@ const XyneAISidebar = ({
   }, [visible]);
 
   const allChannels = useAllVisibleChannels();
-  const nonDMChannels = useMemo(
-    () =>
-      allChannels.filter(
-        ch => ch.scopeType !== ChannelScopeType.DM && ch.scopeType !== ChannelScopeType.GROUP_DM,
-      ),
-    [allChannels],
-  );
 
   const currentUser = useSelf();
   // Load ALL collections the user can access (no scope), so the Ask AI picker works
@@ -744,6 +826,7 @@ const XyneAISidebar = ({
       scopeType !== (ChannelScopeType.GROUP_DM as string)
     ) {
       const ch = allChannels.find(c => c.id === channelId);
+      openedWithRef.current.add(`channel:${channelId}`);
       setSelectedChannels([
         {
           id: channelId,
@@ -776,6 +859,7 @@ const XyneAISidebar = ({
       name: channelName,
       isPrivate: channel ? String(channel.visibility) === 'PRIVATE' : false,
     };
+    openedWithRef.current.add(`channel:${nextChannel.id}`);
     setSelectedChannels(previous => {
       const current = previous[0];
       return previous.length === 1 &&
@@ -818,10 +902,50 @@ const XyneAISidebar = ({
     queryFn: fetchAccessibleClawAgents,
     staleTime: 60_000,
   });
+  useDefaultAgent(isAgentForced ? undefined : accessibleAgents);
 
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
+
   const effectiveAgentSlug = selectedAgentSlug;
+  const { isAuto: isAutoStored, setAuto } = useAskAIAuto();
+  // Beta: Auto acts on screen only once turned on in Preferences → Developer.
+  const screenActions = useUserPreference('screenActionsEnabled');
+  // An agent restored from an earlier visit wins over Auto.
+  const isAuto = isAutoStored && !isAgentForced && selectedAgentSlug === null;
+  // Same key the sidebar's own streams register under (see the adopt/attach
+  // sites below), so the shared handler targets this surface's stream.
+  const flowThreadId = useMemo(
+    () =>
+      buildXyneAIStreamThreadId({
+        channelId: channelId ?? null,
+        threadConversationId: activeThreadInfo?.conversationId ?? null,
+        streamSessionKey: conversationId,
+      }),
+    [channelId, activeThreadInfo?.conversationId, conversationId],
+  );
+  const detachFlowLiveViewer = useCallback((): void => {
+    liveViewerDetachRef.current?.();
+  }, []);
+  const storeFlowLiveViewer = useCallback((detach: () => void): void => {
+    liveViewerDetachRef.current = detach;
+  }, []);
+  const handleFlowActionComplete = useFlowActionComplete({
+    conversationId,
+    agentSlug: effectiveAgentSlug,
+    threadId: flowThreadId,
+    enabled: isV2,
+    messages,
+    setMessages,
+    detachLiveViewer: detachFlowLiveViewer,
+    storeLiveViewer: storeFlowLiveViewer,
+  });
+  // MessageItem is memoized — a fresh object here would re-render every row.
+  const flowCards = useMemo(
+    () =>
+      conversationId ? { conversationId, onActionComplete: handleFlowActionComplete } : undefined,
+    [conversationId, handleFlowActionComplete],
+  );
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
@@ -830,7 +954,7 @@ const XyneAISidebar = ({
   const [thinkingLevel, setThinkingLevel] = useState<
     'off' | 'minimal' | 'low' | 'medium' | 'high' | null
   >(null);
-  const { data: agentModelsData } = useQuery({
+  const { data: agentModelsData, isLoading: agentModelsLoading } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
@@ -840,6 +964,9 @@ const XyneAISidebar = ({
     setSelectedModel(null);
     setThinkingLevel(null);
   }, [modelAgentSlug]);
+  useEffect(() => {
+    if (isV2) warmClawAgent(modelAgentSlug);
+  }, [isV2, modelAgentSlug]);
 
   useEffect(() => {
     onDebuggerOpenChange?.(showDebugger && isV2);
@@ -852,29 +979,12 @@ const XyneAISidebar = ({
       : null;
   const selectedAgentName = selectedAgent?.name ?? null;
 
-  // Ask AI v2 context-picker scope: when a claw agent is active, narrow the
-  // collections list to what THAT agent can actually read.
-  //   • v1 (selectedAgent === null) → unchanged, full list.
-  //   • USER-scoped agent           → agent inherits caller's full KB, so
-  //                                   showing the full list is the truthful
-  //                                   reflection of agent reach.
-  //   • COLLECTIONS-scoped agent    → filter to ids in agent.collections.
-  //                                   A collection appears if there's a
-  //                                   whole-collection grant OR a file-level
-  //                                   grant within it (the agent can still
-  //                                   read at least one doc inside).
-  // The downstream MCP layer is the hard gate; this filter just keeps the
-  // picker honest about what attaching a collection will get you.
-  const effectiveCollectionsList: CollectionSummary[] = useMemo(() => {
-    if (!selectedAgent) return collectionsList;
-    if (selectedAgent.kbScope === 'USER') return collectionsList;
-    // Top-level picker only lists ROOT collections — match against the
-    // resolved rootCollectionId (claw-auth stores the file's immediate
-    // parent, which can be a sub-folder).
-    const allowedRoots = new Set((selectedAgent.collections ?? []).map(g => g.rootCollectionId));
-    if (allowedRoots.size === 0) return [];
-    return collectionsList.filter(c => allowedRoots.has(c.id));
-  }, [collectionsList, selectedAgent]);
+  // The collections the selected agent can read — what the KB auto-add may
+  // attach (the "+" menu's picker narrows its own list the same way).
+  const effectiveCollectionsList: CollectionSummary[] = useMemo(
+    () => collectionsForAgent(collectionsList, selectedAgent),
+    [collectionsList, selectedAgent],
+  );
 
   // Auto-enable web search when browser context is provided (and user has access)
   // Web search stays enabled for the session to allow follow-up questions
@@ -895,6 +1005,10 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    messages: selectedMessages,
+    people: selectedPeople,
+    sharedFiles: selectedSharedFiles,
+    apps: selectedApps,
     localFolders: [],
     folders: folderScopes,
     files: fileScopes,
@@ -967,6 +1081,7 @@ const XyneAISidebar = ({
       }
 
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
+      resetAssistant();
       setMessages([]);
       setBranchSelections({});
       setConversationId('');
@@ -1008,6 +1123,7 @@ const XyneAISidebar = ({
     researchContext,
     isFullscreen,
     isAgentForced,
+    resetAssistant,
   ]);
 
   // Scroll to bottom function
@@ -1018,6 +1134,10 @@ const XyneAISidebar = ({
       block: 'nearest',
     });
   }, []);
+
+  useEffect(() => {
+    if (assistantMessages.length > 0) scrollToBottom();
+  }, [assistantMessages, scrollToBottom]);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -1034,19 +1154,8 @@ const XyneAISidebar = ({
     return ALL_ONBOARDING_SUGGESTIONS.filter(s => !askedQuestions.has(s)).slice(0, 3);
   }, [aiOnboarding.isActive, messages]);
 
-  // v2 sessions hooks (xyne-claw backed)
-  const { data: v2SessionsData, refetch: refetchV2Sessions } = useV2SessionsList(
-    effectiveAgentSlug,
-    isV2,
-  );
+  // The history panel (ConversationHistory) loads its own pages.
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
-
-  // Sync sessions list to local state for the ConversationHistory component
-  useEffect(() => {
-    if (v2SessionsData) {
-      setConversations(v2SessionsData);
-    }
-  }, [v2SessionsData]);
 
   // Thread context: load thread-specific conversation (channel-specific)
   // Global context: load most recent conversation across all channels
@@ -1116,21 +1225,19 @@ const XyneAISidebar = ({
             return;
           }
 
-          let v2Sessions = v2SessionsData;
-          if (!v2Sessions) {
-            const result = await refetchV2Sessions();
-            v2Sessions = result.data;
-          }
-
+          // The most recent conversation this agent answered in.
+          const { conversations: latest } = await fetchV2Conversations({
+            agentSlug: effectiveAgentSlug ?? 'ask-ai',
+            limit: 1,
+          });
           hasLoadedInitialConversationRef.current = true;
-
-          if (!v2Sessions || v2Sessions.length === 0) {
+          const mostRecentConv = latest[0];
+          if (!mostRecentConv) {
             setIsLoadingConversation(false);
             return;
           }
 
           // Load the most recent conversation's messages from claw
-          const mostRecentConv = v2Sessions[0]!;
           setStreamThreadKey(mostRecentConv.sessionId);
           usesDraftStreamKeyRef.current = false;
 
@@ -1196,25 +1303,23 @@ const XyneAISidebar = ({
     scrollToBottom,
     startFreshChat,
     isV2,
-    v2SessionsData,
-    refetchV2Sessions,
     selectedAgentSlug,
     effectiveAgentSlug,
     setSelectedAgentSlug,
   ]);
-
-  // Refetch sessions list when history sidebar is opened to get fresh data
-  useEffect(() => {
-    if (showHistorySidebar) {
-      void refetchV2Sessions();
-    }
-  }, [showHistorySidebar, refetchV2Sessions]);
 
   const handleSuggestionClick = (query: string): void => {
     setInputValue(query);
   };
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
+    // The history spans every agent: continue the chat with the agent it was
+    // last with (a no-op for a panel locked to one agent).
+    const rowAgentSlug = conversation.agentSlug ?? effectiveAgentSlug;
+    if (isV2 && conversation.agentSlug) {
+      setSelectedAgentSlug(conversation.agentSlug === 'ask-ai' ? null : conversation.agentSlug);
+    }
+    resetAssistant();
     setLoadingHistorySessionId(conversation.sessionId);
     setStreamThreadKey(conversation.sessionId);
     setConversationId(conversation.sessionId);
@@ -1268,7 +1373,7 @@ const XyneAISidebar = ({
         const deskDraft = deskAutoDraftRef.current;
         const clawMessages = await fetchV2ConversationMessages(
           conversation.sessionId,
-          effectiveAgentSlug,
+          rowAgentSlug,
           deskDraft && deskDraft.conversationId === conversation.sessionId
             ? deskAutoDraftMessagesUrl(deskDraft.conversationId, deskDraft.channelId)
             : undefined,
@@ -1310,7 +1415,7 @@ const XyneAISidebar = ({
         liveViewerDetachRef.current = xyneAIStreamManager.attachLiveViewer(
           streamTid,
           conversation.sessionId,
-          effectiveAgentSlug || 'ask-ai',
+          rowAgentSlug || 'ask-ai',
           messagesWithoutStreaming,
         );
 
@@ -1342,10 +1447,12 @@ const XyneAISidebar = ({
 
   const handleDeleteConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      await deleteV2Conversation(conversation.sessionId, effectiveAgentSlug);
-      invalidateV2Sessions(effectiveAgentSlug);
+      const rowAgentSlug = conversation.agentSlug ?? effectiveAgentSlug;
+      await deleteV2Conversation(conversation.sessionId, rowAgentSlug);
+      invalidateV2Sessions();
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
+        resetAssistant();
         setMessages([]);
         setBranchSelections({});
         setConversationId('');
@@ -1378,6 +1485,7 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion(0);
     setShowDebugger(false);
     setInputValue('');
+    resetAssistant();
     setAttachments([]);
     setSelectedActivities([]);
     setActiveSelectionInfos([]);
@@ -1386,38 +1494,37 @@ const XyneAISidebar = ({
     setShowUserActivityPanel(false);
 
     processedSelectionKeysRef.current.clear();
-  }, []);
+  }, [resetAssistant]);
 
-  // When user selects a different agent from the global selector,
-  // reset to a fresh conversation scoped to that agent.
+  // When user selects a different agent from the global selector. In an open
+  // conversation this is a mid-conversation switch: the chat stays, and the
+  // next turn goes to the new agent in the SAME conversation (claw-auth hands
+  // it the turns it has not seen). Only an empty panel starts a fresh chat.
   const handleSelectAgent = useCallback(
     (slug: string | null): void => {
       if (!isV2) return;
+      cancelRouting();
+      setAuto(false);
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
+      if (conversationId) return;
       handleNewChat();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
+    [
+      isV2,
+      selectedAgentSlug,
+      setSelectedAgentSlug,
+      handleNewChat,
+      setAuto,
+      cancelRouting,
+      conversationId,
+    ],
   );
 
-  // When user selects an agent from the history page, stay on history
-  // and refresh the conversation list for that agent.
-  const handleSelectAgentFromHistory = useCallback(
-    (slug: string | null): void => {
-      if (!isV2) return;
-      if (slug === selectedAgentSlug) return;
-      setSelectedAgentSlug(slug);
-      // Clear active conversation but stay on history page
-      setConversationId('');
-      setMessages([]);
-      setBranchSelections({});
-      setStreamThreadKey(newStreamSlotKey());
-      usesDraftStreamKeyRef.current = true;
-      // Refresh sessions list for the new agent
-      void refetchV2Sessions();
-    },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
-  );
+  const handleSelectAuto = useCallback((): void => {
+    handleSelectAgent(null);
+    setAuto(true);
+  }, [handleSelectAgent, setAuto]);
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
   handleLoadConversationRef.current = handleLoadConversation;
@@ -1513,42 +1620,16 @@ const XyneAISidebar = ({
     }
   }, [messages, conversationId, streamThreadKey, channelId, activeThreadInfo?.conversationId]);
 
-  const handleOpenContextModal = useCallback(() => setShowContextModal(true), []);
-  const handleCloseContextModal = useCallback(() => {
-    setShowContextModal(false);
-    // Focus the input box after closing the modal
-    setTimeout(() => {
-      xyneAIInputRef.current?.focus();
-    }, 0);
-  }, [xyneAIInputRef]);
   const handleConfirmContext = useCallback((selections: ContextSelections) => {
     setSelectedChannels(selections.channels);
     setSelectedTickets(selections.tickets);
     setSelectedCanvases(selections.canvases);
     setSelectedTranscripts(selections.transcripts);
     setSelectedRecordings(selections.recordings);
-  }, []);
-  const handleRemoveChannel = useCallback((id: string) => {
-    setSelectedChannels(prev => prev.filter(ch => ch.id !== id));
-  }, []);
-  const handleAddChannel = useCallback((ch: SelectedChannel) => {
-    setSelectedChannels(prev => {
-      if (prev.some(c => c.id === ch.id)) return prev;
-      if (prev.length >= 5) return prev;
-      return [...prev, ch];
-    });
-  }, []);
-  const handleRemoveTicket = useCallback((id: string) => {
-    setSelectedTickets(prev => prev.filter(t => t.id !== id));
-  }, []);
-  const handleRemoveCanvas = useCallback((id: string) => {
-    setSelectedCanvases(prev => prev.filter(c => c.id !== id));
-  }, []);
-  const handleRemoveTranscript = useCallback((id: string) => {
-    setSelectedTranscripts(prev => prev.filter(t => t.id !== id));
-  }, []);
-  const handleRemoveRecording = useCallback((id: string) => {
-    setSelectedRecordings(prev => prev.filter(r => r.id !== id));
+    setSelectedMessages(selections.messages ?? []);
+    setSelectedPeople(selections.people ?? []);
+    setSelectedSharedFiles(selections.sharedFiles ?? []);
+    setSelectedApps(selections.apps ?? []);
   }, []);
 
   // On switching to a conversation, carry its last user-turn context into the
@@ -1566,6 +1647,10 @@ const XyneAISidebar = ({
     setSelectedCanvases(c.canvases);
     setSelectedTranscripts(c.transcripts);
     setSelectedRecordings(c.recordings);
+    setSelectedMessages(c.messages ?? []);
+    setSelectedPeople(c.people ?? []);
+    setSelectedSharedFiles(c.sharedFiles ?? []);
+    setSelectedApps(c.apps ?? []);
     setFileScopes(c.fileScopes);
     setFolderScopes(c.folderScopes);
     setSelectedCollectionIds(c.collections.map(col => col.id));
@@ -1784,6 +1869,11 @@ const XyneAISidebar = ({
 
     abortCurrentRequest();
 
+    // A chat can switch agents mid-conversation: regenerate re-runs this turn
+    // with the agent that answered it, not the one picked now.
+    const lastBotMessage = [...displayMessages].reverse().find(m => m.type === 'bot');
+    const turnAgentSlug = lastBotMessage?.agentSlug ?? lastUserMessage.agentSlug;
+
     // Submit with same content, parentId = user message ID (new bot branches as sibling of existing bot)
     await submitQuery(
       lastUserMessage.content,
@@ -1793,6 +1883,10 @@ const XyneAISidebar = ({
       undefined, // userTags — not needed for regenerate
       lastUserMessage.id, // parent is the user message itself — bot response branches from it
       true, // isRegenerate
+      undefined, // isEditUserMessage
+      undefined, // editedUserMessageId
+      undefined, // parentAssistantMessageId
+      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
     );
   }, [messages, displayMessages, submitQuery, abortCurrentRequest]);
 
@@ -1840,6 +1934,8 @@ const XyneAISidebar = ({
         true, // isEditUserMessage — claw-auth branches PI session
         messageToEdit.id, // editedUserMessageId — the user msg being replaced
         editedParentAssistant, // parentAssistantMessageId — same as parentMessageId here
+        // Editing re-asks that turn, so it goes to the agent it was sent to.
+        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
       );
     },
     [messages, abortCurrentRequest, submitQuery],
@@ -1913,6 +2009,9 @@ const XyneAISidebar = ({
         const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
         query = query + contextText;
       }
+
+      const hostContext = hiddenContext?.();
+      if (hostContext) query = `${query}\n\n${hostContext}`;
 
       // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
       // The user message will show original query + selectionContexts as visual cards
@@ -2028,28 +2127,42 @@ const XyneAISidebar = ({
           sendTrigger ? { trigger: sendTrigger } : undefined,
         );
       } finally {
-        // The attachment belongs to the message it was sent with, not to the
-        // conversation: the sent message carries its own copy of attachedContext
-        // (persisted server-side — it is what the history pills and
-        // edit/regenerate read), so clearing the composer changes nothing already
-        // said. Left in place it silently steered every later answer, and nothing
-        // ever removed it.
+        // Context the user ADDED belongs to the message it was sent with, not
+        // to the conversation: the sent message carries its own copy of
+        // attachedContext (persisted server-side — it is what the history pills
+        // and edit/regenerate read), so clearing the composer changes nothing
+        // already said. Context the sidebar was OPENED with — the channel,
+        // thread, canvas, recording, KB file or the canvas selection it was
+        // asked about — is what the whole conversation is about, so it stays
+        // until the user removes it.
         //
         // In a finally: a send that throws is exactly when the context must not
         // be left behind, since the turn it belonged to never happened.
-        setSelectedChannels([]);
-        setSelectedTickets([]);
-        setSelectedCanvases([]);
-        setSelectedTranscripts([]);
-        setSelectedRecordings([]);
-        setActiveSelectionInfos([]);
-        processedSelectionKeysRef.current.clear();
-        // The machine holds the canvas selections that feed the list above;
-        // without this its next update would put them straight back.
-        xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
+        const openedWith = openedWithRef.current;
+        const keep =
+          (kind: string) =>
+          (item: { id: string }): boolean =>
+            openedWith.has(`${kind}:${item.id}`);
+        // An SDLC hub chat keeps its hub: the hub is where the chat happens, and
+        // a follow-up sent without it runs with no hub context at all.
+        const hubId = window.location.pathname.match(/\/sdlc\/([^/]+)/)?.[1];
+        setSelectedChannels(prev => prev.filter(ch => ch.id === hubId || keep('channel')(ch)));
+        setSelectedTickets(prev => prev.filter(keep('ticket')));
+        setSelectedCanvases(prev => prev.filter(keep('canvas')));
+        setSelectedTranscripts(prev => prev.filter(keep('call')));
+        setSelectedRecordings(prev => prev.filter(keep('call')));
+        setSelectedMessages([]);
+        setSelectedPeople([]);
+        setSelectedSharedFiles([]);
+        setSelectedApps([]);
+        setFileScopes(prev => prev.filter(f => f.id === kbDocIdProp));
+        setFolderScopes(prev => prev.filter(f => f.id === kbFolderIdProp));
+        setSentNonce(n => n + 1);
       }
     },
     [
+      kbDocIdProp,
+      kbFolderIdProp,
       inputValue,
       attachments,
       selectedActivities,
@@ -2069,6 +2182,8 @@ const XyneAISidebar = ({
     ],
   );
 
+  // Bumped by a voice transcript, which may equal the current input and so not change inputValue.
+  const [autoSendRequest, setAutoSendRequest] = useState(0);
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
   useEffect(() => {
     if (
@@ -2079,7 +2194,283 @@ const XyneAISidebar = ({
       autoSendTriggerRef.current = 'auto_send';
       void handleSubmit();
     }
-  }, [inputValue, handleSubmit]);
+  }, [inputValue, handleSubmit, autoSendRequest]);
+
+  const routedSubmit = useRoutedSubmit<'button' | 'enter' | undefined>({
+    assistant,
+    value: inputValue,
+    clear: () => setInputValue(''),
+    submit: trigger => void handleSubmit(trigger),
+  });
+
+  const handleAbort = (): void => {
+    if (buddyWorking) {
+      // Also the action cards asked for a request Buddy passed on.
+      buddy.cancel();
+      assistant.cancel();
+      return;
+    }
+    if (routedSubmit.stop()) return;
+    assistant.cancel();
+    abortCurrentRequest();
+  };
+
+  const canRoute =
+    isAuto &&
+    assistant.actions.length > 0 &&
+    !aiOnboarding.isActive &&
+    !editingMessageId &&
+    attachments.length === 0 &&
+    selectedActivities.length === 0 &&
+    activeSelectionInfos.length === 0;
+
+  const sendOnward = (trigger?: 'button' | 'enter'): void => {
+    const text = inputValue.trim();
+    if (canRoute && text !== '' && !text.startsWith('/') && routedSubmit.route(trigger)) return;
+    void handleSubmit(trigger);
+  };
+
+  // A request Buddy passed on goes back in the box, then on as if just sent (fresh closures).
+  // handleSubmit reads the box, so the request is put back for one render and sent before paint.
+  const resendRef = useRef<{ text: string; trigger: 'button' | 'enter' | undefined } | null>(null);
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
+  useLayoutEffect(() => {
+    const resend = resendRef.current;
+    if (!resend || inputValue.trim() !== resend.text) return;
+    resendRef.current = null;
+    void handleSubmitRef.current(resend.trigger);
+  }, [inputValue]);
+
+  // A request Buddy passed on keeps its bubble and loader until what answers it (action cards or
+  // Ask AI's turn) is in, and they go in that same frame: no empty chat between "Working on it"
+  // and Ask AI's thinking. Ids already shown when it started are not the answer.
+  const handoffRef = useRef<{
+    replyId: string;
+    text: string;
+    before: ReadonlySet<string>;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const endHandoff = useCallback((): void => {
+    const handoff = handoffRef.current;
+    if (!handoff) return;
+    handoffRef.current = null;
+    clearTimeout(handoff.timer);
+    endBuddyNote(handoff.replyId, null);
+  }, [endBuddyNote]);
+  useLayoutEffect(() => {
+    const handoff = handoffRef.current;
+    if (!handoff) return;
+    const answers = (message: Message): boolean =>
+      message.type === 'user' &&
+      message.content === handoff.text &&
+      !handoff.before.has(message.id);
+    if (messages.some(answers) || assistantMessages.some(answers)) endHandoff();
+  }, [messages, assistantMessages, endHandoff]);
+  useEffect(() => endHandoff, [endHandoff]);
+
+  // Read after Buddy's walk, so the latest, not the render that started it.
+  const buddyChatRef = useRef({
+    conversationId,
+    branchSelections,
+    displayMessages,
+    messages,
+    assistantMessages,
+  });
+  buddyChatRef.current = {
+    conversationId,
+    branchSelections,
+    displayMessages,
+    messages,
+    assistantMessages,
+  };
+
+  // Once saved, Buddy's local turns give way to the saved rows, as if they came from the server:
+  // a stream started after them carries them (so reopening mid-reply still shows them), and the
+  // next turn follows them instead of forking from the reply before. Linked as a streamed turn is
+  // (request under the tip of what is shown, reply under the request), the same chain claw-auth
+  // saved: unlinked rows would read as a legacy chat, whose next turn is sent with no parent and
+  // forks at the root.
+  const showSavedBuddyTurns = useCallback(
+    (saved: SavedBuddyTurns): void => {
+      invalidateV2Sessions();
+      for (const turn of saved.turns) if (turn.localId) endBuddyNote(turn.localId, null);
+      if (saved.conversationId !== buddyChatRef.current.conversationId) return;
+      const agentSlug = effectiveAgentSlug ?? 'ask-ai';
+      setMessages(prev => {
+        let parentId = resolveActivePath(prev, buddyChatRef.current.branchSelections).at(-1)?.id;
+        const rows = saved.turns.flatMap((turn, index): Message[] => {
+          const userId = saved.messageIds[index * 2];
+          const botId = saved.messageIds[index * 2 + 1];
+          if (!userId || !botId) return [];
+          const shared = { sessionId: saved.conversationId, agentSlug };
+          const pair: Message[] = [
+            {
+              ...shared,
+              id: userId,
+              type: 'user',
+              content: turn.request,
+              timestamp: turn.at,
+              ...(parentId ? { parentId } : {}),
+            },
+            {
+              ...shared,
+              id: botId,
+              type: 'bot',
+              content: turn.reply,
+              timestamp: new Date(turn.at.getTime() + 1),
+              parentId: userId,
+            },
+          ];
+          parentId = botId;
+          return pair;
+        });
+        return [...prev, ...rows];
+      });
+    },
+    [invalidateV2Sessions, endBuddyNote, effectiveAgentSlug],
+  );
+
+  // What Buddy did on screen goes into the chat's history too.
+  const saveBuddyTurn = useSaveBuddyTurns({
+    enabled: isV2,
+    conversationId,
+    agentSlug: effectiveAgentSlug,
+    streaming: isActiveSessionStreaming,
+    onStarted: setConversationId,
+    onSaved: showSavedBuddyTurns,
+  });
+  /** The finished reply on screen a new turn would follow; a stream's stand-in id is no parent. */
+  const shownReplyId = (): string | undefined => {
+    const tip = buddyChatRef.current.displayMessages.at(-1);
+    return tip?.type === 'bot' && !tip.isStreaming ? tip.id : undefined;
+  };
+
+  const buddyTyped =
+    screenActions &&
+    isAuto &&
+    !aiOnboarding.isActive &&
+    !editingMessageId &&
+    attachments.length === 0 &&
+    selectedActivities.length === 0 &&
+    activeSelectionInfos.length === 0;
+
+  // Reads as a chat turn: the request goes up at once with the loader, and Buddy's reply takes
+  // the loader's place. Not for Buddy, or stopped: the turn goes and the request is back in the box,
+  // sent on to Ask AI when Buddy passed it.
+  const runBuddy = async (text: string, trigger?: 'button' | 'enter'): Promise<void> => {
+    setBuddyWorking(true);
+    setInputValue('');
+    const replyId = startBuddyNote(text);
+    try {
+      let reply = '';
+      const outcome = await tryBuddy(text, {
+        quiet: true,
+        onReply: said => {
+          reply = said;
+        },
+      });
+      if (outcome === 'done') {
+        endBuddyNote(replyId, reply);
+        saveBuddyTurn({
+          request: text,
+          reply,
+          at: new Date(),
+          localId: replyId,
+          parentId: shownReplyId(),
+        });
+        return;
+      }
+      // Stopped, or typed over during the walk (what is in the box now is the user's).
+      const typedOver = inputValueRef.current.trim() !== '';
+      if (outcome === 'stopped' || typedOver) {
+        endBuddyNote(replyId, null);
+        if (!typedOver) setInputValue(text);
+        return;
+      }
+      const { messages: shown, assistantMessages: local } = buddyChatRef.current;
+      handoffRef.current = {
+        replyId,
+        text,
+        before: new Set([...shown, ...local].map(message => message.id)),
+        // Nothing answered (the send failed): the stand-in does not wait forever.
+        timer: setTimeout(endHandoff, BUDDY_HANDOFF_MAX_MS),
+      };
+      // Action cards first, still under the loader; then Ask AI.
+      if (canRoute && !text.startsWith('/')) {
+        const routed = await assistant.ask(text);
+        if (routed.outcome === 'replied') return;
+        if (routed.outcome === 'cancelled' || inputValueRef.current.trim() !== '') {
+          const stopped = routed.outcome === 'cancelled' && inputValueRef.current.trim() === '';
+          endHandoff();
+          if (stopped) setInputValue(text);
+          return;
+        }
+      }
+      resendRef.current = { text, trigger };
+      setInputValue(text);
+    } finally {
+      setBuddyWorking(false);
+    }
+  };
+
+  // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
+  // An explicit "/command" is never re-routed by Auto either (same as the AI screen).
+  const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
+    if (buddyWorking) return;
+    const text = inputValue.trim();
+    if (buddyTyped && text !== '' && !text.startsWith('/')) {
+      void runBuddy(text, trigger);
+      return;
+    }
+    sendOnward(trigger);
+  };
+
+  const [voiceMode, setVoiceMode] = useState(false);
+  // Voice mode names the chat it is in, as the history does.
+  const savedChatTitle = useCachedV2ConversationTitle(isV2 ? conversationId : null);
+  const voiceChatTitle = useMemo(
+    () => chatTitleOf(savedChatTitle, transcriptMessages),
+    [savedChatTitle, transcriptMessages],
+  );
+  const submitTranscript = useCallback((text: string): void => {
+    autoSendPendingQueryRef.current = text;
+    setInputValue(text);
+    setAutoSendRequest(request => request + 1);
+  }, []);
+  const screenEnabled = screenActions && isAuto && !aiOnboarding.isActive;
+  const answerTranscript = useCallback(
+    async (text: string): Promise<string | null> => {
+      // '' means Buddy was stopped, so the action cards are not asked.
+      const walked = screenEnabled ? await buddy.answer(text) : null;
+      if (walked) {
+        const parentId = shownReplyId();
+        const localId = startBuddyNote(text);
+        endBuddyNote(localId, walked);
+        saveBuddyTurn({ request: text, reply: walked, at: new Date(), localId, parentId });
+      }
+      return walked ?? (canRoute ? assistant.answer(text) : null);
+    },
+    [screenEnabled, canRoute, assistant, saveBuddyTurn, startBuddyNote, endBuddyNote],
+  );
+  const ownsStream = useCallback(
+    (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
+    [streamThreadKey],
+  );
+  useVoiceHost(voiceMode, {
+    submit: submitTranscript,
+    ownsStream,
+    answer: answerTranscript,
+    onStop: () => {
+      buddy.cancel();
+      handleAbort();
+    },
+    cancelAnswer: () => {
+      buddy.cancel();
+      assistant.cancel();
+    },
+    onExit: () => setVoiceMode(false),
+  });
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
     if (streamingSessionIds.length === 0) return false;
@@ -2088,74 +2479,51 @@ const XyneAISidebar = ({
     return streamingSessionIds.some(id => id && !curKeys.has(id));
   }, [streamingSessionIds, conversationId, streamThreadKey, messages]);
 
-  // Shared props for XyneAIInputSection
-  const contextSelections: ContextSelections = {
-    channels: selectedChannels,
-    tickets: selectedTickets,
-    canvases: selectedCanvases,
-    transcripts: selectedTranscripts,
-    recordings: selectedRecordings,
-    localFolders: [],
-  };
-
+  // Shared props for the composer (XyneAIInputBox), at both mount points.
   const sharedInputSectionProps = {
-    // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
-    // hides itself, so no extra gating is needed here beyond the v2 check.
+    ...(composerPlaceholder === undefined ? {} : { placeholder: composerPlaceholder }),
     models: isV2 ? (agentModelsData?.models ?? []) : [],
+    modelsLoading: agentModelsLoading,
     defaultModel: agentModelsData?.defaultModel ?? null,
+    defaultModelName: agentModelsData?.defaultModelName ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
     thinkingLevel,
     onSelectThinking: setThinkingLevel,
-    showContextModal,
-    onCloseContextModal: handleCloseContextModal,
-    onConfirmContext: handleConfirmContext,
-    contextSelections,
+    onContextSelectionsChange: handleConfirmContext,
     channelId,
-    channelName,
-    channelDescription,
-    scopeType,
     threadInfo: activeThreadInfo,
     canvasInfo,
     workflowInfo: activeWorkflowInfo,
     onRemoveWorkflowInfo: handleRemoveWorkflowInfo,
     selectionInfos: activeSelectionInfos,
     inputValue,
+    showAgentHeader,
+    hideAgentName,
     onInputChange: setInputValue,
-    onSubmit: (trigger?: 'button' | 'enter') => void handleSubmit(trigger),
+    onSubmit: handleComposerSubmit,
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
     onBrowserContextChange: setBrowserContext,
-    selectedChannels,
-    onRemoveChannel: handleRemoveChannel,
-    onAddChannel: handleAddChannel,
-    nonDMChannels,
     collectionsList: effectiveCollectionsList,
-    // Only pass grants when the agent is COLLECTIONS-scoped — USER scope
-    // and v1 (no agent) should keep the legacy "no drill-down gating"
-    // behavior, which the input box achieves when this prop is absent.
-    ...(selectedAgent && selectedAgent.kbScope === 'COLLECTIONS'
-      ? { agentKbGrants: selectedAgent.collections }
-      : {}),
+    sentNonce,
     fileScopes,
     onFileScopesChange: setFileScopes,
     folderScopes,
     onFolderScopesChange: setFolderScopes,
-    onOpenContextModal: handleOpenContextModal,
+    selectedChannels,
     selectedTickets,
-    onRemoveTicket: handleRemoveTicket,
     selectedCanvases,
-    onRemoveCanvas: handleRemoveCanvas,
     selectedTranscripts,
-    onRemoveTranscript: handleRemoveTranscript,
     selectedRecordings,
-    onRemoveRecording: handleRemoveRecording,
+    selectedMessages,
+    selectedPeople,
+    selectedSharedFiles,
+    selectedApps,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
-    onAbort: () => {
-      abortCurrentRequest();
-    },
+    onAbort: handleAbort,
     webSearchEnabled,
     webSearchAccessible,
     onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),
@@ -2195,6 +2563,7 @@ const XyneAISidebar = ({
 
   return (
     <div
+      {...{ [ASSISTANT_PANEL_ATTR]: '' }}
       className={cn(
         'grid h-full min-h-0 w-full overflow-hidden',
         isMobile && 'border bg-background',
@@ -2240,7 +2609,6 @@ const XyneAISidebar = ({
         {showHistorySidebar ? (
           <ConversationHistory
             onClose={() => xyneAIActor.send({ type: 'CLOSE' })}
-            conversations={conversations}
             conversationId={conversationId}
             loadingSessionId={loadingHistorySessionId}
             streamingSessionIds={streamingSessionIds}
@@ -2249,9 +2617,7 @@ const XyneAISidebar = ({
               void handleLoadConversation(conversation);
             }}
             onDeleteConversation={handleDeleteConversation}
-            selectedAgentSlug={effectiveAgentSlug}
-            agents={isV2 ? accessibleAgents : []}
-            {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgentFromHistory } : {})}
+            lockedAgentSlug={isAgentForced ? (forcedAgentSlug ?? 'ask-ai') : null}
           />
         ) : showUserActivityPanel ? (
           <UserActivityPanel
@@ -2304,7 +2670,7 @@ const XyneAISidebar = ({
               />
             )}
 
-            {hasBackgroundStreamingElsewhere ? (
+            {hasBackgroundStreamingElsewhere && !hideBackgroundStreamNotice ? (
               <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
@@ -2347,7 +2713,8 @@ const XyneAISidebar = ({
               </div>
             ) : null}
 
-            <div className='min-h-0 flex-1 overflow-hidden'>
+            {/* Kept mounted in voice mode so the transcript and its scroll position survive. */}
+            <div className={cn('min-h-0 flex-1 overflow-hidden', voiceMode && 'hidden')}>
               <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
                 {isLoadingConversation ? (
                   <div className='px-3 py-4'>
@@ -2364,17 +2731,15 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   </div>
-                ) : messages.length === 0 ? (
+                ) : messages.length === 0 && assistantMessages.length === 0 ? (
                   isFullscreen ? (
                     <AILandingHeroErrorBoundary>
                       <AILandingHero
                         renderInput={
-                          <XyneAIInputSection
+                          <XyneAIInputBox
                             ref={xyneAIInputRef}
                             isOnboarding={false}
-                            showChannelTag={false}
                             isStreaming={false}
-                            contextPanelPosition='top'
                             selectedAgentSlug={effectiveAgentSlug}
                             agents={isV2 ? accessibleAgents : []}
                             {...(isV2 && !isAgentForced
@@ -2412,7 +2777,11 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAIEmptyState hideSuggestions={hideEmptyStateSuggestions} />
+                    <XyneAIEmptyState
+                      hideSuggestions={hideEmptyStateSuggestions}
+                      starters={openedForOnboarding ? assistant.starters : []}
+                      onSelectStarter={assistant.choose}
+                    />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
@@ -2420,10 +2789,10 @@ const XyneAISidebar = ({
                       className={cn(
                         'py-4',
                         aiOnboarding.isActive && 'bot-markdown-content',
-                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-3',
+                        isFullscreen ? 'w-full max-w-2xl px-4' : roomyContent ? 'px-6' : 'px-3',
                       )}
                     >
-                      <div className='max-w-full space-y-4'>
+                      <div className={cn('max-w-full', roomyContent ? 'space-y-8' : 'space-y-4')}>
                         {aiOnboarding.isActive && (
                           <div className='mb-2 flex items-start gap-2'>
                             <div className='mt-0.5 flex-shrink-0'>
@@ -2443,7 +2812,25 @@ const XyneAISidebar = ({
                             // lastBotIndex / lastUserIndex / siblingIndexById are
                             // computed in the memo above; just consume here so this
                             // IIFE doesn't re-walk both lists on every render.
-                            return displayMessages.map((message: Message, index: number) => {
+                            return transcriptMessages.map((message: Message) => {
+                              if (isAssistantMessage(message.id)) {
+                                return (
+                                  <MessageItem
+                                    key={message.id}
+                                    message={message}
+                                    readOnly
+                                    onFeedback={() => undefined}
+                                    onCitationClick={handleCitationClick}
+                                    onSummarizerCitationClick={handleSummarizerCitationClick}
+                                    feedbackValue={null}
+                                    isLatestBotMessage={message.type === 'bot'}
+                                    onFollowUpSuggestionClick={label => {
+                                      assistant.openPill(message.id, label);
+                                    }}
+                                  />
+                                );
+                              }
+                              const index = serverIndexById.get(message.id) ?? -1;
                               const isLatestBotMessage =
                                 message.type === 'bot' && index === lastBotIndex;
                               const isLatestUserMessage =
@@ -2463,76 +2850,81 @@ const XyneAISidebar = ({
                                 !message.isStreaming &&
                                 !!message.followUpSuggestions?.length;
                               return (
-                                <MessageItem
-                                  // Stable key so the bubble doesn't remount when
-                                  // the id swaps temp→server at completion (which
-                                  // would kill the activity block's transition).
-                                  key={message.stableKey ?? message.id}
-                                  message={message}
-                                  onFeedback={(id, type) => void handleFeedback(id, type)}
-                                  onCitationClick={handleCitationClick}
-                                  onSummarizerCitationClick={handleSummarizerCitationClick}
-                                  feedbackValue={feedbackMap[message.id] || null}
-                                  isV2={isV2}
-                                  trackContext={messageTrackContext}
-                                  onRatingChange={handleRatingChange}
-                                  onRegenerate={
-                                    !isLegacyConversation && isLatestBotMessage
-                                      ? () => void handleRegenerate()
-                                      : undefined
-                                  }
-                                  onEditSubmit={
-                                    !isLegacyConversation && isLatestUserMessage
-                                      ? (newContent: string, context?: EditedMessageContext) =>
-                                          void handleEditMessage(message.id, newContent, context)
-                                      : undefined
-                                  }
-                                  onEditMobile={
-                                    !isLegacyConversation && isLatestUserMessage && isMobile
-                                      ? () => handleEditMobile(message.id)
-                                      : undefined
-                                  }
-                                  isLatestBotMessage={isLatestBotMessage}
-                                  branchInfo={
-                                    !isLegacyConversation && hasBranches
-                                      ? { index: siblingIndex, total: siblingCount }
-                                      : undefined
-                                  }
-                                  onBranchNavigate={
-                                    !isLegacyConversation && hasBranches
-                                      ? (dir: 'prev' | 'next') =>
-                                          handleBranchNavigate(message.id, dir)
-                                      : undefined
-                                  }
-                                  onDebug={
-                                    isV2 && !isAgentForced && message.type === 'bot'
-                                      ? () => {
-                                          setDebugTurnIndex(botTurnIndex);
-                                          // Prefer sessionId pinning when the
-                                          // run is known. Falls back to null
-                                          // (turn-index path) for live streams
-                                          // whose AgentRun hasn't been linked
-                                          // to chatMessageId yet.
-                                          setDebugSessionId(message.debugSessionId ?? null);
-                                          setDebugFocusToolCallId(null);
-                                          setShowDebugger(true);
-                                        }
-                                      : undefined
-                                  }
-                                  onOpenToolDebug={
-                                    isV2 && !isAgentForced && message.type === 'bot'
-                                      ? (toolCallId: string) => {
-                                          setDebugTurnIndex(botTurnIndex);
-                                          setDebugSessionId(message.debugSessionId ?? null);
-                                          setDebugFocusToolCallId(toolCallId);
-                                          setShowDebugger(true);
-                                        }
-                                      : undefined
-                                  }
-                                  onFollowUpSuggestionClick={
-                                    showFollowUps ? handleSuggestionClick : undefined
-                                  }
-                                />
+                                <Fragment
+                                  key={`${message.stableKey ?? message.id}${flowPhaseKey(message.uiFlows)}`}
+                                >
+                                  <MessageItem
+                                    // Stable key so the bubble doesn't remount when
+                                    // the id swaps temp→server at completion (which
+                                    // would kill the activity block's transition).
+                                    message={message}
+                                    onFeedback={(id, type) => void handleFeedback(id, type)}
+                                    onCitationClick={handleCitationClick}
+                                    onSummarizerCitationClick={handleSummarizerCitationClick}
+                                    feedbackValue={feedbackMap[message.id] || null}
+                                    isV2={isV2}
+                                    trackContext={messageTrackContext}
+                                    {...(flowCards ? { flowCards } : {})}
+                                    onInterceptPendingAction={onInterceptPendingAction}
+                                    onRatingChange={handleRatingChange}
+                                    onRegenerate={
+                                      !isLegacyConversation && isLatestBotMessage
+                                        ? () => void handleRegenerate()
+                                        : undefined
+                                    }
+                                    onEditSubmit={
+                                      !isLegacyConversation && isLatestUserMessage
+                                        ? (newContent: string, context?: EditedMessageContext) =>
+                                            void handleEditMessage(message.id, newContent, context)
+                                        : undefined
+                                    }
+                                    onEditMobile={
+                                      !isLegacyConversation && isLatestUserMessage && isMobile
+                                        ? () => handleEditMobile(message.id)
+                                        : undefined
+                                    }
+                                    isLatestBotMessage={isLatestBotMessage}
+                                    branchInfo={
+                                      !isLegacyConversation && hasBranches
+                                        ? { index: siblingIndex, total: siblingCount }
+                                        : undefined
+                                    }
+                                    onBranchNavigate={
+                                      !isLegacyConversation && hasBranches
+                                        ? (dir: 'prev' | 'next') =>
+                                            handleBranchNavigate(message.id, dir)
+                                        : undefined
+                                    }
+                                    onDebug={
+                                      isV2 && !isAgentForced && message.type === 'bot'
+                                        ? () => {
+                                            setDebugTurnIndex(botTurnIndex);
+                                            // Prefer sessionId pinning when the
+                                            // run is known. Falls back to null
+                                            // (turn-index path) for live streams
+                                            // whose AgentRun hasn't been linked
+                                            // to chatMessageId yet.
+                                            setDebugSessionId(message.debugSessionId ?? null);
+                                            setDebugFocusToolCallId(null);
+                                            setShowDebugger(true);
+                                          }
+                                        : undefined
+                                    }
+                                    onOpenToolDebug={
+                                      isV2 && !isAgentForced && message.type === 'bot'
+                                        ? (toolCallId: string) => {
+                                            setDebugTurnIndex(botTurnIndex);
+                                            setDebugSessionId(message.debugSessionId ?? null);
+                                            setDebugFocusToolCallId(toolCallId);
+                                            setShowDebugger(true);
+                                          }
+                                        : undefined
+                                    }
+                                    onFollowUpSuggestionClick={
+                                      showFollowUps ? handleSuggestionClick : undefined
+                                    }
+                                  />
+                                </Fragment>
                               );
                             });
                           })()}
@@ -2565,6 +2957,8 @@ const XyneAISidebar = ({
               </div>
             </div>
 
+            {voiceMode && <VoiceStage messages={transcriptMessages} chatTitle={voiceChatTitle} />}
+
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
               <div className='px-3 py-2'>
                 <button
@@ -2579,24 +2973,25 @@ const XyneAISidebar = ({
             )}
 
             {/* composer-container — owns the gutter around the composer */}
-            {!(isFullscreen && messages.length === 0) && (
+            {!voiceMode && !(isFullscreen && messages.length === 0) && (
               <div
                 className={cn(
-                  isFullscreen ? 'flex justify-center px-4 pb-6' : 'px-3',
-                  !isFullscreen && !isMobile && 'pb-3',
+                  isFullscreen ? 'flex justify-center px-4 pb-6' : roomyContent ? 'px-6' : 'px-3',
+                  !isFullscreen && !isMobile && (roomyContent ? 'pb-6' : 'pb-3'),
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                  <XyneAIInputSection
+                  <XyneAIInputBox
                     ref={xyneAIInputRef}
                     isOnboarding={aiOnboarding.isActive}
-                    showChannelTag={true}
-                    isStreaming={isActiveSessionStreaming}
-                    contextPanelPosition='bottom'
+                    isStreaming={isActiveSessionStreaming || assistant.isRouting || buddyWorking}
                     selectedAgentSlug={effectiveAgentSlug}
                     agents={isV2 ? accessibleAgents : []}
                     {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
-                    compactToolbar={isCompactSidebar}
+                    {...(isV2 && !isAgentForced && !isFullscreen
+                      ? { isAuto, onSelectAuto: handleSelectAuto }
+                      : {})}
+                    {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}
                     kbOpenNonce={kbOpenNonce}

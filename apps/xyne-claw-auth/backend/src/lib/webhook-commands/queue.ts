@@ -1,5 +1,6 @@
 import { clearQueue, peekQueue, queueDepth } from "../message-queue.js";
 import type { WebhookCommandCtx } from "./context.js";
+import { notice, pluralize, systemNote } from "../notice-format.js";
 
 // ── /queue ── show messages waiting behind the active run, then stop.
 export async function handleQueueShow(ctx: WebhookCommandCtx): Promise<void> {
@@ -9,9 +10,10 @@ export async function handleQueueShow(ctx: WebhookCommandCtx): Promise<void> {
   const waiting = convId ? await peekQueue(convId, agent.slug) : [];
   const lines =
     depth === 0
-      ? ["🕒 **Message queue** — empty. Nothing is waiting behind the current run."]
+      ? [systemNote("**Message queue** — nothing is waiting behind the current run.")]
       : [
-          `🕒 **Message queue** — ${depth} message${depth === 1 ? "" : "s"} waiting behind the active run:`,
+          notice("Message queue.", `${pluralize(depth, "message")} waiting behind the active run.`),
+          "",
           ...waiting.map((m, i) => {
             const preview = m.task.replace(/\s+/g, " ").slice(0, 80);
             return `${i + 1}. ${preview}${m.task.length > 80 ? "…" : ""}`;
@@ -29,7 +31,10 @@ export async function handleQueueClear(ctx: WebhookCommandCtx): Promise<void> {
   const discarded = convId ? await clearQueue(convId, agent.slug) : 0;
   const reply =
     discarded > 0
-      ? `🧹 Cleared the queue — dropped ${discarded} waiting message${discarded === 1 ? "" : "s"}. The current run continues.`
-      : "The queue is already empty.";
+      ? notice(
+          "Queue cleared.",
+          `Dropped ${pluralize(discarded, "waiting message")}. The current run continues.`,
+        )
+      : systemNote("The queue is already empty.");
   await ctx.reply(reply, "Failed to post /queue clear reply");
 }

@@ -18,6 +18,7 @@ import { VisibleChannel } from '../../../machines/stateMachine';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
+import { ChannelFields } from '../Info/ChannelFields';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { stateMachineActor } from '../../../machines/stateMachine';
 
@@ -29,6 +30,7 @@ const POLICY_OPTIONS = [
 interface ChannelSettingsProps {
   channel: VisibleChannel;
   isAdmin: boolean;
+  canEditFields: boolean;
   previousChannelId?: string | null | undefined;
   onClose?: () => void;
 }
@@ -85,6 +87,7 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
 export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   channel,
   isAdmin,
+  canEditFields,
   previousChannelId,
   onClose,
 }) => {
@@ -192,7 +195,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   };
 
   const handleOpenWorkspaceSettings = (): void => {
-    void navigate(`/${context.workspaceId}/workspace-management`);
+    void navigate(`/${context.workspaceId}/organisations/general`);
   };
 
   const handlePolicyChange = (policy: ChannelAddUserPolicy): void => {
@@ -294,6 +297,8 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
           </div>
         </div>
 
+        <ChannelFields channelId={channel.id} canEdit={canEditFields} />
+
         {canManageTicketVisibility && (
           <div className='bg-card p-[12px] rounded-[12px] border border-border'>
             <div className='flex items-start justify-between gap-3'>
@@ -376,18 +381,22 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
 
-          <div className='h-px bg-border' />
+          {context.role !== 'COMMUNITY_MEMBER' && (
+            <>
+              <div className='h-px bg-border' />
 
-          <button
-            type='button'
-            onClick={() => void handleCopyEmails()}
-            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
-            data-track-category='CHANNEL_SETTINGS'
-            data-track-name='CopyMemberEmails'
-            data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
-          >
-            <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
-          </button>
+              <button
+                type='button'
+                onClick={() => void handleCopyEmails()}
+                className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
+                data-track-category='CHANNEL_SETTINGS'
+                data-track-name='CopyMemberEmails'
+                data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
+              >
+                <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Private -> public card */}

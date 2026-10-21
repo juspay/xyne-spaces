@@ -23,7 +23,9 @@ export const RecordingSummaryActivity = ({
 
   const title = call.title ?? 'Untitled';
   const isRecording = call.callType === CallType.HEADLESS;
-  const targetPath = isRecording ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+  const targetPath = isRecording
+    ? `/recordings/${call.externalId}`
+    : `/calls/${call.externalId}/detail`;
 
   return (
     <ActivityItemCard

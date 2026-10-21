@@ -20,7 +20,7 @@ const channelParticipantRepository = new ChannelParticipantRepository();
 
 router.use(express.json());
 
-async function authorizeAppDeskManager(
+export async function authorizeAppDeskManager(
   channelId: string,
   userId: string,
   workspaceId: string,

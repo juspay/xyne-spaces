@@ -34,13 +34,13 @@ import tempfile
 setup_logging()
 logger = get_logger(__name__)
 
-# Suppress livekit-agents internal logging - only show CRITICAL errors
+# Show livekit-agents worker connection logs (registration, retries) at INFO
 # This must be done at module level (before cli.run_app) to catch all logs
 import logging as _logging
-_logging.getLogger("livekit").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.plugins").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents.ipc").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents").setLevel(_logging.INFO)
+_logging.getLogger("livekit.plugins").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents.ipc").setLevel(_logging.INFO)
 
 # Load configuration
 config = Config.load()
@@ -191,7 +191,7 @@ async def entrypoint(ctx: JobContext):
         stt_model=config.stt_model,
         google_voice_credentials_json=config.google_voice_credentials_json,
         google_stt_model=config.google_stt_model,
-        google_stt_language=config.google_stt_language,
+        google_stt_language=config.google_stt_realtime_language,
         deepgram_api_key=config.deepgram_api_key,
         deepgram_model=config.deepgram_model,
         deepgram_language=config.deepgram_language,

@@ -42,12 +42,12 @@ import { Button } from '../../components/ui/Button/Button';
 import Dialog from '../../components/ui/Dialog';
 import { getStageColor, groupTicketsByStage } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
 import type { Stage } from '../KanbanBoardScreen/KanbanBoardScreen.types';
-import {
-  ticketMatchesDynamicFieldEntries,
-  type DynamicFieldFilterEntry,
-  type DynamicFieldQueryFilter,
-  type FormEntityValueLike,
+import type {
+  DynamicFieldFilterEntry,
+  DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
+import { useKanbanCounts } from '../KanbanBoardScreen/useKanbanCounts';
+import type { SupportKanbanPageBaseArgs } from './useSupportKanbanTicketsPage';
 
 const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
   id: stage.id,
@@ -115,23 +115,19 @@ export const SupportKanbanBoard = ({
   const channelUserStatus = useGetChannelUserStatus(channelId);
   const isMember = !!channelUserStatus;
 
-  // Channel-scoped tickets. Gated on channelId only (NOT boardId), so it loads
-  // immediately on first kanban visit; the board id is then derived from the
-  // first row below.
-  const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
-  const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV4({
+  const pageArgs = useMemo<SupportKanbanPageBaseArgs>(() => {
+    const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
+    return {
       channelId,
       isMember,
       ...restTicketFilter,
       ...(conversationIdWhitelist !== undefined
         ? { conversationIds: conversationIdWhitelist }
         : {}),
-    }),
-    { enabled: !!channelId },
-  );
+    };
+  }, [channelId, isMember, ticketFilter]);
 
-  // Record kanban ticket load duration once the query completes. Mirrors the
+  // Record kanban ticket load duration once a column's page query completes. Mirrors the
   // list view's SUPPORT_TICKETS_LOADED instrumentation so both views are
   // comparable. The timer resets per channel + filter combination.
   const filterKey = useMemo(
@@ -173,12 +169,24 @@ export const SupportKanbanBoard = ({
       ticketFilter.conversationLabelId,
     ],
   );
+  // Columns report their loaded rows here; the grouped view, drag-and-drop and the
+  // parent's merge dialog only ever see what has been paged in.
+  const [ticketsByColumn, setTicketsByColumn] = useState<Record<string, Ticket[]>>({});
+  const handleColumnTicketsChange = useCallback((columnKey: string, tickets: Ticket[]) => {
+    setTicketsByColumn(prev => ({ ...prev, [columnKey]: tickets }));
+  }, []);
+
+  // Columns report the page args they completed for, so a completion left over from the
+  // previous filter is never timed against the new one.
+  const [completedPageArgs, setCompletedPageArgs] = useState<SupportKanbanPageBaseArgs | null>(
+    null,
+  );
   const loadStartTimeRef = useRef<number | null>(Date.now());
   useEffect(() => {
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
   useEffect(() => {
-    if (supportTicketsDetails.type !== 'complete') return;
+    if (completedPageArgs !== pageArgs) return;
     if (loadStartTimeRef.current === null) return;
     const duration = Date.now() - loadStartTimeRef.current;
     logger.info(Event.SUPPORT_TICKETS_LOADED, {
@@ -196,33 +204,18 @@ export const SupportKanbanBoard = ({
       });
     });
     loadStartTimeRef.current = null;
-  }, [supportTicketsDetails.type, filterKey, channelId]);
+  }, [completedPageArgs, pageArgs, filterKey, channelId]);
 
-  // Resolve the board id from the first loaded ticket. Previously this only
-  // happened in the list view (via onBoardIdReady), so visiting kanban first
-  // left boardId null and the stage columns never loaded — tickets had nowhere
-  // to render. Deriving it here makes kanban work on first visit.
-  const firstRowBoardId = supportTickets?.[0]?.boardId;
+  // Fallback for a desk with no board on its channel preference: take the board from
+  // any one of its tickets so the stage columns can load.
+  const [firstTicketRows] = useCachedQuery(
+    queries.supportTicketsPageV4({ channelId, isMember, limit: 1, start: null, dir: 'forward' }),
+    { enabled: !!channelId && !boardId },
+  );
+  const firstRowBoardId = firstTicketRows?.[0]?.boardId;
   useEffect(() => {
     if (firstRowBoardId) onBoardIdResolved(firstRowBoardId);
   }, [firstRowBoardId, onBoardIdResolved]);
-
-  const dynamicallyFilteredTickets = useMemo<Ticket[] | undefined>(() => {
-    if (!supportTickets) return undefined;
-    const rows = supportTickets as Ticket[];
-    if (!dynamicFieldEntries?.length) return rows;
-    return rows.filter(ticket =>
-      ticketMatchesDynamicFieldEntries(
-        (ticket as Ticket & { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
-        dynamicFieldEntries,
-      ),
-    );
-  }, [supportTickets, dynamicFieldEntries]);
-
-  // Report loaded tickets up so the parent can source the merge dialog.
-  useEffect(() => {
-    if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets);
-  }, [dynamicallyFilteredTickets, onTicketsLoaded]);
 
   const effectiveBoardId = boardId ?? firstRowBoardId ?? undefined;
 
@@ -247,16 +240,91 @@ export const SupportKanbanBoard = ({
     isBoardPrioritySla && effectiveBoardId ? [effectiveBoardId] : [],
   );
 
-  const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
-  useEffect(() => {
-    if (dynamicallyFilteredTickets) {
-      setLocalTickets(dynamicallyFilteredTickets);
-    }
-  }, [dynamicallyFilteredTickets]);
-
   // Stages fetched dynamically from the board configured in EmailChannelPreference.
   // Empty if no board is configured — kanban will show no stages.
   const stageColumns = useMemo(() => stages?.map(toStageColumn) ?? [], [stages]);
+
+  const loadedTickets = useMemo(
+    () => stageColumns.flatMap(stage => ticketsByColumn[stage.id] ?? []),
+    [stageColumns, ticketsByColumn],
+  );
+
+  // Report loaded tickets up so the parent can source the merge dialog.
+  useEffect(() => {
+    onTicketsLoaded?.(loadedTickets);
+  }, [loadedTickets, onTicketsLoaded]);
+
+  const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
+  useEffect(() => {
+    setLocalTickets(loadedTickets);
+  }, [loadedTickets]);
+
+  const {
+    groups: countGroups,
+    isLoading: countsLoading,
+    error: countsError,
+  } = useKanbanCounts({
+    viewMode: 'desk',
+    columnType: 'stage',
+    channelId,
+    ...(effectiveBoardId ? { boardId: effectiveBoardId } : {}),
+    deskFilters: {
+      ...(ticketFilter.assignedTo ? { assignedTo: ticketFilter.assignedTo } : {}),
+      ...(ticketFilter.createdBy ? { createdBy: ticketFilter.createdBy } : {}),
+      ...(ticketFilter.priority ? { priority: ticketFilter.priority } : {}),
+      ...(ticketFilter.stageName ? { stageName: ticketFilter.stageName } : {}),
+      ...(ticketFilter.aiCategory ? { aiCategory: ticketFilter.aiCategory } : {}),
+      ...(ticketFilter.conversationIdWhitelist
+        ? { conversationIds: ticketFilter.conversationIdWhitelist }
+        : {}),
+      ...(ticketFilter.hasAiDraft ? { hasAiDraft: true } : {}),
+      ...(ticketFilter.hasSubTickets ? { hasSubTickets: true } : {}),
+      ...(ticketFilter.userGroups ? { userGroups: ticketFilter.userGroups } : {}),
+      ...(ticketFilter.lastEmailAtStart !== undefined
+        ? { lastEmailAtStart: ticketFilter.lastEmailAtStart }
+        : {}),
+      ...(ticketFilter.lastEmailAtEnd !== undefined
+        ? { lastEmailAtEnd: ticketFilter.lastEmailAtEnd }
+        : {}),
+      ...(ticketFilter.createdAtStart !== undefined
+        ? { createdAtStart: ticketFilter.createdAtStart }
+        : {}),
+      ...(ticketFilter.createdAtEnd !== undefined
+        ? { createdAtEnd: ticketFilter.createdAtEnd }
+        : {}),
+      ...(ticketFilter.conversationLabelId
+        ? { conversationLabelId: ticketFilter.conversationLabelId }
+        : {}),
+    },
+    filters: {
+      dynamicFields: Object.fromEntries(
+        (dynamicFieldEntries ?? [])
+          .filter(entry => entry.fieldType !== undefined)
+          .map(entry => [entry.fieldId, entry.value]),
+      ),
+    },
+    enabled: !!channelId && !!effectiveBoardId,
+  });
+
+  // Counts are keyed by raw stage name. Names not on the board belong to the first
+  // column, which is where its page query also collects them.
+  const stageCounts = useMemo<Record<string, number> | undefined>(() => {
+    if (countsLoading || countsError || stageColumns.length === 0) return undefined;
+    const counted: Record<string, number> = {};
+    for (const group of countGroups) {
+      for (const [name, count] of Object.entries(group.stages)) {
+        counted[name] = (counted[name] ?? 0) + count;
+      }
+    }
+    const boardNames = new Set(stageColumns.map(stage => stage.name));
+    const result: Record<string, number> = {};
+    for (const stage of stageColumns) result[stage.id] = counted[stage.name] ?? 0;
+    const firstId = stageColumns[0]!.id;
+    for (const [name, count] of Object.entries(counted)) {
+      if (!boardNames.has(name)) result[firstId] = (result[firstId] ?? 0) + count;
+    }
+    return result;
+  }, [countGroups, countsError, countsLoading, stageColumns]);
 
   // Full stage objects (with formId and approvers) used for drag-and-drop and form checks.
   const stagesForDragDrop = useMemo<Stage[]>(() => {
@@ -455,6 +523,13 @@ export const SupportKanbanBoard = ({
         <KanbanColumns
           stages={stageColumns}
           ticketsByStage={ticketsByStage}
+          {...(stageCounts ? { stageCounts } : {})}
+          onTicketsChange={handleColumnTicketsChange}
+          deskPaginationConfig={{
+            pageArgs,
+            dynamicFieldEntries,
+            onPageComplete: setCompletedPageArgs,
+          }}
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           showEmailReads={true}

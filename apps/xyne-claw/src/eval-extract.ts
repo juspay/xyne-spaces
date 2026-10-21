@@ -12,7 +12,7 @@
  * Runs on LITELLM.fastModel (overridable). Fails closed to an empty extraction
  * on any error — a thread we couldn't process yields no eval pairs, never junk.
  */
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { copilotHeaders, COPILOT_COMPLETIONS_URL } from "./eval-judge.js";
 
@@ -139,7 +139,7 @@ export async function extractEvalPairs(input: ExtractInput): Promise<ExtractResu
     return { items: [], pairs: [] };
   }
   const model = viaCopilot ? input.copilot!.model : (input.model && input.model.trim()) || LITELLM.fastModel;
-  const callUrl = viaCopilot ? COPILOT_COMPLETIONS_URL : `${LITELLM.url}/v1/chat/completions`;
+  const callUrl = viaCopilot ? COPILOT_COMPLETIONS_URL : litellmEndpoint("/v1/chat/completions");
   const callHeaders = viaCopilot
     ? copilotHeaders(input.copilot!.token)
     : { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` };

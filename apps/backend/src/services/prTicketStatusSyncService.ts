@@ -874,7 +874,7 @@ export class PRTicketStatusSyncService {
       ticket.boardId,
       [eventRoleId],
       ticket.projectId,
-      ticket.channelId ?? undefined,
+      ticket.channelId ?? null,
       excludeUserId,
     );
     const slotResult = slots[eventRoleId];
@@ -959,7 +959,7 @@ export class PRTicketStatusSyncService {
       assignmentType,
       excludeUserId,
       ticket.projectId,
-      ticket.channelId ?? undefined,
+      ticket.channelId ?? null,
     );
 
     if (!assignmentResult.assignedUserId) {

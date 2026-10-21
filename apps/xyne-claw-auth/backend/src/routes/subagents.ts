@@ -29,6 +29,7 @@ import {
   userRepository,
 } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import {
   ValidationError,
   validateSubagentInput,
@@ -408,10 +409,13 @@ router.delete("/:name/shares/:userId", asyncHandler(async (req: Request, res: Re
     throw unauthorized("x-user-id header is required");
   }
   const name = typeof req.params.name === "string" ? req.params.name : "";
-  const userId = typeof req.params.userId === "string" ? req.params.userId : "";
-  if (!name || !userId) {
+  const rawUserId = typeof req.params.userId === "string" ? req.params.userId : "";
+  if (!name || !rawUserId) {
     throw badRequest("name and userId are required");
   }
+  // Shares are stored under the canonical Claw id (POST resolves via findById);
+  // the URL param may be a raw Spaces alias, so canonicalize before deleting.
+  const userId = await resolveCanonicalUserIdOrSelf(rawUserId);
   const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
   if (!row) {
     log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);

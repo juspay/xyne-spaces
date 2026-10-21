@@ -30,8 +30,9 @@ export const streamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, c
 export interface ClawStreamHandlers {
   onStarted?: (sessionId: string) => void | Promise<void>;
   onInvocation?: (sessionId: string, toolInvocation: unknown) => void | Promise<void>;
-  onReasoning?: (sessionId: string, delta: string) => void | Promise<void>;
-  onTextDelta?: (sessionId: string, delta: string) => void | Promise<void>;
+  /** `partId` names the thinking/text block the delta belongs to (absent from older pods). */
+  onReasoning?: (sessionId: string, delta: string, partId?: string) => void | Promise<void>;
+  onTextDelta?: (sessionId: string, delta: string, partId?: string) => void | Promise<void>;
   onAttachment?: (sessionId: string, attachment: Extract<ClawStreamEvent, { event: "attachment" }>["attachment"]) => void | Promise<void>;
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
   onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
@@ -184,10 +185,10 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
         await handlers.onInvocation?.(event.sessionId, event.toolInvocation);
         return;
       case "reasoning":
-        await handlers.onReasoning?.(event.sessionId, event.reasoningDelta);
+        await handlers.onReasoning?.(event.sessionId, event.reasoningDelta, event.partId);
         return;
       case "delta":
-        await handlers.onTextDelta?.(event.sessionId, event.textDelta);
+        await handlers.onTextDelta?.(event.sessionId, event.textDelta, event.partId);
         return;
       case "attachment":
         await handlers.onAttachment?.(event.sessionId, event.attachment);
@@ -333,11 +334,11 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         onInvocation: async (sessionId, toolInvocation) => {
           await postProgress({ sessionId, toolInvocation });
         },
-        onReasoning: async (sessionId, reasoningDelta) => {
-          await postProgress({ sessionId, reasoningDelta });
+        onReasoning: async (sessionId, reasoningDelta, partId) => {
+          await postProgress({ sessionId, reasoningDelta, ...(partId ? { partId } : {}) });
         },
-        onTextDelta: async (sessionId, textDelta) => {
-          await postProgress({ sessionId, textDelta });
+        onTextDelta: async (sessionId, textDelta, partId) => {
+          await postProgress({ sessionId, textDelta, ...(partId ? { partId } : {}) });
         },
         onAttachment: async (sessionId, attachment) => {
           await postProgress({ sessionId, attachment });

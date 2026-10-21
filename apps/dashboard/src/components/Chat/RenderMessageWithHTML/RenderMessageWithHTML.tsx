@@ -1,6 +1,15 @@
-import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import React, { JSX, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { NavigateFunction } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { getArtifactApp } from '../../../services/claw/artifactAppsService';
+import { AppIcon } from '../../AppIcon/AppIcon';
+import {
+  useRouterSelector,
+  useStableNavigate,
+  useStableRouter,
+} from '../../../hooks/useStableRouter';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { ThreadNavigationContext } from '../ThreadNavigationContext';
 import {
   Check,
   Copy,
@@ -10,7 +19,6 @@ import {
   Ticket as TicketIcon,
   Users,
   Clock,
-  Phone,
 } from 'lucide-react';
 import {
   getAnchorTargetProps,
@@ -26,7 +34,7 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
-import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
+import { CopyCopied, CopyDefault, MaximizeTwoArrow, PhoneDefault } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
@@ -49,6 +57,8 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { useReportExpandedToMessage } from '../ExpandableMessage/ExpandableMessageContext';
+import { discussionTitleOfBody } from '../ChatInput/ChatInput.utils';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -82,7 +92,7 @@ const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
     case 'canvas':
       return <FileText className='h-3.5 w-3.5' />;
     case 'call':
-      return <Phone className='h-3.5 w-3.5' />;
+      return <PhoneDefault className='h-3.5 w-3.5' />;
     default:
       return <MessageSquare className='h-3.5 w-3.5' />;
   }
@@ -112,7 +122,7 @@ export const InternalXyneLink = ({
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   const copyHref =
     parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
@@ -125,6 +135,17 @@ export const InternalXyneLink = ({
   const [canvas] = useCachedQuery(queries.getCanvas({ canvasId: parsedLink?.canvasId ?? '' }), {
     enabled: !!parsedLink?.canvasId,
   });
+  // An Agent Hub app: title and icon come from claw-auth, which also decides
+  // whether this viewer may open it. Same query key as ArtifactAppHost, so
+  // opening the app from the chip reuses this fetch.
+  const { data: appData } = useQuery({
+    queryKey: ['artifact-app', parsedLink?.appId ?? ''],
+    queryFn: () => getArtifactApp(parsedLink?.appId ?? ''),
+    enabled: parsedLink?.kind === 'app' && !!parsedLink.appId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const linkedApp = appData?.app;
   const [copied, setCopied] = useState(false);
 
   // Call links are left to bubble: the document-level handler in App.tsx routes
@@ -169,8 +190,14 @@ export const InternalXyneLink = ({
     channelLabel,
     getOptionalStringProperty(ticket, 'xyneId'),
     getOptionalStringProperty(canvas, 'title'),
+    linkedApp?.title,
   );
-  const leadingIcon = getInternalLinkIcon(parsedLink.kind);
+  const leadingIcon =
+    parsedLink.kind === 'app' ? (
+      <AppIcon name={linkedApp?.icon ?? null} size={14} aria-hidden='true' />
+    ) : (
+      getInternalLinkIcon(parsedLink.kind)
+    );
 
   if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {
     return (
@@ -197,6 +224,9 @@ export const InternalXyneLink = ({
     <>
       <span className='shrink-0 text-muted-foreground'>{leadingIcon}</span>
       <span className='truncate'>{linkLabel}</span>
+      {parsedLink.kind === 'app' && (
+        <span className='shrink-0 text-xs text-muted-foreground'>· Agent Hub</span>
+      )}
     </>
   );
 
@@ -218,6 +248,7 @@ export const InternalXyneLink = ({
           href={resolvedHref}
           className={linkClassName}
           onClick={onClick}
+          {...(parsedLink.kind === 'app' ? { title: 'Open this app in Agent Hub' } : {})}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
@@ -257,13 +288,16 @@ const CanvasLink = ({
   linkWorkspaceId?: string | undefined;
 }): JSX.Element => {
   const resolvedHref = href ?? '';
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { channelId, workspaceId } = useParams<{ channelId: string; workspaceId: string }>();
+  const stableRouter = useStableRouter();
   const { isMobile } = usePlatform();
+  const { openCanvas } = useContext(ThreadNavigationContext);
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     if (!resolvedHref) return;
+    const { navigate } = stableRouter;
+    const { location, params } = stableRouter.getSnapshot();
+    const channelId = params['channelId'];
+    const workspaceId = params['workspaceId'];
     const url = new URL(resolvedHref, window.location.origin);
 
     // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
@@ -284,7 +318,9 @@ const CanvasLink = ({
     if (url.origin === window.location.origin && isSameWorkspace) {
       event.preventDefault();
 
-      if (canvasId && channelId) {
+      if (canvasId && openCanvas) {
+        openCanvas(canvasId);
+      } else if (canvasId && channelId) {
         // Open as overlay in current channel
         void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
@@ -360,7 +396,7 @@ export function ChannelMentionRenderer({
   channelId: string;
   channelName: string;
   isPrivate: boolean;
-  navigate: ReturnType<typeof useNavigate>;
+  navigate: NavigateFunction;
 }): JSX.Element {
   const channel = useChannel(channelId);
   const [lastActivityAt, setLastActivity] = useState<number | undefined>(undefined);
@@ -481,8 +517,7 @@ export function GroupMentionRenderer({
   groupName: string;
   alias: string;
 }): JSX.Element {
-  const navigate = useNavigate();
-  const { channelId } = useParams<{ channelId: string }>();
+  const stableRouter = useStableRouter();
   const userMemberships = useUserGroupMappings();
 
   const isCurrentUserInGroup = useMemo(
@@ -491,8 +526,9 @@ export function GroupMentionRenderer({
   );
 
   const handleClick = (): void => {
+    const channelId = stableRouter.getSnapshot().params['channelId'];
     if (channelId) {
-      void navigate(`/chat/dir/${channelId}/group/${groupId}`);
+      void stableRouter.navigate(`/chat/dir/${channelId}/group/${groupId}`);
     }
   };
 
@@ -608,6 +644,7 @@ function MessageCodeBlock({
 
   const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
   const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  useReportExpandedToMessage(collapsible && isExpanded);
 
   return (
     <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
@@ -879,7 +916,7 @@ const parseNode = (
   node: Node,
   keyPrefix: string,
   idx: number,
-  navigate: ReturnType<typeof useNavigate>,
+  navigate: NavigateFunction,
   insideSlackBlockquote = false,
   insideCodeBlock = false,
   skipEmojiWrapping = false,
@@ -1288,6 +1325,8 @@ const parseNode = (
     if (title) {
       (props as { src: string; alt?: string; title?: string }).title = title;
     }
+    props['data-emoji'] = 'true';
+    props['data-emoji-id'] = emojiId;
   }
 
   if (tag === 'img' && shouldPreserveStyles) {
@@ -1420,8 +1459,29 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   preserveThreadRoute = false,
   slashCommandArtifactContext,
 }): JSX.Element => {
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
+
+  // Callers build this object inline, so its identity changes on every render.
+  // Keyed on its fields instead, or the memo below re-parses the message HTML on
+  // every re-render of the bubble.
+  const hasArtifactContext = slashCommandArtifactContext !== undefined;
+  const artifactChannelId = slashCommandArtifactContext?.channelId;
+  const artifactSenderId = slashCommandArtifactContext?.senderId;
+  const artifactCreatedAt = slashCommandArtifactContext?.createdAt;
+  const artifactSurface = slashCommandArtifactContext?.surface;
+  const artifactContext = useMemo<RenderMessageWithHTMLProps['slashCommandArtifactContext']>(
+    () =>
+      hasArtifactContext
+        ? {
+            ...(artifactChannelId !== undefined && { channelId: artifactChannelId }),
+            ...(artifactSenderId !== undefined && { senderId: artifactSenderId }),
+            ...(artifactCreatedAt !== undefined && { createdAt: artifactCreatedAt }),
+            ...(artifactSurface !== undefined && { surface: artifactSurface }),
+          }
+        : undefined,
+    [hasArtifactContext, artifactChannelId, artifactSenderId, artifactCreatedAt, artifactSurface],
+  );
 
   const parsedContent = useMemo<React.ReactNode[]>(() => {
     try {
@@ -1443,6 +1503,9 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
 
       trimBoundaryWhitespace(doc.body);
 
+      if (discussionTitleOfBody(doc.body))
+        doc.body.firstElementChild?.classList.add('discussion-title');
+
       const nodes: React.ReactNode[] = [];
       let idx = 0;
 
@@ -1463,7 +1526,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           messageId,
           conversationId,
           preserveThreadRoute,
-          slashCommandArtifactContext,
+          artifactContext,
           disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
@@ -1482,7 +1545,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     messageId,
     conversationId,
     preserveThreadRoute,
-    slashCommandArtifactContext,
+    artifactContext,
   ]);
 
   // Inject (edited) into the last element if it's safe to do so

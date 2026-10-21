@@ -8,7 +8,6 @@ import {
   DownloadDown,
   ChatDefault,
   Hashtag,
-  Headphones,
   Lock02Close,
   MapPin,
   MultipleCrossCancelDefault,
@@ -19,6 +18,7 @@ import {
   VideoCallDefault,
   CopyCopied,
   LinkSlant,
+  PhoneDefault,
 } from '@xyne/icons';
 import { CallStatus, ChannelScopeType, ChannelVisibility, MeetingStatus } from '@xyne/shared';
 import { useCachedQuery } from '@xyne/shared/hooks';
@@ -666,7 +666,7 @@ const CallDetailSidebarView = ({
             {isCurrentUserInCall ? (
               <SpeakerOn className='size-4' strokeWidth={2} aria-hidden='true' />
             ) : (
-              <Headphones className='size-4' strokeWidth={2} aria-hidden='true' />
+              <PhoneDefault className='size-4' strokeWidth={2} aria-hidden='true' />
             )}
             {isCurrentUserInCall
               ? 'Already joined'

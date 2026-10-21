@@ -293,7 +293,14 @@ async function autoAssignTicket(
       return { assignedUserId: null, assignmentReason: 'No userGroupId configured' };
     }
 
-    const assignmentResult = await ticketAssignmentService.assignTicket({ userGroupId });
+    const ticketRow = await db.ticket.findUnique({
+      where: { id: ticketResult.ticketId },
+      select: { channelId: true },
+    });
+    const assignmentResult = await ticketAssignmentService.assignTicket({
+      userGroupId,
+      channelId: ticketRow?.channelId ?? null,
+    });
 
     if (!assignmentResult) {
       return { assignedUserId: null, assignmentReason: 'No team members found' };

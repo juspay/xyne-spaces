@@ -1,3 +1,4 @@
+import { emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
 import { spacesAppFetch } from "../surfaces/spaces/client.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 
@@ -22,19 +23,21 @@ export const USE_EPHEMERAL_PROGRESS = true;
  * silently lost in that mode.
  */
 export async function postGoalPhase(
-  fields: { conversationId: string; channelId?: string | undefined; agentSlug?: string | undefined; spacesAppUserId: string; appToken: string },
+  fields: { sessionId: string; conversationId: string; channelId?: string | undefined; agentSlug?: string | undefined; spacesAppUserId: string; appToken: string },
   label: string,
 ): Promise<void> {
   try {
     if (USE_EPHEMERAL_PROGRESS) {
-      await spacesAppFetch("/chat/agentProgress", {
+      // sessionId is REQUIRED on every agentProgress payload — Spaces keys its
+      // straggler suppression on it. See surfaces/spaces/agent-progress.ts.
+      await emitAgentProgressWorking({
+        sessionId: fields.sessionId,
         conversationId: fields.conversationId,
-        ...(fields.channelId ? { channelId: fields.channelId } : {}),
-        ...(fields.agentSlug ? { agentSlug: fields.agentSlug } : {}),
-        userId: fields.spacesAppUserId,
-        toolLabel: label,
-        status: "working",
-      }, fields.appToken);
+        channelId: fields.channelId,
+        agentSlug: fields.agentSlug,
+        spacesAppUserId: fields.spacesAppUserId,
+        appToken: fields.appToken,
+      }, label);
     } else if (fields.channelId) {
       await postAgentMessage(
         { spacesAppUserId: fields.spacesAppUserId, appToken: fields.appToken },

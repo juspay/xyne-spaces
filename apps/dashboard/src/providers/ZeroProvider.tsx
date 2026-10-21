@@ -10,6 +10,7 @@ import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useEncryptionBootstrap } from '@xyne/shared/hooks';
+import { isElectronApp } from '../utils/electronApp';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -77,7 +78,8 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         pingTimeoutMs: 10000,
         schema,
         mutators: mutators,
-        hiddenTabDisconnectDelay: 60000,
+        // Desktop keeps Zero connected while hidden so badges and unread counts stay live.
+        hiddenTabDisconnectDelay: isElectronApp() ? 24 * 60 * 60 * 1000 : 60000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,

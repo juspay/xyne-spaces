@@ -87,13 +87,15 @@ function extractRuntimeToolName(name: string): string {
 export function matchesDirectPick(tool: ToolDefinition, allowedDirect: readonly string[]): boolean {
   const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
   const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
+  const serverToolKey = (tool as { serverToolKey?: string }).serverToolKey;
   return allowedDirect.some(
     (d) =>
       tool.name === d ||
       tool.name.endsWith(d) ||
       d.endsWith(`__${tool.name}`) ||
       norm(tool.name) === norm(d) ||
-      (toolSelectionKey ? d === toolSelectionKey : false),
+      (toolSelectionKey ? d === toolSelectionKey : false) ||
+      (serverToolKey ? d === serverToolKey : false),
   );
 }
 

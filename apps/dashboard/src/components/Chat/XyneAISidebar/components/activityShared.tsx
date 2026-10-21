@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactElement } from 'react';
-import { Loader2, Clock } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, ReactElement, ReactNode } from 'react';
+import type { AssistantReasoningPart, AssistantToolPart } from '@xyne/shared';
 import type { ToolInvocation } from '../utils/XyneAITypes';
+import { cn } from '../../../../utils/classNames';
 
 /**
- * Shared building blocks for the live "activity" surface used by BOTH the Ask AI
- * sidebar (ActivityBlock) and the AIScreen (ReasoningSection). Extracted so the
- * two surfaces render the same live thinking + tool/subagent affordances and
- * can't drift. Everything here is driven purely by data that already streams
- * (message.reasoning grows char-by-char; message.toolInvocations upsert live) —
- * no backend or type changes.
+ * Shared building blocks for the turn's step timeline (TurnTimeline), which the
+ * Ask AI sidebar, the AIScreen and the Claw overlay all render — so the three
+ * show the same live thinking and tool/subagent affordances and can't drift.
  */
 
 // ── Duration formatting ─────────────────────────────────────────────────────
@@ -22,6 +20,11 @@ export function formatDuration(ms: number): string {
   const mins = Math.floor(totalSecs / 60);
   const secs = Math.round(totalSecs - mins * 60);
   return `${mins}m ${secs}s`;
+}
+
+/** Whole seconds for step timings ("Thought for 4s"), minutes past a minute. */
+export function formatSeconds(ms: number): string {
+  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : formatDuration(ms);
 }
 
 /**
@@ -56,14 +59,6 @@ export function useElapsedMs(active: boolean): number | null {
   return finalRef.current;
 }
 
-/** Top + bottom fade mask so scrollable content dissolves into the column. */
-export const FADE_MASK_STYLE: CSSProperties = {
-  WebkitMaskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-  maskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-};
-
 /** Strip the MCP server prefix / provider suffix and title-case a raw tool id. */
 export function humanizeToolName(raw: string | undefined): string {
   if (!raw) return '';
@@ -76,52 +71,178 @@ export function humanizeToolName(raw: string | undefined): string {
     .join(' ');
 }
 
-// ── Activity accent (monochrome) ────────────────────────────────────────────
-// Fully gray: subagents, spinners, and running/background work all read in
-// neutral tones. The ONLY color accents live directly on their icons — a green
-// check for success and a faint red for errors — so the tree stays calm and
-// modern. Subagents are told apart by a hairline group box (see
-// ToolInvocationList), not a hue. Centralized so the palette retunes in one place.
-export const activityAccent = {
-  text: 'text-muted-foreground',
-  soft: 'text-muted-foreground/70',
-  chip: 'bg-muted text-muted-foreground',
-  // Gray hairline group box for subagents — border only, no background fill.
-  card: 'border-border',
-  dot: 'bg-muted-foreground/50',
-  bgChip: 'bg-muted text-muted-foreground',
-} as const;
-
-// ── Smooth numeric tween ────────────────────────────────────────────────────
-// Eases a displayed number toward its target so counters glide instead of
-// snapping. Snaps within 1 to avoid a lingering fractional tail. Self-stops.
-export function useSmoothCount(target: number): number {
-  const curRef = useRef(target);
-  const [shown, setShown] = useState(target);
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      const c = curRef.current;
-      if (Math.abs(target - c) < 1) {
-        if (c !== target) {
-          curRef.current = target;
-          setShown(target);
-        }
-        return;
-      }
-      curRef.current = c + (target - c) * 0.18;
-      setShown(Math.round(curRef.current));
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
-  return shown;
+// ── Turn timing ─────────────────────────────────────────────────────────────
+/** The closing line of a finished turn: "Worked for 2m 31s", or "Stopped after 12s". */
+export function turnDurationLabel(turn: {
+  durationMs?: number | undefined;
+  isAborted?: boolean | undefined;
+}): string | null {
+  if (turn.durationMs === undefined) return null;
+  const took = formatSeconds(turn.durationMs);
+  return turn.isAborted ? `Stopped after ${took}` : `Worked for ${took}`;
 }
 
-/** Compact char count: 812 → "812", 1240 → "1.2k", 12400 → "12k". */
-export function formatCount(n: number): string {
-  return n < 1000 ? `${n}` : `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`;
+/** When a turn's answer was finished: its start plus how long it took. */
+export function turnFinishedAt(turn: {
+  timestamp: Date | string | number;
+  durationMs?: number | undefined;
+}): Date {
+  return new Date(new Date(turn.timestamp).getTime() + (turn.durationMs ?? 0));
+}
+
+// ── Subagents ───────────────────────────────────────────────────────────────
+/** A top-level call that ran a whole subagent. claw marks these with
+ *  `subagentName`; older runs are only recognisable by the calls under them. */
+export function isSubagentCall(
+  invocation: ToolInvocation,
+  children: ToolInvocation[] | undefined,
+): boolean {
+  return !invocation.parentToolCallId && (!!invocation.subagentName || (children?.length ?? 0) > 0);
+}
+
+/** "Spaces agent" for the `spaces` subagent. */
+export function agentLabel(toolName: string): string {
+  return `${humanizeToolName(toolName) || 'Sub'} agent`;
+}
+
+/** A subagent's call, named without the agent's own prefix: the Spaces
+ *  agent's "Spaces Read Canvas" reads as "Read Canvas" under it. */
+export function childToolLabel(child: ToolInvocation, parentToolName: string): string {
+  const name = humanizeToolName(child.toolName);
+  const prefix = `${humanizeToolName(parentToolName)} `;
+  return name.startsWith(prefix) && name.length > prefix.length ? name.slice(prefix.length) : name;
+}
+
+// ── Step group summary ──────────────────────────────────────────────────────
+export interface StepGroupSummary {
+  /** e.g. "Thought for 4s, asked the Spaces agent, explored Web Search, ran Bash". */
+  label: string;
+  /** Calls that failed — shown after the label, so it survives truncation. */
+  failed: number;
+  /** Wall time from the group's first step to its last, when known. */
+  durationMs: number | null;
+}
+
+/** The calls of a turn: top-level ones by id, a subagent's under its parent. */
+export interface InvocationLookup {
+  byId: Map<string, ToolInvocation>;
+  childrenByParent: Map<string, ToolInvocation[]>;
+}
+
+const ms = (iso: string | undefined): number | null => {
+  if (!iso) return null;
+  const value = Date.parse(iso);
+  return Number.isFinite(value) ? value : null;
+};
+
+type StepVerb = 'asked' | 'ran' | 'explored' | 'used';
+
+/** How a call reads in a sentence: commands are "ran", lookups "explored",
+ *  anything else (writes, MCP actions) "used". Subagents are "asked". */
+function verbFor(toolName: string): StepVerb {
+  const base = (toolName.includes('__') ? toolName.split('__').pop()! : toolName)
+    .toLowerCase()
+    .replace(/-/g, '_');
+  if (/^(bash|shell|sh|exec|execute|run|terminal)(_|$)/.test(base)) return 'ran';
+  if (
+    /^(read|grep|glob|find|ls|list|get|fetch|query|lookup|view|browse|recall)(_|$)/.test(base) ||
+    /(^|_)(search|fetch|lookup)(_|$)/.test(base)
+  ) {
+    return 'explored';
+  }
+  return 'used';
+}
+
+/** "A", "A and B", "A, B and C", "A, B and 3 more". */
+function nameList(names: string[]): string {
+  if (names.length <= 2) return names.join(' and ');
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+}
+
+/**
+ * One sentence naming what a run of thinking + tool calls did — the collapsed
+ * header of a step group, e.g. "Thought for 4s, asked the Spaces agent, explored
+ * Web Search, ran Bash". Each tool is named once however often it ran.
+ */
+export function summarizeSteps(
+  parts: Array<AssistantReasoningPart | AssistantToolPart>,
+  calls: InvocationLookup,
+): StepGroupSummary {
+  let thinkingMs = 0;
+  let thought = false;
+  let start = Infinity;
+  let end = -Infinity;
+  let failed = 0;
+  const clauses = new Map<StepVerb, string[]>();
+  for (const part of parts) {
+    if (part.type === 'reasoning') {
+      thought = true;
+      const from = ms(part.startedAt);
+      const to = ms(part.endedAt);
+      if (from !== null) start = Math.min(start, from);
+      if (to !== null) end = Math.max(end, to);
+      if (from !== null && to !== null && to > from) thinkingMs += to - from;
+      continue;
+    }
+    const invocation = calls.byId.get(part.id);
+    if (!invocation) continue;
+    const subagent = isSubagentCall(invocation, calls.childrenByParent.get(part.id));
+    const verb = subagent ? 'asked' : verbFor(invocation.toolName);
+    const names = clauses.get(verb) ?? [];
+    const name = humanizeToolName(invocation.toolName) || 'a tool';
+    if (!names.includes(name)) names.push(name);
+    clauses.set(verb, names);
+    if (invocation.isError || invocation.status === 'error') failed += 1;
+    const from = ms(invocation.startedAt);
+    if (from !== null) {
+      start = Math.min(start, from);
+      end = Math.max(end, from + (invocation.durationMs || 0));
+    }
+  }
+  const sentence = [
+    thinkingMs >= 1000 ? `thought for ${formatSeconds(thinkingMs)}` : thought ? 'thought' : null,
+    ...[...clauses].map(([verb, names]) =>
+      verb === 'asked'
+        ? `asked the ${nameList(names)} ${names.length > 1 ? 'agents' : 'agent'}`
+        : `${verb} ${nameList(names)}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return {
+    label: sentence ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : 'Steps',
+    failed,
+    durationMs: Number.isFinite(start) && end > start ? end - start : null,
+  };
+}
+
+/** Height + fade reveal that never snaps. The content mounts on first open
+ *  and stays mounted, so closing animates too. */
+export function Reveal({
+  open,
+  id,
+  children,
+}: {
+  open: boolean;
+  id?: string;
+  children: ReactNode;
+}): ReactElement {
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return (
+    <div
+      id={id}
+      // Collapsed content is out of the tab order and hidden from assistive tech.
+      inert={!open}
+      className={cn(
+        'grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none',
+        open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+      )}
+    >
+      <div className='min-h-0 overflow-hidden'>{opened && children}</div>
+    </div>
+  );
 }
 
 /** Soft top fade so older reasoning dissolves as it scrolls up; the newest text
@@ -161,7 +282,7 @@ export function LiveReasoning({
   }, [reasoning]);
 
   // Render whenever there's reasoning — even after streaming ends — so a parent
-  // that collapses this pane on completion (ActivityBlock's grid-rows transition)
+  // that collapses this pane on completion (TurnTimeline's grid-rows transition)
   // animates the text shrinking away instead of it vanishing first. Callers that
   // must hide it post-stream gate on their own isStreaming (AIScreen does).
   if (!reasoning.trim()) return null;
@@ -191,58 +312,5 @@ export function LiveReasoning({
         </span>
       )}
     </div>
-  );
-}
-
-// ── Consolidated live status chip ────────────────────────────────────────────
-/**
- * ONE fixed-footprint chip summarizing all currently-active work:
- * "⟳ 2 running · ⧗ 5 bg". Replaces the old per-tool chip strip + separate
- * background pill, which grew horizontally with every parallel call and made
- * the header jump as chips came and went. Counts tween (useSmoothCount) so
- * changes glide in place; per-tool detail lives in the expanded
- * ToolInvocationList. Self-hides when nothing is active — including AFTER the
- * answer completes, so still-running detached background work stays visible.
- */
-export function ActivityStatusChip({
-  toolInvocations,
-}: {
-  toolInvocations?: ToolInvocation[] | undefined;
-}): ReactElement | null {
-  const { running, background } = useMemo(() => {
-    const invs = toolInvocations ?? [];
-    let running = 0;
-    let background = 0;
-    for (const inv of invs) {
-      if (inv.parentToolCallId) continue; // roots only — children live in the expanded list
-      if (inv.background === true && inv.backgroundState === 'running') background++;
-      else if (inv.status === 'running') running++;
-    }
-    return { running, background };
-  }, [toolInvocations]);
-
-  const smoothRunning = useSmoothCount(running);
-  const smoothBackground = useSmoothCount(background);
-
-  if (running + background === 0) return null;
-
-  return (
-    <span
-      className={`animate-fade-in-up inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tabular-nums ${activityAccent.bgChip}`}
-    >
-      {running > 0 && (
-        <span className='inline-flex items-center gap-1'>
-          <Loader2 size={9} className={`shrink-0 animate-spin ${activityAccent.text}`} />
-          {smoothRunning} running
-        </span>
-      )}
-      {running > 0 && background > 0 && <span className='opacity-50'>·</span>}
-      {background > 0 && (
-        <span className='inline-flex items-center gap-1'>
-          <Clock size={9} className='shrink-0 animate-pulse' />
-          {smoothBackground} background
-        </span>
-      )}
-    </span>
   );
 }

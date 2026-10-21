@@ -16,6 +16,7 @@ import {
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
+import { Loader2 } from 'lucide-react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
 import { getMathSlashMenuItems } from '@blocknote/math-block';
@@ -46,6 +47,7 @@ import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import {
   resolveFileUrl,
   extractHeadingsFromBlocks,
@@ -91,6 +93,7 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -145,6 +148,8 @@ interface CollaborativeCanvasEditorProps {
   currentUserRole?: CanvasRole | null;
   /** Scrolls with the document, above its first block. */
   header?: React.ReactNode;
+  /** Shows the headings as an "On this page" list on the right. */
+  pinnedOutline?: boolean;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -173,6 +178,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasCreatedBy,
       currentUserRole,
       header,
+      pinnedOutline = false,
     },
     ref,
   ) => {
@@ -184,9 +190,13 @@ export const CollaborativeCanvasEditor = forwardRef<
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
     const z = useZero();
     const currentUserId = (user?.id as string) || '';
-    const [queriedParticipants = []] = useCachedQuery(queries.canvasParticipants({ canvasId }), {
-      enabled: Boolean(canvasId) && !preloadedParticipants,
-    });
+    const connectId = useCanvasConnectId(canvasId);
+    const [queriedParticipants = []] = useCachedQuery(
+      queries.canvasParticipants({ canvasId, connectId }),
+      {
+        enabled: Boolean(canvasId) && !preloadedParticipants,
+      },
+    );
     const canvasParticipants = preloadedParticipants ?? queriedParticipants;
     const currentUserName =
       (user?.name ? String(user.name) : undefined) ||
@@ -202,6 +212,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       connectionStatus,
       isReadOnly,
       connectionFailed,
+      isReconnecting,
       reconnect,
     } = useCanvasYjsProvider({
       canvasId,
@@ -228,8 +239,8 @@ export const CollaborativeCanvasEditor = forwardRef<
       hasCollaborationInitializedRef.current = true;
     }
 
-    const shouldUseCollaboration = hasCollaborationInitializedRef.current || isCollaborationReady;
-    const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
+    const shouldUseCollaboration = !!fragment;
+    const canMountEditor = shouldUseCollaboration;
 
     const dictionary = useMemo(
       () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
@@ -246,7 +257,7 @@ export const CollaborativeCanvasEditor = forwardRef<
     };
 
     const editorOptions =
-      shouldUseCollaboration && provider && fragment
+      shouldUseCollaboration && fragment
         ? withCollaboration({
             ...baseEditorOptions,
             collaboration: {
@@ -256,7 +267,7 @@ export const CollaborativeCanvasEditor = forwardRef<
                 name: currentUserName,
                 color: currentUserColor,
               },
-              provider,
+              ...(provider ? { provider } : {}),
             },
           })
         : baseEditorOptions;
@@ -585,8 +596,10 @@ export const CollaborativeCanvasEditor = forwardRef<
     });
     const {
       activeTicketAnchor,
+      activeTicketAction,
       isTicketChannelArchived,
       openTicketForCurrentSelection,
+      openTicketLinkForCurrentSelection,
       closeTicketModal,
       handleTicketCreated,
     } = useCanvasTicketEditorBridge({
@@ -709,6 +722,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           canComment: editable && !isReadOnly,
           canCreateTicket: editable && !isReadOnly && !isTicketChannelArchived,
           onCreateTicket: openTicketForCurrentSelection,
+          onLinkTicket: openTicketLinkForCurrentSelection,
         }),
       [
         canvasId,
@@ -716,6 +730,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         isReadOnly,
         isTicketChannelArchived,
         openCommentsForCurrentBlock,
+        openTicketLinkForCurrentSelection,
         openTicketForCurrentSelection,
         title,
       ],
@@ -789,15 +804,37 @@ export const CollaborativeCanvasEditor = forwardRef<
         tabIndex={-1}
         data-testid='canvas-editor'
       >
-        {connectionFailed && (
-          <div className='flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive'>
-            <span>Connection to the canvas failed. Your changes may not be saved.</span>
-            <Button size='sm' variant='outline' onClick={reconnect}>
-              Reconnect
-            </Button>
-          </div>
-        )}
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
+          {(connectionFailed || isReconnecting) && (
+            <div
+              className='absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-sm'
+              title={
+                isReconnecting
+                  ? 'Reconnecting to the canvas...'
+                  : 'Connection to the canvas failed. Your changes may not be saved.'
+              }
+            >
+              <span className='max-w-[220px] truncate'>
+                {isReconnecting ? 'Reconnecting…' : 'Connection failed'}
+              </span>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={reconnect}
+                disabled={isReconnecting}
+                className='h-6 shrink-0 px-2 py-0 text-xs'
+              >
+                {isReconnecting ? (
+                  <span className='flex items-center gap-1'>
+                    <Loader2 size={12} className='animate-spin' />
+                    Reconnecting
+                  </span>
+                ) : (
+                  'Reconnect'
+                )}
+              </Button>
+            </div>
+          )}
           <div
             className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
             style={{
@@ -893,10 +930,15 @@ export const CollaborativeCanvasEditor = forwardRef<
         </div>
 
         <CanvasTicketCreationFlow
-          anchor={activeTicketAnchor}
+          anchor={activeTicketAction === 'create' ? activeTicketAnchor : null}
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+        <CanvasTicketLinkFlow
+          anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
+          onClose={closeTicketModal}
+          onTicketSelected={handleTicketCreated}
         />
 
         {/* Presentation Modal */}
@@ -909,7 +951,11 @@ export const CollaborativeCanvasEditor = forwardRef<
         )}
 
         {/* Table of Contents */}
-        <TableOfContents headings={tocHeadings} onHeadingClick={handleHeadingClick} />
+        <TableOfContents
+          headings={tocHeadings}
+          onHeadingClick={handleHeadingClick}
+          pinned={pinnedOutline}
+        />
 
         {/* Search Overlay */}
         {editor && (

@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
-import { useAILandingDefault } from './useAILandingDefault';
+import { useAiLaunchPreference } from './useAiLaunchPreference';
 import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
@@ -11,14 +11,15 @@ import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOp
 import { useShowThreadTags } from './useShowThreadTags';
 import { useStreamsVisibility } from './useStreamsVisibility';
 import { useSummaryModelPreference } from './useSummaryModelPreference';
+import { useRecordingDefaultSummaryTemplate } from './useRecordingDefaultSummaryTemplate';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
-import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useCallMediaQualitySettings } from './useCallMediaQualitySettings';
 import { useRecordingDefaultLayout } from './useRecordingDefaultLayout';
 import { useRecordingVersion } from './useRecordingVersion';
 import { useRecordingStore } from './useRecordingStore';
+import { useCallsVersion } from './useCallsVersion';
 import {
   getLinkOpenExternalDefault,
   setLinkOpenExternalDefault,
@@ -44,7 +45,7 @@ export function usePreferencesState(enabled: boolean) {
     serverCalendarVisibility,
   );
   const { theme, changeTheme } = useTheme();
-  const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { aiLandingDefault, setAiLandingDefault } = useAiLaunchPreference();
   const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
@@ -53,8 +54,9 @@ export function usePreferencesState(enabled: boolean) {
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { showStreams, setShowStreams } = useStreamsVisibility();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
+  const { defaultSummaryTemplateId, setDefaultSummaryTemplateId } =
+    useRecordingDefaultSummaryTemplate();
   const { searchMode } = useSearchMode();
-  const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
   const {
@@ -73,6 +75,7 @@ export function usePreferencesState(enabled: boolean) {
   const { recordingVersion, setRecordingVersion } = useRecordingVersion();
   const recordingStatus = useRecordingStore(context => context.status);
   const canSwitchRecordingVersion = recordingStatus === 'idle' || recordingStatus === 'error';
+  const { callsVersion, setCallsVersion } = useCallsVersion();
   const linksOpenExternalByDefault = useSyncExternalStore(
     subscribeLinkOpenPref,
     getLinkOpenExternalDefault,
@@ -155,10 +158,10 @@ export function usePreferencesState(enabled: boolean) {
     setShowThreadTags,
     summaryModelPreference,
     setSummaryModelPreference,
+    defaultSummaryTemplateId,
+    setDefaultSummaryTemplateId,
     setEnterSendsMessage,
     searchMode,
-    showClawDashboard,
-    setShowClawDashboard,
     allowThreadBroadcastMentions,
     setAllowThreadBroadcastMentions,
     linksOpenExternalByDefault,
@@ -190,6 +193,8 @@ export function usePreferencesState(enabled: boolean) {
     recordingVersion,
     setRecordingVersion,
     canSwitchRecordingVersion,
+    callsVersion,
+    setCallsVersion,
   };
 }
 

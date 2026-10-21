@@ -11,6 +11,11 @@ variable "bucket_names" {
   default = {}
 }
 
+variable "keys" {
+  type    = list(string)
+  default = ["main", "docs", "canvas", "recordings", "workflows", "transcription", "bundles", "claw"]
+}
+
 variable "versioning" {
   type    = bool
   default = false

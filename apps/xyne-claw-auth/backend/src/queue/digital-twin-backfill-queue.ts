@@ -8,15 +8,18 @@
  *     worker picks it up and resumes from the cursor we persisted on
  *     User.digitalTwinBackfillState.
  *
- * The actual walking-windows-newest-to-oldest logic lives in
+ * The actual walking-windows-oldest-to-newest logic lives in
  * digital-twin-backfill-worker.ts.
  */
 
 import { Queue } from "bullmq";
 import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
-
-export type BackfillSource = "messages" | "calls" | "canvases";
+import {
+  BACKFILL_SOURCES,
+  type BackfillJobProbe,
+  type BackfillSource,
+} from "../services/digitalTwinBackfillState.js";
 
 export interface BackfillJobData {
   userId: string;
@@ -27,17 +30,20 @@ export interface BackfillJobData {
   to: string;
 }
 
-const QUEUE_NAME = "digital-twin-backfill";
+export const DIGITAL_TWIN_BACKFILL_QUEUE_NAME = "digital-twin-backfill";
+const BACKFILL_MAX_ATTEMPTS = 5;
+/** Job states that mean a job is still progressing (prioritized stays not-live). */
+const LIVE_STATES = new Set(["active", "waiting", "delayed", "waiting-children"]);
 
 let queue: Queue<BackfillJobData> | undefined;
 
-export function getBackfillQueue(): Queue<BackfillJobData> {
+function getBackfillQueue(): Queue<BackfillJobData> {
   if (!queue) {
-    queue = new Queue<BackfillJobData>(QUEUE_NAME, {
+    queue = new Queue<BackfillJobData>(DIGITAL_TWIN_BACKFILL_QUEUE_NAME, {
       connection: redisService.getConnection(),
       defaultJobOptions: {
         // The curator can fail (LLM rate-limit, Spaces 5xx) — keep retrying.
-        attempts: 5,
+        attempts: BACKFILL_MAX_ATTEMPTS,
         backoff: { type: "exponential", delay: 30_000 },
         removeOnComplete: 100,
         removeOnFail: 100,
@@ -99,7 +105,7 @@ export async function enqueueDigitalTwinBackfill(args: {
 export async function cancelDigitalTwinBackfill(userId: string): Promise<number> {
   const q = getBackfillQueue();
   let removed = 0;
-  for (const source of ["messages", "calls", "canvases"] as const) {
+  for (const source of BACKFILL_SOURCES) {
     const job = await q.getJob(jobIdFor(userId, source));
     if (job) {
       await job.remove().catch(() => {});
@@ -107,6 +113,23 @@ export async function cancelDigitalTwinBackfill(userId: string): Promise<number>
     }
   }
   return removed;
+}
+
+/** Best-effort BullMQ probe. Any error (queue down, missing job) → null. */
+export async function probeBackfillJob(userId: string, source: BackfillSource): Promise<BackfillJobProbe | null> {
+  try {
+    const job = await getBackfillQueue().getJob(jobIdFor(userId, source));
+    if (!job) return null;
+    const state = await job.getState();
+    return {
+      state,
+      attemptsMade: job.attemptsMade,
+      maxAttempts: (job.opts?.attempts as number | undefined) ?? BACKFILL_MAX_ATTEMPTS,
+      failedReason: job.failedReason ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -117,14 +140,8 @@ export async function cancelDigitalTwinBackfill(userId: string): Promise<number>
  * job returns false → safe to re-enqueue.
  */
 export async function backfillJobIsLive(userId: string, source: BackfillSource): Promise<boolean> {
-  try {
-    const job = await getBackfillQueue().getJob(jobIdFor(userId, source));
-    if (!job) return false;
-    const state = await job.getState();
-    return state === "active" || state === "waiting" || state === "delayed" || state === "waiting-children";
-  } catch {
-    return false;
-  }
+  const probe = await probeBackfillJob(userId, source);
+  return !!probe && LIVE_STATES.has(probe.state);
 }
 
 export async function closeBackfillQueue(): Promise<void> {

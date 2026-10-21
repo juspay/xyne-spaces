@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { FlowState, FlowAction, AppActionResponse } from '@xyne/shared';
+import type { FlowState, FlowAction, AppActionResponse, FlowDefinition } from '@xyne/shared';
 
 export interface FlowMessageContext {
   channelId?: string;
@@ -17,12 +17,25 @@ export interface FlowContextValue {
   updateFieldValue: (name: string, value: unknown) => void;
   validateField: (name: string, value: unknown) => string | null;
   validateAllFields: () => boolean;
-  executeAction: (action: FlowAction) => Promise<void>;
+  /** Resolves false when the action failed — the caller keeps whatever UI it
+   *  would otherwise tear down (an open editor, an expanded preview). */
+  executeAction: (action: FlowAction) => Promise<boolean>;
   onAppAction: (response: AppActionResponse) => void;
   messageId: string;
   conversationId: string;
   messageContext?: FlowMessageContext;
 }
+
+export interface FlowDraftScope {
+  claims: (flow: FlowDefinition) => boolean;
+  onCardSeen?: (flow: FlowDefinition) => void;
+  valuesForSubmit?: (flow: FlowDefinition, actionId: string) => Record<string, unknown> | null;
+  onApplied: (actionId: string, flow: FlowDefinition) => void;
+}
+
+export const FlowDraftScopeContext = createContext<FlowDraftScope | null>(null);
+
+export const useFlowDraftScope = (): FlowDraftScope | null => useContext(FlowDraftScopeContext);
 
 export const FlowContext = createContext<FlowContextValue | null>(null);
 

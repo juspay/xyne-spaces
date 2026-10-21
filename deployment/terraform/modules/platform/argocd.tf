@@ -14,6 +14,20 @@ resource "helm_release" "argocd" {
         params = {
           "server.insecure" = true
         }
+        cm = {
+          "resource.customizations.health.argoproj.io_Application" = <<-LUA
+            hs = {}
+            hs.status = "Progressing"
+            hs.message = ""
+            if obj.status ~= nil and obj.status.health ~= nil then
+              hs.status = obj.status.health.status
+              if obj.status.health.message ~= nil then
+                hs.message = obj.status.health.message
+              end
+            end
+            return hs
+          LUA
+        }
       }
     }),
     var.argocd_values,
@@ -76,5 +90,6 @@ resource "helm_release" "root" {
   depends_on = [
     helm_release.argocd,
     kubernetes_secret_v1.this,
+    kubernetes_job_v1.db_init,
   ]
 }

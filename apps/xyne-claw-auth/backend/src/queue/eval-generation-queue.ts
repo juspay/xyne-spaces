@@ -12,6 +12,7 @@ export interface EvalGenerationJobData {
   conversationIds: string[];
   genProvider?: string;
   genModel?: string;
+  optimizations?: string;
 }
 
 export interface EvalGenerationProgress {

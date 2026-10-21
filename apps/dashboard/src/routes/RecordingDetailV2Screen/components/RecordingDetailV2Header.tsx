@@ -10,7 +10,6 @@ import { toast } from 'sonner';
 import { MinimizeLineArrow, Spinner } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
-import { useSelf } from '../../../hooks/useUsers';
 import {
   recordingService,
   type RecordingDetail,
@@ -29,6 +28,7 @@ import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTick
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
+  canEdit: boolean;
   titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
@@ -111,13 +111,13 @@ export const RecordingDetailV2Header = ({
   onTicketLinkUpdated,
   onOpenShare,
   onMinimize,
+  canEdit,
 }: RecordingDetailV2HeaderProps): ReactElement => {
-  const currentUser = useSelf();
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
   const applyLabelsChange = useApplyRecordingLabelsChange(onLabelsUpdated);
 
-  // Only the creator can rename or relabel; a recording shared with you is read-only.
-  const isOwner = recording.createdByUserId === currentUser?.id;
+  // Renaming, relabelling and linking a ticket are editor actions; a recording
+  // shared with you as a viewer is read-only.
   const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
   const isGeneratingTitle = titleState?.kind === 'generating';
   const {
@@ -218,7 +218,7 @@ export const RecordingDetailV2Header = ({
                 />
               </div>
             </div>
-          ) : isOwner && !isGeneratingTitle ? (
+          ) : canEdit && !isGeneratingTitle ? (
             <div
               role='button'
               tabIndex={0}
@@ -274,14 +274,14 @@ export const RecordingDetailV2Header = ({
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
-              canEdit={canShare}
+              canEdit={canEdit}
               isUpdating={isUpdatingTicketLink}
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
           )}
           <RecordingLabelPicker
             labels={recording.labels ?? []}
-            canEdit={recording.createdByUserId === currentUser?.id}
+            canEdit={canEdit}
             suggestions={labelSuggestions}
             onChange={labels => void handleLabelsChange(labels)}
           />

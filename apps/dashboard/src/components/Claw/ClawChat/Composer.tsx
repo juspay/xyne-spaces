@@ -37,6 +37,9 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Enter while an IME (CJK input) is composing commits the candidate, not the
+    // message. keyCode 229 covers Safari's composition-ending keydown.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();

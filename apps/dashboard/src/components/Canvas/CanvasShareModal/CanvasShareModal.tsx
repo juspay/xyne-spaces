@@ -20,6 +20,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { queries } from '../../../zero/queries';
 import { useAuth } from '../../../hooks/useAuth';
@@ -32,6 +33,7 @@ import { useUsers, useActiveUsers, searchUsers } from '../../../hooks/useUsers';
 import { useGuestInvite } from '../../../hooks/useGuestInvite';
 import Input from '../../ui/Input/Input';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -75,6 +77,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 }) => {
   const { user: currentUser } = useAuth();
   const z = useZero();
+  // A bare z.mutate drops the server result, so a rejected change reverts with no message.
+  const run = (
+    mutation: Parameters<NonNullable<typeof z>['mutate']>[0],
+    fallback = 'Failed to update access',
+  ): Promise<boolean> =>
+    z ? surfaceMutationError(z.mutate(mutation), fallback) : Promise.resolve(false);
   const shareableOrigin = useShareableOrigin();
   const { isMobile } = usePlatform();
   const guestInvite = useGuestInvite({ entityType: 'CANVAS', entityId: canvas.id });
@@ -86,8 +94,9 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const [pendingRoles, setPendingRoles] = useState<Record<string, CanvasRole>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const connectId = useCanvasConnectId(canvas.id);
   const [queriedParticipants] = useCachedQuery(
-    queries.canvasParticipants({ canvasId: canvas.id }),
+    queries.canvasParticipants({ canvasId: canvas.id, connectId }),
     {
       enabled: !preloadedParticipants?.length,
     },
@@ -218,7 +227,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         acc[u.id] = uuidv4();
         return acc;
       }, {});
-      z.mutate(
+      void run(
         mutators.canvas.addParticipants({
           canvasId: canvas.id,
           userIds: userAdds.map(u => u.id),
@@ -229,7 +238,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
       );
     }
     for (const g of pendingAdds.filter(p => p.kind === 'group')) {
-      z.mutate(
+      void run(
         mutators.canvas.addGroupParticipant({
           canvasId: canvas.id,
           userGroupId: g.id,
@@ -240,7 +249,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
       );
     }
     for (const ch of pendingAdds.filter(p => p.kind === 'channel')) {
-      z.mutate(
+      void run(
         mutators.canvas.addChannelParticipant({
           canvasId: canvas.id,
           channelId: ch.id,
@@ -257,46 +266,40 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
     participant: Pick<CanvasParticipant, 'userId' | 'userGroupId' | 'channelId'>,
     role: CanvasRole,
   ): void => {
-    if (!z) return;
-    try {
-      if (participant.userId) {
-        z.mutate(
-          mutators.canvas.updateParticipantRole({
-            canvasId: canvas.id,
-            userId: participant.userId,
-            role,
-            timestamp: Date.now(),
-          }),
-        );
-      } else if (participant.userGroupId) {
-        z.mutate(
-          mutators.canvas.updateGroupParticipantRole({
-            canvasId: canvas.id,
-            userGroupId: participant.userGroupId,
-            role,
-            timestamp: Date.now(),
-          }),
-        );
-      } else if (participant.channelId) {
-        z.mutate(
-          mutators.canvas.updateChannelParticipantRole({
-            canvasId: canvas.id,
-            channelId: participant.channelId,
-            role,
-            timestamp: Date.now(),
-          }),
-        );
-      }
-    } catch {
-      toast.error('Failed to update role', { duration: 2000 });
+    if (participant.userId) {
+      void run(
+        mutators.canvas.updateParticipantRole({
+          canvasId: canvas.id,
+          userId: participant.userId,
+          role,
+          timestamp: Date.now(),
+        }),
+      );
+    } else if (participant.userGroupId) {
+      void run(
+        mutators.canvas.updateGroupParticipantRole({
+          canvasId: canvas.id,
+          userGroupId: participant.userGroupId,
+          role,
+          timestamp: Date.now(),
+        }),
+      );
+    } else if (participant.channelId) {
+      void run(
+        mutators.canvas.updateChannelParticipantRole({
+          canvasId: canvas.id,
+          channelId: participant.channelId,
+          role,
+          timestamp: Date.now(),
+        }),
+      );
     }
   };
 
   const readd = (participant: CanvasParticipant): void => {
-    if (!z) return;
     const ts = Date.now();
     if (participant.userId) {
-      z.mutate(
+      void run(
         mutators.canvas.addParticipants({
           canvasId: canvas.id,
           userIds: [participant.userId],
@@ -306,7 +309,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         }),
       );
     } else if (participant.userGroupId) {
-      z.mutate(
+      void run(
         mutators.canvas.addGroupParticipant({
           canvasId: canvas.id,
           userGroupId: participant.userGroupId,
@@ -316,7 +319,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         }),
       );
     } else if (participant.channelId) {
-      z.mutate(
+      void run(
         mutators.canvas.addChannelParticipant({
           canvasId: canvas.id,
           channelId: participant.channelId,
@@ -329,34 +332,27 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   };
 
   const removeAccess = (participant: CanvasParticipant, name: string): void => {
-    if (!z) return;
-    try {
-      if (participant.userId) {
-        z.mutate(
-          mutators.canvas.removeParticipant({ canvasId: canvas.id, userId: participant.userId }),
-        );
-      } else if (participant.userGroupId) {
-        z.mutate(
-          mutators.canvas.removeGroupParticipant({
+    const mutation = participant.userId
+      ? mutators.canvas.removeParticipant({ canvasId: canvas.id, userId: participant.userId })
+      : participant.userGroupId
+        ? mutators.canvas.removeGroupParticipant({
             canvasId: canvas.id,
             userGroupId: participant.userGroupId,
-          }),
-        );
-      } else if (participant.channelId) {
-        z.mutate(
-          mutators.canvas.removeChannelParticipant({
-            canvasId: canvas.id,
-            channelId: participant.channelId,
-          }),
-        );
-      }
+          })
+        : participant.channelId
+          ? mutators.canvas.removeChannelParticipant({
+              canvasId: canvas.id,
+              channelId: participant.channelId,
+            })
+          : null;
+    if (!mutation) return;
+    void run(mutation, 'Failed to remove access').then(saved => {
+      if (!saved) return;
       toast.success(`Removed ${name}`, {
         duration: 4000,
         action: { label: 'Undo', onClick: () => readd(participant) },
       });
-    } catch {
-      toast.error('Failed to remove access', { duration: 2000 });
-    }
+    });
   };
 
   // Role changes are staged (not applied) until Done. Remove stays immediate (has Undo).
@@ -388,18 +384,14 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         applyRole(participant, role);
       }
     }
-    if (isOwner && z && localVisibility !== canvas.visibility) {
-      try {
-        z.mutate(
-          mutators.canvas.update({
-            id: canvas.id,
-            visibility: localVisibility,
-            timestamp: Date.now(),
-          }),
-        );
-      } catch {
-        toast.error('Failed to update access', { duration: 2000 });
-      }
+    if (isOwner && localVisibility !== canvas.visibility) {
+      void run(
+        mutators.canvas.update({
+          id: canvas.id,
+          visibility: localVisibility,
+          timestamp: Date.now(),
+        }),
+      );
     }
     setPendingAdds([]);
     setPendingRoles({});

@@ -14,6 +14,7 @@ import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
 import { isXyneOrigin } from './browserPanelPartition';
 import { toStandalonePath } from './electronApp';
+import { parseDMParticipantIds } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 /**
  * Channel data interface for navigation
@@ -21,10 +22,41 @@ import { toStandalonePath } from './electronApp';
  */
 interface Channel {
   readonly id: string;
+  readonly name: string;
   readonly scopeType: ChannelScopeType;
   readonly type?: ChannelType;
-  readonly participants?: ReadonlyArray<{ readonly userId: string }>;
 }
+
+/**
+ * Find the caller ↔ userId DM in the channel list — matches both regular 1:1
+ * DMs and self-DMs. DMs are stored with `name = "userId1,userId2"` (sorted) for
+ * 1:1, or `name = "userId"` (a single id) for a self-DM. The participants
+ * relation isn't loaded on `useAllChannels`, so match on the name instead —
+ * same pattern useExistingDmChannel uses.
+ *
+ * `callerUserId` does two things when provided:
+ *  - target === caller → returns the SELF-DM (single-id name). Without this
+ *    branch, Array.find picks whichever 1:1 DM the user happens to be in first
+ *    and drops them into someone else's chat.
+ *  - target !== caller → also requires the caller to be a participant of the
+ *    1:1 DM, defending against stray channels whose name happens to include
+ *    the target id but where the caller isn't the other party.
+ */
+const findOneToOneDmChannel = (
+  channels: readonly Channel[],
+  userId: string,
+  callerUserId?: string,
+): Channel | undefined =>
+  channels.find(channel => {
+    if (channel.scopeType !== ChannelScopeType.DM) return false;
+    const ids = parseDMParticipantIds({ name: channel.name, scopeType: channel.scopeType });
+    if (callerUserId && userId === callerUserId) {
+      // Self-DM: exactly one participant, the user themselves.
+      return ids.length === 1 && ids[0] === userId;
+    }
+    if (ids.length !== 2 || !ids.includes(userId)) return false;
+    return callerUserId ? ids.includes(callerUserId) : true;
+  });
 
 /**
  * Main navigation router for search results
@@ -37,10 +69,11 @@ export const navigateToSearchResult = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
+  options?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   switch (result.type) {
     case 'user':
-      await navigateToUser(result, navigate, channelData);
+      await navigateToUser(result, navigate, channelData, options);
       break;
 
     case 'channel':
@@ -96,24 +129,30 @@ export const navigateToSearchResult = async (
 export const resolveOrCreateDmChannelId = async (
   userId: string,
   channelData: Channel[],
+  callerUserId?: string,
 ): Promise<string> => {
-  const existingDmChannel = channelData.find(
-    channel =>
-      channel.scopeType === ChannelScopeType.DM &&
-      channel.participants?.length === 2 &&
-      channel.participants?.some(p => p.userId === userId),
-  );
+  const existingDmChannel = findOneToOneDmChannel(channelData, userId, callerUserId);
   if (existingDmChannel) return existingDmChannel.id;
 
   const dmResponse = await channelService.createDm({ participantIds: [userId] });
   return dmResponse.id;
 };
 
-/** Open (or create) the user's 1:1 DM and navigate to it. */
+/**
+ * Open (or create) the user's 1:1 DM and navigate to it.
+ *
+ * `profileFallbackAnchorChannelId` handles the deactivated-user edge case:
+ * the backend refuses to create a DM with a deactivated user (404), so a click
+ * from Cmd+K that has no prior DM would otherwise land nowhere. When set, a
+ * failed DM creation redirects to the existing profile route
+ * (`/chat/dir/{anchor}/profile/{userId}`) so the click produces a visible
+ * result.
+ */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
+  options?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   if (!channelData) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
@@ -124,9 +163,23 @@ export const navigateToUser = async (
   }
 
   try {
-    const channelId = await resolveOrCreateDmChannelId(result.id, channelData);
+    const channelId = await resolveOrCreateDmChannelId(
+      result.id,
+      channelData,
+      options?.callerUserId,
+    );
     void navigate(`/chat/dir/${channelId}`);
   } catch (error) {
+    // Self-DM failures never redirect to profile — landing a user on their own
+    // profile page when their Saved Messages fails to open would be surprising.
+    // Let the error propagate so the caller (or a retry) can handle it.
+    const isSelfDmAttempt = !!options?.callerUserId && options.callerUserId === result.id;
+    if (options?.profileFallbackAnchorChannelId && !isSelfDmAttempt) {
+      // Most common cause: target is deactivated so createDm 404s. Fall back to
+      // the existing profile route so the click produces a visible result.
+      void navigate(`/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`);
+      return;
+    }
     logger.error(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_error',
       message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
@@ -368,16 +421,12 @@ type SearchResultTarget =
 export const computeSearchResultPath = (
   result: DisplaySearchResult,
   channelData?: Channel[],
+  callerUserId?: string,
 ): SearchResultTarget | null => {
   switch (result.type) {
     case 'user': {
       if (!channelData) return null;
-      const existingDmChannel = channelData.find(
-        channel =>
-          channel.scopeType === ChannelScopeType.DM &&
-          channel.participants?.length === 2 &&
-          channel.participants?.some(p => p.userId === result.id),
-      );
+      const existingDmChannel = findOneToOneDmChannel(channelData, result.id, callerUserId);
       if (existingDmChannel) {
         return { kind: 'internal', path: `/chat/dir/${existingDmChannel.id}` };
       }
@@ -503,17 +552,18 @@ export const openSearchResult = async (
   options: { modifier: boolean; isElectron: boolean; isMobile: boolean },
   navigate: NavigateFunction,
   channelData?: Channel[],
+  navOptions?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   const { modifier, isElectron, isMobile } = options;
 
   if (!modifier || isMobile) {
-    await navigateToSearchResult(result, navigate, channelData);
+    await navigateToSearchResult(result, navigate, channelData, navOptions);
     return;
   }
 
-  let target = computeSearchResultPath(result, channelData);
+  let target = computeSearchResultPath(result, channelData, navOptions?.callerUserId);
   if (!target) {
-    await navigateToSearchResult(result, navigate, channelData);
+    await navigateToSearchResult(result, navigate, channelData, navOptions);
     return;
   }
   if (target.kind === 'async-user') {
@@ -613,24 +663,28 @@ export const navigateToCollection = (
   const { projectId, channelId, docId, collectionId, folderId } = result.searchContext || {};
 
   // Navigate to knowledge base file viewer
-  if (!projectId || !channelId || !collectionId || !docId) {
+  // projectId is not required: a projectless channel stores it as '', and the
+  // viewer route takes the '_' sentinel for it below.
+  if (!channelId || !collectionId || !docId) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_warn',
       message: String(
-        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
+        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing channelId, collectionId, or docId',
       ),
     });
     return;
   }
 
-  // Use '_' sentinel for root-level files (no parent folder), matching KB convention
+  // Use '_' sentinel for a missing project or a root-level file (no parent
+  // folder), matching KB convention — an empty segment would 404.
+  const project = projectId || '_';
   const folder = folderId || '_';
 
   const params = new URLSearchParams();
   if (result.context) params.set('highlight', btoa(encodeURIComponent(result.context)));
 
   const queryString = params.toString();
-  const path = `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folder}/${docId}`;
+  const path = `/knowledge-base/${project}/${channelId}/${collectionId}/${folder}/${docId}`;
 
   void navigate(queryString ? `${path}?${queryString}` : path);
 };

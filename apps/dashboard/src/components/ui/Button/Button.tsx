@@ -31,7 +31,7 @@ function buildCaptureAttributes(
 }
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*="size-"])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer disabled:cursor-not-allowed',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*="size-"])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer disabled:cursor-not-allowed',
   {
     variants: {
       variant: {
@@ -66,8 +66,21 @@ const buttonVariants = cva(
   },
 );
 
-interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
+type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>['size']>;
+type IconButtonSize = 'icon' | 'iconSm' | 'iconLg';
+
+/** Icon-sized buttons have no visible text, so they must carry a name (an `asChild` button is exempt). */
+type AccessibleName =
+  | Required<Pick<React.AriaAttributes, 'aria-label'>>
+  | Required<Pick<React.AriaAttributes, 'aria-labelledby'>>
+  | { title: string };
+
+type ButtonSizing =
+  | { asChild: true; size?: ButtonSize | null }
+  | { asChild?: false; size?: Exclude<ButtonSize, IconButtonSize> | null }
+  | ({ asChild?: false; size: ButtonSize } & AccessibleName);
+
+interface ButtonExtraProps {
   loading?: boolean;
   /**
    * Stable id describing this button's PURPOSE (e.g. `send_message`,
@@ -93,6 +106,11 @@ interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeo
   trackProps?: EventProperties;
 }
 
+type ButtonProps = React.ComponentProps<'button'> &
+  Omit<VariantProps<typeof buttonVariants>, 'size'> &
+  ButtonSizing &
+  ButtonExtraProps;
+
 function Button({
   className,
   variant,
@@ -114,6 +132,9 @@ function Button({
   // Callers pass `trackProps` as inline object literals, so a useMemo here would
   // miss every render anyway — just build the attributes directly.
   const captureAttributes = buildCaptureAttributes(trackId, trackProps);
+
+  const isIconSize = size === 'icon' || size === 'iconSm' || size === 'iconLg';
+  const titleName = isIconSize && !props['aria-labelledby'] ? props.title : undefined;
 
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
@@ -146,6 +167,7 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       disabled={isDisabled}
       onClick={handleClick}
+      aria-label={titleName}
       {...captureAttributes}
       {...props}
     >

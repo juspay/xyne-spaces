@@ -22,6 +22,7 @@ import {
   type AdminMcpServerSummary, type AdminMcpGlobalCredsDetail,
 } from "../lib/api";
 import type { Agent, AgentLight, McpServer, CredentialField } from "../lib/types";
+import { isCurrentUser } from "../lib/identity";
 
 interface Props {
   userId: string;
@@ -1237,9 +1238,9 @@ export function AdminPage({ userId }: Props) {
                   <span className="ml-2 text-xs text-zinc-600">granted {new Date(r.createdAt).toLocaleDateString()}</span>
                 </div>
                 <button onClick={() => handleRevoke(r.userId)}
-                  disabled={r.userId === userId}
+                  disabled={isCurrentUser(r.userId)}
                   className="rounded p-1.5 text-zinc-600 transition hover:bg-red-950 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
-                  title={r.userId === userId ? "Cannot revoke yourself" : "Revoke admin"}>
+                  title={isCurrentUser(r.userId) ? "Cannot revoke yourself" : "Revoke admin"}>
                   <Trash2 size={14} />
                 </button>
               </div>

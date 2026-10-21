@@ -234,18 +234,21 @@ async function resolveKbContext(
     }
   };
   for (const root of tree) {
-    // Channel-scoped collections store the channelId in `scopeId` when
-    // scopeType='CHANNEL'. Other scope types (e.g. WORKSPACE) don't have a
-    // channel — the file viewer route still needs a placeholder so we treat
-    // it as undefined and downstream link builders fall back gracefully.
-    const channelId = root.scopeType === "CHANNEL" ? root.scopeId : undefined;
-    walk(root, root.name, root.id, root.projectId, channelId, "", null);
+    // The file viewer route's `:channelId` slot carries the collection's
+    // `scopeId` for every scope type — the channel id for CHANNEL-scoped
+    // collections, the workspace id for WORKSPACE-scoped ones. Collections
+    // with no owning project use the '_' sentinel in the `:projectId` slot,
+    // matching the URLs the KB screen itself builds.
+    walk(root, root.name, root.id, root.projectId || "_", root.scopeId || undefined, "", null);
   }
 
   // Best-effort fetch of the user's workspaceId for citation deep-links. We
   // don't fail the resolution if it's missing — link builders just fall back
   // to a workspace-less URL (which 404s today, but at least the rest of the
   // handler still works).
+  // First lookup, so no workspace hint exists yet: the unscoped resolution
+  // relies on the user having a single active Spaces identity. Handlers below
+  // re-scope their follow-up lookups with the workspace this one returns.
   const authForLinks = await getSpacesAuthForUser(userId, "agent-chat");
   const workspaceId = authForLinks?.workspaceId;
 
@@ -350,10 +353,12 @@ function collectionAllowed(ctx: KbResolution, collectionId: string): boolean {
  * and 404 with the standard Express not-found JSON.
  *
  * Returns "" when the user has no active spaces session (no workspaceId) OR
- * we don't have enough tree metadata to build the full path (channel-scoped
- * collections that predate scopeType tracking, workspace-scoped collections,
- * etc.). The caller (fileCitation) just omits the `url` field in that case
- * so the chip still renders without navigation.
+ * we don't have enough tree metadata to build the full path (a root
+ * collection with no scopeId). `<channelId>` is the root's scopeId — a channel
+ * id or, for workspace-scoped collections, the workspace id — and
+ * `<projectId>` is '_' when the collection has no owning project. The caller
+ * (fileCitation) just omits the `url` field in that case so the chip still
+ * renders without navigation.
  */
 function deepLinkForFile(
   ctx: KbResolution,
@@ -364,7 +369,8 @@ function deepLinkForFile(
 ): string {
   const meta = ctx.filesById.get(itemId);
   // Need workspaceId + projectId + channelId + rootCollectionId to land on the
-  // file viewer route; without any of them the link would 404.
+  // file viewer route; without any of them the link would 404. projectId is
+  // always set ('_' for collections with no owning project).
   if (!ctx.workspaceId) return "";
   if (!meta?.projectId || !meta.channelId || !meta.rootCollectionId) return "";
   // `?page=<N>` is read by FileViewerLayout and forwarded as PdfViewer's 1-based
@@ -667,7 +673,9 @@ export async function handleKbSearch(args: {
   const scope = buildVespaScope(ctx, args.collectionId);
   if ("error" in scope) return { content: scope.error, isError: true };
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Re-scope the identity resolution to the workspace resolveKbContext
+  // already selected (session-derived) — safe for two-workspace users.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) return { content: "Spaces session unavailable — cannot search the Knowledge Base.", isError: true };
 
   // Fetch a bit more than `limit` so the post-filter pass (single-file grants,
@@ -1022,7 +1030,8 @@ export async function handleKbReadFile(args: {
   const fileMeta = ctx.filesById.get(args.fileId)!;
 
   // Fetch the binary via spaces' download endpoint, with the user's session auth.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) return { content: "Spaces session unavailable — cannot fetch file content.", isError: true };
 
   try {
@@ -1180,7 +1189,8 @@ export async function handleKbGetChunks(args: {
     };
   }
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) {
     return { content: "Spaces session unavailable — cannot fetch chunks.", isError: true };
   }
@@ -1316,7 +1326,8 @@ export async function handleKbSearchWithinDoc(args: {
     };
   }
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) {
     return {
       content: "Spaces session unavailable — cannot search within document.",

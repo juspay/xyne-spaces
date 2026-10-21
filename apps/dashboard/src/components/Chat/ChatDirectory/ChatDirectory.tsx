@@ -8,7 +8,7 @@ import {
   useCallback,
   type ComponentType,
 } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../../hooks/useStableRouter';
 import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -36,7 +36,7 @@ import {
 } from '../../ui/dropdown-menu';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { keyBetween } from './ChatDirectory.utils';
+import { keyBetween, parseDMParticipantIds } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useAllMentionCount } from '../../../hooks/useMentionCount';
@@ -52,6 +52,11 @@ import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
+import ProjectSectionSuggestionCard from './ProjectSectionSuggestionCard';
+import SectionOrganizerDialog, {
+  type OrganizerGroup,
+  type OrganizerMode,
+} from './SectionOrganizerDialog';
 import ManageSectionChannelsDialog from './ManageSectionChannelsDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
@@ -59,7 +64,15 @@ import Avatar from '../../ui/Avatar/Avatar';
 import Dialog, { cn } from '../../ui/Dialog';
 
 import { useZero } from '../../../hooks/useZero';
+import { useUsersById } from '../../../hooks/useUsers';
+import { useDmAffinityRank } from '@xyne/shared/hooks';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
+import { affinityService } from '../../../services/affinityService';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { toast } from 'sonner';
 import {
   useChannelSort,
   type SidebarGroup,
@@ -75,8 +88,15 @@ import {
   ChannelSection,
   ChannelType,
   ChannelScopeType,
+  ChannelFilterMode,
   isDeskChannelType,
   NotificationLevel,
+  DEFAULT_ACTIVE_WINDOW_DAYS,
+  UserType,
+  computeProjectSectionSuggestions,
+  computeActivitySectionSuggestions,
+  computeDmSectionSuggestions,
+  getCandidateProjectIds,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -89,7 +109,16 @@ import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
 import type { ShortcutId } from '../../../shortcuts';
-import { chatNavItems, type ChatNavKey } from '../../AppSidebar/navigationConfig';
+import type { InboxItemKey } from '../../AppSidebar/navigationConfig';
+import { useInboxNavItems } from '../../../hooks/useInboxNavItems';
+import { appIdOf, inboxItemsStore } from '../../../hooks/barItems';
+import {
+  BarAddMenu,
+  BarRemoveButton,
+  SortableBar,
+  SortableBarItem,
+  useInboxBuiltIns,
+} from '../../BarCustomize';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
@@ -97,6 +126,9 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+
+const SECTION_SUGGESTION_DISMISSED_KEY = 'xyne:section-suggestion-dismissed';
+const CREATE_SECTION_CHUNK_SIZE = 25;
 
 const ContainerDropZone = ({
   id,
@@ -113,6 +145,12 @@ const ContainerDropZone = ({
       {children}
     </div>
   );
+};
+
+const GROUP_NAMES: Record<SidebarGroup, string> = {
+  starred: 'Starred',
+  channels: 'Channels',
+  dms: 'Direct messages',
 };
 
 const GroupSettingsMenu = ({
@@ -159,7 +197,7 @@ const GroupSettingsMenu = ({
             e.preventDefault();
             e.stopPropagation();
           }}
-          aria-label='Section options'
+          aria-label={`${GROUP_NAMES[group]} section options`}
           data-track-category='CHAT_SIDEBAR'
           data-track-name={trackName}
         >
@@ -211,26 +249,30 @@ const GroupSettingsMenu = ({
 
 const CHAT_NAV_ROW_DEFAULT_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-foreground';
 
-const CHAT_NAV_TEST_IDS: Partial<Record<ChatNavKey, string>> = {
+const CHAT_NAV_TEST_IDS: Partial<Record<InboxItemKey, string>> = {
+  threads: 'open-threads-button',
   bookmarks: 'open-bookmarks-button',
   'drafts-sent': 'open-drafts-and-sent-button',
+  'scheduled-messages': 'open-scheduled-messages-button',
 };
 
-const CHAT_NAV_SHORTCUTS: Partial<Record<ChatNavKey, ShortcutId>> = {
+const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
   'new-message': 'global.composeMessage',
   threads: 'global.openThreads',
 };
+
+const NO_SECTIONS: ChannelSection[] = [];
 
 const ChatDirectory = ({
   channelData,
   allChannelsUserStatus,
 }: ChatDirectoryProps): ReactElement | null => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { workspaceId, channelId: activeChannelId } = useParams<{
-    workspaceId: string;
-    channelId: string;
-  }>();
+  const navigate = useStableNavigate();
+  // Only the pieces of the route the sidebar renders from: it re-renders when the path or the
+  // active channel changes, not on hash, search or history-state navigations.
+  const pathname = useRouterSelector(snapshot => snapshot.location.pathname);
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
+  const activeChannelId = useRouterSelector(snapshot => snapshot.params['channelId']);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
@@ -238,6 +280,9 @@ const ChatDirectory = ({
   // enabling it must not need a dashboard rebuild, and the pilot runs on an
   // allowedEmails subset first.
   const radarEnabled = useRadarEnabled(auth.user?.email);
+  const inboxNavItems = useInboxNavItems(radarEnabled);
+  const inboxBuiltIns = useInboxBuiltIns();
+  const inboxNavIds = useMemo(() => inboxNavItems.map(item => item.key), [inboxNavItems]);
   const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
@@ -248,6 +293,15 @@ const ChatDirectory = ({
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  // Opened by the Ask AI assistant; the param is removed so a refresh does not reopen it.
+  const opensAddChannel = useRouterSelector(
+    snapshot => new URLSearchParams(snapshot.location.search).get('dialog') === 'add_channel',
+  );
+  useEffect(() => {
+    if (!opensAddChannel) return;
+    setShowAddChannelForm(true);
+    void navigate(pathname, { replace: true });
+  }, [opensAddChannel, navigate, pathname]);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
@@ -290,7 +344,250 @@ const ChatDirectory = ({
     unreadCounts,
     mentionCounts,
     activeChannelId,
+    currentUserId: context.userID,
   });
+
+  const [suggestionDismissed, setSuggestionDismissed] = useState(
+    () => localStorage.getItem(SECTION_SUGGESTION_DISMISSED_KEY) === 'true',
+  );
+  const [showOrganizer, setShowOrganizer] = useState(false);
+  const [organizerMode, setOrganizerMode] = useState<OrganizerMode>('project');
+  const [activeWindowDays, setActiveWindowDays] = useState(DEFAULT_ACTIVE_WINDOW_DAYS);
+  const [suggestionsNowMs, setSuggestionsNowMs] = useState(() => Date.now());
+
+  const usersById = useUsersById();
+  const dmRank = useDmAffinityRank(context.userID);
+  const affinityVersion = useAffinityCallback();
+
+  const dmCounterpartByChannelId = useMemo(() => {
+    const counterparts = new Map<string, string>();
+    for (const channel of channelData ?? []) {
+      if (channel.scopeType !== ChannelScopeType.DM) continue;
+      const others = parseDMParticipantIds(channel).filter(id => id !== context.userID);
+      const [onlyOther] = others;
+      if (others.length === 1 && onlyOther) counterparts.set(channel.id, onlyOther);
+    }
+    return counterparts;
+  }, [channelData, context.userID]);
+
+  const isBotDmChannel = useCallback(
+    (channel: VisibleChannel): boolean => {
+      const otherId = dmCounterpartByChannelId.get(channel.id);
+      if (!otherId) return false;
+      const userType = usersById.get(otherId)?.userType;
+      return userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
+    },
+    [dmCounterpartByChannelId, usersById],
+  );
+
+  const contactWeightByChannelId = useMemo(() => {
+    const weights = new Map<string, number>();
+    if (suggestionDismissed) return weights;
+    void affinityVersion;
+
+    let hasAffinity = false;
+    for (const [channelId, otherId] of dmCounterpartByChannelId) {
+      const weight = affinityService.getUserWeight(otherId);
+      const userType = usersById.get(otherId)?.userType;
+      const isBot =
+        userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
+      if (weight > 0 && !isBot) hasAffinity = true;
+      weights.set(channelId, weight);
+    }
+    if (hasAffinity) return weights;
+
+    const recencyScore = new Map(dmRank.map((id, index) => [id, dmRank.length - index]));
+    for (const [channelId, otherId] of dmCounterpartByChannelId) {
+      weights.set(channelId, recencyScore.get(otherId) ?? 0);
+    }
+    return weights;
+  }, [dmCounterpartByChannelId, dmRank, suggestionDismissed, affinityVersion, usersById]);
+
+  const suggestionChannels = useMemo(
+    () =>
+      suggestionDismissed
+        ? []
+        : (channelData ?? []).map(channel => ({
+            id: channel.id,
+            projectId: channel.projectId,
+            scopeType: channel.scopeType,
+            type: channel.type,
+            lastActivityAt: channel.channelStats?.lastActivityAt ?? channel.lastActivityAt ?? null,
+            isBotDm: isBotDmChannel(channel),
+            contactWeight: contactWeightByChannelId.get(channel.id) ?? 0,
+          })),
+    [channelData, suggestionDismissed, isBotDmChannel, contactWeightByChannelId],
+  );
+
+  const candidateProjectIdsKey = useMemo(
+    () =>
+      getCandidateProjectIds({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+      }).join(','),
+    [suggestionChannels, allChannelsUserStatus],
+  );
+  const projectsQuery = useMemo(
+    () =>
+      queries.projectsByIds({
+        projectIds: candidateProjectIdsKey ? candidateProjectIdsKey.split(',') : [],
+      }),
+    [candidateProjectIdsKey],
+  );
+  const [projects] = useCachedQuery(projectsQuery, {
+    enabled: !suggestionDismissed && candidateProjectIdsKey.length > 0,
+  });
+
+  const existingSectionNames = useMemo(
+    () => (channelSections ?? []).map(section => section.name),
+    [channelSections],
+  );
+
+  const projectSuggestions = useMemo(
+    () =>
+      computeProjectSectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        projects: projects ?? [],
+        existingSectionNames,
+      }),
+    [suggestionChannels, allChannelsUserStatus, projects, existingSectionNames],
+  );
+
+  const activitySuggestions = useMemo(
+    () =>
+      computeActivitySectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        existingSectionNames,
+        nowMs: suggestionsNowMs,
+        activeWindowDays,
+      }),
+    [
+      suggestionChannels,
+      allChannelsUserStatus,
+      existingSectionNames,
+      suggestionsNowMs,
+      activeWindowDays,
+    ],
+  );
+
+  const dmSuggestions = useMemo(
+    () =>
+      computeDmSectionSuggestions({
+        channels: suggestionChannels,
+        statuses: allChannelsUserStatus ?? [],
+        existingSectionNames,
+      }),
+    [suggestionChannels, allChannelsUserStatus, existingSectionNames],
+  );
+
+  const sectionSuggestions =
+    organizerMode === 'activity'
+      ? activitySuggestions
+      : organizerMode === 'dms'
+        ? dmSuggestions
+        : projectSuggestions;
+
+  const showSuggestionCard =
+    !suggestionDismissed &&
+    (projectSuggestions.length > 0 || activitySuggestions.length > 0 || dmSuggestions.length > 0);
+
+  const channelsById = useMemo(
+    () => new Map((channelData ?? []).map(channel => [channel.id, channel])),
+    [channelData],
+  );
+
+  const handleDismissSuggestion = useCallback(() => {
+    localStorage.setItem(SECTION_SUGGESTION_DISMISSED_KEY, 'true');
+    setSuggestionDismissed(true);
+    toast('You can create sections any time from the channel menu.', { duration: 5000 });
+  }, []);
+
+  const handleCreateSections = useCallback(
+    async (groups: OrganizerGroup[]) => {
+      const timestamp = Date.now();
+      const created: { id: string; channelIds: string[] }[] = [];
+      let prevSectionKey = lastSectionPosition;
+
+      setShowOrganizer(false);
+
+      for (const group of groups) {
+        const sectionId = crypto.randomUUID();
+        const position = keyBetween(prevSectionKey, null);
+        prevSectionKey = position;
+
+        const sectionCreated = await surfaceMutationError(
+          zero.mutate(
+            mutators.channelSection.create({
+              id: sectionId,
+              name: group.name.trim(),
+              emoji: null,
+              position,
+              filterMode: ChannelFilterMode.ALL,
+              timestamp,
+            }),
+          ),
+        );
+        if (!sectionCreated) continue;
+
+        const movedChannelIds: string[] = [];
+        let prevChannelKey: string | null = null;
+        for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
+          const chunk = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const positions = chunk.map(() => {
+            const channelPosition = keyBetween(prevChannelKey, null);
+            prevChannelKey = channelPosition;
+            return channelPosition;
+          });
+          const results = await Promise.all(
+            chunk.map((channelId, index) =>
+              surfaceMutationError(
+                zero.mutate(
+                  mutators.channel.moveToSection({
+                    channelId,
+                    sectionId,
+                    position: positions[index] ?? keyBetween(null, null),
+                    timestamp,
+                  }),
+                ),
+              ),
+            ),
+          );
+          chunk.forEach((channelId, index) => {
+            if (results[index]) movedChannelIds.push(channelId);
+          });
+        }
+
+        created.push({ id: sectionId, channelIds: movedChannelIds });
+      }
+
+      if (created.length === 0) return;
+
+      const sectionCount = created.length;
+      const channelCount = created.reduce((sum, s) => sum + s.channelIds.length, 0);
+      toast(
+        `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channel${channelCount === 1 ? '' : 's'}.`,
+        {
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              const undoTimestamp = Date.now();
+              for (const section of created) {
+                void surfaceMutationError(
+                  zero.mutate(
+                    mutators.channelSection.remove({ id: section.id, timestamp: undoTimestamp }),
+                  ),
+                );
+              }
+            },
+          },
+        },
+      );
+    },
+    [zero, lastSectionPosition],
+  );
 
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
   // ChatDirectory renders (starred → custom sections → channels → DMs) so keyboard
@@ -425,8 +722,8 @@ const ChatDirectory = ({
         s => s.channelId === c.id && s.userId === context.userID,
       );
       const isDM = c.scopeType === ChannelScopeType.DM || c.scopeType === ChannelScopeType.GROUP_DM;
-      if (status?.desktopNotificationLevel === NotificationLevel.NONE) continue;
       const hasUnreadCount = (unreadCounts[c.id] ?? 0) > 0;
+      if (status?.desktopNotificationLevel === NotificationLevel.NONE && !hasUnreadCount) continue;
       let isUnread = hasUnreadCount;
       if (!isDM) {
         const hasNewActivity =
@@ -490,8 +787,7 @@ const ChatDirectory = ({
   useEffect(() => {
     if (isMobile) return; // Don't redirect on mobile
     const isAtChatDirRoot =
-      location.pathname === '/chat/dir' ||
-      (workspaceId && location.pathname === `/${workspaceId}/chat/dir`);
+      pathname === '/chat/dir' || (workspaceId && pathname === `/${workspaceId}/chat/dir`);
     if (!isAtChatDirRoot) return;
 
     const targetChannelId =
@@ -506,7 +802,7 @@ const ChatDirectory = ({
       void navigate(`/chat/dir/${targetChannelId}`, { replace: true });
     }
   }, [
-    location.pathname,
+    pathname,
     lastVisitedChannelId,
     starred,
     channels,
@@ -630,14 +926,20 @@ const ChatDirectory = ({
     createDmMutation.mutate(dmRequest);
   };
 
-  const chatNavStateClass = (key: ChatNavKey): string => {
+  const chatNavStateClass = (key: InboxItemKey): string => {
+    const appId = appIdOf(key);
+    if (appId) {
+      return pathname.includes(`/chat/dir/app/${appId}`)
+        ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
+        : CHAT_NAV_ROW_DEFAULT_CLASS;
+    }
     switch (key) {
       case 'threads':
         return hasUnreadThreads
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'unreads':
-        return location.pathname.includes('/chat/dir/unreads')
+        return pathname.includes('/chat/dir/unreads')
           ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
           : unreadActivityStats.hasUnread
             ? 'text-sidebar-accent-foreground font-semibold'
@@ -647,7 +949,11 @@ const ChatDirectory = ({
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'drafts-sent':
-        return location.pathname.endsWith('/chat/drafts-sent')
+        return pathname.endsWith('/chat/drafts-sent')
+          ? 'text-sidebar-accent-foreground'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'scheduled-messages':
+        return location.pathname.endsWith('/scheduled-messages')
           ? 'text-sidebar-accent-foreground'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'recap':
@@ -655,7 +961,7 @@ const ChatDirectory = ({
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'radar':
-        return location.pathname.includes('/chat/dir/radar')
+        return pathname.includes('/chat/dir/radar')
           ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       default:
@@ -663,7 +969,7 @@ const ChatDirectory = ({
     }
   };
 
-  const chatNavBadgeCount = (key: ChatNavKey): number => {
+  const chatNavBadgeCount = (key: InboxItemKey): number => {
     switch (key) {
       case 'threads':
         return threadCount;
@@ -676,7 +982,7 @@ const ChatDirectory = ({
     }
   };
 
-  const chatNavTrackMetadata = (key: ChatNavKey): string | undefined => {
+  const chatNavTrackMetadata = (key: InboxItemKey): string | undefined => {
     switch (key) {
       case 'threads':
         return JSON.stringify({ threadCount, hasUnreadThreads });
@@ -730,64 +1036,118 @@ const ChatDirectory = ({
           className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
         >
           <div className='hidden md:block'>
-            {chatNavItems(radarEnabled).map(item => {
-              const Icon = item.icon;
-              const shortcut = CHAT_NAV_SHORTCUTS[item.key];
-              const badgeCount = chatNavBadgeCount(item.key);
-              return (
+            <SortableBar store={inboxItemsStore} ids={inboxNavIds} direction='vertical'>
+              {inboxNavItems.map(item => {
+                const Icon = item.icon;
+                const shortcut = CHAT_NAV_SHORTCUTS[item.key];
+                const badgeCount = chatNavBadgeCount(item.key);
+                const removable = !inboxItemsStore.locked.includes(item.key);
+                return (
+                  // `group` so the row's "×" shows on hover; the row makes room
+                  // for it (pr) only then, so badges and shortcut hints keep
+                  // their place until the pointer arrives.
+                  <SortableBarItem key={item.key} id={item.key} as='div' className='group relative'>
+                    <BarRemoveButton
+                      store={inboxItemsStore}
+                      id={item.key}
+                      label={item.label}
+                      trackCategory='CHAT_SIDEBAR'
+                      className='right-2 top-1/2 size-5 -translate-y-1/2'
+                    />
+                    <button
+                      className={cn(
+                        'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                        removable && 'group-hover:pr-9',
+                        chatNavStateClass(item.key),
+                      )}
+                      onClick={() => {
+                        void (item.replace
+                          ? navigate(item.to, { replace: true })
+                          : navigate(item.to));
+                      }}
+                      onMouseEnter={item.key === 'recap' ? prefetchRecap : undefined}
+                      data-testid={CHAT_NAV_TEST_IDS[item.key]}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name={item.trackName}
+                      data-track-metadata={chatNavTrackMetadata(item.key)}
+                    >
+                      <span className='size-4 flex items-center justify-center shrink-0'>
+                        <Icon className='size-4' />
+                      </span>
+                      <span className='flex-1 min-w-0 text-left truncate block'>{item.label}</span>
+                      {shortcut !== undefined && <ShortcutHint shortcut={shortcut} />}
+                      {item.key === 'drafts-sent' && (
+                        <span className='flex items-center gap-2 text-sidebar-foreground'>
+                          {draftsCount > 0 && (
+                            <span className='flex items-center gap-1 text-xs'>
+                              <PencilEdit size={12} />
+                              {draftsCount}
+                            </span>
+                          )}
+                          {pendingScheduledCount > 0 && (
+                            <span className='flex items-center gap-1 text-xs'>
+                              <ClockDefault size={12} />
+                              {pendingScheduledCount}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {badgeCount > 0 && (
+                        <span className='size-5 flex items-center justify-center shrink-0'>
+                          <Badge
+                            variant='success'
+                            className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                          >
+                            {badgeCount > 10 ? '10+' : badgeCount}
+                          </Badge>
+                        </span>
+                      )}
+                    </button>
+                  </SortableBarItem>
+                );
+              })}
+            </SortableBar>
+            <BarAddMenu
+              store={inboxItemsStore}
+              builtIns={inboxBuiltIns}
+              trackCategory='CHAT_SIDEBAR'
+              side='bottom'
+              align='start'
+              trigger={
                 <button
-                  key={item.key}
-                  className={cn(
-                    'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                    chatNavStateClass(item.key),
-                  )}
-                  onClick={() => {
-                    const to = item.sidebarTo ?? item.to;
-                    void (item.replace ? navigate(to, { replace: true }) : navigate(to));
-                  }}
-                  onMouseEnter={item.key === 'recap' ? prefetchRecap : undefined}
-                  data-testid={CHAT_NAV_TEST_IDS[item.key]}
+                  type='button'
+                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                  data-testid='chat-nav-add'
                   data-track-category='CHAT_SIDEBAR'
-                  data-track-name={item.trackName}
-                  data-track-metadata={chatNavTrackMetadata(item.key)}
+                  data-track-name='OPEN_ADD_MENU'
                 >
                   <span className='size-4 flex items-center justify-center shrink-0'>
-                    <Icon className='size-4' />
+                    <PlusDefault size={16} />
                   </span>
-                  <span className='flex-1 min-w-0 text-left truncate block'>{item.label}</span>
-                  {shortcut !== undefined && <ShortcutHint shortcut={shortcut} />}
-                  {item.key === 'drafts-sent' && (
-                    <span className='flex items-center gap-2 text-sidebar-foreground'>
-                      {draftsCount > 0 && (
-                        <span className='flex items-center gap-1 text-xs'>
-                          <PencilEdit size={12} />
-                          {draftsCount}
-                        </span>
-                      )}
-                      {pendingScheduledCount > 0 && (
-                        <span className='flex items-center gap-1 text-xs'>
-                          <ClockDefault size={12} />
-                          {pendingScheduledCount}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                  {badgeCount > 0 && (
-                    <span className='size-5 flex items-center justify-center shrink-0'>
-                      <Badge
-                        variant='success'
-                        className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                      >
-                        {badgeCount > 10 ? '10+' : badgeCount}
-                      </Badge>
-                    </span>
-                  )}
+                  <span className='flex-1 min-w-0 text-left truncate block'>Add</span>
                 </button>
-              );
-            })}
+              }
+            />
           </div>
 
           <div className='py-3 w-full hidden md:block' />
+
+          {showSuggestionCard && (
+            <ProjectSectionSuggestionCard
+              onAccept={() => {
+                setSuggestionsNowMs(Date.now());
+                setOrganizerMode(
+                  projectSuggestions.length > 0
+                    ? 'project'
+                    : activitySuggestions.length > 0
+                      ? 'activity'
+                      : 'dms',
+                );
+                setShowOrganizer(true);
+              }}
+              onDismiss={handleDismissSuggestion}
+            />
+          )}
 
           <Accordion.Root
             type='multiple'
@@ -843,7 +1203,7 @@ const ChatDirectory = ({
                               channel={channel}
                               unreadCount={unreadCounts[channel.id] ?? 0}
                               isActive={activeChannelId === channel.id}
-                              sections={channelSections ?? []}
+                              sections={channelSections ?? NO_SECTIONS}
                               onMoveToSection={moveChannelToSection}
                             />
                           ))
@@ -864,7 +1224,7 @@ const ChatDirectory = ({
                     key={section.id}
                     section={section}
                     channels={sectionChannels}
-                    sections={channelSections ?? []}
+                    sections={channelSections ?? NO_SECTIONS}
                     unreadCounts={unreadCounts}
                     sectionUnreadCount={sectionUnreadCounts[section.id] ?? 0}
                     activeChannelId={activeChannelId}
@@ -959,6 +1319,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             void navigate('/chat/search?mode=channels');
                           }}
+                          aria-label='Browse channels'
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='BROWSE_CHANNELS'
                         >
@@ -982,6 +1343,7 @@ const ChatDirectory = ({
                             e.stopPropagation();
                             setShowAddChannelForm(true);
                           }}
+                          aria-label='Create channel'
                           data-testid='create-new-channel'
                           data-track-event='BUTTON_CLICK'
                           data-track-category='CHAT_SIDEBAR'
@@ -1040,7 +1402,7 @@ const ChatDirectory = ({
                         channel={channel}
                         unreadCount={unreadCounts[channel.id] ?? 0}
                         isActive={activeChannelId === channel.id}
-                        sections={channelSections ?? []}
+                        sections={channelSections ?? NO_SECTIONS}
                         onMoveToSection={moveChannelToSection}
                       />
                     ))}
@@ -1086,6 +1448,7 @@ const ChatDirectory = ({
                           e.stopPropagation();
                           handleAddDirectMessage();
                         }}
+                        aria-label='Add direct message'
                         data-testid='create-new-dm'
                         data-track-event='BUTTON_CLICK'
                         data-track-category='CHAT_SIDEBAR'
@@ -1133,7 +1496,7 @@ const ChatDirectory = ({
                         channel={channel}
                         unreadCount={unreadCounts[channel.id] ?? 0}
                         isActive={activeChannelId === channel.id}
-                        sections={channelSections ?? []}
+                        sections={channelSections ?? NO_SECTIONS}
                         onMoveToSection={moveChannelToSection}
                       />
                     ))}
@@ -1198,6 +1561,22 @@ const ChatDirectory = ({
               lastSectionPosition={lastSectionPosition}
               prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
               onClose={() => setShowAddSectionForm(false)}
+            />
+          )}
+        </Dialog>
+
+        <Dialog open={showOrganizer} onOpenChange={setShowOrganizer} className='max-w-lg'>
+          {showOrganizer && (
+            <SectionOrganizerDialog
+              suggestions={sectionSuggestions}
+              channelsById={channelsById}
+              existingNames={existingSectionNames}
+              mode={organizerMode}
+              onModeChange={setOrganizerMode}
+              activeWindowDays={activeWindowDays}
+              onActiveWindowDaysChange={setActiveWindowDays}
+              onCancel={() => setShowOrganizer(false)}
+              onConfirm={groups => void handleCreateSections(groups)}
             />
           )}
         </Dialog>
@@ -1538,6 +1917,8 @@ const ChatDirectory = ({
       </Dialog>
 
       <ChannelCommandMenu
+        aiOverview
+        globalShortcuts={false}
         channels={channels}
         starred={starred}
         directMessages={directMessages}

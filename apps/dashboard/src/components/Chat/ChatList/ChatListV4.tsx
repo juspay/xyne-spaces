@@ -9,11 +9,13 @@ import React, {
   useRef,
   startTransition,
   useState,
+  useContext,
 } from 'react';
 import { useChannelParticipation, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
+import { messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { DatePill } from '../DatePill';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -27,7 +29,11 @@ import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, MessagesSquare } from 'lucide-react';
+import {
+  DiscussionListContext,
+  type DiscussionScope,
+} from '../ConversationPannel/DiscussionListContext';
 import { mutators } from '../../../zero/mutators';
 import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
@@ -39,12 +45,15 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
 import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
+import { afterReturn, markWhenLeft, usePageCoverage } from '../../../hooks/usePageCoverage';
 
 export type ChatListProps = {
   channelId: string;
   projectId?: string | undefined;
   cachedConversations: Conversation[];
   conversationIds?: string[] | undefined;
+  /** Scopes the list to SDLC discussions, joined in the query; paged as ever. */
+  discussionScope?: DiscussionScope | undefined;
   onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
@@ -65,6 +74,18 @@ export type ChatListProps = {
   loadingFallback?: React.ReactNode;
   // Reports the virtualizer's real total content height (px) whenever it changes.
   onTotalHeightChange?: (height: number) => void;
+  /**
+   * Called when a deep link inside this already-open list points at a conversation
+   * that isn't loaded. The host recreates the list (new key) so it opens at the
+   * target like a fresh deep link instead of jumping into freshly fetched rows.
+   */
+  onLinkedTargetNotLoaded?: () => void;
+  /**
+   * True while the host remounts this list for onLinkedTargetNotLoaded. That
+   * unmount/mount isn't the user leaving or opening the channel, so neither marks
+   * it as read nor consumes the skip-mark-as-read flags.
+   */
+  isReopeningForLinkedTargetRef?: React.RefObject<boolean>;
 };
 
 type Anchor = {
@@ -79,11 +100,38 @@ type UpdatedConveresationsAnchor = {
 
 const PAGE_SIZE = 50;
 
-function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
+type DeepLinkTarget = { conversationId: string; createdAt: number };
+
+/**
+ * The deep-link target itself, or a row strictly newer than it. Rows sharing the
+ * target's timestamp are excluded: the list sorts by createdAt only, so they could
+ * land above the target. They arrive later with the older rows.
+ */
+function isDeepLinkTargetOrNewer(conversation: Conversation, target: DeepLinkTarget): boolean {
+  return (
+    conversation.conversationId === target.conversationId ||
+    conversation.createdAt > target.createdAt
+  );
+}
+
+/**
+ * `lastAmongTiesId` sorts that conversation after any rows sharing its createdAt, so
+ * ties loaded above a deep-link target insert above it rather than below (a row
+ * landing below it would make the end-anchor push the target up).
+ */
+function dedupeAndSort(
+  a: Conversation[],
+  b: Conversation[],
+  lastAmongTiesId?: string,
+): Conversation[] {
   const map = new Map<string, Conversation>();
   for (const c of a) map.set(c.conversationId, c);
   for (const c of b) map.set(c.conversationId, c);
-  return Array.from(map.values()).sort((x, y) => x.createdAt - y.createdAt);
+  return Array.from(map.values()).sort(
+    (x, y) =>
+      x.createdAt - y.createdAt ||
+      (x.conversationId === lastAmongTiesId ? 1 : y.conversationId === lastAmongTiesId ? -1 : 0),
+  );
 }
 
 function mergeWithCached(
@@ -192,6 +240,14 @@ function reconcileConversationWindow(
 
 type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'][number];
 const VISIBLE_CONVERSATION_EPSILON_PX = 1;
+/** Breathing room at both edges before a keyboard-selected row counts as visible. */
+const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the list: clear of the sticky date pill (its wrapper's py-2, the pill's own
+ * py-2, and the badge) rather than tucked behind it.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 56;
 
 function computeNewConvIdx(
   messages: CombinedMessage[],
@@ -214,6 +270,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   projectId,
   cachedConversations,
   conversationIds: conversationIdsFilter,
+  discussionScope,
   onOpenThread: onOpenThreadOverride,
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
@@ -224,7 +281,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
   onThreadClick,
   loadingFallback,
   onTotalHeightChange,
+  onLinkedTargetNotLoaded,
+  isReopeningForLinkedTargetRef,
 }) => {
+  // Set where these conversations are shown as discussions (the SDLC panel).
+  const discussionList = useContext(DiscussionListContext);
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
     return () => {
@@ -245,6 +306,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
+  // lastViewedAt as it was when this channel opened. The list marks what is on
+  // screen as read while open, which moves the live value — the "New Messages"
+  // divider and unread scroll must keep pointing at where the user left off.
+  const lastViewedAtOnOpenRef = useRef<{ value: number | null } | null>(null);
+  if (!lastViewedAtOnOpenRef.current && channelParticipation) {
+    lastViewedAtOnOpenRef.current = { value: channelParticipation.lastViewedAt ?? null };
+  }
+  const lastViewedAtOnOpen = lastViewedAtOnOpenRef.current
+    ? lastViewedAtOnOpenRef.current.value
+    : channelParticipation?.lastViewedAt;
   const isDmScope =
     channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
   // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
@@ -268,32 +339,91 @@ const ChatListV4: React.FC<ChatListProps> = ({
     },
   );
   const [inViewAnchor, setInViewAnchor] = useState<UpdatedConveresationsAnchor | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>(cachedConversations);
-  const conversationsRef = useRef<Conversation[]>(cachedConversations);
+  // Deep link opened at mount: the linked conversation becomes the FIRST row and
+  // only newer rows load below it. With nothing above the target its offset is 0,
+  // so the jump needs no height estimates and nothing above can resize and push
+  // it. Older rows are held until the target has landed, then preloaded in the
+  // background (see isDeepLinkLandingRef). Decided once at mount: a link clicked
+  // inside an already-open list doesn't switch modes.
+  const [openedFromDeepLink] = useState(
+    () =>
+      !!linkedConversationId &&
+      !!linkedItemCreatedAt &&
+      !unreadsOnly &&
+      !discussionScope &&
+      (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId)),
+  );
+  // The linked conversation, or null when this list didn't open from a deep link.
+  // Its createdAt must be the conversation's own: linkedItemCreatedAt can be a reply's
+  // time (copied thread-reply links, slash-command banners), and using that as the
+  // boundary skips every conversation started between the root and the reply. So it
+  // comes from the cached row, else from the row fetched by id in the initial load;
+  // linkedItemCreatedAt is only the fallback when the target can't be read.
+  const deepLinkTargetRef = useRef<DeepLinkTarget | null>(null);
+  if (deepLinkTargetRef.current === null && openedFromDeepLink && linkedConversationId) {
+    const cachedTarget = cachedConversations.find(c => c.conversationId === linkedConversationId);
+    const createdAt = cachedTarget?.createdAt ?? linkedItemCreatedAt?.createdAt;
+    if (createdAt !== undefined) {
+      deepLinkTargetRef.current = { conversationId: linkedConversationId, createdAt };
+    }
+  }
+  const [initialConversations] = useState<Conversation[]>(() => {
+    const deepLinkTarget = deepLinkTargetRef.current;
+    // Normal opening: start from the cached rows as they are.
+    if (!deepLinkTarget) return cachedConversations;
+
+    // Target not cached yet: start empty (loader) rather than painting the cached
+    // newer rows — the list would scroll to their bottom, queue size corrections
+    // there, and those would land after the jump to the target at offset 0.
+    const isTargetCached = cachedConversations.some(
+      c => c.conversationId === deepLinkTarget.conversationId,
+    );
+    if (!isTargetCached) return [];
+
+    return cachedConversations.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
+  });
+  // True while a deep link's target is being placed: older rows are held and kept
+  // out of the list. Goes false once the first load has placed it (when the older
+  // rows are preloaded) and stays false — from then on this is a normal list.
+  const isDeepLinkLandingRef = useRef(openedFromDeepLink);
+  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+  const conversationsRef = useRef<Conversation[]>(initialConversations);
   // The cache snapshot we hydrated from — used to skip echoing identical
   // data back into the query cache at mount (would dirty the IndexedDB
   // persist key for no reason).
-  const hydratedFromCacheRef = useRef<Conversation[]>(cachedConversations);
+  const hydratedFromCacheRef = useRef<Conversation[]>(initialConversations);
+  // While the deep link is landing, the target must stay the first row: every write
+  // (cache, newer fetch, the real-time "latest" tail — which can contain rows older
+  // than a target near the end of the channel) drops rows before it. Returns the
+  // same array when nothing is dropped, so an unchanged list doesn't re-render.
+  const dropRowsBeforeDeepLinkTarget = useCallback((list: Conversation[]): Conversation[] => {
+    const deepLinkTarget = deepLinkTargetRef.current;
+    if (!deepLinkTarget || !isDeepLinkLandingRef.current) return list;
+    const kept = list.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
+    return kept.length === list.length ? list : kept;
+  }, []);
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
       if (typeof next !== 'function') {
-        conversationsRef.current = next;
-        setConversations(next);
+        const kept = dropRowsBeforeDeepLinkTarget(next);
+        conversationsRef.current = kept;
+        setConversations(kept);
         return;
       }
 
       setConversations(prev => {
-        const resolved = next(prev);
+        const resolved = dropRowsBeforeDeepLinkTarget(next(prev));
         conversationsRef.current = resolved;
         return resolved;
       });
     },
-    [],
+    [dropRowsBeforeDeepLinkTarget],
   );
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -323,6 +453,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
+  const messageListFocusRef = useRef<HTMLButtonElement>(null);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<
     Map<Element, { timestamp: number; conversationId: string; rect: DOMRect }>
@@ -351,11 +482,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // In unreads-only mode (the Unreads inbox), hide everything the user has
   // already seen; pending rows carry the newest timestamps so they survive.
   const filteredConversations = useMemo(() => {
-    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
-    return conversationsWithPending.filter(
-      conv => conv.createdAt > channelParticipation.lastViewedAt,
-    );
-  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+    if (!unreadsOnly || !lastViewedAtOnOpen) return conversationsWithPending;
+    return conversationsWithPending.filter(conv => conv.createdAt > lastViewedAtOnOpen);
+  }, [conversationsWithPending, unreadsOnly, lastViewedAtOnOpen]);
 
   const ephemeralConversations = useEphemeralChannelConversations(channelId);
   const conversationsWithEphemeral = useMemo(() => {
@@ -368,6 +497,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
+
   const lastConversationAutoScrollKey = useMemo(() => {
     const lastConversation = conversations[conversations.length - 1];
     if (!lastConversation) return '';
@@ -392,6 +522,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isMember &&
     !linkedConversationId;
 
+  // Deep link landed on a conversation that isn't the newest: keep IT fixed rather than
+  // the bottom. If the rows below it don't fill the screen the list sits at the end,
+  // and every "stick to bottom" behaviour (followOnAppend, TanStack's at-end resize
+  // adjustment, the near-bottom rule, the last-message auto-scroll) would scroll each
+  // new message into view and push the target up. Released when the target leaves the
+  // screen, or on explicit user intent (see releaseDeepLinkHold); state because the
+  // virtualizer options read it.
+  const [isHoldingDeepLink, setIsHoldingDeepLink] = useState(false);
+  const isHoldingDeepLinkRef = useRef(false);
+  // The held conversation, so the scroll check can tell when it leaves the screen.
+  const heldDeepLinkIdRef = useRef<string | null>(null);
+  /** Holds `conversationId` in place, or releases the hold when null. */
+  const setDeepLinkHold = useCallback((conversationId: string | null): void => {
+    heldDeepLinkIdRef.current = conversationId;
+    const hold = conversationId !== null;
+    if (isHoldingDeepLinkRef.current === hold) return;
+    isHoldingDeepLinkRef.current = hold;
+    setIsHoldingDeepLink(hold);
+  }, []);
+
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
   // Prepends are scroll-stable natively as long as getItemKey returns stable conversationIds.
@@ -409,10 +559,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // paddingEnd is baked into getTotalSize(), so scrollToEnd()/isAtEnd() and the
     // anchorTo:'end' prepend adjustment all account for it — no per-frame cost,
     // it's a constant added to the sized container.
-    paddingEnd: 28,
+    // Discussion cards carry their own spacing, so the list ends close to the composer.
+    paddingEnd: discussionList ? 12 : 28,
     anchorTo: 'end',
-    followOnAppend: 'auto',
-    scrollEndThreshold: 80,
+    // While a deep link is held: don't follow appends, and a threshold below 0 means the
+    // list is never "at end", which turns off TanStack's at-end resize adjustment.
+    followOnAppend: isHoldingDeepLink ? false : 'auto',
+    scrollEndThreshold: isHoldingDeepLink ? -1 : 80,
     // directDomUpdates: positions are written directly to DOM nodes via TanStack,
     // bypassing React entirely. React only re-renders when the visible index range
     // changes (not on every scroll pixel or measurement).
@@ -426,21 +579,52 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // viewport stays anchored (prevents flicker from estimate→measure drift).
   // After initial load: adjust when scrolling up, or when idle at bottom AND
   // the changed item is among the last few (prevents drift from async loads).
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  const shouldAdjustOnSizeChange = (
+    item: { index: number; key: React.Key; start: number; size: number },
+    instance: { options: { count: number } },
+  ): boolean => {
     if (!lifecycleRef.current.initialPositionSet) return false;
     if (!lifecycleRef.current.initialLoadComplete) {
       // Only keep the viewport pinned while we intentionally anchored to bottom.
       // This prevents "almost at bottom" drift on initial load as tall rows measure.
       return lifecycleRef.current.didInitialScrollAlign === 'end';
     }
+    // A row above the viewport measured for the first time (e.g. older rows just
+    // prepended) replaces its estimate with its real height; compensate so the
+    // rows on screen don't get pushed down. TanStack's own default for first
+    // measurements. Needed even without a 'backward' scroll: a wheel-up at
+    // scrollTop 0 fires no scroll event, so scrollDirection never turns backward.
+    // The virtualizer's own offset, not the DOM's: right after an insert above, the
+    // end-anchor has already moved its offset (e.g. 0 → 17096) but hasn't written it
+    // to scrollTop yet, so the DOM would still say 0 and every row would look
+    // "below" the viewport. Same basis TanStack's default rule uses.
+    const scrollTop = (virtualizer.scrollOffset ?? 0) + virtualizer.scrollAdjustments;
+    const isFirstMeasure = !virtualizer.itemSizeCache.has(item.key);
+    if (isFirstMeasure && item.start < scrollTop) return true;
+    // A row entirely above the viewport can't be seen, so shifting the viewport by
+    // its size change is always invisible — compensate regardless of scroll
+    // direction (at scrollTop ~0 a wheel-up fires no scroll event, so the
+    // 'backward' check below never sees the user scrolling up).
+    const previousSize = virtualizer.itemSizeCache.get(item.key) ?? item.size;
+    if (item.start + previousSize <= scrollTop) return true;
+    // Holding a deep link: rows below it grow downward instead of pinning the bottom.
+    if (isHoldingDeepLinkRef.current) return false;
     const isNearBottom = virtualizer.isAtEnd(80);
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+    shouldAdjustOnSizeChange(item, instance);
 
   const lastReportedTotalHeightRef = useRef<number | null>(null);
   useEffect(() => {
     if (!onTotalHeightChange) return;
+    // Mirrors the loading-overlay guard at the bottom of this component: while
+    // there's no cached or loaded content yet, getTotalSize() reflects an empty
+    // list, not the row's real height. Reporting that would be indistinguishable
+    // from "genuinely short" to a caller sizing a collapsed row (UnreadsInbox),
+    // so hold off until there's something real to measure.
+    if (!isInitialLoadComplete && cachedConversations.length === 0) return;
     const totalHeight = virtualizer.getTotalSize();
     if (lastReportedTotalHeightRef.current === totalHeight) return;
     lastReportedTotalHeightRef.current = totalHeight;
@@ -455,8 +639,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       const scrollElement = parentRef.current;
       if (!scrollElement) return false;
 
-      const conversationElement = document.getElementById(`conv-${conversationId}`);
-      if (!conversationElement || !scrollElement.contains(conversationElement)) return false;
+      // Scoped to this list: the same conversation can also be rendered elsewhere in the document
+      // (a page kept mounted, hidden, under full-page search).
+      const conversationElement = scrollElement.querySelector(
+        `#${CSS.escape(`conv-${conversationId}`)}`,
+      );
+      if (!conversationElement) return false;
 
       const scrollRect = scrollElement.getBoundingClientRect();
       const conversationRect = conversationElement.getBoundingClientRect();
@@ -467,6 +655,66 @@ const ChatListV4: React.FC<ChatListProps> = ({
       );
     },
     [virtualizer],
+  );
+
+  // Deep links land with the linked row exactly at the top edge: rows below it can
+  // then grow or shrink without moving it, and every row above it sits entirely above
+  // the viewport, so their first measurements and later resizes (e.g. media loading)
+  // are compensated by shouldAdjustOnSizeChange. A gap above the target would leave
+  // a row straddling the edge, which isn't compensated. The newest row aligns to the
+  // end instead, so the list isn't left with empty space below it.
+  const scrollLinkedConversationIntoView = useCallback(
+    (index: number, isLast: boolean): void => {
+      // The newest row is the latest message: keep following new ones as usual.
+      setDeepLinkHold(isLast ? null : String(virtualizer.options.getItemKey(index)));
+      if (isLast) {
+        virtualizer.scrollToIndex(index, { align: 'end', behavior: 'auto' });
+        return;
+      }
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) {
+        virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
+        return;
+      }
+      virtualizer.scrollToOffset(offsetInfo[0]);
+    },
+    [setDeepLinkHold, virtualizer],
+  );
+
+  // Explicit "I'm moving on" input: wheel/trackpad and touch on the list, and sending.
+  // These release even while the target is still visible — e.g. at the end of the
+  // list the user can't scroll it off screen, but still expects new messages to follow.
+  const releaseDeepLinkHold = useCallback((): void => {
+    setDeepLinkHold(null);
+  }, [setDeepLinkHold]);
+
+  // Catch-all release: once the held target is off screen, whatever moved it
+  // (keyboard, jump buttons, find-in-page…), there's nothing left to hold. Runs a
+  // frame after the scroll event so the virtualizer has read the new offset, and
+  // uses its range (recomputed, from its own offset and measurements) rather than the
+  // DOM: right after rows are inserted above, the DOM scrollTop lags the virtualizer
+  // and the target would look off screen.
+  const holdCheckFrameRef = useRef<number | null>(null);
+  const scheduleHeldTargetCheck = useCallback((): void => {
+    if (!heldDeepLinkIdRef.current || holdCheckFrameRef.current !== null) return;
+    holdCheckFrameRef.current = requestAnimationFrame(() => {
+      holdCheckFrameRef.current = null;
+      const heldId = heldDeepLinkIdRef.current;
+      if (!heldId) return;
+      const range = virtualizer.calculateRange();
+      if (!range) return;
+      const { getItemKey } = virtualizer.options;
+      for (let i = range.startIndex; i <= range.endIndex; i++) {
+        if (getItemKey(i) === heldId) return;
+      }
+      setDeepLinkHold(null);
+    });
+  }, [setDeepLinkHold, virtualizer]);
+  useEffect(
+    () => (): void => {
+      if (holdCheckFrameRef.current !== null) cancelAnimationFrame(holdCheckFrameRef.current);
+    },
+    [],
   );
 
   // ── Queries ───────────────────────────────────────────────────────────────────
@@ -480,6 +728,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
@@ -503,6 +752,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: cutoffAnchor,
       direction: 'backward',
       limit: PAGE_SIZE,
@@ -517,6 +767,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       limit: PAGE_SIZE / 2,
     }),
     { enabled: conversationFilterEnabled },
@@ -528,34 +779,64 @@ const ChatListV4: React.FC<ChatListProps> = ({
       return;
     }
 
-    Promise.all([
+    const loadOlder = (): Promise<Conversation[]> =>
       !unreadsOnly
         ? zero.run(
             queries.channelConversationsPaginatedV3({
               channelId,
               isMember,
-              ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
-              start: oldConversationsAnchorRef.current,
+              // Deep link at top: fetch only the linked conversation itself, not the
+              // page of older rows before it.
+              ...(openedFromDeepLink && linkedConversationId
+                ? { conversationIds: [linkedConversationId] }
+                : conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              ...(discussionScope && { discussionScope }),
+              start: openedFromDeepLink ? null : oldConversationsAnchorRef.current,
               direction: 'forward',
-              limit: PAGE_SIZE,
+              limit: openedFromDeepLink ? 1 : PAGE_SIZE,
             }),
             { type: 'complete' },
           )
-        : Promise.resolve([]),
-      newConversationsAnchor &&
-        zero.run(
-          queries.channelConversationsPaginatedV3({
-            channelId,
-            isMember,
-            start: newConversationsAnchor,
-            direction: 'backward',
-            limit: PAGE_SIZE / 2,
-          }),
-          { type: 'complete' },
-        ),
-    ])
+        : Promise.resolve([]);
+    const loadNewer = (start: Anchor | null): Promise<Conversation[]> | null =>
+      start &&
+      zero.run(
+        queries.channelConversationsPaginatedV3({
+          channelId,
+          isMember,
+          ...(discussionScope && { discussionScope }),
+          start,
+          direction: 'backward',
+          limit: openedFromDeepLink ? PAGE_SIZE : PAGE_SIZE / 2,
+        }),
+        { type: 'complete' },
+      );
+    // Deep link at top: read the target first, then load newer rows from its own
+    // createdAt (see deepLinkTargetRef) — not from linkedItemCreatedAt.
+    const initialLoad: Promise<[Conversation[], Conversation[] | null]> = openedFromDeepLink
+      ? loadOlder().then(older => {
+          const target = older.find(c => c.conversationId === linkedConversationId);
+          if (target && deepLinkTargetRef.current) {
+            deepLinkTargetRef.current = {
+              ...deepLinkTargetRef.current,
+              createdAt: target.createdAt,
+            };
+          }
+          const newerStart = deepLinkTargetRef.current
+            ? { createdAt: deepLinkTargetRef.current.createdAt }
+            : newConversationsAnchor;
+          return Promise.all([Promise.resolve(older), loadNewer(newerStart)]);
+        })
+      : Promise.all([loadOlder(), loadNewer(newConversationsAnchor)]);
+
+    initialLoad
       .then(([older, newerNullable]) => {
-        const newer = newerNullable ?? [];
+        // Deep link at top: same rule as the cached rows — only rows strictly newer
+        // than the target go below it; same-timestamp rows load with the older ones.
+        const deepLinkTarget = deepLinkTargetRef.current;
+        const newer = (newerNullable ?? []).filter(
+          c => !deepLinkTarget || isDeepLinkTargetOrNewer(c, deepLinkTarget),
+        );
         const fetched = dedupeAndSort(older, newer);
         const mergedWithCached = mergeWithCached(conversations, fetched);
         const { merged, latestClear } = mergeWithLatest(
@@ -581,7 +862,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
         setIsInitialLoadComplete(true);
         lifecycleRef.current.initialLoadComplete = true;
       })
-      .catch(() => {});
+      .catch(() => {
+        // Deep link load failed: release the hold and fall back to the full cache, as
+        // a normal opening would show — otherwise the list stays empty (or trimmed to
+        // the target) and older rows never load.
+        if (!isDeepLinkLandingRef.current) return;
+        isDeepLinkLandingRef.current = false;
+        setConversationsState(prev => dedupeAndSort(prev, cachedConversations));
+      });
   }, []);
 
   // ── Initial load (cutoff path) ────────────────────────────────────────────────
@@ -659,6 +947,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   ]);
 
   const fetchOlderMessages = useCallback(() => {
+    // Deep link at top: nothing loads above the target until it has landed.
+    if (isDeepLinkLandingRef.current) return;
     // isFetchingOlder=true → suppressed (previous fetch in flight).
     if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
@@ -668,6 +958,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -688,7 +979,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           // newItems=0 → items already loaded (cold cache) — no-op, retry on next scroll.
           if (newItems.length === 0) return prev;
 
-          const fetched = dedupeAndSort(older, prev);
+          const fetched = dedupeAndSort(older, prev, deepLinkTargetRef.current?.conversationId);
           const { merged, latestClear } = mergeWithLatest(
             fetched,
             latestConversationsListRef.current,
@@ -719,6 +1010,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,
@@ -757,13 +1049,32 @@ const ChatListV4: React.FC<ChatListProps> = ({
       });
   }, [channelId, newConversationsAnchor, isInitialLoadComplete, zero]);
 
+  // ── Deep link at top: load older rows once the target has landed ─────────────
+  // Once the first load has placed the target (the jump runs in the initial-scroll
+  // layout effect, before this), release the hold and fetch the older rows, so they
+  // are already there when the user scrolls up. They are inserted above the target:
+  // the end-anchor keeps it in place and their size changes are compensated (see
+  // shouldAdjustOnSizeChange), both from the virtualizer's own offset.
+  useEffect(() => {
+    if (!isInitialLoadComplete || !isDeepLinkLandingRef.current) return;
+    isDeepLinkLandingRef.current = false;
+    // Start just past the target's createdAt so rows sharing it load too: a start
+    // cursor with no conversationId resolves to `createdAt < T`, which would skip
+    // them, and the newer fetch excluded them on purpose (see isDeepLinkTargetOrNewer).
+    const target = deepLinkTargetRef.current;
+    if (target && conversationsRef.current[0]?.conversationId === target.conversationId) {
+      oldConversationsAnchorRef.current = { createdAt: target.createdAt + 1 };
+    }
+    fetchOlderMessages();
+  }, [isInitialLoadComplete, fetchOlderMessages]);
+
   // ── New message boundary ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!channelParticipation?.lastViewedAt || !isInitialLoadComplete) {
+    if (!lastViewedAtOnOpen || !isInitialLoadComplete) {
       setNewConversationBoundary(null);
       return;
     }
-    const idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
     setNewConversationBoundary(prev => {
       if (idx === -1) {
         return null;
@@ -775,7 +1086,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       if (prev !== null && prev.index === idx) return prev;
       return { index: idx, seenConvId: null };
     });
-  }, [combinedMessages, isInitialLoadComplete, channelParticipation?.lastViewedAt, user?.id]);
+  }, [combinedMessages, isInitialLoadComplete, lastViewedAtOnOpen, user?.id]);
 
   // ── Initial scroll ────────────────────────────────────────────────────────────
   // Fires as soon as there is data to render (cache or fresh fetch). Runs before
@@ -811,7 +1122,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ? combinedMessages.findIndex(m => m.data.conversationId === linkedConversationId)
       : -1;
 
-    const p3Idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const p3Idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
 
     // ── Select winner by priority order ──
     let doScroll: () => void;
@@ -824,11 +1135,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
       };
     } else if (p2Idx !== -1) {
       const isLast = p2Idx === combinedMessages.length - 1;
-      const p2Align = isLast ? 'end' : 'center';
+      const p2Align = isLast ? 'end' : 'start';
       initialLinkedIdRef.current = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
       doScroll = () => {
         lifecycleRef.current.didInitialScrollAlign = p2Align;
-        virtualizer.scrollToIndex(p2Idx, { align: p2Align, behavior: 'auto' });
+        scrollLinkedConversationIntoView(p2Idx, isLast);
       };
     } else if (p3Idx !== -1) {
       const p3Align = 'start';
@@ -875,8 +1186,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
       requestAnimationFrame(() => {
         const scrollToLinkedConversation = (): boolean => {
-          if (isConversationFullyVisible(linkedConversationId, idx)) return false;
-          virtualizer.scrollToIndex(idx, { align: isLast ? 'end' : 'center', behavior: 'auto' });
+          if (isConversationFullyVisible(linkedConversationId, idx)) {
+            // Already on screen, so no scroll — but still hold it like any deep-link
+            // landing, so new messages don't push it up.
+            setDeepLinkHold(isLast ? null : linkedConversationId);
+            return false;
+          }
+          scrollLinkedConversationIntoView(idx, isLast);
           return true;
         };
         if (scrollToLinkedConversation()) {
@@ -892,10 +1208,17 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (requestedFetchKeyRef.current === navigationKey) return;
     requestedFetchKeyRef.current = navigationKey;
 
-    if (linkedCutoffCreatedAt) {
-      setCutoffAnchor(prev =>
-        prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
-      );
+    // Ask the host to recreate the list so it opens at the target. Not when this list
+    // was already created for this target (e.g. the target no longer exists) — that
+    // would loop — and only where deep-link opening applies (see openedFromDeepLink).
+    const canOpenAtTarget =
+      !unreadsOnly &&
+      !discussionScope &&
+      (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId));
+    const listWasCreatedForTarget =
+      deepLinkTargetRef.current?.conversationId === linkedConversationId;
+    if (onLinkedTargetNotLoaded && canOpenAtTarget && !listWasCreatedForTarget) {
+      onLinkedTargetNotLoaded();
       return;
     }
     oldConversationsAnchorRef.current = linkedItemCreatedAt;
@@ -928,7 +1251,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
     lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
 
-    if (virtualizer.isAtEnd(80) && latestConversationsListRef.current.length === 0) {
+    if (
+      !isHoldingDeepLinkRef.current &&
+      virtualizer.isAtEnd(80) &&
+      latestConversationsListRef.current.length === 0
+    ) {
       window.setTimeout(() => {
         virtualizer.scrollToEnd();
       }, 80);
@@ -941,6 +1268,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   useEffect(() => {
     const handler = (e: Event): void => {
       if ((e as CustomEvent<{ channelId: string }>).detail?.channelId !== channelId) return;
+      // Sending is "take me to the latest": stop holding a deep-link target.
+      releaseDeepLinkHold();
       const latest = latestConversationsListRef.current;
       if (latest.length > 0) {
         const first = latest[0];
@@ -959,7 +1288,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // ChatInput dispatches 'xyne:chat-message-sent'
     window.addEventListener('xyne:chat-message-sent', handler);
     return () => window.removeEventListener('xyne:chat-message-sent', handler);
-  }, [channelId, virtualizer]);
+  }, [channelId, releaseDeepLinkHold, virtualizer]);
 
   // ── In-window mutation reconciliation ────────────────────────────────────────
   useEffect(() => {
@@ -1063,15 +1392,27 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [channelId, latestConversations, latestConversationsDetails.type, isInitialLoadComplete]);
 
   // ── Mark as read on unmount ────────────────────────────────────────────────────
+  // Full-page search covering the channel counts as leaving it (markWhenLeft), so what arrives
+  // while the user searches stays unread; the route coming back to it marks it read again, as
+  // reopening it would. The skip flags hold until unmount: a cover is not the end of the page's
+  // skip. The Activity flag is app-wide and goes to the first list that reads it, so this one takes
+  // it as it leaves — a list opened meanwhile (full page's side panel) neither sees nor uses it up.
+  const coverage = usePageCoverage();
+  const activitySkipRef = useRef(false);
   useEffect(() => {
     if (!channelId) return;
 
-    return () => {
-      if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
-        skipMarkAsReadRef.current = false;
+    const skipped = (): boolean => {
+      if (activitySkipMarkAsReadChannelRef.current) {
         activitySkipMarkAsReadChannelRef.current = false;
-        return;
+        activitySkipRef.current = true;
       }
+      return !!skipMarkAsReadRef?.current || activitySkipRef.current;
+    };
+    const stopWatching = markWhenLeft(coverage, () => {
+      // Remounting for a linked target: not a real leave.
+      if (isReopeningForLinkedTargetRef?.current) return;
+      if (skipped()) return;
 
       const draft = getDraft(channelId, null);
       const payload = {
@@ -1081,12 +1422,56 @@ const ChatListV4: React.FC<ChatListProps> = ({
         draftMessage: draft || '',
       };
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
+    });
+    // No draft args, as on open: the composer's draft is saved when the channel is left. Once the
+    // collapse is over and the browser idle: the re-renders the write sets off must not land in it.
+    // Covered again by then (expanded straight back), that cover has marked it.
+    const stopReturning = afterReturn(coverage, () => {
+      if (skipped()) return;
+      void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
+    });
+
+    return () => {
+      stopWatching();
+      stopReturning();
+      // Remounting for a linked target: not a real leave, so the skips carry over to the list that
+      // takes this one's place — the Activity flag this one took is handed back for it.
+      if (isReopeningForLinkedTargetRef?.current) {
+        if (activitySkipRef.current) activitySkipMarkAsReadChannelRef.current = true;
+        return;
+      }
+      skipMarkAsReadRef.current = false;
+      activitySkipRef.current = false;
     };
-  }, [channelId]);
+  }, [channelId, coverage]);
+
+  // ── Mark as read once the list has loaded ─────────────────────────────────────
+  // Without this the channel only counts as read on unmount, so the sidebar badge
+  // keeps showing unread for a channel the user is looking at. The divider and
+  // unread scroll read lastViewedAtOnOpen, so moving lastViewedAt here is safe.
+  const hasMarkedOnOpenRef = useRef(false);
+  // Created by a remount for a linked target: the channel was already marked when it
+  // first opened, and the user may have marked it unread since — don't mark it again.
+  const [reopenedForLinkedTarget] = useState(() => !!isReopeningForLinkedTargetRef?.current);
+  useEffect(() => {
+    if (isReopeningForLinkedTargetRef) isReopeningForLinkedTargetRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!channelId || !isInitialLoadComplete || hasMarkedOnOpenRef.current) return;
+    if (reopenedForLinkedTarget) return;
+    if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) return;
+
+    hasMarkedOnOpenRef.current = true;
+    // No draft args: the composer may not have loaded the draft yet, and sending
+    // '' would delete it. The unmount call above still saves the draft on leave.
+    void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
+  }, [channelId, isInitialLoadComplete, reopenedForLinkedTarget, skipMarkAsReadRef, zero]);
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
-    if (!channelId || conversationIdsFilter) return;
+    // A filtered list isn't the channel's, so it never stands in for it in the cache.
+    if (!channelId || conversationIdsFilter || discussionScope) return;
 
     const flushToCache = (): void => {
       const latest = conversationsRef.current;
@@ -1115,7 +1500,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       flushToCache();
     };
-  }, [channelId, conversationIdsFilter]);
+  }, [channelId, conversationIdsFilter, discussionScope]);
 
   // ── Thread opening scroll ──────────────────────────────────────────────────────
   const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
@@ -1218,12 +1603,178 @@ const ChatListV4: React.FC<ChatListProps> = ({
     when: isEventFromChannelInput,
   });
 
+  const isMessageListNavigationEvent = useCallback((event: KeyboardEvent): boolean => {
+    const focusTarget = messageListFocusRef.current;
+    if (!focusTarget || event.target !== focusTarget) return false;
+    return document.activeElement === focusTarget;
+  }, []);
+
+  /**
+   * Where the next arrow press starts from. A ref, not state, because the
+   * anchor must never paint anything: only keyboard navigation highlights a
+   * row, while clicks and hovers just move the starting point. It outlives
+   * blur too, so refocusing the list resumes from where the user left off
+   * instead of jumping back to the newest message.
+   */
+  const navigationAnchorRef = useRef<string | null>(null);
+
+  const findSelectedMessageIndex = useCallback((): number => {
+    const anchorMessageId = keyboardSelectedMessageId ?? navigationAnchorRef.current;
+    if (!anchorMessageId) return -1;
+    return combinedMessages.findIndex(item => {
+      const message = getInitialMessageFromConversation(item.data);
+      return message?.messageId === anchorMessageId;
+    });
+  }, [combinedMessages, keyboardSelectedMessageId]);
+
+  /** Keyboard navigation: moves the anchor AND highlights the row it lands on. */
+  const selectMessage = useCallback((messageId: string): void => {
+    navigationAnchorRef.current = messageId;
+    setKeyboardSelectedMessageId(messageId);
+  }, []);
+
+  /**
+   * Scrolls only when the row the selection lands on is not already readable,
+   * then parks it at the top, just below the sticky date pill. Scrolling on
+   * every arrow press makes the whole list lurch under a selection that was
+   * perfectly visible where it was.
+   *
+   * A row taller than the viewport can never be "fully visible", so any
+   * overlap counts for those — otherwise every press on a long message would
+   * scroll.
+   */
+  const scrollSelectionIntoView = useCallback(
+    (index: number): void => {
+      const container = parentRef.current;
+      const row = container?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+      if (container && row) {
+        const containerRect = container.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        // Leaves room for the sticky date pill, so a row tucked under it is
+        // treated as out of view rather than readable.
+        const top = containerRect.top + SELECTION_VIEWPORT_PADDING;
+        const bottom = containerRect.bottom - SELECTION_VIEWPORT_PADDING;
+        const isReadable =
+          rowRect.height >= containerRect.height
+            ? rowRect.top < bottom && rowRect.bottom > top
+            : rowRect.top >= top && rowRect.bottom <= bottom;
+        if (isReadable) return;
+      }
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) return;
+      virtualizer.scrollToOffset(offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET);
+    },
+    [virtualizer],
+  );
+
+  const selectMessageAtIndex = useCallback(
+    (index: number, direction: -1 | 1): void => {
+      for (let i = index; i >= 0 && i < combinedMessages.length; i += direction) {
+        const item = combinedMessages[i];
+        if (!item) continue;
+        const message = getInitialMessageFromConversation(item.data);
+        if (!message) continue;
+        selectMessage(message.messageId);
+        scrollSelectionIntoView(i);
+        return;
+      }
+    },
+    [combinedMessages, scrollSelectionIntoView, selectMessage],
+  );
+
+  const selectPreviousMessage = useCallback((): void => {
+    // Claims the shortcuts back from a pointer the user has stopped moving.
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    selectMessageAtIndex(
+      selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex - 1,
+      -1,
+    );
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  const selectNextMessage = useCallback((): void => {
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    // -1 means the selected message is gone (deleted, or no longer loaded).
+    // Both directions then fall back to the newest message, so neither key
+    // goes dead after the anchor disappears.
+    selectMessageAtIndex(selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex + 1, 1);
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  useShortcutById('message.selectPrevious', selectPreviousMessage, {
+    enabled: combinedMessages.length > 0,
+    when: isMessageListNavigationEvent,
+  });
+  useShortcutById('message.selectNext', selectNextMessage, {
+    enabled: combinedMessages.length > 0,
+    // Down needs somewhere to start: a highlighted row, or a click anchor.
+    when: event =>
+      (keyboardSelectedMessageId !== null || navigationAnchorRef.current !== null) &&
+      isMessageListNavigationEvent(event),
+  });
+
+  useEffect(() => {
+    navigationAnchorRef.current = null;
+    setKeyboardSelectedMessageId(null);
+  }, [channelId]);
+
+  const handleMessageListClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Mobile taps belong to the actions drawer, and there is no keyboard to
+      // hand the selection to.
+      if (isMobile) return;
+      if (!(event.target instanceof Element)) return;
+      if (!event.currentTarget.contains(event.target)) return;
+      if (
+        event.target.closest(
+          'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+        )
+      ) {
+        return;
+      }
+      // A click that ends a text drag must leave that text selected: moving
+      // focus to the nav button would collapse it.
+      const textSelection = window.getSelection();
+      if (textSelection !== null && !textSelection.isCollapsed) return;
+
+      // Move the anchor to the clicked row, so the next Up/Down continues from
+      // the message the user just pointed at. Nothing is highlighted here —
+      // the row keeps its ordinary hover treatment and loses it when the
+      // pointer leaves. Clicks on empty space — a date pill, the gap between
+      // rows, the padding under the last message — carry no row and leave the
+      // anchor where it was.
+      const row = event.target.closest<HTMLElement>('[data-conversation-id]');
+      const conversationId = row?.getAttribute('data-conversation-id');
+      if (conversationId !== null && conversationId !== undefined) {
+        // Resolved through the conversation rather than the clicked bubble's
+        // own id: a row can render more than one message, but only the
+        // conversation's initial message is a navigation stop.
+        const item = combinedMessages.find(entry => entry.data.conversationId === conversationId);
+        const message = item ? getInitialMessageFromConversation(item.data) : null;
+        if (message) {
+          navigationAnchorRef.current = message.messageId;
+          // A highlight left over from earlier arrow navigation would now be
+          // somewhere else entirely, so drop it.
+          setKeyboardSelectedMessageId(null);
+        }
+      }
+
+      messageListFocusRef.current?.focus({ preventScroll: true });
+    },
+    [combinedMessages, isMobile],
+  );
+
+  const handleMessageListBlur = useCallback((): void => {
+    setKeyboardSelectedMessageId(null);
+  }, []);
+
   // ── onScroll (replaces Virtuoso rangeChanged + atTopStateChange + atBottomStateChange) ──
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
     if (!el || combinedMessages.length === 0) return;
 
     lifecycleRef.current.initialPositionSet = true;
+    scheduleHeldTargetCheck();
 
     const distanceFromEnd = Math.max(el.scrollHeight - el.clientHeight - el.scrollTop, 0);
     // Near-bottom: within ~300px of end (DOM-based, avoids virtualizer scroll lag)
@@ -1318,6 +1869,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     conversations,
     shouldUseCutoffQuery,
     inViewAnchor,
+    scheduleHeldTargetCheck,
     virtualizer,
   ]);
 
@@ -1404,13 +1956,24 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Empty / loading states ─────────────────────────────────────────────────────
   if (conversations.length === 0 && isInitialLoadComplete)
-    return (
+    return discussionList ? (
+      <div className='flex flex-1 flex-col items-center justify-start px-6 pt-[16vh] text-center'>
+        <span className='mb-3 flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground'>
+          <MessagesSquare className='size-5' />
+        </span>
+        <p className='max-w-[18rem] text-[14px] font-medium text-foreground'>
+          No discussions about {discussionList.subject} yet
+        </p>
+      </div>
+    ) : (
       <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
         <p className='text-muted-foreground'>No conversations in this channel yet</p>
       </div>
     );
 
-  if (!isInitialLoadComplete && cachedConversations.length === 0)
+  // `conversations`, not the cache prop: a deep link whose target isn't cached
+  // starts empty on purpose (see initialConversations) and should show the loader.
+  if (!isInitialLoadComplete && conversations.length === 0)
     return loadingFallback !== undefined ? (
       <div className='absolute inset-0 bg-background z-50' data-testid='chat-list-loading'>
         {loadingFallback}
@@ -1433,10 +1996,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ref={hoverToolbarContainerRef}
       data-component='ChatListV11'
       data-testid='chat-message-list'
-      className='flex-1 relative no-scrollbar min-h-0'
+      className='flex-1 relative no-scrollbar min-h-0 isolate'
     >
       {/* Sticky date pill overlay */}
-      {stickyDate && isFirstItemScrolledOff && (
+      {/* Over discussion cards it covers the top one, and each card has its date. */}
+      {stickyDate && isFirstItemScrolledOff && !discussionList && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
             <DatePill dateText={stickyDate} />
@@ -1444,10 +2008,24 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       )}
 
+      <button
+        ref={messageListFocusRef}
+        type='button'
+        className='sr-only'
+        aria-label='Navigate messages with the up and down arrow keys'
+        data-track-category='CHAT_LIST'
+        data-track-name='FOCUS_MESSAGE_NAVIGATION'
+        onClick={selectPreviousMessage}
+        onBlur={handleMessageListBlur}
+      />
+
       {/* Scroll container — replaces <Virtuoso> */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onWheel={releaseDeepLinkHold}
+        onTouchMove={releaseDeepLinkHold}
+        onClickCapture={handleMessageListClick}
         style={{ height: '100%', overflow: 'auto', zIndex: 0, overflowAnchor: 'none' }}
         className='no-scrollbar'
         data-virtuoso-scroller='true'
@@ -1455,13 +2033,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
         {/* Flex wrapper: when content is shorter than the viewport, justify-content: flex-end
                pushes it to the bottom. For full/overflowing lists it has no effect. This is a
                pure CSS solution — no state, no TanStack paddingStart — so item deletion and
-               addition never interfere with anchorTo:'end' scroll adjustments. */}
+               addition never interfere with anchorTo:'end' scroll adjustments. Discussions
+               start at the top instead: a short list of them reads down from the first. */}
         <div
           style={{
             minHeight: '100%',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'flex-end',
+            justifyContent: discussionList ? 'flex-start' : 'flex-end',
           }}
         >
           <div
@@ -1480,8 +2059,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
               const prevItem =
                 virtualItem.index > 0 ? combinedMessages[virtualItem.index - 1] : null;
               const dateText = formatDatePill(item.createdAt);
+              // Deep-link target: fixed shape (no inline pill, always the sender header) so
+              // older rows loading above it can't shrink the row and jump it up.
+              const isDeepLinkTarget =
+                item.data.conversationId === deepLinkTargetRef.current?.conversationId;
               const showDatePill =
-                !prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString();
+                !isDeepLinkTarget &&
+                (!prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString());
               const shouldHideInlineDatePill =
                 showDatePill &&
                 dateText === stickyDate &&
@@ -1537,6 +2121,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
                       channelScopeType={channelScopeType}
                       handleOpenThread={handleOpenThread}
                       linkedConversationId={linkedConversationId ?? null}
+                      forceShowAvatar={isDeepLinkTarget}
                     />
                   </div>
                 </div>
@@ -1546,7 +2131,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       </div>
 
-      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+      <MessageHoverToolbar
+        containerRef={hoverToolbarContainerRef}
+        keyboardSelectedMessageId={keyboardSelectedMessageId}
+      />
 
       {/* New messages pill */}
       {newConversationBoundary !== null && newConversationBoundary.seenConvId === null && (

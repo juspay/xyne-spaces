@@ -11,17 +11,19 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
-import { buildTwinDeliverMandate } from "./twin-deliver.js";
+import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
+import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
+import { checkTwinDelivery } from "./twin-delivery-check.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
-import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
+import { compactionExtension, fitTask, setCompactionSubmitTool } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
-import { getSandboxSession } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession } from "xyne-claw-shared";
 import type {
   ClawAttachmentPayload,
   ClawSandboxPreviewPayload,
@@ -46,16 +48,57 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
-import { gcsUploadDebugRun } from "./storage.js";
+import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-trace.js";
+import { effectiveOptimizations, optEnabled } from "./optimizations.js";
+import { xorThreshold } from "./xor.js";
+import { attachRunMessages, pinRunTask } from "./run-context.js";
+import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
+import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
+import { assessAnswer, type AnswerAssessment } from "./xor-completeness.js";
+import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
+import {
+  BlobIndex,
+  BlobWriter,
+  Recorder,
+  RunStore,
+  startCapture,
+  installStreamCapture,
+  resolveCaptureLevel,
+  runIdFor,
+  runFileNameFor,
+  startingRunObjectName,
+  indexObjectName,
+  packedRunObjectName,
+  packRun,
+  readRun,
+  toV1Snapshot,
+  emptyLatency,
+  emptyTokenUsage,
+  type CaptureHandles,
+  type CaptureLevel,
+  type RunHeader,
+  type RunStatus,
+  type DebugEventKind,
+  type DebugEventRecord,
+  type DebugSessionSnapshot,
+  type DebugThinkingConfiguration,
+  type DebugSpeedConfiguration,
+  type StreamRateSample,
+} from "./debug/index.js";
+import { isSafeId } from "./safe-id.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { LlmTurnRecorder, type LlmCallStat } from "./llm-turn-stats.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
 import { installAwakeningInbox } from "./awakening-inbox.js";
+import { TurnParts, type TurnPart } from "./turn-parts.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
 const log = createLogger("agent");
+
+const CLAUDE_CODE_CLIENT_VERSION = process.env["CLAUDE_CODE_CLIENT_VERSION"]?.trim() || "2.1.280";
 
 export interface Attachment {
   fileName: string;
@@ -77,7 +120,9 @@ export interface ToolInvocation {
   /** Set when this invocation originated inside a subagent's own session.
    *  Points at the tool_call_id on the parent agent that invoked the subagent. */
   parentToolCallId?: string;
-  /** Name of the subagent wrapping this invocation (e.g. "spaces", "bitbucket"). */
+  /** Name of the subagent wrapping this invocation (e.g. "spaces", "bitbucket").
+   *  On a top-level call (no parentToolCallId) it names the subagent the call
+   *  itself runs, so the UI can show it as one from the moment it starts. */
   subagentName?: string;
   /** The underlying pi-coding-agent tool_call_id for this specific call. */
   toolCallId?: string;
@@ -232,14 +277,31 @@ export interface LatencyMetrics {
   toolMs: number;
 }
 
+/** Outcome of the citation-reflection pass, when the agent has it enabled. */
+export interface CitationReflectionOutcome {
+  outcome: "already_cited" | "no_citeable_sources" | "fixed_after_nudge" | "still_uncited" | "aborted";
+  initialCited: boolean;
+  sourcesWereCiteable: boolean;
+  finalCited: boolean;
+  rounds: number;
+}
+
 export interface RunResult {
   readonly text: string;
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly latency?: LatencyMetrics;
+  /** Absent when citationReflection is disabled or the run produced structured output. */
+  readonly citationReflection?: CitationReflectionOutcome;
+  /** Per-LLM-call series, parent calls plus tagged subagent calls. */
+  readonly llmCalls?: LlmCallStat[];
+  /** Model this run was configured with after every override resolved. */
+  readonly model?: string;
   readonly attachments?: Attachment[];
   readonly reasoning?: string;
+  /** The run's thinking, text and tool calls in the order they happened. */
+  readonly parts?: TurnPart[];
   /** Distinct real `[clf-<id>#n]` citation tokens seen ANYWHERE in the session
    *  transcript (all prior + current turns' tool outputs). Lets run.ts sanitize
    *  citations SESSION-wide so a follow-up turn can re-cite an earlier turn's
@@ -278,105 +340,17 @@ export class QuotaExhaustedError extends Error {
   }
 }
 
-type DebugEventKind =
-  | "session_start"
-  | "session_tools"
-  | "mode_switch"
-  | "session_prompt"
-  | "stream_rate"
-  | "thinking"
-  | "assistant_turn_end"
-  | "tool_execution_start"
-  | "tool_execution_end"
-  | "compaction_start"
-  | "compaction_end"
-  | "auto_retry_start"
-  | "auto_retry_end"
-  | "citation_reflection"
-  | "twin_deliver_reflection"
-  | "follow_up_generation_start"
-  | "follow_up_generation_end"
-  | "background_subagents_delivered"
-  | "session_end"
-  | "session_cancelled"
-  | "session_error";
-
-export interface DebugEventRecord {
-  seq: number;
-  at: string;
-  kind: DebugEventKind;
-  turn?: number;
-  llmCall?: number;
-  toolCallId?: string;
-  parentToolCallId?: string;
-  subagentName?: string;
-  data: Record<string, unknown>;
-}
-
-interface StreamRateSample {
-  offsetMs: number;
-  streamsPerSec: number;
-  streamsCollected: number;
-}
-
-interface DebugThinkingConfiguration {
-  /** Value selected by agent model settings / provider config / default policy. */
-  requestedLevel: string;
-  /** Pi's final value after capability clamping for the resolved model. */
-  effectiveLevel: string;
-  /** Where the requested setting came from, so precedence is inspectable. */
-  source: "agent_model_settings" | "provider_credential" | "codex_default" | "server_default" | "temperature_override";
-  /** Whether the resolved Pi model was registered as reasoning-capable. */
-  modelSupportsReasoning: boolean;
-  /** The provider request shape that disables/enables thinking for this model. */
-  wireMode: string;
-}
-
-/** Provider fast mode (modelSettings.speed) as it was resolved for this run —
- *  so a "why wasn't it faster?" report can be answered from the trace. */
-interface DebugSpeedConfiguration {
-  requested: ModelSpeed;
-  applied: boolean;
-  reason: string;
-}
-
-interface DebugSessionSnapshot {
-  schemaVersion: 1;
-  conversationId?: string;
-  sessionId?: string;
-  agentSlug?: string;
-  userId?: string;
-  userName?: string;
-  userEmail?: string;
-  provider?: string;
-  /** The model resolved for this particular run (not merely the agent default). */
-  model?: string;
-  /** Requested/effective thinking selection and its provider wire representation. */
-  thinking?: DebugThinkingConfiguration;
-  /** Requested/applied provider fast mode and the eligibility verdict. */
-  speed?: DebugSpeedConfiguration;
-  startedAt: string;
-  finishedAt: string;
-  task: string;
-  context?: string;
-  systemPromptOverride?: boolean;
-  /** True when the snapshot was captured via the fallback writer in runTask's
-   *  finally because the agent loop threw (cancel / transient provider error)
-   *  before the success-path write could run. Tools list + messages are
-   *  whatever state existed at throw time. UI can branch on this to mark the
-   *  debugger view as "partial". */
-  cancelled?: boolean;
-  /** True for the incremental snapshot written at each turn boundary while the
-   *  run is still in flight (so the debugger can show a PARTIAL trace instead of
-   *  404ing until completion). Overwritten by the final snapshot on completion. */
-  inProgress?: boolean;
-  messages: unknown[];
-  toolInvocations: ToolInvocation[];
-  tokenUsage: TokenUsage;
-  latency: LatencyMetrics;
-  lastAssistantText: string;
-  events: DebugEventRecord[];
-}
+// Debug trace types live in ./debug — one definition shared by the recorder,
+// the materializer and the retrieval route. Re-exported here because
+// routes/run.ts and subagent-tools.ts have always imported them from agent.js.
+export type {
+  DebugEventKind,
+  DebugEventRecord,
+  DebugSessionSnapshot,
+  DebugThinkingConfiguration,
+  DebugSpeedConfiguration,
+  StreamRateSample,
+} from "./debug/index.js";
 
 function cloneForDebug<T>(value: T): T {
   try {
@@ -471,16 +445,14 @@ export class ProviderStallError extends Error {
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly partialText: string;
+  /** Latency up to the stall, so stalled runs still count in latency percentiles. */
+  readonly latency?: LatencyMetrics;
+  readonly llmCalls?: LlmCallStat[];
 
   constructor(
     public readonly provider: string,
     public readonly idleMs: number,
-    progress?: {
-      toolsUsed: string[];
-      toolInvocations: ToolInvocation[];
-      tokenUsage: TokenUsage;
-      partialText: string;
-    },
+    progress?: AbortProgress,
   ) {
     super(`Provider ${provider} stalled: no stream activity for ${idleMs}ms`);
     this.name = "ProviderStallError";
@@ -488,6 +460,8 @@ export class ProviderStallError extends Error {
     this.toolInvocations = [...(progress?.toolInvocations ?? [])];
     this.tokenUsage = { ...(progress?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) };
     this.partialText = progress?.partialText ?? "";
+    if (progress?.latency) this.latency = progress.latency;
+    if (progress?.llmCalls?.length) this.llmCalls = progress.llmCalls;
   }
 }
 
@@ -515,6 +489,19 @@ export class ProviderTerminalError extends Error {
   }
 }
 
+const REFUSAL_TURN_ERROR = "An unknown error occurred";
+
+export function isRefusalTurnError(provider: string | undefined, detail: string): boolean {
+  return provider === "claude" && detail.trim() === REFUSAL_TURN_ERROR;
+}
+
+export class ProviderRefusalError extends Error {
+  constructor(public readonly provider: string) {
+    super(`Provider ${provider} declined to answer this conversation (stop_reason refusal)`);
+    this.name = "ProviderRefusalError";
+  }
+}
+
 /**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
@@ -528,6 +515,7 @@ export class ProviderTerminalError extends Error {
  * substrings here can't turn a user stop into a fallback.
  */
 export function isTransientProviderError(err: unknown): boolean {
+  if (err instanceof ProviderRefusalError) return false;
   if (err instanceof ProviderStallError) return true;
   if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
@@ -577,82 +565,34 @@ export function isProviderFallbackEligibleError(err: unknown): boolean {
   );
 }
 
+/** What an aborted run had done when it stopped. respond-to-user, propose-plan and emit_brief END runs by aborting, so this is their only telemetry. */
+export interface AbortProgress {
+  toolsUsed: string[];
+  toolInvocations: ToolInvocation[];
+  tokenUsage: TokenUsage;
+  partialText: string;
+  latency?: LatencyMetrics | undefined;
+  llmCalls?: LlmCallStat[] | undefined;
+}
+
 export class RunCancelledError extends Error {
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly partialText: string;
+  readonly latency?: LatencyMetrics;
+  readonly llmCalls?: LlmCallStat[];
 
-  constructor(message: string, payload: {
-    toolsUsed: string[];
-    toolInvocations: ToolInvocation[];
-    tokenUsage: TokenUsage;
-    partialText: string;
-  }) {
+  constructor(message: string, payload: AbortProgress) {
     super(message);
     this.name = "RunCancelledError";
     this.toolsUsed = payload.toolsUsed;
     this.toolInvocations = payload.toolInvocations;
     this.tokenUsage = payload.tokenUsage;
     this.partialText = payload.partialText;
+    if (payload.latency) this.latency = payload.latency;
+    if (payload.llmCalls?.length) this.llmCalls = payload.llmCalls;
   }
-}
-
-function buildSystemPrompt(userId: string, userName?: string, userEmail?: string, mandateDeliver = false): string {
-  const identity = userName ? `**${userName}**` : "the user";
-  const emailLine = userEmail ? `\n- **Email:** ${userEmail}` : "";
-
-  // Mention/approval flow only: the user NEVER sees your assistant text — only
-  // what you pass to twin_deliver. Shared with the systemPromptOverride path in
-  // run.ts (the ACTUAL prompt for the mention twin) via buildTwinDeliverMandate,
-  // so the mandate lands regardless of which prompt path runs.
-  const deliverySection = mandateDeliver ? buildTwinDeliverMandate(userName ? { userName } : {}) : "";
-
-  return `You are the **Digital Twin** of ${identity}. You act, think, and respond exactly as this person would.
-
-## Identity
-You ARE this user's digital representative. When someone asks you a question, they are asking ${userName ?? "this user"} — not a generic assistant. Your job is to respond the way this person would, using their knowledge, context, communication style, and expertise.
-- **Name:** ${userName ?? "unknown"}${emailLine}
-
-To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the \`spaces-whoami\` tool first.
-
-## How to Build Context (do this FIRST)
-Before answering any query, use your available tools to gather context. Look at the tools you have access to — they include tools for searching messages, tickets, activity, memory, users, channels, and more. Use them proactively:
-
-1. **Recent activity** — Check for mentions, replies, and assignments.
-2. **Knowledge base** — Search memory/facts/SOPs relevant to the query.
-3. **Messages & conversations** — Read threads to understand communication style.
-4. **Tickets & work items** — Check current workload and priorities.
-5. **Search** — Broad search across all connected apps for relevant context.
-6. **People lookup** — Resolve names to user IDs when needed.
-
-Note: Tool names may be prefixed with the server name (e.g. \`xyne-spaces__spaces-search\`). Use the tools as they appear in your tool list.
-
-## How to Respond
-- **Mirror the user's communication style.** If they write short direct messages, you do too. If they use detailed explanations, match that.
-- **Use the user's actual knowledge.** Ground every answer in data from their messages, tickets, memory, and activity. Do not guess.
-- **For engineering queries** — use any available code/log/metrics tools.
-- **Be the user.** Respond in first person ("I", "my", "we") as if you are them. Do not say "the user" or "they".
-- **Acknowledge gaps honestly.** If you cannot find relevant information in the user's data, say so — don't fabricate.
-
-## Critical Rules
-1. NEVER fabricate information. Only use data retrieved from tools.
-2. ALWAYS gather context before responding — do not answer from thin air.
-3. Respond as the user, not as an assistant describing the user.
-4. When the query is about "what are you working on" or "what do you know about X", search the user's actual data first.
-5. Use the tools available to you — check your tool list, don't assume tool names.
-6. NEVER narrate your process or expose the machinery. No "Saved to memory", "Searching…", "Got it", "Step N", "updating todos", or references to tools/memory. Only the final human message is your voice.
-
-## Data Correlation Rules
-When correlating data across different systems (e.g. tickets from Spaces + PRs from Bitbucket):
-- ALWAYS clearly distinguish between verified facts and inferred/unverified data.
-- Ticket board status (COMPLETED, "Merged" stage) is a WORKFLOW state — it does NOT prove a Bitbucket PR exists or was merged. These are separate systems.
-- If Bitbucket search doesn't find a PR for a ticket, report it as "PR not found in search", NOT "No PR".
-- When reporting ticket-to-PR mappings, use three clear categories:
-  1. **PR verified** — matching PR found and confirmed in Bitbucket
-  2. **PR not found in search** — Bitbucket search returned no match (PR may exist under different naming)
-  3. **Board suggests done, PR not verified** — ticket board says Completed/Merged but no Bitbucket PR match found
-- Never collapse categories 2 and 3 together. The user needs to know what was verified vs what was assumed.${deliverySection}`;
 }
 
 /**
@@ -762,16 +702,32 @@ export async function applyCopilotProxyIfNeeded<T extends { apiKey: string; mode
  * catches the heavy-investigation bloat path.
  */
 export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: string): ToolDefinition[] {
+  // With result sifting on, every wrapped tool gets an optional `sift` switch
+  // the model can set per call (R3); it is stripped here, before the tool (or
+  // its MCP server) ever sees the params.
+  const offerSift = optEnabled("jev_result_sift");
   return tools.map((tool) => {
     const orig = tool.execute.bind(tool);
+    // Only a `sift` we added is ours to strip; a tool's own `sift` param passes through.
+    const ownsSift = offerSift && withSiftParam(tool.parameters) !== tool.parameters;
     const wrapped: ToolDefinition["execute"] = async (...args) => {
-      const result = await orig(...args);
+      const [toolCallId, rawParams, ...rest] = args;
+      const { params, sift } = ownsSift ? takeSiftParam(rawParams) : { params: rawParams, sift: undefined };
+      const callCtx: ToolCallContext = { tool: tool.name, args: params, ...(sift !== undefined ? { sift } : {}) };
+      const result = await runWithToolCall(
+        callCtx,
+        () => (orig as (...a: unknown[]) => ReturnType<ToolDefinition["execute"]>)(toolCallId, params, ...rest),
+      );
       const content = (result as { content?: unknown })?.content;
       if (Array.isArray(content)) {
         const mapped = await Promise.all(content.map(async (block) => {
           const b = block as { type?: string; text?: string };
           if (b && b.type === "text" && typeof b.text === "string") {
-            return { ...b, text: await promoteIfOversized(outputBaseDir, "custom", tool.name, b.text) };
+            const text = b.text;
+            return {
+              ...b,
+              text: await runWithToolCall(callCtx, () => promoteIfOversized(outputBaseDir, "custom", tool.name, text)),
+            };
           }
           return block;
         }));
@@ -779,7 +735,9 @@ export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: stri
       }
       return result;
     };
-    return { ...tool, execute: wrapped };
+    return ownsSift
+      ? { ...tool, parameters: withSiftParam(tool.parameters), execute: wrapped }
+      : { ...tool, execute: wrapped };
   });
 }
 
@@ -846,13 +804,16 @@ const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
 const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
   ["claude-opus-4-8", 1_000_000],
   ["claude-opus-5", 1_000_000],
+  ["claude-opus-5-5", 1_000_000],
   ["claude-sonnet-5", 1_000_000],
+  ["claude-sonnet-5-5", 1_000_000],
   ["claude-fable-5", 1_000_000],
   ["claude-fable-5-1", 1_000_000],
   ["gpt-5.6-luna", 272_000],
   ["gpt-5.6-sol", 272_000],
   ["gpt-5.6-terra", 272_000],
   ["gpt-6-astra", 272_000],
+  ["glm-5.3-flash", 300_000],
 ]);
 
 export function contextWindowFor(modelId: string | undefined): number {
@@ -1048,6 +1009,7 @@ export function resolveModel(
       api: "anthropic-messages",
       // api_key → x-api-key (authHeader: false). oauth_token → Authorization: Bearer (authHeader: true).
       authHeader: isOauthToken,
+      ...(isOauthToken ? { headers: { "user-agent": `claude-cli/${CLAUDE_CODE_CLIENT_VERSION}` } } : {}),
       models: [
         {
           id: providerConfig.model,
@@ -1181,7 +1143,7 @@ export interface ProgressEmitter {
    *  progress POST → renderPrCard). */
   pr(sessionId: string, pr: Record<string, unknown>): void;
   uiWidget(sessionId: string, widget: UiWidget): void;
-  streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string }): void;
+  streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string; partId?: string }): void;
   debugProgress(sessionId: string, event: DebugEventRecord): void;
   progressLabel(sessionId: string, toolLabel: string, meta?: ClawStreamMeta): void;
   /** Final result frame. Returns once flushed so the route handler can close
@@ -1205,8 +1167,8 @@ function isEmitter(dest: ProgressDest): dest is ProgressEmitter {
 // parent tools AND nested subagent child tools — so a PR card is emitted whether
 // create_pull_request runs directly in the parent or inside the git-host
 // subagent. Fire-and-forget: PR card rendering must NEVER block or fail a tool.
-// Only the URL/webhook progress path carries the card; SSE (emitter) mode has no
-// such surface, so we skip there (mirrors the plan card).
+// Both progress transports carry the card: an emitter run hands the fact to
+// emitter.pr() (see below), a URL run POSTs kind:"pr".
 
 type PrProviderName = "github" | "bitbucket" | "gitlab" | "other";
 
@@ -1500,6 +1462,7 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
 // Send a single tool invocation to the progress endpoint — NOT throttled,
 // fires on every tool_execution_end so the Control Center sees live tool streams.
 export function pushInvocation(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
+  flushStreamChunks(progressUrl, sessionId);
   if (!progressUrl) return;
   // Emit a PR card when this invocation is a completed create/merge PR (guards
   // internally; no-op for every other tool). Runs for parent + nested tools.
@@ -1526,6 +1489,34 @@ export function pushInvocation(progressUrl: ProgressDest, sessionId: string, inv
       `[agent] Tool invocation push failed: toolCallId=${inv.toolCallId ?? "?"} ` +
       `tool=${inv.toolName ?? "?"} err=${err instanceof Error ? err.message : String(err)}`,
     );
+  });
+}
+
+const INTERIM_MESSAGE_MAX_CHARS = 1_500;
+
+/**
+ * Whether an assistant turn ended by calling tools — i.e. the run continues.
+ * pi reports this as "toolUse" (pi-ai StopReason); "tool_use" is the Anthropic
+ * wire spelling this code was written against, which pi never emits, so a
+ * check for that alone is silently never true. The interim-message check was
+ * exactly that: no interim line ever left a run until this.
+ */
+export function endedInToolCalls(stopReason: string | undefined): boolean {
+  return stopReason === "toolUse" || stopReason === "tool_use";
+}
+
+export function pushInterimMessage(progressUrl: ProgressDest, sessionId: string, text: string): void {
+  if (!progressUrl || typeof progressUrl !== "string") return;
+  fetch(progressUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({ sessionId, kind: "interim", text: text.slice(0, INTERIM_MESSAGE_MAX_CHARS) }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch((err) => {
+    log.warn(`[agent] Interim message push failed session=${sessionId} err=${err instanceof Error ? err.message : String(err)}`);
   });
 }
 
@@ -1562,7 +1553,7 @@ export function pushAttachment(
 export function pushSandboxPreview(
   progressUrl: ProgressDest,
   sessionId: string,
-  payload: { sandboxId: string; sandboxPreviewUrl: string; sandboxCodePreviewUrl: string },
+  payload: { sandboxId: string; sandboxPreviewUrl: string; sandboxCodePreviewUrl: string; sandboxTermUrl?: string },
   progressMeta?: { conversationId?: string | null; agentSlug?: string | null },
 ): void {
   if (!progressUrl) return;
@@ -1595,10 +1586,60 @@ export function pushSandboxPreview(
 
 // Stream raw text fragments (reasoning deltas, assistant text deltas) to the progress endpoint.
 // These are fired on every pi-ai text_delta / thinking_delta event — high-frequency, keep it lean.
+const STREAM_CHUNK_FLUSH_MS = 200;
+
+type StreamChunkKind = "reasoningDelta" | "textDelta";
+
+interface PendingStreamChunk {
+  url: string;
+  sessionId: string;
+  kind: StreamChunkKind;
+  partId: string | undefined;
+  text: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingStreamChunks = new Map<string, PendingStreamChunk>();
+
+function postStreamChunk(chunk: PendingStreamChunk): void {
+  fetch(chunk.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({
+      sessionId: chunk.sessionId,
+      [chunk.kind]: chunk.text,
+      ...(chunk.partId !== undefined ? { partId: chunk.partId } : {}),
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {
+    // Best-effort — don't spam logs on every chunk
+  });
+}
+
+function streamChunkKey(url: string, sessionId: string): string {
+  return `${url}\u0000${sessionId}`;
+}
+
+function flushStreamChunkKey(key: string): void {
+  const chunk = pendingStreamChunks.get(key);
+  if (!chunk) return;
+  clearTimeout(chunk.timer);
+  pendingStreamChunks.delete(key);
+  postStreamChunk(chunk);
+}
+
+export function flushStreamChunks(progressUrl: ProgressDest, sessionId: string): void {
+  if (!progressUrl || isEmitter(progressUrl)) return;
+  flushStreamChunkKey(streamChunkKey(progressUrl, sessionId));
+}
+
 function pushStreamChunk(
   progressUrl: ProgressDest,
   sessionId: string,
-  payload: { reasoningDelta?: string; textDelta?: string },
+  payload: { reasoningDelta?: string; textDelta?: string; partId?: string },
 ): void {
   if (!progressUrl) return;
   if (isEmitter(progressUrl)) {
@@ -1607,16 +1648,23 @@ function pushStreamChunk(
     }
     return;
   }
-  fetch(progressUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
-    },
-    body: JSON.stringify({ sessionId, ...payload }),
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => {
-    // Best-effort — don't spam logs on every chunk
+  const kind: StreamChunkKind = payload.reasoningDelta !== undefined ? "reasoningDelta" : "textDelta";
+  const text = payload[kind];
+  if (text === undefined) return;
+  const key = streamChunkKey(progressUrl, sessionId);
+  const pending = pendingStreamChunks.get(key);
+  if (pending && pending.kind === kind && pending.partId === payload.partId) {
+    pending.text += text;
+    return;
+  }
+  if (pending) flushStreamChunkKey(key);
+  pendingStreamChunks.set(key, {
+    url: progressUrl,
+    sessionId,
+    kind,
+    partId: payload.partId,
+    text,
+    timer: setTimeout(() => flushStreamChunkKey(key), STREAM_CHUNK_FLUSH_MS),
   });
 }
 
@@ -1805,7 +1853,7 @@ export interface RunTaskOptions {
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
   requiredTool?: { name: string; nudge: string } | undefined;
   /** Digital Twin persona (soul.md, …) folded into the actual system prompt on
-   *  both the override and buildSystemPrompt-fallback paths, so it reads as
+   *  both the override and buildTwinSystemPrompt-fallback paths, so it reads as
    *  identity and shows in the debug panel. */
   twinPersona?: string | undefined;
   abortSignal?: AbortSignal | undefined;
@@ -1839,7 +1887,7 @@ export interface RunTaskOptions {
    *  delivery MANDATORY — runTask runs a hardcoded reflection stage that nudges
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
-  twinDeliverRef?: import("./twin-deliver.js").TwinDeliverRef | undefined;
+  twinDeliverRef?: TwinDeliverRef | undefined;
   /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
@@ -1849,11 +1897,16 @@ export interface RunTaskOptions {
    *  was approved (or a trivial plan auto-continued). Debug-telemetry only —
    *  emits a mode_switch (plan→auto) event at session start. */
   planContinuation?: boolean | undefined;
+  /** Multi-agent direct chat hand-off note (claw-auth lib/agent-handoff.ts):
+   *  `resume` when this run resumes the agent's own session, `fresh` when it
+   *  starts one. Picked here because only runTask knows which it is. */
+  agentHandoff?: { resume?: string | null; fresh?: string | null } | undefined;
   /** Opt-in citation reflection (agentConfig.citationReflection). When true and
    *  the run pulled citeable sources (a tool result carried [clf-…#n] tokens)
    *  yet the final prose cites none, runTask nudges the model once to rewrite
    *  the answer with inline citations. See the post-loop block. */
   citationReflection?: boolean | undefined;
+  replyFormat?: ResultSectionLimits | undefined;
   /** Opt-in generic auto-citations (agentConfig.autoToolCitations). When true,
    *  EVERY tool result that doesn't already self-cite is chunked and prefixed
    *  with inline [clf-<toolCallId>#n] tokens (plus one generic citation per
@@ -1878,7 +1931,35 @@ export interface RunTaskOptions {
    *  the subagent tools via SubagentProgressCtx. After the model loop settles,
    *  runTask drains it, injecting each completed subagent result back into the
    *  session so the model can incorporate it before finishing. */
-  backgroundRegistry?: import("./subagent-tools.js").BackgroundSubagentRegistry | undefined;
+  backgroundRegistry?: import("./child-tasks.js").ChildTaskRegistry | undefined;
+  /** Slot the run fills in with its own trace handles, shared with the subagent
+   *  tools via SubagentProgressCtx. The tools are built before this run opens
+   *  its trace, so a child can only learn where to write itself — and which
+   *  recorder to announce itself on — through this object. */
+  parentDebug?: import("./subagent-tools.js").ParentDebugHandle | undefined;
+  /** Set when this run is a child of another run. Its trace is written into the
+   *  PARENT's store and stamped with the parentage the retrieval route nests on,
+   *  so the child shows up inside the caller's trace rather than orphaned under
+   *  a store key nobody reads. */
+  childRun?: {
+    storeKey: string;
+    /** Minted by the caller so its timeline row and this header agree. */
+    runId: string;
+    parentRunId?: string | undefined;
+    /** The caller's session: what the debug bundle matches this trace to, and
+     *  the address `liveMirror` pushes to. */
+    parentSessionId: string;
+    parentToolCallId: string;
+    /** Callee slug — surfaced as `subagentName` on the child's header. */
+    label: string;
+    kind: "subagent" | "agent";
+    captureLevel?: CaptureLevel | undefined;
+    /** Mirror this run's tool calls as they happen. A child has no live viewer
+     *  of its own — the human watches the CALLER's chat — so without this the
+     *  caller sees an empty spinner until the whole child returns. Omit when the
+     *  caller has no live stream. */
+    liveMirror?: ProgressDest;
+  } | undefined;
   fastMode?: boolean | undefined;
   fastToolCatalogNames?: string[] | undefined;
   fastToolController?: FastToolRuntimeController | undefined;
@@ -1993,10 +2074,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     twinDeliverRef,
     mode,
     planContinuation,
+    agentHandoff,
     citationReflection,
+    replyFormat,
     autoToolCitations,
     isRegenerate,
     backgroundRegistry,
+    parentDebug,
+    childRun,
     fastMode,
     fastToolCatalogNames,
     fastToolController,
@@ -2060,6 +2145,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   const authStorage = AuthStorage.create();
+  if (LITELLM.apiKey) {
+    authStorage.setRuntimeApiKey("litellm", LITELLM.apiKey);
+  }
   // Pi v0.75 made the ModelRegistry constructor private — must use the
   // static factory. `.create(authStorage)` uses the default models.json path
   // (~/.pi/agent/models.json); for in-memory use ModelRegistry.inMemory().
@@ -2380,7 +2468,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // "did it even get the tool?" question is answerable from the run logs.
   if (twinDeliverRef) {
     log.info(
-      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes("twin_deliver")} ` +
+      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes(TWIN_DELIVER_TOOL_NAME)} ` +
       `(allowlist=${builtinAllow.length + customToolNames.length}); customTools=[${customToolNames.join(", ")}]`,
     );
   }
@@ -2531,6 +2619,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // mid-turn-compaction.ts, where the pi-internals coupling is contained and
   // version-guarded — see that file's header.
   installMidTurnCompaction(session);
+  // Digital Twin: end the loop right after the first accepted twin_deliver.
+  // Installed after mid-turn compaction so it chains that stop hook.
+  if (twinDeliverRef) {
+    installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
+  }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
   // directly-assignable property of the same name on the Agent. Semantics
   // unchanged — the hook still runs before each tool call.
@@ -2578,6 +2671,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let streamedText = "";
   let streamedReasoning = "";
+  // The same output in order — thinking, text and tool calls across every LLM
+  // call — for the chat's step timeline (done.parts).
+  const turnParts = new TurnParts();
   // Detail of the most recent assistant turn that ended in a provider error
   // (stopReason "error") with the SDK's own auto-retries already exhausted.
   // Reset to null whenever a later turn ends cleanly, so a mid-run blip the
@@ -2588,14 +2684,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // instead of advancing to the configured fallback. See ProviderTerminalError.
   let lastTurnErrorDetail: string | null = null;
   let compactedThisRun = false;
-  const debugEvents: DebugEventRecord[] = [];
-  let debugSeq = 0;
-  // Set once the success-path debug write (near the end of the agent loop) has
-  // run. The inner finally below uses this as a guard so it only fires the
-  // fallback partial-state debug write when the success path didn't get there
-  // — i.e. the loop threw (RunCancelledError, ProviderStallError, etc.). The
-  // success path keeps producing the full snapshot exactly as it did before.
-  let debugWritten = false;
+  // The trace recorder owns event capture and persistence for this run. It is
+  // created a few lines below, once the store key and header are known; every
+  // pushDebugEvent call site funnels through it.
+  let recorder: Recorder | null = null;
+  let capture: CaptureHandles | null = null;
+  let debugRunStore: RunStore | null = null;
   let llmCallSeq = 0;
   let currentPromptText = "";
   let currentPromptKind: "fresh" | "resume" = "fresh";
@@ -2634,6 +2728,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // is our TTFT signal. message_end closes the turn.
   let turnStartedAt: number | null = runStartedAt;
   let firstDeltaAt: number | null = null;
+  // TTFT of the CURRENT turn (the run-level accumulator keeps only the first).
+  let turnTtftMs: number | null = null;
+  const llmTurnRecorder = new LlmTurnRecorder();
   // LLM stall watchdog: fall back instead of hanging forever when a provider
   // call makes no progress (the silent-drop failure mode). `modelActive` is true
   // only while we're awaiting/receiving model output (NOT during tool execution,
@@ -2667,120 +2764,121 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     try { return JSON.stringify(result); } catch { return String(result); }
   };
 
+  // Every debug emission in this file goes through here. The recorder applies
+  // the per-field size policy from the event registry, interns large payloads
+  // into the run's blob log, appends to the on-disk event log and pushes the
+  // event live — and it can never throw, because this runs inside pi's event
+  // subscription where a throw would take the run down with it.
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
-    const event: DebugEventRecord = {
-      seq: ++debugSeq,
-      at: extras?.at ?? new Date().toISOString(),
-      kind,
-      ...(extras?.turn != null ? { turn: extras.turn } : {}),
-      ...(extras?.llmCall != null ? { llmCall: extras.llmCall } : {}),
-      ...(extras?.toolCallId ? { toolCallId: extras.toolCallId } : {}),
-      ...(extras?.parentToolCallId ? { parentToolCallId: extras.parentToolCallId } : {}),
-      ...(extras?.subagentName ? { subagentName: extras.subagentName } : {}),
-      data,
-    };
-    debugEvents.push(event);
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    recorder?.record(kind, data, extras);
   };
+  pinRunTask(task);
+  // Lazy view of the live transcript for classifier call sites (result sift,
+  // context gate): read at call time, so a tool mid-loop sees every prior turn.
+  attachRunMessages(() => (session as unknown as { messages?: readonly unknown[] }).messages);
 
-  // Incremental debug snapshot — written at assistant turn boundaries and tool
-  // lifecycle boundaries (NOT per token), so the debugger can serve a PARTIAL
-  // bundle mid-run and does not leave a completed tool displayed as running.
-  // Writes only debug-session.json + debug-events.json
-  // (never the immutable debug-run-*.json). `messages` is intentionally omitted
-  // (kept only in the final snapshot) to avoid O(turns) PVC growth — the drawer
-  // renders off `events`/`toolInvocations`. Skipped once the completion write
-  // has run (debugWritten). Best-effort: never throws into the run loop.
-  let partialDebugFlushing = false;
-  // Tracks the in-flight partial write so the completion/finally writers can
-  // await it before writing their FULL snapshot — otherwise the two race on the
-  // same debug-session.json path and can leave a torn/partial final trace.
-  let partialFlushPromise: Promise<void> | null = null;
-  const flushDebugPartial = async (): Promise<void> => {
-    if (!conversationId || debugWritten || partialDebugFlushing) return;
-    partialDebugFlushing = true;
-    try {
-      const debugDir = await ensureSessionDebugDir(conversationId);
-      if (debugWritten) return; // completion writer won the race while we awaited
-      const { writeFile } = await import("node:fs/promises");
-      if (debugWritten) return;
-      // Strip the per-event full-transcript `messages` embeds (session_prompt /
-      // assistant_turn_end each carry a deep clone of the WHOLE session for that
-      // turn) — keeping them would make each partial file O(turns) and the
-      // rewrite-every-turn cadence O(turns²) bytes to the PVC. The drawer renders
-      // off event metadata + toolInvocations, not these mid-run message embeds.
-      const leanEvents = debugEvents.map((e) =>
-        e.data && (e.data as Record<string, unknown>)["messages"] !== undefined
-          ? { ...e, data: { ...(e.data as Record<string, unknown>), messages: undefined } }
-          : e,
+  /**
+   * The single terminal path for a run's trace. Idempotent — the success path
+   * and the fallback in `finally` both call it and only the first one lands.
+   *
+   * Order matters, and each stage is independently guarded: the append-only log
+   * is already durable, the header/materialize step makes it readable, and the
+   * GCS upload puts a copy somewhere the PVC eviction sweep can't reach. A pod
+   * that is out of disk still gets a complete off-pod artifact, which is the
+   * exact case that used to lose traces entirely.
+   */
+  const finishDebugCapture = async (
+    status: RunStatus,
+    finalText: string,
+    assessment?: AnswerAssessment | null,
+  ): Promise<void> => {
+    if (!capture || capture.finished) return;
+    const finalLatency: LatencyMetrics = {
+      totalMs: Date.now() - runStartedAt,
+      llmDecodeMs: latency.llmDecodeMs,
+      llmWaitMs: latency.llmWaitMs,
+      llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
+      llmTurns: latency.llmTurns,
+      llmRetries: latency.llmRetries,
+      ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
+      ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
+      ...(latency.llmDecodeMs > 0 && tokenUsage.output > 0
+        ? { tokensPerSec: Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000)) }
+        : {}),
+      ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
+      ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
+      ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
+      ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
+      toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
+    };
+    const judgeSummary = judgeRunSummary();
+    if (judgeSummary && judgeSummary.calls > 0) {
+      log.info(
+        `[judge] backend=${judgeSummary.backend} calls=${judgeSummary.calls} failed=${judgeSummary.failed} ` +
+        `questions=${judgeSummary.questions} total=${judgeSummary.totalMs}ms`,
       );
-      const snapshot: DebugSessionSnapshot = {
-        schemaVersion: 1,
-        conversationId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-        userId,
-        ...(userName ? { userName } : {}),
-        ...(userEmail ? { userEmail } : {}),
-        ...(provider ? { provider } : {}),
-        model: model.id,
-        thinking: debugThinking,
-        ...(debugSpeed ? { speed: debugSpeed } : {}),
-        inProgress: true,
-        startedAt: debugStartedIso,
-        finishedAt: new Date().toISOString(),
-        task,
-        ...(context ? { context } : {}),
-        ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-        messages: [],
-        toolInvocations: cloneForDebug(toolInvocations),
+    }
+    try {
+      await capture.finish(status, {
+        text: finalText,
         tokenUsage: { ...tokenUsage },
-        latency: {
-          totalMs: Date.now() - runStartedAt,
-          llmDecodeMs: latency.llmDecodeMs,
-          llmWaitMs: latency.llmWaitMs,
-          llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-          llmTurns: latency.llmTurns,
-          llmRetries: latency.llmRetries,
-          toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-        },
-        lastAssistantText: streamedText,
-        events: leanEvents,
-      };
-      await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(snapshot), "utf8");
-      await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(leanEvents), "utf8");
+        latency: finalLatency,
+        ...(assessment ? { answerAssessment: assessment } : {}),
+        ...(judgeSummary && judgeSummary.calls > 0 ? { judge: judgeSummary } : {}),
+        optimizations: effectiveOptimizations(),
+      });
     } catch (err) {
-      log.warn(`[agent] partial debug flush failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      partialDebugFlushing = false;
+      log.warn(`[agent] debug finish failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!debugRunStore || !debugStoreKey) return;
+    // Upload off-pod. The v1 snapshot keeps every existing reader working; the
+    // packed v2 run carries the full fidelity (blobs included) for the newer
+    // retrieval path. Both best-effort, neither on the run's critical path.
+    try {
+      const run = await readRun(debugRunStore.runDir);
+      if (run) {
+        const v1 = Buffer.from(JSON.stringify(toV1Snapshot(run)), "utf8");
+        const uploaded = await gcsUploadDebugRunWithRetries(debugStoreKey, runFileNameFor(debugRunId), v1);
+        const packed = await packRun(debugRunStore.runDir);
+        if (packed) {
+          await gcsUploadDebugObject(`${debugStoreKey}/${packedRunObjectName(debugRunId)}`, packed);
+        }
+        if (uploaded) {
+          await debugRunStore.markUploaded();
+        } else {
+          // GCS unreachable: keep the v1 snapshot on the PVC so the trace is
+          // still servable from this pod until the session is archived.
+          const debugDir = await ensureSessionDebugDir(debugStoreKey);
+          const { writeFile } = await import("node:fs/promises");
+          await writeFile(`${debugDir}/${runFileNameFor(debugRunId)}`, v1);
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent] debug run upload failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  // Serialize partial snapshots. A plain `void flushDebugPartial()` can lose a
-  // tool-end update when a turn-boundary write is already in flight because
-  // flushDebugPartial deliberately skips concurrent writes. Chaining preserves
-  // every requested boundary and gives the final writer one promise to await.
+  // Mid-run durability is no longer a rewrite-the-whole-file affair: the
+  // recorder appends each event as it happens, so a partial trace is simply
+  // "whatever is on disk right now". flushHint() only asks the store to get its
+  // queued appends onto the fd sooner; it copies nothing and never blocks the
+  // run loop. (The old flushDebugPartial rewrote debug-session.json at every
+  // turn and tool boundary, which is what made a long run cost O(turns^2)
+  // bytes to the PVC.)
   const queueDebugPartialFlush = (): void => {
-    const previous = partialFlushPromise ?? Promise.resolve();
-    const next = previous
-      .catch(() => {})
-      .then(() => flushDebugPartial());
-    partialFlushPromise = next;
-    void next.finally(() => {
-      if (partialFlushPromise === next) partialFlushPromise = null;
-    });
+    recorder?.flushHint();
   };
 
+
+  // Stream rate is a live-only heartbeat (once per second while decoding). It
+  // is deliberately not persisted, and recordLive consumes no sequence number —
+  // burning one per tick used to leave holes in the persisted event log that
+  // looked like dropped events.
   const pushLiveStreamRate = (streamsPerSec: number, active: boolean): void => {
-    const event: DebugEventRecord = {
-      seq: ++debugSeq,
-      at: new Date().toISOString(),
-      kind: "stream_rate",
+    recorder?.recordLive("stream_rate", { streamsPerSec, streamsCollected: turnStreamCount, active }, {
       turn: latency.llmTurns + 1,
       ...(llmCallSeq ? { llmCall: llmCallSeq } : {}),
-      data: { streamsPerSec, streamsCollected: turnStreamCount, active },
-    };
-    pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event);
+    });
   };
 
   const flushStreamRate = (active: boolean): void => {
@@ -2806,11 +2904,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     streamRateTimer = null;
     flushStreamRate(false);
     streamWindowStartedAt = null;
-  };
-
-  const snapshotMessages = (): unknown[] => {
-    const messages = (session as unknown as { messages?: unknown[] }).messages ?? [];
-    return cloneForDebug(messages);
   };
 
   const repairDanglingToolUses = (reason: string): number => {
@@ -2856,6 +2949,140 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     currentPromptImagesCount = imagesCount;
   };
 
+  // ── Debug capture ──────────────────────────────────────────────────────
+  // Opened BEFORE the model is ever called, and the header is written with
+  // status "running" immediately: any run that gets this far is discoverable
+  // on the PVC and (fire-and-forget) in GCS within about a second, so a pod
+  // killed mid-run still leaves a readable, correctly-labelled trace instead
+  // of nothing at all.
+  //
+  // The store key falls back to the sessionId when there is no conversationId —
+  // runs without one used to produce no artifact whatsoever.
+  const debugStoreKey =
+    childRun?.storeKey ?? conversationId ?? (sessionId && isSafeId(sessionId) ? sessionId : undefined);
+  const debugRunId = childRun?.runId ?? runIdFor(runStartedAt, sessionId);
+  const debugCaptureLevel = childRun?.captureLevel ?? resolveCaptureLevel();
+  if (debugStoreKey) {
+    debugRunStore = await RunStore.open({
+      storeKey: debugStoreKey,
+      runId: debugRunId,
+      captureLevel: debugCaptureLevel,
+    }).catch((err: unknown) => {
+      log.warn(`[agent] debug store open failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    });
+  }
+  const debugBlobs = new BlobWriter({
+    appendLine: (line) => debugRunStore?.appendBlobLine(line),
+    captureLevel: debugCaptureLevel,
+  });
+  recorder = new Recorder({
+    store: debugRunStore,
+    blobs: debugBlobs,
+    captureLevel: debugCaptureLevel,
+    ...(progressUrl
+      ? {
+          live: {
+            push: (event: DebugEventRecord) =>
+              pushDebugProgress(progressUrl, sessionId ?? conversationId ?? "unknown", event),
+          },
+        }
+      : {}),
+  });
+  const debugHeader: RunHeader = {
+    schemaVersion: 2,
+    runId: debugRunId,
+    storeKey: debugStoreKey ?? "unknown",
+    ...(conversationId ? { conversationId } : {}),
+    ...(progressMeta?.conversationId ? { rawConversationId: progressMeta.conversationId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
+    ...(userId ? { userId } : {}),
+    ...(userName ? { userName } : {}),
+    ...(userEmail ? { userEmail } : {}),
+    ...(provider ? { provider } : {}),
+    model: model.id,
+    thinking: debugThinking,
+    ...(debugSpeed ? { speed: debugSpeed } : {}),
+    captureLevel: debugCaptureLevel,
+    startedAt: debugStartedIso,
+    finishedAt: debugStartedIso,
+    status: "running",
+    task,
+    ...(context ? { context } : {}),
+    ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
+    mode: mode ?? "auto",
+    ...(childRun?.parentRunId ? { parentRunId: childRun.parentRunId } : {}),
+    ...(childRun ? { parentSessionId: childRun.parentSessionId } : {}),
+    ...(childRun
+      ? {
+          parentToolCallId: childRun.parentToolCallId,
+          subagentName: childRun.label,
+          childKind: childRun.kind,
+          question: task,
+        }
+      : {}),
+    counts: { events: 0, blobs: 0, messages: 0, toolCalls: 0 },
+    tokenUsage: emptyTokenUsage(),
+    latency: emptyLatency(),
+  };
+  capture = startCapture({
+    store: debugRunStore,
+    recorder,
+    header: debugHeader,
+    // A child writes into the parent's debug dir, where the v1 files live one
+    // per directory — materializing would overwrite the parent's own trace. It
+    // needs no discovery marker either; readers reach it through the parent.
+    ...(childRun ? { materializeV1: false } : {}),
+    // Off-pod discovery marker. Written at START, not at finish, and it carries
+    // the run's REAL store key in its own object name — which is what lets the
+    // retrieval path stop guessing key shapes (branch keys, per-user twin keys
+    // and userId-prefixed keys each used to defeat a different guesser).
+    onStart: (h) => {
+      if (!debugStoreKey || childRun) return;
+      // Index under every id a caller might ask by. The debugger asks with the
+      // RAW conversation id, while `conversationId` here is the session key —
+      // indexing only the latter made the whole discovery layer unreachable.
+      for (const id of new Set([h.rawConversationId, h.conversationId].filter((v): v is string => !!v))) {
+        void gcsPutDebugIndex(indexObjectName(id, h.runId, debugStoreKey));
+      }
+      // Deliberately NOT written under the final snapshot's object name: a
+      // header-only stub parked there would permanently shadow the complete
+      // trace if the finish-time upload later failed.
+      void gcsUploadDebugObject(
+        `${debugStoreKey}/${startingRunObjectName(h.runId)}`,
+        Buffer.from(JSON.stringify(toV1Snapshot({ header: h, events: [], blobs: BlobIndex.empty(), warnings: [] })), "utf8"),
+        "application/json",
+      );
+    },
+  });
+  // Subagent tools were constructed before this point; hand them the run they
+  // are children of, so their traces land in this run's store and their
+  // start/end shows up on this run's timeline.
+  if (parentDebug) {
+    parentDebug.recorder = recorder;
+    parentDebug.runId = debugRunId;
+    parentDebug.captureLevel = debugCaptureLevel;
+    if (debugStoreKey) parentDebug.storeKey = debugStoreKey;
+  }
+
+  // The one hook that sees what the model is ACTUALLY sent: pi's assembled
+  // system prompt (with its <available_skills> block), the resolved tool
+  // definitions including their JSON schemas, and the real transcript. Installed
+  // after installLlmCallMetrics so this wrapper sits outermost, and before
+  // session.subscribe below so the first turn is captured.
+  installStreamCapture({
+    agent: session.agent as unknown as { streamFn: (model: unknown, context: unknown, options?: unknown) => unknown },
+    recorder,
+    fastMode: fastMode === true,
+    ...(provider ? { provider } : {}),
+  });
+
+  // Attach the judge sink only once capture has started: it flushes every Jev
+  // call made so far (pre-run sites: mode router, prefetch gate, plan gate,
+  // persona pick) into this run's trace. Attached earlier, those events went to
+  // a recorder with no open store and were lost.
+  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
   pushDebugEvent("session_start", {
     conversationId,
     sessionId,
@@ -2897,17 +3124,36 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   const reportProgress = createProgressReporter(progressUrl, sessionId ?? conversationId ?? "unknown", progressMeta);
 
+  // Stamped with the spawning toolCallId so each row nests under it rather than
+  // arriving flat — the same envelope subagents emit for their own children.
+  const liveMirror = childRun?.liveMirror;
+  const mirrorToCaller =
+    liveMirror && childRun
+      ? (invocation: ToolInvocation): void => {
+          pushInvocation(liveMirror, childRun.parentSessionId, {
+            ...invocation,
+            parentToolCallId: childRun.parentToolCallId,
+            subagentName: childRun.label,
+          });
+        }
+      : undefined;
+
   try {
   // Build a lookup of toolName → progressLabels[] from subagent tools.
   // Each invocation picks one at random so long-running tools cycle labels
   // instead of staying on a single string.
   const progressLabels = new Map<string, string[]>();
+  // Tools that run a whole subagent — their calls carry `subagentName`.
+  const subagentToolNames = new Set<string>();
   if (customTools) {
     for (const t of customTools) {
       const labels = (t as unknown as { progressLabels?: string[] }).progressLabels;
       if (labels?.length) progressLabels.set(t.name, labels);
+      if ((t as unknown as { subagent?: boolean }).subagent) subagentToolNames.add(t.name);
     }
   }
+  const subagentMark = (toolName: string): { subagentName?: string } =>
+    subagentToolNames.has(toolName) ? { subagentName: toolName } : {};
   const pickLabel = (toolName: string, fallback: string): string => {
     const arr = progressLabels.get(toolName);
     if (!arr?.length) return fallback;
@@ -2924,8 +3170,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         kind: currentPromptKind,
         prompt: currentPromptText,
         imagesCount: currentPromptImagesCount,
-        messageCount: snapshotMessages().length,
-        messages: snapshotMessages(),
+        messageCount: recorder?.messageCount ?? 0,
         ...(personaSystemPrompt ? { systemPrompt: personaSystemPrompt } : {}),
         turnIndex: (event as { turnIndex?: number }).turnIndex,
         timestamp: (event as { timestamp?: string }).timestamp,
@@ -2941,6 +3186,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       modelActive = false;
       log.info(`[agent] Tool call: ${event.toolName} argCount=${Object.keys(event.args ?? {}).length} argKeys=[${Object.keys(event.args ?? {}).join(",")}]`);
       inflightCalls.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
+      turnParts.tool(event.toolCallId);
       pushDebugEvent("tool_execution_start", {
         toolName: event.toolName,
         args: cloneForDebug(event.args),
@@ -2956,7 +3202,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // their children (pushed with parentToolCallId) nest under a single
       // collapsible parent row instead of appearing flat at the top level
       // while the parent is still in flight.
-      pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", {
+      const pendingInvocation: ToolInvocation = {
         toolName: event.toolName,
         args: event.args,
         result: "",
@@ -2965,7 +3211,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         durationMs: 0,
         status: "running",
         toolCallId: event.toolCallId,
-      } satisfies ToolInvocation);
+        ...subagentMark(event.toolName),
+      };
+      pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", pendingInvocation);
+      mirrorToCaller?.(pendingInvocation);
       queueDebugPartialFlush();
     }
     if (event.type === "tool_execution_end") {
@@ -3017,6 +3266,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           durationMs: Date.now() - started.startedAt,
           status: "completed",
           toolCallId: event.toolCallId,
+          ...subagentMark(event.toolName),
           ...(citations ? { citations } : {}),
           ...(debug ? { debug } : {}),
           ...(bgTask ? { background: true, backgroundState: "running" as const, backgroundTaskId: bgTask.taskId } : {}),
@@ -3024,6 +3274,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         toolInvocations.push(inv);
         // Stream the invocation to xyne-claw-auth so Control Center watchers see tools populate live
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
+        mirrorToCaller?.(inv);
         pushDebugEvent("tool_execution_end", {
           toolName: event.toolName,
           args: cloneForDebug(started.args),
@@ -3059,12 +3310,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
             const previewBase = SANDBOX_PREVIEW.baseUrl.replace(/\/+$/, "");
             const sandboxPreviewUrl = `${previewBase}/claw-preview/${sbx.id}/`;
             const sandboxCodePreviewUrl = `${previewBase}/claw-code/${sbx.id}`;
+            const sandboxTermUrl = `${previewBase}/claw-term/${sbx.id}/`;
             sandboxPreviewEmitted = true;
-            log.info(`[agent] Sandbox preview ready: ${sandboxPreviewUrl} | code: ${sandboxCodePreviewUrl} (storeKey=${storeKey})`);
+            log.info(`[agent] Sandbox preview ready: ${sandboxPreviewUrl} | code: ${sandboxCodePreviewUrl} | term: ${sandboxTermUrl} (storeKey=${storeKey})`);
             // pushSandboxPreview goes to /webhook/progress which is keyed by
             // the run sessionId (the UUID), NOT the storeKey — claw-auth
             // looks the run session up. Use sessionId here.
-            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl }, progressMeta);
+            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl }, progressMeta);
           } else {
             log.info(`[agent] Sandbox preview skipped: no SESSION_STORE entry for storeKey=${storeKey} (tool=${event.toolName})`);
           }
@@ -3082,11 +3334,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     // We no longer persist the raw deltas in debug artifacts. Instead we only
     // accumulate stream-rate summaries for the current turn.
     if (event.type === "message_update") {
-      const ame = (event as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
+      const ame = (event as { assistantMessageEvent?: { type?: string; delta?: string; contentIndex?: number } }).assistantMessageEvent;
+      const partId = TurnParts.partId(llmCallSeq, ame?.contentIndex);
+      if (ame?.type === "thinking_end") turnParts.endReasoning(partId);
       if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
         if (firstDeltaAt == null && turnStartedAt != null) {
           firstDeltaAt = Date.now();
           const wait = firstDeltaAt - turnStartedAt;
+          turnTtftMs = wait;
           latency.llmWaitMs += wait;
           if (latency.firstTurnTtftMs == null) latency.firstTurnTtftMs = wait;
         }
@@ -3100,7 +3355,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           startStreamRateTimer();
           turnStreamThinkingChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { reasoningDelta: ame.delta });
+          turnParts.delta("reasoning", partId, ame.delta);
+          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { reasoningDelta: ame.delta, partId });
         } else if (ame.type === "text_delta") {
           turnStreamCount += 1;
           streamWindowCount += 1;
@@ -3108,13 +3364,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           streamedText += ame.delta;
           turnStreamTextChars += ame.delta.length;
           turnStreamChars += ame.delta.length;
-          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { textDelta: ame.delta });
+          turnParts.delta("text", partId, ame.delta);
+          pushStreamChunk(progressUrl, sessionId ?? conversationId ?? "unknown", { textDelta: ame.delta, partId });
         }
       }
     }
     if (event.type === "message_end") {
-      modelActive = false; // turn finished — next turn_start re-arms the watchdog
+      flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
+      if (msg?.role === "assistant") modelActive = false; // turn finished — next turn_start re-arms the watchdog
       if (msg?.role === "assistant" && msg.usage) {
         tokenUsage.input += msg.usage.input ?? 0;
         tokenUsage.output += msg.usage.output ?? 0;
@@ -3139,9 +3397,22 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           latency.streamTextChars += turnStreamTextChars;
           latency.streamCharsPerSec = Math.round(turnStreamChars / decodeSeconds);
         }
+        const called = msg as unknown as { model?: string; responseModel?: string; provider?: string; stopReason?: string };
+        llmTurnRecorder.record({
+          index: llmCallSeq,
+          ttftMs: turnTtftMs,
+          decodeMs: firstDeltaAt != null ? now - firstDeltaAt : 0,
+          usage: msg.usage,
+          streamChars: turnStreamChars,
+          ...(called.stopReason ? { stopReason: called.stopReason } : {}),
+          // responseModel is what the gateway actually served.
+          ...(called.responseModel ?? called.model ? { model: called.responseModel ?? called.model } : {}),
+          ...(called.provider ? { provider: called.provider } : {}),
+        });
         latency.llmTurns += 1;
         turnStartedAt = null;
         firstDeltaAt = null;
+        turnTtftMs = null;
         // HA: checkpoint the session to GCS after each assistant turn (debounced
         // + single-flight) and keep the conversation lock alive, so a pod death
         // mid-run loses ≈one turn, not the whole conversation.
@@ -3168,6 +3439,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         if (stopReason !== "tool_use" && stopReason !== "aborted" && stopReason !== "error") {
           recordHandoffBoundary(latency.llmTurns);
         }
+        if (endedInToolCalls(stopReason) && optEnabled("interim_messages")) {
+          const interim = piAssistantText(msg as PiMsg);
+          if (interim && sessionId) pushInterimMessage(progressUrl, sessionId, interim);
+        }
         // Emit the turn's thinking as its OWN timeline event, before
         // assistant_turn_end, so the debugger shows the reasoning block exactly
         // where it happened — before this turn's tool calls, and between LLM
@@ -3186,7 +3461,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           });
         }
         pushDebugEvent("assistant_turn_end", {
-          message: cloneForDebug(msg),
           assistantText: session.getLastAssistantText() ?? "",
           usage: cloneForDebug(msg.usage),
           stopReason,
@@ -3197,7 +3471,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           streamCharsPerSec: latency.streamCharsPerSec,
           streamsCollected: turnStreamCount,
           streamRateSamples: turnStreamRateSamples,
-          messages: snapshotMessages(),
         }, {
           turn: latency.llmTurns,
           ...(llmCallSeq ? { llmCall: llmCallSeq } : {}),
@@ -3224,6 +3497,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       }, { turn: latency.llmTurns + 1 });
     }
     if (event.type === "compaction_end") {
+      llmTurnRecorder.markCompaction();
       const e = event as {
         aborted?: boolean;
         willRetry?: boolean;
@@ -3248,6 +3522,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "auto_retry_start") {
       const e = event as { attempt?: number; maxAttempts?: number; errorMessage?: string };
+      llmTurnRecorder.markRetry();
       latency.llmRetries += 1;
       if (e.errorMessage) latency.lastRetryReason = e.errorMessage.slice(0, 200);
       // A retry restarts the current turn — re-arm the wait window so the
@@ -3271,21 +3546,40 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   });
 
-  const buildCancelledError = (): RunCancelledError => new RunCancelledError("Run cancelled by user", {
+  // Shared by the success path and both abort builders.
+  const snapshotLatency = (): LatencyMetrics => {
+    const totalMs = Date.now() - runStartedAt;
+    const toolMs = toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0);
+    const tokensPerSec = latency.llmDecodeMs > 0 && tokenUsage.output > 0
+      ? Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000))
+      : undefined;
+    return {
+      totalMs,
+      llmDecodeMs: latency.llmDecodeMs,
+      llmWaitMs: latency.llmWaitMs,
+      llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
+      llmTurns: latency.llmTurns,
+      llmRetries: latency.llmRetries,
+      ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
+      ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
+      ...(tokensPerSec != null ? { tokensPerSec } : {}),
+      toolMs,
+    };
+  };
+  const snapshotAbortProgress = (): AbortProgress => ({
     toolsUsed: [...toolsUsed],
     toolInvocations: [...toolInvocations],
     tokenUsage: { ...tokenUsage },
     partialText: streamedText,
+    latency: snapshotLatency(),
+    llmCalls: llmTurnRecorder.snapshot(),
   });
+  const buildCancelledError = (): RunCancelledError =>
+    new RunCancelledError("Run cancelled by user", snapshotAbortProgress());
   const buildProviderStallError = (): ProviderStallError => new ProviderStallError(
     provider ?? "spaces",
     Date.now() - lastActivityAt,
-    {
-      toolsUsed: [...toolsUsed],
-      toolInvocations: [...toolInvocations],
-      tokenUsage: { ...tokenUsage },
-      partialText: streamedText,
-    },
+    snapshotAbortProgress(),
   );
 
   // On cancel we must call session.abort() — it stops the agent loop and
@@ -3425,7 +3719,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         "Read these files from disk before answering.",
       ].join("\n")
     : "";
-  const mergedContext = [context, attachmentContext].filter(Boolean).join("\n\n");
+  // Multi-agent direct chat: the other agents' turns this session has not
+  // seen. A resumed session already holds this agent's own earlier turns, so it
+  // only needs what came after its last reply; a fresh one needs the whole path.
+  const handoffNote = (isResume ? agentHandoff?.resume : agentHandoff?.fresh) ?? "";
+  if (handoffNote) {
+    log.info(`[agent] multi-agent hand-off note (${isResume ? "resume" : "fresh"}, ${handoffNote.length} chars)`);
+  }
+  const mergedContext = [context, handoffNote, attachmentContext].filter(Boolean).join("\n\n");
   const contextBlock = mergedContext ? `\n\n## Additional Context\n${mergedContext}` : "";
 
   if (isResume) {
@@ -3473,7 +3774,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     //   appended the <available_skills> XML block to it. We only send the
     //   query as the first user message.
     // - Otherwise: pi uses its default system prompt; we prepend our local
-    //   buildSystemPrompt scaffold to the user message so the agent gets
+    //   buildTwinSystemPrompt scaffold to the user message so the agent gets
     //   userId/email context.
     if (systemPromptOverride) {
       const prompt = `${contextBlock}\n\n## Query\n${task}`;
@@ -3483,7 +3784,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Mention-flow twin has no systemPromptOverride — its persona is prepended
       // to the first user message. Fold the twin persona files in here too so a
       // mention-driven reply speaks as the user.
-      const basePrompt = `${buildSystemPrompt(userId, userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
+      const basePrompt = `${buildTwinSystemPrompt(userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
       const prompt = `${basePrompt}${contextBlock}\n\n## Query\n${task}`;
       recordPrompt(prompt, "fresh", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(prompt, images?.length ? { images } : undefined));
@@ -3544,18 +3845,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // timed out. Flip its wrapper invocation running → completed/error and
       // stream the update so the UI resolves the background chip.
       const blocks: string[] = [];
-      const delivered: Array<{ taskId: string; subagentName: string; status: string; durationMs: number; result: string }> = [];
+      const delivered: Array<{ taskId: string; name: string; kind: string; status: string; durationMs: number; result: string }> = [];
       for (const t of pending) {
         t.delivered = true;
         const state: "completed" | "error" = t.status === "error" ? "error" : "completed";
         const text =
           t.status === "completed" ? (t.result ?? "")
           : t.status === "error" ? `(failed: ${t.error ?? "unknown error"})`
-          : "(timed out — this background subagent did not finish in time)";
+          : "(timed out — this background task did not finish in time)";
         const durationMs = Date.now() - t.startedAt;
         const existing = toolInvocations.find((i) => i.toolCallId === t.taskId);
         const inv: ToolInvocation = existing ?? {
-          toolName: t.subagentName,
+          toolName: t.name,
           args: { question: t.question },
           result: "",
           isError: false,
@@ -3563,7 +3864,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           durationMs,
           status: "completed",
           toolCallId: t.taskId,
-          subagentName: t.subagentName,
+          subagentName: t.name,
         };
         inv.result = text;
         inv.durationMs = durationMs;
@@ -3573,8 +3874,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         inv.backgroundTaskId = t.taskId;
         if (!existing) toolInvocations.push(inv);
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
-        delivered.push({ taskId: t.taskId, subagentName: t.subagentName, status: t.status, durationMs, result: text });
-        blocks.push(`Background subagent "${t.subagentName}" (task ${t.taskId}) ${state === "error" ? "failed" : "completed"}:\n${text}`);
+        mirrorToCaller?.(inv);
+        delivered.push({ taskId: t.taskId, name: t.name, kind: t.kind, status: t.status, durationMs, result: text });
+        const label = t.kind === "agent" ? "Delegated agent" : "Background subagent";
+        blocks.push(`${label} "${t.name}" (task ${t.taskId}) ${state === "error" ? "failed" : "completed"}:\n${text}`);
       }
       if (blocks.length === 0) break;
 
@@ -3582,9 +3885,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // background subagent actually returned (the wrapper tool row only ever
       // held the "started in background" stub).
       pushDebugEvent("background_subagents_delivered", { round, count: blocks.length, tasks: delivered });
-      log.info(`[agent] Delivering ${blocks.length} background subagent result(s) to the parent (round ${round + 1})`);
+      log.info(`[agent] Delivering ${blocks.length} background task result(s) to the parent (round ${round + 1})`);
       await promptWithAbort(() => session.prompt(
-        `<system>Background subagent task(s) you started have finished. Incorporate their results into your answer to the user (copy any [clf-…] citation tokens VERBATIM). Do NOT mention this system message.\n\n${blocks.join("\n\n---\n\n")}</system>`,
+        `<system>Background task(s) you started have finished. Incorporate their results into your answer to the user (copy any [clf-…] citation tokens VERBATIM). Do NOT mention this system message.\n\n${blocks.join("\n\n---\n\n")}</system>`,
       ));
       const bq = session as unknown as { _agentEventQueue?: Promise<void> };
       if (bq._agentEventQueue) await withAbort(bq._agentEventQueue);
@@ -3670,6 +3973,23 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
+  if (replyFormat && !structuredOutputRef && !verifyResponsesRef && !abortSignal?.aborted) {
+    const before = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+    if (!before.ok) {
+      log.info(`[agent] replyFormat: answer does not fit (${before.problems.join("; ")}) — nudging rewrite`);
+      pushDebugEvent("reply_format", { phase: "nudge", problems: before.problems });
+      turnParts.supersedeTrailingText();
+      await promptWithAbort(() => session.prompt(`<system>${replyFormatNudge(before.problems, replyFormat)}</system>`));
+      const nq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (nq._agentEventQueue) {
+        await withAbort(nq._agentEventQueue);
+      }
+      const after = checkReplyFormat(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "", replyFormat);
+      log.info(`[agent] replyFormat: rewrite ${after.ok ? "fits" : `still over (${after.problems.join("; ")}) — delivery will split it`}`);
+      pushDebugEvent("reply_format", { phase: "result", ok: after.ok, problems: after.problems });
+    }
+  }
+
   // Citation reflection (opt-in via agentConfig.citationReflection). If this run
   // pulled citeable sources — a tool/subagent result carried [clf-…#n] tokens —
   // but the final prose cites NONE of them, the agent answered from retrieved
@@ -3679,6 +3999,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // invocations carry the tokens in their returned text, not in metadata.
   // Deliberately skipped for: structured-output runs (JSON, not citable prose),
   // and honest "nothing found" answers (no tool returned a token → no nag).
+  let citationReflectionOutcome: CitationReflectionOutcome | undefined;
   if (citationReflection && !structuredOutputRef) {
     // A well-formed citation token is `[clf-<toolCallId>#<chunk>]`. The id is a
     // FULL tool-call id whose charset varies by provider (`functions.x:2`,
@@ -3721,6 +4042,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         rounds = nudge + 1;
         log.info(`[agent] citationReflection: uncited answer with citeable sources — nudging ${rounds}/${maxRounds}`);
         pushDebugEvent("citation_reflection", { phase: "nudge", round: rounds, maxRounds });
+        // The rewrite replaces the answer just written; show only the rewrite.
+        turnParts.supersedeTrailingText();
         await promptWithAbort(() => session.prompt(`<system>${CITATION_REFLECTION_NUDGE}</system>`));
         const nq = session as unknown as { _agentEventQueue?: Promise<void> };
         if (nq._agentEventQueue) {
@@ -3735,6 +4058,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
 
     const finalCited = CITE_RE.test(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "");
+    citationReflectionOutcome = {
+      outcome: outcome as CitationReflectionOutcome["outcome"],
+      initialCited,
+      sourcesWereCiteable,
+      finalCited,
+      rounds,
+    };
     pushDebugEvent("citation_reflection", {
       phase: "result",
       outcome,
@@ -3755,9 +4085,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // posting the raw assistant text (chatter). This is the hardcoded reflection
   // stage the Twin always runs.
   if (twinDeliverRef) {
-    const { TWIN_DELIVER_NUDGE, recoverTwinDeliveryFromText } = await import("./twin-deliver.js");
-    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined; nudge++) {
-      if (abortSignal?.aborted) break;
+    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined && !abortSignal?.aborted; nudge++) {
       log.info(`[agent] twin_deliver missing — nudge ${nudge + 1}/2 to deliver via twin_deliver`);
       pushDebugEvent("twin_deliver_reflection", { phase: "nudge", round: nudge + 1 });
       await promptWithAbort(() => session.prompt(`<system>${TWIN_DELIVER_NUDGE}</system>`));
@@ -3778,11 +4106,21 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         pushDebugEvent("twin_deliver_reflection", { phase: "recovered", action: recovered.action });
       }
     }
-    const delivered = twinDeliverRef.value !== undefined;
-    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered, action: twinDeliverRef.value?.action ?? null });
-    if (!delivered) {
-      log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
+    const delivery = twinDeliverRef.value;
+    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered: delivery !== undefined, action: delivery?.action ?? null });
+    // R6: classifier self-check of the accepted delivery. Advisory — the owner
+    // still approves; the scores ride along for the approver and calibration.
+    if (delivery && !abortSignal?.aborted) {
+      const check = await checkTwinDelivery(delivery, {
+        task,
+        messages: (session as unknown as { messages?: readonly unknown[] }).messages ?? [],
+      }).catch(() => null);
+      if (check) {
+        twinDeliverRef.value = { ...delivery, check };
+        pushDebugEvent("twin_deliver_reflection", { phase: "check", ...check });
+      }
     }
+    if (!delivery) log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
   }
 
   // NOTE: there used to be a raw `debug-session-<conv>.json` dump of these
@@ -3810,7 +4148,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     };
     const isCheckpointAnswer = (): boolean =>
       looksLikeCompactionCheckpoint(extractFinalAnswerText(session, opts.finalAnswerMaxTurns)) && endedWithoutTools();
-    if (isCheckpointAnswer()) {
+    // Jev confirms the text-pattern match before paying for a full LLM turn.
+    const confirmedAnswer =
+      isCheckpointAnswer() &&
+      (await checkpointPrecheck(task, extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "").catch(() => false));
+    if (confirmedAnswer) {
+      log.info("[agent] Checkpoint-looking final text confirmed as a real answer by the classifier — no nudge");
+    }
+    if (!confirmedAnswer && isCheckpointAnswer()) {
       metric.count("agent_summary_as_answer", { provider: provider ?? "spaces" });
       log.warn("[agent] Final text looks like a compaction checkpoint, not an answer — nudging once to continue the task");
       if (!abortSignal?.aborted) {
@@ -3827,13 +4172,99 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
-  const text = checkpointSuppressed && structuredOutputRef?.value === undefined
-    ? ""
-    : structuredOutputRef?.value !== undefined
-    ? (typeof structuredOutputRef.value === "string"
-        ? structuredOutputRef.value
-        : JSON.stringify(structuredOutputRef.value, null, 2))
-    : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+  const computeFinalText = (): string =>
+    checkpointSuppressed && structuredOutputRef?.value === undefined
+      ? ""
+      : structuredOutputRef?.value !== undefined
+      ? (typeof structuredOutputRef.value === "string"
+          ? structuredOutputRef.value
+          : JSON.stringify(structuredOutputRef.value, null, 2))
+      : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+
+  const AUTO_CONTINUE_NUDGE =
+    "Your last message did not deliver the result the user asked for — it described what you " +
+    "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
+    "and then give the COMPLETE answer. Do not restate the plan. " +
+    "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own." +
+    (task.trim() ? `\n\nThe task you are completing, verbatim:\n${fitTask(task)}` : "");
+  const maxContinuations = optEnabled("jev_auto_continue")
+    ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
+    : 0;
+  // A twin run's only output is twin_deliver (enforced by the reflection stage
+  // above); an auto-continue nudge would reopen a finished delivery.
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef;
+
+  let text = computeFinalText();
+  let answerAssessment: AnswerAssessment | null = null;
+
+  // R12: before the answer is accepted, check the evidence supports it. A
+  // clear gap earns ONE nudge to fetch more context (never on twin runs or
+  // structured output — `continuable` excludes those).
+  if (continuable && text.trim() && optEnabled("jev_context_gate") && !abortSignal?.aborted) {
+    const messages = (session as unknown as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+    const { extractEvidenceDigest } = await import("./verify-response.js");
+    const gate = await contextGate({
+      task,
+      messages,
+      answer: text,
+      evidence: extractEvidenceDigest(messages as Parameters<typeof extractEvidenceDigest>[0], 4_000),
+    }).catch(() => "accept" as const);
+    if (gate === "fetch-more") {
+      pushDebugEvent("auto_continue", { attempt: 0, maxAttempts: 1, verdict: "context-gate" });
+      metric.count("agent_context_gate_nudge", {});
+      log.info("[agent] context gate: evidence does not support the answer — nudging once to fetch more");
+      await promptWithAbort(() => session.prompt(`<system>${CONTEXT_GATE_NUDGE}</system>`));
+      const gq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (gq._agentEventQueue) await withAbort(gq._agentEventQueue);
+      text = computeFinalText();
+    }
+  }
+
+  for (let attempt = 0; ; attempt += 1) {
+    answerAssessment = await assessAnswer({
+      task,
+      answer: text,
+      toolCalls: toolInvocations.length,
+    }).catch(() => null);
+
+    if (answerAssessment) {
+      recordJudgeOutcome(
+        "answer-completeness",
+        `verdict ${answerAssessment.verdict} · answered ${answerAssessment.answered.toFixed(2)} · finished ${answerAssessment.finished.toFixed(2)} · intent-only ${answerAssessment.intent.toFixed(2)}`,
+        { ...answerAssessment, attempt },
+      );
+    }
+    if (!continuable || !answerAssessment) break;
+    if (answerAssessment.verdict === "complete") break;
+    if (
+      optEnabled("auto_continue_strict") &&
+      answerAssessment.verdict === "partial" &&
+      answerAssessment.finished >= xorThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
+    ) {
+      break;
+    }
+    if (attempt >= maxContinuations || abortSignal?.aborted) break;
+
+    pushDebugEvent("auto_continue", {
+      attempt: attempt + 1,
+      maxAttempts: maxContinuations,
+      verdict: answerAssessment.verdict,
+      answered: answerAssessment.answered,
+      finished: answerAssessment.finished,
+      intent: answerAssessment.intent,
+    });
+    metric.count("agent_auto_continue", {
+      verdict: answerAssessment.verdict,
+      attempt: attempt + 1,
+    });
+    log.info(
+      `[agent] auto-continue ${attempt + 1}/${maxContinuations} — answer looked ${answerAssessment.verdict}`,
+    );
+    await promptWithAbort(() => session.prompt(`<system>${AUTO_CONTINUE_NUDGE}</system>`));
+    const queue = session as unknown as { _agentEventQueue?: Promise<void> };
+    if (queue._agentEventQueue) await withAbort(queue._agentEventQueue);
+    text = computeFinalText();
+  }
   pushDebugEvent("session_end", {
     textLength: text.length,
     toolCount: toolInvocations.length,
@@ -3856,73 +4287,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     },
   });
 
-  if (conversationId) {
-    try {
-      // Let any in-flight incremental partial write finish before the full
-      // completion snapshot overwrites the same debug-session.json (no torn write).
-      await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
-      const debugDir = await ensureSessionDebugDir(conversationId);
-      const { writeFile } = await import("node:fs/promises");
-      const debugSnapshot: DebugSessionSnapshot = {
-        schemaVersion: 1,
-        conversationId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-        userId,
-        ...(userName ? { userName } : {}),
-        ...(userEmail ? { userEmail } : {}),
-        ...(provider ? { provider } : {}),
-        model: model.id,
-        thinking: debugThinking,
-        ...(debugSpeed ? { speed: debugSpeed } : {}),
-        startedAt: debugStartedIso,
-        finishedAt: new Date().toISOString(),
-        task,
-        ...(context ? { context } : {}),
-        ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-        messages: cloneForDebug(sessionMessages ?? []),
-        toolInvocations: cloneForDebug(toolInvocations),
-        tokenUsage: { ...tokenUsage },
-        latency: {
-          totalMs: Date.now() - runStartedAt,
-          llmDecodeMs: latency.llmDecodeMs,
-          llmWaitMs: latency.llmWaitMs,
-          llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-          llmTurns: latency.llmTurns,
-          llmRetries: latency.llmRetries,
-          ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-          ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-          ...(latency.llmDecodeMs > 0 && tokenUsage.output > 0 ? { tokensPerSec: Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000)) } : {}),
-          ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
-          ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
-          ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
-          ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
-          toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-        },
-        lastAssistantText: text,
-        events: cloneForDebug(debugEvents),
-      };
-      await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");
-      await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(debugEvents, null, 2), "utf8");
-      // Per-run snapshots go straight to GCS, NOT the PVC: each one embeds the
-      // full conversation so far, so keeping them on disk grows O(turns²) per
-      // conversation and the TTL sweep never reclaims an active thread (prod
-      // ENOSPC, 2026-06-12). The debug route reads them back from GCS. Local
-      // write only as a fallback (local dev / GCS down) so debugging still works.
-      const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
-      const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
-      const runSnapshot = Buffer.from(JSON.stringify(debugSnapshot), "utf8");
-      if (await gcsUploadDebugRun(conversationId, runFile, runSnapshot)) {
-        log.info(`[agent] Debug artifacts written: ${debugDir}/debug-session.json, gcs:${runFile}`);
-      } else {
-        await writeFile(`${debugDir}/${runFile}`, runSnapshot);
-        log.info(`[agent] Debug artifacts written: ${debugDir}/debug-session.json, ${debugDir}/${runFile} (GCS unavailable)`);
-      }
-      debugWritten = true;
-    } catch (err) {
-      log.warn(`[agent] Failed to write debug artifacts: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  // Finish the trace: durable append-only data is already on disk, so this only
+  // stamps the final header and materializes the v1 compat artifacts every
+  // existing reader (drawer, webhook /debug, HTML export) still consumes.
+  // `text` — not `streamedText` — is the run's answer: streamedText is the raw
+  // concatenation of every turn's deltas, so it misses a structured-output final
+  // value, keeps text a suppressed checkpoint deliberately dropped, and prepends
+  // earlier turns' chatter. This is the same value session_end reports above.
+  await finishDebugCapture("completed", text, answerAssessment);
+
 
   // Log context usage for monitoring
   const contextUsage = session.getContextUsage?.();
@@ -3955,24 +4328,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   // ── Finalize latency ────────────────────────────────────────────────
-  const totalMs = Date.now() - runStartedAt;
-  const toolMs = toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0);
-  const llmTotalMs = latency.llmWaitMs + latency.llmDecodeMs;
-  const tokensPerSec = latency.llmDecodeMs > 0 && tokenUsage.output > 0
-    ? Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000))
-    : undefined;
-  const latencyMetrics: LatencyMetrics = {
-    totalMs,
-    llmDecodeMs: latency.llmDecodeMs,
-    llmWaitMs: latency.llmWaitMs,
-    llmTotalMs,
-    llmTurns: latency.llmTurns,
-    llmRetries: latency.llmRetries,
-    ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-    ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-    ...(tokensPerSec != null ? { tokensPerSec } : {}),
-    toolMs,
-  };
+  const latencyMetrics = snapshotLatency();
+  const { totalMs, toolMs, llmTotalMs, tokensPerSec } = latencyMetrics;
   // Run-level summary line — pairs with the existing `[run] Completed:` line
   // in routes/run.ts but lives here too so persistent-session resumes (which
   // skip some of the run.ts wrapping) still emit it.
@@ -4006,9 +4363,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       provider: provider ?? "spaces",
       agentSlug: progressMeta?.agentSlug ?? "unknown",
     });
+    if (isRefusalTurnError(provider, lastTurnErrorDetail)) {
+      throw new ProviderRefusalError(provider ?? "spaces");
+    }
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
-  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
+  const parts = turnParts.finish();
+  const llmCallSeries = llmTurnRecorder.snapshot();
+  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(parts.length > 0 ? { parts } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}), ...(citationReflectionOutcome ? { citationReflection: citationReflectionOutcome } : {}), ...(llmCallSeries ? { llmCalls: llmCallSeries } : {}), ...(model.id ? { model: model.id } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
     // pinging after the agent finishes — including on thrown errors.
@@ -4020,80 +4382,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       agent: progressMeta?.agentSlug ?? "unknown",
     });
 
-    // Fallback debug write — fires when the success-path block didn't run
-    // because the agent loop threw (cancel / transient provider error / any
-    // other error). Without this the debugger UI shows nothing for the run
-    // after a Stop click, even though we already have all session events,
-    // tool invocations, and partial assistant text in memory. The success
-    // path sets debugWritten=true above so we don't double-write.
-    if (!debugWritten && conversationId) {
-      try {
-        // Let any in-flight incremental partial write finish before the fallback
-        // snapshot overwrites the same debug-session.json (no torn write).
-        await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
-        const debugDir = await ensureSessionDebugDir(conversationId);
-        const { writeFile } = await import("node:fs/promises");
-        let partialSessionMessages: Array<Record<string, unknown>> = [];
-        try {
-          partialSessionMessages = (session as unknown as { messages: Array<Record<string, unknown>> }).messages ?? [];
-        } catch { /* session may not be initialised yet */ }
-        const partialText = streamedText || (() => {
-          try { return session.getLastAssistantText() ?? ""; } catch { return ""; }
-        })();
-        const debugSnapshot: DebugSessionSnapshot = {
-          schemaVersion: 1,
-          conversationId,
-          ...(sessionId ? { sessionId } : {}),
-          ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
-          userId,
-          ...(userName ? { userName } : {}),
-          ...(userEmail ? { userEmail } : {}),
-          ...(provider ? { provider } : {}),
-          model: model.id,
-          thinking: debugThinking,
-          ...(debugSpeed ? { speed: debugSpeed } : {}),
-          cancelled: true,
-          startedAt: debugStartedIso,
-          finishedAt: new Date().toISOString(),
-          task,
-          ...(context ? { context } : {}),
-          ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
-          messages: cloneForDebug(partialSessionMessages),
-          toolInvocations: cloneForDebug(toolInvocations),
-          tokenUsage: { ...tokenUsage },
-          latency: {
-            totalMs: Date.now() - runStartedAt,
-            llmDecodeMs: latency.llmDecodeMs,
-            llmWaitMs: latency.llmWaitMs,
-            llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
-            llmTurns: latency.llmTurns,
-            llmRetries: latency.llmRetries,
-            ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-            ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-            ...(latency.streamCharsPerSec != null ? { streamCharsPerSec: latency.streamCharsPerSec } : {}),
-            ...(latency.streamChars ? { streamChars: latency.streamChars } : {}),
-            ...(latency.streamThinkingChars ? { streamThinkingChars: latency.streamThinkingChars } : {}),
-            ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
-            toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
-          },
-          lastAssistantText: partialText,
-          events: cloneForDebug(debugEvents),
-        };
-        await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");
-        await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(debugEvents, null, 2), "utf8");
-        const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
-        const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
-        const runSnapshot = Buffer.from(JSON.stringify(debugSnapshot), "utf8");
-        if (await gcsUploadDebugRun(conversationId, runFile, runSnapshot)) {
-          log.info(`[agent] Debug artifacts written (cancelled): ${debugDir}/debug-session.json, gcs:${runFile}`);
-        } else {
-          await writeFile(`${debugDir}/${runFile}`, runSnapshot);
-          log.info(`[agent] Debug artifacts written (cancelled): ${debugDir}/debug-session.json, ${debugDir}/${runFile} (GCS unavailable)`);
-        }
-        debugWritten = true;
-      } catch (err) {
-        log.warn(`[agent] Failed to write partial debug artifacts: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    // Fallback finish — fires when the success path didn't run because the loop
+    // threw (Stop, provider error, stall). The events are already durable on
+    // disk; this stamps the terminal status so the drawer shows the run as
+    // cancelled rather than leaving it looking like it is still in flight.
+    if (capture && !capture.finished) {
+      const partialText = streamedText || (() => {
+        try { return session.getLastAssistantText() ?? ""; } catch { return ""; }
+      })();
+      await finishDebugCapture("cancelled", partialText);
     }
   }
   } finally {

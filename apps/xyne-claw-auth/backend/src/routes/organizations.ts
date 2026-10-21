@@ -17,8 +17,8 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 import { getRequesterId, isOrgAdmin, isOrgOwner } from "../middleware/agent-acl.js";
-import { userRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
+import { findUserByAnyId, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { agentScope, CHANNELS_POST_SCOPE, generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
 
 import { createLogger } from "../logger.js";
@@ -334,7 +334,9 @@ router.post("/:id/members", asyncHandler(async (req: Request, res: Response) => 
   // promoted afterwards via PATCH, which is OWNER-gated). Fails safe.
   const requestedRole: OrgRole = body.role === "ADMIN" ? "ADMIN" : "MEMBER";
 
-  let targetUser = await userRepository.findById(raw);
+  // `raw` may be a canonical Claw id, a Spaces workspace-scoped alias, or an
+  // email — resolve through all three ladders before giving up.
+  let targetUser = await findUserByAnyId(raw);
   if (!targetUser) targetUser = await prisma.user.findFirst({ where: { email: raw, orgId } });
   if (!targetUser) {
     throw notFound(`No user matches "${raw}"`);
@@ -362,11 +364,14 @@ router.patch("/:id/members/:userId", asyncHandler(async (req: Request, res: Resp
     throw unauthorized();
   }
   const orgId = req.params["id"] as string;
-  const targetUserId = req.params["userId"] as string;
 
   if (!(await isOrgAdmin(requesterId, orgId))) {
     throw forbidden("Requires OWNER or ADMIN");
   }
+
+  // The URL parameter may be a canonical Claw id OR a Spaces alias —
+  // normalize when resolvable; otherwise the membership lookup reports not-found.
+  const targetUserId = await resolveCanonicalUserIdOrSelf(req.params["userId"] as string);
 
   const role = (req.body as { role?: string }).role;
   if (role !== "OWNER" && role !== "ADMIN" && role !== "MEMBER") {
@@ -419,11 +424,14 @@ router.delete("/:id/members/:userId", asyncHandler(async (req: Request, res: Res
     throw unauthorized();
   }
   const orgId = req.params["id"] as string;
-  const targetUserId = req.params["userId"] as string;
 
   if (!(await isOrgAdmin(requesterId, orgId))) {
     throw forbidden("Requires OWNER or ADMIN");
   }
+
+  // The URL parameter may be a canonical Claw id OR a Spaces alias —
+  // normalize when resolvable; otherwise the membership lookup reports not-found.
+  const targetUserId = await resolveCanonicalUserIdOrSelf(req.params["userId"] as string);
 
   const target = await prisma.orgMember.findUnique({
     where: { userId_orgId: { userId: targetUserId, orgId } },

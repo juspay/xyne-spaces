@@ -1,6 +1,6 @@
 import { ReactElement, Fragment, MouseEvent as ReactMouseEvent } from 'react';
 import { Command } from 'cmdk';
-import { Eye } from 'lucide-react';
+import { Eye, AudioLines } from 'lucide-react';
 import {
   Hashtag,
   UserTwo,
@@ -9,7 +9,6 @@ import {
   TicketToken,
   File02Text,
   File02Default,
-  MicOn,
   CheckTickSingle,
 } from '@xyne/icons';
 import { DisplaySearchResult } from '../../../types/search';
@@ -71,7 +70,7 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
         return <File02Text size={16} className='text-muted-foreground' />;
       }
       if (searchContext?.subApp?.toUpperCase() === 'TRANSCRIPT') {
-        return <MicOn size={16} className='text-muted-foreground' />;
+        return <AudioLines size={16} className='text-muted-foreground' />;
       }
       return <File02Default size={16} className='text-muted-foreground' />;
     default:
@@ -283,6 +282,7 @@ const AttachmentSearchResultItem = ({
                 }}
                 className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
                 title='Preview file'
+                aria-label='Preview file'
                 data-track-category='GLOBAL_SEARCH'
                 data-track-name='PREVIEW_SEARCH_RESULT'
                 data-track-metadata={JSON.stringify({
@@ -474,6 +474,13 @@ const SearchResultItem = ({
                     {utcToIst(result.metadata.timestamp)}
                   </span>
                 </div>
+                {/* Line 4: assignee of the linked desk ticket, when one is set.
+                    Same muted style as the sender/channel line above. */}
+                {result.searchContext?.assigneeName && (
+                  <div className='text-xs text-muted-foreground truncate'>
+                    {`Assigned to ${result.searchContext.assigneeName}`}
+                  </div>
+                )}
               </div>
               {!mergeMode && isSelected && <SelectedBadge />}
             </div>

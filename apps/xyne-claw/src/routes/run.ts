@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import { advertiseRunOwner, currentOwnerPod, isFencedSession, withdrawRunOwner } from "../run-ownership.js";
 import {
   decideRunControl,
   publishRunControl,
@@ -17,6 +17,7 @@ import {
   pushDebugProgress,
   applyCopilotProxyIfNeeded,
   ProviderStallError,
+  ProviderRefusalError,
   RunHandoffError,
   RunCancelledError,
   QuotaExhaustedError,
@@ -27,8 +28,12 @@ import {
   type ProgressDest,
   type ProgressEmitter,
   type Attachment,
+  type ToolInvocation,
+  type LatencyMetrics,
+  type TokenUsage,
 } from "../agent.js";
-import {
+import { mergeLlmCallSeries, type LlmCallStat } from "../llm-turn-stats.js";
+import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
   type ClawStreamEvent,
@@ -45,20 +50,46 @@ import {
   openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { matchesDirectPick } from "../tool-resolution.js";
+import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
+import { TurnParts } from "../turn-parts.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
   searchDeploymentTools,
 } from "../mcp.js";
-import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
+import {
+  buildSdlcRunContextSection,
+  packSdlcRunMeta,
+  SDLC_DIRECT_TOOL_NAMES,
+  SDLC_META_KEYS,
+  trustedSdlcToolBindings,
+} from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { beginJudgeRun, judgeRunSummary } from "../judge-trace.js";
+
+function judgeCallbackFields(): { judge?: { backend: string; calls: number; failed: number; compactionCalls: number } } {
+  const s = judgeRunSummary();
+  if (!s || s.calls === 0) return {};
+  return {
+    judge: {
+      backend: s.backend,
+      calls: s.calls,
+      failed: s.failed,
+      compactionCalls: s.byPurpose["compaction-call"]?.calls ?? 0,
+    },
+  };
+}
+import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
+import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
+  type AgentHandoffNote,
   type InternalRunPayload,
   type RunExecutionState,
 } from "../run-execution.js";
@@ -80,6 +111,7 @@ import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
   buildFollowUpGenerationStartEvent,
+  describeFollowUpGenerationInput,
   generateFollowUpSuggestions,
   normalizeFollowUpAgentContext,
   normalizeFollowUpConversationHistory,
@@ -88,19 +120,26 @@ import {
 } from "../follow-up-generator.js";
 import {
   buildSubagentTools,
+  withoutBuiltinSubagents,
   loadDeepwikiTools,
   loadContext7Tools,
   type SkillTrigger,
 } from "../subagent-tools.js";
+import { createChildTaskRegistry } from "../child-tasks.js";
+import { childRunIdFor } from "../debug/index.js";
+import { buildChildTaskTools } from "../child-task-tools.js";
+import { reportDelegatedRunStart, reportDelegatedRunFinish } from "../delegated-run.js";
 import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
   duplicatesMetaTool,
   type DeploymentToolSearch,
+  renderUnresolvedConfigured,
   buildToolCatalog,
   describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
+  type ToolCatalogEntry,
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
@@ -116,30 +155,35 @@ import {
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
+  resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  REPO_CONFIGS,
+  getRepoConfigsFor,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
   clearPlan,
+  isDigitalTwinAgent,
   isPlanToolSlug,
   // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
   // scope; this shared util is the single-source scheduled/automation check.
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
-import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
+import { buildTaxonomyInjection, listSubsystemTaxonomy } from "../twin-memory-taxonomy.js";
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
-import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverTool, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverMandate } from "../twin-prompts.js";
+import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
-import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
-import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildDescribeAgentTool, describeAgentCardForReply, type DescribeAgentRef } from "../describe-agent.js";
+import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -152,31 +196,35 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExistsAnywhere } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
+import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
 /** Built-in skill bundle for coverage-gated understanding runs. */
 const UNDERSTANDING_SKILL_PATH = "understanding-skills";
+export const PROVIDER_REFUSAL_REPLY =
+  "Claude declined to answer in this conversation: its safety filter stopped the reply. Asking again in this thread will be declined the same way, so please start a new thread and rephrase the request.";
 
 const router = Router();
 
@@ -312,7 +360,7 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
 /**
- * `read-app-file` rides on `create-app` selection.
+ * `read-app-file` and `publish-app` ride on `create-app` selection.
  *
  * The two are one feature. `create-app` writes a project but hands back only a
  * manifest — file paths, never contents — so without the read half an
@@ -328,7 +376,10 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
  */
 function expandCustomSelection(custom: string[] | undefined): Set<string> {
   const selected = new Set(custom ?? []);
-  if (selected.has("create-app")) selected.add("read-app-file");
+  if (selected.has("create-app")) {
+    selected.add("read-app-file");
+    selected.add("publish-app");
+  }
   return selected;
 }
 
@@ -441,6 +492,11 @@ The minimum unit size is ₹1 crore [clf-agzja79pabewihgzkfe9pa97#14-#22].
 
 The inline citation tokens are the only citation mechanism for Claw v3. Never use the legacy add-citations flow.`;
 
+const RESULT_SIFT_GUIDE = `
+
+## Filtered tool results
+Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
+
 const SPACES_MENTION_GUIDE = `
 
 ## Mentioning people
@@ -542,8 +598,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
+    optimizations,
     memoryBankId,
-    twinDestinations,
     senderName,
     channelName,
     mode,
@@ -551,9 +607,12 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    agentHandoff,
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
+  beginJudgeRun();
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -748,6 +807,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     hasCallbackUrl: typeof callbackUrl === "string" && !!callbackUrl.trim(),
   };
   activeRuns.set(sessionId, activeRun);
+  const runOwnerToken = await advertiseRunOwner(sessionId);
 
   if (detached === true) {
     clog.info(`[run] detached dispatch accepted (sessionId=${sessionId}, eventType=${eventType ?? ""})`);
@@ -799,7 +859,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       fastMode,
       resumedFromHandoff,
       memoryBankId,
-      twinDestinations,
       senderName,
       channelName,
       effectiveMode,
@@ -808,10 +867,12 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      agentHandoff,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
     });
     return;
   }
@@ -926,7 +987,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         fastMode,
         resumedFromHandoff,
         memoryBankId,
-        twinDestinations,
         senderName,
         channelName,
         effectiveMode,
@@ -935,6 +995,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        agentHandoff,
       );
     } catch (err) {
       processTaskError = err;
@@ -946,6 +1007,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
+      void withdrawRunOwner(sessionId, runOwnerToken);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
       // callback) and any future throw outside its try/catch around
@@ -991,7 +1053,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId }).finally(() => withdrawRunOwner(sessionId, runOwnerToken));
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -1114,11 +1176,12 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
+      const partId = payload.partId ? { partId: payload.partId } : {};
       if (payload.reasoningDelta !== undefined) {
-        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
+        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta, ...partId });
       }
       if (payload.textDelta !== undefined) {
-        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta });
+        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta, ...partId });
       }
     },
     debugProgress: (sid, event) => write({ event: "debug", seq: next(), sessionId: sid, debugEvent: event }),
@@ -1361,8 +1424,9 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   }
 
   try {
+    const targetExisted = branchMode === "full" && (await sessionExistsAnywhere(targetConversationId));
     const success = await branchSession(sourceConversationId, targetConversationId, branchMode);
-    res.json({ success });
+    res.json({ success, targetExisted });
   } catch (err) {
     clog.error(
       `[clone-session] ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
@@ -1384,9 +1448,45 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
   const fallbackText = details.length > 0
     ? details.join("\n")
     : "I had not produced a stable partial result yet.";
+  // Claw speaking about itself, not agent output — italic marks it as an aside
+  // so it reads as distinct from the summary below, which is the agent's own
+  // words. See systemNote() in xyne-claw-auth notice-format.ts for the rule.
+  const lead = "_Picked up your new message and I'm switching to it now._";
   return trimmed
-    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
-    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+    ? `${lead}\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
+}
+
+/** Telemetry fields an aborted run's terminal callback carries. */
+export interface AbortTelemetry {
+  toolsUsed?: string[];
+  toolInvocations?: ToolInvocation[];
+  tokenUsage?: TokenUsage;
+  latency?: LatencyMetrics;
+  llmCalls?: LlmCallStat[];
+}
+
+/** Run telemetry for abort-path callbacks. Only RunCancelledError / ProviderStallError carry a snapshot; other errors report nothing. */
+export function abortTelemetry(
+  err: unknown,
+  nested: {
+    toolsUsed?: readonly string[];
+    invocations?: readonly ToolInvocation[];
+    llmCalls?: readonly LlmCallStat[];
+  } = {},
+): AbortTelemetry {
+  if (!(err instanceof RunCancelledError || err instanceof ProviderStallError)) return {};
+  const toolsUsed = [...err.toolsUsed, ...(nested.toolsUsed ?? [])];
+  const toolInvocations = [...err.toolInvocations, ...(nested.invocations ?? [])];
+  const llmCalls = mergeLlmCallSeries(err.llmCalls, nested.llmCalls).calls;
+  return {
+    ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
+    ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
+    tokenUsage: err.tokenUsage,
+    ...judgeCallbackFields(),
+    ...(err.latency ? { latency: err.latency } : {}),
+    ...(llmCalls.length > 0 ? { llmCalls } : {}),
+  };
 }
 
 export async function processTask(
@@ -1462,7 +1562,6 @@ export async function processTask(
   fastMode?: boolean,
   resumedFromHandoff?: boolean,
   memoryBankId?: string,
-  twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
   mode?: "plan" | "auto" | "daily_brief",
@@ -1480,11 +1579,15 @@ export async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
+  // Answer from Context: retrieve once before the only turn, then answer with no
+  // tools (see answer-context.ts). It replaces prefetch, whose id hints it makes moot.
+  const answerFromContext = answerFromContextEnabled(agentConfig);
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
-  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+  const prefetchSpecPromise = prefetchEnabled(agentConfig) && !answerFromContext
     ? startPrefetchExtraction(task)
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
@@ -1556,8 +1659,10 @@ export async function processTask(
   const proposeAgentRef: ProposeAgentRef = {};
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
+  let experimentEnded = false;
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
   // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
@@ -1572,17 +1677,24 @@ export async function processTask(
   const followUpConversationHistory = normalizeFollowUpConversationHistory(
     agentConfig?.["followUpConversationHistory"],
   );
-  const followUpGenerationInput = followUpConversationHistory.length > 0
-    ? "conversation_history_and_prompt"
-    : "prompt_only";
-  const parallelFollowUpStartedAt = new Date().toISOString();
-  const parallelFollowUpDebugSeq = Date.now();
-  let parallelFollowUpResult:
-    | { generation: FollowUpGenerationResult; completedAt: string }
-    | undefined;
-  let parallelFollowUpPromise:
-    | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
-    | undefined;
+  // Follow-ups are generated AFTER the agent loop finishes so the model sees
+  // the user's request AND the agent's final answer. Suggestions grounded in
+  // the actual answer ("drill into item X it listed", "apply the fix it
+  // proposed") are far more useful than ones guessed from the question alone.
+  const followUpGenerationInput = describeFollowUpGenerationInput(
+    followUpConversationHistory.length,
+    true,
+  );
+  const runDebugStartedAt = new Date().toISOString();
+  // Nested-loop sinks live outside the try so the catch can report them (aborted runs land there).
+  // Subagents append inner MCP tool names here so chain `toolsMustInclude`/`toolsMustExclude`
+  // can target nested tools (e.g. Bitbucket__create_pull_request), not just wrapper names.
+  const subagentInnerTools: string[] = [];
+  // Durable sink for subagent tool calls: the live push is fire-and-forget. Finalize dedupes by
+  // toolCallId. A2A callees are not folded in; each has its own run row.
+  const nestedInvocations: ToolInvocation[] = [];
+  // Subagent LLM calls, tagged with the subagent name, merged into the parent's series.
+  const nestedLlmCalls: LlmCallStat[] = [];
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1599,49 +1711,109 @@ export async function processTask(
     log(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
-    if (followUpsEnabled) {
-      // Follow-ups use prior conversation plus the current user prompt, but
-      // never wait for the current assistant response. This fast-model request
-      // overlaps the main agent run and stays off the answer's critical path.
-      pushDebugProgress(
-        progressUrl,
-        sessionId,
-        buildFollowUpGenerationStartEvent({
-          seq: parallelFollowUpDebugSeq,
-          at: parallelFollowUpStartedAt,
-          sessionId,
-          model: LITELLM.fastModel,
-          generationInput: followUpGenerationInput,
-          conversationMessageCount: followUpConversationHistory.length,
-          ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-        }),
-      );
-      parallelFollowUpPromise = generateFollowUpSuggestions(
-        task,
-        followUpAgentContext,
-        followUpConversationHistory,
-        abortSignal,
-      ).then((generation) => {
-        const settled = { generation, completedAt: new Date().toISOString() };
-        pushDebugProgress(
-          progressUrl,
-          sessionId,
-          buildFollowUpGenerationEndEvent({
-            seq: parallelFollowUpDebugSeq + 1,
-            at: settled.completedAt,
-            startedAt: parallelFollowUpStartedAt,
-            sessionId,
-            model: LITELLM.fastModel,
-            generationInput: followUpGenerationInput,
-            conversationMessageCount: followUpConversationHistory.length,
-            ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-            generation,
-          }),
-        );
-        parallelFollowUpResult = settled;
-        return settled;
-      });
-    }
+
+    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
+    const isTwinAgent = isDigitalTwinAgent(agentSlug);
+    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
+    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
+    // (which post todo cards to the thread and instruct "write your final answer
+    // as plain text with NO trailing tool call") are both inapplicable AND
+    // actively conflict with twin_deliver — the model followed the primer and
+    // never called the delivery tool, fail-closing to silence. Exclude the twin
+    // mention flow from plan tools/primer entirely.
+    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
+    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
+    // thread mentions): the agent gets a READ-ONLY palette + the terminal
+    // propose-plan tool, proposes a plan, and STOPS for approval. The
+    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
+    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
+    // is 'auto'/undefined this is false and every branch below is the existing
+    // path, so auto-mode behavior is unchanged (INVARIANT A).
+    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
+    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
+    // the agent gets the FULL read-only palette + subagents + the terminal
+    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
+    // structured brief, and STOPS. Like plan mode, the palette + primer are
+    // server-owned here and cannot be changed from the dashboard. Excluded from the
+    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
+    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
+    // `postTodos`, which only hides the Spaces card while the agent still keeps
+    // the list: this removes the todo tools AND the primer, so no turn is spent
+    // on plan bookkeeping at all.
+    //
+    // Why an agent would turn it off: `todo-write` ends the assistant turn like
+    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
+    // of a run ("before your first tool call", and again immediately before the
+    // final answer). On a slow model that is two full round trips of pure
+    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
+    // agents that answer in one message get no value from the checklist card and
+    // pay the whole cost.
+    const planTrackingEnabled =
+      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
+    const planGateEligible =
+      planTrackingEnabled &&
+      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      !isScheduledOrAutomationRun(eventType, conversationId) &&
+      !isTwinMentionFlow &&
+      !isPlanMode &&
+      !isDailyBrief;
+    const planGatePreviousReply =
+      planGateEligible && isShortFollowUp(task)
+        ? readPreviousAgentReply(
+            sessionDir(
+              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+                piSessionConversationId ??
+                conversationId ??
+                "",
+            ),
+          )
+        : undefined;
+    const planGateDecision = planGateEligible
+      ? decidePlanTracking(task, agentConfig, {}, planGatePreviousReply).catch(() => null)
+      : Promise.resolve(null);
+
+    // Key the workspace by the CONVERSATION, not the run.
+    //
+    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
+    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
+    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
+    // a brand-new cwd, so that filter never matched: the session directory was
+    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
+    // silently handed back an empty session. Every turn started from zero, and
+    // the agent would answer follow-ups with "I don't have any record of that in
+    // this conversation" (2026-08-30).
+    //
+    // Same identifier as the session store below, so cwd is stable exactly when
+    // the session is. Runs with no conversation (one-shots, automations) keep a
+    // per-run ephemeral workspace.
+    const workspaceStoreKey =
+      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+      (piSessionConversationId ?? conversationId);
+    const workspaceDir =
+      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
+    const toolPermissions =
+      (agentConfig?.["toolPermissions"] as
+        | Record<string, string>
+        | undefined) ?? {};
+    // Over-large MCP results spill to the persistent session dir (survives the
+    // ephemeral workspace teardown + resume) when a conversation is in play;
+    // the workspace is still used for binary attachments. See toolOutputBaseDir.
+    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoad = loadMcpToolsForUser(
+      sessionId,
+      sessionToken,
+      workspaceDir,
+      toolPermissions,
+      agentSlug,
+      mcpOutputDir,
+      (att) => pushAttachment(progressUrl, sessionId, att),
+      trustedSdlcBindings,
+      (serverType) => blockedConnectors.add(serverType),
+      undefined,
+      userId,
+    ).then((value) => ({ value }), (error: unknown) => ({ error }));
 
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
@@ -1650,12 +1822,7 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
-    const taskCommand = routedMode.command;
-    if (routedMode.source === "model" && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router`);
-    }
+    const taskCommand = parseTaskCommand(task);
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -1686,25 +1853,6 @@ export async function processTask(
         : []),
     ];
 
-    // Key the workspace by the CONVERSATION, not the run.
-    //
-    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
-    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
-    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
-    // a brand-new cwd, so that filter never matched: the session directory was
-    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
-    // silently handed back an empty session. Every turn started from zero, and
-    // the agent would answer follow-ups with "I don't have any record of that in
-    // this conversation" (2026-08-30).
-    //
-    // Same identifier as the session store below, so cwd is stable exactly when
-    // the session is. Runs with no conversation (one-shots, automations) keep a
-    // per-run ephemeral workspace.
-    const workspaceStoreKey =
-      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
-      (piSessionConversationId ?? conversationId);
-    const workspaceDir =
-      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1746,31 +1894,15 @@ export async function processTask(
       log(`Record-skill originals staged: ${recordingFiles.length}`);
     }
 
-    const toolPermissions =
-      (agentConfig?.["toolPermissions"] as
-        | Record<string, string>
-        | undefined) ?? {};
-    // Over-large MCP results spill to the persistent session dir (survives the
-    // ephemeral workspace teardown + resume) when a conversation is in play;
-    // the workspace is still used for binary attachments. See toolOutputBaseDir.
-    const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const mcpLoaded = await mcpLoad;
+    if ("error" in mcpLoaded) throw mcpLoaded.error;
     const {
       groups: mcpGroups,
+      unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
-    } = await loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-    );
+    } = mcpLoaded.value;
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
     // copilot-mode respond-to-user terminations can still recover signed
@@ -1781,7 +1913,10 @@ export async function processTask(
 
     // Task commands are parsed before custom-tool loading so command-owned
     // tools can be force-mounted for this run without mutating Agent.config.
-    const forcedTaskCommandTools = new Set(taskCommand?.autoTools ?? []);
+    const forcedTaskCommandTools = new Set([
+      ...(taskCommand?.autoTools ?? []),
+      ...(parseReplyFormat(agentConfig?.["replyFormat"]) ? ["create-pdf"] : []),
+    ]);
 
     const meta: Record<string, string> = { userId };
     if (userName) meta["userName"] = userName;
@@ -1789,6 +1924,7 @@ export async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    else meta["sandboxConversationId"] = sessionId;
     // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
     meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
@@ -1807,6 +1943,8 @@ export async function processTask(
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
     if (eventType) meta["eventType"] = eventType;
+    // Set by claw-auth start-run: scopes the sandbox profiles this run can use.
+    if (typeof agentConfig?.["workspaceId"] === "string") meta["workspaceId"] = agentConfig["workspaceId"];
     // Surface the originating scheduled-job row id so the scheduledJobControl
     // tool can resolve jobId:"current" (worker forwards it in the run body).
     if (scheduledJobId) meta["scheduledJobId"] = scheduledJobId;
@@ -1855,13 +1993,23 @@ export async function processTask(
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
 
+    // The tools selection this run enforces (resolveAgentToolsConfig, shared
+    // with claw-auth's MCP gate). A standard agent with nothing selected gets
+    // an EMPTY selection here — only framework tools no selection gates
+    // survive the filters below. Only an orchestrator with nothing selected
+    // keeps a missing `tools` object, which every filter reads as unrestricted.
+    const runToolsSelection = resolveAgentToolsConfig(effectiveConfig, delegationMode ?? "standard");
+    if (runToolsSelection) effectiveConfig["tools"] = runToolsSelection;
+    else delete effectiveConfig["tools"];
+
     // Surface-default tool injection, per run only. Slack already injects its
     // subagent in claw-auth before dispatch; Spaces runs arrive directly from
     // the Spaces webhook and need the same default here so mention/automation/
     // scheduled runs can read the room without mutating the stored agent config.
     // Scheduled jobs post into a Spaces channel too, so they get the same spaces
-    // default as an interactive mention. A missing tools object means the agent
-    // is unrestricted, so do not create one.
+    // default as an interactive mention. A missing tools object only remains for
+    // an unrestricted orchestrator (see above), which already has everything, so
+    // do not create one.
     const effectiveTools = effectiveConfig["tools"];
     const isSpacesSurfaceEvent =
       eventType === "APP_MENTIONED" ||
@@ -1881,7 +2029,8 @@ export async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -1949,7 +2098,7 @@ export async function processTask(
       undefined,
       runtimeProviderConfig,
       emitUiWidgetForCustom,
-      taskCommand?.autoTools ?? [],
+      [...forcedTaskCommandTools],
     );
     const {
       tools: customToolDefs,
@@ -2027,63 +2176,15 @@ export async function processTask(
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
-    if (agentSlug && memoryEnabled) {
-      // Bank-id comparison, not raw slug — see isDigitalTwinAgent in memory.ts.
-      const isDigitalTwin = isDigitalTwinAgent(agentSlug);
-      const taxonomy = await listSubsystemTaxonomy(
-        agentSlug,
-        isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
-        memoryBankId,
-      ).catch(() => []);
-      if (isDigitalTwin && taxonomy.length > 0) {
-        const lines = taxonomy
-          .slice(0, 12)
-          .map(
-            (s) =>
-              `- ${s.name} (${s.memoryCount} ${s.memoryCount === 1 ? "memory" : "memories"})`,
-          )
-          .join("\n");
-        activeInjections.push({
-          id: "__memory-taxonomy",
-          label: "Your Personal Memory",
-          content: [
-            "You have a personal memory bank — facts about THIS user that they",
-            "themselves approved. Currently you have memories under these clusters:",
-            "",
-            lines,
-            "",
-            "When you need to know how the user works, who they collaborate with,",
-            "what they prefer, or what they own, call `memory-search` FIRST with a",
-            "specific natural-language query. Never invent facts about the user —",
-            "only use what the tool returns.",
-          ].join("\n"),
-        });
-      }
+    if (agentSlug && memoryEnabled && isTwinAgent) {
+      const taxonomy = await listSubsystemTaxonomy(agentSlug, `user:${userId}`).catch(() => []);
+      if (taxonomy.length > 0) activeInjections.push(buildTaxonomyInjection(taxonomy));
 
-      // Digital Twin: inject the always-loaded persona files (soul.md, …) so the
-      // twin speaks AS the user with ZERO tool calls. Injected via
-      // activeInjections (not systemPrompt) so it applies on BOTH the @mention
-      // flow (which sends no systemPrompt) and interactive chat. Files are the
-      // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
-      if (isDigitalTwin) {
-        const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
-        if (promptFiles.length > 0) {
-          const body = promptFiles
-            .map((f) => `=== ${f.name} ===\n${f.content.trim()}`)
-            .join("\n\n");
-          // Folded into the system prompt inside runTask (both the override and
-          // the buildSystemPrompt-fallback paths), so it shows under LLM →
-          // system prompt in the debug panel.
-          twinPersonaBlock = [
-            "# Speaking as you",
-            "This is your persona — who you are and how you sound — drawn from the user's own",
-            "approved memory files. Speak AS this person by default; you do not need to call any",
-            "tool to use what's below. Prefer this voice over generic phrasing.",
-            "",
-            body,
-          ].join("\n");
-        }
-      }
+      // Digital Twin: the always-loaded persona files (soul.md, …), so the twin
+      // speaks AS the user with ZERO tool calls. Folded into the system prompt
+      // inside runTask (both the override and the buildTwinSystemPrompt-fallback
+      // paths), so it shows under LLM → system prompt in the debug panel.
+      twinPersonaBlock = await buildTwinPersonaBlock(agentSlug, userId, task);
     }
 
     // Resolve subagent-level skills: NONE by default — users opt skills in
@@ -2159,11 +2260,6 @@ export async function processTask(
       subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
-    // Shared ref: subagents append their inner MCP tool names here so chain
-    // `toolsMustInclude`/`toolsMustExclude` conditions can target specific
-    // nested tools (e.g. Bitbucket__create_pull_request), not just the
-    // subagent wrapper names returned by the parent agent.
-    const subagentInnerTools: string[] = [];
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2177,7 +2273,9 @@ export async function processTask(
     // should still expose that one tool to the parent. Without this, picking
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
-    const directPickSuffixes = toolsConfigEarly?.direct ?? [];
+    // An agent with no tools selection still gets the SDLC tools out of the spaces wrapper in a hub;
+    // one with a selection already has them from claw-auth's per-run merge.
+    const directPickSuffixes = toolsConfigEarly?.direct ?? (trustedSdlcContext ? SDLC_DIRECT_TOOL_NAMES : []);
     // Hoisted above the catalog build: the palette decides what gets catalogued,
     // not just what survives filtering (see `includeSubagentTools` below).
     const paletteMode = openPaletteModeFromTools(toolsConfigEarly);
@@ -2186,7 +2284,10 @@ export async function processTask(
     // reference with the subagent tools (via the progressCtx below) and with
     // runTask (opts), so a detached spawn registered inside a tool's execute()
     // is drained by runTask after the model loop settles. See agent.ts.
-    const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+    const childTaskRegistry = createChildTaskRegistry();
+    // Filled in by runTask once this run's trace is open; the subagent tools
+    // below only close over the object.
+    const parentDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
@@ -2204,11 +2305,12 @@ export async function processTask(
       // here the palette has nothing to admit and load-tools nothing to load.
       // The palette itself still refuses wrappers (a wrapper grants a whole
       // server, not one tool).
-      includeSubagentTools: fastModeEnabled || paletteMode !== "off",
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only"),
       // Without this, def-less servers' tools and in-process custom tools are
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -2217,7 +2319,17 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
-    const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
+    const uiTesterSandboxTools = customToolDefs.filter(
+      (t) => (t as { source?: string }).source === "custom:sandbox" && UI_TESTER_SANDBOX_TOOL_NAMES.has(t.name),
+    );
+    const uiTesterTools =
+      !fastModeEnabled &&
+      (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
+      uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
+        : [];
+
+    const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
           ...buildFastModeDirectTools({
@@ -2228,7 +2340,7 @@ export async function processTask(
         }
       : buildSubagentTools(
           allGroups,
-          customToolDefs,
+          [...customToolDefs, ...uiTesterTools],
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
           resolvedSubagentSkills,
           { parentProvider, subagentProviderMode, subagentProviders, providerConfigs },
@@ -2243,6 +2355,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: subagentInnerTools,
+            parentToolInvocations: nestedInvocations,
+            parentLlmCalls: nestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               ...(agentSlug ? { agentSlug } : {}),
@@ -2253,12 +2367,17 @@ export async function processTask(
             // hits Stop, instead of running for its full duration and orphaning
             // the result back to a parent that's already thrown RunCancelledError.
             ...(abortSignal ? { abortSignal } : {}),
-            backgroundRegistry: backgroundSubagentRegistry,
+            backgroundRegistry: childTaskRegistry,
+            parentDebug: parentDebugHandle,
           },
-          undefined, // bonusToolsBySubagent — removed with the sandbox subagent
+          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
         );
+
+    const subagentTools = optEnabled("subagent_direct_only")
+      ? withoutBuiltinSubagents(builtSubagentTools)
+      : builtSubagentTools;
 
     directTools.push(buildPublishReviewRoomTool(sessionId));
 
@@ -2314,17 +2433,7 @@ export async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
-      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
-      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
-      return allowedDirect.some((d) =>
-        tool.name === d ||
-        tool.name.endsWith(d) ||
-        d.endsWith(`__${tool.name}`) ||
-        norm(tool.name) === norm(d) ||
-        (toolSelectionKey ? d === toolSelectionKey : false),
-      );
-    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -2334,6 +2443,8 @@ export async function processTask(
         customTools: ToolDefinition[];
       },
     ): ToolDefinition[] => {
+      // No selection only reaches here for an orchestrator callee
+      // (resolveAgentToolsConfig): unrestricted by design.
       if (!cfg) return tools;
       const allowedSubagents = new Set(cfg.subagents ?? []);
       const allowedDirect = cfg.direct ?? [];
@@ -2357,12 +2468,14 @@ export async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, toolCallId, followUpId, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
       const calleeConfig = spec.agentConfig ?? {};
-      const calleeToolsConfig = parseToolsConfig(calleeConfig);
+      // Same tier rule as the parent run: an empty selection means nothing
+      // granted unless the callee itself is an orchestrator.
+      const calleeToolsConfig = resolveAgentToolsConfig(calleeConfig, spec.delegationTier ?? "standard");
       const calleeMeta: Record<string, string> = { userId };
       if (userName) calleeMeta["userName"] = userName;
       if (userEmail) calleeMeta["userEmail"] = userEmail;
@@ -2393,6 +2506,12 @@ export async function processTask(
         spec.slug,
         mcpOutputDir,
         (att) => pushAttachment(progressUrl, sessionId, att),
+        undefined,
+        // A delegated agent's 401/403 is the same signal as the parent's: the
+        // user's own connection is the fix, so it feeds the same connector card.
+        (serverType) => blockedConnectors.add(serverType),
+        undefined,
+        userId,
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2421,6 +2540,10 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        // The callee's subagent work belongs on the callee's run row, so it gets its own sinks.
+        const calleeNestedInvocations: ToolInvocation[] = [];
+        const calleeNestedLlmCalls: LlmCallStat[] = [];
+        const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
           calleeCustom.tools,
@@ -2442,12 +2565,15 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: calleeInnerTools,
+            parentToolInvocations: calleeNestedInvocations,
+            parentLlmCalls: calleeNestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               agentSlug: spec.slug,
               userId,
             },
             ...(signal ? { abortSignal: signal } : {}),
+            parentDebug: calleeDebugHandle,
           },
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
@@ -2476,29 +2602,152 @@ export async function processTask(
         }
 
         const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
-        const result = await runTask({
-          userId,
-          task: question,
-          userName,
-          userEmail,
-          customTools: calleePalette,
-          systemPromptOverride: spec.systemPrompt,
-          cwd: workspaceDir,
-          provider: spec.provider,
-          providerConfig,
-          progressUrl: undefined,
-          sessionId: `${sessionId}-a2a-${spec.slug}`,
-          skills: spec.skills,
-          abortSignal: signal,
-          progressMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            agentSlug: spec.slug,
+
+        // A delegation is a real run in a thread of its OWN, keyed per follow-up
+        // handle so a follow-up resumes it. Filed under the CALLER's conversation
+        // it would point at a thread holding none of its messages. `a2a_` marks
+        // it machine-initiated the way `app_` marks artifact-app threads: real
+        // and openable, but kept out of the chat sidebar.
+        const calleeFollowUpId = followUpId ?? randomUUID();
+        const calleeChatConversationId = `a2a_${calleeFollowUpId}`;
+        const calleeConversationId =
+          buildSandboxStoreKey(userId, calleeChatConversationId, spec.slug) ?? calleeChatConversationId;
+
+        // File the callee's trace inside the CALLER's run, so reading the
+        // parent's trace already contains the delegated session.
+        const parentStoreKey =
+          parentDebugHandle.storeKey ??
+          (conversationId ? buildSandboxStoreKey(userId, conversationId, agentSlug) : undefined);
+        const calleeSessionId = `${sessionId}-a2a-${toolCallId}`;
+        const calleeRunId = childRunIdFor(Date.now(), spec.slug, toolCallId);
+        const calleeChildRun = parentStoreKey
+          ? {
+              storeKey: parentStoreKey,
+              runId: calleeRunId,
+              ...(parentDebugHandle.runId ? { parentRunId: parentDebugHandle.runId } : {}),
+              parentSessionId: sessionId,
+              parentToolCallId: toolCallId,
+              label: spec.slug,
+              kind: "agent" as const,
+              ...(parentDebugHandle.captureLevel ? { captureLevel: parentDebugHandle.captureLevel } : {}),
+              ...(progressUrl ? { liveMirror: progressUrl } : {}),
+            }
+          : undefined;
+
+        parentDebugHandle.recorder?.record(
+          "subagent_start",
+          {
+            subagentName: spec.slug,
+            childKind: "agent",
+            ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+            question,
+            questionChars: question.length,
+            provider: spec.provider ?? "spaces",
+            model: providerConfig?.model ?? "shared",
+            toolNames: calleePalette.map((t) => t.name),
           },
+          { toolCallId },
+        );
+
+        const calleeStartedAt = Date.now();
+        await reportDelegatedRunStart({
+          sessionId: calleeSessionId,
+          userId,
+          agentSlug: spec.slug,
+          task: question,
+          conversationId: calleeChatConversationId,
+          parentSessionId: sessionId,
+          ...(agentSlug ? { parentAgentSlug: agentSlug } : {}),
+          parentToolCallId: toolCallId,
         });
-        if (calleeInnerTools.length > 0) {
-          subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        try {
+          const result = await runTask({
+            userId,
+            task: question,
+            userName,
+            userEmail,
+            customTools: calleePalette,
+            systemPromptOverride: spec.systemPrompt,
+            cwd: workspaceDir,
+            provider: spec.provider,
+            providerConfig,
+            progressUrl: undefined,
+            conversationId: calleeConversationId,
+            sessionId: calleeSessionId,
+            skills: spec.skills,
+            abortSignal: signal,
+            parentDebug: calleeDebugHandle,
+            ...(calleeChildRun ? { childRun: calleeChildRun } : {}),
+            progressMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+            },
+          });
+          if (calleeInnerTools.length > 0) {
+            subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+          }
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: "completed",
+              durationMs: Date.now() - calleeStartedAt,
+              textLength: result.text.length,
+              toolsUsed: result.toolsUsed,
+            },
+            { toolCallId },
+          );
+          // Reported on the callee's own run row, never folded into the caller's (double count).
+          const calleeLlmCalls = mergeLlmCallSeries(result.llmCalls, calleeNestedLlmCalls).calls;
+          const calleeModel = result.model ?? providerConfig?.model;
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: "completed",
+            result: result.text,
+            // Resolved values, as a top-level run reports them (unset provider is the platform route).
+            provider: spec.provider ?? "spaces",
+            ...(calleeModel ? { model: calleeModel } : {}),
+            toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
+            toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
+            tokenUsage: result.tokenUsage,
+            ...judgeCallbackFields(),
+            ...(result.latency ? { latency: result.latency } : {}),
+            ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
+          });
+          return {
+            text: result.text,
+            toolsUsed: result.toolsUsed,
+            followUpId: calleeFollowUpId,
+          };
+        } catch (err) {
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: signal?.aborted ? "cancelled" : "error",
+              durationMs: Date.now() - calleeStartedAt,
+              providerError: err instanceof Error ? err.message : String(err),
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: signal?.aborted ? "cancelled" : "failed",
+            error: err instanceof Error ? err.message : String(err),
+            provider: spec.provider ?? "spaces",
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            ...abortTelemetry(err, {
+              toolsUsed: calleeInnerTools,
+              invocations: calleeNestedInvocations,
+              llmCalls: calleeNestedLlmCalls,
+            }),
+          });
+          throw err;
         }
-        return { text: result.text, toolsUsed: result.toolsUsed };
       } finally {
         await calleeMcp.cleanup().catch(() => {});
       }
@@ -2564,15 +2813,30 @@ export async function processTask(
             delegationGovernor,
             hydrateOrchestratorCallee,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
         : buildCallableAgentTools(
             callableAgents as CallableAgentSpec[],
             delegationGovernor,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
       : [];
+
+    // Only worth exposing when something in this run can actually spawn
+    // background work to inspect.
+    const childTaskTools =
+      subagentTools.length > 0 || callableAgentTools.length > 0
+        ? buildChildTaskTools(childTaskRegistry)
+        : [];
 
     const fastAlwaysActiveToolNames = new Set([
       ...directTools,
@@ -2580,6 +2844,7 @@ export async function processTask(
       ...parentHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
+      ...childTaskTools,
     ].map((tool) => tool.name));
 
     let allTools = [
@@ -2587,6 +2852,7 @@ export async function processTask(
       ...fastMetaTools, // search-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
+      ...childTaskTools, // task-status / task-stop over background children
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
@@ -2612,6 +2878,8 @@ export async function processTask(
 
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
+    // `toolsConfigEarly` is undefined only for an orchestrator with nothing
+    // selected — it keeps every resolved tool, capped by active_tool_cap below.
     if (toolsConfigEarly) {
       const allowedSubagents = new Set(toolsConfigEarly.subagents ?? []);
       const allowedDirect = toolsConfigEarly.direct ?? [];
@@ -2634,17 +2902,8 @@ export async function processTask(
           // matching across different servers — we compare the whole string,
           // not just the bare suffix, so a config entry from server A can't
           // accidentally grant tools from server B that share a bare name.
-          const norm = (s: string): string =>
-            s.toLowerCase().replace(/_/g, "-");
-          const tNorm = norm(t.name);
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
-          const isDirectPick = allowedDirect.some((d: string) =>
-            t.name === d ||
-            t.name.endsWith(d) ||
-            d.endsWith(`__${t.name}`) ||
-            tNorm === norm(d) ||
-            (toolSelectionKey ? d === toolSelectionKey : false),
-          );
+          const isDirectPick = matchesDirectPick(t, allowedDirect);
           // Gateway tools are exposed as direct tools; keep them when their
           // service name (e.g. "mettle") is selected in tools.gateway.
           // Use stable serviceName metadata instead of mutable display label.
@@ -2721,6 +2980,17 @@ export async function processTask(
         `Agent tools config applied: ${allTools.length} tools after filtering` +
         (paletteMode === "off" ? "" : ` (open palette "${paletteMode}" admitted ${allTools.length - granted} beyond the grant, of ${before} offered)`),
       );
+
+      // task-status / task-stop were built from the PRE-filter wrappers. When
+      // the selection kept nothing that can run in the background (e.g. a
+      // standard agent with nothing selected), they have nothing to inspect.
+      const canRunInBackground = allTools.some((t) =>
+        subagentTools.some((s) => s.name === t.name) || callableAgentTools.some((c) => c.name === t.name),
+      );
+      if (!canRunInBackground && childTaskTools.length > 0) {
+        const childTaskNames = new Set(childTaskTools.map((t) => t.name));
+        allTools = allTools.filter((t) => !childTaskNames.has(t.name));
+      }
     }
 
     // ── Plan tools: framework default, not per-agent config ──────────────────
@@ -2734,51 +3004,10 @@ export async function processTask(
     // (already ctx-threaded by loadCustomTools). Mirrors the isScheduledRun /
     // isReadOnlyJob logic computed later — inlined here because tool assembly
     // runs before it.
-    // Digital Twin mention/approval flow: it delivers ONLY via the mandatory
-    // twin_deliver tool and NEVER posts to the thread, so the plan tools + primer
-    // (which post todo cards to the thread and instruct "write your final answer
-    // as plain text with NO trailing tool call") are both inapplicable AND
-    // actively conflict with twin_deliver — the model followed the primer and
-    // never called the delivery tool, fail-closing to silence. Exclude the twin
-    // mention flow from plan tools/primer entirely.
-    const isTwinMentionFlow = !!agentSlug && isDigitalTwinAgent(agentSlug) && eventType === "USER_MENTIONED";
-    // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
-    // thread mentions): the agent gets a READ-ONLY palette + the terminal
-    // propose-plan tool, proposes a plan, and STOPS for approval. The
-    // `&& !isTwinMentionFlow` is a belt-and-suspenders safety net — claw-auth
-    // already never sets mode='plan' for USER_MENTIONED (INVARIANT B). When mode
-    // is 'auto'/undefined this is false and every branch below is the existing
-    // path, so auto-mode behavior is unchanged (INVARIANT A).
-    const isPlanMode = mode === "plan" && !isTwinMentionFlow;
-    // Daily brief (agent.config.dailyBriefMode → dispatched with mode='daily_brief'):
-    // the agent gets the FULL read-only palette + subagents + the terminal
-    // emit_brief tool, gathers the user's tickets/activity/calendar, emits the
-    // structured brief, and STOPS. Like plan mode, the palette + primer are
-    // server-owned here and cannot be changed from the dashboard. Excluded from the
-    // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
-    const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
-    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
-    // `postTodos`, which only hides the Spaces card while the agent still keeps
-    // the list: this removes the todo tools AND the primer, so no turn is spent
-    // on plan bookkeeping at all.
-    //
-    // Why an agent would turn it off: `todo-write` ends the assistant turn like
-    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
-    // of a run ("before your first tool call", and again immediately before the
-    // final answer). On a slow model that is two full round trips of pure
-    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
-    // agents that answer in one message get no value from the checklist card and
-    // pay the whole cost.
-    const planTrackingEnabled =
-      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planToolsDefaultOn =
-      planTrackingEnabled &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isPlanMode &&
-      !isDailyBrief;
+    const planGate = await planGateDecision;
+    const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
+    if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) {
@@ -2814,7 +3043,10 @@ export async function processTask(
       allTools.push(
         ...(experiment.mode === "review"
           ? buildExperimentReviewTools(experiment)
-          : buildExperimentTools(experiment, abortRun)),
+          : buildExperimentTools(experiment, () => {
+              experimentEnded = true;
+              abortRun?.();
+            })),
       );
       log(
         experiment.mode === "review"
@@ -2837,9 +3069,11 @@ export async function processTask(
     // without a human to approve its card, so a scheduled/automation run (no one
     // watching) must never get the tool. Never alongside the other terminal tools
     // (plan / daily brief own turn termination in their modes).
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
     const agentAuthoringEnabled =
       agentConfig?.["agentAuthoring"] === true &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      (hasSpacesCardSurface || isChatSurfaceRun) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
@@ -2858,16 +3092,19 @@ export async function processTask(
     // mode's read-only filter passes it through untouched), and an agent
     // configured to plan first should still be able to say what it is. Twin is
     // excluded because that flow delivers through its own approval surface.
-    const describeAgentAvailable =
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+    const interactiveCardRun =
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
+    const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
-      // Same gate as describe-agent: a connector card is only worth posting
-      // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+    }
+    if (interactiveCardRun && hasSpacesCardSurface) {
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
+    }
+    if (describeAgentAvailable) {
+      allTools.push(buildSuggestProvidersTool(suggestProvidersRef, userId));
     }
 
 
@@ -2898,7 +3135,7 @@ export async function processTask(
       log("Memory enabled — injected memory-search tool");
       // Deterministic file-memory tools (read/write named files) — twin only,
       // since the file store is per-user (agentSlug + userId).
-      if (isDigitalTwinAgent(agentSlug)) {
+      if (isTwinAgent) {
         for (const t of buildMemoryFileTools(agentSlug, userId, sessionId)) allTools.push(t);
         allTools.push(buildMemoryWriteTool(agentSlug, userId, sessionId));
         log("Digital Twin — injected read/write memory-file tools + memory-write");
@@ -2951,10 +3188,11 @@ export async function processTask(
     // casual chat (rhetorical questions, no verifiable deliverable), so the
     // GLOBAL default skips Twin agents; an explicit per-agent `true` still
     // honors them. Always yields to structured output (it owns delivery).
+    const replyFormat = parseReplyFormat(agentConfig?.["replyFormat"]);
+    if (replyFormat) log(`replyFormat enabled — ≤${replyFormat.maxSections} sections of ≤${replyFormat.maxWords} words`);
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
-    const isTwinAgent = agentSlug ? isDigitalTwinAgent(agentSlug) : false;
 
     // Digital Twin mention/approval flow: the twin_deliver tool is the single,
     // MANDATORY delivery channel (react and/or reply, and where). It replaces the
@@ -2991,6 +3229,7 @@ export async function processTask(
           evidenceRef,
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
+          ...(replyFormat ? { replyFormat } : {}),
         }),
       );
       log(
@@ -3072,16 +3311,19 @@ export async function processTask(
       eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
     if (isArtifactAppRun) {
       const before = allTools.length;
-      // read-app-file goes with create-app: it is keyed by conversation, and an
-      // app-invoked run carries the `app_` conversation of the app itself, so
-      // leaving it in would let an app read its own source back.
+      // The app tools go with create-app: an app-invoked run acts as the viewer,
+      // so leaving them in would let an app read, rewrite or publish apps —
+      // including itself — on whoever opens it.
       allTools = allTools.filter(
         (t) =>
-          t.name !== "create-app" && t.name !== "read-app-file" && t.name !== "schedule-task",
+          t.name !== "create-app" &&
+          t.name !== "read-app-file" &&
+          t.name !== "publish-app" &&
+          t.name !== "schedule-task",
       );
       if (allTools.length !== before) {
         log(
-          "Artifact-app run — create-app + read-app-file + schedule-task removed (self-replication ban)",
+          "Artifact-app run — create-app + read-app-file + publish-app + schedule-task removed (self-replication ban)",
         );
       }
     }
@@ -3108,6 +3350,17 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
+      const pinnedProfile = meta["sandboxRepo"]
+        ? (await getRepoConfigsFor(meta[SDLC_META_KEYS.workspaceId] || meta["workspaceId"]))[meta["sandboxRepo"]]
+        : undefined;
+      if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
+        RO_DISABLED.delete("sandbox-create");
+        RO_DISABLED.delete("sandbox-destroy");
+        RO_DISABLED.delete("sandbox-run");
+        RO_DISABLED.delete("sandbox-run-detached");
+        RO_DISABLED.delete("sandbox-write-file");
+        RO_DISABLED.delete("write");
+      }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {
@@ -3160,36 +3413,105 @@ export async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
+    if (optEnabled("active_tool_cap")) {
+      const demotable = new Set(
+        [...directTools, ...remainingCustomTools, ...parentHoistedTools, ...kbHoistedTools].map((tool) => tool.name),
+      );
+      const capPlan = planActiveToolCap({
+        activeNames: allTools
+          .filter((tool) =>
+            !duplicatesMetaTool(tool.name) &&
+            (!fastCatalogCandidateByName.has(tool.name) ||
+              (fastAlwaysActiveToolNames.has(tool.name) && !paletteAdmittedNames.has(tool.name))),
+          )
+          .map((tool) => tool.name),
+        demotable,
+        pinned: new Set([
+          PROPOSE_PLAN_TOOL_NAME,
+          EMIT_BRIEF_TOOL_NAME,
+          "ask-user-question",
+          ...forcedTaskCommandTools,
+          ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
+        ]),
+        usageRank: readToolUsageRank(agentConfig),
+        cap: activeToolCap(agentConfig),
+        fixedExtra: 7,
+      });
+      const toolByName = new Map(allTools.map((tool) => [tool.name, tool]));
+      for (const name of capPlan.demote) {
+        const tool = toolByName.get(name);
+        if (!tool) continue;
+        const item = demotedCatalogItem(tool, isWriteTool(tool, allGroups));
+        fastCatalogCandidateItems.push(item);
+        fastCatalogCandidateByName.set(name, item);
+        fastAlwaysActiveToolNames.delete(name);
+      }
+      log(
+        `[active-tool-cap] outcome=${capPlan.outcome} cap=${capPlan.cap} total=${capPlan.total} budget=${capPlan.budget} demoted=${capPlan.demote.length}${capPlan.demote.length ? ` (${capPlan.demote.join(", ")})` : ""}`,
+      );
+    }
     // Derived predicate, not a new config knob: the catalog machinery runs when
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // search-tools/load-tools.
-    const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
+    // search-tools/load-tools. Orchestrators ALWAYS get them: their job is
+    // finding the right capability, and search-tools scope="claw" is how they
+    // see tools (connected or not) beyond what this run resolved.
+    //
+    // Decided on the catalog that SURVIVED the selection filter, not on the
+    // pre-filter candidates: a standard agent whose selection leaves nothing to
+    // load gets no search-tools / load-tools (they would only ever answer
+    // "the catalog is empty").
+    const isOrchestratorRun = delegationMode === "orchestrator";
+    const registeredToolNames = new Set(allTools.map((tool) => tool.name));
+    const survivingCatalogItems = fastCatalogCandidateItems.filter((item) =>
+      registeredToolNames.has(item.entry.name) &&
+      // Palette-admitted tools can also be in the always-active list (def-less
+      // servers push everything to directTools) — palette wins, route to catalog.
+      (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
+    );
+    const catalogActive = fastModeEnabled || survivingCatalogItems.length > 0 || isOrchestratorRun;
+    const suggestConnectorsRegistered = allTools.some((tool) => tool.name === SUGGEST_CONNECTORS_TOOL_NAME);
+    const suggestProvidersRegistered = allTools.some((tool) => tool.name === SUGGEST_PROVIDERS_TOOL_NAME);
     if (catalogActive) {
-      const registeredToolNames = new Set(allTools.map((tool) => tool.name));
-      fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
-        registeredToolNames.has(item.entry.name) &&
-        // Palette-admitted tools can also be in the always-active list (def-less
-        // servers push everything to directTools) — palette wins, route to catalog.
-        (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
-      );
+      fastCatalogItems = survivingCatalogItems;
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      const activeToolEntries: ToolCatalogEntry[] | undefined =
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap")
+          ? allTools
+              .filter((tool) =>
+                !duplicatesMetaTool(tool.name) &&
+                tool.name !== "search-tools" &&
+                tool.name !== "load-tools" &&
+                !finalFastCatalogNameSet.has(tool.name) &&
+                (!fastCatalogCandidateByName.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name)),
+              )
+              .map((tool) => ({
+                name: tool.name,
+                oneLineDescription: String(tool.description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+                source: "active",
+                catalog: "active",
+              }))
+          : undefined;
       allTools = dedupeToolsByName([
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
+          ...(activeToolEntries ? { activeTools: activeToolEntries } : {}),
           controller: fastToolController,
           // Injected here (needs the run's session) rather than imported by the
           // catalog module; absent without a session — scope:"claw" reports why.
           ...(sessionId && sessionToken
             ? {
                 searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
-                  searchDeploymentTools(sessionId, sessionToken, params),
+                  searchDeploymentTools(sessionId, sessionToken, params, userId),
               }
             : {}),
           openPalette: openPaletteEnabled,
           mcpServers: describeMcpServers(allGroups),
+          unresolvedConfigured,
+          suggestConnectorsAvailable: suggestConnectorsRegistered,
+          runToolNames: [...registeredToolNames],
           ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
             ? {
                 emptyCatalogNote:
@@ -3305,6 +3627,27 @@ export async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${metaLines.join("\n")}`
         : metaLines.join("\n");
+    }
+
+    // Configured-but-unresolved connectors. The agent's selection grants these
+    // servers, the UI shows them as selected, but this user has no working
+    // connection, so their tools never reached the tool list. Say so up front:
+    // otherwise the agent answers as if the capability does not exist instead
+    // of offering the one fix (the user connecting it).
+    if (unresolvedConfigured.length > 0) {
+      const connectorPrimer = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsRegistered);
+      fullContext = fullContext ? `${fullContext}\n\n${connectorPrimer}` : connectorPrimer;
+      log(`[connectors] configured-but-unresolved: ${unresolvedConfigured.map((u) => `${u.serverType}:${u.reason}`).join(", ")}`);
+    }
+
+    if (suggestProvidersRegistered) {
+      const runModelPrimer = [
+        "## Your model",
+        `You are running on provider \`${provider ?? "spaces"}\`, model \`${effectiveModel}\`.`,
+        "If the user asks what model or provider YOU run on, answer from this line — it is your own configuration.",
+        "That is NOT a question about their connected accounts, so do not call suggest-providers for it and do not say the model is unavailable to you.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${runModelPrimer}` : runModelPrimer;
     }
 
     // /goal-awareness primer. Injected only when suggest-goal is registered
@@ -3440,7 +3783,7 @@ export async function processTask(
       const sandboxLines: string[] = [
         "## Sandbox usage",
         sdlcRepositoryAccessEnabled
-          ? "SDLC hub repositories: call `sandbox-create`, then `sdlc-repository-access` with the repoId and that sessionId, and clone with the exact cloneUrl it returns. Git then works normally for fetch, commit and push, with commits made as the repository's credential account. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state. Open pull requests for these repositories with `spaces-sdlc-create-pull-request`, not a github or bitbucket subagent."
+          ? "SDLC hub repositories: follow the SDLC Run Context section for sandbox, repository access and pull requests. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
           : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
@@ -3481,7 +3824,8 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? REPO_CONFIGS[pinnedRepoName]
+        ? // Same scope as the sandbox tools: built-ins plus this run's workspace.
+          (await getRepoConfigsFor(meta[SDLC_META_KEYS.workspaceId] || meta["workspaceId"]))[pinnedRepoName]
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps
@@ -3639,6 +3983,23 @@ export async function processTask(
         : idLines.join("\n");
     }
 
+    // Answer from Context: the palette is final, so its search tools can run the
+    // question now — through their own `execute`, so ACL and KB grants apply.
+    if (answerFromContext) {
+      const retrieveStartedAt = Date.now();
+      const scope = answerScopeFrom(agentConfig);
+      const { block, sections } = await buildAnswerContext({
+        query: task,
+        scope,
+        tools: allTools as unknown as ExecutableTool[],
+        askerName: userName,
+        progressUrl,
+        sessionId,
+      });
+      fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+      log(`[answer-context] scope=${scope} sources=${sections.length} chars=${block.length} in ${Date.now() - retrieveStartedAt}ms`);
+    }
+
     // Resolve the prefetch spec now that the tool palette is final: the
     // resolvers ARE the agent's own Spaces tools, invoked through the same
     // `execute` closure the model would use, so ACL and permissions come along
@@ -3713,16 +4074,10 @@ export async function processTask(
         : "";
     // Digital Twin mention flow runs with the agent's CONFIGURED system prompt
     // (systemPromptOverride), so the twin_deliver mandate baked into
-    // buildSystemPrompt's fallback never reaches it — the model was never told
+    // buildTwinSystemPrompt's fallback never reaches it — the model was never told
     // the tool is its only output channel and just answered in text. Append the
     // mandate to the ACTUAL system prompt here so the model always sees it.
-    const twinMandate = isTwinMentionFlow
-      ? buildTwinDeliverMandate({
-          ...(userName ? { userName } : {}),
-          ...(senderName ? { senderName } : {}),
-          ...(channelName ? { channelName } : {}),
-        })
-      : "";
+    const twinMandate = isTwinMentionFlow ? buildTwinDeliverMandate({ userName, senderName, channelName }) : "";
     // Accounts the agent is configured to use but the user hasn't connected or
     // configured. Told to the model so it surfaces the gap instead of
     // fabricating results from a tool it never received.
@@ -3755,12 +4110,13 @@ export async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext
-      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify({ ...trustedSdlcContext, interactiveGrant: undefined }, null, 2)}\n\`\`\``
-      : "";
+    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    // R4: when tool-result sifting is on, tell the model up front what it will
+    // see and how to get the raw result — not only after the fact per result.
+    const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
+      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + siftGuide + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
@@ -3776,6 +4132,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap"),
+          preferDirect: optEnabled("subagent_read_tools") && !optEnabled("subagent_direct_only"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -3888,13 +4246,15 @@ export async function processTask(
         userId,
         task,
         context: fullContext,
+        ...(agentHandoff ? { agentHandoff } : {}),
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
         // batch fleets can't queue interactive mentions (same predicate as the
         // read-only sandbox routing above).
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
-        customTools: tools,
+        // Answer from Context answers in one turn from the retrieved block: no tools.
+        customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -3922,7 +4282,7 @@ export async function processTask(
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
-        debugStartedAt: parallelFollowUpStartedAt,
+        debugStartedAt: runDebugStartedAt,
         // Raw Spaces identity for progress callbacks → lets /webhook/progress fall
         // back to claw-auth's conv-keyed session index (mirrors the /result body).
         progressMeta: {
@@ -3935,14 +4295,16 @@ export async function processTask(
         ...(verifyResponses && !isCopilot
           ? { verifyResponsesRef: evidenceRef }
           : {}),
-        citationReflection,
+        citationReflection: answerFromContext ? false : citationReflection,
+        replyFormat,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
         // surface keep ALL turns so the stored answer matches the streamed one.
-        finalAnswerMaxTurns: channelId ? 2 : undefined,
+        finalAnswerMaxTurns: channelId ? (optEnabled("interim_messages") ? 1 : 2) : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
-        backgroundRegistry: backgroundSubagentRegistry,
+        backgroundRegistry: childTaskRegistry,
+        parentDebug: parentDebugHandle,
         fastMode: fastModeEnabled,
         ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(catalogActive ? { fastToolController } : {}),
@@ -4056,9 +4418,77 @@ export async function processTask(
       result.text,
       pendingQuestions,
     );
-    const inlineFollowUps = shouldAttachGeneratedFollowUps
-      ? parallelFollowUpResult
-      : undefined;
+    // End-of-loop follow-up generation: the agent's final answer is now known,
+    // so the fast model gets (history, user request, final answer). When a
+    // late-delivery callback exists, generation runs in the background after
+    // the answer is posted, so the answer's latency is unchanged. Without one,
+    // we await it inline (bounded by the generator's own timeout).
+    // NOTE: the "parallel_pending" outcome name is kept for wire compatibility
+    // with claw-auth / the dashboard debug panel; it now means "generating
+    // after the answer, delivered via the late follow-ups callback".
+    const lateFollowUpDeliveryUrl =
+      shouldAttachGeneratedFollowUps && lateFollowUpCallbackUrl
+        ? buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl)
+        : undefined;
+    const followUpStartedAt = new Date().toISOString();
+    const followUpDebugSeq = Date.now();
+    const startFollowUpGeneration = (
+      signal: AbortSignal | undefined,
+    ): Promise<{ generation: FollowUpGenerationResult; completedAt: string }> => {
+      const lifecycle = {
+        sessionId,
+        model: LITELLM.fastModel,
+        generationInput: followUpGenerationInput,
+        conversationMessageCount: followUpConversationHistory.length,
+        ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
+      };
+      pushDebugProgress(
+        progressUrl,
+        sessionId,
+        buildFollowUpGenerationStartEvent({
+          seq: followUpDebugSeq,
+          at: followUpStartedAt,
+          ...lifecycle,
+        }),
+      );
+      return generateFollowUpSuggestions({
+        task,
+        finalResponse: result.text,
+        agentContext: followUpAgentContext,
+        conversationHistory: followUpConversationHistory,
+        abortSignal: signal,
+      }).then((generation) => {
+        const settled = { generation, completedAt: new Date().toISOString() };
+        pushDebugProgress(
+          progressUrl,
+          sessionId,
+          buildFollowUpGenerationEndEvent({
+            seq: followUpDebugSeq + 1,
+            at: settled.completedAt,
+            startedAt: followUpStartedAt,
+            ...lifecycle,
+            generation,
+          }),
+        );
+        return settled;
+      });
+    };
+    let followUpPromise:
+      | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
+      | undefined;
+    let inlineFollowUps:
+      | { generation: FollowUpGenerationResult; completedAt: string }
+      | undefined;
+    if (shouldAttachGeneratedFollowUps) {
+      if (lateFollowUpDeliveryUrl) {
+        // The run's abort signal is deliberately NOT passed: the answer has
+        // already been produced, and tearing down the run must not cancel
+        // suggestions for it. The generator enforces its own timeout.
+        followUpPromise = startFollowUpGeneration(undefined);
+      } else {
+        inlineFollowUps = await startFollowUpGeneration(abortSignal);
+      }
+    }
     const followUpOutcome:
       | "delivered_inline"
       | "parallel_pending"
@@ -4123,12 +4553,12 @@ export async function processTask(
         },
         result: `Follow-up generation ${followUpOutcome}.`,
         isError: false,
-        startedAt: parallelFollowUpStartedAt,
+        startedAt: followUpStartedAt,
         durationMs: inlineFollowUps
           ? Math.max(
               0,
               new Date(inlineFollowUps.completedAt).getTime() -
-                new Date(parallelFollowUpStartedAt).getTime(),
+                new Date(followUpStartedAt).getTime(),
             )
           : 0,
         status: followUpOutcome === "parallel_pending" ? ("running" as const) : ("completed" as const),
@@ -4181,6 +4611,10 @@ export async function processTask(
     // on specific inner tools (Bitbucket__create_pull_request) in addition to
     // subagent wrappers (bitbucket).
     const combinedToolsUsed = [...result.toolsUsed, ...subagentInnerTools];
+    if (nestedInvocations.length > 0) {
+      result.toolInvocations.push(...nestedInvocations);
+    }
+    const llmCallSeries = mergeLlmCallSeries(result.llmCalls, nestedLlmCalls).calls;
 
     const lat = result.latency;
     const latencyStr = lat
@@ -4348,7 +4782,10 @@ export async function processTask(
         }),
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
+        ...judgeCallbackFields(),
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        ...(result.latency ? { latency: result.latency } : {}),
+        ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
         provider: completedProvider,
         model: completedModel,
       });
@@ -4397,8 +4834,20 @@ export async function processTask(
       pendingResponses.length === 0 &&
       pendingActions.length === 0 &&
       pendingQuestions.length === 0;
-    const emptyReason =
-      finalProducedNothing && providerFellBack ? "provider_capacity" : undefined;
+    // Reaching the success path having produced NOTHING — no text, no
+    // attachment, no pending anything — is an anomaly, not an outcome. A user
+    // stop is caught above (userCancelled) and a handoff throws, so the
+    // remaining cause is a turn that ended without writing: an aborted or
+    // stalled LLM request whose stopReason the loop treats as benign. Naming
+    // it here means the surfaces stop guessing why the answer was blank.
+    const emptyReason = finalProducedNothing
+      ? providerFellBack
+        ? "provider_capacity"
+        : "no_output"
+      : undefined;
+    if (emptyReason === "no_output") {
+      logErr(`[run] completed with no output at all session=${sessionId} agentSlug=${agentSlug ?? ""}`);
+    }
     const emptyReasonDetail =
       emptyReason && lastFallbackUnderlying
         ? lastFallbackUnderlying
@@ -4458,10 +4907,22 @@ export async function processTask(
       ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
+      ...judgeCallbackFields(),
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
         : {}),
+      // The turn as ordered thinking / text / tool parts, ending in exactly the
+      // answer delivered as `result` (same citation sanitizing).
+      ...(result.parts?.length && structuredOutputPayload === undefined
+        ? {
+            parts: TurnParts.alignFinalAnswer(result.parts, callbackResultText, (text) =>
+              sanitizeCitations(text, result.toolInvocations, result.sessionClfTokens),
+            ),
+          }
+        : {}),
       ...(result.latency ? { latency: result.latency } : {}),
+      ...(result.citationReflection ? { citationReflection: result.citationReflection } : {}),
+      ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
       ...(result.toolInvocations.length > 0
         ? { toolInvocations: result.toolInvocations }
         : {}),
@@ -4486,10 +4947,14 @@ export async function processTask(
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),
-      ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
-      ...(proposeAgentRef.value || describeAgentRef.value
-        ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
+      ...(suggestProvidersRef.value
+        ? { pendingProviderSuggestions: suggestProvidersRef.value }
         : {}),
+      ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
+      ...(() => {
+        const card = proposeAgentRef.value ?? describeAgentCardForReply(describeAgentRef.value, dedupedPendingActions);
+        return card ? { pendingAgentCard: card } : {};
+      })(),
       // Daily brief: emit_brief normally aborts (→ catch branch below), but if the
       // run finished cleanly with a brief emitted, carry it here too. claw-auth
       // persists it to GeneratedContent and (on the SSE regenerate path) forwards
@@ -4500,18 +4965,16 @@ export async function processTask(
       provider: completedProvider,
       model: completedModel,
     });
-    if (
-      followUpOutcome === "parallel_pending" &&
-      parallelFollowUpPromise &&
-      lateFollowUpCallbackUrl
-    ) {
-      const lateCallbackUrl = buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl);
-      if (lateCallbackUrl) {
-        void parallelFollowUpPromise.then(async ({ generation, completedAt }) => {
+    if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
+      // Attached only after the main result callback above has been sent, so
+      // claw-auth always sees the answer before its follow-up suggestions.
+      const lateCallbackUrl = lateFollowUpDeliveryUrl;
+      void followUpPromise
+        .then(async ({ generation, completedAt }) => {
           const delivered = await sendCallback(lateCallbackUrl, sessionToken, {
             sessionId,
             suggestions: generation.suggestions,
-            startedAt: parallelFollowUpStartedAt,
+            startedAt: followUpStartedAt,
             completedAt,
             answerLength: result.text.length,
             enabledByV2Flag: followUpsEnabledByFlag,
@@ -4530,8 +4993,12 @@ export async function processTask(
           if (!delivered) {
             clog.warn(`[follow-ups] late callback was not delivered sessionId=${sessionId}`);
           }
+        })
+        .catch((err: unknown) => {
+          clog.warn(
+            `[follow-ups] late generation failed sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         });
-      }
     }
   } catch (err) {
     if (err instanceof RunHandoffError) {
@@ -4628,6 +5095,11 @@ export async function processTask(
     // "Query aborted by user." in the UI. When the user cancelled, fall through
     // to the cancelled branch below instead.
     const isUserCancel = activeRuns.get(sessionId)?.userCancelled === true;
+    const abortFields = abortTelemetry(err, {
+      toolsUsed: subagentInnerTools,
+      invocations: nestedInvocations,
+      llmCalls: nestedLlmCalls,
+    });
     if (
       pendingResponsesAtError.length > 0 &&
       !isUserCancel &&
@@ -4678,17 +5150,21 @@ export async function processTask(
         pendingResponses: pendingResponsesAtError,
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
-        ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(() => {
+          const card = describeAgentCardForReply(describeAgentRef.value, dedupedPendingActionsAtError);
+          return card ? { pendingAgentCard: card } : {};
+        })(),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+          : {}),
+        ...(suggestProvidersRef.value
+          ? { pendingProviderSuggestions: suggestProvidersRef.value }
           : {}),
         ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         ...(llmCitationsAtError && llmCitationsAtError.length > 0 ? { llmCitations: llmCitationsAtError } : {}),
         provider: callbackProvider,
         model: callbackModel,
@@ -4717,9 +5193,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4747,9 +5221,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingAgentCard: proposeAgentRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4777,9 +5249,26 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (
+      experimentEnded &&
+      !isUserCancel &&
+      (err instanceof RunCancelledError || abortSignal?.aborted)
+    ) {
+      log(`Session terminated by end-experiment: ${sessionId}`);
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: partialResult || "Experiment complete — report recorded.",
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4800,15 +5289,7 @@ export async function processTask(
           fastMode: fastModeForCallback,
           status: "completed",
           result: interruptSummary,
-          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-            ? { toolsUsed: err.toolsUsed }
-            : {}),
-          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-            ? { toolInvocations: err.toolInvocations }
-            : {}),
-          ...(err instanceof RunCancelledError
-            ? { tokenUsage: err.tokenUsage }
-            : {}),
+          ...abortFields,
           provider: callbackProvider,
           model: callbackModel,
         });
@@ -4825,15 +5306,20 @@ export async function processTask(
         ...(err instanceof RunCancelledError && err.partialText
           ? { result: err.partialText }
           : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof RunCancelledError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
+        provider: callbackProvider,
+        model: callbackModel,
+      });
+    } else if (err instanceof ProviderRefusalError) {
+      logErr(`Session failed (provider refusal): ${err.message}`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: PROVIDER_REFUSAL_REPLY,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -4894,15 +5380,7 @@ export async function processTask(
           : { status: "completed" as const, result: "" }),
         emptyReason: "provider_capacity" as const,
         ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
-        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof ProviderStallError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5054,7 +5532,7 @@ export async function sendCallback(
     } catch (err) {
       lastErr = err;
       clog.error(
-        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${describeFetchError(err)}`,
       );
       if (attempt === maxAttempts) return false;
     }
@@ -5164,7 +5642,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5354,7 +5832,7 @@ router.post(
 
     try {
       const llmRes = await fetchLiteLLMWithRetry(
-        `${LITELLM.url}/v1/chat/completions`,
+        litellmEndpoint("/v1/chat/completions"),
         {
           method: "POST",
           headers: {
@@ -5573,7 +6051,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   ].join("\n");
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

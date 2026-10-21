@@ -195,6 +195,22 @@ const handlers: ExperimentHandlers = {
       );
     }
     const summary = summaryLines.join("\n");
+    // In a chat: the write-up as a PDF a phone can open, the zip as whatever
+    // the messenger allows (a link on WhatsApp).
+    if (ctx.channelDelivery) {
+      try {
+        const { renderMarkdownToPdf } = await import("../result-pdf.js");
+        const pdf = await renderMarkdownToPdf(markdown, { title: "Experiment findings" });
+        await ctx.attach({ fileName: filename.replace(/\.md$/i, ".pdf"), mimeType: "application/pdf", content: pdf, summary });
+        if (bundle) {
+          await ctx.attach({ fileName: bundle.filename, mimeType: "application/zip", content: bundle.buffer, summary: "The proof bundle (zip)." });
+        }
+      } catch (err) {
+        log.warn("[experiment] findings delivery to chat failed; posting inline fallback", { error: errMsg(err) });
+        await ctx.reply(`${summary}\n\n${markdown}`, REPLY_LABEL);
+      }
+      return;
+    }
     try {
       await postGeneratedMarkdownFile({
         channelId: payload.channelId,
@@ -267,7 +283,7 @@ const handlers: ExperimentHandlers = {
       // 57-table list mid-word and the run explored a narrower scope than the
       // user believed they had asked for.
       ...(experimentCommand.droppedFocus
-        ? [`⚠️ Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
+        ? [`Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
         : []),
       `Use \`/experiment status\` to inspect progress.`,
     ].join("\n"), REPLY_LABEL);
@@ -279,7 +295,7 @@ const handlers: ExperimentHandlers = {
       const msg = errMsg(err);
       log.warn("[experiment] initial dispatch failed", { error: msg });
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
-      await ctx.reply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`, REPLY_LABEL);
+      await ctx.reply(`/experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`, REPLY_LABEL);
     }
   },
 };

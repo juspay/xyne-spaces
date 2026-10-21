@@ -1,0 +1,38 @@
+namespace: xyne
+argocdNamespace: argocd
+rootApp: xyne-root
+repoURL: https://github.com/juspay/xyne-spaces.git
+imageRegistry: ""
+imagePullSecrets: []
+toolsImage: alpine/k8s:1.35.9
+serviceAccount: xyne-upgrade
+apps: []
+migrating: []
+
+timeouts:
+  plan: 900
+  rollout: 3600
+
+targets:
+  xyne-backend:
+    repository: juspay/xyne-spaces-backend
+    workingDir: /repo/apps/backend
+    schemas:
+      - prisma/schema.prisma
+      - prisma-common/schema.prisma
+    secretEnv:
+      - name: DATABASE_URL
+        secret: xyne-backend-secrets
+      - name: COMMON_DATABASE_URL
+        secret: xyne-backend-secrets
+  xyne-claw-auth:
+    repository: juspay/xyne-spaces-claw-auth-backend
+    workingDir: /repo/apps/xyne-claw-auth/backend
+    schemas:
+      - prisma/schema.prisma
+    secretEnv:
+      - name: DATABASE_URL
+        secret: xyne-claw-auth-secrets
+
+ui:
+  serviceAccount: xyne-workflows-ui

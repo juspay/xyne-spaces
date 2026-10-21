@@ -32,6 +32,7 @@
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { getSandboxSession, buildSandboxStoreKey, sandboxConversationIdFromMeta } from "../sandbox/index.js";
+import { waitForSandboxReady } from "../sandbox/tools.js";
 import { redactSecrets } from "../sandbox/redact.js";
 
 // Cap the collection/environment payloads we write into the VM. A Postman
@@ -158,6 +159,12 @@ export const postmanSbxRunCollection: ToolDefinition = {
         "Error: No active sandbox for this conversation. Create one first with sandbox-create " +
         "(or sandbox-repo-setup), then call postman-sbx-run-collection again."
       );
+    }
+
+    try {
+      await waitForSandboxReady(session);
+    } catch (err) {
+      return `Error: sandbox services are not ready: ${redactSecrets(err instanceof Error ? err.message : String(err))}`;
     }
 
     const suffix = randSuffix();

@@ -33,10 +33,16 @@ export function getResolvedChannelId(req: Request): string {
 }
 
 export async function resolveSlackChannel(channel: string): Promise<string> {
+	if (typeof channel !== "string") throw new Error("Channel not found");
+
 	const existing = await repositories.channels.findById(channel);
 	if (existing) return existing.id;
 
-	const byName = await repositories.channels.findByName(channel);
+	// Slack allows "#name"; Spaces stores bare names.
+	const name = channel.startsWith("#") ? channel.slice(1) : channel;
+	if (!name) throw new Error("Channel not found");
+
+	const byName = await repositories.channels.findByName(name);
 	if (byName) return byName.id;
 
 	throw new Error("Channel not found");

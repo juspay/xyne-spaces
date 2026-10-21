@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runAutomationQueueJob } from '@/bypassAcl/automationServices';
 import { automationQueue, type AutomationJobData } from './automation.queue';
 import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
@@ -23,7 +23,7 @@ import type { TriggerType } from '../types/trigger-types';
 const EXECUTION_FETCH_MAX_RETRIES = 3;
 const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
 
-class AutomationWorker {
+export class AutomationWorker {
   private isInitialized = false;
   private executor: AutomationExecutor | null = null;
 
@@ -100,12 +100,10 @@ class AutomationWorker {
       return;
     }
 
-    await runAsServiceActor('automation', workspaceId, () =>
-      this.runJob(job, execution),
-    );
+    await runAutomationQueueJob(this, workspaceId, job, execution);
   }
 
-  private async runJob(
+  async runJob(
     job: Bull.Job<AutomationJobData>,
     execution: NonNullable<Awaited<ReturnType<typeof db.workflowExecution.findUnique>>>,
   ): Promise<void> {

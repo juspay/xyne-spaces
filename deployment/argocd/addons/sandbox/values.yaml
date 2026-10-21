@@ -5,6 +5,7 @@ template:
   name: kata-workspace-template
   image: ""
   imagePullPolicy: IfNotPresent
+  serviceAccount: xyne-sandbox
   runtimeClassName: kata-qemu
   vcpus: "2"
   memory: "5120"

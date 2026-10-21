@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { isCurrentUser } from "../../lib/identity";
 import {
   WarningCircleIcon,
   ChatCircleIcon,
@@ -66,7 +67,7 @@ interface AgentSlideOverProps {
 }
 
 function ScopeBadge({ agent, userId }: { agent: AgentLight; userId: string }) {
-  if (agent.shares?.some((s) => s.userId === userId)) {
+  if (agent.shares?.some((s) => isCurrentUser(s.userId))) {
     return (
       <span className="text-[12px] font-medium px-[10px] py-[2px] rounded-full bg-xyne-brand/10 text-xyne-brand border border-xyne-brand/20">
         shared
@@ -344,7 +345,7 @@ export function AgentSlideOver({
 
   if (!agent) return null;
 
-  const isOwner = agent.ownerUserId === userId;
+  const isOwner = isCurrentUser(agent.ownerUserId);
   const isGlobal = agent.scope === "global";
   const canPublish = isOwner && !isGlobal;
 

@@ -1,4 +1,4 @@
-import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
+import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, GatewayServiceRow, GatewayServiceRequest, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
 
 import { frontendConfig } from "./config";
 
@@ -119,6 +119,30 @@ export async function getMe(): Promise<User> {
     `${BACKEND_URL}/api/auth/validate`,
   );
   return data.user;
+}
+
+/**
+ * The Claw-side identity for the logged-in user. `userId` is the canonical
+ * Claw id (what Claw-owned rows like Agent.ownerUserId store); `spacesUserId`
+ * is the raw workspace-scoped Spaces id (what `getMe().id` returns). A user's
+ * agent rows may be keyed by either, so ownership comparisons must accept both.
+ */
+export interface ClawIdentity {
+  userId: string;
+  spacesUserId?: string;
+  spacesWorkspaceId?: string;
+  spacesOrgMemberId?: string;
+}
+
+export async function getClawIdentity(): Promise<ClawIdentity | null> {
+  try {
+    const data = await request<{ success: boolean; data: ClawIdentity }>(
+      `${AUTH_API_URL}/api/v1/users/me`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
 }
 
 export async function upsertUser(user: User): Promise<void> {
@@ -463,6 +487,33 @@ export interface SandboxRepoOption {
   description?: string;
 }
 
+export interface OptimizationOption {
+  key: string;
+  label: string;
+  summary: string;
+  detail: string;
+  group: string;
+  defaultOn: boolean;
+  /** "fleet" switches are decided outside agent runs, so only env changes them. */
+  scope: "agent" | "fleet";
+  requires?: string;
+}
+
+export interface OptimizationCatalog {
+  groups: Array<{ id: string; title: string; description: string }>;
+  optimizations: OptimizationOption[];
+  /** Per delegation tier: switches that default on (or off) for that tier. */
+  tierDefaults: Record<string, Record<string, boolean>>;
+}
+
+/** Every claw optimization switch, for the agent page's Optimizations section. */
+export async function getOptimizationCatalog(): Promise<OptimizationCatalog> {
+  const data = await request<{ success: boolean; data: OptimizationCatalog }>(
+    `${AUTH_API_URL}/api/v1/agents/optimizations`,
+  );
+  return data.data;
+}
+
 /** Available sandbox repo setups (for the agent "Sandbox repository" picker). */
 export async function listSandboxRepos(): Promise<SandboxRepoOption[]> {
   const data = await request<{ success: boolean; data: SandboxRepoOption[] }>(
@@ -708,6 +759,111 @@ export async function decideDelegationRequest(
   const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/decision`,
     { method: "POST", body: JSON.stringify({ approve }) },
+  );
+  return data.data;
+}
+
+export type RunSource = "automation" | "scheduled" | "people" | "workflow" | "delegated" | "awakening";
+export type InflightState = "live" | "stuck" | "lost";
+type SourceCounts = Partial<Record<RunSource, { completed: number; failed: number; lost: number }>>;
+
+export interface AgentRunHealth {
+  windowDays: number;
+  sampled: boolean;
+  sources: Array<{
+    id: RunSource | "all";
+    runs: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    lost: number;
+    p50Ms: number | null;
+    p90Ms: number | null;
+  }>;
+  inflight: Array<{
+    sessionId: string;
+    state: InflightState;
+    source: RunSource;
+    task: string;
+    startedAt: string;
+    ageMs: number;
+    idleMs: number;
+    owned: boolean;
+    currentStep: string | null;
+  }>;
+  daily: Array<{ day: string; bySource: SourceCounts }>;
+  reasons: Array<{ error: string; count: number; lastAt: string; bySource: Partial<Record<RunSource, number>> }>;
+  models: Array<{
+    provider: string;
+    model: string;
+    runs: number;
+    failed: number;
+    llmP50Ms: number | null;
+    bySource: Partial<Record<RunSource, { runs: number; failed: number }>>;
+  }>;
+  recentRuns: Array<{
+    sessionId: string;
+    source: RunSource;
+    status: string;
+    startedBy: string | null;
+    startedAt: string;
+    durationMs: number | null;
+    model: string | null;
+    task: string;
+  }>;
+  thresholds: { liveIdleMs: number; lostIdleMs: number };
+}
+
+export interface AgentRunDetail {
+  run: {
+    sessionId: string;
+    agentSlug: string;
+    status: string;
+    triggerSource: string;
+    task: string;
+    result: string | null;
+    error: string | null;
+    provider: string | null;
+    model: string | null;
+    conversationId: string | null;
+    channelId: string | null;
+    parentSessionId: string | null;
+    currentToolLabel: string | null;
+    toolInvocations: ToolInvocation[] | null;
+    tokensIn: number | null;
+    tokensOut: number | null;
+    llmTotalMs: number | null;
+    toolMs: number | null;
+    llmTurns: number | null;
+    llmRetries: number | null;
+    lastRetryReason: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  source: RunSource;
+  inflight: { state: InflightState; idleMs: number; owned: boolean } | null;
+  requester: { id: string; name: string | null; email: string | null } | null;
+  children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
+}
+
+export async function getAgentRunDetail(slug: string, sessionId: string): Promise<AgentRunDetail> {
+  const data = await request<{ success: boolean; data: AgentRunDetail }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/runs/${encodeURIComponent(sessionId)}`,
+  );
+  return data.data;
+}
+
+export async function getAgentRunHealth(slug: string, days: number): Promise<AgentRunHealth> {
+  const data = await request<{ success: boolean; data: AgentRunHealth }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor?days=${days}`,
+  );
+  return data.data;
+}
+
+export async function closeLostRuns(slug: string, sessionIds?: string[]): Promise<{ closed: string[]; skipped: string[] }> {
+  const data = await request<{ success: boolean; data: { closed: string[]; skipped: string[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/close-lost`,
+    { method: "POST", body: JSON.stringify(sessionIds ? { sessionIds } : {}) },
   );
   return data.data;
 }
@@ -1553,6 +1709,17 @@ export async function connectWebflow(userId: string): Promise<string> {
   return data.data.authUrl;
 }
 
+// ── ClickUp OAuth ──────────────────────────────────────────────────────────
+
+/** Start the ClickUp OAuth flow (DCR + PKCE, public client) — returns the consent URL. */
+export async function connectClickUp(userId: string): Promise<string> {
+  const data = await request<{ success: boolean; data: { authUrl: string } }>(
+    `${AUTH_API_URL}/api/v1/users/${userId}/oauth/clickup/authorize`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return data.data.authUrl;
+}
+
 // ── Wix OAuth ────────────────────────────────────────────────────────────────
 
 /** Start the Wix OAuth flow (DCR + PKCE, public client) — returns the consent URL. */
@@ -1619,7 +1786,6 @@ export async function connectLinkedInRapidApi(
     { method: "POST", body: JSON.stringify({ apiKey }) },
   );
 }
-
 
 export async function createAgentApp(slug: string): Promise<void> {
   const userToken = getGoogleToken();
@@ -2887,11 +3053,26 @@ export interface ChatMsg {
   reasoning?: string | null;
   /** Tree parent for branching conversations. Null/undefined = root child. */
   parentId?: string | null;
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message, not per conversation. */
+  agentSlug?: string;
   attachments?: ChatAttachmentMeta[];
   contextItems?: AttachedContextRef[];
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
+/** `conversation` = every agent's turns in a direct chat, for a window that
+ *  lets the user switch agents mid-conversation. Omitted = one agent's turns. */
+export type ChatReadScope = "conversation";
+
+function chatReadQuery(allRuns: boolean, scope?: ChatReadScope): string {
+  const params = new URLSearchParams();
+  if (allRuns) params.set("allRuns", "1");
+  if (scope) params.set("scope", scope);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {
@@ -2997,6 +3178,61 @@ export interface PlanTodo {
   status: PlanTodoStatus;
 }
 
+/** A payload interned into the v2 blob log and referenced by hash. Large fields
+ *  (system prompt, tool result, transcript) arrive as one of these instead of a
+ *  string whenever the blob content could not be inlined — capture level
+ *  `metadata`, or a blob log that lost its tail. `preview` is the first ~200
+ *  chars so a reader always has something to show. */
+export interface DebugBlobRef {
+  hash: string;
+  bytes: number;
+  originalBytes?: number;
+  truncated?: true;
+  preview?: string;
+}
+
+export interface DebugSkillRef {
+  name: string;
+  description?: string;
+  location?: string;
+}
+
+export interface DebugToolDefinition {
+  name: string;
+  description?: string;
+  /** JSON Schema the model was given for this tool's arguments. */
+  parameters?: unknown;
+}
+
+/**
+ * Event payload. Every field is optional and must be guarded at the read site:
+ * older runs predate them, capture level can drop them, and the big ones may
+ * come through as a `DebugBlobRef`. The index signature stays because readers
+ * (the debug drawer, the trace exporter) treat data as an open bag.
+ */
+export interface DebugEventData {
+  [key: string]: unknown;
+  /** On `session_prompt`, the TRUE prompt pi sent — persona plus the
+   *  `<available_skills>` block — not just the persona prompt. */
+  systemPrompt?: string | DebugBlobRef;
+  availableSkills?: DebugSkillRef[];
+  tools?: DebugToolDefinition[];
+  toolNames?: string[];
+  /** Mid-run tool-palette diff (load-tools / fast-mode). */
+  paletteAdded?: string[];
+  paletteRemoved?: string[];
+  temperature?: number;
+  maxTokens?: number;
+  thinkingLevel?: string;
+  fastMode?: boolean;
+  model?: string;
+  provider?: string;
+  /** `cacheRead`/`cacheWrite` are the prompt-cache hit/miss signal. */
+  responseUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  responseStopReason?: string;
+  ttftMs?: number;
+}
+
 export interface DebugEventRecord {
   seq: number;
   at: string;
@@ -3006,7 +3242,9 @@ export interface DebugEventRecord {
   toolCallId?: string;
   parentToolCallId?: string;
   subagentName?: string;
-  data: Record<string, unknown>;
+  /** Run id of the child trace a `subagent_start` / `delegation` event spawned. */
+  childRunId?: string;
+  data: DebugEventData;
 }
 
 export interface StreamCallbacks {
@@ -3054,10 +3292,24 @@ export interface ChatReply {
 // switcher. Any chat participant may call this — the backend reads the agent's
 // admin-set key and never returns it. Empty models ⇒ hide the picker.
 // `defaultModel` is the agent's configured model, used to preselect the dropdown.
+export interface EvalAgentModel {
+  provider: string;
+  model: string | null;
+  isDefault: boolean;
+}
+
+/** Providers (with the model each would use) this agent can really run on for the caller. */
+export async function listEvalAgentModels(slug: string): Promise<EvalAgentModel[]> {
+  const data = await request<{ success: boolean; models?: EvalAgentModel[] }>(
+    `${AUTH_API_URL}/api/v1/evals/agent-models/${encodeURIComponent(slug)}`,
+  );
+  return data.models ?? [];
+}
+
 export async function listChatLitellmModels(
   slug: string,
   userId: string,
-): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null }> {
+): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null; pinProvider: string | null }> {
   const res = await fetch(
     `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`,
     { credentials: "include", headers: { "x-user-id": userId } },
@@ -3067,8 +3319,9 @@ export async function listChatLitellmModels(
     success: boolean;
     data?: Array<{ id: string; name: string }>;
     defaultModel?: string | null;
+    pinProvider?: string | null;
   };
-  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null };
+  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null, pinProvider: data.pinProvider ?? null };
 }
 
 export async function sendChatMessage(
@@ -3373,13 +3626,14 @@ export async function pollChatMessages(
   // the normal chat window shows only the caller's own turns — the backend ACL
   // gates on ?allRuns=1 AND admin, so passing this from a non-admin is a no-op.
   allRuns = false,
+  scope?: ChatReadScope,
 ): Promise<ChatHistory> {
   const data = await request<{
     success: boolean;
     data: ChatMsg[];
     invocationsByMsgId?: Record<string, ToolInvocation[]>;
   }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${allRuns ? "?allRuns=1" : ""}`,
+    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/messages${chatReadQuery(allRuns, scope)}`,
   );
   const invocationsByMsgId = new Map<string, ToolInvocation[]>();
   if (data.invocationsByMsgId) {
@@ -3436,12 +3690,13 @@ export function subscribeLiveConversation(
   callbacks: LiveStreamCallbacks,
   // OPT-IN cross-user live stream (admin "All Runs" only) — mirrors pollChatMessages.
   allRuns = false,
+  scope?: ChatReadScope,
 ): () => void {
   const controller = new AbortController();
   void (async () => {
     let res: Response;
     try {
-      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${allRuns ? "?allRuns=1" : ""}`, {
+      res = await fetch(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/live${chatReadQuery(allRuns, scope)}`, {
         credentials: "include",
         headers: { "x-user-id": userId, Accept: "text/event-stream" },
         signal: controller.signal,
@@ -3531,28 +3786,69 @@ export interface DebugArtifactBundle {
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+  /** Non-fatal problems hit while reading these artifacts (dropped torn line,
+   *  unreadable blob log, GCS miss). Surfaced in the drawer so a partial trace
+   *  never reads as "no data". Individual runs carry their own `data.warnings`. */
+  warnings?: string[];
+  /** Runs this viewer may see in the whole conversation. `runs` is one capped
+   *  page of them; without these a long thread silently loses its older runs. */
+  totalRuns?: number;
+  /** True when runs older than this page exist — ask again with a bigger
+   *  `limit`, or with `before` set to the oldest runId on this page. */
+  truncated?: boolean;
 }
 
-export async function fetchConversationDebugArtifacts(slug: string, conversationId: string): Promise<DebugArtifactBundle> {
+export async function fetchConversationDebugArtifacts(
+  slug: string,
+  conversationId: string,
+  opts?: { limit?: number; before?: string },
+): Promise<DebugArtifactBundle> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.before !== undefined) params.set("before", opts.before);
+  const query = params.toString();
   const data = await request<{
     success: boolean;
     data: DebugArtifactBundle;
-  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug`);
+  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug${query ? `?${query}` : ""}`);
   return data.data;
 }
 
+/** One row of the chat history: a chat the user switched agents in is one row. */
 export interface ConversationSummary {
+  /** Unique per row (a Spaces thread is listed once per agent). */
+  rowId: string;
   conversationId: string;
   title: string;
   messageCount: number;
   lastMessageAt: string;
+  /** The agent to open and continue the chat with — the most recent one. */
+  agentSlug: string;
+  /** Every agent that answered, in first-use order. */
+  agentSlugs: string[];
 }
 
-export async function listChatConversations(slug: string, userId: string): Promise<ConversationSummary[]> {
-  const data = await request<{ success: boolean; data: ConversationSummary[] }>(
-    `${AUTH_API_URL}/api/v1/agent-chat/${slug}/conversations?userId=${userId}`,
+export interface ConversationPage {
+  conversations: ConversationSummary[];
+  /** Pass back as `cursor` for the next page; null on the last one. */
+  nextCursor: string | null;
+}
+
+/** One page of the user's chat history across every agent — newest first, 50
+ *  rows a page with every pinned chat on the first; the same endpoint the
+ *  Spaces AI screen and sidebar use. `agentSlug` keeps only that agent's chats. */
+export async function listChatConversations(
+  userId: string,
+  opts: { agentSlug?: string | null; cursor?: string | null; limit?: number } = {},
+): Promise<ConversationPage> {
+  const query = new URLSearchParams({ userId });
+  if (opts.agentSlug) query.set("agentSlug", opts.agentSlug);
+  if (opts.cursor) query.set("cursor", opts.cursor);
+  if (opts.limit) query.set("limit", String(opts.limit));
+  const data = await request<{ success: boolean; data: ConversationSummary[]; nextCursor?: string | null }>(
+    `${AUTH_API_URL}/api/v1/agent-chat/conversations?${query.toString()}`,
   );
-  return data.data;
+  return { conversations: data.data, nextCursor: data.nextCursor ?? null };
 }
 // ── Knowledge Base (spaces collections) ──────────────────────────────
 
@@ -3908,7 +4204,7 @@ export interface AgentRun {
   sessionId: string;
   userId: string;
   agentSlug: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "delegation";
   status: "running" | "completed" | "failed" | "cancelled";
   currentToolLabel: string | null;
   task: string;
@@ -3943,6 +4239,10 @@ export interface AgentRun {
    *  branching: once a user message has multiple assistant siblings,
    *  chronology no longer pairs runs ↔ assistants — chatMessageId does. */
   chatMessageId?: string | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Populated only by the elevated "All Runs" (scope=all) listing — null elsewhere. */
   userName?: string | null;
   userEmail?: string | null;
@@ -4105,6 +4405,10 @@ export interface AgentRunListItem {
   tokensIn: number | null;
   tokensOut: number | null;
   rating: "up" | "down" | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Hydrated only by scope=all — null/absent otherwise. */
   userName?: string | null;
   userEmail?: string | null;
@@ -4422,7 +4726,6 @@ export interface DashboardAgentMeta {
   _count: { tools: number; skills: number; shares: number };
 }
 
-
 export interface SkillUsageRow {
   skillId: string;
   skillSlug: string;
@@ -4612,7 +4915,6 @@ export async function getProjectInsights(
   return data.data;
 }
 
-
 // ── Doctor Bitbucket Stats (admin) ───────────────────────────────────
 // Live count of PRs / commits authored by the bot identity that powers
 // xyne-doctor commits in Bitbucket (default `john.doe@gmail.com`).
@@ -4751,7 +5053,10 @@ export interface CuratorEmittedCandidate {
   signalScore?: number;
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
-  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed" | "classifier-duplicate" | "classifier-noise";
+  jevVerdict?: "new" | "duplicate" | "update" | "noise";
+  jevConfidence?: number;
+  jevScore?: number;
 }
 
 /** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
@@ -4779,14 +5084,26 @@ export interface CuratorTrace {
    *  Guard (`trace?.emitted`) before reading `.length` / `.map`. */
   emitted?: CuratorEmittedCandidate[];
   error?: string;
+  /** Classifier (Jev) pass after the LLM (R8), stored with the LLM exchange. */
+  classifier?: CuratorClassifierTrace;
 }
 
 /** Per-file outcome of a soul-synthesis run (runType="synthesize"). */
 export interface SynthFileResult {
   name: string;
   factsUsed: number;
-  action: "updated" | "skipped" | "error";
+  /** "held" = rewrite generated, but the nightly update check kept the old file. */
+  action: "updated" | "skipped" | "error" | "held";
   chars?: number;
+  check?: {
+    verdict: "accept" | "review" | "reject";
+    keepsOld?: number;
+    supported?: number;
+    choice?: string;
+    source: "jev" | "fallback";
+    ms: number;
+    exchange?: ClassifierExchange;
+  };
   error?: string;
   model?: string;
   durationMs?: number;
@@ -4832,6 +5149,8 @@ export interface GateTrace {
   /** Set when the gate FAILED (timeout / HTTP error / bad response) and
    *  fail-opened — the event is recorded with status="error". */
   error?: string;
+  /** Every classifier (Jev) call the gate made, in full. */
+  classifier?: ClassifierExchange[];
 }
 
 export interface PipelineRecordPreview {
@@ -5508,7 +5827,6 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
   }
 }
 
-
 export async function getDigitalTwinStats(
   userId: string,
   range: "7d" | "30d" | "90d" = "7d",
@@ -5712,6 +6030,19 @@ export interface TwinReplyAgg {
   responseTime: TwinReplyResponseTime;
   previousApprovalRate: number | null;
   previousEditRate: number | null;
+  /** Per-week approval trend, oldest first (absent on older backends). */
+  weekly?: TwinWeeklyReplyPoint[];
+}
+
+export interface TwinWeeklyReplyPoint {
+  weekStart: string;
+  proposed: number;
+  accepted: number;
+  acceptedEdited: number;
+  declined: number;
+  ignored: number;
+  approvalRate: number | null;
+  cleanApprovalRate: number | null;
 }
 
 export interface TwinGateAgg {
@@ -5787,118 +6118,7 @@ export async function getTwinReplyMetrics(
   return data.data;
 }
 
-// ── Workspace-wide metrics (v3 Metrics page) ───────────────────────────
-
-export interface SlowSessionToolRow {
-  tool: string;
-  ms: number;
-  calls: number;
-  isError: boolean;
-}
-export interface SlowSession {
-  sessionId: string;
-  agentSlug: string;
-  totalMs: number | null;
-  llmTotalMs: number | null;
-  toolMs: number | null;
-  completedAt: string;
-  task: string | null;
-  topTools: SlowSessionToolRow[];
-}
-
-export interface GlobalMetricsDayBucket {
-  day: string;
-  runs: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-  avgLlmMs: number | null;
-  avgToolMs: number | null;
-  errorRate: number;
-  user?: number;
-  automation?: number;
-  scheduled?: number;
-  api?: number;
-}
-export interface GlobalMetricsAgentRow {
-  agentSlug: string;
-  orgId?: string | null;
-  orgName?: string | null;
-  runs: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-  avgLlmMs: number | null;
-  avgToolMs: number | null;
-  errorRate: number;
-}
-export interface GlobalMetricsProviderRow {
-  provider: string;
-  model: string | null;
-  runs: number;
-  p50LlmMs: number | null;
-  p95LlmMs: number | null;
-  p50TtftMs: number | null;
-  p95TtftMs: number | null;
-  avgTokensPerSec: number | null;
-  errorRate: number;
-}
-export type GlobalMetricsTriggerGroup = "user" | "automation" | "scheduled" | "api";
-export interface GlobalMetricsTriggerRow {
-  trigger: GlobalMetricsTriggerGroup;
-  runs: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  errorRate: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-}
-export interface GlobalMetrics {
-  days: number;
-  windowStart: string;
-  windowEnd: string;
-  totals: {
-    runs: number;
-    completed: number;
-    failed: number;
-    cancelled: number;
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    avgLlmMs: number | null;
-    avgToolMs: number | null;
-    errorRate: number;
-    /** Window token totals. in = fresh input; cacheRead/cacheWrite = replayed/
-        stored context (real consumption on cache-heavy agents); out = generated. */
-    tokens?: { in: number; out: number; cacheRead: number; cacheWrite: number };
-    /** Distinct users in the window. */
-    uniqueUsers?: number;
-    /** Memory adoption — runs that recalled >=1 memory (per-agent endpoint only). */
-    memoryRecall?: { runsWithRecall: number; rate: number };
-  };
-  delta: {
-    runs: number;
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    errorRate: number;
-  };
-  perDay: GlobalMetricsDayBucket[];
-  byTrigger: GlobalMetricsTriggerRow[];
-  topAgents: GlobalMetricsAgentRow[];
-  byProvider: GlobalMetricsProviderRow[];
-  slowSessions: SlowSession[];
-}
-
-export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<GlobalMetrics> {
-  const qs = new URLSearchParams();
-  qs.set("days", String(days));
-  applyAdminOrgScope(qs, orgScope);
-  return request<GlobalMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
-    { headers: { "x-user-id": userId } },
-  );
-}
+// ── Metrics page: awakening, sentiment, improvements ─────────────────────
 
 /**
  * Activity for agents that wake on their own. Kept out of the main metrics
@@ -6006,36 +6226,6 @@ export interface AgentSentiment {
   recentComments: SentimentComment[];
 }
 
-// Per-agent metrics — same shape as global minus `topAgents`, with a couple
-// of extra single-agent rollups (avgTurns, avgTokensPerSec).
-export interface AgentMetrics {
-  agentSlug: string;
-  days: number;
-  windowStart: string;
-  windowEnd: string;
-  totals: GlobalMetrics["totals"] & {
-    avgTurns: number | null;
-    avgTokensPerSec: number | null;
-    // tokens + uniqueUsers inherited from GlobalMetrics["totals"] — both
-    // endpoints report them with identical shapes.
-  };
-  delta: GlobalMetrics["delta"];
-  perDay: GlobalMetricsDayBucket[];
-  slowSessions: SlowSession[];
-  toolLatency: ToolLatencyRow[];
-  sentiment: AgentSentiment;
-}
-
-export interface ToolLatencyRow {
-  tool: string;
-  calls: number;
-  errors: number;
-  avgMs: number | null;
-  p50Ms: number | null;
-  p95Ms: number | null;
-  totalMs: number;
-}
-
 // FailureCurator candidate types and endpoints
 export type ImprovementBucket = "agent_unable_to_do_work" | "failure" | "user_frustrated";
 export type ImprovementRootCause =
@@ -6084,15 +6274,748 @@ export async function dismissImprovement(userId: string, id: string, reason?: st
   );
 }
 
-export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<AgentMetrics> {
-  const qs = new URLSearchParams();
-  qs.set("days", String(days));
-  applyAdminOrgScope(qs, orgScope);
-  return request<AgentMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?${qs.toString()}`,
-    { headers: { "x-user-id": userId } },
+/**
+ * Admin-only. Summarises historical runs so the tool panels stop under-reporting.
+ * `force` re-summarises rows written by an older summariser version.
+ */
+export async function backfillToolStats(
+  userId: string,
+  body?: { batchSize?: number; maxRows?: number; sinceDays?: number; force?: boolean },
+): Promise<ToolStatsBackfillReport> {
+  return request<ToolStatsBackfillReport>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/backfill`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify(body ?? {}),
+    },
   );
 }
+
+// ── Metrics v2 (one endpoint per card) ────────────────────────────────────
+// Every GET answers `{ window, ...body }` with `n` beside each average, percentile and rate.
+// Fetchers take an optional AbortSignal so the page cache can cancel unused requests.
+
+export type MetricsDays = 1 | 7 | 30;
+
+/** The filter context every metrics endpoint shares (a subset of the page's MetricsScopeParams). */
+export interface MetricsQueryScope {
+  userId: string;
+  days: MetricsDays;
+  orgScope: AdminOrgScope;
+  agentSlugs: readonly string[];
+}
+
+export type MetricsWindowColumn = "completedAt" | "startedAt";
+
+/** Echo of the window a response was computed over. Every v2 response starts with it. */
+export interface WindowInfo {
+  days: MetricsDays;
+  start: string;
+  end: string;
+  column: MetricsWindowColumn;
+  scope: { level: "org" | "own" | "all-orgs"; agentSlugs: string[] };
+  computedAt: string;
+  cached: boolean;
+}
+
+export type TriggerGroup = "user" | "automation" | "scheduled" | "api" | "awakened" | "delegation" | "messaging" | "other";
+
+export interface PctBlock {
+  n: number;
+  p50Ms: number | null;
+  p95Ms: number | null;
+}
+
+export interface SummaryFigures {
+  runs: number;
+  /** A2A callee rows inside `runs` — context, not a separate population. */
+  delegatedRuns: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  /** completed / runs. */
+  successRate: number | null;
+  users: number;
+  /** End-to-end wall clock (completedAt − startedAt) over completed runs. */
+  wall: PctBlock;
+  /** Agent-reported totalMs; its own n, never coalesced with `wall`. */
+  agent: PctBlock & { avgLlmMs: number | null; avgToolMs: number | null; avgOtherMs: number | null };
+  /** Run-level ttftMs — "Reply starts after". */
+  replyStart: PctBlock;
+  tokens: {
+    n: number;
+    promptPerRun: number | null;
+    outputPerRun: number | null;
+    freshPerRun: number | null;
+    cachedPerRun: number | null;
+    cacheHitRate: number | null;
+    promptTotal: number;
+    outputTotal: number;
+  };
+  /** Σout ÷ Σ decode seconds over rows with both > 0. */
+  throughput: { n: number; tokensPerSec: number | null };
+  /** From agent_run_stats; compare runsSummarised with `runs` for capture coverage. */
+  tools: {
+    runsWithTools: number;
+    runsSummarised: number;
+    calls: number;
+    errors: number;
+    errorRate: number | null;
+  };
+  llm: { runsWithSeries: number };
+}
+
+export interface SummaryResponse {
+  window: WindowInfo;
+  current: SummaryFigures;
+  previous: SummaryFigures | null;
+}
+
+export interface DailyPoint {
+  /** YYYY-MM-DD in the requested tz. */
+  day: string;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  byTrigger: Partial<Record<TriggerGroup, number>>;
+  wall: PctBlock;
+  agent: { n: number; avgLlmMs: number | null; avgToolMs: number | null; totalLlmMs: number; totalToolMs: number };
+  tokens: { n: number; prompt: number; output: number };
+}
+
+export interface TriggerRow {
+  group: TriggerGroup;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  successRate: number | null;
+  wall: PctBlock;
+}
+
+export interface RunDailyResponse {
+  window: WindowInfo;
+  tz: string;
+  /** Zero-filled, oldest first. */
+  days: DailyPoint[];
+  /** Groups with runs > 0 only. */
+  triggers: TriggerRow[];
+}
+
+export interface AgentLeaderRow {
+  agentSlug: string;
+  orgId: string;
+  orgName?: string | null;
+  runs: number;
+  failed: number;
+  successRate: number | null;
+  wall: PctBlock;
+  agent: { n: number; avgLlmMs: number | null; avgToolMs: number | null };
+  tokens: { n: number; promptPerRun: number | null; outputPerRun: number | null };
+  toolCalls: number;
+  toolErrorRate: number | null;
+}
+
+export interface AgentsTopResponse {
+  window: WindowInfo;
+  rows: AgentLeaderRow[];
+}
+
+export interface ActiveAgentRow {
+  agentSlug: string;
+  orgId: string;
+  runs: number;
+}
+
+/** Always a 30-day window, whatever `days` the page is on — it feeds the agent picker. */
+export interface ActiveAgentsResponse {
+  window: WindowInfo;
+  agents: ActiveAgentRow[];
+}
+
+/** One run-level route (agent_runs.provider) + model. "Route", not "Provider": see spec decisions. */
+export interface RouteRow {
+  route: string;
+  model: string | null;
+  runs: number;
+  /** Runs carrying LLM timing — the n behind `llm`. */
+  timed: number;
+  llm: PctBlock;
+  replyStart: PctBlock;
+  tokensPerSec: number | null;
+  failed: number;
+  errorRate: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface RoutesResponse {
+  window: WindowInfo;
+  rows: RouteRow[];
+}
+
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+export interface JudgeResponse {
+  window: WindowInfo;
+  rows: JudgeSummaryRow[];
+}
+
+export interface MetricsSentiment extends AgentSentiment {
+  /** Runs with a non-null llmRetries — the denominator of retriedRate. */
+  retriesKnown: number;
+}
+
+export interface MemoryRecallFigures {
+  recalled: number;
+  runs: number;
+  rate: number | null;
+  /** False when recall is not instrumented for this scope — render "not captured", not 0%. */
+  captured: boolean;
+}
+
+export interface SentimentResponse {
+  window: WindowInfo;
+  sentiment: MetricsSentiment;
+  memoryRecall: MemoryRecallFigures;
+}
+
+/* Tools */
+
+/** Sortable columns of GET /metrics/tools. An unknown key makes the server sort by `errors` and echo that in `page.sort`. */
+export type ToolSortKey =
+  | "tool" | "calls" | "errors" | "errorRate" | "recoveryRate" | "dropped" | "duplicateRate" | "duplicates"
+  | "emptyRate" | "citeRate" | "uncited" | "avgMs" | "p95Ms" | "maxMs" | "totalMs" | "bytes" | "avgBytes";
+
+export const TOOL_SORT_KEYS: readonly ToolSortKey[] = [
+  "tool", "calls", "errors", "errorRate", "recoveryRate", "dropped", "duplicateRate", "duplicates",
+  "emptyRate", "citeRate", "uncited", "avgMs", "p95Ms", "maxMs", "totalMs", "bytes", "avgBytes",
+];
+
+/** One tool, window-wide. Every rate is null (not 0) when its denominator is 0. */
+export interface ToolRow {
+  tool: string;
+  calls: number;
+  runs: number;
+  topLevelCalls: number;
+  childCalls: number;
+  errors: number;
+  errorRate: number | null;
+  /** Errors of the form "tool X not found" — a palette problem, not a tool problem. */
+  notFound: number;
+  dropped: number;
+  droppedRate: number | null;
+  empty: number;
+  emptyRate: number | null;
+  duplicates: number;
+  duplicateRate: number | null;
+  recovered: number;
+  /** recovered / errors. */
+  recoveryRate: number | null;
+  unrecovered: number;
+  citeable: number;
+  cited: number;
+  citeRate: number | null;
+  timedCalls: number;
+  avgMs: number | null;
+  /** Estimated from the duration buckets (linear within the bucket the percentile falls in). */
+  p50Ms: number | null;
+  p95Ms: number | null;
+  /** True when p95 fell in the overflow bucket: render "> 5m", not a number. */
+  p95Overflow: boolean;
+  maxMs: number;
+  totalMs: number;
+  bytes: number;
+  avgBytes: number | null;
+  contextShare: number | null;
+  /** RUN counts per signal — the drill-down total, which can be smaller than the call counts. */
+  sessions: { errored: number; recovered: number; unrecovered: number; dropped: number; duplicated: number; empty: number; cited: number };
+}
+
+/** Window-wide sums, independent of the table page and the search box. */
+export interface ToolTotals {
+  distinctTools: number;
+  calls: number;
+  errors: number;
+  notFound: number;
+  dropped: number;
+  duplicates: number;
+  empty: number;
+  recovered: number;
+  citeable: number;
+  cited: number;
+  bytes: number;
+  totalMs: number;
+  timedCalls: number;
+  avgMsPerCall: number | null;
+  runsWithTools: number;
+}
+
+export interface RankPoint {
+  tool: string;
+  calls: number;
+  value: number;
+  share: number | null;
+  avg: number | null;
+  errorRate: number | null;
+  p95Ms: number | null;
+}
+
+export interface RankRemainder {
+  tools: number;
+  value: number;
+  share: number | null;
+}
+
+export interface RankSet {
+  byTotal: RankPoint[];
+  /** Tools with >= 5 calls. */
+  byAvg: RankPoint[];
+  other: RankRemainder;
+}
+
+export interface ToolRollup {
+  totals: ToolTotals;
+  rows: ToolRow[];
+  ranking: {
+    time: RankSet;
+    bytes: RankSet;
+    /** byRate: tools with >= 10 calls. */
+    errors: { byCount: RankPoint[]; byRate: RankPoint[]; other: RankRemainder };
+  };
+}
+
+/** Share of the window's runs with tool stats. `coverage` null when the window has no runs. */
+export interface ToolSummaryCoverage {
+  runsInWindow: number;
+  runsSummarised: number;
+  coverage: number | null;
+}
+
+export interface ToolsPageInfo {
+  limit: number;
+  offset: number;
+  /** Tools matching the search across the whole window. */
+  total: number;
+  sort: ToolSortKey;
+  dir: "asc" | "desc";
+}
+
+/** GET /metrics/tools: the cached rollup, with `rows` sliced to the requested page. */
+export interface ToolsResponse extends ToolRollup {
+  window: WindowInfo;
+  coverage: ToolSummaryCoverage;
+  page: ToolsPageInfo;
+}
+
+export interface ToolsRequest {
+  sort?: ToolSortKey;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+export interface ErrorClassRow {
+  tool: string;
+  /** Normalised one-liner (ids, numbers, literals replaced). */
+  errorClass: string;
+  occurrences: number;
+  runs: number;
+  /** One raw example, <= 400 chars. */
+  sample: string;
+  lastSeen: string | null;
+  notFound: boolean;
+}
+
+export interface ErrorClassesResponse {
+  window: WindowInfo;
+  rows: ErrorClassRow[];
+  total: number;
+  occurrences: number;
+}
+
+export interface ErrorClassesRequest {
+  tool?: string;
+  limit?: number;
+  offset?: number;
+  /** Top N classes per tool when `tool` is absent. */
+  perTool?: number;
+}
+
+export interface CitationReflectionOutcome {
+  outcome: string;
+  runs: number;
+  share: number;
+}
+
+export interface CitationFlagRow {
+  orgId: string;
+  agentSlug: string;
+  autoToolCitations: boolean;
+  citationReflection: boolean;
+}
+
+export interface ExactCitationRow {
+  tool: string;
+  calls: number;
+  citeableCalls: number;
+  citedCalls: number;
+  citeRate: number | null;
+}
+
+export interface CitationsResponse {
+  window: WindowInfo;
+  scope: "same-turn" | "conversation";
+  funnel: { citeable: number; cited: number };
+  reflection: CitationReflectionOutcome[];
+  flags: CitationFlagRow[];
+  /** Only with `exact=1`; the server answers 400 unless one agent is selected or days <= 7. */
+  exact: ExactCitationRow[] | null;
+}
+
+/** open-palette = tools.openPalette read|all: every tool is allowed, so "granted nothing" is wrong. */
+export type PaletteState = "scoped" | "open-palette" | "unscoped";
+
+export interface AgentPaletteRow {
+  orgId: string;
+  agentSlug: string;
+  state: PaletteState;
+  openPalette?: "read" | "all";
+  /** toolsUsed ∪ toolStats[].t in the window. */
+  observedTools: number;
+  /** Null unless state = scoped. */
+  granted: number | null;
+  used: number | null;
+  unused: number | null;
+  usedShare: number | null;
+}
+
+export interface UnusedGrant {
+  orgId: string;
+  agentSlug: string;
+  kind: string;
+  grant: string;
+  server?: string | null;
+}
+
+export interface UnusedGrantsResponse {
+  window: WindowInfo;
+  agents: AgentPaletteRow[];
+  unusedGrants: UnusedGrant[];
+}
+
+/* LLM calls */
+
+export interface LlmSummary {
+  calls: number;
+  runs: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  nDecode: number;
+  p50DecodeMs: number | null;
+  /** Weighted: Σout ÷ Σ decode seconds. */
+  tokensPerSec: number | null;
+  avgContextTokens: number | null;
+  avgOutputTokens: number | null;
+  cacheHitRate: number | null;
+  compactions: number;
+  retries: number;
+  subagentCalls: number;
+  errorStops: number;
+}
+
+export interface LlmBucketRow {
+  /** Lower edge of the context-size bucket, in tokens. */
+  contextBucket: number;
+  calls: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  tokensPerSec: number | null;
+  avgOutputTokens: number | null;
+}
+
+export interface LlmIndexRow {
+  callIndex: number;
+  calls: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgContextTokens: number | null;
+  tokensPerSec: number | null;
+  compactionShare: number | null;
+  retriedShare: number | null;
+}
+
+export interface LlmModelRow {
+  model: string | null;
+  provider: string | null;
+  calls: number;
+  runs: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  tokensPerSec: number | null;
+  avgContextTokens: number | null;
+  avgOutputTokens: number | null;
+  errorStops: number;
+  retries: number;
+}
+
+export interface LlmCallsResponse {
+  window: WindowInfo;
+  coverage: {
+    runsInWindow: number;
+    runsWithSeries: number;
+    coverage: number | null;
+    /** ISO completedAt of the earliest in-window run carrying a per-call series. */
+    seriesSince?: string | null;
+  };
+  summary: LlmSummary;
+  byContext: LlmBucketRow[];
+  /** At most 40 positions. */
+  byCallIndex: LlmIndexRow[];
+  byModel: LlmModelRow[];
+}
+
+/* Sessions drill-down */
+
+export type SessionKind = "tool" | "failed" | "slow" | "model";
+export type ToolSignal = "calls" | "errors" | "recovered" | "unrecovered" | "dropped" | "duplicates" | "empty" | "cited" | "notFound";
+
+export interface MetricSessionToolFigures {
+  c: number;
+  e: number;
+  rec: number;
+  unrec: number;
+  d: number;
+  dup: number;
+  z: number;
+  ci: number;
+  nf: number;
+  ms: number;
+}
+
+export interface MetricSessionRow {
+  id: string;
+  sessionId: string;
+  conversationId: string | null;
+  channelId: string | null;
+  agentSlug: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
+  triggerSource: string;
+  status: string;
+  task: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  totalMs: number | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  rating: string | null;
+  /** Ran on the owner's personal credentials: task/error/sample/links are withheld. */
+  restricted: boolean;
+  /** kind=tool: this tool's figures in this run. */
+  tool?: MetricSessionToolFigures;
+  /** First error sample of that tool, for error-shaped signals. */
+  sample?: string | null;
+  /** kind=failed, <= 300 chars. */
+  error?: string | null;
+  /** kind=slow. */
+  split?: {
+    llmMs: number | null;
+    toolMs: number | null;
+    totalMs: number | null;
+    topTools: Array<{ tool: string; ms: number; calls: number; errored: boolean }>;
+  };
+  /** kind=model. calls = 0 means no per-call series was recorded for the run. */
+  model?: { calls: number; ttftMaxMs: number | null; ctxMax: number | null; retries: number; errorStops: number };
+}
+
+export interface MetricSessionsRequest {
+  kind: SessionKind;
+  tool?: string;
+  signal?: ToolSignal;
+  errorClass?: string;
+  status?: Array<"failed" | "cancelled">;
+  minMs?: number;
+  model?: string;
+  provider?: string;
+  limit: number;
+  cursor?: string;
+  /** Page 1 only: ask for the capped session total. */
+  count?: boolean;
+}
+
+export interface MetricSessionsResponse {
+  window: WindowInfo;
+  rows: MetricSessionRow[];
+  page: { limit: number; nextCursor: string | null; hasMore: boolean };
+  /** Distinct sessions, capped at 1000 (capped = true → "1,000+"). Null unless count was asked for. */
+  total: { value: number; capped: boolean } | null;
+  coverage: { runsInWindow: number; runsSummarised: number };
+}
+
+/* Backfill */
+
+export interface ToolStatsBackfillReport {
+  scanned: number;
+  summarised: number;
+  /** Runs scanned that had no tool calls to summarise. */
+  emptied: number;
+  /** agent_run_tool_stats rows written (one per tool per run). */
+  toolRows?: number;
+  /** Errored tool calls recorded in those rows. */
+  errorRows?: number;
+  /** Runs left without a row for the next call to retry: their write failed for a reason a retry can fix. */
+  failed?: number;
+  batches: number;
+  durationMs: number;
+  /** Finished runs still without tool stats after this call. */
+  remaining?: number;
+}
+
+/* Fetchers */
+
+const METRICS_BASE = `${AUTH_API_URL}/api/v1/metrics`;
+
+type QueryValue = string | number | boolean | readonly string[] | null | undefined;
+
+/** Builds `/metrics<path>?…`; the page cache keys on this URL. `agentSlug` repeats (slugs may contain commas); empty values are dropped. */
+export function metricsUrl(
+  path: string,
+  scope: Pick<MetricsQueryScope, "days" | "orgScope" | "agentSlugs">,
+  extra?: Record<string, QueryValue>,
+): string {
+  const qs = new URLSearchParams();
+  qs.set("days", String(scope.days));
+  applyAdminOrgScope(qs, scope.orgScope);
+  for (const slug of scope.agentSlugs) if (slug) qs.append("agentSlug", slug);
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value == null || value === false || value === "") continue;
+    if (Array.isArray(value)) {
+      if (value.length > 0) qs.set(key, value.join(","));
+    } else {
+      qs.set(key, value === true ? "1" : String(value));
+    }
+  }
+  return `${METRICS_BASE}${path}?${qs.toString()}`;
+}
+
+function metricsGet<T>(userId: string, url: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(url, { headers: { "x-user-id": userId }, signal });
+}
+
+export function fetchMetricsSummary(scope: MetricsQueryScope, signal?: AbortSignal): Promise<SummaryResponse> {
+  return metricsGet(scope.userId, metricsUrl("/summary", scope), signal);
+}
+
+export function fetchMetricsRunDaily(scope: MetricsQueryScope, tz: string, signal?: AbortSignal): Promise<RunDailyResponse> {
+  return metricsGet(scope.userId, metricsUrl("/runs/daily", scope, { tz }), signal);
+}
+
+export function fetchMetricsAgentsTop(scope: MetricsQueryScope, limit = 20, signal?: AbortSignal): Promise<AgentsTopResponse> {
+  return metricsGet(scope.userId, metricsUrl("/agents/top", scope, { limit }), signal);
+}
+
+/** The server always answers for 30 days; `days` is pinned so every range shares one cache entry. */
+export function fetchMetricsActiveAgents(scope: MetricsQueryScope, signal?: AbortSignal): Promise<ActiveAgentsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/agents/active", { ...scope, days: 30, agentSlugs: [] }), signal);
+}
+
+export function fetchMetricsRoutes(scope: MetricsQueryScope, signal?: AbortSignal): Promise<RoutesResponse> {
+  return metricsGet(scope.userId, metricsUrl("/routes", scope), signal);
+}
+
+export function fetchMetricsJudge(scope: MetricsQueryScope, signal?: AbortSignal): Promise<JudgeResponse> {
+  return metricsGet(scope.userId, metricsUrl("/judge", scope), signal);
+}
+
+/** Exactly one agent must be selected — the server answers 400 otherwise. */
+export function fetchMetricsSentiment(scope: MetricsQueryScope, signal?: AbortSignal): Promise<SentimentResponse> {
+  return metricsGet(scope.userId, metricsUrl("/sentiment", scope), signal);
+}
+
+/** `status` goes out comma-joined (`status=failed,cancelled`). */
+export function metricSessionsParams(req: MetricSessionsRequest): Record<string, QueryValue> {
+  return {
+    kind: req.kind,
+    tool: req.tool,
+    signal: req.signal,
+    errorClass: req.errorClass,
+    status: req.status,
+    minMs: req.minMs,
+    model: req.model,
+    provider: req.provider,
+    limit: req.limit,
+    cursor: req.cursor,
+    count: req.count,
+  };
+}
+
+export function fetchMetricSessions(
+  scope: MetricsQueryScope,
+  req: MetricSessionsRequest,
+  signal?: AbortSignal,
+): Promise<MetricSessionsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/sessions", scope, metricSessionsParams(req)), signal);
+}
+
+export function fetchMetricsTools(scope: MetricsQueryScope, req: ToolsRequest = {}, signal?: AbortSignal): Promise<ToolsResponse> {
+  return metricsGet(
+    scope.userId,
+    metricsUrl("/tools", scope, { sort: req.sort, dir: req.dir, limit: req.limit, offset: req.offset, search: req.search }),
+    signal,
+  );
+}
+
+export function fetchMetricsErrorClasses(
+  scope: MetricsQueryScope,
+  req: ErrorClassesRequest = {},
+  signal?: AbortSignal,
+): Promise<ErrorClassesResponse> {
+  return metricsGet(
+    scope.userId,
+    metricsUrl("/tools/error-classes", scope, { tool: req.tool, limit: req.limit, offset: req.offset, perTool: req.perTool }),
+    signal,
+  );
+}
+
+/** `exact` is the conversation-scoped join: allowed only with an agent filter or days <= 7. */
+export function fetchMetricsCitations(
+  scope: MetricsQueryScope,
+  req: { exact?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<CitationsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/tools/citations", scope, { exact: req.exact }), signal);
+}
+
+export function fetchMetricsUnusedGrants(scope: MetricsQueryScope, signal?: AbortSignal): Promise<UnusedGrantsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/tools/unused-grants", scope), signal);
+}
+
+export function fetchMetricsLlmCalls(
+  scope: MetricsQueryScope,
+  req: { includeSubagents?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<LlmCallsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/llm-calls", scope, { includeSubagents: req.includeSubagents }), signal);
+}
+
 // ── Evals ─────────────────────────────────────────────────────────────────
 // A folder explorer of conversations to replay against an agent. The browser
 // orchestrates a run by calling sendChatMessage() per turn (the real chat SSE
@@ -6288,6 +7211,7 @@ export interface StartGenerationAgent {
   agentSlug: string;
   genProvider?: string;
   genModel?: string;
+  optimizations?: string;
 }
 
 /** Start a comparison of 1-3 agents over the same conversations. Each agent gets
@@ -6583,11 +7507,26 @@ export async function cancelEvalImportJob(jobId: string, userId: string): Promis
 }
 
 /** Judge/extraction model options + what an empty ("default") model resolves to. */
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string }> {
-  const data = await request<{ success: boolean; models: string[]; defaultModel?: string }>(
-    `${AUTH_API_URL}/api/v1/evals/models`,
-  );
-  return { models: data.models ?? [], defaultModel: data.defaultModel ?? "" };
+export async function listEvalModels(): Promise<{
+  models: string[];
+  defaultModel: string;
+  judgeBackends: Array<{ id: string; label: string }>;
+  optimizations: Array<{ key: string; summary: string; defaultOn: boolean }>;
+}> {
+  const data = await request<{
+    success: boolean;
+    models: string[];
+    defaultModel?: string;
+    judgeBackends?: string[];
+    judgeBackendLabels?: Record<string, string>;
+    optimizations?: Array<{ key: string; summary: string; defaultOn: boolean }>;
+  }>(`${AUTH_API_URL}/api/v1/evals/models`);
+  return {
+    models: data.models ?? [],
+    defaultModel: data.defaultModel ?? "",
+    judgeBackends: (data.judgeBackends ?? []).map((id) => ({ id, label: data.judgeBackendLabels?.[id] ?? id })),
+    optimizations: data.optimizations ?? [],
+  };
 }
 
 /**
@@ -7015,6 +7954,44 @@ export async function deleteErrorPipelineRule(userId: string, name: string): Pro
   );
 }
 
+export interface SandboxRepoConfigRow {
+  key: string;
+  source: "database" | "default";
+  hasDefault: boolean;
+  enabled: boolean;
+  active: boolean;
+  config: Record<string, unknown>;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+  workspaceId: string | null;
+}
+
+export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRepoConfigRow[]> {
+  const data = await request<{ success: boolean; data: SandboxRepoConfigRow[] }>(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function saveSandboxRepoConfig(
+  userId: string,
+  key: string,
+  body: { config: unknown; enabled: boolean; workspaceId?: string },
+): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "PUT", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteSandboxRepoConfig(userId: string, key: string): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
 // ── Entity extraction ────────────────────────────────────────────────────────
 // Type discovery over a channel: read its threads/tickets, propose an entity
 // type vocabulary, pause for human approval. Approving writes the channel's
@@ -7120,6 +8097,206 @@ export async function resyncChannelEntityTypes(
     `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/resync-types`,
     { method: "POST", headers: { "x-user-id": userId } },
   );
+}
+
+// ── Messaging channels (WhatsApp, Telegram, …) — surfaces/messaging admin API ──
+
+export type MessagingChannelKey = "whatsapp" | "whatsapp-cloud";
+export type ChannelConnState = "pending_login" | "connected" | "disconnected" | "logged_out";
+export type ChannelDmPolicy = "linked" | "disabled";
+export type ChannelGroupPolicy = "allowlist" | "open" | "disabled";
+
+export interface ChannelAccountView {
+  id: string;
+  accountKey: string;
+  channel: MessagingChannelKey;
+  orgId: string;
+  label: string;
+  desiredState: "running" | "stopped";
+  connState: ChannelConnState;
+  selfId?: string;
+  displayId?: string;
+  lastConnectedAt?: string;
+  lastDisconnect?: { code?: number; reason?: string; at: string };
+  dmPolicy: ChannelDmPolicy;
+  groupPolicy: ChannelGroupPolicy;
+  groupAllowlist: string[];
+  requireMention: boolean;
+  groupHistoryLimit: number;
+  ackReaction?: string;
+  rateLimitPerMinute: number;
+  channelConfig: Record<string, unknown> | null;
+  agent: { slug: string; name: string } | null;
+  login: { kind: "qr" | "token" };
+  /** "org": one shared business number. "user": this is one person's own
+   *  number and only they (or an admin) can see or manage it. */
+  scope: "org" | "user";
+  ownerUserId: string | null;
+  loginFields: Array<{ key: string; label: string; type: "text" | "password"; placeholder?: string; hint?: string }>;
+  transport: "connection" | "webhook";
+  /** Webhook channels only: where the provider must POST. */
+  webhookUrl?: string;
+  webhookPath?: string;
+  capabilities: { groups: boolean; media: boolean; typing: boolean; reactions: boolean; maxTextChars: number };
+  leaseHolder: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelAccountPolicyPatch {
+  label?: string;
+  agentSlug?: string;
+  dmPolicy?: ChannelDmPolicy;
+  groupPolicy?: ChannelGroupPolicy;
+  groupAllowlist?: string[];
+  requireMention?: boolean;
+  groupHistoryLimit?: number;
+  ackReaction?: string;
+  rateLimitPerMinute?: number;
+  channel?: Record<string, unknown>;
+}
+
+export interface ChannelLoginArtifact {
+  connState: ChannelConnState;
+  desiredState: "running" | "stopped";
+  login: { kind: "qr" | "token" };
+  artifact: string | null;
+  /** Data URL of the rendered QR (login.kind === "qr"). */
+  qr: string | null;
+}
+
+function channelBase(channel: MessagingChannelKey): string {
+  return `${AUTH_API_URL}/api/v1/surfaces/${channel}`;
+}
+
+/** Omit `orgId` for a user-scoped channel: the server uses the session's org
+ *  and returns only the caller's own accounts. */
+export async function listChannelAccounts(channel: MessagingChannelKey, orgId?: string): Promise<ChannelAccountView[]> {
+  const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+  const data = await request<{ success: boolean; accounts: ChannelAccountView[] }>(
+    `${channelBase(channel)}/accounts${query}`,
+  );
+  return data.accounts;
+}
+
+export async function createChannelAccount(
+  channel: MessagingChannelKey,
+  input: { orgId?: string; label?: string; agentSlug: string; channel?: Record<string, unknown> },
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(`${channelBase(channel)}/accounts`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.account;
+}
+
+export async function updateChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  patch: ChannelAccountPolicyPatch,
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.account;
+}
+
+/** Publish the WhatsApp question form (Flows) into the business account, so
+ *  multi-part questions arrive as one native form. Returns the form id. */
+export async function publishChannelQuestionForm(
+  channel: MessagingChannelKey,
+  accountId: string,
+  wabaId: string,
+): Promise<string> {
+  const data = await request<{ success: boolean; questionFormId: string }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/question-form`,
+    { method: "POST", body: JSON.stringify({ wabaId }) },
+  );
+  return data.questionFormId;
+}
+
+export async function deleteChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function loginChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  input: { token?: string; secrets?: Record<string, string> } = {},
+): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function logoutChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/logout`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function getChannelLoginArtifact(
+  channel: MessagingChannelKey,
+  accountId: string,
+): Promise<ChannelLoginArtifact> {
+  return request<ChannelLoginArtifact & { success: boolean }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login-artifact`,
+  );
+}
+
+// ── my numbers (self-service linking) ──
+
+export interface LinkedChannelNumber {
+  senderId: string;
+  linkedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface ChannelNumberLink {
+  senderId: string;
+  /** The number to message, when the org has exactly one to offer. */
+  sendTo: string | null;
+  linkedAt: string;
+}
+
+export async function listMyChannelNumbers(channel: MessagingChannelKey): Promise<LinkedChannelNumber[]> {
+  const data = await request<{ success: boolean; numbers: LinkedChannelNumber[] }>(`${channelBase(channel)}/my-numbers`);
+  return data.numbers;
+}
+
+export async function linkChannelNumber(channel: MessagingChannelKey, phone: string): Promise<ChannelNumberLink> {
+  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  });
+  return data.linked;
+}
+
+export async function unlinkMyChannelNumber(channel: MessagingChannelKey, senderId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/my-numbers/${encodeURIComponent(senderId)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface ChannelGroup {
+  id: string;
+  name: string;
+  participants: number;
+}
+
+/** Groups the account is a member of, for the allowlist picker. Only the server
+ *  holding the account's connection can answer, so this can legitimately fail
+ *  with 503 while the account moves between servers. */
+export async function listChannelGroups(channel: MessagingChannelKey, accountId: string): Promise<ChannelGroup[]> {
+  const data = await request<{ success: boolean; groups: ChannelGroup[] }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/groups`,
+  );
+  return data.groups;
 }
 
 // ── Agent index ────────────────────────────────────────────────────────────
@@ -7278,4 +8455,133 @@ export async function writeUsagePatternFile(slug: string, content: string): Prom
     { method: "PUT", body: JSON.stringify({ content }) },
   );
   return data.data;
+}
+
+// ── MCP Gateway service registry (session-authed UI surface) ──────────────
+// The secret x-s2s-key / tenant are injected server-side by the
+// /gateway-registry route; the browser only sends its session cookie.
+
+export interface GatewayToolInput {
+  name: string;
+  description?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  requiresApproval?: boolean;
+  isWriteTool?: boolean;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export interface RegisterGatewayServiceInput {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  tokenEndpointUrl: string;
+  xAuthHeaderName?: string;
+  tools: GatewayToolInput[];
+}
+
+/** Submit an MCP-gateway service registration for admin approval (does not go live). */
+export async function registerGatewayService(
+  input: RegisterGatewayServiceInput,
+): Promise<{ success: boolean; message: string; status?: string; requestId?: string }> {
+  const data = await request<{ success: boolean; data: { success: boolean; message: string; status?: string; requestId?: string } }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return data.data;
+}
+
+/** The caller's own registration requests (pending/approved/rejected). */
+export async function listMyGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/my-requests`,
+  );
+  return data.data;
+}
+
+/** Pending registration requests awaiting review (admin only). */
+export async function listGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests`,
+  );
+  return data.data;
+}
+
+/** Approve a pending request → registers it live (admin only). */
+export async function approveGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/approve`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+/** Reject a pending request (admin only). */
+export async function rejectGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export interface GatewayServiceDetail {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  xAuthHeaderName: string | null;
+  tokenEndpointUrl: string | null;
+  tools: GatewayToolInput[];
+}
+
+/** Fetch one registered service with its full tool definitions (for editing). */
+export async function getGatewayService(serviceName: string, backendId?: string): Promise<GatewayServiceDetail> {
+  const q = backendId ? `?backendId=${encodeURIComponent(backendId)}` : "";
+  const data = await request<{ success: boolean; data: GatewayServiceDetail }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}${q}`,
+  );
+  return data.data;
+}
+
+/** List MCP-gateway services registered for the workspace tenant. */
+export async function listGatewayServices(): Promise<GatewayServiceRow[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRow[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+  );
+  return data.data;
+}
+
+/** Deregister all backends for a service under the workspace tenant. */
+export async function deregisterGatewayService(serviceName: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** One classifier (Jev) call in full: what it was told, asked, and answered. */
+export interface ClassifierExchange {
+  purpose: string;
+  backend: string;
+  ms: number;
+  ok: boolean;
+  error?: string;
+  state: string;
+  questionSpec: Record<string, unknown>;
+  answers: Record<string, unknown> | null;
+  at: string;
+}
+
+export interface CuratorClassifierTrace {
+  checked: number;
+  kept: number;
+  dropped: number;
+  unavailable: number;
+  ms: number;
+  calls: Array<{
+    text: string;
+    verdict?: "new" | "duplicate" | "update" | "noise";
+    confidence?: number;
+    worth?: number;
+    exchange: ClassifierExchange;
+  }>;
 }

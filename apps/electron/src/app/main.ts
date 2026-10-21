@@ -1,7 +1,8 @@
-import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
+import { app, dialog, Menu, MenuItem } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config, ENABLE_LOCAL_HARNESS } from './config';
+import { setIsQuitting } from './app-state';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
@@ -23,11 +24,19 @@ import { initTray } from '../services/tray';
 import { registerGlobalShortcuts } from '../services/global-shortcuts';
 import { initRecordingPillVisibility } from '../services/recording-controller';
 import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
+import { setupCallWindowHandlers } from '../services/call-window';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
+import { followAppTheme } from '../services/webview-theme';
+import { setupBrowserTabsUserAgent } from '../services/browser-tabs-session';
+import { trackBrowserHistory } from '../services/browser-history';
+import { watchBrowserMemory } from '../services/browser-memory';
+import { setupBrowserDownloads } from '../services/browser-downloads';
+import { routeMenuZoom } from '../services/zoom-menu';
+import { browserSettingsService } from '../services/browser-settings';
 import { callInvitePath } from '../utils/validation';
 import Store from 'electron-store';
 
@@ -63,23 +72,37 @@ if (config.USER_DATA_SUFFIX) {
   app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
 }
 
+// Let hidden windows actually go hidden (frames stop), while keeping the timer
+// guarantees Zero and the sync socket rely on: the 1/min intensive clamp after 5min
+// hidden would trip Zero's 10s ping / 20s detection into reconnect churn.
+const addDisabledFeatures = (features: string[]): void => {
+  const existing = app.commandLine.getSwitchValue('disable-features');
+  const merged = Array.from(
+    new Set(existing.split(',').filter(Boolean).concat(features)),
+  );
+  app.commandLine.appendSwitch('disable-features', merged.join(','));
+};
+
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+addDisabledFeatures(
+  [
+    'IntensiveWakeUpThrottling',
+    'AllowAggressiveThrottlingWithWebSocket',
+  ].concat(
+    // Windows occlusion tracking has a live blank-client-area bug; macOS needs
+    // nothing here, Electron already disables MacWebContentsOcclusion.
+    process.platform === 'win32' ? ['CalculateNativeWinOcclusion'] : [],
+  ),
+);
+
 // Register deep links BEFORE app is ready (required for Windows/Linux)
 // This must be called before app.whenReady() for proper protocol handling
 const gotTheLock = setupDeepLinks(createMainWindow);
 
-// Track if app is quitting (for Cmd+Q support on macOS)
-let isQuitting = false;
-
-export function getIsQuitting(): boolean {
-  return isQuitting;
-}
-
-
-
 // Handle before-quit to allow Cmd+Q to actually quit the app
 app.on('before-quit', async () => {
-  isQuitting = true;
-  
+  setIsQuitting(true);
+
   // Log app quit event
   Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
 
@@ -103,28 +126,21 @@ app.on('before-quit', async () => {
 
 
 
-function menuItemToTemplate(item: MenuItem): MenuItemConstructorOptions {
-  return {
-    label: item.label,
-    role: item.role || undefined,
-    type: item.type,
-    accelerator: item.accelerator || undefined,
-    checked: item.checked,
-    enabled: item.enabled,
-    visible: item.visible,
-    submenu: item.submenu ? item.submenu.items.map(menuItemToTemplate) : undefined,
-    click: item.click as MenuItemConstructorOptions['click'],
-    id: item.id,
-  };
-}
-
 function setupApplicationMenu(): void {
-  const existingMenu = Menu.getApplicationMenu();
-  const template: MenuItemConstructorOptions[] = existingMenu
-    ? existingMenu.items.map(menuItemToTemplate)
-    : [];
+  // Append to Electron's existing default menu instead of rebuilding it from
+  // a template. Copying `role`-derived `click` handlers off built MenuItems
+  // into a fresh Menu.buildFromTemplate() call detaches Electron's internal
+  // role dispatcher from its original context, which throws
+  // "e.getOwnerBrowserWindow is not a function" the next time a role item
+  // (e.g. macOS Window menu's zoom/front) is clicked and crashes the main
+  // process.
+  const menu = Menu.getApplicationMenu() ?? new Menu();
 
-  template.push({
+  // ⌘+, ⌘- and ⌘0 zoom what has the keyboard: a browser's page, so its bar shows the
+  // size, or else the app.
+  routeMenuZoom(menu);
+
+  menu.append(new MenuItem({
     label: 'Beta',
     submenu: [
       {
@@ -147,10 +163,9 @@ function setupApplicationMenu(): void {
         },
       },
     ],
-  });
+  }));
 
-  const newMenu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(newMenu);
+  Menu.setApplicationMenu(menu);
 }
 
 async function initializeApp(): Promise<void> {
@@ -165,8 +180,11 @@ async function initializeApp(): Promise<void> {
   setupMTLS();
   setupRequestInterceptor();
   setupXyneSpacesInterceptor();
+  setupBrowserTabsUserAgent();
+  setupBrowserDownloads();
   void hydrateCachedUserFromCookies();
   setupIpcHandlers();
+  setupCallWindowHandlers();
 
   // Clear network cache on app start to ensure fresh assets
   try {
@@ -260,17 +278,44 @@ function setupAppStateListeners(): void {
 // Handle webview preload scripts - will-attach-webview fires on the HOST webContents
 app.on('web-contents-created', (_event, webContents) => {
   // Listen for will-attach-webview on any webContents (to catch webviews being created in the renderer)
-  webContents.on('will-attach-webview', (_event, webPreferences, _params) => {
-    // Set the webview preload script for Ask AI text selection
-    // In production, the preload script is in resources/app/dist
-    // In development, it's in the dist folder (parent of app folder where main.js is)
-    const webviewPreloadPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'dist', 'webview-preload.js')
-      : path.join(__dirname, '..', 'webview-preload.js');
+  webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    // The SDLC folder page's browser marks its pages in their webpreferences: they
+    // are plain browsing, with no use for the panel's Ask AI script — whose button
+    // sits over a site's own popups for a selection — nor for its bridge to the app,
+    // which a third-party page has no business holding.
+    // Xyne AI's workspace browser marks its pages `plain` for the same reason.
+    // Xyne's own pages, in their own partition, keep the script whatever the mark:
+    // it is how a Xyne page knows it is in a panel and shows only what fits one.
+    const features = typeof params.webpreferences === 'string' ? params.webpreferences : '';
+    const ownPage = params.partition === 'persist:xyne-spaces';
+    if (!ownPage && /(^|,)\s*xyneSurface=(sdlc|plain)\s*(,|$)/.test(features)) {
+      delete webPreferences.preload;
+      log.info('[Main] Plain browsing page: no webview preload');
+    } else {
+      // Xyne's own pages, which load in their own partition, are told they are
+      // in the browser panel; a third-party site never is.
+      if (ownPage) {
+        webPreferences.additionalArguments = [
+          ...(webPreferences.additionalArguments ?? []),
+          '--xyne-own-page',
+        ];
+      }
+      // Set the webview preload script for Ask AI text selection
+      // In production, the preload script is in resources/app/dist
+      // In development, it's in the dist folder (parent of app folder where main.js is)
+      const webviewPreloadPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'app', 'dist', 'webview-preload.js')
+        : path.join(__dirname, '..', 'webview-preload.js');
+
+      webPreferences.preload = webviewPreloadPath;
+      log.info('[Main] Setting webview preload:', webviewPreloadPath);
+    }
     
-    webPreferences.preload = webviewPreloadPath;
-    log.info('[Main] Setting webview preload:', webviewPreloadPath);
-    
+    // A page going full screen — a video — fills the app's window, which the app
+    // does for it, and never resizes or full-screens the window itself: leaving it
+    // would otherwise take the whole app out of macOS full screen with it.
+    webPreferences.disableHtmlFullscreenWindowResize = true;
+
     // Enable context isolation for security
     webPreferences.contextIsolation = true;
     // Disable node integration for security
@@ -288,7 +333,12 @@ app.on('web-contents-created', (_event, webContents) => {
 
   // Handle new window requests from webviews
   if (webContents.getType() === 'webview') {
-    webContents.setWindowOpenHandler(({ url }) => {
+    webContents.setWindowOpenHandler(({ url, disposition }) => {
+      // A script's own window — a popup — is held back while popups are turned off
+      // in the browser's settings. Links that open in a new tab are not popups.
+      if (disposition === 'new-window' && !browserSettingsService.getSettings().popups) {
+        return { action: 'deny' };
+      }
       try {
         const urlObj = new URL(url);
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
@@ -307,14 +357,16 @@ app.on('web-contents-created', (_event, webContents) => {
             if (invitePath) {
               mainWindow.webContents.send('navigate-to', invitePath);
             } else {
+              // How it asked: a ⌘-click or middle click opens a tab behind.
               (embedder ?? mainWindow.webContents).send(
                 'open-in-browser-panel',
                 url,
                 webContents.id,
+                disposition,
               );
             }
           } else if (embedder) {
-            embedder.send('open-in-browser-panel', url, webContents.id);
+            embedder.send('open-in-browser-panel', url, webContents.id, disposition);
           }
         }
       } catch (e) {
@@ -323,6 +375,15 @@ app.on('web-contents-created', (_event, webContents) => {
       
       return { action: 'deny' };
     });
+
+    // Pages see the app's theme, not the OS's, as prefers-color-scheme.
+    followAppTheme(webContents);
+
+    // Where the in-app browsers go, for their address bars to suggest.
+    trackBrowserHistory(webContents);
+
+    // How much memory the pages use, so a window lets go of hidden ones when too much.
+    watchBrowserMemory();
 
     // Keyboard shortcuts for webview (Cmd+T, Cmd+F, Cmd+R, etc.).
     // To add new shortcuts edit services/webview-shortcuts.ts.

@@ -12,6 +12,11 @@ import type {
   SearchSessionEndEvent,
   SearchTabClickEvent,
   SearchShowResultsEvent,
+  SearchSurface,
+  SearchFullPageOpenEvent,
+  SearchSizePreferenceSwitchEvent,
+  SearchReturnBannerEvent,
+  SearchFullPageSnackbarEvent,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
@@ -35,12 +40,20 @@ class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string, tab: TabType): void {
+  trackSessionStart(params: {
+    searchSessionId: string;
+    userId: string;
+    tab: TabType;
+    starredCount?: number;
+    surface?: SearchSurface;
+  }): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
-      search_session_id: searchSessionId,
-      user_id: userId,
-      tab,
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      tab: params.tab,
+      ...(params.starredCount !== undefined && { starred_count: params.starredCount }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_SESSION_START, event as unknown as Record<string, unknown>);
 
@@ -49,9 +62,9 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsStarted.add(1, {
         version: SEARCH_VERSION,
-        user_id: userId,
+        user_id: params.userId,
         platform: platform,
-        tab: tab,
+        tab: params.tab,
       });
     });
   }
@@ -126,6 +139,8 @@ class SearchMetricsService {
     resultUrl?: string;
     tab: TabType;
     relevanceScore?: number;
+    isStarred?: boolean;
+    surface?: SearchSurface;
   }): void {
     const words = countWords(params.queryText);
     // Log structured event
@@ -142,6 +157,8 @@ class SearchMetricsService {
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
       ...(params.relevanceScore !== undefined && { relevance_score: params.relevanceScore }),
+      ...(params.isStarred !== undefined && { is_starred: params.isStarred }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
     // Record metrics - increment click counter
@@ -288,6 +305,76 @@ class SearchMetricsService {
       filters_used: params.filtersUsed,
     };
     logger.info(Event.VESPA_SEARCH_SHOW_RESULTS, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track each time cmd+K search is shown full page, by entry point. Log-only, like
+   * trackShowResults.
+   */
+  trackFullPageOpen(params: {
+    searchSessionId: string;
+    userId: string;
+    source: SearchFullPageOpenEvent['source'];
+  }): void {
+    const event: SearchFullPageOpenEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      source: params.source,
+    };
+    logger.info(Event.VESPA_SEARCH_FULL_PAGE_OPEN, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track a change of the learned cmd+K open size.
+   */
+  trackSizePreferenceSwitch(params: {
+    searchSessionId: string;
+    userId: string;
+    to: SearchSizePreferenceSwitchEvent['to'];
+    reason: SearchSizePreferenceSwitchEvent['reason'];
+  }): void {
+    const event: SearchSizePreferenceSwitchEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      to: params.to,
+      reason: params.reason,
+    };
+    logger.info(
+      Event.VESPA_SEARCH_SIZE_PREFERENCE_SWITCH,
+      event as unknown as Record<string, unknown>,
+    );
+  }
+
+  /**
+   * Track the return banner being shown, clicked or dismissed.
+   */
+  trackReturnBanner(params: {
+    searchSessionId: string;
+    userId: string;
+    action: SearchReturnBannerEvent['action'];
+  }): void {
+    const event: SearchReturnBannerEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      action: params.action,
+    };
+    logger.info(Event.VESPA_SEARCH_RETURN_BANNER, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track the "Search now opens in full page" snackbar being shown, undone or dismissed.
+   */
+  trackFullPageSnackbar(params: {
+    searchSessionId: string;
+    userId: string;
+    action: SearchFullPageSnackbarEvent['action'];
+  }): void {
+    const event: SearchFullPageSnackbarEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      action: params.action,
+    };
+    logger.info(Event.VESPA_SEARCH_FULL_PAGE_SNACKBAR, event as unknown as Record<string, unknown>);
   }
 }
 

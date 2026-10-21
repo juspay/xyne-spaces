@@ -14,8 +14,8 @@
 import { createHash } from 'crypto';
 
 /**
- * Value of `extendedProperties.private.xyneOrigin` on a Calendar event that
- * Xyne created by pushing an internally scheduled call outward
+ * Value of the `xyneOrigin` extended property on a Calendar event that Xyne
+ * created by pushing an internally scheduled call outward
  * (see callCalendarPushService).
  *
  * It is the loop-breaker for the two inbound passes. Both the sync (which
@@ -23,14 +23,23 @@ import { createHash } from 'crypto';
  * Call for) and the link injector (which would treat it as a foreign event
  * needing a Xyne link grafted on) must leave these events alone. Xyne is the
  * source of truth for them; the calendar copy is the mirror, not the original.
+ *
+ * Written as both a private and a shared property. Private properties stay on
+ * the organizer's copy of the event; only shared ones reach the copy on each
+ * attendee's calendar, which is synced inbound just the same.
  */
 export const XYNE_CALENDAR_ORIGIN_VALUE = 'xyne';
 
 /** True when this event is Xyne's own outbound mirror of a scheduled call. */
 export function isXyneOriginatedEvent(
-  privateProperties: Record<string, string> | undefined
+  extendedProperties:
+    | { private?: Record<string, string>; shared?: Record<string, string> }
+    | undefined
 ): boolean {
-  return privateProperties?.xyneOrigin === XYNE_CALENDAR_ORIGIN_VALUE;
+  return (
+    extendedProperties?.private?.xyneOrigin === XYNE_CALENDAR_ORIGIN_VALUE ||
+    extendedProperties?.shared?.xyneOrigin === XYNE_CALENDAR_ORIGIN_VALUE
+  );
 }
 
 /** Escapes a URL for safe use inside an HTML attribute in the event description. */
@@ -69,9 +78,10 @@ function buildEventDescription(description: string | null | undefined, roomLink:
 /**
  * The Google event body for a Xyne-scheduled call.
  *
- * `extendedProperties.private.xyneOrigin` is what keeps the push from feeding
- * itself: the inbound sync and the link injector both skip events carrying it,
- * so the event this creates never comes back around as a second Call.
+ * `xyneOrigin` is what keeps the push from feeding itself: the inbound sync
+ * and the link injector both skip events carrying it, so the event this
+ * creates never comes back around as a second Call. `shared` holds nothing
+ * else — every attendee can read it, and the marker is all their copy needs.
  */
 export function buildGoogleEventBody(params: GoogleEventBodyParams): Record<string, unknown> {
   return {
@@ -87,6 +97,9 @@ export function buildGoogleEventBody(params: GoogleEventBodyParams): Record<stri
         xyneCallId: params.callId,
         xyneCallExternalId: params.callExternalId,
         xyneRoomLink: params.roomLink,
+      },
+      shared: {
+        xyneOrigin: XYNE_CALENDAR_ORIGIN_VALUE,
       },
     },
     reminders: { useDefault: true },

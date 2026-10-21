@@ -21,6 +21,12 @@ in
       example = lib.literalExpression "[ pkgs.nodejs_22 pkgs.just ]";
     };
 
+    shellHook = mkOption {
+      type = types.lines;
+      default = "";
+      description = "Additional commands run when entering the development shell.";
+    };
+
     banner = mkOption {
       type = types.nullOr types.lines;
       default = null;
@@ -37,19 +43,25 @@ in
         ```
       '';
     };
+
+    environment = mkOption {
+      type = types.attrsOf types.str;
+      default = { };
+      description = "Environment variables for development commands";
+    };
   };
 
   config = mkIf (cfg.packages != [ ] || cfg.banner != null) {
-    devShells.default = pkgs.mkShell {
+    devShells.default = pkgs.mkShell (cfg.environment // {
       name = cfg.name;
 
       packages = cfg.packages ++ lib.optional (cfg.banner != null) pkgs.glow;
 
-      shellHook = lib.optionalString (cfg.banner != null) ''
+      shellHook = cfg.shellHook + lib.optionalString (cfg.banner != null) ''
         glow <<'BANNER_EOF'
 ${cfg.banner}
 BANNER_EOF
       '';
-    };
+    });
   };
 }

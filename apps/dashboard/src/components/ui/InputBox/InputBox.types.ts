@@ -29,6 +29,8 @@ export interface InputBoxProps {
   ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;
+  /** Edit composers retain their content until the parent confirms the save. */
+  clearOnSend?: boolean;
   mentionItems?: import('@xyne/shared').MentionResult[];
   voiceMentionItems?: import('@xyne/shared').MentionResult[];
   onMentionSearch?: (query: string) => void;
@@ -78,6 +80,13 @@ export interface InputBoxProps {
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
   dockSlot?: React.ReactNode;
+  /** Rendered inside the composer's border, above the editor (desktop only). */
+  headerSlot?: React.ReactNode;
+  /**
+   * Background work on the draft is in flight (e.g. a related-context lookup): a thin
+   * line traces the border. Leave undefined to opt out entirely (desktop only).
+   */
+  borderActivity?: boolean;
   slashCommandArtifactCommand?: string;
   slashCommandArtifactChannelLabel?: string;
   onCancelSlashCommandArtifact?: () => void;

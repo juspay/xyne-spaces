@@ -118,7 +118,7 @@ export async function deliverSlackResult(input: {
   const text =
     input.status === "completed"
       ? prepareSlackResultText(input.result || "The run completed without a response.")
-      : "⚠️ The agent couldn't complete this request. Please try again.";
+      : "The agent couldn't complete this request. Please try again.";
   await postSlackMessage(botToken, {
     channel: input.target.channelId,
     threadTs: input.target.threadTs,
@@ -136,7 +136,7 @@ export async function deliverSlackResult(input: {
       await postSlackMessage(botToken, {
         channel: input.target.channelId,
         threadTs: input.target.threadTs,
-        text: `⚠️ ${failed} attachment(s) could not be uploaded to Slack${uploaded > 0 ? ` (${uploaded} succeeded)` : ""}. The app may need the files:write scope (reinstall after scope update).`,
+        text: `${failed} attachment(s) could not be uploaded to Slack${uploaded > 0 ? ` (${uploaded} succeeded)` : ""}. The app may need the files:write scope (reinstall after scope update).`,
       }).catch(() => undefined);
     }
   }

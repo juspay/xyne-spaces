@@ -71,7 +71,7 @@ export function BuiltinDetailPanel({
                 : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
             )}
           >
-            {enabled ? 'Disable' : 'Enable'}
+            {enabled ? 'Remove' : 'Add'}
           </button>
         </div>
         <Separator />

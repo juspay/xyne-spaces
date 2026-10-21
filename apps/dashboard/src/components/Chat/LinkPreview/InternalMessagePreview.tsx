@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Hash, Lock, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import {
   ChannelScopeType,
   Ticket,
@@ -11,6 +10,7 @@ import {
 import type { InternalMessageLinkMetadata } from './LinkPreview';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useCrossWorkspaceNavigate } from '../../../hooks/useCrossWorkspaceNavigate';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import Avatar from '../../ui/Avatar/Avatar';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
@@ -348,7 +348,7 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
   metadata,
   onClose,
 }) => {
-  const navigate = useNavigate();
+  const navigate = useCrossWorkspaceNavigate();
   const { isMobile } = usePlatform();
 
   const {
@@ -396,7 +396,7 @@ const InternalMessagePreviewComponent: React.FC<InternalMessagePreviewProps> = (
       const targetUrl = new URL(url, window.location.origin);
       const normalizedUrl = normalizeToCurrentOrigin(targetUrl);
       if (normalizedUrl.origin === window.location.origin) {
-        void navigate(`${normalizedUrl.pathname}${normalizedUrl.search}${normalizedUrl.hash}`);
+        void navigate(normalizedUrl.href).catch(() => undefined);
         return;
       }
     } catch {

@@ -11,6 +11,8 @@ import type {
   SourceType,
   TestConnectionResult,
 } from './connectors/types';
+import { createTx } from '@/bypassAcl/transactions/DataSourceService';
+import { requestRefreshTx } from '@/bypassAcl/transactions/DataSourceService';
 
 export type { SourceType };
 
@@ -212,34 +214,7 @@ export class DataSourceService {
     const plaintext = JSON.stringify(input.connectionConfig);
     const ciphertext = encrypt(plaintext);
 
-    const dataSource = await db.$transaction(async (tx) => {
-      const created = await tx.dataSource.create({
-        data: {
-          workspaceId: input.workspaceId,
-          name: input.name,
-          description: input.description,
-          sourceType: input.sourceType,
-          credentials: ciphertext,
-          healthStatus: 'healthy',
-          ingestionStatus: 'pending',
-          createdBy: input.createdBy,
-        },
-      });
-      await tx.dashboardActivity.create({
-        data: {
-          workspaceId: input.workspaceId,
-          entityType: 'data_source',
-          entityId: created.id,
-          eventType: 'created',
-          actorUserId: input.createdBy,
-          details: JSON.stringify({
-            sourceType: input.sourceType,
-            name: input.name,
-          }),
-        },
-      });
-      return created;
-    });
+    const dataSource = await createTx(input, ciphertext);
 
     logger.info(
       `[DataSource] Created ${dataSource.id} (${input.sourceType}, ws=${input.workspaceId})`,
@@ -303,21 +278,7 @@ export class DataSourceService {
       tableName: t.tableName,
     }));
 
-    await db.$transaction(async (tx) => {
-      await tx.dataSource.update({
-        where: { id },
-        data: { ingestionStatus: 'pending' },
-      });
-      await tx.dashboardActivity.create({
-        data: {
-          workspaceId,
-          entityType: 'data_source',
-          entityId: id,
-          eventType: 'refresh_requested',
-          actorUserId,
-        },
-      });
-    });
+    await requestRefreshTx(id, workspaceId, actorUserId);
 
     return { found: true, includedTables };
   }

@@ -5,6 +5,10 @@ export interface RefetchResult {
   newTickets: number;
   skipped: number;
   errors: string[];
+  /** True when a run budget (page cap / wall-clock) stopped the fetch early — rerun to continue. */
+  partial?: boolean;
+  /** True error count across the run when `errors` was truncated to its display cap. */
+  totalErrors?: number;
 }
 
 export interface RefetchOptions {

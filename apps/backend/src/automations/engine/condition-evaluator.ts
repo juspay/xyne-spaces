@@ -54,12 +54,14 @@ function looseEquals(a: unknown, b: unknown): boolean {
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value instanceof Date) return toFiniteNumber(+value);
   if (typeof value !== 'string') return null;
 
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
 
-  const parsed = Number(trimmed);
+  // Numeric strings must win here, so "5" stays 5 instead of parsing as a date.
+  const parsed = Number.isFinite(Number(trimmed)) ? Number(trimmed) : Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -105,6 +107,14 @@ function applyOperator(
         return resolved.includes(refValue);
       }
       if (Array.isArray(resolved)) return resolved.includes(refValue);
+      return false;
+
+    // Case-sensitive, like CONTAINS — lets `ALARM |` match an alert header
+    // without also matching `Cloudwatch Alarm |` further in the body.
+    case ConditionOperator.STARTS_WITH:
+      if (typeof resolved === 'string' && typeof refValue === 'string') {
+        return resolved.startsWith(refValue);
+      }
       return false;
 
     case ConditionOperator.GT:

@@ -35,6 +35,7 @@ import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { buildYqlFromParams } from "../mcp/servers/vespa-search-areas.js";
 import { queryDirect } from "../mcp/servers/vespa-direct.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -719,18 +720,27 @@ export async function assembleConversationUnits(
   // Spaces API only when it can't be resolved.
   const workspaceId = auth.workspaceId || (await getWorkspaceIdForUser(userId, "scheduled-job")) || "";
 
+  // Sender/mention/group filters below are keyed by Spaces' workspace-scoped
+  // user id (Vespa senderId, message content mention tokens, userGroupMapping),
+  // while `userId` here is the canonical Claw id — the two forms diverge for
+  // any user mirrored after canonicalization. Translate once, fail-open.
+  const spacesUserId = await spacesUserIdForClawUser(userId, workspaceId || undefined).catch(() => userId);
+  if (spacesUserId !== userId) {
+    logger.info("[assembler] userId translated to Spaces form for windowed reads", { userId });
+  }
+
   // 1. What the user said + what came at them. Own-messages come from Vespa (the
   //    read replica) — mentions stay on the Spaces API (content-substring match).
   const [ownMsgs, mentions] = await Promise.all([
     (workspaceId
-      ? fetchOwnMessagesVespa(userId, workspaceId, window)
-      : fetchOwnMessagesSpaces(auth, userId, window)
+      ? fetchOwnMessagesVespa(spacesUserId, workspaceId, window)
+      : fetchOwnMessagesSpaces(auth, spacesUserId, window)
     ).catch((e) => {
       logger.warn("[assembler] own-messages fetch failed", { userId, err: String(e) });
       return [] as MsgRow[];
     }),
-    fetchInboundMentions(auth, userId, window).catch((e) => {
-      logger.warn("[assembler] inbound-mentions fetch failed", { userId, err: String(e) });
+    fetchInboundMentions(auth, spacesUserId, window).catch((e) => {
+      logger.info("[assembler] inbound-mentions fetch failed", { userId, err: String(e) });
       return [] as ActivityRow[];
     }),
   ]);

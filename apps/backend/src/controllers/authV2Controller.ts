@@ -4,11 +4,11 @@ import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
+import { authSessionService } from '../services/authSessionService';
 import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { channelService } from '../services/channelService';
 import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -16,7 +16,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
-import { switchWorkspaceData } from '@/bypassAcl/authServices';
+import { switchWorkspaceData, ensureSelfDmForUserData, getWorkspaceLandingChannelData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
@@ -45,7 +45,7 @@ type AutoLoginResult = {
     name: string;
     picture: string | null;
     workspaceId: string | null;
-    orgMemberId: string | null;
+    orgMemberId: string;
     providerUserId: string;
     role: string;
   };
@@ -118,14 +118,7 @@ export class AuthV2Controller {
     userId: string,
     workspaceId: string
   ): Promise<string | null> {
-    try {
-      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
-      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
-      return selfDmChannelId;
-    } catch (error) {
-      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
-      return null;
-    }
+    return ensureSelfDmForUserData(userId, workspaceId);
   }
 
   /**
@@ -320,7 +313,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/contacts.readonly', 'https://www.googleapis.com/auth/contacts.other.readonly'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -544,13 +537,24 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces — the only
+        // path forward for a workspace-less user without a pending community join
+        // or invitation — so fail fast on them regardless of the entry flow. The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -957,13 +961,23 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces, so fail fast
+        // on them regardless of the entry flow (mirrors handleCallback). The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -1024,7 +1038,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`${tag()} Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -1059,6 +1073,12 @@ export class AuthV2Controller {
         res.cookie('user_session_id', sessionId, {
           ...cookieBase,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
         });
 
         logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
@@ -1400,6 +1420,12 @@ export class AuthV2Controller {
           });
         }
 
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+        });
+
         logger.info(`${tag()} Google OAuth login succeeded (platform=mobile, outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
 
         // Return JSON instead of redirect (mobile expects this)
@@ -1489,6 +1515,9 @@ export class AuthV2Controller {
       if (req.user && sessionId) {
         await getEncryptionProvider().revokeSessionKey(sessionId);
       }
+
+      // Revoke the device's org-scoped auth session and clear the xs cookie.
+      await authSessionService.revokeOnLogout(req, res, { orgMemberId: req.user?.memberId });
 
       // Clear global session cookie
       res.clearCookie('user_session_id', { path: '/' });
@@ -1663,10 +1692,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { landingChannelId: true },
-      });
+      const workspace = await getWorkspaceLandingChannelData(workspaceId);
 
       let sessionId = null;
       if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
@@ -1734,6 +1760,12 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
+
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+      });
 
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
@@ -1847,10 +1879,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       let sessionId = null;
 
@@ -1912,11 +1941,18 @@ export class AuthV2Controller {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
-      
+
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', targetWorkspaceId, {
         ...cookieOptions,
         maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+      });
+
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        orgId: organization.orgId,
       });
 
       setOnboardingCookie(res, isNewUser, {
@@ -2085,6 +2121,12 @@ export class AuthV2Controller {
         res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
       }
 
+      // Stamp the entered workspace on the device's auth session; never fails the switch.
+      await authSessionService.recordWorkspaceAccess(req, {
+        orgMemberId: targetUser.orgMemberId,
+        workspaceId,
+      });
+
       logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
 
       res.status(200).json({
@@ -2166,6 +2208,16 @@ export class AuthV2Controller {
 
         logger.info(`[CREATE-WORKSPACE-PENDING] User ${oauthUserData.email} creating workspace "${workspaceName}" via ${provider}`);
 
+        // The pending-auth cookie is a plain string — normalize it into the enum
+        // we persist on the User row so a Microsoft login is not saved as GOOGLE.
+        const normalizedProvider = provider?.toUpperCase();
+        const signUpProvider =
+          normalizedProvider === 'MICROSOFT'
+            ? AuthProvider.MICROSOFT
+            : normalizedProvider === 'EMAIL'
+              ? AuthProvider.EMAIL
+              : AuthProvider.GOOGLE;
+
         const userData = {
           providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
           email: oauthUserData.email.toLowerCase(),
@@ -2209,7 +2261,7 @@ export class AuthV2Controller {
         });
 
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture },
+          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
           {
             workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
@@ -2220,10 +2272,7 @@ export class AuthV2Controller {
         await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
         const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-        const workspaceRecord = await this.prisma.workspace.findUnique({
-          where: { id: workspace.id },
-          select: { landingChannelId: true },
-        });
+        const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
         let sessionId = null;
         if (pendingRefreshToken) {
@@ -2282,6 +2331,13 @@ export class AuthV2Controller {
         res.cookie('xyne_last_workspace', targetWorkspaceId, {
           ...cookieOptions,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+          orgId: organization.orgId,
         });
 
         const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
@@ -2368,7 +2424,7 @@ export class AuthV2Controller {
       }
 
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },
+        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
         {
           workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
@@ -2379,10 +2435,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       // Reuse refresh token from current session
       // Get global session cookie
@@ -2431,6 +2484,13 @@ export class AuthV2Controller {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
+
+      // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+      await authSessionService.issueOnLogin(req, res, {
+        orgMemberId: workspaceUser.orgMemberId,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        orgId: organization.orgId,
+      });
       const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,

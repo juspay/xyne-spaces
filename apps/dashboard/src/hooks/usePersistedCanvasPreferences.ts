@@ -16,7 +16,7 @@ interface CanvasPreferences {
 
 const DEFAULT: CanvasPreferences = {
   version: PREFERENCES_VERSION,
-  filter: 'all',
+  filter: 'created_by_me',
   viewMode: 'list',
   lastCanvasId: null,
   isSidebarCollapsed: false,

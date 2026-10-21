@@ -51,6 +51,9 @@ export interface ToolMatch {
   name: string;
   /** `custom:google` → `google`. The grouping a human recognises. */
   integration: string;
+  /** The raw `tools.source` (`mcp:grafana`, `custom:sandbox`, …). Tells an MCP
+   *  connector's tool, which needs a connection, from a built-in one. */
+  source: string;
   description: string;
   risk: RiskLevel;
   params: ToolParam[];

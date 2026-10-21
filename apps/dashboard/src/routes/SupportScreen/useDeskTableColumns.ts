@@ -85,6 +85,7 @@ const readColumns = (channelId: string | null): Set<string> => {
 export function useDeskTableColumns(channelId: string | null): {
   selectedColumnKeys: Set<string>;
   toggleColumn: (key: string, visible: boolean) => void;
+  setColumns: (keys: Set<string>) => void;
 } {
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<Set<string>>(() =>
     readColumns(channelId),
@@ -113,5 +114,19 @@ export function useDeskTableColumns(channelId: string | null): {
     [channelId],
   );
 
-  return { selectedColumnKeys, toggleColumn };
+  const setColumns = useCallback(
+    (keys: Set<string>): void => {
+      setSelectedColumnKeys(keys);
+      if (channelId) {
+        try {
+          writeColumns(channelId, keys);
+        } catch {
+          // Storage full or unavailable — selection still applies in-memory.
+        }
+      }
+    },
+    [channelId],
+  );
+
+  return { selectedColumnKeys, toggleColumn, setColumns };
 }

@@ -1,59 +1,54 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import {
-  TicketContextSchema,
   matchTicketScopeFilters,
   hydrateTicketBoundPayload,
   type TicketLike,
 } from './ticket-context';
 import type { TicketUpdatedEventPayload } from '../types/automation-events';
+import {
+  TicketUpdatedFieldSchema,
+  FormFieldConditionSchema,
+  TicketUpdatedOutputSchema,
+  resolveFormFieldConditions,
+  matchesFormFieldCondition,
+  isTicketReopenTransition,
+  type TicketChanges,
+  type FormFieldChanges,
+} from './ticket-updated-schema';
+
+// Re-exported so every existing importer keeps its import path; the definitions
+// moved to a leaf that the engine cannot reach. See `ticket-updated-schema.ts`.
+export {
+  REOPENED_STATUSES,
+  isTicketReopenTransition,
+  TicketUpdatedFieldSchema,
+  FormFieldConditionMatchSchema,
+  FormFieldConditionSchema,
+  TicketChangeSchema,
+  TicketUpdatedOutputSchema,
+  resolveFormFieldConditions,
+  matchesFormFieldCondition,
+} from './ticket-updated-schema';
+export type {
+  TicketChange,
+  FormFieldCondition,
+  TicketChanges,
+  FormFieldChanges,
+  TicketUpdatedField,
+} from './ticket-updated-schema';
 import { logger } from '@/utils/logger';
 
 export const TICKET_UPDATED_EVENT = 'TICKET_UPDATED';
-
-export const TicketUpdatedFieldSchema = z.enum([
-  'statusV2',
-  'assignedTo',
-  'priority',
-  'stageName',
-  'title',
-  'description',
-  'eta',
-  'boardId',
-  'userGroupId',
-]);
-export type TicketUpdatedField = z.infer<typeof TicketUpdatedFieldSchema>;
 
 const FieldTransitionSchema = z.object({
   field: TicketUpdatedFieldSchema,
   previousValue: z.union([z.string(), z.number()]).nullable().optional(),
   newValue: z.union([z.string(), z.number()]).nullable().optional(),
 });
-
-export const FormFieldConditionMatchSchema = z.enum(['changed', 'contains']);
-
-export const FormFieldConditionSchema = z
-  .object({
-    fieldId: z.string().min(1),
-    match: FormFieldConditionMatchSchema.default('changed'),
-    value: z
-      .string()
-      .optional()
-      .describe('Substring to look for in the new field value when match is "contains".'),
-  })
-  .superRefine((val, ctx) => {
-    if (val.match === 'contains' && !(val.value ?? '').trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'A contains value is required when match is "contains".',
-        path: ['value'],
-      });
-    }
-  });
-export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
 
 const TicketUpdatedConfigSchema = z.object({
   projectIds: z
@@ -88,77 +83,8 @@ const TicketUpdatedConfigSchema = z.object({
     ),
 });
 
-export const TicketChangeSchema = z.object({
-  previousValue: z.union([z.string(), z.number(), z.null()]).optional(),
-  newValue: z.union([z.string(), z.number(), z.null()]).optional(),
-});
-
-export const TicketUpdatedOutputSchema = TicketContextSchema.extend({
-  changes: z.record(TicketUpdatedFieldSchema, TicketChangeSchema),
-  formFieldChanges: z.record(z.string(), TicketChangeSchema).optional(),
-  performedBy: z.object({
-    id: z.string().nullable(),
-  }),
-});
-
 type TicketUpdatedConfig = z.infer<typeof TicketUpdatedConfigSchema>;
 type TicketUpdatedPayload = z.infer<typeof TicketUpdatedOutputSchema>;
-type TicketChange = z.infer<typeof TicketChangeSchema>;
-
-export type TicketChanges = Partial<Record<TicketUpdatedField, TicketChange>>;
-
-/**
- * Statuses a ticket can come back to from COMPLETED. Mirrors the reopen definition
- * used for desk metrics (deskMetricsRepository's reopenedPredicate) so "reopened"
- * means one thing across the product.
- */
-export const REOPENED_STATUSES: string[] = [
-  TicketStatusV2.TODO,
-  TicketStatusV2.STARTED,
-  TicketStatusV2.PAUSED,
-];
-
-/** True when this diff represents a completed ticket being brought back to life. */
-export function isTicketReopenTransition(changes: TicketChanges): boolean {
-  const statusChange = changes.statusV2;
-  if (!statusChange) return false;
-  return (
-    statusChange.previousValue === TicketStatusV2.COMPLETED &&
-    REOPENED_STATUSES.includes(String(statusChange.newValue))
-  );
-}
-export type FormFieldChanges = Record<string, TicketChange>;
-
-/** Normalize legacy formFieldIds into formFieldConditions (match: changed). */
-export function resolveFormFieldConditions(cfg: TicketUpdatedConfig): FormFieldCondition[] {
-  if (cfg.formFieldConditions && cfg.formFieldConditions.length > 0) {
-    return cfg.formFieldConditions.map(c => ({
-      fieldId: c.fieldId,
-      match: c.match ?? 'changed',
-      value: c.value,
-    }));
-  }
-  if (cfg.formFieldIds && cfg.formFieldIds.length > 0) {
-    return cfg.formFieldIds.map(fieldId => ({ fieldId, match: 'changed' as const }));
-  }
-  return [];
-}
-
-export function matchesFormFieldCondition(
-  condition: FormFieldCondition,
-  formFieldChanges: FormFieldChanges | undefined,
-): boolean {
-  const change = formFieldChanges?.[condition.fieldId];
-  if (!change) return false;
-
-  const match = condition.match ?? 'changed';
-  if (match === 'changed') return true;
-
-  const needle = (condition.value ?? '').trim();
-  if (!needle) return false;
-  if (change.newValue === null || change.newValue === undefined) return false;
-  return String(change.newValue).toLowerCase().includes(needle.toLowerCase());
-}
 
 export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfigSchema> {
   readonly type = TICKET_UPDATED_EVENT;
@@ -321,11 +247,16 @@ export async function emitTicketUpdated(params: {
     // fresh from the DB when the automation actually runs.
     const payload = {
       ticketId: ticket.id,
+      scope: {
+        boardId: ticket.boardId ?? null,
+        projectId: ticket.projectId ?? null,
+        channelId: ticket.channelId ?? null,
+      },
       changes,
       formFieldChanges: formFieldChanges ?? {},
       performedBy: { id: performedById },
     };
-    await eventRouter.emit(
+    await emitDomainEvent(
       { type: TICKET_UPDATED_EVENT, payload },
       ticket.workspaceId,
     );

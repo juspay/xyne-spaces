@@ -16,6 +16,7 @@ import {
 export type SlackEmailMessage = {
   id: string;
   from: string | null;
+  to: string[] | null;
   body: string | null;
   createdAt: number | null;
   type: string | null;
@@ -38,7 +39,13 @@ function extractEmail(from: string | null): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
-const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => {
+const SlackMessage = ({
+  email,
+  showRecipient = false,
+}: {
+  email: SlackEmailMessage;
+  showRecipient?: boolean;
+}): ReactElement => {
   const allUsers = useUsers();
 
   const senderEmail = useMemo(() => extractEmail(email.from), [email.from]);
@@ -58,6 +65,8 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
       })
     : '';
   const isOutgoing = email.type === 'REPLY';
+  // For incoming DMs show which account received the message (e.g. "@xyne.spaces").
+  const recipientLabel = showRecipient && !isOutgoing && email.to?.length ? email.to[0] : null;
 
   const panelAttachments: PanelAttachmentRow[] = useMemo(
     () =>
@@ -109,6 +118,11 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
             <span className='text-sm font-semibold text-foreground truncate'>{senderName}</span>
           )}
           <span className='text-[11px] text-muted-foreground whitespace-nowrap'>{timestamp}</span>
+          {recipientLabel && (
+            <span className='text-[11px] text-muted-foreground whitespace-nowrap'>
+              → {recipientLabel}
+            </span>
+          )}
         </div>
         {/* Body */}
         <div className='mt-1 text-sm text-foreground leading-relaxed'>

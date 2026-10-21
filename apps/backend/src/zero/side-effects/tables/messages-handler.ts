@@ -26,12 +26,14 @@ import { Platform,
   serializeMessagePreviewMd,
   serializeLinkPreviewMd,
   parseLinkPreviewMd,
+  serializeCallPreviewMd,
   parseForwardedMessageXml,
   type MessagePreviewData,
   type TicketPreviewSnapshot,
   ActivityClassification,
   ActivityClassificationJobType,
   AttachmentEntityType,
+  CallType,
   ChannelScopeType,
   NotificationDeliveryMethod,
   NotificationType,
@@ -43,7 +45,7 @@ import { MessageAttachmentRepository } from '@/database/repositories/messageAtta
 import { syncMessageArtifact } from '@/database/repositories/messageArtifactRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
-import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
+import { extractInternalUrl, parseInternalUrl, extractFirstUrl, extractCallLink } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
@@ -69,6 +71,7 @@ import {
   mentionRecipients,
   notifyMentioned,
 } from './mention-delivery';
+import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -220,7 +223,7 @@ function getKeywordScanText(content: string): string {
   return flowText ?? getPlainTextNotificationContent(content);
 }
 
-function formatDmChannelName(names: string[], maxVisible: number = 2): string {
+export function formatDmChannelName(names: string[], maxVisible: number = 2): string {
   const visible = names.slice(0, maxVisible);
   const remainder = names.length - visible.length;
   if (remainder === 0) {
@@ -300,6 +303,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
+        workspaceId: true,
         initialMessageId: true,
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
@@ -337,13 +341,19 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
 
+    // Replies fan out too; only automations with `includeReplies` act on them.
+    void emitMessageReceived({
+      messageId: message.messageId,
+      conversationId,
+      channelId,
+      msgType: message.msgType as MessageType,
+      userId: senderId,
+      isReply: conversation.initialMessageId !== message.messageId,
+    });
     if (conversation.initialMessageId === message.messageId) {
-      void emitMessageReceived({
-        messageId: message.messageId,
-        conversationId,
-        channelId,
-        msgType: message.msgType as MessageType,
-        userId: senderId,
+      // A new thread in a channel that feeds a Channels desk gets a desk ticket.
+      channelsDeskTicketForConversation(conversation.workspaceId, conversationId).catch(error => {
+        logger.error('[MessagesSideEffect] Channels desk ticket failed:', { conversationId, error });
       });
     }
 
@@ -372,7 +382,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { id: { in: participantUserIds } },
       select: { id: true, email: true, name: true, displayName: true, userType: true, status: true }
     });
-    const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
+    const appUserIds = users.filter(u => u.userType === UserType.APP || u.userType === UserType.AGENT).map(u => u.id);
 
     // Top-level user message with a Bitbucket PR link in a regular channel:
     // post the "Run PR Check" button in this thread (gated on the Varys bot
@@ -385,6 +395,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       message.msgType === 'USER' &&
       sender != null &&
       sender.userType !== UserType.APP &&
+      sender.userType !== UserType.AGENT &&
       channel?.scopeType === ChannelScopeType.DEFAULT &&
       content?.includes('/pull-requests/')
     ) {
@@ -433,7 +444,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
-    const contentForMentions = flowRawText ?? content;
+    const contentForMentions =
+      message.msgType === MessageType.FORWARDED
+        ? parseForwardedMessageXml(content)?.optionalText ?? ''
+        : flowRawText ?? content;
     // Channel-addressing artifacts reach the channel from inside a thread too:
     // an incident is the case the thread-broadcast restriction exists to allow.
     const allowBroadcastExpansion =
@@ -443,6 +457,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       : { hasChannel: false, hasHere: false };
     // Reuses the @channel pipeline wholesale: mention-tier notification
     // filtering, per-user activities, and thread-aware action URLs all follow.
+    // Describes the message, not each recipient. Never pass it for personally
+    // mentioned users — it would subject them to the @channel/@here mute.
     const mentionType =
       artifactBroadcastsToChannel || specialMentions.hasChannel
         ? '@channel'
@@ -565,7 +581,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
     // In thread replies, disable @channel/@here expansion by not passing channelId.
-    // contentForMentions is already computed above (flow text for FlowJSON, raw HTML otherwise)
+    // contentForMentions is already computed above (the note for forwards, flow text for FlowJSON, raw HTML otherwise)
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,
@@ -642,6 +658,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           )
       ),
     ];
+    // Direct/group mentions must not be gated by the @channel/@here toggle, so they
+    // are notified separately from users reached only through the broadcast.
+    const personallyMentionedIds = new Set(finalMentionedUserIds);
+    const directNotificationUserIds = notificationUserIds.filter(id => personallyMentionedIds.has(id));
+    const broadcastNotificationUserIds = notificationUserIds.filter(id => !personallyMentionedIds.has(id));
 
     if (validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
@@ -726,27 +747,35 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         senderId
       );
-      deliveredMentionUserIds = await notifyMentioned(notificationUserIds, {
-        workspaceId: this.ctx.workspaceId,
-        messageId,
-        conversationId,
-        channelId,
-        channelName,
-        senderId,
-        senderName,
-        senderPicture: sender?.picture ?? '',
-        cleanContent,
-        isReply: !!isReply,
-        isDM: isOneToOneDM,
-        mentionType,
-        prefetchedData,
-        slackEmails: new Map(
-          notificationUserIds
-            .map(id => channelParticipants.find(p => p.userId === id))
-            .filter(p => p?.user?.email)
-            .map(p => [p!.userId, p!.user.email]),
-        ),
-      });
+      const notifyMentionGroup = (userIds: string[], groupMentionType: typeof mentionType) =>
+        userIds.length === 0
+          ? Promise.resolve<string[]>([])
+          : notifyMentioned(userIds, {
+              workspaceId: this.ctx.workspaceId,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              senderPicture: sender?.picture ?? '',
+              cleanContent,
+              isReply: !!isReply,
+              isDM: isOneToOneDM,
+              mentionType: groupMentionType,
+              prefetchedData,
+              slackEmails: new Map(
+                userIds
+                  .map(id => channelParticipants.find(p => p.userId === id))
+                  .filter(p => p?.user?.email)
+                  .map(p => [p!.userId, p!.user.email]),
+              ),
+            });
+      const [directDelivered, broadcastDelivered] = await Promise.all([
+        notifyMentionGroup(directNotificationUserIds, undefined),
+        notifyMentionGroup(broadcastNotificationUserIds, mentionType),
+      ]);
+      deliveredMentionUserIds = [...directDelivered, ...broadcastDelivered];
     }
 
     // Keyword-match notifications: delivered like a mention (activity feed +
@@ -1124,7 +1153,15 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     );
     if (resolvedInternal) return;
 
-    // 2) Try Bitbucket PR link preview (API-first with URL-derived fallback)
+    // 2) Try Xyne call link preview (DB lookup, no HTTP fetch)
+    const resolvedCall = await this.resolveCallLinkPreview(
+      messageId,
+      conversationId,
+      contentWithoutMentions,
+    );
+    if (resolvedCall) return;
+
+    // 3) Try Bitbucket PR link preview (API-first with URL-derived fallback)
     const url = extractFirstUrl(contentWithoutMentions);
     if (url) {
       const resolvedBitbucket = await this.resolveBitbucketLinkPreview(
@@ -1135,8 +1172,58 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       if (resolvedBitbucket) return;
     }
 
-    // 3) Fall through to external OG-based preview
+    // 4) Fall through to external OG-based preview
     await this.resolveExternalLinkPreview(messageId, conversationId, contentWithoutMentions);
+  }
+
+  /**
+   * Detect a Xyne call link and write a pointer block (url + externalId) — no HTTP fetch. The
+   * card reads title and status live (see CallLinkPreview); this only checks the call exists.
+   *
+   * Returns true even when the call is unresolved: falling through hands the link to the OG
+   * scraper, which fetches our own SPA and produces a generic "Xyne Spaces" card.
+   */
+  private async resolveCallLinkPreview(
+    messageId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<boolean> {
+    const callLink = extractCallLink(content);
+    if (!callLink) return false;
+
+    logger.info('[MessagesSideEffect] Detected Xyne call URL:', {
+      url: callLink.url,
+      externalId: callLink.externalId,
+    });
+
+    const call = await withWorkspaceScope(() => db.call.findUnique({
+      where: { externalId: callLink.externalId },
+      select: { externalId: true, callType: true },
+    }));
+
+    if (!call) {
+      logger.info(
+        `[MessagesSideEffect] No call for externalId ${callLink.externalId}; skipping preview`,
+      );
+      return true;
+    }
+
+    // Recordings share this table: a HEADLESS row gets no card, but is still claimed.
+    if (call.callType === CallType.HEADLESS) return true;
+
+    const md = serializeCallPreviewMd({ url: callLink.url, externalId: call.externalId });
+    if (!md) return true;
+
+    // The message may be a bot's, so the write runs above the caller's own scope.
+    await withWorkspaceScope(() => db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    }));
+
+    await this.syncConversationMessageMetadata(conversationId);
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with call preview`);
+    return true;
   }
 
   /**
@@ -1500,28 +1587,41 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
         if (mentionType) {
           // @channel/@here in GROUP_DM thread: use 'thread_mention' context.
-          try {
-            const { deliveredUserIds } = await notificationService.createMentionNotifications(
-              recipientIds,
-              messageId,
-              conversationId,
-              channelId,
-              channelName,
-              senderId,
-              senderName,
-              cleanContent,
-              this.ctx.workspaceId,
-              mentionType,
-              false,
-              true,
-              senderPicture,
-              prefetchedData,
-              true, // isGroupDM
-            );
-            groupDMThreadMentionedUserIds = deliveredUserIds;
-          } catch (error) {
-            logger.error('[SIDE-EFFECT] GROUP_DM thread @channel/@here notifications failed', { error });
-          }
+          // Personally mentioned members are sent without mentionType so the
+          // @channel/@here toggle can't suppress their mention.
+          const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+          const personalSet = new Set(personalIds);
+          const sendThreadMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
+            if (userIds.length === 0) return [];
+            try {
+              const { deliveredUserIds } = await notificationService.createMentionNotifications(
+                userIds,
+                messageId,
+                conversationId,
+                channelId,
+                channelName,
+                senderId,
+                senderName,
+                cleanContent,
+                this.ctx.workspaceId,
+                groupMentionType,
+                false,
+                true,
+                senderPicture,
+                prefetchedData,
+                true, // isGroupDM
+              );
+              return deliveredUserIds;
+            } catch (error) {
+              logger.error('[SIDE-EFFECT] GROUP_DM thread @channel/@here notifications failed', { error });
+              return [];
+            }
+          };
+          const [personalDelivered, broadcastDelivered] = await Promise.all([
+            sendThreadMentions(personalIds, undefined),
+            sendThreadMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+          ]);
+          groupDMThreadMentionedUserIds = [...personalDelivered, ...broadcastDelivered];
         } else {
           // @username mentions in GROUP_DM thread.
           const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
@@ -1663,28 +1763,41 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
       if (scopeType === ChannelScopeType.GROUP_DM && mentionType) {
         // Case 1: GROUP_DM @channel/@here — route through createMentionNotifications.
-        try {
-          const { deliveredUserIds } = await notificationService.createMentionNotifications(
-            recipientIds,
-            messageId,
-            conversationId,
-            channelId,
-            channelName,
-            senderId,
-            senderName,
-            cleanContent,
-            this.ctx.workspaceId,
-            mentionType,
-            false,
-            false,
-            senderPicture,
-            prefetchedData,
-            true, // isGroupDM
-          );
-          allDeliveredUserIds = deliveredUserIds;
-        } catch (error) {
-          logger.error('[SIDE-EFFECT] GROUP_DM @channel/@here mention notifications failed', { error });
-        }
+        // Personally mentioned members are sent without mentionType so the
+        // @channel/@here toggle can't suppress their mention.
+        const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+        const personalSet = new Set(personalIds);
+        const sendMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
+          if (userIds.length === 0) return [];
+          try {
+            const { deliveredUserIds } = await notificationService.createMentionNotifications(
+              userIds,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              cleanContent,
+              this.ctx.workspaceId,
+              groupMentionType,
+              false,
+              false,
+              senderPicture,
+              prefetchedData,
+              true, // isGroupDM
+            );
+            return deliveredUserIds;
+          } catch (error) {
+            logger.error('[SIDE-EFFECT] GROUP_DM @channel/@here mention notifications failed', { error });
+            return [];
+          }
+        };
+        const [personalDelivered, broadcastDelivered] = await Promise.all([
+          sendMentions(personalIds, undefined),
+          sendMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+        ]);
+        allDeliveredUserIds = [...personalDelivered, ...broadcastDelivered];
         } else {
         // Case 2: GROUP_DM @username mentions + regular DM notifications.
         let groupDMMentionedUserIds: string[] = [];
@@ -1872,6 +1985,21 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         logger.error(`[MessagesSideEffectHandler] Failed to queue Vespa job for attachment ${attachment.id}:`, error);
       }
     }
+  }
+
+  /** Group-DM members @mentioned directly or via a user group, excluding the sender. */
+  private async getPersonalGroupDMMentionIds(
+    htmlContent: string,
+    channelParticipants: Array<{ userId: string }>,
+    senderId: string,
+  ): Promise<string[]> {
+    // No channelId: @channel/@here expansion isn't needed here.
+    const mentioned = await extractAllUsersForNotification(
+      getFlowJsonRawTextForMentions(htmlContent) ?? htmlContent,
+      this.ctx.workspaceId,
+    );
+    const participantIds = new Set(channelParticipants.map(p => p.userId));
+    return mentionRecipients(mentioned, { participantIds, senderId }).map(u => u.userId);
   }
 
   private async handleSpecialMentionActivities(
@@ -2158,7 +2286,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       !currentMessage.isDeleted &&
       previousValue.content !== undefined &&
       currentMessage.content !== previousValue.content &&
-      !previousValue.isThreadReply &&
       previousValue.channelId
     ) {
       void emitMessageReceived({
@@ -2168,6 +2295,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         msgType: previousValue.msgType as MessageType,
         userId: previousValue.senderId,
         isEdit: true,
+        isReply: previousValue.isThreadReply,
         previousContent: previousValue.content,
       });
     }

@@ -1,9 +1,8 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { autoDraftQueue, type AutoDraftJobData } from '@/queues/autoDraftQueue';
-import { emailService } from '@/services/emailService';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { retriggerAutoDraft } from '@/bypassAcl/emailFetchServices';
 
 class AutoDraftWorker {
   private isInitialized = false;
@@ -45,9 +44,7 @@ class AutoDraftWorker {
       throw new Error(`AutoDraftWorker: channel ${channelId} not found or has no workspaceId`);
     }
 
-    const dispatched = await runAsServiceActor('auto-draft-worker', channel.workspaceId,
-      () => emailService.retriggerAutoDraftForTicket(ticketId),
-    );
+    const dispatched = await retriggerAutoDraft(channel.workspaceId, ticketId);
 
     if (dispatched) {
       logger.info(`[AUTO-DRAFT-WORKER] Draft triggered for ticket ${ticketId}`);

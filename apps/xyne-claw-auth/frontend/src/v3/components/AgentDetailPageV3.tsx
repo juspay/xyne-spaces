@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { Agent, AgentLight, AgentShare, ScheduledJob } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 import type {
   ClaudeModelInfo,
   AvailableTools,
@@ -85,6 +86,17 @@ function sameSet(a: string[], b: string[]): boolean {
   return b.every((v) => s.has(v));
 }
 
+function readAgentOptimizations(config: Record<string, unknown> | undefined | null): Record<string, boolean> {
+  const raw = config?.["optimizations"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
+}
+
+function sameOptimizations(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+}
+
 /* ── props ─────────────────────────────────────────────────────────── */
 
 interface Props {
@@ -166,6 +178,9 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // routes every run to the shared read-only sbx-git sandbox (grep across all repos,
   // no per-project clone, mutating sandbox tools stripped).
   const [draftForceReadOnlySandbox, setDraftForceReadOnlySandbox] = useState(false);
+  const [draftAllowWriteInReadOnlyJob, setDraftAllowWriteInReadOnlyJob] = useState(false);
+  // Suppress the "Live preview" thread message when a sandbox starts (agent.config.hideLivePreview).
+  const [draftHideLivePreview, setDraftHideLivePreview] = useState(false);
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   const [draftSbxGitRepos, setDraftSbxGitRepos] = useState<string[]>([]);
   const [sbxGitRepoOptions, setSbxGitRepoOptions] = useState<SbxGitRepoOption[]>([]);
@@ -183,6 +198,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // BEFORE the first model turn and attaches the ids to the prompt, so the
   // agent does not spend turns looking them up.
   const [draftPrefetchContext, setDraftPrefetchContext] = useState(false);
+  // Answer from Context opt-in (agent.config.answerFromContext). When on, xyne-claw
+  // runs the question as a search before the only turn and the agent answers from
+  // the results with no tools — one fast answer instead of the agentic loop.
+  const [draftAnswerFromContext, setDraftAnswerFromContext] = useState(false);
   // Per-agent opt-OUT: post the live plan/TODO card (from the todo-write tool)
   // into the Spaces thread. Default true (post) so existing agents are
   // unchanged; turning it off sets agent.config.postTodos=false, which
@@ -203,6 +222,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // Plan mode opt-in (agent.config.planMode). When on, non-twin thread mentions
   // propose a plan and wait for approval before multi-step work. Default false.
   const [draftPlanMode, setDraftPlanMode] = useState(false);
+  const [draftOptimizations, setDraftOptimizations] = useState<Record<string, boolean>>({});
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
@@ -323,15 +343,19 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPromptInjection(promptInj);
         setDraftSandboxRepo((agentData.config as { sandboxRepo?: string }).sandboxRepo ?? "");
         setDraftForceReadOnlySandbox((agentData.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true);
+        setDraftAllowWriteInReadOnlyJob((agentData.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true);
+        setDraftHideLivePreview((agentData.config as { hideLivePreview?: boolean }).hideLivePreview === true);
         setDraftSbxGitRepos(Array.isArray((agentData.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agentData.config as { sbxGitRepos: string[] }).sbxGitRepos : []);
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
         setDraftSuggestGoal((agentData.config as { suggestGoal?: boolean }).suggestGoal === true);
         setDraftPrefetchContext((agentData.config as { prefetchContext?: boolean }).prefetchContext === true);
+        setDraftAnswerFromContext((agentData.config as { answerFromContext?: boolean }).answerFromContext === true);
         setDraftPostTodos((agentData.config as { postTodos?: boolean }).postTodos !== false);
         setDraftPlanTracking((agentData.config as { planTracking?: boolean }).planTracking !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
+        setDraftOptimizations(readAgentOptimizations(agentData.config));
         {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
@@ -432,15 +456,19 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePromptInjection = (agent.config as { promptInjection?: string }).promptInjection ?? "";
     const baseSandboxRepo = (agent.config as { sandboxRepo?: string }).sandboxRepo ?? "";
     const baseForceReadOnlySandbox = (agent.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true;
+    const baseAllowWriteInReadOnlyJob = (agent.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true;
+    const baseHideLivePreview = (agent.config as { hideLivePreview?: boolean }).hideLivePreview === true;
     const baseSbxGitRepos = Array.isArray((agent.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agent.config as { sbxGitRepos: string[] }).sbxGitRepos : [];
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
     const baseSuggestGoal = (agent.config as { suggestGoal?: boolean }).suggestGoal === true;
     const basePrefetchContext = (agent.config as { prefetchContext?: boolean }).prefetchContext === true;
+    const baseAnswerFromContext = (agent.config as { answerFromContext?: boolean }).answerFromContext === true;
     const basePostTodos = (agent.config as { postTodos?: boolean }).postTodos !== false;
     const basePlanTracking = (agent.config as { planTracking?: boolean }).planTracking !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
+    const baseOptimizations = readAgentOptimizations(agent.config);
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
     const basePlanModePrompt =
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
@@ -478,15 +506,19 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPromptInjection !== basePromptInjection ||
       draftSandboxRepo !== baseSandboxRepo ||
       draftForceReadOnlySandbox !== baseForceReadOnlySandbox ||
+      draftAllowWriteInReadOnlyJob !== baseAllowWriteInReadOnlyJob ||
+      draftHideLivePreview !== baseHideLivePreview ||
       JSON.stringify([...draftSbxGitRepos].sort()) !== JSON.stringify([...baseSbxGitRepos].sort()) ||
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
       draftSuggestGoal !== baseSuggestGoal ||
       draftPrefetchContext !== basePrefetchContext ||
+      draftAnswerFromContext !== baseAnswerFromContext ||
       draftPostTodos !== basePostTodos ||
       draftPlanTracking !== basePlanTracking ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
+      !sameOptimizations(draftOptimizations, baseOptimizations) ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
@@ -502,7 +534,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -566,6 +598,16 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.forceReadOnlySandbox;
       }
+      if (draftAllowWriteInReadOnlyJob) {
+        nextConfig.allowWriteInReadOnlyJob = true;
+      } else {
+        delete nextConfig.allowWriteInReadOnlyJob;
+      }
+      if (draftHideLivePreview) {
+        nextConfig.hideLivePreview = true;
+      } else {
+        delete nextConfig.hideLivePreview;
+      }
       if (draftSbxGitRepos.length > 0) {
         nextConfig.sbxGitRepos = draftSbxGitRepos;
       } else {
@@ -579,6 +621,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         nextConfig.prefetchContext = true;
       } else {
         delete nextConfig.prefetchContext;
+      }
+      if (draftAnswerFromContext) {
+        nextConfig.answerFromContext = true;
+      } else {
+        delete nextConfig.answerFromContext;
       }
       if (draftSuggestGoal) {
         nextConfig.suggestGoal = true;
@@ -643,6 +690,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.planMode;
         delete nextConfig.planModePrompt;
+      }
+      if (Object.keys(draftOptimizations).length) {
+        nextConfig.optimizations = draftOptimizations;
+      } else {
+        delete nextConfig.optimizations;
       }
       // Per-run delegation budget. Persist only a non-default value; DEFAULT
       // drops the key so the runtime falls back to its own default (kept in
@@ -737,7 +789,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1110,6 +1162,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             sandboxRepoOptions={sandboxRepoOptions}
             draftForceReadOnlySandbox={draftForceReadOnlySandbox}
             onDraftForceReadOnlySandboxChange={setDraftForceReadOnlySandbox}
+            draftAllowWriteInReadOnlyJob={draftAllowWriteInReadOnlyJob}
+            onDraftAllowWriteInReadOnlyJobChange={setDraftAllowWriteInReadOnlyJob}
+            draftHideLivePreview={draftHideLivePreview}
+            onDraftHideLivePreviewChange={setDraftHideLivePreview}
             draftSbxGitRepos={draftSbxGitRepos}
             onDraftSbxGitReposChange={setDraftSbxGitRepos}
             sbxGitRepoOptions={sbxGitRepoOptions}
@@ -1123,6 +1179,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftSuggestGoalChange={setDraftSuggestGoal}
             draftPrefetchContext={draftPrefetchContext}
             onDraftPrefetchContextChange={setDraftPrefetchContext}
+            draftAnswerFromContext={draftAnswerFromContext}
+            onDraftAnswerFromContextChange={setDraftAnswerFromContext}
             draftPostTodos={draftPostTodos}
             onDraftPostTodosChange={setDraftPostTodos}
             draftPlanTracking={draftPlanTracking}
@@ -1139,6 +1197,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftAutoGoalChange={setDraftAutoGoal}
             draftPlanMode={draftPlanMode}
             onDraftPlanModeChange={setDraftPlanMode}
+            draftOptimizations={draftOptimizations}
+            onDraftOptimizationsChange={setDraftOptimizations}
             draftPlanModePrompt={draftPlanModePrompt}
             onDraftPlanModePromptChange={setDraftPlanModePrompt}
             draftMaxDelegations={draftMaxDelegations}
@@ -1259,7 +1319,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
         needsApproval={!permissions?.canEdit}
-        isOwnAgent={agent.ownerUserId === userId}
+        isOwnAgent={isCurrentUser(agent.ownerUserId)}
         sourceEnabled={agent.enabled}
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}

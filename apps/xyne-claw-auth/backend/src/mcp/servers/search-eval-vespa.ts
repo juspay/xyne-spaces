@@ -8,9 +8,9 @@
  *
  * - "with" permission: the real per-user ACL guard (permissions contains
  *   <userId>, same clause aclConditionForSchema()/ACL.* in vespa-direct.ts
- *   use) — `userId` is xyne-claw-auth's internal user id, which is JIT-
- *   mirrored to equal the Spaces user id, so it's usable directly as the ACL
- *   value without a Spaces session/token.
+ *   use) — `userId` MUST be Spaces' workspace-scoped user id (Vespa docs are
+ *   keyed by it). Callers holding a canonical Claw id translate first — see
+ *   search-eval-run-worker.ts (spacesUserIdForClawUser).
  * - "without" permission: publicOnlyConditionForSchema() instead — public
  *   content only (isPrivate == false), no real user checked at all. Private
  *   channels, DMs, and anything member-scoped are never returned.

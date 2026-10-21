@@ -31,6 +31,7 @@ export interface CreateActivityParams {
   channelId?: string;
   pullRequestId?: string;
   canvasId?: string;
+  savedViewId?: string;
   trackId?: string;
   blockId?: string;
   conversationSeenCutoffAt?: Date | null;
@@ -326,6 +327,7 @@ export class ActivityService {
         ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
         ...(activity.pullRequestId ? { pullRequestId: activity.pullRequestId } : {}),
         ...(activity.canvasId ? { canvasId: activity.canvasId } : {}),
+        ...(activity.savedViewId ? { savedViewId: activity.savedViewId } : {}),
         ...(activity.trackId ? { trackId: activity.trackId } : {}),
         ...(activity.blockId ? { blockId: activity.blockId } : {}),
         ...(activity.conversationSeenCutoffAt
@@ -403,6 +405,7 @@ export class ActivityService {
         ...(a.conversationId ? { conversationId: a.conversationId } : {}),
         ...(a.pullRequestId ? { pullRequestId: a.pullRequestId } : {}),
         ...(a.canvasId ? { canvasId: a.canvasId } : {}),
+        ...(a.savedViewId ? { savedViewId: a.savedViewId } : {}),
         ...(a.trackId ? { trackId: a.trackId } : {}),
         ...(a.blockId ? { blockId: a.blockId } : {}),
         ...(a.conversationSeenCutoffAt

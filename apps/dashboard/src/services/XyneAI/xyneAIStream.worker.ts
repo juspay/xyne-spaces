@@ -24,11 +24,15 @@ export interface WorkerStartStreamMessage {
           | 'ticket'
           | 'canvas'
           | 'call'
+          | 'app'
           | 'activity'
           | 'collection'
           | 'folder'
           | 'file'
-          | 'local-folder';
+          | 'local-folder'
+          | 'message'
+          | 'user'
+          | 'attachment';
         id: string;
         title: string;
         threadId?: string;
@@ -46,6 +50,8 @@ export interface WorkerStartStreamMessage {
       /** Single search + single answer pass instead of the full agentic tool
        *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
       instant?: boolean;
+      /** cmd+K: the palette tab the `cmdk-answer` agent searches for this answer. */
+      tab?: string;
       /** Per-run thinking level (composer dropdown). Absent = agent default. */
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
@@ -207,6 +213,7 @@ async function executeStream(
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         instant: requestBody.instant ?? false,
+        ...(requestBody.tab && { tab: requestBody.tab }),
         ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {

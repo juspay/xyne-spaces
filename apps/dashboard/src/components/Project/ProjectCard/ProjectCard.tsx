@@ -104,6 +104,7 @@ export const ProjectCard = ({
               data-track-category='Projects'
               data-track-name='COPY_PROJECT_ID'
               title='Copy project ID'
+              aria-label='Copy project ID'
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
             </Button>

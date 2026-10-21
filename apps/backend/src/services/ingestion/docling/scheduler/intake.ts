@@ -18,14 +18,14 @@
  */
 import { db } from '@/database/client';
 import { IngestionStatus, AttachmentEntityType } from '@xyne/shared';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { routeDoclingIntake } from '@/bypassAcl/doclingIngestServices';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { storageService } from '@/services/storage';
 import { convertToPdf, getConvertedPdfGcsPath } from '@/services/officeConversionService';
 import { getRuntimeConfig } from '../runtime/config';
-import { inferDoclingSourcePriority, upsertDoclingAsyncFileForSplit } from './store';
+import { inferDoclingSourcePriority } from './store';
 
 const isPdf = (mime: string | null | undefined, name: string | null | undefined): boolean =>
   (mime || '').toLowerCase().includes('application/pdf') ||
@@ -91,16 +91,14 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
 
   const { basePriority } = inferDoclingSourcePriority({ collectionId: item.rootCollectionId });
 
-  const inserted = await runAsServiceActor('docling-intake', attachment.workspaceId,
-    () => upsertDoclingAsyncFileForSplit({
-      fileId: item.fileId,
-      collectionId: item.rootCollectionId,
-      sourcePath: sourceKey,
-      sourceStorageKey: sourceKey,
-      basePriority,
-      pageChunkSize: pageChunkSize(),
-    }),
-  );
+  const inserted = await routeDoclingIntake(attachment.workspaceId, {
+    fileId: item.fileId,
+    collectionId: item.rootCollectionId,
+    sourcePath: sourceKey,
+    sourceStorageKey: sourceKey,
+    basePriority,
+    pageChunkSize: pageChunkSize(),
+  });
 
   if (inserted !== null) {
     await db.collectionItem.updateMany({
@@ -125,16 +123,14 @@ const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boole
 
   const { basePriority } = inferDoclingSourcePriority({ collectionId: '' });
 
-  const inserted = await runAsServiceActor('docling-intake', att.workspaceId,
-    () => upsertDoclingAsyncFileForSplit({
-      fileId: att.id,
-      collectionId: '',  // empty sentinel = attachment, not collection
-      sourcePath: sourceKey,
-      sourceStorageKey: sourceKey,
-      basePriority,
-      pageChunkSize: pageChunkSize(),
-    }),
-  );
+  const inserted = await routeDoclingIntake(att.workspaceId, {
+    fileId: att.id,
+    collectionId: '',  // empty sentinel = attachment, not collection
+    sourcePath: sourceKey,
+    sourceStorageKey: sourceKey,
+    basePriority,
+    pageChunkSize: pageChunkSize(),
+  });
 
   logger.info('[DOCLING_SCHEDULER] Routed ATTACHMENT PDF to scheduler', {
     attachmentId: att.id, app, basePriority, alreadyQueued: inserted === null,

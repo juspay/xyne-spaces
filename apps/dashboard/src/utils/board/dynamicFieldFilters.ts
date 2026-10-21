@@ -46,15 +46,21 @@ export const matchesDynamicFieldValue = (
       } else if (typeof actualFieldValue === 'number' || typeof actualFieldValue === 'boolean') {
         ticketValue = String(actualFieldValue);
       }
-      ticketValue = ticketValue.toLowerCase();
-      const searchTerm = (filterValue[0] || '').toLowerCase();
-      return ticketValue.includes(searchTerm);
+      // Whole-value match against any selected value, case-insensitive — the rule the column
+      // itself is fetched with. `formFields.fieldValue` is an uncased Vespa attribute, so its
+      // token match folds case and compares the entire value; a substring rule here (what a
+      // lone value used to get, back when every value was typed) counted tickets the column
+      // could never list. Mirrored by kanbanCountsService.matchesDynamicFilter and by
+      // matchesRequest in useKanbanCounts, so a filter counts the same tickets it shows.
+      const needle = ticketValue.toLowerCase();
+      return filterValue.some(value => value.toLowerCase() === needle);
     }
     if (fieldType === FormFieldType.NUMBER) {
       const ticketValue =
         typeof actualFieldValue === 'number' || typeof actualFieldValue === 'string'
           ? String(actualFieldValue)
           : '';
+      if (filterValue.length > 1) return filterValue.some(value => String(value) === ticketValue);
       return ticketValue === String(filterValue[0] || '');
     }
     if (fieldType === FormFieldType.USER) {

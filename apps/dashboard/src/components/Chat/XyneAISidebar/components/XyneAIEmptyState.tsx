@@ -1,6 +1,8 @@
 import { ReactElement, ReactNode } from 'react';
 import { CheckTickSingle } from '@xyne/icons';
 import { cn } from '../../../../utils/classNames';
+import type { ActionDefinition } from '../../../Assistant/actions/action';
+import { ActionCards } from '../../../Assistant/ActionCards';
 
 // Wavy squiggle path data lifted from the Figma "Agent Hub" empty-state cards.
 // Each squiggle stretches to fill its row (preserveAspectRatio='none'), so the
@@ -133,6 +135,8 @@ interface XyneAIEmptyStateProps {
    * column they dominate a panel meant to sit quietly beside five others.
    */
   hideSuggestions?: boolean;
+  starters?: readonly ActionDefinition[];
+  onSelectStarter?: (action: ActionDefinition) => void;
 }
 
 /**
@@ -143,6 +147,8 @@ interface XyneAIEmptyStateProps {
 export const XyneAIEmptyState = ({
   onSelect = () => {},
   hideSuggestions = false,
+  starters = [],
+  onSelectStarter = () => {},
 }: XyneAIEmptyStateProps): ReactElement => {
   if (hideSuggestions) {
     return (
@@ -152,6 +158,20 @@ export const XyneAIEmptyState = ({
           <h2 className='text-center text-[15px] font-semibold leading-[24px] tracking-[-0.3px] text-muted-foreground'>
             What can Xyne help you with?
           </h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (starters.length > 0) {
+    return (
+      <div className='flex min-h-full w-full select-none items-center justify-center px-4 py-4'>
+        <div className='flex w-full max-w-[382px] flex-col items-center gap-[24px]'>
+          <Spark className='size-12' />
+          <h2 className='text-center text-[16px] font-semibold leading-[28px] tracking-[-0.32px] text-muted-foreground'>
+            Get started
+          </h2>
+          <ActionCards actions={starters} onSelect={onSelectStarter} />
         </div>
       </div>
     );

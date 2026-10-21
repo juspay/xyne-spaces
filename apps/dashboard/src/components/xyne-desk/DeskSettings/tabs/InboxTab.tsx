@@ -1,23 +1,41 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
-import type { EmailSignature } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  type EmailSignature,
+} from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
-import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
+import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
+import { ConnectedSlackSection } from '../ConnectedSlackSection';
+import { ConnectedChannelsDeskAppSection } from '../ConnectedChannelsDeskAppSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
+import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
+import { getIconForFieldType } from '../../../Tickets/TicketFilters/fieldTypeIcons';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
+import {
+  DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS,
+  DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS,
+  DUPLICATE_LOOKBACK_PRESETS,
+} from '../constants';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/Select';
 import SignatureIcon from '../../../icons/SignatureIcon';
 
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
@@ -48,9 +66,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const {
     canManage,
     isEmail,
-    isSlack,
     isApp,
     isSocial,
+    isChannelsDesk,
     isDeskChannel,
     ownerId,
     setOwner,
@@ -69,8 +87,38 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setAutoMergeEmails,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
+    duplicateDetectionEnabled,
+    setDuplicateDetectionEnabled,
+    duplicateScopeFieldIds,
+    setDuplicateScopeFieldIds,
+    duplicateLookbackDays,
+    setDuplicateLookbackDays,
+    boardId,
   } = form;
 
+  // Custom when the saved window matches no preset, or once picked — it then sticks even
+  // if the typed number happens to match a preset.
+  const [lookbackCustomPicked, setLookbackCustom] = useState(false);
+  useEffect(() => setLookbackCustom(false), [channelId]);
+  const lookbackCustom =
+    lookbackCustomPicked ||
+    !DUPLICATE_LOOKBACK_PRESETS.some(preset => preset.days === duplicateLookbackDays);
+  const lookbackSelectValue = lookbackCustom ? 'custom' : String(duplicateLookbackDays);
+  // The custom box edits text and only commits a clamped number on blur, so clearing it
+  // to type a new value doesn't snap to the minimum or auto-save every keystroke.
+  const [lookbackDaysInput, setLookbackDaysInput] = useState(String(duplicateLookbackDays));
+  useEffect(() => setLookbackDaysInput(String(duplicateLookbackDays)), [duplicateLookbackDays]);
+  const commitLookbackDaysInput = (): void => {
+    const parsed = parseInt(lookbackDaysInput, 10);
+    const days = Number.isNaN(parsed)
+      ? duplicateLookbackDays
+      : Math.max(
+          DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS,
+          Math.min(DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS, parsed),
+        );
+    setLookbackDaysInput(String(days));
+    if (days !== duplicateLookbackDays) setDuplicateLookbackDays(days);
+  };
   const [ccInputValue, setCcInputValue] = useState('');
   const [dlAliasInput, setDlAliasInput] = useState('');
   const commitDlAlias = (): boolean => {
@@ -97,6 +145,41 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const { data: connectedApps } = useChannelApps(channelId, isDeskChannel && canManage);
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
+  const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
+  // The board's ticket form, not the project's global fields: a legacy form's fields have
+  // no GlobalField id, so project-wide options would offer keys the backend can't resolve.
+  const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: boardId || 'nonexistent',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: isDeskChannel && !!boardId },
+  );
+  const scopedFields = useMemo(
+    () =>
+      scopeFieldsMapping?.formFields
+        ? resolveDisplayFormFields(scopeFieldsMapping.formId, [...scopeFieldsMapping.formFields])
+        : [],
+    [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
+  );
+  // Chips come from the saved config, not the field list, so a deleted field still gets a
+  // chip to remove rather than a stranded id that counts toward the cap forever.
+  const scopeFieldById = useMemo(
+    () => new Map(scopedFields.map(field => [field.id, field])),
+    [scopedFields],
+  );
+  const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
+    id,
+    field: scopeFieldById.get(id),
+  }));
+  // No board and an unlanded sync both leave scopedFields empty, so nothing calls a saved
+  // field deleted until the result is complete.
+  const scopeFieldsResolved = !!boardId && scopeFieldsDetails.type === 'complete';
+  const hasUnresolvedScopeField =
+    scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
+  const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
+
   useEffect(() => {
     if (signatureModalOpen) {
       signatureModalRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -117,15 +200,29 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   return (
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='instagram' channelId={channelId} canManage={canManage} />
+      )}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='facebook' channelId={channelId} canManage={canManage} />
+      )}
       {/*
-        Single owner of app connections on every desk type, APP included. Apps are the
-        one source type that went 1:N per channel, so unlike Slack/social they cannot be
-        managed by a single-connection card.
+        Single owner of app connections on every desk type, APP included. Apps and Slack both
+        went 1:N per channel, so unlike social they cannot be managed by a
+        single-connection card.
       */}
-      {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
+      {isChannelsDesk && (
+        <ConnectedChannelsDeskAppSection channelId={channelId} canManage={canManage} />
+      )}
+      {/* A Channels desk is fed only by its app's channels. */}
+      {isDeskChannel && !isChannelsDesk && (
+        <ConnectedAppsSection channelId={channelId} canManage={canManage} />
+      )}
+      {isDeskChannel && !isChannelsDesk && (
+        <ConnectedSlackSection channelId={channelId} canManage={canManage} />
+      )}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>
@@ -354,7 +451,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       />
                       <span className='min-w-0 flex-1 truncate text-[13px] leading-[18px]'>
                         <span className='font-medium text-foreground'>{user.name}</span>
-                        <span className='text-desk-helper'> · {user.email}</span>
+                        {user.email && <span className='text-desk-helper'> · {user.email}</span>}
                       </span>
                       {isSelected && <Check size={16} className='shrink-0 text-foreground' />}
                     </button>
@@ -430,6 +527,212 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             disabled={!canManage}
             aria-label='Toggle auto-merge similar emails'
           />
+        </div>
+      )}
+
+      {isDeskChannel && (
+        <div className='flex flex-col gap-[16px]'>
+          <div className='flex items-start justify-between gap-4'>
+            <div className='flex flex-col gap-[4px]'>
+              <div className='text-desk-label'>Limit duplicate detection by field</div>
+              <div className='text-desk-helper w-full max-w-[500px]'>
+                Possible-duplicate matching runs only when this is on, and only against tickets
+                sharing the selected fields. A ticket without a value for a selected field is not
+                checked. Select up to {MAX_DUPLICATE_SCOPE_FIELDS} fields.
+              </div>
+            </div>
+            <Switch
+              variant='desk'
+              checked={duplicateDetectionEnabled}
+              onCheckedChange={setDuplicateDetectionEnabled}
+              disabled={!canManage}
+              aria-label='Toggle limiting duplicate detection by field'
+            />
+          </div>
+
+          <div className='flex flex-col gap-[8px]'>
+            <div className='flex flex-col gap-[4px]'>
+              <div className='text-desk-label'>Duplicate detection window</div>
+              <div className='text-desk-helper w-full max-w-[500px]'>
+                A ticket is compared against tickets created within this window before it. The check
+                runs only when &quot;Limit duplicate detection by field&quot; is on — when a ticket
+                is created and again when it is opened.
+              </div>
+            </div>
+            <div className='flex flex-wrap items-center gap-2'>
+              <Select
+                value={lookbackSelectValue}
+                onValueChange={value => {
+                  if (value === 'custom') {
+                    setLookbackCustom(true);
+                    // Start from the current window, or a month when it was all time.
+                    if (duplicateLookbackDays === 0) setDuplicateLookbackDays(30);
+                    return;
+                  }
+                  setLookbackCustom(false);
+                  setDuplicateLookbackDays(Number(value));
+                }}
+                disabled={!canManage || !duplicateDetectionEnabled}
+              >
+                <SelectTrigger
+                  size='sm'
+                  className='w-[180px]'
+                  aria-label='Duplicate detection window'
+                  data-track-category='DeskSettings'
+                  data-track-name='SelectDuplicateLookback'
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DUPLICATE_LOOKBACK_PRESETS.map(preset => (
+                    <SelectItem key={preset.days} value={String(preset.days)}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value='custom'>Custom</SelectItem>
+                </SelectContent>
+              </Select>
+              {lookbackCustom && (
+                <div className='flex items-center gap-2'>
+                  <span className='text-sm text-desk-muted'>Last</span>
+                  <input
+                    type='number'
+                    min={DUPLICATE_LOOKBACK_CUSTOM_MIN_DAYS}
+                    max={DUPLICATE_LOOKBACK_CUSTOM_MAX_DAYS}
+                    value={lookbackDaysInput}
+                    onChange={e => setLookbackDaysInput(e.target.value)}
+                    onBlur={commitLookbackDaysInput}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    disabled={!canManage || !duplicateDetectionEnabled}
+                    aria-label='Custom duplicate detection window in days'
+                    data-track-category='DeskSettings'
+                    data-track-name='EditDuplicateLookbackCustomDays'
+                    className='h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                  />
+                  <span className='text-sm text-desk-muted'>days</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {duplicateDetectionEnabled && (
+            <div className='flex flex-col gap-[8px]'>
+              <div className='text-desk-label'>Scope fields</div>
+              <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
+                {selectedDuplicateScopeFields.map(({ id, field }) => {
+                  const isMissing = scopeFieldsResolved && !field;
+                  const unresolvedLabel = boardId ? 'Loading…' : 'Unresolved field';
+                  const label = field?.fieldName ?? (isMissing ? 'Deleted field' : unresolvedLabel);
+                  return (
+                    <div
+                      key={id}
+                      title={isMissing ? `This field no longer exists (${id})` : undefined}
+                      className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
+                        isMissing
+                          ? 'bg-destructive/10 line-through decoration-destructive/60'
+                          : 'bg-desk-accent-subtle'
+                      }`}
+                    >
+                      <span
+                        className={`max-w-[220px] truncate text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setDuplicateScopeFieldIds(
+                            duplicateScopeFieldIds.filter(selected => selected !== id),
+                          )
+                        }
+                        disabled={!canManage || !duplicateDetectionEnabled}
+                        className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                        data-track-category='DeskSettings'
+                        data-track-name='RemoveDuplicateScopeField'
+                        aria-label={`Remove ${label}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {scopeFieldsResolved && scopedFields.length > 0 && (
+                  <SearchableMultiSelect
+                    options={scopedFields.map(field => {
+                      const FieldTypeIcon = getIconForFieldType(field.fieldType);
+                      return {
+                        value: field.id,
+                        label: field.fieldName,
+                        icon: (
+                          <FieldTypeIcon size={13} className='shrink-0 text-muted-foreground' />
+                        ),
+                      };
+                    })}
+                    selectedValues={duplicateScopeFieldIds}
+                    onSelectedValuesChange={next => {
+                      // The trigger is disabled at the cap, but the popover stays open,
+                      // so a 6th option is still clickable in the already-open list.
+                      // Reject it loudly instead of letting the setter quietly slice it off.
+                      if (next.length > MAX_DUPLICATE_SCOPE_FIELDS) {
+                        toast.error(`Select up to ${MAX_DUPLICATE_SCOPE_FIELDS} scope fields.`);
+                        return;
+                      }
+                      setDuplicateScopeFieldIds(next);
+                    }}
+                    isOpen={scopeFieldPickerOpen && duplicateDetectionEnabled && canManage}
+                    onOpenChange={open => {
+                      if (open && (!duplicateDetectionEnabled || !canManage)) return;
+                      setScopeFieldPickerOpen(open);
+                    }}
+                    searchPlaceholder='Search fields...'
+                    searchAriaLabel='Search scope fields'
+                    listAriaLabel='Scope fields'
+                    emptyMessage='No matching fields'
+                    align='start'
+                    trackCategory='DeskSettings'
+                    trackName='DuplicateScopeFieldOption'
+                    trigger={
+                      <button
+                        type='button'
+                        className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                        disabled={
+                          !canManage || !duplicateDetectionEnabled || duplicateScopeFieldCapReached
+                        }
+                        data-track-category='DeskSettings'
+                        data-track-name='AddDuplicateScopeField'
+                      >
+                        <Plus size={14} />
+                        <span>Add field</span>
+                      </button>
+                    }
+                  />
+                )}
+              </div>
+              {hasUnresolvedScopeField && (
+                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
+                  A selected field is not on the board ticket form for this desk, so duplicate
+                  detection is skipped until this is fixed. Remove it and pick a field from the list
+                  to re-enable the check.
+                </div>
+              )}
+              {!boardId && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  Set a target board for this desk first — scope fields come from its ticket form.
+                </div>
+              )}
+              {scopeFieldsResolved && scopedFields.length === 0 && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  This board&apos;s ticket form has no fields yet. Add one there first.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

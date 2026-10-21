@@ -134,7 +134,7 @@ async function processBoundSlackEvent(input: {
   void postSlackMessage(botToken, {
     channel: event.channelId,
     threadTs: threadRootTs,
-    text: `⏳ ${surfaceAgent.agent.name} is working on it…`,
+    text: `${surfaceAgent.agent.name} is working on it…`,
   }).catch((error) =>
     log.warn("[surfaces-slack] failed to post working acknowledgement", {
       error: errMsg(error),

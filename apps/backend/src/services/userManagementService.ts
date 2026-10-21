@@ -26,6 +26,7 @@ import {
   ResourceAccessWithDetails,
 } from '../types/database';
 import { v4 as uuidv4 } from 'uuid';
+import { revokeGuestEntityAccessTx } from '@/bypassAcl/transactions/userManagementService';
 
 /**
  * User Management Service
@@ -53,7 +54,7 @@ function unresolvedEntityName(entityType: string): string {
 
 export class UserManagementService {
   private static instance: UserManagementService;
-  private prisma: PrismaClient;
+  prisma: PrismaClient;
 
   private constructor() {
     this.prisma = DatabaseClient.getInstance();
@@ -532,37 +533,7 @@ export class UserManagementService {
       return { revoked: false };
     }
 
-    return this.prisma.$transaction(async tx => {
-      const deleted = await tx.guestAccess.deleteMany({
-        where: {
-          workspaceId: params.workspaceId,
-          userId: params.userId,
-          accessibleEntityType: params.accessibleEntityType,
-          accessibleEntityId: params.accessibleEntityId,
-        },
-      });
-
-      if (deleted.count === 0) {
-        return { revoked: false };
-      }
-
-      if (params.accessibleEntityType === GuestEntity.CHANNEL) {
-        await tx.channelParticipant.deleteMany({
-          where: { channelId: params.accessibleEntityId, userId: params.userId },
-        });
-        await tx.channelUserStatus.deleteMany({
-          where: { channelId: params.accessibleEntityId, userId: params.userId },
-        });
-      }
-
-      if (params.accessibleEntityType === GuestEntity.CANVAS) {
-        await tx.canvasParticipant.deleteMany({
-          where: { canvasId: params.accessibleEntityId, userId: params.userId },
-        });
-      }
-
-      return { revoked: true };
-    });
+    return revokeGuestEntityAccessTx(this, params);
   }
 
   // Resource Operations
@@ -961,6 +932,37 @@ export class UserManagementService {
   }
 
   /**
+   * Remove profile picture for a user. The avatar falls back to initials.
+   */
+  async removeProfilePicture(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { picture: true },
+    });
+    const previousPicture = user?.picture;
+    if (!previousPicture) return;
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { picture: null },
+    });
+
+    // Only uploaded pictures live in our storage; SSO pictures are external URLs
+    if (!previousPicture.startsWith('http')) {
+      try {
+        await getStorageService().deleteFile(previousPicture);
+      } catch (error) {
+        logger.warn(`Failed to delete stored profile picture for user ${userId}`, {
+          filePath: previousPicture,
+          error,
+        });
+      }
+    }
+
+    logger.info(`Profile picture removed for user ${userId}`);
+  }
+
+  /**
    * Extract a speaker embedding from an audio file and store it as the user's voice signature.
    *
    * Flow:
@@ -1062,3 +1064,4 @@ export class UserManagementService {
   }
 
 }
+

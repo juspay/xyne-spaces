@@ -20,7 +20,12 @@ import { isDMChannel, resolveChannelLabel } from '../../Chat/ChatDirectory/ChatD
 import { type SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { type Channel } from '@xyne/shared';
-import { clearInapplicable, entriesFor } from '../../../search/filterRegistry';
+import {
+  buildTokens,
+  clearInapplicable,
+  entriesFor,
+  type FilterResolvers,
+} from '../../../search/filterRegistry';
 import {
   hasExactSearchQuotes,
   unwrapExactSearchQuery,
@@ -230,21 +235,16 @@ function useListKeyNav(
     [length, activeIndex, onSelect, onClose, scrollActiveIntoView],
   );
 
+  // Arrows are left to bubble to `handleKeyDown` on the popover, which already starts at the
+  // first/last item from -1 and scrolls. Handling them here too ran both on every press —
+  // this reset to 0, then that stepped to 1 — pinning the highlight on the second row.
   const handleInputKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIndex(0);
-        scrollActiveIntoView(0);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIndex(length - 1);
-        scrollActiveIntoView(length - 1);
-      } else if (e.key === 'Escape') {
+      if (e.key === 'Escape') {
         onClose();
       }
     },
-    [length, onClose, scrollActiveIntoView],
+    [onClose],
   );
 
   return { activeIndex, setActiveIndex, handleKeyDown, handleInputKeyDown, listRef };
@@ -838,4 +838,42 @@ export function SearchFilterBar({
       </Popover.Root>
     </div>
   );
+}
+
+/**
+ * Labels for the active filters, as shown in the filter bar: `Messages`, `from:alice`,
+ * `@Ch`, `"ab"`. Used in search feedback. Reads from the filter registry, so new filters
+ * are included automatically.
+ */
+export function buildFilterSummary(
+  filters: SearchResultsFilters,
+  resolve: FilterResolvers,
+  query: string,
+): string[] {
+  const labels: string[] = [];
+
+  // "All types" means no type filter, so skip it.
+  if (filters.docType !== 'all') {
+    labels.push(TYPE_LABELS[filters.docType]);
+  }
+
+  // Value filters, e.g. `from:alice`, `in:#general`.
+  for (const token of buildTokens(filters, resolve)) {
+    labels.push(`${token.prefix ?? ''}${token.label}`);
+  }
+
+  // Toggle pills that are on. Exact match is on when the query is wrapped in quotes.
+  for (const entry of entriesFor(filters.docType)) {
+    if (entry.control?.kind !== 'toggle') continue;
+    const isOn =
+      entry.id === 'exactMatch' ? hasExactSearchQuotes(query) : entry.getValue?.(filters) === true;
+    if (isOn) labels.push(entry.control.barLabel);
+  }
+
+  return labels;
+}
+
+/** Sort label as shown in the filter bar, e.g. `Relevance`. */
+export function sortSummary(filters: SearchResultsFilters): string {
+  return SORT_OPTIONS.find(o => o.value === filters.sortBy)?.label ?? 'Relevance';
 }

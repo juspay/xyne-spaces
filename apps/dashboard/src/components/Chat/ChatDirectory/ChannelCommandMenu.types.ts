@@ -5,6 +5,8 @@ import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
 import type { InitialQueryData } from './LexicalSearchInput';
 import { parseSearchFilters, parseTypeFilter } from '../../../utils/searchFilterParser';
+import type { TicketSearchView } from '../../../search/ticketSearchScope';
+import type { CmdkOpenOrigin } from '../../../search/cmdkPolicy';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -97,7 +99,7 @@ export const DOC_TYPE_TO_TAB = Object.fromEntries(
 ) as Record<SearchResultsDocType, TabType>;
 
 /**
- * Palette TabType -> results-page docType, so "Show detailed results for" lands on the
+ * Palette TabType -> results-page docType, so "Expand to full-page search" lands on the
  * tab the user was already looking at.
  *
  * Deliberately NOT an inversion of DOC_TYPE_TO_TAB: 'all' and 'channels' both map to
@@ -115,6 +117,32 @@ export const TAB_TO_DOC_TYPE = {
   [TabType.DESK]: 'desk',
 } as const satisfies Partial<Record<TabType, SearchResultsDocType>>;
 
+/** The palette's tab names; full page labels recent searches with them too (see tabLabel). */
+export const TAB_LABELS = {
+  [TabType.MESSAGES]: 'Messages',
+  [TabType.USERS]: 'People',
+  [TabType.CHANNELS]: 'Channels',
+  [TabType.ATTACHMENTS]: 'Files',
+  [TabType.CANVAS]: 'Canvas',
+  [TabType.TICKETS]: 'Tickets',
+  [TabType.CALL]: 'Calls',
+  [TabType.RECORDING]: 'Recordings',
+  [TabType.DESK]: 'Desk',
+} as const satisfies Partial<Record<TabType, string>>;
+
+/** A tab's name, or '' for one without (All). */
+export const tabLabel = (tab: TabType): string =>
+  (TAB_LABELS as Partial<Record<TabType, string>>)[tab] ?? '';
+
+/**
+ * The palette at rest, which full page shows too with nothing searched: Starred capped while
+ * recents show, to fit both, and the merged people+channel list's rows before "See more" — the
+ * merge keeps more than that, so expanding has something to reveal.
+ */
+export const RECENTS_STARRED_CAP = 3;
+export const MERGED_DISPLAY_LIMIT = 8;
+export const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
+
 /**
  * Backend-result group key -> results-page docType — derived by inverting each
  * registry entry's `groupKeys`.
@@ -124,6 +152,41 @@ export const GROUP_KEY_TO_DOC_TYPE = Object.fromEntries(
     Object.entries(DOC_TYPE_REGISTRY) as [SearchResultsDocType, { groupKeys: readonly string[] }][]
   ).flatMap(([docType, { groupKeys }]) => groupKeys.map(groupKey => [groupKey, docType])),
 ) as Record<string, SearchResultsDocType>;
+
+/** Render order of backend-result groups in the palette's search-active branch. */
+export const BACKEND_GROUP_KEYS = [
+  'conversation',
+  'ticket',
+  'attachment',
+  'canvas',
+  'transcript',
+  'recording',
+  'desk',
+] as const;
+
+/** Section heading per result group — shared by the cmd+K palette and the full-page results. */
+export const RESULT_GROUP_LABELS: Record<string, string> = {
+  user: 'Users',
+  channel: 'Channels',
+  conversation: 'Messages',
+  ticket: 'Tickets',
+  attachment: 'Attachments',
+  canvas: 'Canvas',
+  transcript: 'Calls',
+  recording: 'Recordings',
+  desk: 'Desk',
+  // The flat ALL list is every backend type in one score-ordered list, not a leftovers bucket.
+  others: 'Results',
+};
+
+/**
+ * Backend-result group key -> palette TabType, for the groups that show a loading skeleton
+ * on the ALL tab while a search is pending (Messages and Tickets).
+ */
+export const ALL_TAB_SKELETON_GROUPS: Partial<Record<string, TabType>> = {
+  conversation: TabType.MESSAGES,
+  ticket: TabType.TICKETS,
+};
 
 export const VespaApps = {
   CHAT: 'chat',
@@ -198,7 +261,18 @@ export interface SearchScopeToggles {
  * A whole restorable palette search: the query text, its chips, and the scope it ran at.
  * Stored on the palette's history entry and rebuilt from the results page's parked params.
  */
-export type PaletteRestore = InitialQueryData & { toggles?: SearchScopeToggles };
+export type PaletteRestore = InitialQueryData & {
+  toggles?: SearchScopeToggles;
+  /** The ticket screen view the search ran in, so coming back reopens it in that view. */
+  ticketView?: TicketSearchView;
+  /** How the session started, so coming back to a Cmd+F search keeps it one. */
+  sessionOrigin?: CmdkOpenOrigin;
+};
+
+/**
+ * How an open came about: Cmd+K itself, or a Back restoring a session that started as `restore`.
+ */
+export type PaletteOpenVia = 'shortcut' | { restore: CmdkOpenOrigin };
 
 export interface ChipData {
   id: string;
@@ -228,7 +302,12 @@ export interface ChannelCommandMenuProps {
   currentUserID: string;
   unreadCounts: Record<string, number>;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  /**
+   * `via: 'shortcut'` marks an open from Cmd+K itself, the only open that consults the size
+   * policy; `{ restore }`, a Back bringing a session back, and how it started. Returns false when
+   * an open went elsewhere instead (to full page, or its search box).
+   */
+  onOpenChange: (open: boolean, via?: PaletteOpenVia) => boolean | void;
   /** When true, clicking items adds them to context instead of navigating */
   contextSelectionMode?: boolean;
   /** Currently selected context items (used to show checkmarks) */
@@ -264,6 +343,14 @@ export interface ChannelCommandMenuProps {
    */
   enabledTabs?: TabType[];
   /**
+   * Show the inline AI overview: classify what the user typed and, when it reads as a
+   * question, answer it above the results. Only the desktop workspace search sets this;
+   * the pickers that reuse this palette (Ask AI context, Streams columns, Desk) leave it
+   * off — there you are choosing a thing, not asking a question — and so does mobile,
+   * where an answer above the results would push them off the viewport.
+   */
+  aiOverview?: boolean;
+  /**
    * When true, renders as a plain inline panel (<Command>) instead of a
    * full-screen dialog (<Command.Dialog>). Parent controls visibility by
    * conditionally mounting/unmounting this component.
@@ -280,6 +367,15 @@ export interface ChannelCommandMenuProps {
   /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
   deskMergeEnabled?: boolean;
   /**
+   * The ticket screen view the palette searches in: its name shown under the input, its
+   * filters sent on Tickets-tab requests (Vespa's, then Zero's full set when needed).
+   */
+  ticketView?: TicketSearchView | null;
+  /** Removes that view: the screen's filters are dropped and a plain search remains. */
+  onRemoveTicketView?: () => void;
+  /** A back-navigation brought back a search that ran in a ticket view; re-apply it. */
+  onRestoreTicketView?: (ticketView: TicketSearchView) => void;
+  /**
    * How a chosen row is marked — a solid brand tick (`filled`, the default) or a
    * bordered one (`outline`). Pick `outline` where the mark states a fact about
    * a row you cannot act on, rather than offering a choice.
@@ -292,6 +388,33 @@ export interface ChannelCommandMenuProps {
    * by default: every existing caller keeps the full-label row it had.
    */
   compactTabs?: boolean;
+  /**
+   * Whether Cmd+K and mod+/ open this palette (default true). A page's own copy of the palette
+   * (the chat directory's) sets false, so the shortcuts always reach the app-level palette: it
+   * then takes them only while open, to close itself.
+   */
+  globalShortcuts?: boolean;
+  /**
+   * The app-level Cmd+K search: remembers the query of an opened result for a quick return.
+   * Pickers built on this menu leave it off.
+   */
+  fullPageSearch?: boolean;
+  /** Offer the "Expand to full-page search" return banner on this open, in place of the row. */
+  returnBanner?: boolean;
+  /** Hold off the palette's history entry while a collapse from full page navigates back. */
+  deferHistory?: boolean;
+  /** How this open started: Cmd+F sessions never teach the open-size policy. */
+  sessionOrigin?: CmdkOpenOrigin;
+  /**
+   * A result carried back from full page: selected in place of the first result once it loads, for
+   * as long as the query is the one it came with.
+   */
+  preferredResultId?: string | null;
+  /**
+   * The palette was opened over a dialog: it never leaves for the full-page results (no expand,
+   * no "See N more" to the results page), which would open under that dialog.
+   */
+  overPageDialog?: boolean;
 }
 
 /* ------------------------------------------------------------------------- *

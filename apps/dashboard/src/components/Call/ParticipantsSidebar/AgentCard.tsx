@@ -9,6 +9,7 @@ import {
   handleAiButtonClick,
 } from '../../../utils/callControls';
 import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
+import { deriveTranscriptionDisplayStatus } from '../../../utils/livekitAgent';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +49,11 @@ export function AgentCard({
     state => state.context.isTranscriptionEnabled,
   );
   const isPending = useSelector(roomActor, state => state.context.transcriptionPending);
+  const agentPresent = useSelector(roomActor, state => state.context.agentPresent);
+  const transcriptionAgentLeft = useSelector(
+    roomActor,
+    state => state.context.transcriptionAgentLeft,
+  );
   const isAIAssistantEnabled = useSelector(roomActor, state => state.context.isAIAssistantEnabled);
   const aiController = useSelector(roomActor, state => state.context.aiController);
   const pendingControlRequest = useSelector(
@@ -77,18 +83,26 @@ export function AgentCard({
     requestedAiController: agentControls?.requestedAiController ?? false,
   });
 
-  // Talk-back needs speech-to-text, so it's only offered while transcribing.
-  const showTalkBack = !!agentControls && isTranscriptionEnabled;
+  // transcribing = agent live; connecting = meant to be on but the agent isn't here yet
+  // (self-heals); off = host turned it off.
+  const status = deriveTranscriptionDisplayStatus({ isTranscriptionEnabled, agentPresent });
+
+  // Talk-back needs the live agent, so it's only offered while actually transcribing.
+  const showTalkBack = !!agentControls && status === 'transcribing';
 
   const statusLabel = isPending
     ? isTranscriptionEnabled
       ? 'Stopping…'
       : 'Starting…'
-    : isTranscriptionEnabled
+    : status === 'transcribing'
       ? aiController
         ? `Transcribing · controlled by ${isController ? 'you' : aiController.name}`
         : 'Transcribing this call'
-      : 'Not transcribing';
+      : status === 'connecting'
+        ? transcriptionAgentLeft
+          ? 'Reconnecting…'
+          : 'Connecting…'
+        : 'Not transcribing';
 
   const talkBackClick = (): void =>
     handleAiButtonClick({
@@ -114,7 +128,11 @@ export function AgentCard({
         <span
           className={cn(
             'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background',
-            isTranscriptionEnabled ? 'animate-pulse bg-red-500' : 'bg-muted-foreground',
+            status === 'transcribing'
+              ? 'animate-pulse bg-red-500'
+              : status === 'connecting'
+                ? 'bg-amber-500'
+                : 'bg-muted-foreground',
           )}
           aria-hidden
         />

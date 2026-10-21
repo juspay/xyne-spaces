@@ -284,7 +284,7 @@ export async function deliverMentionsToAddedMembers(
     mentionActivities(recipients, { messageId, channelId, senderId, isThreadActivity }),
   );
 
-  const appUserIds = recipientIds.filter(id => userMap.get(id)?.userType === UserType.APP);
+  const appUserIds = recipientIds.filter(id => userMap.get(id)?.userType === UserType.APP || userMap.get(id)?.userType === UserType.AGENT);
   if (appUserIds.length > 0) {
     deps.emitAppMention(await appMentionPayload({
       messageId,

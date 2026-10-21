@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import axios from 'axios';
-import { authActor } from '../machines/authMachine';
+import { authActor, setEnterpriseLoginIntent } from '../machines/authMachine';
 import type {
   AuthState,
   CommunityJoinRequestContext,
@@ -143,6 +143,10 @@ export const useAuth = (): UseAuthReturn => {
   }, [send]);
 
   const startEnterpriseLogin = useCallback(() => {
+    // Persist the enterprise intent so the OAuth initiate actors can pass
+    // enterpriseLogin=true to the backend — the machine event alone is only
+    // handled in the communityJoinRequested state.
+    setEnterpriseLoginIntent();
     send({ type: 'START_ENTERPRISE_LOGIN' });
   }, [send]);
 

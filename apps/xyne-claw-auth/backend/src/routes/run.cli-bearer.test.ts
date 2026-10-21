@@ -62,6 +62,13 @@ vi.mock("../middleware/require-auth.js", () => ({
   s2sKeyMatches: vi.fn((value: unknown) => value === "s2s-secret"),
 }));
 
+vi.mock("../mcpgateway/services/http-client.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  assertSafeOutboundUrl: vi.fn(async (url: string) => {
+    if (new URL(url).hostname === "rebind.example.com") throw new Error("Blocked destination address: 10.0.0.5");
+  }),
+}));
+
 vi.mock("../db.js", () => ({
   prisma: {
     user: {
@@ -134,7 +141,8 @@ vi.mock("../lib/agent-provider-config.js", () => ({
   resolveSubagentProviderMode: vi.fn(() => "spaces"),
 }));
 
-vi.mock("xyne-claw-shared", () => ({
+vi.mock("xyne-claw-shared", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   ClawSseParser: class {
     feed() {
       return [];
@@ -369,6 +377,44 @@ describe("/run CLI bearer path", () => {
 
     expect(response).toMatchObject({ status: 400, body: { error: "callbackUrl is not an allowed target" } });
     expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it.each([
+    "http://127.0.0.1:15000/quitquitquit",
+    "http://10.4.2.9:3001/callback",
+    "http://xyne-backend.xyne-apps.svc.cluster.local:3001/api/internal/automations/claw-callback/x/y",
+    "https://rebind.example.com/results",
+  ])("rejects a non-S2S callbackUrl that targets an internal address: %s", async (callbackUrl) => {
+    const response = await postRun({ agentSlug: "agent-a", task: "do work", triggerSource: "api", callbackUrl });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "callbackUrl is not an allowed target" } });
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("rejects progressUrl from a non-S2S caller", async () => {
+    const response = await postRun({
+      agentSlug: "agent-a",
+      task: "do work",
+      triggerSource: "api",
+      progressUrl: "http://127.0.0.1:15000/quitquitquit",
+    });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "progressUrl requires internal service authentication" } });
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("accepts an in-cluster callbackUrl and progressUrl from an S2S caller", async () => {
+    const response = await postRun(
+      {
+        agentSlug: "agent-a",
+        task: "do work",
+        callbackUrl: "http://xyne-backend.xyne-apps.svc.cluster.local:3001/api/internal/automations/claw-callback/x/y",
+        progressUrl: "http://auth.local/claw/api/v1/webhook/progress",
+      },
+      { s2s: true },
+    );
+
+    expect(response.status).toBe(200);
   });
 
   it("service token: strips non-contract body fields before dispatch", async () => {

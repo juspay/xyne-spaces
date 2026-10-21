@@ -21,7 +21,7 @@ import { errMsg } from "./errors.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
-import { AMBIENT_USER_CREDENTIAL_SERVER_TYPES } from "./credentials-loader.js";
+import { AMBIENT_USER_CREDENTIAL_SERVER_TYPES, loadEffectiveCredentials } from "./credentials-loader.js";
 
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
@@ -34,12 +34,16 @@ export interface SignedWriteAction {
   params: Record<string, unknown>;
   userId: string;
   signature: string;
+  /** Covered by the signature when a subagent's credential decided the call;
+   *  see writeActionPayload in routes/mcp.ts. */
+  subagentId?: string;
 }
 
 export interface WriteActionResult {
   ok: boolean;
   content: string;
   error?: string;
+  createdSkillId?: string;
 }
 
 function parseGatewayActionTarget(serverType: string): { serviceName: string; backendId?: string } | null {
@@ -66,8 +70,8 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
   const { serverType, tool, params, userId, signature } = action;
 
   // 1. Signature verification — prevents tampered params sneaking through.
-  const { verifyActionSignature } = await import("../routes/mcp.js");
-  const actionCore = { serverType, tool, params, userId };
+  const { verifyActionSignature, writeActionPayload } = await import("../routes/mcp.js");
+  const actionCore = writeActionPayload(action);
   if (!verifyActionSignature(actionCore, signature)) {
     return { ok: false, content: "", error: "Signature verification failed — action may have been tampered with." };
   }
@@ -135,6 +139,39 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       return { ok: true, content: String(result) };
     }
 
+    // 2b-i. Agent-authoring writes (agents, subagents, MCP servers) — no MCP
+    // connector; applied directly, mirroring routes/flow-action.ts.
+    {
+      const { AGENT_TOOL_SLUGS, applyAgentToolAction } = await import("./agent-tools-apply.js");
+      if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
+        const outcome = await applyAgentToolAction(tool, params, userId);
+        if (!outcome.ok) return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.note ? `${outcome.message}\n\n${outcome.note}` : outcome.message };
+      }
+    }
+
+    // 2b-ii. create-skill — also no MCP connector. Without this it fell through
+    // to 2c and failed with "No adapter for server type: agent-tools".
+    {
+      const { applyCreateSkill, isCreateSkillAction } = await import("./skill-apply.js");
+      if (isCreateSkillAction(serverType, tool)) {
+        const outcome = await applyCreateSkill(params, userId);
+        if (outcome.status !== "created") return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.message, createdSkillId: outcome.id };
+      }
+    }
+
+    // 2b-iii. Artifact-app writes (publish-app) — no MCP connector; applied
+    // directly against claw-auth's own app tables.
+    {
+      const { applyArtifactAppAction, isArtifactAppAction } = await import("./artifact-app-apply.js");
+      if (isArtifactAppAction(serverType, tool)) {
+        const outcome = await applyArtifactAppAction(tool, params, userId);
+        if (!outcome.ok) return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.message };
+      }
+    }
+
     // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
     // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
     const { callTool } = await import("../mcp/runner.js");
@@ -144,12 +181,16 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
     }
 
     let credentials: Record<string, unknown>;
+    let instance: string | undefined;
     if (AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType)) {
       const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
       const live = await getSpacesAuthForUser(userId, "write-action");
       if (live) {
         credentials = {
-          url: CONFIG.spacesAppUrl,
+          // Server-to-server call from the claw-auth pod: use the in-cluster
+          // Spaces URL, same as credentials-loader (flow-action path). The
+          // public spacesAppUrl is not reachable from here ("fetch failed").
+          url: CONFIG.spacesInternalUrl,
           token: live.token,
           sessionId: live.sessionId,
           workspaceId: live.workspaceId,
@@ -159,18 +200,17 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
         return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
       }
     } else {
-      const connection = await prisma.userMcpConnection.findFirst({
-        where: { userId, mcpServer: { type: serverType } },
-      });
-      if (!connection) {
+      // Same resolver /mcp/call used to queue the write, so a subagent's write
+      // runs on the subagent's credential rather than the user's own.
+      const effective = await loadEffectiveCredentials(userId, serverType, undefined, undefined, undefined, actionCore.subagentId);
+      if (!effective) {
         return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
       }
-
-      const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-      credentials = JSON.parse(decrypted) as Record<string, unknown>;
+      credentials = effective.credentials;
+      instance = effective.instance;
     }
 
-    const result = await callTool(userId, serverType, credentials, tool, params);
+    const result = await callTool(userId, serverType, credentials, tool, params, undefined, undefined, instance);
     return { ok: true, content: result.content };
   } catch (err) {
     const msg = errMsg(err);

@@ -41,6 +41,19 @@ export const uploadProfilePicture = async (file: File): Promise<string> => {
   }
 };
 
+/**
+ * Remove the current user's profile picture
+ */
+export const removeProfilePicture = async (): Promise<void> => {
+  try {
+    await apiInstance.delete('/users/me/picture');
+    toast.success('Profile picture removed');
+  } catch (error) {
+    toast.error('Failed to remove profile picture');
+    throw error;
+  }
+};
+
 export interface SaveQuestionnaireResponseInput {
   questionnaireType: string;
   payload: Record<string, unknown>;

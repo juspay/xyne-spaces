@@ -13,6 +13,7 @@ import {
   appSchema,
   callSchema,
 } from '../types';
+import { CallType } from '@xyne/shared';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
 type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call';
@@ -170,6 +171,9 @@ export interface SlackFilters {
   // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
   // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
   entityNames?: string[];
+  // Link filter: true → only messages containing a link, false → only messages without one.
+  // `hasLinks` exists only on chat_message.
+  hasLinks?: boolean;
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -199,6 +203,8 @@ export interface TicketFilters {
   createdAfter?: string; // Created after date (multiple formats)
   createdOn?: string; // Created on specific date (multiple formats)
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
+  createdAfterTimestamp?: number; // Created at or after this epoch-ms instant (programmatic callers)
+  createdBeforeTimestamp?: number; // Created strictly before this epoch-ms instant (programmatic callers)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
   userGroupId?: string[]; // Filter by user group ID - comma-separated
@@ -210,6 +216,7 @@ export interface TicketFilters {
 export interface FileFilters {
   subApp?: string[];
   callType?: string[];
+  labels?: string[]; // Recording label slugs (OR-ed), from the shared `tags` filter
   docType?: string[];
   createdBy?: string[];
   createdBefore?: string;
@@ -563,10 +570,10 @@ export class YqlBuilder {
    */
   private buildUserConditions(): string {
     // People-search filters only on `docType contains "user"` today — with two known gaps:
-    //  1. transformUserToVespa stamps docType='user' on EVERY user (human/BOT/APP alike), so
-    //     docType cannot exclude bots/apps. The real discriminator is `userType` (USER/BOT/APP
+    //  1. transformUserToVespa stamps docType='user' on EVERY user (human/BOT/APP/AGENT alike), so
+    //     docType cannot exclude bots/apps/agents. The real discriminator is `userType` (USER/BOT/APP/AGENT
     //     on the User model) — NOT written to Vespa yet. Write it there, then add
-    //     `and userType contains "USER"` here to keep bots/apps out of people-search.
+    //     `and userType contains "USER"` here to keep bots/apps/agents out of people-search.
     //  2. The personalization worker creates weight-only stubs with NO docType/docId (it writes
     //     by document key, not identity fields), and pre-middleware users were never ingested —
     //     so those docs won't match this filter. The users schema likely needs a BACKFILL
@@ -579,6 +586,7 @@ export class YqlBuilder {
    * may only be emitted when at least one selected schema declares the field.
    * Verified against vespa-core/vespa/common/schemas/*.sd (incl. imported fields):
    * - chat_message:    permissions, isPrivate, messageType, workspaceId  (acl fields imported from channelRef; messageType own)
+   *                    also entityNames, hasLinks (own)
    * - chat_container:  permissions, ownerId, isPrivate, workspaceId
    * - chat_attachment: permissions, workspaceId                          (permissions imported; no ownerId/isPrivate/messageType)
    * - ticket:          permissions, workspaceId                          (imported from channelRef)
@@ -597,6 +605,7 @@ export class YqlBuilder {
       isPrivate: boolean;
       messageType: boolean;
       entityNames: boolean;
+      hasLinks: boolean;
     }
   > = {
     [messageSchema]: {
@@ -607,6 +616,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: true,
       entityNames: true,
+      hasLinks: true,
     },
     [channelSchema]: {
       ownerId: true,
@@ -616,6 +626,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [attachmentSchema]: {
       ownerId: false,
@@ -625,6 +636,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [ticketSchema]: {
       ownerId: false,
@@ -634,6 +646,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: true,
+      hasLinks: false,
     },
     [fileSchema]: {
       ownerId: true,
@@ -643,6 +656,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [mailSchema]: {
       ownerId: false,
@@ -652,6 +666,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [callSchema]: {
       ownerId: false,
@@ -661,6 +676,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
   };
 
@@ -766,14 +782,18 @@ export class YqlBuilder {
       );
     }
 
-    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
-    if (
-      subApps.some(
-        (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
-      )
-    ) {
+    // Chat/Ticket attachments and transcripts: owner/channelPermissions/isPrivate check
+    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"`;
+    if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
-        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (${channelAccess}))`
+      );
+    }
+
+    // Transcripts: plus a recording's share recipients (its `permissions`)
+    if (subApps.some((s) => s === 'TRANSCRIPT')) {
+      subAppConditions.push(
+        `((subApp contains "TRANSCRIPT") and (${channelAccess} or (callType contains "${CallType.HEADLESS}" and permissions contains ${accessUser})))`
       );
     }
 
@@ -818,6 +838,14 @@ export class YqlBuilder {
         .map((callType) => `callType contains ${params.bind('callType', callType.trim())}`)
         .join(' or ');
       conditions.push(`(${types})`);
+    }
+
+    // labels filter (recording transcripts' confirmed label slugs) — OR-ed like ticket tags
+    if (filters.labels && filters.labels.length > 0) {
+      const labels = filters.labels
+        .map((label) => `labels contains ${params.bind('labels', label.trim())}`)
+        .join(' or ');
+      conditions.push(`(${labels})`);
     }
 
     // createdBy filter (for from: functionality - files uploaded by specific user)
@@ -985,6 +1013,15 @@ export class YqlBuilder {
         .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
         .join(' and ');
       conditions.push(`(${entities})`);
+    }
+
+    // Link filter — hasLinks is a bool attribute only on chat_message; attachments lack it,
+    // so setting this narrows chat results to messages.
+    if (
+      typeof filters.hasLinks === 'boolean' &&
+      this.schemasHaveField(selectedSchemas, (f) => f.hasLinks)
+    ) {
+      conditions.push(`hasLinks = ${filters.hasLinks}`);
     }
 
     if (filters.createdBefore) {
@@ -1250,6 +1287,14 @@ export class YqlBuilder {
           `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
         );
       }
+    }
+
+    if (filters.createdAfterTimestamp !== undefined && Number.isFinite(filters.createdAfterTimestamp)) {
+      conditions.push(`createdAtTimestamp >= ${Math.floor(filters.createdAfterTimestamp)}`);
+    }
+
+    if (filters.createdBeforeTimestamp !== undefined && Number.isFinite(filters.createdBeforeTimestamp)) {
+      conditions.push(`createdAtTimestamp < ${Math.floor(filters.createdBeforeTimestamp)}`);
     }
 
     return conditions.join(' and ');

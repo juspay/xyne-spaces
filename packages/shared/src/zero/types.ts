@@ -74,6 +74,12 @@ export enum EmailMergeMode {
 }
 
 // @ts-ignore TS1294
+export enum SlackDeskTriggerMode {
+  ALL_MESSAGES = 'ALL_MESSAGES',
+  MENTION_ONLY = 'MENTION_ONLY',
+}
+
+// @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',
@@ -100,6 +106,16 @@ export enum GuestEntity {
   CANVAS = 'CANVAS',
 }
 
+// Slack Connect — the two entity kinds that get a connectId + connect_group row.
+// Values are LOWERCASE on purpose: they are the exact strings stored in the
+// connect_group.entityType String column, so this is a code-level enum only — the
+// DB column stays a plain String and existing rows keep matching.
+// @ts-ignore TS1294
+export enum ConnectEntityType {
+  CHANNEL = 'channel',
+  CANVAS = 'canvas',
+}
+
 // @ts-ignore TS1294
 export enum RecapEntityType {
   CHANNEL = 'CHANNEL',
@@ -122,6 +138,17 @@ export enum AttachmentEntityType {
   RECORDING = 'RECORDING',
   SDLC_HUB = 'SDLC_HUB',
 }
+
+export const UNSENT_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.DRAFT,
+  AttachmentEntityType.DELAYED_MESSAGE,
+];
+
+export const CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.CHAT,
+  AttachmentEntityType.EMAIL,
+  AttachmentEntityType.TICKET,
+];
 
 // @ts-ignore TS1294
 export enum TicketEnvironment {
@@ -510,6 +537,7 @@ export enum UserType {
   USER = 'USER',
   BOT = 'BOT',
   APP = 'APP',
+  AGENT = 'AGENT',
 }
 
 // @ts-ignore TS1294
@@ -519,6 +547,7 @@ export enum AppIncomingWebhookType {
   AMAZON_SNS = 'AMAZON_SNS',
   PINGDOM = 'PINGDOM',
   GCP = 'GCP',
+  HUBSPOT = 'HUBSPOT',
 }
 
 // @ts-ignore TS1294
@@ -583,6 +612,24 @@ export enum ACLAuditTargetType {
   RESOURCE = 'RESOURCE',
   RESOURCE_ACCESS = 'RESOURCE_ACCESS',
   USER_GROUP = 'USER_GROUP',
+}
+
+// Generalized audit trail types. The audit tables live in the non_zero schema —
+// written by the backend audit interceptors, read via REST (GET /api/audit-logs).
+// @ts-ignore TS1294
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+}
+
+// Logical context an audit log belongs to (non_zero.audit_logs.entityType).
+// Determines which screen an audit row is displayed on (audit_logs.entityId).
+// @ts-ignore TS1294
+export enum AuditEntityType {
+  USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
+  BOARD = 'BOARD',
+  DESK = 'DESK',
 }
 
 // @ts-ignore TS1294
@@ -665,13 +712,16 @@ export enum NotificationType {
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  VIEW_SHARED = "VIEW_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
+  TRANSCRIPT_TRANSLATION_READY = "TRANSCRIPT_TRANSLATION_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
   COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
   MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
   ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
   ASSIGNMENT_RESUMED = "ASSIGNMENT_RESUMED",
+  DESK_ACCOUNT_DISCONNECTED = "DESK_ACCOUNT_DISCONNECTED",
 }
 
 // @ts-ignore TS1294
@@ -773,6 +823,8 @@ export enum ChannelType {
   // SDLC repository channel: system-managed, hidden from the chat surfaces
   // the same way SUPPORT channels are (inline type checks).
   SDLC = 'SDLC',
+  // Channels desk: tickets for threads in channels connected to one service account.
+  CHANNELS = 'CHANNELS',
 }
 
 // @ts-ignore TS1294
@@ -783,6 +835,7 @@ export enum DeskType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  CHANNELS = 'CHANNELS',
 }
 
 // @ts-ignore TS1294
@@ -807,11 +860,39 @@ export enum FormFieldType {
   TICKET = 'TICKET',
 }
 
+/**
+ * Max scope fields on EmailChannelPreference.duplicateScopeConfig. Enforced in the
+ * desk settings picker, both Zero mutators, and the duplicate service's parser —
+ * a config over the limit is treated as malformed and detection falls back to
+ * project-wide, so the three must agree.
+ */
+export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
+
+/**
+ * Largest duplicate-detection window a desk may configure (days, 10 years). Enforced
+ * identically by the duplicate service's config parser, both Zero mutators, and the
+ * desk settings UI — the four must agree or saves validate in one place and reject
+ * in another.
+ */
+export const MAX_DUPLICATE_LOOKBACK_DAYS = 3650;
+
+/** Max apps published to one channel, DM, group DM or desk (channel_published_tabs). */
+export const MAX_PUBLISHED_APPS = 8;
+
+/** channel_published_tabs.entityType — what a published channel tab points at. */
+export const ChannelPublishedEntityType = {
+  APP: 'APP',
+} as const;
+
+export type ChannelPublishedEntityType =
+  typeof ChannelPublishedEntityType[keyof typeof ChannelPublishedEntityType];
+
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',
   RELEASE_CHANGE = 'RELEASE_CHANGE',
   STAGE = 'STAGE',
+  WORKSPACE = 'WORKSPACE',
 }
 
 // @ts-ignore TS1294
@@ -826,6 +907,7 @@ export enum BoardType {
 export enum FormEntityType {
   TICKET = 'TICKET',
   SUB_TICKET = 'SUB_TICKET',
+  CHANNEL = 'CHANNEL',
   RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
   RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
 }
@@ -1011,10 +1093,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
-// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// Who a saved-view share grant targets. USER shares with an individual; CHANNEL shares
+// with every current & future member of a channel. USER_GROUP slot reserved.
 // @ts-ignore TS1294
 export enum ViewAccessEntityType {
   USER = 'USER',
+  CHANNEL = 'CHANNEL',
 }
 
 // @ts-ignore TS1294

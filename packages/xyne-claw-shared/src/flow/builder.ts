@@ -7,7 +7,7 @@
  * in xyne-claw-shared. They mirror @xyne/shared/types/flowUI exactly.
  */
 
-import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+import { twinDeliveryParts, type TwinDelivery, type TwinReplyDestination } from "../types/twin-delivery.js";
 import type { UserQuestion } from "../tools/types.js";
 import { normalizeUnifiedPatch } from "./unified-patch.js";
 
@@ -99,6 +99,12 @@ export interface FlowDefinition {
     history: string[];
     loadingComponentIds: string[];
   };
+}
+
+/** Stamp `data.spacesAppId` onto a flow (no-op when there is no app id) so card actions route back to the posting app. */
+export function withSpacesAppId<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
+  if (!spacesAppId) return flow;
+  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -264,6 +270,8 @@ export class FlowBuilder {
       placeholder?: string;
       options: SelectOption[];
       required?: boolean;
+      /** true → multi-select; the submitted value is a string[] instead of a string */
+      multiple?: boolean;
       action?: FlowAction;
     },
   ): this {
@@ -339,6 +347,9 @@ export function buildWriteApprovalFlow(
     userId: string;
     signature: string;
     agentSlug: string;
+    /** Signed into the action when a subagent's credential decided the call —
+     *  flow-action re-resolves that credential from it on approve. */
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
   },
@@ -367,6 +378,7 @@ export function buildWriteApprovalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
       ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
       ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })
@@ -391,6 +403,7 @@ export function buildWriteResultFlow(opts: {
     userId: string;
     signature: string;
     agentSlug: string;
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
     spacesAppId?: string;
@@ -422,6 +435,7 @@ export function buildWriteResultFlow(opts: {
       userId: opts.retry.userId,
       signature: opts.retry.signature,
       agentSlug: opts.retry.agentSlug,
+      ...(opts.retry.subagentId ? { subagentId: opts.retry.subagentId } : {}),
       ...(opts.retry.channelId !== undefined ? { channelId: opts.retry.channelId } : {}),
       ...(opts.retry.conversationId !== undefined ? { conversationId: opts.retry.conversationId } : {}),
       ...(opts.retry.spacesAppId !== undefined ? { spacesAppId: opts.retry.spacesAppId } : {}),
@@ -487,8 +501,7 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
     agentSlug, dmChannelId, spacesBaseUrl,
   } = params;
 
-  const willReact = delivery.action === "react" || delivery.action === "react_and_reply";
-  const willReply = delivery.action === "reply" || delivery.action === "react_and_reply";
+  const { emoji: willReact, message: willReply } = twinDeliveryParts(delivery.action);
   const message = delivery.message ?? "";
   const dest = delivery.destination;
   const destLabel = twinDestinationLabel(dest, channelName, senderName);
@@ -1121,27 +1134,65 @@ export interface TicketArtifact {
   assigneeId?: string;
 }
 
+/** The `ticket` component for a created ticket. Shared so the email-sent card
+ *  cannot drift from the ticket card it is meant to match. */
+function createdTicketComponent(ticket: TicketArtifact): FlowComponent {
+  return {
+    id: 'ticket',
+    type: 'ticket',
+    props: {
+      phase: 'created',
+      xyneId: ticket.xyneId,
+      ...(ticket.ticketId ? { ticketId: ticket.ticketId } : {}),
+      title: ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      ...(ticket.stageName ? { stageName: ticket.stageName } : {}),
+      ...(ticket.eta ? { eta: ticket.eta } : {}),
+      ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+      ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+      ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
+      url: ticket.url,
+    },
+  } as FlowComponent;
+}
+
 export function buildTicketFlow(ticket: TicketArtifact): FlowDefinition {
-  return new FlowBuilder(`ticket-${ticket.xyneId}`)
-    .addComponent({
-      id: 'ticket',
-      type: 'ticket',
-      props: {
-        phase: 'created',
-        xyneId: ticket.xyneId,
-        ...(ticket.ticketId ? { ticketId: ticket.ticketId } : {}),
-        title: ticket.title,
-        status: ticket.status,
-        priority: ticket.priority,
-        ...(ticket.stageName ? { stageName: ticket.stageName } : {}),
-        ...(ticket.eta ? { eta: ticket.eta } : {}),
-        ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
-        ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
-        ...(ticket.assigneeId ? { assigneeId: ticket.assigneeId } : {}),
-        url: ticket.url,
-      },
-    })
-    .build();
+  return new FlowBuilder(`ticket-${ticket.xyneId}`).addComponent(createdTicketComponent(ticket)).build();
+}
+
+/**
+ * The result card for an email sent from a desk ticket.
+ *
+ * The generic write-result card echoes the tool's raw text into one "Result:"
+ * blob, which for a send reads as a wall of machine output — the recipients,
+ * the subject and the ticket are the whole story and deserve their own lines.
+ * When the ticket is resolvable it rides along as the same `ticket` component
+ * the create-ticket card uses, so the card is clickable through to the thread.
+ */
+export function buildEmailSentFlow(email: {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  ticket?: TicketArtifact;
+}): FlowDefinition {
+  const b = new FlowBuilder(`email-sent-${crypto.randomUUID()}`)
+    .setTitle('Email sent')
+    .addText('email-head', '📧 Email sent', { variant: 'success', bold: true });
+
+  const rows = [FlowBuilder.text('email-to', `**To:** ${email.to.join(', ')}`)];
+  if (email.cc?.length) rows.push(FlowBuilder.text('email-cc', `**Cc:** ${email.cc.join(', ')}`));
+  if (email.bcc?.length) rows.push(FlowBuilder.text('email-bcc', `**Bcc:** ${email.bcc.join(', ')}`));
+  if (email.subject) rows.push(FlowBuilder.text('email-subject', `**Subject:** ${email.subject}`));
+  rows.push(
+    FlowBuilder.text('email-note', "It's on the ticket's email thread — replies land there."),
+  );
+  b.addCard('email-card', rows, { maxHeight: '280px', overflowY: 'auto' });
+
+  if (email.ticket) b.addComponent(createdTicketComponent(email.ticket));
+
+  return b.build();
 }
 
 export function buildTicketProposalFlow(
@@ -1158,6 +1209,9 @@ export function buildTicketProposalFlow(
     userId: string;
     signature: string;
     agentSlug: string;
+    /** Signed into the action when a subagent's credential decided the call —
+     *  flow-action re-resolves that credential from it on approve. */
+    subagentId?: string;
     channelId?: string;
     conversationId?: string;
   },
@@ -1186,6 +1240,7 @@ export function buildTicketProposalFlow(
       userId: action.userId,
       signature: action.signature,
       agentSlug: action.agentSlug,
+      ...(action.subagentId ? { subagentId: action.subagentId } : {}),
       ...(action.channelId !== undefined ? { channelId: action.channelId } : {}),
       ...(action.conversationId !== undefined ? { conversationId: action.conversationId } : {}),
     })

@@ -1,14 +1,12 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { createEtaBreachSystemMessage } from '@/bypassAcl/ticketEtaServices';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
-import { ActivityType } from '@xyne/shared';
 import {
   getUsersToNotifyForTicket,
   getTicketBotActorId,
   calculateDaysOverdueMidnight,
-  createEtaSystemMessage,
   OPEN_STATUSES,
 } from '@/utils/etaNotificationUtils';
 
@@ -109,14 +107,12 @@ class EtaDeadlineWorker {
           if (ticket.conversationId) {
             // Multi-workspace cron → open a per-ticket tenant context so the system message's
             // workspaceId gets stamped from this ticket's workspace.
-            await runAsServiceActor('eta-deadline-worker', ticket.workspaceId,
-              () => createEtaSystemMessage({
-                conversationId: ticket.conversationId!,
-                content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
-                createdAt: now,
-                activityType: ActivityType.ETA,
-              }),
-            );
+            await createEtaBreachSystemMessage({
+              workspaceId: ticket.workspaceId,
+              conversationId: ticket.conversationId,
+              content: `Ticket ${ticket.xyneId} is overdue (${daysOverdue} days)`,
+              createdAt: now,
+            });
           }
 
           logger.info(

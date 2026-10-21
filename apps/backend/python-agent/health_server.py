@@ -8,12 +8,14 @@ GET  /health      -> health_check  (liveness probe)
 GET  /            -> health_check
 POST /embed-voice -> embed_voice   (speaker enrollment, handled by embed_voice_server)
 POST /transcribe-audio -> transcribe_audio (voice dictation STT)
+POST /transcribe-recording -> transcribe_recording (batch STT of a call recording URL)
 """
 import asyncio
 import logging
 from aiohttp import web
 from config import get_logger, Config
 from transcribe_audio_handler import transcribe_audio, transcribe_stream_ws
+from transcribe_recording_handler import transcribe_recording
 from infra import get_user_registry
 
 from embed_voice_handler import embed_voice
@@ -73,6 +75,7 @@ async def start_health_server(host: str = "0.0.0.0", port: int = 8080):
     app.router.add_post("/transcribe-audio", transcribe_audio)
     app.router.add_post("/embed-voice", embed_voice)
     app.router.add_get("/transcribe-stream", transcribe_stream_ws)
+    app.router.add_post("/transcribe-recording", transcribe_recording)
 
     runner = web.AppRunner(app)
     await runner.setup()

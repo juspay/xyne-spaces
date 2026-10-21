@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification, ActivityType, EmailType } from '@xyne/shared';
+import { ActivityClassification, ActivityType, EmailType, TicketStatusV2 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { emailClassificationQueue, type EmailClassificationJobData } from '@/queues/emailClassificationQueue';
 import { EmailClassificationService } from '@/services/emailClassificationService';
@@ -12,7 +12,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { classifyAndAssignTicket } from '@/bypassAcl/emailFetchServices';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
@@ -26,7 +26,12 @@ function shouldAssignTicketPerson(
   groupChanged: boolean,
   ticketIsUnassigned: boolean,
   effectiveGroupId: string | null,
+  assignmentOnly: boolean = false,
 ): boolean {
+  if (boardId === null) return false;
+  if (assignmentOnly) {
+    return ticketIsUnassigned && effectiveGroupId !== null;
+  }
   // ASSIGN RULE:
   // 1. Group changed → assign to someone in the new group
   // 2. Ticket is unassigned + classification yielded a group → assign
@@ -36,7 +41,7 @@ function shouldAssignTicketPerson(
   );
 }
 
-class EmailClassificationWorker {
+export class EmailClassificationWorker {
   private isInitialized = false;
 
   async start(): Promise<void> {
@@ -76,21 +81,20 @@ class EmailClassificationWorker {
       });
       throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
     }
-    return runAsServiceActor('email-classification-worker', channel.workspaceId,
-      () => this.classifyAndAssign(job, channel.workspaceId),
-    );
+    return classifyAndAssignTicket(this, channel.workspaceId, job);
   }
 
-  private async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
-    const { ticketId, channelId, emailId, groupId } = job.data;
+  async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
+    const { ticketId, channelId, emailId, groupId, sourceChannelId } = job.data;
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;
     const runPriority = job.data.runPriority ?? true;
+    const runAssignment = job.data.runAssignment ?? false;
 
-    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority}`);
+    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
 
-    if (!runClassification && !runPriority) {
+    if (!runClassification && !runPriority && !runAssignment) {
       logger.info(`[EMAIL-CLASSIFICATION-WORKER] Nothing to run for ticket ${ticketId}, skipping`);
       return;
     }
@@ -115,9 +119,12 @@ class EmailClassificationWorker {
     } | null = null;
 
     try {
-      classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
-        emailMetadata: buildEmailMetadata(emailRecord),
-      });
+      if (runClassification || runPriority) {
+        classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
+          emailMetadata: buildEmailMetadata(emailRecord),
+          evaluate: true,
+        });
+      }
     } catch (error) {
       logger.error(
         `[EMAIL-CLASSIFICATION-WORKER] Classification failed for ticket ${ticketId}:`,
@@ -168,6 +175,8 @@ class EmailClassificationWorker {
         channelId: true,
         conversationId: true,
         priority: true,
+        statusV2: true,
+        isArchived: true,
       },
     });
     if (!ticket) {
@@ -175,8 +184,37 @@ class EmailClassificationWorker {
       return;
     }
 
+    const assignmentOnly = runAssignment && !runClassification;
+
+    // An assignment-only run is a retry queued by a sweep, and sits in that sweep's
+    // stagger window before it runs. The ticket may have been resolved, cancelled or
+    // archived in between; assigning it then would resurrect it in someone's queue.
+    if (
+      assignmentOnly &&
+      (ticket.isArchived ||
+        ticket.statusV2 === TicketStatusV2.COMPLETED ||
+        ticket.statusV2 === TicketStatusV2.CANCELLED)
+    ) {
+      logger.info(
+        `[EMAIL-CLASSIFICATION-WORKER] Ticket ${ticketId} is ${ticket.isArchived ? 'archived' : ticket.statusV2} since the sweep selected it; skipping assignment`,
+      );
+      return;
+    }
+    if (assignmentOnly && ticket.userGroupId) {
+      effectiveGroupId = ticket.userGroupId;
+    }
+
     const groupChanged = effectiveGroupId !== null && effectiveGroupId !== ticket.userGroupId;
     const ticketIsUnassigned = !ticket.assignedTo;
+
+    // The sweep selected this ticket because nobody owned it, then it sat in the stagger
+    // window. If someone has taken it since, there is nothing left to assign.
+    if (assignmentOnly && !ticketIsUnassigned) {
+      logger.info(
+        `[EMAIL-CLASSIFICATION-WORKER] Ticket ${ticketId} was claimed by ${ticket.assignedTo} since the sweep selected it; skipping assignment`,
+      );
+      return;
+    }
 
     const priorityAboveThreshold =
       runPriority &&
@@ -188,6 +226,7 @@ class EmailClassificationWorker {
       groupChanged,
       ticketIsUnassigned,
       effectiveGroupId,
+      assignmentOnly,
     );
 
     const updatePayload: Record<string, unknown> = {
@@ -218,9 +257,11 @@ class EmailClassificationWorker {
         });
         const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
+        // Channels desks assign by rule alone, as their own auto-assignment does.
         if (
-          (Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
-          || boardMetadata?.fullRoleAssignment === true
+          !sourceChannelId
+          && ((Array.isArray(boardMetadata?.assignmentRoles) && boardMetadata!.assignmentRoles!.length > 0)
+            || boardMetadata?.fullRoleAssignment === true)
         ) {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
             ticketId,
@@ -237,6 +278,10 @@ class EmailClassificationWorker {
             logger.info(
               `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: primary=${primaryUserId}`,
             );
+          } else {
+            logger.warn(
+              `[EMAIL-CLASSIFICATION-WORKER] No primary assignee for ticket ${ticketId} (group ${effectiveGroupId}, board ${ticket.boardId}) — ticket left unassigned; see [Assignment] evaluateRoleSlots results for the reason`,
+            );
           }
         } else {
           const assignmentResult = await evaluateAssignmentRule(
@@ -246,6 +291,7 @@ class EmailClassificationWorker {
             undefined,
             ticket.projectId ?? undefined,
             ticket.channelId ?? undefined,
+            sourceChannelId,
           );
           if (assignmentResult.assignedUserId) {
             newAssignedTo = assignmentResult.assignedUserId;
@@ -273,10 +319,25 @@ class EmailClassificationWorker {
     }
 
     if (hasMeaningfulUpdates) {
-      const updatedTicket = await prisma.ticket.update({
-        where: { id: ticketId },
-        data: updatePayload,
-      });
+      let updatedTicket;
+      if (assignmentOnly) {
+        const { count } = await prisma.ticket.updateMany({
+          where: { id: ticketId, assignedTo: null },
+          data: updatePayload,
+        });
+        if (count === 0) {
+          logger.info(
+            `[EMAIL-CLASSIFICATION-WORKER] Ticket ${ticketId} was claimed by someone else while this retry was queued; leaving it as is`,
+          );
+          return;
+        }
+        updatedTicket = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      } else {
+        updatedTicket = await prisma.ticket.update({
+          where: { id: ticketId },
+          data: updatePayload,
+        });
+      }
 
       try {
         await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
@@ -315,9 +376,11 @@ class EmailClassificationWorker {
     // Activity logging
 
     if (newAssignedTo && assignmentSucceeded) {
-      const assignReason = resolvedGroupId
-        ? 'AI classification'
-        : 'Default channel group';
+      const assignReason = assignmentOnly
+        ? 'Auto-assign retry'
+        : resolvedGroupId
+          ? 'AI classification'
+          : 'Default channel group';
 
       try {
         // 1. Ticket activity row (appears in the ticket's activity log)

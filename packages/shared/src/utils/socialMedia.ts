@@ -10,4 +10,6 @@ export const APP_STORE_KEY_ID_PATTERN = /^[A-Z0-9]{10,20}$/;
 export const SOCIAL_MEDIA_SOURCE_TYPE = {
   GOOGLE_PLAY: 'google-play-reviews',
   APP_STORE: 'app-store-reviews',
+  INSTAGRAM: 'instagram',
+  FACEBOOK: 'facebook',
 } as const;

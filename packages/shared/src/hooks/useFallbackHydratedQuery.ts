@@ -13,6 +13,7 @@ import type { QueryRequest } from '@rocicorp/zero';
 import {
   queryCacheActor,
   loadCacheEntryFromStorage,
+  retainCacheKey,
   type CacheEntry,
 } from '../machines/queryCacheMachine.js';
 import { consumeShadow } from '../utils/warmShadow.js';
@@ -49,7 +50,7 @@ function mergeById<T>(existing: T[], incoming: T[]): T[] {
  *   - Otherwise → call the fallback REST endpoint, seed the cache.
  *
  * Phase 2 (runs after Phase 1 sets a watermark):
- *   - Subscribe to a Zero useQuery with lastUpdatedAt = watermark.
+ *   - Subscribe to a Zero useQuery with updatedAt = watermark.
  *   - Merge deltas into cache by id.
  */
 export function useFallbackHydratedQuery<
@@ -78,6 +79,13 @@ export function useFallbackHydratedQuery<
   }, [query, zero.context]);
 
   const isHydrated = useSelector(queryCacheActor, (s) => s.context.isHydrated);
+
+  // The cache entry is the only full copy of the list; if eviction drops it,
+  // this hook falls back to the bare delta and callers replace their state with it.
+  useEffect(() => {
+    if (!hash) return;
+    return retainCacheKey(hash);
+  }, [hash]);
 
   const cacheEntry = useSelector(queryCacheActor, (s) =>
     hash ? s.context.cache.get(hash) : undefined,
@@ -191,7 +199,7 @@ export function useFallbackHydratedQuery<
       : {}) as Record<string, unknown>;
     return {
       ...query,
-      args: { ...baseArgs, lastUpdatedAt: watermark },
+      args: { ...baseArgs, updatedAt: watermark },
     } as unknown as typeof query;
   }, [query, deltaEnabled, watermark]);
 

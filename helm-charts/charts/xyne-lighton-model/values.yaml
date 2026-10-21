@@ -1,0 +1,218 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: docker.io
+  repository: vllm/vllm-openai
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 1
+revisionHistoryLimit: 3
+strategy:
+  type: Recreate
+
+command:
+  - /bin/sh
+  - -c
+  - |
+    major="$(python3 -c 'import torch; print(torch.cuda.get_device_capability()[0])' 2>/dev/null || echo 0)"
+    dtype=auto
+    if [ "$major" -lt 8 ]; then dtype=float32; fi
+    echo "GPU compute capability ${major}.x: serving with --dtype $dtype"
+    exec vllm serve "$@" --dtype "$dtype"
+  - vllm
+args:
+  - lightonai/LightOnOCR-2-1B-bbox
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+  - --limit-mm-per-prompt
+  - '{"image": 1}'
+  - --mm-processor-cache-gb
+  - "0"
+  - --no-enable-prefix-caching
+  - --gpu-memory-utilization
+  - "0.9"
+
+containerPorts:
+  - name: http
+    containerPort: 8000
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+
+env:
+  HF_HOME: /models
+  VLLM_NO_USAGE_STATS: "1"
+
+secretEnv:
+  HF_TOKEN:
+    name: xyne-lighton-model-secrets
+    key: HF_TOKEN
+    optional: true
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 90
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 8Gi
+  limits:
+    memory: 12Gi
+    nvidia.com/gpu: 1
+
+podSecurityContext: {}
+securityContext:
+  allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: ""
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 60
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: models
+    emptyDir:
+      sizeLimit: 40Gi
+  - name: shm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 2Gi
+volumeMounts:
+  - name: models
+    mountPath: /models
+  - name: shm
+    mountPath: /dev/shm
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 40Gi
+  mountPath: /models
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: ""
+  metrics: []
+  behavior: {}
+
+pdb:
+  enabled: false
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 600s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+migrations:
+  enabled: false
+
+extraObjects: []

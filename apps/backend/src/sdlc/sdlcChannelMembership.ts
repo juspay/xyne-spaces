@@ -1,10 +1,9 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
-  SDLC_ARTIFACT_REPOSITORY_RELATION,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
-
+import { AppError } from '@/middleware/errorHandler';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -156,21 +155,20 @@ export async function isCanvasInChannel(
   return Boolean(artifact);
 }
 
-export async function canvasIdsForRepos(
+/** Reads are open to the workspace on a public hub; writes still require membership. */
+export async function requireSdlcHubReader(
   db: Db,
-  channelId: string,
-  repoIds: readonly string[]
-): Promise<string[]> {
-  if (repoIds.length === 0) return [];
-  const edges = await db.sdlcEntityLink.findMany({
+  actor: { workspaceId: string; userId: string },
+  channelId: string
+): Promise<void> {
+  const channel = await db.channel.findFirst({
     where: {
-      channelId,
-      sourceType: 'CANVAS',
-      targetType: 'REPOSITORY',
-      targetId: { in: [...repoIds] },
-      relationType: SDLC_ARTIFACT_REPOSITORY_RELATION,
+      id: channelId,
+      workspaceId: actor.workspaceId,
+      type: 'SDLC',
+      OR: [{ visibility: 'PUBLIC' }, { participants: { some: { userId: actor.userId } } }],
     },
-    select: { sourceId: true },
+    select: { id: true },
   });
-  return [...new Set(edges.map(edge => edge.sourceId))];
+  if (!channel) throw new AppError('SDLC hub not found', 404);
 }

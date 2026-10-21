@@ -126,6 +126,7 @@ const MonthView: React.FC<{
 
           return (
             <button
+              aria-pressed={isSelected}
               key={day}
               type='button'
               onClick={() => !isDisabled && onSelect(date)}
@@ -397,6 +398,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           </span>
           {showClearButton && selectedDate && (
             <button
+              aria-label='Clear selected date'
               onClick={handleClear}
               className='ml-1 flex-shrink-0 hover:bg-muted rounded p-0.5 transition-colors'
               data-track-category='Tickets'

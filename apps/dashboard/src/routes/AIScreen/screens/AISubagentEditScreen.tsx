@@ -17,6 +17,7 @@ const AISubagentEditScreen = (): ReactElement => {
         data-id='ai-subagent-edit-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         {isLoading ? (
           <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
             <Skeleton className='h-8 w-40' />

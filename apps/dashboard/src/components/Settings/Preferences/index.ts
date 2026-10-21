@@ -8,8 +8,12 @@ export type PreferenceSection =
   | 'calls'
   | 'recordings'
   | 'messaging'
+  | 'browser'
   | 'launch'
   | 'toolbar'
+  | 'inbox'
+  | 'channelTabs'
+  | 'messageActions'
   | 'calendar'
   | 'password'
   | 'developer';

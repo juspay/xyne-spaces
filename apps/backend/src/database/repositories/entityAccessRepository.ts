@@ -9,6 +9,21 @@ export interface EntityAccessKey {
   userId: string;
 }
 
+// A null workspaceId (legacy rows) skips the filter rather than matching nothing.
+function activeGrantsWhere(params: {
+  workspaceId: string | null;
+  shareableEntityType: string;
+  entityId: string;
+}): Prisma.EntityAccessWhereInput {
+  const { workspaceId, shareableEntityType, entityId } = params;
+  return {
+    ...(workspaceId ? { workspaceId } : {}),
+    shareableEntityType,
+    entityId,
+    entityUserAccess: { not: EntityUserAccess.REVOKED },
+  };
+}
+
 export class EntityAccessRepository {
   private readonly db = DatabaseClient.getInstance();
 
@@ -35,24 +50,29 @@ export class EntityAccessRepository {
   }
 
   /**
-   * Active share for a viewer, matched via direct userId share OR via
-   * membership in a shared userGroupId/channelId (mirrors CallsACL.canSelect).
+   * Every active grant reaching a viewer — directly, or through a group or
+   * channel they belong to. The full set rather than the first match, so a
+   * caller can rank the levels and take the strongest (a channel VIEW grant
+   * plus a direct EDIT grant is an edit).
+   *
+   * `tx` lets the read join a caller's transaction; it defaults to the shared
+   * client for ordinary request-path reads.
    */
-  findActiveForViewer(params: {
-    workspaceId: string;
-    shareableEntityType: string;
-    entityId: string;
-    userId: string;
-    userGroupIds: string[];
-    channelIds: string[];
-  }): Promise<EntityAccess | null> {
+  listActiveForViewer(
+    params: {
+      workspaceId: string;
+      shareableEntityType: string;
+      entityId: string;
+      userId: string;
+      userGroupIds: string[];
+      channelIds: string[];
+    },
+    tx?: Prisma.TransactionClient
+  ): Promise<EntityAccess[]> {
     const { workspaceId, shareableEntityType, entityId, userId, userGroupIds, channelIds } = params;
-    return this.db.entityAccess.findFirst({
+    return (tx ?? this.db).entityAccess.findMany({
       where: {
-        workspaceId,
-        shareableEntityType,
-        entityId,
-        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        ...activeGrantsWhere({ workspaceId, shareableEntityType, entityId }),
         OR: [
           { userId },
           ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
@@ -62,55 +82,15 @@ export class EntityAccessRepository {
     });
   }
 
-  listForResource(params: {
-    workspaceId: string;
+  /** Every active grant on an entity, whoever it reaches. */
+  listActiveForEntity(params: {
+    workspaceId: string | null;
     shareableEntityType: string;
     entityId: string;
-    includeRevoked?: boolean;
-  }): Promise<EntityAccess[]> {
-    const { includeRevoked = false, ...where } = params;
+  }): Promise<Array<Pick<EntityAccess, 'userId' | 'userGroupId' | 'channelId'>>> {
     return this.db.entityAccess.findMany({
-      where: {
-        ...where,
-        ...(includeRevoked ? {} : { entityUserAccess: { not: EntityUserAccess.REVOKED } }),
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    });
-  }
-
-  upsert(params: {
-    workspaceId: string;
-    shareableEntityType: string;
-    entityId: string;
-    userId: string;
-    entityUserAccess: string;
-  }): Promise<EntityAccess> {
-    const { workspaceId, shareableEntityType, entityId, userId, ...values } = params;
-    const updatedAt = new Date();
-    return this.db.entityAccess.upsert({
-      where: {
-        workspaceId_shareableEntityType_entityId_userId: {
-          workspaceId,
-          shareableEntityType,
-          entityId,
-          userId,
-        },
-      },
-      create: { ...params, updatedAt },
-      update: {
-        entityUserAccess: values.entityUserAccess,
-        updatedAt,
-      },
-    });
-  }
-
-  update(
-    id: string,
-    data: Pick<Prisma.EntityAccessUpdateInput, 'entityUserAccess'>
-  ): Promise<EntityAccess> {
-    return this.db.entityAccess.update({
-      where: { id },
-      data: { ...data, updatedAt: new Date() },
+      where: activeGrantsWhere(params),
+      select: { userId: true, userGroupId: true, channelId: true },
     });
   }
 

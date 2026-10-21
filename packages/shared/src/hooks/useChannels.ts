@@ -7,6 +7,7 @@ import { searchChannels as _searchChannels, searchChannelsWithScores as _searchC
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
+import { searchMentionableChannels } from '../utils/channelMentionSearch.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 import { useCachedQuery } from './useCachedQuery';
@@ -24,9 +25,29 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
   return _searchChannels(channels, query, limit);
 }
 
-export function searchChannelsWithScores(channels: Channel[], query: string, limit = 10): { item: Channel; score: number }[] {
-  return _searchChannelsWithScores(channels, query, limit);
+export function searchChannelsWithScores(
+  channels: Channel[],
+  query: string,
+  limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: Channel; score?: number | undefined }>,
+): { item: Channel; score: number }[] {
+  return _searchChannelsWithScores(channels, query, limit, fuseMatches);
 }
+
+/** All channels, plus the visible ones not among them. */
+const combineChannels = (channels: Channel[], visibleChannels: VisibleChannel[]): Channel[] => {
+  const combined = [...channels];
+  // Set-based dedup: O(n + m) instead of the previous O(n * m) `combined.some`
+  // scan, which cost ~1.7s/recompute over ~749 all + ~431 visible channels.
+  const seenIds = new Set(channels.map(c => c.id));
+  for (const visibleChannel of visibleChannels) {
+    if (!seenIds.has(visibleChannel.id)) {
+      seenIds.add(visibleChannel.id);
+      combined.push(visibleChannel);
+    }
+  }
+  return combined;
+};
 
 export const useAllChannels = (): Channel[] => {
   const channels = useSelector(
@@ -37,19 +58,16 @@ export const useAllChannels = (): Channel[] => {
     stateMachineActor,
     state => state.context.visibleChannels,
   );
-  return useMemo(() => {
-    const combined = [...channels];
-    // Set-based dedup: O(n + m) instead of the previous O(n * m) `combined.some`
-    // scan, which cost ~1.7s/recompute over ~749 all + ~431 visible channels.
-    const seenIds = new Set(channels.map(c => c.id));
-    for (const visibleChannel of visibleChannels) {
-      if (!seenIds.has(visibleChannel.id)) {
-        seenIds.add(visibleChannel.id);
-        combined.push(visibleChannel);
-      }
-    }
-    return combined;
-  }, [channels, visibleChannels]);
+  return useMemo(() => combineChannels(channels, visibleChannels), [channels, visibleChannels]);
+};
+
+/**
+ * `useAllChannels`, read once without subscribing — for code that needs the list only
+ * when something happens, like a click, and shouldn't re-render as channels change.
+ */
+export const getAllChannels = (): Channel[] => {
+  const { allChannels, visibleChannels } = stateMachineActor.getSnapshot().context;
+  return combineChannels(allChannels, visibleChannels);
 };
 
 export const useAllVisibleChannels = (): VisibleChannel[] => {
@@ -81,7 +99,23 @@ export const useVisibleProjects = (): VisibleProject[] => {
   );
 };
 
-export const useChannel = (channelId: string): Channel | undefined => {
+export interface ChannelLookup {
+  channel: Channel | undefined;
+  /**
+   * True while the channel is absent from the channel sets and the
+   * `getChannelById` fallback has not completed yet. Callers that render an
+   * "Unknown channel" label should wait for this to be false.
+   */
+  isResolving: boolean;
+}
+
+/**
+ * Resolves a channel by id. Reads from the shared `allChannels` / `visibleChannels`
+ * sets first; only when the id is missing from a hydrated set does it fall back to a
+ * `getChannelById` Zero query. `channel` is undefined after resolution only when the
+ * backend has no channel with that id that the user can see.
+ */
+export const useChannelLookup = (channelId: string): ChannelLookup => {
   const channel = useSelector(
     stateMachineActor,
     state => state.context.allChannels.find(c => c.id === channelId),
@@ -106,7 +140,34 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.createdAt === b?.createdAt &&
       a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
-  return channel || visibleChannel;
+  const cachedChannel = channel || visibleChannel;
+
+  // Before the channel sets are hydrated every id is "missing"; firing a point
+  // query per rendered channel chip then would flood Zero on initial load.
+  const channelsHydrated = useSelector(
+    stateMachineActor,
+    state => state.context.allChannels.length > 0 || state.context.visibleChannels.length > 0,
+  );
+
+  const needsFallback = !!channelId && !cachedChannel && channelsHydrated;
+
+  const [fallbackChannel, fallbackDetails] = useQuery(
+    queries.getChannelById({ channelId }),
+    { enabled: needsFallback },
+  );
+
+  if (cachedChannel) return { channel: cachedChannel, isResolving: false };
+  if (!needsFallback) {
+    return { channel: undefined, isResolving: !!channelId && !channelsHydrated };
+  }
+  return {
+    channel: (fallbackChannel as Channel | undefined) ?? undefined,
+    isResolving: !fallbackChannel && fallbackDetails.type !== 'complete',
+  };
+};
+
+export const useChannel = (channelId: string): Channel | undefined => {
+  return useChannelLookup(channelId).channel;
 };
 
 export const useVisibleChannel = (channelId: string): VisibleChannel | undefined => {
@@ -156,9 +217,19 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
   return channel || visibleChannel;
 };
 
+export { searchMentionableChannels };
+
 export const useChannelSearch = (query: string, limit: number): Channel[] => {
   const channels = useAllChannels();
   return useMemo(() => searchChannels(channels, query, limit), [channels, query, limit]);
+};
+
+export const useChannelMentionSearch = (query: string, limit: number): Channel[] => {
+  const channels = useAllChannels();
+  return useMemo(
+    () => searchMentionableChannels(channels, query, limit),
+    [channels, query, limit],
+  );
 };
 
 export const useBrowsableChannels = (): Channel[] => {

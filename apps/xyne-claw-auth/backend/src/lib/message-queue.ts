@@ -21,8 +21,9 @@
  * defence (fail-open). This module is additive: with the feature flag off it is
  * inert and behaviour is exactly the legacy drop.
  *
- * Keys (all per conversation + agent):
+ * Keys (all per conversation + agent; digital-twin adds a `:{twinUserScopeId}` suffix):
  *   claw:busy:{conversationId}:{agentSlug}       string  — presence = a run is active. PX TTL.
+ *   claw:busymeta:{conversationId}:{agentSlug}   string  — slot owner JSON ({userId, sessionId}). PX TTL.
  *   claw:mq:{conversationId}:{agentSlug}         list    — FIFO of QueuedMessage JSON blobs.
  *   claw:mq:seen:{conversationId}:{agentSlug}    set     — eventIds already enqueued (dedupe).
  */
@@ -30,6 +31,7 @@
 import { redisService } from "../redis.js";
 import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
+import { twinScopedKey } from "./twin-scope.js";
 
 const log = createLogger("message-queue");
 
@@ -43,34 +45,19 @@ export const QUEUE_CAP = Number(process.env["CLAW_MSG_QUEUE_CAP"] ?? "10");
  * never fires (so the drain never runs). Must comfortably exceed the longest
  * expected run. The runtime session lock TTL is 15 min; we use 20 to outlast it.
  */
-export const BUSY_TTL_MS = Number(process.env["CLAW_MSG_QUEUE_BUSY_TTL_MS"] ?? String(20 * 60 * 1000));
+const BUSY_TTL_MS = Number(process.env["CLAW_MSG_QUEUE_BUSY_TTL_MS"] ?? String(20 * 60 * 1000));
 
 /** Dedupe window for eventIds — comfortably longer than any queued wait. */
 const SEEN_TTL_SEC = Number(process.env["CLAW_MSG_QUEUE_SEEN_TTL_SEC"] ?? String(60 * 60));
 
-const BUSY_PREFIX = "claw:busy:";
-const BUSY_META_PREFIX = "claw:busymeta:";
-const QUEUE_PREFIX = "claw:mq:";
-const SEEN_PREFIX = "claw:mq:seen:";
+// Every key is per conversation + agent, plus a twin owner suffix (see twinScopedKey).
+const keyFor = (prefix: string) => (conversationId: string, agentSlug: string, twinUserScopeId?: string): string =>
+  twinScopedKey(`${prefix}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
 
-// Per-user scoping (Digital Twin ONLY). A twin thread shares one conversationId
-// across every mentioned user, but each owner has a PRIVATE session/lock (see
-// buildSandboxStoreKey) — so their mid-run queues must be private too, else
-// user B's tag would serialize behind user A's run instead of running in
-// parallel. Only `digital-twin` opts in; every other agent keeps the 2-part key
-// (backward compatible — an omitted/undefined twinUserScopeId is a no-op). Mirrors
-// convKey's twin scoping in webhook.ts.
-const scoped = (base: string, agentSlug: string, twinUserScopeId?: string): string =>
-  agentSlug === "digital-twin" && twinUserScopeId ? `${base}:${twinUserScopeId}` : base;
-
-const busyKey = (conversationId: string, agentSlug: string, twinUserScopeId?: string): string =>
-  scoped(`${BUSY_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
-const busyMetaKey = (conversationId: string, agentSlug: string, twinUserScopeId?: string): string =>
-  scoped(`${BUSY_META_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
-const queueKey = (conversationId: string, agentSlug: string, twinUserScopeId?: string): string =>
-  scoped(`${QUEUE_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
-const seenKey = (conversationId: string, agentSlug: string, twinUserScopeId?: string): string =>
-  scoped(`${SEEN_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
+const busyKey = keyFor("claw:busy:");
+const busyMetaKey = keyFor("claw:busymeta:");
+const queueKey = keyFor("claw:mq:");
+const seenKey = keyFor("claw:mq:seen:");
 
 /**
  * A queued message carries exactly what /webhook/result needs to re-dispatch the
@@ -130,11 +117,11 @@ export interface QueuedMessage {
    */
   twinUserScopeId?: string;
   /**
-   * Twin-only byte-identical replay blobs. Unlike conversation-mode messages —
-   * which carry a thin task and re-derive context on drain — a twin tag is
-   * enqueued BEFORE it ever dispatches, so the full /internal/run body and the
-   * SessionContext (approval mode preserved) are stored here and replayed
-   * verbatim by the twin drain. Present ONLY for twin FIFO entries. NOTE: the
+   * Byte-identical replay blobs for twin tags and messaging-channel messages.
+   * Unlike conversation-mode messages — which carry a thin task and re-derive
+   * context on drain — these are enqueued BEFORE they ever dispatch, so the
+   * full /internal/run body and the SessionContext (approval mode / channel
+   * delivery preserved) are stored here and replayed verbatim on drain. NOTE: the
    * sessionContext carries a decrypted appToken (parity with RunRecoveryState,
    * which already persists the same in Redis) — never log this blob.
    */
@@ -194,7 +181,7 @@ export async function tryAcquireSlot(conversationId: string, agentSlug: string, 
   }
 }
 
-export interface SlotOwner {
+interface SlotOwner {
   userId?: string;
   sessionId?: string;
 }

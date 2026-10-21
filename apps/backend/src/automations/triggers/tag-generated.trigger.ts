@@ -1,7 +1,7 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { TicketContextSchema, buildTicketContext } from './ticket-context';
@@ -180,7 +180,7 @@ export async function emitTagGenerated(result: {
       return;
     }
 
-    await eventRouter.emit(
+    await emitDomainEvent(
       {
         type: TAG_GENERATED_EVENT,
         payload: {

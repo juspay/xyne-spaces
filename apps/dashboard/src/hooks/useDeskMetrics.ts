@@ -1,6 +1,7 @@
 import { useQuery, UseQueryResult } from '@tanstack/react-query';
 import type {
   DeskMetricsAggregateResponse,
+  DeskMetricsDateBasis,
   DeskMetricsResponse,
   TicketPriority,
 } from '@xyne/shared';
@@ -69,6 +70,7 @@ export function useAggregateDeskMetrics(
   userGroupIds?: string[],
   tagValues?: string[],
   aiCategories?: string[],
+  dateBasis: DeskMetricsDateBasis = 'created',
 ): UseQueryResult<DeskMetricsAggregateResponse> {
   const sortedIds = [...channelIds].sort();
   const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
@@ -83,6 +85,7 @@ export function useAggregateDeskMetrics(
       'desk-metrics-aggregate',
       idsKey,
       timeRange,
+      dateBasis,
       sortedAssigneeIds,
       customFieldFilter ?? null,
       sortedStageNames,
@@ -102,6 +105,7 @@ export function useAggregateDeskMetrics(
         sortedUserGroupIds,
         sortedTagValues,
         sortedAiCategories,
+        dateBasis,
       ),
     enabled: enabled && sortedIds.length > 0,
     retry: 1,

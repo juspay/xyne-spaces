@@ -28,7 +28,9 @@ export const databricksAdapter: StdioMcpAdapter = {
 
     return {
       cmd: "uvx",
-      args: ["databricks-mcp-server==0.4.4"],
+      // mcp 2.x moved FastMCP and broke this package's import (unpinned
+      // transitive `mcp[cli]>=1.2.0` dep) — pin it too.
+      args: ["--with", "mcp<2", "databricks-mcp-server==0.4.4"],
       env,
     };
   },

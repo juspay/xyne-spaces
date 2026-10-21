@@ -1,13 +1,15 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { PencilEditLine } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { Pill } from '../../shared/primitives/Pill';
+import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
-import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
+import { BUILDER_DRIVER_SLUG } from './AgentBuilderPanel';
 import { AgentPersonaTabV2 } from './persona/AgentPersonaTabV2';
 import { AgentActivityTabV2 } from './activity/AgentActivityTabV2';
 import { AgentBehaviourTabV2 } from './behaviour/AgentBehaviourTabV2';
@@ -17,7 +19,13 @@ import { AgentToolsTabV2 } from './tools/AgentToolsTabV2';
 import { AGENT_DETAIL_TABS, resolveTab, type AgentDetailTabId } from './detailTabs';
 import { AgentCallGraphTabV2 } from './callGraph/AgentCallGraphTabV2';
 import { useAgentDetailActions } from './useAgentDetailActions';
+import { useAgentDraft } from './useAgentDraft';
+import { Button } from '@/components/ui/Button/index';
 import { useOpenAgentChat } from '@/hooks/useOpenAgentChat';
+
+const NAME_TEXT = 'text-sm font-semibold leading-[22px] text-foreground';
+
+const HANDLE_TEXT = 'text-xs leading-[22px]';
 
 const DATE = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
@@ -48,15 +56,20 @@ const ClawAgentDetailV2 = (): ReactElement => {
       : null;
   const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
   const tab = resolveTab(searchParams.get('tab'));
-  const justCreated = (location.state as { justCreated?: unknown } | null)?.justCreated === true;
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  const dismissBanner = useCallback(() => setBannerDismissed(true), []);
 
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
   const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
-  const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
+  const canEdit = actions.permissions?.canEdit ?? false;
+  const canRenameHandle = actions.isOwner;
+  const draft = useAgentDraft(agent, canRenameHandle);
+  const [focusField, setFocusField] = useState<'name' | 'slug'>('name');
   const { canOpenAgentChat, openAgentChat } = useOpenAgentChat();
+
+  const startEditing = (field: 'name' | 'slug'): void => {
+    setFocusField(field);
+    draft.start();
+  };
 
   // Delegation approvals spend the callee's credentials and quota, so the
   // inbox is the owner's (or an admin's) — mirrors claw's canManageRequests.
@@ -69,12 +82,21 @@ const ClawAgentDetailV2 = (): ReactElement => {
     setSearchParams(params, { replace: true, state: navigationState });
   };
 
+  const openBuilder = (): void => {
+    const params = new URLSearchParams(searchParams);
+    params.set('build', '1');
+    setSearchParams(params, { replace: true, state: navigationState });
+  };
+
+  const builderOpen = searchParams.get('build') === '1';
+  const canBuild = agent !== undefined && agent.slug !== BUILDER_DRIVER_SLUG && !builderOpen;
+
   const updated = formatUpdated(agent?.updatedAt);
   const version = agent?.activePromptVersion;
 
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentDetailV2'>
-      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
+      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6'>
         <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
           {agent && (
             <AgentDetailHeaderV2
@@ -82,6 +104,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
               actions={actions}
               onChat={() => openAgentChat(agent.slug)}
               canChat={canOpenAgentChat}
+              onBuild={canBuild ? openBuilder : undefined}
               onBack={() => void navigate(returnPath)}
             />
           )}
@@ -121,29 +144,58 @@ const ClawAgentDetailV2 = (): ReactElement => {
           </p>
         ) : (
           <>
-            {showBanner && (
-              <AgentCreatedBanner
-                agent={agent}
-                pendingRegistration={pendingRegistration}
-                onDismiss={dismissBanner}
-              />
-            )}
-
-            <div className='flex w-full items-start gap-3'>
-              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='md' />
+            <div className='flex w-full items-start gap-4'>
+              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='lg' />
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
-                    {agent.name}
-                  </span>
+                  {draft.editing && canEdit ? (
+                    <AutoWidthInput
+                      value={draft.name}
+                      onChange={draft.setName}
+                      aria-label='Agent name'
+                      placeholder='Agent name'
+                      autoFocus={focusField === 'name'}
+                      className={NAME_TEXT}
+                      data-track-category='Claw Agents'
+                      data-track-name='Agent detail v2: edit name'
+                    />
+                  ) : (
+                    <span
+                      {...(canEdit ? { onClick: () => startEditing('name') } : {})}
+                      className={cn('truncate', NAME_TEXT, canEdit && 'cursor-text')}
+                    >
+                      {agent.name}
+                    </span>
+                  )}
                   <Pill tone={agent.enabled ? 'success' : 'neutral'}>
                     {agent.enabled ? 'Enabled' : 'Disabled'}
                   </Pill>
                 </div>
 
                 <div className='flex flex-wrap items-center gap-1.5 text-xs leading-[22px] text-foreground/80 opacity-70'>
-                  <span>@{agent.slug}</span>
+                  {draft.editing && canRenameHandle ? (
+                    <span className='inline-flex items-center'>
+                      <span aria-hidden>@</span>
+                      <AutoWidthInput
+                        value={draft.slug}
+                        onChange={draft.setSlug}
+                        aria-label='Agent handle'
+                        placeholder='handle'
+                        autoFocus={focusField === 'slug'}
+                        className={HANDLE_TEXT}
+                        data-track-category='Claw Agents'
+                        data-track-name='Agent detail v2: edit handle'
+                      />
+                    </span>
+                  ) : (
+                    <span
+                      {...(canRenameHandle ? { onClick: () => startEditing('slug') } : {})}
+                      className={cn(canRenameHandle && 'cursor-text')}
+                    >
+                      @{agent.slug}
+                    </span>
+                  )}
                   {version !== null && version !== undefined && (
                     <>
                       <span aria-hidden>·</span>
@@ -157,21 +209,75 @@ const ClawAgentDetailV2 = (): ReactElement => {
                     </>
                   )}
                 </div>
+
+                {draft.editing && draft.slugError && (
+                  <span className='text-xs leading-4 text-destructive'>{draft.slugError}</span>
+                )}
+                {draft.editing && draft.slugChanged && !draft.slugError && (
+                  <span className='text-xs leading-4 text-muted-foreground'>
+                    Changing the handle breaks existing @mentions and links to @{agent.slug}.
+                  </span>
+                )}
+
+                {pendingRegistration && (
+                  <p className='text-xs leading-[18px] text-muted-foreground/70'>
+                    Chat works now. An admin needs to register this agent before it can be
+                    @mentioned in Spaces.
+                  </p>
+                )}
               </div>
+
+              {canEdit && (
+                <div className='flex shrink-0 items-center gap-1.5'>
+                  {draft.editing && (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={draft.cancel}
+                      disabled={draft.saving}
+                      className='rounded-lg'
+                      data-track-category='Claw Agents'
+                      data-track-name='Agent detail v2: cancel edits'
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                  <Button
+                    type='button'
+                    variant={draft.dirty ? 'default' : 'outline'}
+                    size='sm'
+                    onClick={
+                      draft.dirty ? (): void => void draft.save() : (): void => startEditing('name')
+                    }
+                    disabled={draft.dirty ? !draft.canSave : draft.editing}
+                    loading={draft.saving}
+                    className='rounded-lg'
+                    data-track-category='Claw Agents'
+                    data-track-name={
+                      draft.dirty ? 'Agent detail v2: save edits' : 'Agent detail v2: start editing'
+                    }
+                  >
+                    {!draft.dirty && <PencilEditLine size={14} className='mr-1 shrink-0' />}
+                    {draft.dirty ? 'Save' : 'Edit'}
+                  </Button>
+                </div>
+              )}
             </div>
 
             {tab === 'persona' ? (
               <AgentPersonaTabV2
                 agent={agent}
-                canEdit={actions.permissions?.canEdit ?? false}
+                canEdit={canEdit}
                 canManageCredentials={actions.isOwner || actions.isAdmin}
+                draft={draft}
               />
             ) : tab === 'behaviour' ? (
-              <AgentBehaviourTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
+              <AgentBehaviourTabV2 agent={agent} canEdit={canEdit} />
             ) : tab === 'tools' ? (
-              <AgentToolsTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
+              <AgentToolsTabV2 agent={agent} canEdit={canEdit} />
             ) : tab === 'knowledge' ? (
-              <AgentKnowledgeTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
+              <AgentKnowledgeTabV2 agent={agent} canEdit={canEdit} />
             ) : tab === 'people' ? (
               <AgentPeopleTabV2 agent={agent} actions={actions} />
             ) : tab === 'call-graph' && canManageDelegation ? (
@@ -181,6 +287,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
             )}
           </>
         )}
+
+        <div className='h-12 shrink-0' aria-hidden />
       </div>
     </div>
   );

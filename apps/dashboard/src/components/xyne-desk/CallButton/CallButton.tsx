@@ -1,9 +1,9 @@
 import { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Phone } from 'lucide-react';
 import { getOzonetelToolbar } from '../../../services/clients/telephonyApi';
 import { openFloatingDock } from '../CloudAgentDock/CloudAgentDock';
 import Tooltip from '../../ui/Tooltip';
+import { PhoneDefault } from '@xyne/icons';
 
 export const CallButton = (): ReactElement | null => {
   const { data: toolbar } = useQuery({
@@ -24,7 +24,7 @@ export const CallButton = (): ReactElement | null => {
         data-track-name='OpenOzonetelForTicket'
         onClick={() => openFloatingDock(toolbarUrl)}
       >
-        <Phone size={16} className='shrink-0' />
+        <PhoneDefault size={16} className='shrink-0' />
       </button>
     </Tooltip>
   );

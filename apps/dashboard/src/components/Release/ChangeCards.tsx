@@ -65,7 +65,7 @@ interface ChangeSectionsProps {
 // carry `+`/`-`/space markers — and SQL `--` comments would be misread as
 // deletion markers if we tried. Legacy pre-cleanup rows still display
 // readably (just with the original `+`/`-` prefix visible in the text).
-const cleanDiff = (raw: string): string[] => {
+export const cleanDiff = (raw: string): string[] => {
   const drop =
     /^(diff --git |index |new file mode |deleted file mode |old mode |new mode |--- |\+\+\+ |@@ )/;
   return raw.split('\n').filter(line => !drop.test(line));
@@ -104,7 +104,7 @@ const buildFileUrl = (
 };
 
 // Single-commit URL per provider.
-const buildCommitUrl = (repoUrl: string | null, commitId: string | null): string | null => {
+export const buildCommitUrl = (repoUrl: string | null, commitId: string | null): string | null => {
   if (!repoUrl || !commitId) return null;
   const base = repoWebBase(repoUrl);
   return isGitHubRepoUrl(repoUrl) ? `${base}/commit/${commitId}` : `${base}/commits/${commitId}`;

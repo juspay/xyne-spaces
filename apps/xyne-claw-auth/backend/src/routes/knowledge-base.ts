@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { asyncHandler, ok, unauthorized } from "../lib/http.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { fetchAccessibleKb } from "../lib/spaces-kb.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("knowledge-base");
@@ -36,6 +37,7 @@ router.get("/tree", asyncHandler(async (req: Request, res: Response) => {
     includeItems,
     ...(scopeType ? { scopeType } : {}),
     ...(scopeId ? { scopeId } : {}),
+    ...(requestWorkspaceHint(req) ? { workspaceHint: requestWorkspaceHint(req) } : {}),
   });
   if (tree === null) {
     // No active spaces session — the picker should ask the user to log in

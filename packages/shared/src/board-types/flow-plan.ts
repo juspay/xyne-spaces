@@ -86,6 +86,7 @@ export const FLOW_STAGE_NAMES = {
   STARTED: 'STARTED',
   PAUSED: 'PAUSED',
   BACKLOG: 'BACKLOG',
+  SKIPPED: 'SKIPPED',
   COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
 } as const;
@@ -104,6 +105,11 @@ export const FLOW_STAGE_TRANSITIONS: ReadonlyArray<readonly [FlowStageName, Flow
   [FLOW_STAGE_NAMES.PAUSED, FLOW_STAGE_NAMES.CANCELLED],
   [FLOW_STAGE_NAMES.BACKLOG, FLOW_STAGE_NAMES.COMPLETED],
   [FLOW_STAGE_NAMES.BACKLOG, FLOW_STAGE_NAMES.CANCELLED],
+  // SKIPPED is terminal: no transition leaves it, and nothing may be skipped twice.
+  [FLOW_STAGE_NAMES.TODO, FLOW_STAGE_NAMES.SKIPPED],
+  [FLOW_STAGE_NAMES.STARTED, FLOW_STAGE_NAMES.SKIPPED],
+  [FLOW_STAGE_NAMES.PAUSED, FLOW_STAGE_NAMES.SKIPPED],
+  [FLOW_STAGE_NAMES.BACKLOG, FLOW_STAGE_NAMES.SKIPPED],
 ];
 
 /** Immutable design data copied onto a step ticket when that run node materializes. */
@@ -240,9 +246,7 @@ export function normalizeFlowPlan(plan: {
   decisions?: FlowPlanDecision[];
 }): FlowPlan {
   const groupIds = new Set((plan.groups ?? []).map((group) => group.id));
-  const groupScope = new Map(
-    (plan.groups ?? []).map((group) => [group.id, group.groupId ?? null]),
-  );
+  const groupScope = new Map((plan.groups ?? []).map((group) => [group.id, group.groupId ?? null]));
   const groupOfNode = new Map<string, string>();
   for (const node of plan.nodes) {
     if (node.groupId && groupIds.has(node.groupId)) groupOfNode.set(node.id, node.groupId);
@@ -251,7 +255,7 @@ export function normalizeFlowPlan(plan: {
     (plan.decisions ?? []).map((decision) => [
       decision.id,
       groupOfNode.get(decision.parentNodeId) ?? null,
-    ]),
+    ])
   );
   const scopeOf = (id: string): string | null =>
     groupOfNode.get(id) ?? groupScope.get(id) ?? decisionScope.get(id) ?? null;
@@ -485,9 +489,7 @@ export function validateFlowPlan(plan: FlowPlan): void {
       const parent = nodeById.get(parentId);
       const parentGroup = groupById.get(parentId);
       const parentDecision = decisionById.get(parentId);
-      const decisionSource = parentDecision
-        ? nodeById.get(parentDecision.parentNodeId)
-        : undefined;
+      const decisionSource = parentDecision ? nodeById.get(parentDecision.parentNodeId) : undefined;
       const scopeId = group.groupId ?? null;
       const parentScopeId = parent
         ? (parent.groupId ?? null)
@@ -951,7 +953,7 @@ export class FlowPlanModel {
     const routeIndex = decisionParent
       ? Math.max(
           0,
-          decisionParent.routes.findIndex((route) => route.targetId === entityId),
+          decisionParent.routes.findIndex((route) => route.targetId === entityId)
         )
       : 0;
     return baseOrder * 1000 + routeIndex;
@@ -1022,11 +1024,22 @@ export class FlowPlanModel {
     if (members.length === 0) return null;
     const statuses = members.map((member) => statusByNodeId.get(member.id));
     if (statuses.some((status) => status === 'CANCELLED')) return 'CANCELLED';
-    if (members.every((member) => skippedNodeIds.has(member.id))) return 'SKIPPED';
+    if (
+      members.every(
+        (member) => skippedNodeIds.has(member.id) || statusByNodeId.get(member.id) === 'SKIPPED'
+      )
+    ) {
+      return 'SKIPPED';
+    }
     const terminals = this.terminalIdsOf(groupId);
     if (
       terminals.length > 0 &&
-      terminals.every((id) => statusByNodeId.get(id) === 'COMPLETED' || skippedNodeIds.has(id))
+      terminals.every(
+        (id) =>
+          statusByNodeId.get(id) === 'COMPLETED' ||
+          statusByNodeId.get(id) === 'SKIPPED' ||
+          skippedNodeIds.has(id)
+      )
     ) {
       return 'COMPLETED';
     }
@@ -1043,7 +1056,7 @@ export class FlowPlanModel {
     const notInstantiated = (node: FlowPlanNode): boolean => !statusByNodeId.has(node.id);
     const satisfied = (nodeId: string): boolean => {
       const status = statusByNodeId.get(nodeId);
-      return status === 'COMPLETED' || status === 'BACKLOG';
+      return status === 'COMPLETED' || status === 'BACKLOG' || status === 'SKIPPED';
     };
     const cancelled = (nodeId: string): boolean => statusByNodeId.get(nodeId) === 'CANCELLED';
     const groupCancelled = (groupId: string): boolean =>

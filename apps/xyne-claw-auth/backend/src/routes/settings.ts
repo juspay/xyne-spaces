@@ -24,6 +24,7 @@ import {
   verifyProviderCredential,
 } from "../lib/provider-credential-verify.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("settings");
@@ -614,7 +615,7 @@ router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => 
     headers["User-Agent"] = "codex-cli";
   }
 
-  const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+  const upstream = await safeFetch(url, { headers }, { timeoutMs: 20_000 });
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
     const detail = extractProviderMessage(text);
@@ -667,10 +668,11 @@ router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Req
 
   const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
   log.info(`[settings] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
-  const upstream = await fetch(`${root}/v1/models`, {
-    headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
-    signal: AbortSignal.timeout(20_000),
-  });
+  const upstream = await safeFetch(
+    `${root}/v1/models`,
+    { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" } },
+    { timeoutMs: 20_000 },
+  );
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
     log.warn(`[settings] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);

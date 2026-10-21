@@ -15,6 +15,7 @@ import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
 import type { JsonSchema } from '../../Automation.types';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import {
+  buildOutputSchemaFromAskJevConfig,
   buildOutputSchemaFromRunAgentConfig,
   buildOutputSchemaFromWebhookConfig,
 } from '../AutomationBuilder.utils';
@@ -26,6 +27,7 @@ import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
 import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
 import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
+import { DelayStepForm } from './DelayStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -186,7 +188,9 @@ export function StepCard({
                     ? buildOutputSchemaFromRunAgentConfig(step.config)
                     : step.type === 'TRIGGER_WEBHOOK'
                       ? buildOutputSchemaFromWebhookConfig(step.config)
-                      : schema.outputSchema
+                      : step.type === 'ASK_JEV'
+                        ? buildOutputSchemaFromAskJevConfig(step.config)
+                        : schema.outputSchema
                 }
               />
               {step.type === 'TRIGGER_WEBHOOK' ? (
@@ -254,6 +258,15 @@ export function StepCard({
                 />
               ) : step.type === 'APPLY_CONVERSATION_LABEL' ? (
                 <ApplyConversationLabelStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'DELAY' || step.type === 'IS_OUTSIDE_BUSINESS_HOURS' ? (
+                <DelayStepForm
+                  schema={schema.configSchema}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}

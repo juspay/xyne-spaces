@@ -105,7 +105,14 @@ export const CONFIG = {
   ),
   localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
   localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
+  /** How long a run-stream answer stays open after `done` waiting for its late
+   *  follow-up suggestions (generated after the answer). 0 closes on `done`;
+   *  the suggestions then only appear from conversation history. */
+  followUpStreamHoldMs: Math.max(0, Number(process.env["FOLLOW_UP_STREAM_HOLD_MS"] ?? 30_000)),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
+  // Python agent (Azure STT behind /transcribe-audio). Same service the Spaces
+  // voice input proxies to; empty disables voice-note transcription.
+  pythonAgentUrl: (process.env["PYTHON_AGENT_URL"] ?? "").replace(/\/+$/, ""),
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
   // calls (auth/me on every authenticated request, chat/postMessage on every
@@ -113,6 +120,8 @@ export const CONFIG = {
   // public ingress out of the path. Falls back to spacesBackendUrl so dev /
   // single-node deploys keep working without setting two envs.
   spacesInternalUrl: process.env["SPACES_INTERNAL_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
+  // The dedicated SDLC backend. Empty means SDLC calls go to spacesInternalUrl.
+  sdlcBackendUrl: process.env["SDLC_BACKEND_URL"] ?? "",
   /**
    * Read-only Postgres connection string to the Spaces DB. When set, claw-auth
    * fetches fresh user session credentials (token, sessionId, workspaceId)
@@ -210,6 +219,7 @@ export const CONFIG = {
   // over Redis pub/sub + an SSE endpoint. ON by default; set
   // LIVE_TOOLCALLS_ENABLED=false to disable.
   liveToolCallsEnabled: process.env["LIVE_TOOLCALLS_ENABLED"] !== "false",
+  chatTitleGenerationEnabled: process.env["CHAT_TITLE_GENERATION_ENABLED"] !== "false",
   runRecoveryMaxRetries: Number(process.env["RUN_RECOVERY_MAX_RETRIES"] ?? 3),
   // Must be > SESSION_LOCK_TTL_MS (15 min in xyne-claw) — when equal, a slow but
   // progressing run keeps refreshing its lock on every message_end while the
@@ -228,25 +238,15 @@ export const CONFIG = {
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",
-  // Object storage provider — 'gcs' (default), 's3' or 'azure'; see @xyne/storage.
+  // Object storage provider — 'gcs' (default) or 's3'; see @xyne/storage.
   // Env names match the Spaces backend (config/env.ts) and xyne-claw so one
-  // set of envs configures all three apps. Azure needs no key in the normal
-  // path: AZURE_STORAGE_ACCOUNT alone lets DefaultAzureCredential use the AKS
-  // workload-identity token.
-  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ||
-  process.env["STORAGE_PROVIDER"] === "azure"
-    ? process.env["STORAGE_PROVIDER"]
-    : "gcs") as "gcs" | "s3" | "azure",
+  // set of envs configures all three apps.
+  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
   s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
   s3BucketName: process.env["S3_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
   s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
   s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
-  azureAccountName: process.env["AZURE_STORAGE_ACCOUNT"] ?? "",
-  azureContainerName: process.env["AZURE_STORAGE_CONTAINER"] ?? "xyne-claw-chat-attachments",
-  azureEndpoint: process.env["AZURE_STORAGE_ENDPOINT"] ?? "",
-  azureConnectionString: process.env["AZURE_STORAGE_CONNECTION_STRING"] ?? "",
-  azureSasToken: process.env["AZURE_STORAGE_SAS_TOKEN"] ?? "",
   isProduction: process.env["NODE_ENV"] === "production",
   /**
    * Bitbucket Server creds used by the admin dashboard to count PRs/commits

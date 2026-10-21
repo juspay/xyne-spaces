@@ -1,4 +1,5 @@
-import { Phone, X } from 'lucide-react';
+import { PhoneDefault } from '@xyne/icons';
+import { X } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 interface IncomingCallActionsProps {
@@ -85,7 +86,7 @@ export function IncomingCallActions({
           data-track-name='ACCEPT_INCOMING_CALL'
           data-track-metadata={trackMetadata}
         >
-          <Phone className='h-[22px] w-[22px]' strokeWidth={2} />
+          <PhoneDefault className='h-[22px] w-[22px]' strokeWidth={2} />
           <span>Switch call</span>
         </button>
       ) : (
@@ -100,7 +101,7 @@ export function IncomingCallActions({
             data-track-name='ACCEPT_INCOMING_CALL'
             data-track-metadata={trackMetadata}
           >
-            <Phone className='h-[22px] w-[22px]' strokeWidth={2} />
+            <PhoneDefault className='h-[22px] w-[22px]' strokeWidth={2} />
           </button>
           <span className={LABEL}>Accept</span>
         </div>

@@ -1,5 +1,4 @@
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
 import { runAsSystem, runAsServiceActor } from '@/database/tenant/context';
 import type { Prisma } from '@prisma/client';
 
@@ -35,13 +34,22 @@ export function asService<T>(
   return runAsServiceActor(userId, workspaceId, fn);
 }
 
+export type TxOptions = { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel };
+export type TxFn<T> = (tx: Prisma.TransactionClient) => Promise<T>;
+/** Any client that can open an interactive transaction: the shared `db`, or an injected one. */
+export interface TxCapableClient {
+  $transaction<R>(fn: TxFn<R>, options?: TxOptions): Promise<R>;
+}
+
 export function transaction<T>(
   tables: TableName[],
   reason: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  client: TxCapableClient,
+  fn: TxFn<T>,
+  options?: TxOptions,
 ): Promise<T> {
   recordBypass({ kind: 'transaction', tables, reason });
-  return db.$transaction(fn);
+  return options ? client.$transaction(fn, options) : client.$transaction(fn);
 }
 
 export function rawQuery<T>(tables: TableName[], reason: string, fn: () => Promise<T>): Promise<T> {

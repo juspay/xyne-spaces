@@ -2,6 +2,7 @@ import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
 
 interface SocialMediaReplyComposerProps {
@@ -61,8 +62,8 @@ export const SocialMediaReplyComposer = ({
       setContent('');
       loadedDraftRef.current = '';
       deleteDraft();
-    } catch {
-      toast.error('Failed to send reply');
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to send reply'));
     } finally {
       setSending(false);
     }

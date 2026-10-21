@@ -239,7 +239,8 @@ function markdownToHtml(text: string): string {
 
 function stringifyForTemplate(value: unknown): string {
   if (value === undefined || value === null) return '';
-  if (typeof value === 'object' && !(value instanceof Date)) {
+  if (value instanceof Date) return Number.isNaN(+value) ? '' : value.toISOString();
+  if (typeof value === 'object') {
     try {
       return JSON.stringify(value);
     } catch {

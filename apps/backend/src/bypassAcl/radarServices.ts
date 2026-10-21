@@ -1,7 +1,10 @@
+import type { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { asSystem } from './base';
+import { radarExecutionService } from '@/services/radar/radarExecutionService';
+import { radarPrMergeResolver, type PrMergedEvent } from '@/services/radar/radarPrMergeResolver';
+import { asSystem, asService, rawQuery } from './base';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -53,5 +56,62 @@ export function sweepRunLogsQuery(): Promise<void> {
         logger.warn('[RADAR-EXECUTION-WORKER] Run-log sweep failed', { deleted, error });
       }
     },
+  );
+}
+
+/**
+ * Relocated from services/radar/radarApplier. Removes one actor from an execution item's
+ * pendingOn array in a single statement, so two concurrent dismissals cannot write back each
+ * other's removal. The workspace, conversation and status predicates are written explicitly.
+ */
+export async function removeExecutionItemPendingOn(tx: Prisma.TransactionClient, itemId: string, workspaceId: string, conversationId: string, actorId: string): Promise<number> {
+  return rawQuery(
+    ['ExecutionItem'],
+    'radar: array_remove of one actor from pendingOn so two concurrent dismissals cannot write back each other\'s removal',
+    () => tx.$executeRaw`
+                UPDATE "non_zero"."execution_items"
+                SET "pendingOn" = array_remove("pendingOn", ${actorId}),
+                    "updatedAt" = NOW()
+                WHERE "id" = ${itemId}
+                  AND "workspaceId" = ${workspaceId}
+                  AND "conversationId" = ${conversationId}
+                  AND "status" = 'OPEN'
+                  AND ${actorId} = ANY("pendingOn")
+              `,
+  );
+}
+
+/**
+ * Relocated from workers/radarExecutionWorker.ts's processJob. Bull job → no HTTP tenant
+ * context; opens one from the conversation's own workspaceId so the thread-processing writes
+ * (execution items, thread state, messages) get workspaceId stamped.
+ */
+export function processRadarThread(
+  workspaceId: string,
+  scope: Parameters<typeof radarExecutionService.processThread>[0],
+): ReturnType<typeof radarExecutionService.processThread> {
+  return asService(
+    ['ExecutionItem', 'ExecutionThreadState', 'RadarPrLink', 'Message', 'MessageAttachment', 'Channel', 'ChannelParticipant', 'User'],
+    'radar execution worker: Bull job has no HTTP tenant context, writes stamped from the conversation\'s own workspaceId',
+    'radar-execution-worker',
+    workspaceId,
+    () => radarExecutionService.processThread(scope),
+  );
+}
+
+/**
+ * PR merge webhook → Radar. The webhook's own scope names only the PR/ticket tables, so the
+ * pass opens its own tenant context from the webhook URL's workspaceId, like the worker does.
+ */
+export function resolveRadarOnPrMerge(event: PrMergedEvent): Promise<void> {
+  // The legacy /github route carries no workspaceId; an undefined one would
+  // leave every workspace filter empty and resolve items across tenants.
+  if (!config.radar.enabled || !event.workspaceId) return Promise.resolve();
+  return asService(
+    ['ExecutionItem', 'ExecutionItemMutation', 'ExecutionRunLog', 'RadarPrLink', 'Message', 'Channel', 'User', 'PullRequests', 'WorkflowExecution', 'Workflow', 'Ticket'],
+    'radar pr-merge pass: webhook has no user context, reads and writes stamped from the webhook URL\'s workspaceId',
+    'radar-pr-merge',
+    event.workspaceId,
+    () => radarPrMergeResolver.onPrMerged(event),
   );
 }

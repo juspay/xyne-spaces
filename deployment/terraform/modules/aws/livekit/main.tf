@@ -368,7 +368,7 @@ resource "aws_launch_template" "this" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = merge(var.tags, { Name = "${var.name}-livekit-${each.key}", role = "livekit-${each.key}" })
+    tags          = merge(var.tags, { Name = "${var.name}-livekit-${each.key}", role = "livekit-${each.key}", config = nonsensitive(substr(sha256(local.configs[each.key]), 0, 16)) })
   }
 
   tag_specifications {
@@ -451,7 +451,7 @@ resource "aws_autoscaling_group" "server" {
 
   launch_template {
     id      = aws_launch_template.this["server"].id
-    version = "$Latest"
+    version = aws_launch_template.this["server"].latest_version
   }
 
   instance_refresh {
@@ -534,7 +534,7 @@ resource "aws_autoscaling_group" "egress" {
 
   launch_template {
     id      = aws_launch_template.this["egress"].id
-    version = "$Latest"
+    version = aws_launch_template.this["egress"].latest_version
   }
 
   instance_refresh {

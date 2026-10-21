@@ -35,6 +35,8 @@ import {
   type SynthTrace,
   type SynthFileResult,
   type GateTrace,
+  type ClassifierExchange,
+  type CuratorClassifierTrace,
   type DigitalTwinBackfillBlock,
 } from "../../../lib/api";
 import { SUBSYSTEM_LABELS } from "./ProposalModal";
@@ -86,6 +88,8 @@ const DROP_REASON_LABELS: Record<string, string> = {
   "low-signal":        "score < 0.7",
   "ungrounded":        "no grounding record",
   "malformed":         "malformed",
+  "classifier-duplicate": "classifier: duplicate",
+  "classifier-noise":  "classifier: noise",
 };
 
 const PAGE_SIZE = 40;
@@ -414,6 +418,16 @@ function EmittedRow({ c }: { c: CuratorEmittedCandidate }) {
           {c.groundedOnIds && (
             <span className="text-xyne-fg-muted">· {c.groundedOnIds.length} grounding{c.groundedOnIds.length === 1 ? "" : "s"}</span>
           )}
+          {c.jevVerdict && (
+            <span
+              className="rounded bg-xyne-surface-sunken px-[5px] py-[1px] font-medium text-xyne-fg-secondary"
+              title="Second opinion from the Jev classifier, compared with the user's most similar stored memories"
+            >
+              classifier: {c.jevVerdict}
+              {typeof c.jevConfidence === "number" ? ` ${Math.round(c.jevConfidence * 100)}%` : ""}
+              {typeof c.jevScore === "number" ? ` · useful ${Math.round(c.jevScore * 100)}%` : ""}
+            </span>
+          )}
           {!kept && c.dropReason && (
             <span className="rounded bg-xyne-error-bg px-[5px] py-[1px] font-medium text-xyne-error-fg">
               dropped: {DROP_REASON_LABELS[c.dropReason] ?? c.dropReason}
@@ -611,6 +625,9 @@ function EventDetail({ userId, id }: { userId: string; id: string }) {
         </div>
       )}
 
+      {/* Classifier (Jev) — the second-opinion pass over the LLM's candidates */}
+      {trace?.classifier && <CuratorClassifierSection c={trace.classifier} />}
+
       {/* Records sent */}
       {detail.records && detail.records.length > 0 && (
         <Section title="Records sent" count={detail.records.length}>
@@ -674,6 +691,7 @@ function GateDetail({ detail, trace }: { detail: PipelineEventDetail; trace: Gat
       </div>
       {/* Incoming message (the webhook event) */}
       <CodeBlock label="Incoming message" text={trace.incoming} icon={<ChatTextIcon size={11} />} defaultOpen />
+      {trace.classifier?.map((x, i) => <ClassifierExchangeBlock key={i} x={x} />)}
       {/* Full LLM exchange */}
       {hasExchange ? (
         <div className="flex flex-col gap-[8px]">
@@ -692,13 +710,15 @@ function GateDetail({ detail, trace }: { detail: PipelineEventDetail; trace: Gat
   );
 }
 
-function SynthFileRow({ f }: { f: SynthFileResult }) {
+export function SynthFileRow({ f }: { f: SynthFileResult }) {
   const [open, setOpen] = useState(false);
   const tone =
     f.action === "updated"
       ? "text-xyne-success-fg"
       : f.action === "error"
       ? "text-xyne-error-fg"
+      : f.action === "held"
+      ? "text-xyne-warning-fg"
       : "text-xyne-fg-muted";
   const hasExchange = !!(f.systemPrompt || f.userPrompt || f.rawOutput);
   const available = f.factsAvailable ?? f.factsUsed;
@@ -721,6 +741,14 @@ function SynthFileRow({ f }: { f: SynthFileResult }) {
           {f.chars ? ` · ${f.chars.toLocaleString()} chars` : ""}
           {f.error ? ` · ${f.error}` : ""}
         </span>
+        {f.check && (
+          <span
+            className={`text-[10px] font-medium ${f.check.verdict === "accept" ? "text-xyne-fg-tertiary" : "text-xyne-warning-fg"}`}
+            title={`Update check (${f.check.source}, ${f.check.ms} ms): keeps old ${f.check.keepsOld ?? "n/a"} · supported ${f.check.supported ?? "n/a"}`}
+          >
+            check: {f.check.verdict}{f.action === "held" ? " · old file kept" : ""}
+          </span>
+        )}
         {f.contextLimited && (
           <span
             className="flex items-center gap-[3px] text-[10px] font-medium text-xyne-warning-fg"
@@ -762,8 +790,58 @@ function SynthFileRow({ f }: { f: SynthFileResult }) {
           {f.systemPrompt && <CodeBlock label="System prompt" text={f.systemPrompt} icon={<ScrollIcon size={11} />} />}
           {f.userPrompt && <CodeBlock label="User prompt" text={f.userPrompt} icon={<ChatTextIcon size={11} />} />}
           {f.rawOutput && <CodeBlock label="LLM output" text={f.rawOutput} icon={<CodeIcon size={11} />} defaultOpen />}
+          {f.check?.exchange && <ClassifierExchangeBlock x={f.check.exchange} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The classifier pass over a curator batch: counts, then each call in full. */
+export function CuratorClassifierSection({ c }: { c: CuratorClassifierTrace }) {
+  return (
+    <div className="flex flex-col gap-[8px]">
+      <div className="flex flex-wrap items-center gap-[6px] text-[11px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-muted">
+        <SparkleIcon size={12} className="text-xyne-brand" weight="fill" />
+        Classifier (Jev)
+        <span className="font-normal normal-case tracking-normal text-xyne-fg-tertiary">
+          {c.checked} checked · {c.kept} kept · {c.dropped} dropped
+          {c.unavailable > 0 ? ` · ${c.unavailable} not answered (passed through)` : ""} · {fmtDuration(c.ms)}
+        </span>
+      </div>
+      {c.calls.map((call, i) => (
+        <details key={i} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface">
+          <summary className="flex cursor-pointer list-none items-start gap-[8px] px-[10px] py-[8px] text-[12px]">
+            <CaretRightIcon size={11} className="mt-[3px] shrink-0 text-xyne-fg-muted" />
+            <span className="min-w-0 flex-1 text-xyne-fg-primary">{call.text}</span>
+            <span className="shrink-0 text-[10px] font-medium text-xyne-fg-secondary">
+              {call.verdict ?? "no answer"}
+              {typeof call.confidence === "number" ? ` ${Math.round(call.confidence * 100)}%` : ""}
+              {typeof call.worth === "number" ? ` · useful ${Math.round(call.worth * 100)}%` : ""}
+            </span>
+          </summary>
+          <div className="px-[10px] pb-[10px]">
+            <ClassifierExchangeBlock x={call.exchange} />
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+/** A classifier (Jev) call in full: input, questions, answers. */
+function ClassifierExchangeBlock({ x }: { x: ClassifierExchange }) {
+  return (
+    <div className="flex flex-col gap-[6px] rounded-lg border border-xyne-border-subtle bg-xyne-surface px-[10px] py-[8px]">
+      <div className="flex flex-wrap items-center gap-[6px] text-[11px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-muted">
+        <SparkleIcon size={12} className="text-xyne-brand" weight="fill" /> Classifier (Jev) · {x.purpose}
+        <span className="font-normal normal-case tracking-normal text-xyne-fg-tertiary">
+          {x.backend} · {x.ms} ms{x.ok ? "" : ` · failed${x.error ? `: ${x.error}` : ""} → fell back`}
+        </span>
+      </div>
+      <CodeBlock label="Input (state)" text={x.state} icon={<ChatTextIcon size={11} />} />
+      <CodeBlock label="Questions" text={JSON.stringify(x.questionSpec, null, 2)} icon={<ScrollIcon size={11} />} />
+      {x.answers && <CodeBlock label="Answers" text={JSON.stringify(x.answers, null, 2)} icon={<CodeIcon size={11} />} defaultOpen />}
     </div>
   );
 }

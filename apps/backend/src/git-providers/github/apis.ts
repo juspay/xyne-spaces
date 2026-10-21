@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { resolveSecret } from '@/config/secretResolver';
 import type { IGitProvider, GitDiffFile, GithubConfig } from '../types';
 
 // GitHub login / repo name: alphanumerics, '-', '_', '.' (no path separators).
@@ -82,9 +83,10 @@ export class GithubManager implements IGitProvider {
     return url.includes('github.com') || url.includes('github.');
   }
 
-  private getHeaders() {
+  private async getHeaders() {
+    const token = await resolveSecret('github-token', this.config.token);
     return {
-      'Authorization': `Bearer ${this.config.token}`,
+      'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'xyne-spaces',
     };
@@ -133,7 +135,7 @@ export class GithubManager implements IGitProvider {
       description: safeDescription,
     });
     try {
-      await axios.post(url, payload, { headers: this.getHeaders() });
+      await axios.post(url, payload, { headers: await this.getHeaders() });
       logger.info('[GitHub-API] Commit status posted', {
         owner: safeOwner,
         repo: safeRepo,
@@ -169,7 +171,7 @@ export class GithubManager implements IGitProvider {
     )}/commits/${encodeURIComponent(commitSha)}/statuses`;
     try {
       const response = await axios.get<Array<{ context?: string }>>(url, {
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         // Newest first; a commit will not have more contexts than this.
         params: { per_page: 100 },
       });
@@ -232,7 +234,7 @@ export class GithubManager implements IGitProvider {
           base: baseBranch,
           draft,
         },
-        { headers: this.getHeaders() }
+        { headers: await this.getHeaders() }
       );
 
       const prUrl = response.data.html_url;
@@ -266,7 +268,7 @@ export class GithubManager implements IGitProvider {
       const response = await axios.get(
         `${this.config.apiUrl}/repos/${owner}/${repo}/pulls`,
         {
-          headers: this.getHeaders(),
+          headers: await this.getHeaders(),
           params: {
             head: `${owner}:${headBranch}`,
             state: 'open',
@@ -313,7 +315,7 @@ export class GithubManager implements IGitProvider {
         {
           body: description,
         },
-        { headers: this.getHeaders() }
+        { headers: await this.getHeaders() }
       );
       logger.info(`[GithubManager] Updated PR description for PR #${prId}`);
     } catch (error) {
@@ -333,7 +335,7 @@ export class GithubManager implements IGitProvider {
       // GitHub's PR files endpoint returns the list of changed files
       const response = await axios.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/pulls/${prId}/files`,
-        { headers: this.getHeaders() }
+        { headers: await this.getHeaders() }
       );
 
       const files = response.data;
@@ -363,7 +365,7 @@ export class GithubManager implements IGitProvider {
       // GitHub's compare endpoint
       const response = await axios.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/compare/${sinceHash}...${untilHash}`,
-        { headers: this.getHeaders() }
+        { headers: await this.getHeaders() }
       );
 
       const files = response.data.files || [];
@@ -392,7 +394,7 @@ export class GithubManager implements IGitProvider {
       const response = await axios.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/commits/${branch}`,
         {
-          headers: this.getHeaders(),
+          headers: await this.getHeaders(),
           params: { per_page: 1 },
         }
       );

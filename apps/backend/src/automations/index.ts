@@ -14,6 +14,7 @@ import { tagGeneratedTrigger } from './triggers/tag-generated.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
 import { switchStep } from './steps/switch.step';
+import { isOutsideBusinessHoursStep } from './steps/is-outside-business-hours.step';
 import { delayStep } from './steps/delay.step';
 
 import { sendMessageStep } from './steps/send-message.step';
@@ -21,6 +22,8 @@ import { notifyUserStep } from './steps/notify-user.step';
 import { notifyUserSosStep } from './steps/notify-user-sos.step';
 import { createTicketStep } from './steps/create-ticket.step';
 import { createSubTicketStep } from './steps/create-sub-ticket.step';
+import { linkSubTicketStep } from './steps/link-sub-ticket.step';
+import { sendAppReplyStep } from './steps/send-app-reply.step';
 import { updateTicketStep } from './steps/update-ticket.step';
 import { assignTicketStep } from './steps/assign-ticket.step';
 import { closeTicketStep } from './steps/close-ticket.step';
@@ -40,6 +43,9 @@ import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.st
 import { updateFormFieldsStep } from './steps/update-form-fields.step';
 import { sendCsatRequestStep } from './steps/send-csat-request.step';
 import { makeCallStep } from './steps/make-call.step';
+import { askJevStep } from './steps/ask-jev.step';
+import { sendReviewReplyStep } from './steps/send-review-reply.step';
+import { resolveConversationStep } from './steps/resolve-conversation.step';
 
 import { automationQueue } from './queue/automation.queue';
 import { deskLabelBackfillQueue } from './queue/desk-label-backfill.queue';
@@ -63,12 +69,15 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(conditionalStep);
   stepRegistry.register(switchStep);
   stepRegistry.register(delayStep);
+  stepRegistry.register(isOutsideBusinessHoursStep);
 
   stepRegistry.register(sendMessageStep);
   stepRegistry.register(notifyUserStep);
   stepRegistry.register(notifyUserSosStep);
   stepRegistry.register(createTicketStep);
   stepRegistry.register(createSubTicketStep);
+  stepRegistry.register(linkSubTicketStep);
+  stepRegistry.register(sendAppReplyStep);
   stepRegistry.register(updateTicketStep);
   stepRegistry.register(assignTicketStep);
   stepRegistry.register(closeTicketStep);
@@ -88,6 +97,9 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(updateFormFieldsStep);
   stepRegistry.register(sendCsatRequestStep);
   stepRegistry.register(makeCallStep);
+  stepRegistry.register(askJevStep);
+  stepRegistry.register(sendReviewReplyStep);
+  stepRegistry.register(resolveConversationStep);
 
   await automationQueue.initialize();
   await deskLabelBackfillQueue.initialize();

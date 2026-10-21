@@ -8,6 +8,7 @@ import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { isOAuthConnector } from "./oauth-token.js";
+import { type ConnectorMeta, isVisibleToUser, parseConnectorMeta } from "../lib/connector-visibility.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("servers");
@@ -41,30 +42,9 @@ function diffConnector(before: Record<string, unknown> | null, after: Record<str
 const router = Router();
 const mcpServerAny = prisma.mcpServer as any;
 
-type ConnectorScope = "personal" | "global";
-type PublishStatus = "draft" | "pending" | "approved" | "rejected";
-
-type ConnectorMeta = {
-  ownerType?: string;
-  ownerUserId?: string;
-  scope?: ConnectorScope;
-  publishStatus?: PublishStatus;
-  publishRequestedAt?: string;
-  publishReviewedAt?: string;
-  publishReviewedBy?: string;
-  publishReviewNote?: string;
-  mode?: string;
-};
-
-export function parseConnectorMeta(value: unknown): ConnectorMeta {
-  return isRecord(value) ? (value as ConnectorMeta) : {};
-}
-
-export function isVisibleToUser(meta: ConnectorMeta, requesterId?: string): boolean {
-  const scope = meta.scope ?? "global";
-  if (scope === "global") return true;
-  return Boolean(requesterId && meta.ownerUserId === requesterId);
-}
+// Visibility lives in lib/connector-visibility.ts; re-exported for existing
+// importers (routes/webhook.ts).
+export { parseConnectorMeta, isVisibleToUser };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);

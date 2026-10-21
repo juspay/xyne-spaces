@@ -46,7 +46,7 @@ const AddReactionDrawerMobile = ({
       <Drawer.Trigger asChild>
         <button
           type='button'
-          className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
+          className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition duration-150'
           onClick={e => e.stopPropagation()}
           data-track-category='MESSAGE'
           data-track-name='OPEN_ADD_REACTION_DRAWER'

@@ -2,24 +2,28 @@ import { Fragment, useEffect, useMemo, useState, type ReactElement } from 'react
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
-import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { AGENT_CATEGORIES } from '@/services/claw/agentCategory';
 import {
   BrowseDialog,
   handleBrowseDialogOpenChange,
   type FilterOption,
 } from '../../primitives/BrowseDialog';
+import { Pill } from '../../primitives/Pill';
 import { SectionHeading, Separator } from '../../primitives/Section';
 import {
   disableEntry,
   enableEntry,
   isEntryEnabled,
+  scopeLabel,
   selectedTools,
   type McpCatalogEntry,
   type McpSelection,
 } from './mcpCatalog';
+import { connectStrategyFor } from './mcpConnectionService';
+import { useMcpCredentialFields } from './useMcpCredentialFields';
 import { McpChip } from './McpChip';
-import { EnabledBadge, McpIdentity } from './McpIdentity';
+import { McpIdentity } from './McpIdentity';
 import { McpDetailPanel } from './McpDetailPanel';
 import type { SuggestedMcp } from './useMcpSuggestions';
 
@@ -29,6 +33,19 @@ interface EntryState {
   enabled: boolean;
   selectedCount: number;
 }
+
+interface ConnectionState {
+  needed: boolean;
+  connected: boolean;
+  orgCovered: boolean;
+}
+
+const connectionLabel = (connection: ConnectionState): string =>
+  connection.connected
+    ? 'Connected'
+    : connection.orgCovered
+      ? 'Available via org'
+      : 'Not connected';
 
 function mcpSearchFields(entry: McpCatalogEntry) {
   return {
@@ -50,11 +67,13 @@ function entrySummary(entry: McpCatalogEntry, state: EntryState): string {
 const McpCard = ({
   entry,
   state,
+  connection,
   onOpen,
   onToggle,
 }: {
   entry: McpCatalogEntry;
   state: EntryState;
+  connection: ConnectionState;
   onOpen: () => void;
   onToggle: () => void;
 }): ReactElement => (
@@ -66,15 +85,23 @@ const McpCard = ({
       data-track-name='Create agent v2: open MCP detail'
       className={cn(BROWSE_CARD, state.enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
-      <span className='flex w-full items-center justify-between gap-2'>
+      <span className={cn('flex w-full items-center gap-2', entry.selectable && 'pr-7')}>
         <McpIdentity
           label={entry.label}
           iconType={entry.iconType}
-          {...(state.enabled ? { trailing: <EnabledBadge /> } : {})}
+          trailing={
+            <>
+              <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
+                {scopeLabel(entry.scope)}
+              </Pill>
+              {connection.needed && (
+                <Pill tone={connection.connected || connection.orgCovered ? 'success' : 'warning'}>
+                  {connectionLabel(connection)}
+                </Pill>
+              )}
+            </>
+          }
         />
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
-          <ChevronRight className='size-4' aria-hidden />
-        </span>
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
         {entrySummary(entry, state)}
@@ -89,7 +116,7 @@ const McpCard = ({
         title={state.enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
         data-track-category='Claw Agents'
         data-track-name='Create agent v2: quick toggle MCP'
-        className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+        className='absolute right-4 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
       >
         {state.enabled ? (
           <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -133,6 +160,7 @@ export function BrowseMcpsDialog({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
   const [openSlug, setOpenSlug] = useState<string | null>(null);
+  const { fieldsFor } = useMcpCredentialFields();
 
   useEffect(() => {
     if (open) setOpenSlug(initialSlug ?? null);
@@ -151,6 +179,18 @@ export function BrowseMcpsDialog({
 
   const stateOf = (entry: McpCatalogEntry): EntryState =>
     entryStates.get(entry.slug) ?? { enabled: false, selectedCount: 0 };
+
+  // Mirrors what McpDetailPanel decides, so a card and its detail never
+  // disagree about whether a connector still needs a key.
+  const connectionOf = (entry: McpCatalogEntry): ConnectionState => {
+    const server = entry.server;
+    if (!server) return { needed: false, connected: false, orgCovered: false };
+    return {
+      needed: connectStrategyFor(server) === 'oauth' || fieldsFor(server).length > 0,
+      connected: connectedServerIds.has(server.id),
+      orgCovered: !!orgCoveredServerIds?.has(server.id),
+    };
+  };
 
   const q = query.trim();
   const searchFiltered = useMemo(
@@ -294,6 +334,7 @@ export function BrowseMcpsDialog({
                   key={`${section.key}-${entry.slug}`}
                   entry={entry}
                   state={stateOf(entry)}
+                  connection={connectionOf(entry)}
                   onOpen={() => setOpenSlug(entry.slug)}
                   onToggle={() => toggleEntry(entry)}
                 />

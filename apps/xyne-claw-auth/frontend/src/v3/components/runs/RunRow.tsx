@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import {
   CircleDashedIcon,
   CheckCircleIcon,
@@ -49,6 +50,7 @@ function SessionIdChip({ sessionId }: { sessionId: string }) {
       title={`${sessionId} — click to copy`}
       onClick={(e) => {
         e.stopPropagation();
+        e.preventDefault();
         void navigator.clipboard?.writeText(sessionId).then(
           () => {
             setCopied(true);
@@ -76,12 +78,15 @@ function SessionIdChip({ sessionId }: { sessionId: string }) {
  *
  * `run` is typed to the light `AgentRunListItem`, which is a structural subset
  * of `AgentRun`, so callers holding a full row can pass it straight through.
+ * With `href` the row is a router `Link`; interactive `footer` content must stop propagation and prevent default.
  */
 export function RunRow({
   run,
   showOwner,
   agentLabel,
   onOpen,
+  href,
+  footer,
 }: {
   run: AgentRunListItem;
   showOwner?: boolean;
@@ -89,6 +94,10 @@ export function RunRow({
    *  agent Activity tab every row is the same agent and the chip is noise. */
   agentLabel?: string;
   onOpen?: () => void;
+  /** Router path; renders the row as a link. */
+  href?: string;
+  /** Extra line under the meta line. */
+  footer?: ReactNode;
 }) {
   const duration =
     run.completedAt
@@ -115,26 +124,12 @@ export function RunRow({
     tokens,
   ].filter((p): p is string => !!p);
 
-  const clickable = !!onOpen;
-  return (
-    <div
-      onClick={onOpen}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onOpen?.();
-              }
-            }
-          : undefined
-      }
-      className={`group flex items-center gap-3 rounded-lg border border-xyne-border-subtle px-4 py-3 transition-colors hover:bg-xyne-surface-subtle hover:border-xyne-border ${
-        clickable ? "cursor-pointer" : ""
-      }`}
-    >
+  const clickable = !!onOpen || !!href;
+  const className = `group flex ${footer ? "items-start" : "items-center"} gap-3 rounded-lg border border-xyne-border-subtle px-4 py-3 transition-colors hover:bg-xyne-surface-subtle hover:border-xyne-border ${
+    clickable ? "cursor-pointer" : ""
+  }`;
+  const body = (
+    <>
       <StatusIcon status={run.status} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-2">
@@ -164,13 +159,43 @@ export function RunRow({
             </span>
           ))}
         </div>
+        {footer && <div className="mt-1 min-w-0">{footer}</div>}
       </div>
       {clickable && (
         <CaretRightIcon
           size={16}
-          className="shrink-0 text-xyne-fg-muted opacity-0 transition-opacity group-hover:opacity-100"
+          className={`shrink-0 text-xyne-fg-muted opacity-0 transition-opacity group-hover:opacity-100 ${footer ? "self-center" : ""}`}
         />
       )}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link to={href} onClick={onOpen} className={`${className} no-underline`}>
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <div
+      onClick={onOpen}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen?.();
+              }
+            }
+          : undefined
+      }
+      className={className}
+    >
+      {body}
     </div>
   );
 }

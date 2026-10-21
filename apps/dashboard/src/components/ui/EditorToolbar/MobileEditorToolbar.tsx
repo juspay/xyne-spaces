@@ -159,7 +159,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
   );
 
   const buttonClass = (active: boolean): string =>
-    `p-1.5 rounded transition-all duration-200 ease-in-out flex-shrink-0 ${
+    `p-1.5 rounded transition duration-200 ease-in-out flex-shrink-0 ${
       active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
     }`;
 

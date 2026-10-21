@@ -29,6 +29,7 @@ export { ChannelParticipantsACL } from './channel-participants-acl';
 export { ChannelStatsACL } from './channel-stats-acl';
 export { ChannelsACL } from './channels-acl';
 export { ChannelBoardMappingsACL } from './channel-board-mappings-acl';
+export { ChannelPublishedTabsACL } from './channel-published-tabs-acl';
 export { ChannelSectionsACL } from './channel-sections-acl';
 export { ConversationParticipantsACL } from './conversation-participants-acl';
 export { ConversationsACL } from './conversations-acl';

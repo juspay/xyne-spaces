@@ -3,11 +3,13 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
-import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { rotateTemplate, isSameTemplateFamily, rotatedTemplateNames } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
+import { hasRange, sliceLines } from "./read-range.js";
+import { findSandboxKeys, resolveSandboxProfile } from "./repo-url.js";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcRepositoryAccess,
@@ -28,6 +30,9 @@ function isCredentialPath(p: string): boolean {
   const s = p.toLowerCase();
   return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\.sdlc-git-credential|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
 }
+
+const BACKGROUND_SETUP_ENABLED =
+  (process.env["XYNE_SANDBOX_BACKGROUND_SETUP"] ?? "true").toLowerCase() !== "false";
 
 const SESSION_STORE = new Map<string, Session>();
 
@@ -517,7 +522,187 @@ export type SetupStep =
   // healthCheck still runs so the caller knows the dependency is ready.
   | { type: "services"; cmd: string; healthCheck?: HealthCheck; markerPath?: string }
   | { type: "devserver"; name: string; cmd: string; cwd: string; markerPath?: string }
-  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number };
+  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number; runOnReuse?: boolean };
+
+type ReuseStepSession = {
+  commands: {
+    runDetached(cmd: string): Promise<string>;
+    pollJob(jobId: string): Promise<{ done: boolean; exitCode: number | null; stdout?: string | null; stderr?: string | null }>;
+  };
+};
+
+const STEP_OUTPUT_TAIL_LINES = 20;
+
+export function stepOutputTail(stdout: string | null | undefined): string | null {
+  const output = redactSecrets(stdout ?? "").trim();
+  return output ? output.split("\n").slice(-STEP_OUTPUT_TAIL_LINES).join("\n") : null;
+}
+
+export async function runReuseSteps(
+  session: ReuseStepSession,
+  steps: readonly SetupStep[],
+  workDir: string,
+  log: string[],
+  pollIntervalMs = 2_000,
+): Promise<void> {
+  for (const step of steps) {
+    if (step.type !== "run" || step.runOnReuse !== true) continue;
+    log.push(`Running on reuse: ${step.label}...`);
+    try {
+      const jobId = await session.commands.runDetached(`cd ${step.cwd || workDir} && ${step.cmd}`);
+      const timeoutMs = step.timeoutMs || 5 * 60_000;
+      const deadline = Date.now() + timeoutMs;
+      let finished = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        const status = await session.commands.pollJob(jobId);
+        if (!status.done) continue;
+        finished = true;
+        if (status.exitCode !== null && status.exitCode !== 0) {
+          log.push(`${step.label}: WARN failed on reuse (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
+        } else {
+          log.push(`${step.label} done.`);
+        }
+        const tail = stepOutputTail(status.stdout);
+        if (tail) log.push(tail);
+        break;
+      }
+      if (!finished) log.push(`${step.label}: WARN still running after ${timeoutMs / 1000}s on reuse; continuing.`);
+    } catch (err) {
+      log.push(`${step.label}: WARN ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
+    }
+  }
+}
+
+export const SANDBOX_READY_FILE = "$HOME/.sandbox-ready";
+
+function shSingleQuote(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+export function buildSetupOrchestratorScript(config: RepoSetupConfig): string {
+  const lines: string[] = [];
+  lines.push("#!/usr/bin/env bash");
+  lines.push(`READY_FILE="${SANDBOX_READY_FILE}"`);
+  lines.push(`echo syncing > "$READY_FILE"`);
+  lines.push("fail() {");
+  lines.push(`  printf 'failed:%s\\n' "$1" > "$READY_FILE"`);
+  lines.push("  exit 0");
+  lines.push("}");
+
+  lines.push("PREBAKE_DEADLINE=$(( $(date +%s) + 2700 ))");
+  lines.push("PREBAKE_START=$(date +%s)");
+  lines.push("FATAL_GRACE=90");
+  lines.push("CRASH_GRACE=480");
+  lines.push("PREBAKE_DONE=0");
+  lines.push(`while [ "$(date +%s)" -lt "$PREBAKE_DEADLINE" ]; do`);
+  lines.push("  if [ -f /tmp/prebake-done ]; then PREBAKE_DONE=1; break; fi");
+  lines.push("  WAITED=$(( $(date +%s) - PREBAKE_START ))");
+  lines.push(`  if [ "$WAITED" -gt "$FATAL_GRACE" ] && [ "$WAITED" -le "$CRASH_GRACE" ]; then`);
+  lines.push(`    FATAL=$(grep -iE 'Config validation error|must not be the published|is required' /tmp/prebake-backend-dev.log 2>/dev/null | tail -4)`);
+  lines.push(`    if [ -n "$FATAL" ]; then fail "$FATAL"; fi`);
+  lines.push("  fi");
+  lines.push(`  if [ "$WAITED" -gt "$CRASH_GRACE" ]; then`);
+  lines.push("    if ! nc -z 127.0.0.1 3001 >/dev/null 2>&1; then");
+  lines.push(`      CRASH=$(grep -iE 'Config validation error|is required|Error:|Cannot find|is not a function|EADDRINUSE' /tmp/prebake-backend-dev.log 2>/dev/null | tail -6)`);
+  lines.push(`      if [ -n "$CRASH" ]; then fail "$CRASH"; fi`);
+  lines.push("    fi");
+  lines.push("  fi");
+  lines.push("  sleep 5");
+  lines.push("done");
+
+  let stepIndex = 0;
+  for (const step of config.steps) {
+    stepIndex += 1;
+    const logFile = `/tmp/setup-step-${stepIndex}.log`;
+    if (step.type === "install") {
+      let pkgIndex = 0;
+      for (const pkg of step.packages) {
+        pkgIndex += 1;
+        const installLog = `/tmp/setup-install-${stepIndex}-${pkgIndex}.log`;
+        const inner = step.cmd
+          ? step.cmd
+          : `cd ${config.workDir}/${pkg} && npm ci --prefer-offline --no-audit --no-fund --no-progress --loglevel=error`;
+        lines.push(`if ! bash -c ${shSingleQuote(inner)} > ${installLog} 2>&1; then`);
+        lines.push(`  fail "install ${pkg}: $(tail -20 ${installLog})"`);
+        lines.push("fi");
+      }
+    } else if (step.type === "services") {
+      const servicesLog = `/tmp/services.log`;
+      if (step.markerPath) {
+        lines.push(`if [ -f ${shSingleQuote(step.markerPath)} ]; then`);
+        lines.push(`  :`);
+        lines.push("else");
+        lines.push(`  setsid bash -c ${shSingleQuote(step.cmd)} < /dev/null > ${servicesLog} 2>&1 &`);
+        lines.push("fi");
+      } else {
+        lines.push(`setsid bash -c ${shSingleQuote(step.cmd)} < /dev/null > ${servicesLog} 2>&1 &`);
+      }
+      if (step.healthCheck) {
+        const timeoutSec = Math.ceil(step.healthCheck.timeoutMs / 1000);
+        const intervalSec = Math.max(1, Math.ceil(step.healthCheck.intervalMs / 1000));
+        lines.push(`HC_DEADLINE=$(( $(date +%s) + ${timeoutSec} ))`);
+        lines.push("HC_OK=0");
+        lines.push(`while [ "$(date +%s)" -lt "$HC_DEADLINE" ]; do`);
+        lines.push(`  sleep ${intervalSec}`);
+        lines.push(`  HC_OUT=$(bash -c ${shSingleQuote(step.healthCheck.cmd)} 2>/dev/null)`);
+        if (step.healthCheck.successCondition === "all-up") {
+          lines.push(`  if [ "$HC_OUT" = "all-up" ]; then HC_OK=1; break; fi`);
+        } else {
+          lines.push(`  if [ -n "$HC_OUT" ] && [ -z "$(printf '%s\\n' "$HC_OUT" | grep -vE '^Up|healthy')" ]; then HC_OK=1; break; fi`);
+        }
+        lines.push("done");
+      }
+    } else if (step.type === "devserver") {
+      const devLog = `/tmp/${step.name}.log`;
+      const inner = `cd ${step.cwd} && ${step.cmd}`;
+      if (step.markerPath) {
+        lines.push(`if [ -f ${shSingleQuote(step.markerPath)} ]; then`);
+        lines.push(`  :`);
+        lines.push("else");
+        lines.push(`  setsid bash -c ${shSingleQuote(inner)} < /dev/null > ${devLog} 2>&1 &`);
+        lines.push("fi");
+      } else {
+        lines.push(`setsid bash -c ${shSingleQuote(inner)} < /dev/null > ${devLog} 2>&1 &`);
+      }
+    } else if (step.type === "run") {
+      const cwd = step.cwd || config.workDir;
+      const inner = `cd ${cwd} && ${step.cmd}`;
+      lines.push(`if ! bash -c ${shSingleQuote(inner)} > ${logFile} 2>&1; then`);
+      lines.push(`  fail "${step.label}: $(tail -20 ${logFile})"`);
+      lines.push("fi");
+    }
+  }
+
+  lines.push(`echo ready > "$READY_FILE"`);
+  return lines.join("\n");
+}
+
+type SandboxReadySession = {
+  commands: { run(cmd: string, timeoutMs?: number): Promise<{ stdout?: string | null }> };
+};
+
+export async function waitForSandboxReady(
+  session: SandboxReadySession,
+  timeoutMs = 10 * 60_000,
+): Promise<{ ready: true }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let state = "";
+    try {
+      const probe = await session.commands.run(`cat "${SANDBOX_READY_FILE}" 2>/dev/null`, 5_000);
+      state = (probe.stdout ?? "").trim();
+    } catch {
+      state = "";
+    }
+    if (state === "ready") return { ready: true };
+    if (state.startsWith("failed:")) {
+      throw new Error(`sandbox setup failed: ${redactSecrets(state.slice("failed:".length).trim())}`);
+    }
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  throw new Error(`sandbox was not ready within ${Math.round(timeoutMs / 1000)}s (status: ${SANDBOX_READY_FILE})`);
+}
 
 // Auxiliary repos baked into a sandbox template alongside the primary
 // repo. Each entry's branch is independently overridable at claim time
@@ -572,6 +757,8 @@ export interface RepoSetupConfig {
   /** Generic repositories are not baked into their template. Skip the golden
    * clone probe and clone them immediately. */
   skipBakedCloneWait?: boolean;
+  /** Set by claw-auth on a workspace's own profile; built-ins have none. */
+  workspaceId?: string;
 }
 
 export function buildRepoCloneCommand(
@@ -641,9 +828,84 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
-  return REPO_CONFIGS[pinnedRepo]?.template;
+  return (await runRepoConfigs(context))[pinnedRepo]?.template;
 }
+
+/** The profiles this run may use: built-ins plus its workspace's own. */
+async function runRepoConfigs(context: ToolExecutionContext | undefined) {
+  const workspaceId = context?.meta?.[SDLC_META_KEYS.workspaceId]?.trim() || context?.meta?.["workspaceId"]?.trim();
+  const { getRepoConfigsFor } = await import("./repo-config-source.js");
+  return getRepoConfigsFor(workspaceId || undefined);
+}
+
+/** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
+async function knownTemplate(value: unknown): Promise<string | undefined> {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const { getRepoConfigs } = await import("./repo-config-source.js");
+  const repoConfigs = await getRepoConfigs();
+  const known = new Set([
+    "kata-workspace-template",
+    ...Object.values(repoConfigs).map((config) => config.template),
+    ...rotatedTemplateNames(),
+  ]);
+  return known.has(value.trim()) ? value.trim() : undefined;
+}
+
+const REPO_URL_INPUT = {
+  type: "string",
+  description: "Repository URL from spaces-sdlc-list-repositories. Picks that repository's sandbox profile; defaults to this run's SDLC repository.",
+};
+const PROFILE_INPUT = {
+  type: "string",
+  description:
+    "Sandbox profile key, needed only when repoUrl has several profiles. Take it from sandbox-list-profiles or the user; never guess it from the repository name.",
+};
+
+type RepoProfile = { key: string; config: RepoSetupConfig } | { error: string };
+
+/** A profile matched by repo URL wins over the agent pin. undefined → no match, keep the pin path. */
+async function repoProfileFor(params: Record<string, unknown>, context: ToolExecutionContext): Promise<RepoProfile | undefined> {
+  const param = typeof params["repoUrl"] === "string" ? params["repoUrl"].trim() : "";
+  const repoUrl = param || context.meta?.[SDLC_META_KEYS.repositoryUrl]?.trim();
+  // When a repository has several profiles and the model names none, the agent's pinned one is used.
+  const named = typeof params["profile"] === "string" ? params["profile"].trim() : "";
+  const profile = named || context.meta?.["sandboxRepo"]?.trim() || undefined;
+  const configs = await runRepoConfigs(context);
+  const choice = resolveSandboxProfile(configs, repoUrl, profile);
+  if (!choice || "error" in choice) return choice;
+  const config = configs[choice.key];
+  return config ? { key: choice.key, config } : undefined;
+}
+
+export const sandboxListProfiles: ToolDefinition = {
+  slug: "sandbox-list-profiles",
+  name: "Sandbox List Profiles",
+  description:
+    "List the sandbox profiles for a repository. Call before sandbox-create / sandbox-repo-setup. " +
+    "Get repoUrl from spaces-sdlc-list-repositories. Without repoUrl it uses this run's SDLC repository, " +
+    "and with neither it lists every profile. Pass the chosen key as profile when a repository has several.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: { repoUrl: REPO_URL_INPUT },
+    required: [],
+  },
+
+  async execute(params, context) {
+    const param = typeof params["repoUrl"] === "string" ? params["repoUrl"].trim() : "";
+    const repoUrl = param || context?.meta?.[SDLC_META_KEYS.repositoryUrl]?.trim();
+    const configs = await runRepoConfigs(context);
+    const keys = repoUrl ? findSandboxKeys(configs, repoUrl) : Object.keys(configs).sort();
+    const profiles = keys.flatMap((key) => {
+      const config = configs[key];
+      return config
+        ? [{ key, name: config.name, description: config.description, template: config.template, defaultBranch: config.defaultBranch }]
+        : [];
+    });
+    return JSON.stringify({ repoUrl: repoUrl || null, profiles });
+  },
+};
 
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
@@ -655,7 +917,8 @@ export const sandboxCreate: ToolDefinition = {
     "Create a persistent isolated Kata/QEMU microVM sandbox session for multi-step workflows. " +
     "Provides clean, isolated environment for development tasks. Returns sessionId. " +
     "Use sandbox-run / sandbox-run-detached to execute commands, sandbox-write-file to upload files, " +
-    "and sandbox-destroy when done.",
+    "and sandbox-destroy when done. Pass repoUrl (and profile when it has several, see sandbox-list-profiles) " +
+    "to get that repository's sandbox.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -673,6 +936,8 @@ export const sandboxCreate: ToolDefinition = {
         type: "string",
         description: "Sandbox template name to use (default: kata-workspace-template). For browser automation pin the agent to 'Browser (no repo)'; for repo work pin to a repo. Only override here for special cases.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
     },
     required: [],
   },
@@ -687,10 +952,12 @@ export const sandboxCreate: ToolDefinition = {
       params["idleTimeoutMs"] as number | undefined,
       10 * 60 * 1000,
     );
-    // A UI-pinned sandbox repo wins over whatever template the LLM passed —
+    const byRepo = await repoProfileFor(params, context);
+    if (byRepo && "error" in byRepo) return byRepo.error;
+    // A repo-matched profile, then a UI-pinned sandbox repo, win over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
-    const pinnedTemplate = await pinnedTemplateForContext(context);
-    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
+    const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
     // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
@@ -747,7 +1014,9 @@ export const sandboxRun: ToolDefinition = {
     "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
     "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
     "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
-    "Auto-detects existing sessions or creates fresh sandboxes as needed.",
+    "Auto-detects existing sessions or creates fresh sandboxes as needed. A fresh one-shot sandbox uses the " +
+    "repoUrl profile (pass profile when it has several, see sandbox-list-profiles). " +
+    "Set waitReady:true to block until background setup (services/dev servers) has finished before running the command.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -756,6 +1025,10 @@ export const sandboxRun: ToolDefinition = {
       sessionId: {
         type: "string",
         description: "Optional session ID. If omitted, auto-resolves from conversation context or runs one-shot.",
+      },
+      waitReady: {
+        type: "boolean",
+        description: "Wait for background setup (services/dev servers) to finish before running the command; surfaces the real setup error instead of hanging. Default false.",
       },
       cmd: {
         type: "string",
@@ -771,6 +1044,8 @@ export const sandboxRun: ToolDefinition = {
         type: "number",
         description: "Command timeout in milliseconds (default: 60000). On timeout the call returns an error and the work is abandoned — raise this only for commands you are confident finish sooner; otherwise use sandbox-run-detached.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
     },
     required: ["cmd"],
   },
@@ -782,6 +1057,7 @@ export const sandboxRun: ToolDefinition = {
     if (!cmd?.trim()) return "Error: cmd or command is required.";
     const destructive = destructiveCommandGuard(cmd);
     if (destructive) return destructive;
+    const waitReady = params["waitReady"] === true;
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
@@ -795,6 +1071,13 @@ export const sandboxRun: ToolDefinition = {
       const roExplicit = readOnlyGuard(session, { command: cmd });
       if (roExplicit) return roExplicit;
 
+      if (waitReady) {
+        try {
+          await waitForSandboxReady(session);
+        } catch (err) {
+          return sandboxErr(err);
+        }
+      }
       try {
         const result = await session.commands.run(cmd, timeoutMs);
         return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
@@ -813,7 +1096,7 @@ export const sandboxRun: ToolDefinition = {
     }
 
     // Try auto-resolve from conversation context
-    const conversationId = context.meta?.["conversationId"];
+    const conversationId = sandboxConversationIdFromMeta(context.meta);
     const storeKey = storeKeyFromContext(context);
     if (conversationId && !replacedDeadSession) {
       const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
@@ -823,6 +1106,13 @@ export const sandboxRun: ToolDefinition = {
         }
         const roStore = readOnlyGuard(session, { command: cmd });
         if (roStore) return roStore;
+        if (waitReady) {
+          try {
+            await waitForSandboxReady(session);
+          } catch (err) {
+            return sandboxErr(err);
+          }
+        }
         try {
           const result = await session.commands.run(cmd, timeoutMs);
           return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
@@ -845,7 +1135,9 @@ export const sandboxRun: ToolDefinition = {
     // so the ephemeral VM uses the pinned template (with /services + browser),
     // never the legacy kata default.
     try {
-      const pinnedTemplate = await pinnedTemplateForContext(context);
+      const byRepo = await repoProfileFor(params, context);
+      if (byRepo && "error" in byRepo) return byRepo.error;
+      const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
       // Rotate here too — a one-shot exec still provisions a VM from the
       // template's snapshot, so an un-rotated base name concentrates clones
       // the same way sandbox-create did.
@@ -882,7 +1174,8 @@ export const sandboxRunDetached: ToolDefinition = {
     "session and returns immediately with a jobId; poll it with sandbox-poll-job. This is the correct tool " +
     "for dependency installs (pnpm/npm/yarn add|install), builds, tsc typechecks, lint, and test suites — " +
     "sandbox-run would time out on these and lose the work, while a detached job keeps running to " +
-    "completion. Prefer starting the job, doing other useful work, then polling.",
+    "completion. Prefer starting the job, doing other useful work, then polling. " +
+    "Set waitReady:true to block until background setup (services/dev servers) has finished before launching the command.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -896,6 +1189,10 @@ export const sandboxRunDetached: ToolDefinition = {
         type: "string",
         description: "Shell command to run in the background",
       },
+      waitReady: {
+        type: "boolean",
+        description: "Wait for background setup (services/dev servers) to finish before launching the command; surfaces the real setup error instead of hanging. Default false.",
+      },
     },
     required: ["sessionId", "cmd"],
   },
@@ -906,6 +1203,7 @@ export const sandboxRunDetached: ToolDefinition = {
     const cmd = (params["cmd"] ?? params["command"]) as string;
     const destructive = destructiveCommandGuard(cmd);
     if (destructive) return destructive;
+    const waitReady = params["waitReady"] === true;
 
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Create one with sandbox-create first.`;
@@ -915,6 +1213,13 @@ export const sandboxRunDetached: ToolDefinition = {
     const roDetached = readOnlyGuard(session, { command: cmd });
     if (roDetached) return roDetached;
 
+    if (waitReady) {
+      try {
+        await waitForSandboxReady(session);
+      } catch (err) {
+        return sandboxErr(err);
+      }
+    }
     try {
       const jobId = await session.commands.runDetached(cmd);
       return JSON.stringify({ jobId });
@@ -1229,11 +1534,20 @@ export const sandboxCopyIn: ToolDefinition = {
       // endpoint per chunk and appends server-side, so no single request is
       // large and no workspace-image change is needed. 256 KiB keeps a clear
       // margin under the observed cap.
-      const { bytesWritten } = await session.files.writeStream(
-        destPath,
-        createReadStream(sourceAbs),
-        { chunkBytes: 256 * 1024 },
-      );
+      // A read stream reports ENOENT through an async 'error' event, not by
+      // rejecting writeStream, so without this race the failure escapes the
+      // catch below and reaches the process handler — killing a pod that is
+      // serving every other session. Racing it makes a missing spill file an
+      // ordinary rejection, which is what the ENOENT branch below expects.
+      const source = createReadStream(sourceAbs);
+      const sourceFailure = new Promise<never>((_, reject) => {
+        source.once("error", reject);
+      });
+      void sourceFailure.catch(() => {});
+      const { bytesWritten } = await Promise.race([
+        session.files.writeStream(destPath, source, { chunkBytes: 256 * 1024 }),
+        sourceFailure,
+      ]).finally(() => source.destroy());
       return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
@@ -1248,12 +1562,83 @@ export const sandboxCopyIn: ToolDefinition = {
   },
 };
 
+/**
+ * Extension → content type for files leaving the sandbox.
+ *
+ * This LABELS, it never gates: `sandbox-deliver-files` sends whatever the agent
+ * produced, and Spaces' upload filter is extension-primary (see
+ * apps/backend/src/middleware/upload.ts — MIME is consulted only for the
+ * executable block-list). But the label is what GCS stores as the object's
+ * content type and what every consumer reads, so an unmapped extension used to
+ * mean a real .xlsx / .docx / .pptx arrived as `application/octet-stream`:
+ * downloads with the wrong type, no inline preview, and the wrong app on open.
+ *
+ * Deliberately wider than "binary" now — a delivered .py or .json is just as
+ * much a deliverable as a PDF. Kept in step with ALLOWED_UPLOAD_EXTENSIONS in
+ * apps/backend/src/middleware/upload.ts so nothing is labelled that Spaces
+ * would then refuse. `sandbox-read-file` still decides text-vs-binary by
+ * null-byte sniffing, NOT by membership here, so adding text types does not
+ * turn a readable file into a base64 blob.
+ */
 const BINARY_MIME: Record<string, string> = {
+  // images
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
-  mp4: "video/mp4",
-  pdf: "application/pdf", zip: "application/zip",
+  bmp: "image/bmp", tiff: "image/tiff", tif: "image/tiff",
+  ico: "image/x-icon", avif: "image/avif", heic: "image/heic",
+  // video / audio
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", avi: "video/x-msvideo",
+  mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", ogg: "audio/ogg",
+  // documents
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  rtf: "application/rtf",
+  // text / data
+  txt: "text/plain", md: "text/markdown", log: "text/plain",
+  csv: "text/csv", tsv: "text/tab-separated-values",
+  json: "application/json", jsonl: "application/x-ndjson",
+  xml: "application/xml", yaml: "application/yaml", yml: "application/yaml",
+  toml: "application/toml", ini: "text/plain", conf: "text/plain",
+  sql: "application/sql", har: "application/json",
+  html: "text/html", htm: "text/html",
+  // source / dev
+  ts: "text/x-typescript", tsx: "text/x-typescript",
+  js: "text/javascript", mjs: "text/javascript", cjs: "text/javascript",
+  jsx: "text/jsx",
+  py: "text/x-python", sh: "application/x-sh", bash: "application/x-sh",
+  java: "text/x-java-source", go: "text/x-go", rs: "text/x-rust", rb: "text/x-ruby",
+  c: "text/x-c", h: "text/x-c", cpp: "text/x-c++", hpp: "text/x-c++",
+  patch: "text/x-patch", diff: "text/x-patch",
+  ipynb: "application/x-ipynb+json",
+  // archives
+  zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+  tgz: "application/gzip", bz2: "application/x-bzip2", xz: "application/x-xz",
+  "7z": "application/x-7z-compressed", rar: "application/vnd.rar",
+  // fonts / misc with real traffic
+  ttf: "font/ttf", otf: "font/otf", stl: "model/stl",
 };
+
+/**
+ * Content type for a file leaving the sandbox, by extension.
+ *
+ * Shared by `sandbox-read-file`'s INSPECT marker and `sandbox-deliver-files`'
+ * ATTACHMENT marker so the two cannot disagree about the same file. Unknown
+ * extensions stay `application/octet-stream`: a wrong specific type is worse
+ * than an honest generic one, and nothing downstream gates on it.
+ */
+export function sandboxContentType(fileName: string): string {
+  const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
+  return BINARY_MIME[ext] ?? "application/octet-stream";
+}
 
 /**
  * Read a file from the sandbox.
@@ -1268,7 +1653,8 @@ export const sandboxReadFile: ToolDefinition = {
   name: "Sandbox Read File",
   description:
     "Read a file from a sandbox session. " +
-    "Text files are returned inline. Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
+    "Text files are returned inline with totalLines; for a large file pass offset (1-based first line) and limit (number of lines) to read just the part you need. " +
+    "Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
     "If you want to actually send files to the user, call `sandbox-deliver-files` (it accepts multiple paths in one call).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -1282,6 +1668,14 @@ export const sandboxReadFile: ToolDefinition = {
       path: {
         type: "string",
         description: "Absolute path inside the sandbox to read",
+      },
+      offset: {
+        type: "number",
+        description: "Optional 1-based line number to start reading from (text files only).",
+      },
+      limit: {
+        type: "number",
+        description: "Optional maximum number of lines to return (text files only).",
       },
     },
     required: ["sessionId", "path"],
@@ -1311,11 +1705,13 @@ export const sandboxReadFile: ToolDefinition = {
         // redactor exists — defence-in-depth against accidental / unsophisticated
         // leaks; ephemeral creds are the real fix against determined attackers.
         const content = redactSecrets(buf.toString("utf8"));
-        return JSON.stringify({ path, content, encoding: "utf8" });
+        if (hasRange(params["offset"], params["limit"])) {
+          return JSON.stringify({ path, ...sliceLines(content, params["offset"], params["limit"]), encoding: "utf8" });
+        }
+        return JSON.stringify({ path, content, encoding: "utf8", totalLines: content.split("\n").length });
       }
       const fileName = path.split("/").pop() ?? "file";
-      const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-      const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+      const mimeType = sandboxContentType(fileName);
       // INSPECT marker (not ATTACHMENT) — xyne-claw routes the bytes into the
       // agent's tool-result content for visual self-check but does NOT push
       // to user-facing attachments. This stops the "agent took 12 screenshots
@@ -1342,8 +1738,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
   slug: "sandbox-deliver-files",
   name: "Sandbox Deliver Files",
   description:
-    "Send one or more files from the sandbox to the user as message attachments. " +
-    "Pass the exact paths you want delivered. Use this after inspecting screenshots/PDFs via `sandbox-read-file` to send the relevant subset — the user does NOT see anything you only `sandbox-read-file`.",
+    "THE way to give the user a file built in the server sandbox — any type (PDF, xlsx, pptx, docx, csv, " +
+    "json, source, archives, images). Pass the exact absolute paths; order is preserved.\n\n" +
+    "Nothing you write, run or read in the sandbox reaches the user until this call: `sandbox-read-file` on a " +
+    "binary is self-inspection ONLY. Generate → read-file to verify → deliver-files the subset worth sending.\n\n" +
+    "Sibling tools for files that are NOT in the sandbox: `deliver-files` (local harness workspace) and " +
+    "`send-attachment` (bytes you already hold in this turn).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1388,8 +1788,7 @@ export const sandboxDeliverFiles: ToolDefinition = {
         const buf = await session.files.read(p);
         const fileName = p.split("/").pop() ?? "file";
         deliveredNames.push(fileName);
-        const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-        const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+        const mimeType = sandboxContentType(fileName);
         blocks.push(`[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`);
       } catch (err) {
         if (isStaleSessionError(err)) {
@@ -1586,7 +1985,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
     async execute(params, context) {
       if (!context) return "Error: No execution context available.";
-      const conversationId = context.meta?.["conversationId"];
+      const conversationId = sandboxConversationIdFromMeta(context.meta);
       if (!conversationId) return "Error: No conversationId in context.";
       const storeKey = storeKeyFromContext(context);
       if (!storeKey) return "Error: No userId/conversationId in context.";
@@ -1729,6 +2128,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
             await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            await runReuseSteps(cached, config.steps, config.workDir, log);
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -1897,6 +2297,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // connect to backend sandbox" → claw's STALE_PATTERNS fire →
         // claim eviction storm. Instead: 2-sec probes in a JS loop, with
         // sleep on the claw side, so the event loop stays unblocked.
+        if (!BACKGROUND_SETUP_ENABLED) {
         log.push("Waiting for prebake-done marker...");
         // 45-min budget covers the worst-case template cold-start
         // (hyperswitch's prebake gates prebake-done on services-up,
@@ -1983,6 +2384,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         } else {
           log.push("Warning: prebake didn't finish in 45min — proceeding anyway, expect possible npm errors.");
         }
+        }
       } else {
         // Should never happen with the agent-workspace image (entrypoint
         // prebakes the clone), but kept as a safety net for older / bare
@@ -2007,6 +2409,24 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
       await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
+
+      if (BACKGROUND_SETUP_ENABLED) {
+        await session.commands
+          .run(`echo syncing > "$HOME/.sandbox-ready"`, 5_000)
+          .catch(() => undefined);
+        const orchestratorScript = buildSetupOrchestratorScript(config);
+        await session.commands.runDetached(orchestratorScript);
+        log.push(
+          "Services are starting in the background; preview/test tools will wait for them (status: ~/.sandbox-ready).",
+        );
+        return JSON.stringify({
+          sessionId: session.id,
+          branch: branchName,
+          status: "syncing",
+          ports: config.ports || {},
+          log: log.map(redactSecrets),
+        });
+      }
 
       const jobIds: Record<string, string> = {};
 
@@ -2116,7 +2536,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Running: ${step.label}...`);
             const cwd = step.cwd || config.workDir;
             const jobId = await session.commands.runDetached(`cd ${cwd} && ${step.cmd}`);
-            await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const status = await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const tail = stepOutputTail(status.stdout);
+            if (tail) log.push(tail);
             break;
           }
         }
@@ -2310,8 +2732,8 @@ export const sandboxRepoSetup: ToolDefinition = {
   name: "Sandbox Repository Setup",
   description:
     "Set up a workspace for one of the platform's configured repositories (REPO_CONFIGS). Read-first repositories " +
-    "default to the shared read-only workspace; write:true claims a writable one. SDLC hub repositories are not set " +
-    "up here: create a sandbox and call sdlc-repository-access instead.",
+    "default to the shared read-only workspace; write:true claims a writable one. repoUrl (and profile when it " +
+    "has several, see sandbox-list-profiles) picks the repository's profile instead of repoName.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -2319,8 +2741,10 @@ export const sandboxRepoSetup: ToolDefinition = {
     properties: {
       repoName: {
         type: "string",
-        description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS.",
+        description: "Repository name (e.g. 'xyne-spaces', 'hyperswitch'). Must match a key in REPO_CONFIGS. Ignored when repoUrl matches a profile.",
       },
+      repoUrl: REPO_URL_INPUT,
+      profile: PROFILE_INPUT,
       write: {
         type: "boolean",
         description:
@@ -2335,23 +2759,26 @@ export const sandboxRepoSetup: ToolDefinition = {
         description: "Write-sandbox lifetime in ms (default 1800000 = 30 min; write sandboxes are intentionally short-lived).",
       },
     },
-    required: ["repoName"],
+    required: [],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
+    const byRepo = await repoProfileFor(params, context);
+    if (byRepo && "error" in byRepo) return byRepo.error;
 
     // Deterministic pin: if the agent is bound to a repo in its config
     // (agent.config.sandboxRepo → context.meta.sandboxRepo), force THAT repo and
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const repoName = pinnedRepo || (params["repoName"] as string);
+    const repoName = byRepo?.key ?? (pinnedRepo || (params["repoName"] as string));
     const wantWrite = params["write"] === true;
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+    const { isReadOnlyJob } = await import("./repo-configs.js");
+    const repoConfigs = await runRepoConfigs(context);
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
@@ -2366,6 +2793,17 @@ export const sandboxRepoSetup: ToolDefinition = {
     // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
+    const profile = pinnedRepo ? repoConfigs[pinnedRepo] : undefined;
+    if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
+      try {
+        return await makeRepoSetupTool(profile).execute(
+          sessionDurationMs ? { sessionDurationMs } : {},
+          context,
+        );
+      } catch (err) {
+        return sandboxErr(err);
+      }
+    }
     const forcedReadOnly =
       (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
@@ -2373,7 +2811,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       return resolveSbxGit(repoName, context);
     }
 
-    const config = REPO_CONFIGS[repoName];
+    const config = repoConfigs[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2387,7 +2825,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // 3. Provision a writable dev sandbox (golden clone). Reached when a
     //    read-first repo asked write:true, OR a non-read-first (legacy) repo.
     if (!config) {
-      const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
+      const availableRepos = Object.keys(repoConfigs).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
     // branchName is now optional in the schema (read-first calls don't pass it).
@@ -2500,9 +2938,15 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (!workspaceId || !actorUserId) {
       return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
     }
-    if (actorUserId !== context.meta?.["userId"]?.trim()) {
-      return "Error: SDLC run context does not belong to this run's user.";
-    }
+    // actorUserId (workspace-scoped Spaces id from the hub context) and
+    // meta.userId (canonical Claw id) live in different id namespaces, so no
+    // equality check is possible here. The authoritative binding — actorUserId
+    // must be one of the session-token user's own ids — is enforced by
+    // claw-auth's runtime-credentials bootstrap route, which this call hits.
+    // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
+    const runSessionId = context.sessionId;
+    const sessionToken = context.sessionToken;
+    if (!runSessionId || !sessionToken) return "Error: SDLC repository access needs a claw-auth run session.";
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Call sandbox-create first.`;
     if (!isSessionOwnedByContext(session, sessionId, context)) {
@@ -2512,11 +2956,16 @@ export const sdlcRepositoryAccess: ToolDefinition = {
       return "Error: A shared read-only sandbox cannot hold repository credentials. Call sandbox-create for your own sandbox.";
     }
     try {
-      const { mode, repository } = await installSdlcRepositoryAccess(session, {
-        repoId,
-        workspaceId,
-        actorUserId,
-      });
+      const { mode, repository } = await installSdlcRepositoryAccess(
+        session,
+        { repoId, workspaceId, actorUserId },
+        {
+          authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
+          s2sKey: context.s2sKey ?? context.config["XYNE_CLAW_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+          runSessionId,
+          sessionToken,
+        },
+      );
       return JSON.stringify({
         sessionId,
         repoId,

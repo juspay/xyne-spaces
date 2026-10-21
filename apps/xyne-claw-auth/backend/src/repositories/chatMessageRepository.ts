@@ -1,5 +1,7 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { AssistantPart } from "../lib/chat-run-record.js";
 import { prisma } from "../db.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 export const chatMessageRepository = {
   create: (data: {
@@ -19,11 +21,14 @@ export const chatMessageRepository = {
      *  unknown so callers can pass the domain array without a Prisma import; the
      *  JSON cast is localized here. */
     attachedContext?: unknown;
+    /** The assistant turn as ordered parts (see the `parts` column). */
+    parts?: AssistantPart[] | null;
   }) => {
-    const { attachedContext, pendingActions, ...rest } = data;
+    const { attachedContext, pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.create({
       data: {
         ...rest,
+        ...(parts ? { parts: parts as unknown as Prisma.InputJsonValue } : {}),
         ...(attachedContext !== undefined
           ? { attachedContext: attachedContext as Prisma.InputJsonValue }
           : {}),
@@ -39,9 +44,9 @@ export const chatMessageRepository = {
    *  run completes (branching needs the assistant id reserved up-front). */
   update: (
     id: string,
-    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null },
+    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null; parts?: AssistantPart[] | null },
   ) => {
-    const { pendingActions, ...rest } = data;
+    const { pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.update({
       where: { id },
       data: {
@@ -49,8 +54,56 @@ export const chatMessageRepository = {
         ...(pendingActions !== undefined
           ? { pendingActions: pendingActions as Prisma.InputJsonValue }
           : {}),
+        ...(parts !== undefined
+          ? { parts: parts === null ? Prisma.DbNull : (parts as unknown as Prisma.InputJsonValue) }
+          : {}),
       },
     });
+  },
+
+  /** Appends finished user/assistant pairs in one transaction, chained from
+   *  `parentId` so the tree stays linear. `createdAt` is set a millisecond
+   *  apart: rows of one transaction would otherwise share a timestamp and the
+   *  transcript (ordered by createdAt) could show a reply before its request. */
+  appendTurns: (data: {
+    conversationId: string;
+    agentSlug: string;
+    userId: string;
+    orgId: string;
+    parentId: string | null;
+    turns: Array<{ request: string; reply: string }>;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const { turns, parentId: firstParentId, ...owner } = data;
+      const start = Date.now();
+      const ids: string[] = [];
+      let parentId = firstParentId;
+      for (const [index, turn] of turns.flatMap((t) => [
+        { role: "user", content: t.request },
+        { role: "assistant", content: t.reply },
+      ]).entries()) {
+        const row = await tx.chatMessage.create({
+          data: { ...owner, ...turn, status: "completed", parentId, createdAt: new Date(start + index) },
+          select: { id: true },
+        });
+        ids.push(row.id);
+        parentId = row.id;
+      }
+      return ids;
+    }),
+
+  /** The pending action exactly as the run stored it, found by signature. */
+  findPendingAction: async (conversationId: string, signature: string): Promise<Record<string, unknown> | null> => {
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, pendingActions: { array_contains: [{ signature }] } },
+      select: { pendingActions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row || !Array.isArray(row.pendingActions)) return null;
+    const match = (row.pendingActions as Array<Record<string, unknown>>).find(
+      (action) => action && typeof action === "object" && action["signature"] === signature,
+    );
+    return match ?? null;
   },
 
   resolvePendingAction: async (
@@ -71,12 +124,48 @@ export const chatMessageRepository = {
     return true;
   },
 
+  /** Append a FlowUI artifact card, deduped by screenId. */
+  appendUiFlow: async (id: string, flow: { screenId: string }): Promise<void> => {
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row) return;
+      const existing = Array.isArray(row.uiFlows)
+        ? (row.uiFlows as Array<Record<string, unknown>>)
+        : [];
+      if (existing.some((entry) => entry?.["screenId"] === flow.screenId)) return;
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: [...existing, flow] as unknown as Prisma.InputJsonValue },
+      });
+    });
+  },
+
+  /** Swap a stored card for a new version of itself (pending → answered /
+   *  declined). Returns false when the message or screenId is gone. */
+  replaceUiFlow: async (id: string, screenId: string, flow: unknown): Promise<boolean> => {
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row || !Array.isArray(row.uiFlows)) return false;
+      const existing = row.uiFlows as Array<Record<string, unknown>>;
+      if (!existing.some((entry) => entry?.["screenId"] === screenId)) return false;
+      const next = existing.map((entry) => (entry?.["screenId"] === screenId ? flow : entry));
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: next as unknown as Prisma.InputJsonValue },
+      });
+      return true;
+    });
+  },
+
   /** Persist mid-run PARTIAL content, but ONLY while the row is still "running".
    *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
    *  can never clobber the final content the completion callback wrote (which
    *  flips status off "running"). Returns count of rows updated (0 = ignored). */
-  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null }) =>
-    prisma.chatMessage.updateMany({ where: { id, status: "running" }, data }),
+  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null; parts?: AssistantPart[] }) =>
+    prisma.chatMessage.updateMany({
+      where: { id, status: "running" },
+      data: { ...data, ...(data.parts ? { parts: data.parts as unknown as Prisma.InputJsonValue } : {}) },
+    }),
 
   /** Hard-delete a single message by id. Used to drop a duplicate run's
    *  pre-created assistant placeholder when that run is skipped because another
@@ -112,14 +201,16 @@ export const chatMessageRepository = {
 
   /** Newest user message in this conversation+agent whose attachedContext holds
    *  a `local-folder` item, or null. Powers the sticky local folder: once a turn
-   *  attaches a folder, later turns in the same thread keep running in it. */
+   *  attaches a folder, later turns in the same thread keep running in it.
+   *  `agentSlug` null = any agent: a direct chat keeps its folder when the user
+   *  switches agents mid-conversation. */
   latestLocalFolderContext: async (
     conversationId: string,
-    agentSlug: string,
+    agentSlug: string | null,
   ): Promise<unknown | null> => {
-    if (!conversationId || !agentSlug) return null;
+    if (!conversationId || agentSlug === "") return null;
     const rows = await prisma.chatMessage.findMany({
-      where: { conversationId, agentSlug, role: "user" },
+      where: { conversationId, ...(agentSlug ? { agentSlug } : {}), role: "user" },
       orderBy: { createdAt: "desc" },
       take: 40,
       select: { attachedContext: true },
@@ -156,16 +247,96 @@ export const chatMessageRepository = {
       include: { attachments: true },
     }),
 
-  findByUserAndAgent: (userId: string, agentSlug: string) =>
-    prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+  /** Every (conversation, agent) pair one user has rows in, with first/last
+   *  activity and row counts — the whole all-agents history in one aggregate
+   *  query instead of loading every message. Rows may be keyed by either of
+   *  the caller's verified ids (see getRequesterAliases). */
+  conversationAgentGroupsForUser: async (
+    userIds: string | string[],
+  ): Promise<Array<{ conversationId: string; agentSlug: string; firstAt: Date; lastAt: Date; count: number }>> => {
+    const rows = await prisma.chatMessage.groupBy({
+      by: ["conversationId", "agentSlug"],
+      where: userIdFilter(userIds),
+      _min: { createdAt: true },
+      _max: { createdAt: true },
+      _count: { _all: true },
+    });
+    return rows
+      .filter((row) => row._min.createdAt && row._max.createdAt)
+      .map((row) => ({
+        conversationId: row.conversationId,
+        agentSlug: row.agentSlug,
+        firstAt: row._min.createdAt!,
+        lastAt: row._max.createdAt!,
+        count: row._count._all,
+      }));
+  },
+
+  /** The earliest user message per (conversation, agent) for one user, oldest
+   *  first, clipped to a title's worth of text. One aggregate finds each
+   *  pair's first timestamp, then only those rows are read — not every user
+   *  message in every conversation. */
+  firstUserMessagesPerAgent: async (
+    conversationIds: string[],
+    userIds: string | string[],
+  ): Promise<Array<{ conversationId: string; agentSlug: string; content: string }>> => {
+    if (conversationIds.length === 0) return [];
+    const where = { ...userIdFilter(userIds), role: "user", conversationId: { in: conversationIds } };
+    const firsts = await prisma.chatMessage.groupBy({
+      by: ["conversationId", "agentSlug"],
+      where,
+      _min: { createdAt: true },
+    });
+    const pairs = firsts.flatMap((row) =>
+      row._min.createdAt
+        ? [{ conversationId: row.conversationId, agentSlug: row.agentSlug, createdAt: row._min.createdAt }]
+        : [],
+    );
+    if (pairs.length === 0) return [];
+    const rows = await prisma.chatMessage.findMany({
+      where: { ...where, OR: pairs },
+      select: { conversationId: true, agentSlug: true, content: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+    // Two messages can share a pair's first timestamp; keep one per pair.
+    const seen = new Set<string>();
+    return rows.flatMap(({ conversationId, agentSlug, content }) => {
+      const key = `${conversationId}:${agentSlug}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [{ conversationId, agentSlug, content: content.slice(0, 200) }];
+    });
+  },
+
+  /** The ordered parts a still-running placeholder accumulated (partial writes). */
+  partialParts: async (id: string): Promise<unknown> =>
+    (await prisma.chatMessage.findUnique({ where: { id }, select: { parts: true } }))?.parts ?? null,
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
-   *  even if they guess a conversationId. Returns the delete count. */
-  deleteConversation: async (userId: string, agentSlug: string, conversationId: string) => {
+   *  even if they guess a conversationId. Returns the delete count. Alias
+   *  array = both verified representations of the SAME caller. */
+  deleteConversation: async (userIds: string | string[], agentSlug: string, conversationId: string) => {
     const result = await prisma.chatMessage.deleteMany({
-      where: { userId, agentSlug, conversationId },
+      where: { ...userIdFilter(userIds), agentSlug, conversationId },
     });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({
+        where: { conversationId, agentSlug, ...userIdFilter(userIds) },
+      });
+    }
+    return result.count;
+  },
+
+  /** Delete ONE user's rows in a direct chat across every agent that answered
+   *  in it. A chat the user switched agents in is one conversation: deleting
+   *  only the requesting agent's rows would leave the other agents' turns
+   *  hanging off parents that no longer exist. Same user scoping as above. */
+  deleteConversationAllAgents: async (userIds: string | string[], conversationId: string) => {
+    const result = await prisma.chatMessage.deleteMany({ where: { ...userIdFilter(userIds), conversationId } });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({ where: { conversationId, ...userIdFilter(userIds) } });
+    }
     return result.count;
   },
 };

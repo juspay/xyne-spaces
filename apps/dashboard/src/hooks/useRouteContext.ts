@@ -9,6 +9,20 @@ export type BaseRoute =
 
 const CHANNEL_ROUTE_SEGMENTS = ['dm', 'bookmarks', 'drafts-sent', 'activity'];
 
+/** The channel route base for a pathname (e.g. "/ws/chat/dm/123" -> "/chat/dm"). */
+export const getBaseRoute = (pathname: string): BaseRoute => {
+  const pathSegments = pathname.split('/');
+  const chatIndex = pathSegments.indexOf('chat');
+  const routeSegment =
+    chatIndex !== -1 && chatIndex + 1 < pathSegments.length ? pathSegments[chatIndex + 1] : 'dir';
+
+  return (
+    routeSegment && CHANNEL_ROUTE_SEGMENTS.includes(routeSegment)
+      ? `/chat/${routeSegment}`
+      : '/chat/dir'
+  ) as BaseRoute;
+};
+
 /**
  * Hook to detect the current route context and build a context-aware navigation URL
  */
@@ -17,18 +31,7 @@ export const useRouteContext = (): {
   buildChannelRoute: (channelId: string, params?: Record<string, string>) => string;
 } => {
   const location = useLocation();
-
-  // Extract route type from pathname (e.g., "/chat/dm/123" -> "dm")
-  const pathSegments = location.pathname.split('/');
-  const chatIndex = pathSegments.indexOf('chat');
-  const routeSegment =
-    chatIndex !== -1 && chatIndex + 1 < pathSegments.length ? pathSegments[chatIndex + 1] : 'dir';
-
-  const baseRoute = (
-    routeSegment && CHANNEL_ROUTE_SEGMENTS.includes(routeSegment)
-      ? `/chat/${routeSegment}`
-      : '/chat/dir'
-  ) as BaseRoute;
+  const baseRoute = getBaseRoute(location.pathname);
 
   const buildChannelRoute = (channelId: string, params?: Record<string, string>): string => {
     const route = `${baseRoute}/${channelId}`;

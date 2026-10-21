@@ -16,6 +16,9 @@ router.post('/disableEmailSend', requirePermission('tickets:write'), validateCha
 router.post('/enableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.enableEmailSend);
 router.get('/listBySender', requirePermission('tickets:read'), ticketController.listBySender);
 router.post('/list/search', requirePermission('tickets:read'), ticketController.searchTickets);
+// Must stay above '/:xyneId' so "boards" isn't captured as a xyneId.
+router.get('/boards', requirePermission('tickets:read'), ticketController.listBoards);
+router.get('/boards/:boardId/stages', requirePermission('tickets:read'), ticketController.listBoardStages);
 router.get('/:ticketId/conversation', requirePermission('tickets:read'), ticketController.getConversation);
 router.get('/:xyneId', requirePermission('tickets:read'), ticketController.getInfo);
 

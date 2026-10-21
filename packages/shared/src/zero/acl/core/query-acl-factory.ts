@@ -25,6 +25,7 @@ import {
   RecapsACL,
   ChannelParticipantsACL,
   ChannelBoardMappingsACL,
+  ChannelPublishedTabsACL,
   ChannelsACL,
   ChannelSectionsACL,
   ChannelStatsACL,
@@ -187,6 +188,8 @@ export class QueryACLFactory {
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_board_mappings':
         return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_published_tabs':
+        return new ChannelPublishedTabsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':
@@ -397,6 +400,10 @@ export class QueryACLFactory {
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'guest_access':
         return new GuestAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'connect_group':
+        // Slack Connect reach table — no per-row ACL in Phase 1 (default pass-through).
+        // It has no workspaceId column, so it's also in WORKSPACE_SCOPE_OPT_OUT.
+        return new BaseQueryACL(ctx, 'connect_group') as BaseQueryACL<TTable>;
     }
   }
 }

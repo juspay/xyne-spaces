@@ -1,6 +1,6 @@
 import { setup, assign, createActor, fromPromise } from 'xstate';
 import { CallType } from '@xyne/shared';
-import { roomActor } from './roomMachine';
+import { roomActor, type JoinMediaOverrides } from './roomMachine';
 import type { Zero } from '@rocicorp/zero';
 import { detectPlatform } from '../hooks/usePlatform';
 import { logger, Event } from '../utils/logger';
@@ -22,6 +22,7 @@ export interface CallContext {
   acceptingCallId: string | null;
   // Store zero instance to use after state transitions
   zero: Zero | null;
+  joinMediaOverrides: JoinMediaOverrides | null;
   // Track call ID that was joined via native VoIP notification (before Zero syncs)
   // Used to prevent IncomingCallModal from showing for calls already joined from native
   nativeActiveCallId: string | null;
@@ -30,9 +31,9 @@ export interface CallContext {
 // Simplified event types - only accept/reject for incoming calls
 export type CallEvent =
   | { type: 'INCOMING_CALL'; callData: CallContext['incomingCallQueue'][0] }
-  | { type: 'ACCEPT'; zero: Zero | null }
+  | { type: 'ACCEPT'; zero: Zero | null; joinMediaOverrides?: JoinMediaOverrides }
   | { type: 'REJECT' }
-  | { type: 'SWITCH_CALL'; zero: Zero | null }
+  | { type: 'SWITCH_CALL'; zero: Zero | null; joinMediaOverrides?: JoinMediaOverrides }
   | { type: 'SET_NATIVE_ACTIVE_CALL'; callId: string }
   | { type: 'CLEAR_NATIVE_ACTIVE_CALL' };
 
@@ -63,9 +64,13 @@ export const callMachine = setup({
       ({
         input,
       }: {
-        input: { callId: string; zero: Zero | null };
+        input: {
+          callId: string;
+          zero: Zero | null;
+          joinMediaOverrides: JoinMediaOverrides | null;
+        };
       }): Promise<{ callId: string }> => {
-        const { callId, zero } = input;
+        const { callId, zero, joinMediaOverrides } = input;
 
         // Debug: Check roomActor state before sending
         const currentState = roomActor.getSnapshot().value;
@@ -86,6 +91,7 @@ export const callMachine = setup({
           callId,
           zero,
           viewMode: isMobile ? 'full' : 'mini',
+          ...(joinMediaOverrides && { joinMediaOverrides }),
         });
 
         return Promise.resolve({ callId });
@@ -114,6 +120,10 @@ export const callMachine = setup({
     storeZero: assign({
       zero: ({ event }) =>
         event.type === 'ACCEPT' || event.type === 'SWITCH_CALL' ? event.zero : null,
+      joinMediaOverrides: ({ event }) =>
+        event.type === 'ACCEPT' || event.type === 'SWITCH_CALL'
+          ? (event.joinMediaOverrides ?? null)
+          : null,
     }),
 
     // Store the callId being accepted before removing from queue
@@ -125,6 +135,7 @@ export const callMachine = setup({
     clearAcceptingCallId: assign({
       acceptingCallId: () => null,
       zero: () => null,
+      joinMediaOverrides: () => null,
     }),
 
     // Add incoming call to queue
@@ -173,6 +184,7 @@ export const callMachine = setup({
     incomingCallQueue: [],
     acceptingCallId: null,
     zero: null,
+    joinMediaOverrides: null,
     nativeActiveCallId: null,
   }),
   id: 'callMachine',
@@ -255,6 +267,7 @@ export const callMachine = setup({
         input: ({ context }) => ({
           callId: context.acceptingCallId || '',
           zero: context.zero,
+          joinMediaOverrides: context.joinMediaOverrides,
         }),
         onDone: {
           target: 'idle',

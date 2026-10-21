@@ -3,8 +3,7 @@
  *
  * These functions take already-fetched rows (no Prisma, no IO) and roll them up
  * into the overall + per-user shapes the dashboard renders. Keeping them pure
- * makes them unit-testable without a DB (see scripts/twin-reply-metrics.test.ts)
- * — the memory-starved dev box OOMs on ts-jest + Prisma, so we verify with tsx.
+ * makes them unit-testable without a DB (see twin-reply-metrics.test.ts).
  *
  * Three independent subsystems feed the page:
  *   1. TwinResponseFeedback  → the user's accept/edit/decline/ignore of a twin
@@ -108,18 +107,12 @@ export interface PerUserRow {
   userId: string;
   name: string;
   email: string;
-  replies: {
-    accepted: number;
-    acceptedEdited: number;
-    declined: number;
-    ignored: number;
-    pending: number;
-    totalApproved: number;
-    approvalRate: number | null;
-    medianResponseSec: number | null;
-  };
-  gate: { respond: number; ignore: number; error: number };
-  behavior: { responded: number; ignored: number; shouldHaveResponded: number };
+  replies: Pick<
+    ReplyAgg,
+    "accepted" | "acceptedEdited" | "declined" | "ignored" | "pending" | "totalApproved" | "approvalRate"
+  > & { medianResponseSec: number | null };
+  gate: Pick<GateAgg, "respond" | "ignore" | "error">;
+  behavior: Pick<BehaviorAgg, "responded" | "ignored" | "shouldHaveResponded">;
   /** Total actioned events — used to sort the table by activity. */
   activity: number;
 }
@@ -148,84 +141,63 @@ function ratio(numerator: number, denominator: number): number | null {
   return denominator > 0 ? numerator / denominator : null;
 }
 
-function traceString(trace: unknown, key: string): string | null {
-  if (trace && typeof trace === "object" && key in (trace as Record<string, unknown>)) {
-    const v = (trace as Record<string, unknown>)[key];
-    return typeof v === "string" ? v : null;
-  }
-  return null;
+/** One key off a JSON trace, without trusting its shape. */
+function traceField(trace: unknown, key: string): unknown {
+  return trace && typeof trace === "object" ? (trace as Record<string, unknown>)[key] : undefined;
 }
 
-function traceNumber(trace: unknown, key: string): number | null {
-  if (trace && typeof trace === "object" && key in (trace as Record<string, unknown>)) {
-    const v = (trace as Record<string, unknown>)[key];
-    return typeof v === "number" && !Number.isNaN(v) ? v : null;
+function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const row of rows) {
+    const k = key(row);
+    const bucket = map.get(k);
+    if (bucket) bucket.push(row);
+    else map.set(k, [row]);
   }
-  return null;
+  return map;
+}
+
+function countBy<T>(rows: T[], key: (row: T) => string): Map<string, number> {
+  return new Map([...groupBy(rows, key)].map(([k, group]) => [k, group.length]));
 }
 
 // ── Reply feedback aggregation ───────────────────────────────────────────────
 
 const REPLY_ACTIONS = ["react", "reply", "react_and_reply"] as const;
 
+// Response time is only meaningful for an explicit decision (accept/edit/
+// decline). "ignored" rows have decidedAt set to the 12h reconcile time, so
+// they'd wildly inflate the latency — exclude them.
+const EXPLICIT_DECISION_STATUSES = new Set(["accepted", "accepted_edited", "declined"]);
+
 export function computeReplyAgg(rows: ReplyFeedbackRow[]): ReplyAgg {
-  let pending = 0;
-  let accepted = 0;
-  let acceptedEdited = 0;
-  let declined = 0;
-  let ignored = 0;
-  const actionCounts: Record<string, number> = {};
-  const responseSecs: number[] = [];
-
-  for (const r of rows) {
-    switch (r.status) {
-      case "pending":
-        pending += 1;
-        break;
-      case "accepted":
-        accepted += 1;
-        break;
-      case "accepted_edited":
-        acceptedEdited += 1;
-        break;
-      case "declined":
-        declined += 1;
-        break;
-      case "ignored":
-        ignored += 1;
-        break;
-      default:
-        break;
-    }
-    actionCounts[r.deliveryAction] = (actionCounts[r.deliveryAction] ?? 0) + 1;
-
-    // Response time is only meaningful for an explicit decision (accept/edit/
-    // decline). "ignored" rows have decidedAt set to the 12h reconcile time, so
-    // they'd wildly inflate the latency — exclude them.
-    const explicitlyDecided =
-      r.status === "accepted" || r.status === "accepted_edited" || r.status === "declined";
-    if (explicitlyDecided && r.decidedAt) {
-      const sec = (r.decidedAt.getTime() - r.proposedAt.getTime()) / 1000;
-      if (sec >= 0) responseSecs.push(sec);
-    }
-  }
-
+  const byStatus = countBy(rows, (r) => r.status);
+  const byDelivery = countBy(rows, (r) => r.deliveryAction);
+  const count = (status: string): number => byStatus.get(status) ?? 0;
+  const accepted = count("accepted");
+  const acceptedEdited = count("accepted_edited");
+  const declined = count("declined");
   const totalApproved = accepted + acceptedEdited;
   const decided = totalApproved + declined;
 
+  const responseSecs = rows
+    .filter((r) => EXPLICIT_DECISION_STATUSES.has(r.status) && r.decidedAt)
+    .map((r) => (r.decidedAt!.getTime() - r.proposedAt.getTime()) / 1000)
+    .filter((sec) => sec >= 0);
+
   const byAction = REPLY_ACTIONS.map((action) => ({
     action,
-    count: actionCounts[action] ?? 0,
+    count: byDelivery.get(action) ?? 0,
   })).filter((a) => a.count > 0);
 
   return {
     total: rows.length,
-    pending,
+    pending: count("pending"),
     accepted,
     acceptedEdited,
     totalApproved,
     declined,
-    ignored,
+    ignored: count("ignored"),
     approvalRate: ratio(totalApproved, decided),
     editRate: ratio(acceptedEdited, totalApproved),
     declineRate: ratio(declined, decided),
@@ -239,65 +211,98 @@ export function computeReplyAgg(rows: ReplyFeedbackRow[]): ReplyAgg {
   };
 }
 
+// ── Weekly trend (R11: "is the twin getting better?") ────────────────────────
+
+export interface WeeklyReplyPoint {
+  /** Monday 00:00 UTC of the week, ISO date (YYYY-MM-DD). */
+  weekStart: string;
+  proposed: number;
+  accepted: number;
+  acceptedEdited: number;
+  declined: number;
+  ignored: number;
+  /** approved / (approved + declined). null when no explicit decisions. */
+  approvalRate: number | null;
+  /** accepted as-is / (approved + declined): drafts good enough to send untouched. */
+  cleanApprovalRate: number | null;
+}
+
+function weekStartUtc(d: Date): string {
+  const day = (d.getUTCDay() + 6) % 7; // Monday = 0
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+  return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * Per-week approval trend, oldest first, bucketed by when the draft was
+ * proposed. The one number that says whether accept/edit/decline feedback is
+ * actually improving the twin over time.
+ */
+export function computeWeeklyTrend(rows: ReplyFeedbackRow[]): WeeklyReplyPoint[] {
+  return [...groupBy(rows, (r) => weekStartUtc(r.proposedAt))]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, weekRows]) => {
+      const a = computeReplyAgg(weekRows);
+      return {
+        weekStart,
+        proposed: a.total,
+        accepted: a.accepted,
+        acceptedEdited: a.acceptedEdited,
+        declined: a.declined,
+        ignored: a.ignored,
+        approvalRate: a.approvalRate,
+        cleanApprovalRate: ratio(a.accepted, a.totalApproved + a.declined),
+      };
+    });
+}
+
 // ── Gate aggregation ─────────────────────────────────────────────────────────
 
 export function computeGateAgg(rows: GateEventRow[]): GateAgg {
-  let respond = 0;
-  let ignore = 0;
-  let error = 0;
-  const durations: number[] = [];
-  const confidences: number[] = [];
-  const sourceMap: Record<string, { respond: number; ignore: number }> = {};
+  const byStatus = countBy(rows, (r) => r.status);
+  const respond = byStatus.get("ok") ?? 0;
+  const ignore = byStatus.get("empty") ?? 0;
+  const error = byStatus.get("error") ?? 0;
+  const durations = rows.map((r) => r.durationMs).filter((ms) => typeof ms === "number" && ms > 0);
 
-  for (const r of rows) {
-    if (r.status === "ok") respond += 1;
-    else if (r.status === "empty") ignore += 1;
-    else if (r.status === "error") error += 1;
-
-    if (typeof r.durationMs === "number" && r.durationMs > 0) durations.push(r.durationMs);
-
-    // confidence / decisionSource live in the GateTrace, only on real decisions.
-    if (r.status === "ok" || r.status === "empty") {
-      const conf = traceNumber(r.trace, "confidence");
-      if (conf !== null) confidences.push(conf);
-      const src = traceString(r.trace, "decisionSource") ?? "unknown";
-      if (!sourceMap[src]) sourceMap[src] = { respond: 0, ignore: 0 };
-      if (r.status === "ok") sourceMap[src].respond += 1;
-      else sourceMap[src].ignore += 1;
-    }
+  // confidence / decisionSource live in the GateTrace, only on real decisions.
+  const decisions = rows.filter((r) => r.status === "ok" || r.status === "empty");
+  const confidences = decisions
+    .map((r) => traceField(r.trace, "confidence"))
+    .filter((c): c is number => typeof c === "number" && !Number.isNaN(c));
+  // Plain object (not Map) + ||= (not ??=) on purpose: mirrors the old falsy check and Object.values keeps the pre-refactor order for ties.
+  const bySource: Record<string, DecisionSourceAgg> = {};
+  for (const r of decisions) {
+    const decisionSource = traceField(r.trace, "decisionSource");
+    const source = typeof decisionSource === "string" ? decisionSource : "unknown";
+    const agg = (bySource[source] ||= { source, respond: 0, ignore: 0 });
+    agg[r.status === "ok" ? "respond" : "ignore"] += 1;
   }
-
-  const decisions = respond + ignore;
-  const byDecisionSource = Object.entries(sourceMap)
-    .map(([source, c]) => ({ source, respond: c.respond, ignore: c.ignore }))
-    .sort((a, b) => b.respond + b.ignore - (a.respond + a.ignore));
 
   return {
     total: rows.length,
     respond,
     ignore,
     error,
-    respondRate: ratio(respond, decisions),
+    respondRate: ratio(respond, respond + ignore),
     errorRate: ratio(error, rows.length),
     avgConfidence: mean(confidences),
     avgDurationMs: mean(durations),
     medianDurationMs: percentile(durations, 0.5),
-    byDecisionSource,
+    byDecisionSource: Object.values(bySource).sort((a, b) => b.respond + b.ignore - (a.respond + a.ignore)),
   };
 }
 
 // ── Behaviour aggregation ────────────────────────────────────────────────────
 
 export function computeBehaviorAgg(rows: BehaviorRow[]): BehaviorAgg {
-  let responded = 0;
-  let ignored = 0;
-  let shouldHaveResponded = 0;
-  for (const r of rows) {
-    if (r.outcome === "responded") responded += 1;
-    else if (r.outcome === "ignored") ignored += 1;
-    if (r.shouldHaveResponded) shouldHaveResponded += 1;
-  }
-  return { total: rows.length, responded, ignored, shouldHaveResponded };
+  const byOutcome = countBy(rows, (r) => r.outcome);
+  return {
+    total: rows.length,
+    responded: byOutcome.get("responded") ?? 0,
+    ignored: byOutcome.get("ignored") ?? 0,
+    shouldHaveResponded: rows.filter((r) => r.shouldHaveResponded).length,
+  };
 }
 
 // ── Per-user rollup ──────────────────────────────────────────────────────────
@@ -346,20 +351,13 @@ export function computePerUser(
       behavior.total;
     if (activity === 0) continue;
 
+    const { accepted, acceptedEdited, declined, ignored, pending, totalApproved, approvalRate } = reply;
+    const medianResponseSec = reply.responseTime.medianSec;
     out.push({
       userId,
       name: who?.name ?? userId,
       email: who?.email ?? "",
-      replies: {
-        accepted: reply.accepted,
-        acceptedEdited: reply.acceptedEdited,
-        declined: reply.declined,
-        ignored: reply.ignored,
-        pending: reply.pending,
-        totalApproved: reply.totalApproved,
-        approvalRate: reply.approvalRate,
-        medianResponseSec: reply.responseTime.medianSec,
-      },
+      replies: { accepted, acceptedEdited, declined, ignored, pending, totalApproved, approvalRate, medianResponseSec },
       gate: { respond: gate.respond, ignore: gate.ignore, error: gate.error },
       behavior: {
         responded: behavior.responded,
@@ -370,17 +368,5 @@ export function computePerUser(
     });
   }
 
-  out.sort((a, b) => b.activity - a.activity);
-  return out;
-}
-
-function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
-  const map = new Map<string, T[]>();
-  for (const row of rows) {
-    const k = key(row);
-    const bucket = map.get(k);
-    if (bucket) bucket.push(row);
-    else map.set(k, [row]);
-  }
-  return map;
+  return out.sort((a, b) => b.activity - a.activity);
 }

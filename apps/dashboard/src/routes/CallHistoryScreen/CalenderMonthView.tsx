@@ -13,50 +13,116 @@ import {
   formatTime,
   getCurrentUserMeetingStatus,
   getCallPillVariant,
+  hasCallEnded,
   isCallJoinableNow,
   HATCH_BACKGROUND,
 } from './CalenderViewUtils';
 import { usePlatform } from '../../hooks/usePlatform';
-import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
+import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
+import { Popover } from '../../components/ui/Popover/Popover';
+import { OtherUserCallDetails } from './OtherUserCallDetails';
+
+/** Start – end for a month row, in the calendar's usual h:mm format; start alone without an end. */
+function formatMonthTimeRange(
+  startsAt: string | number | null | undefined,
+  endsAt: string | number | null | undefined,
+): string {
+  const start = formatTime(startsAt);
+  const end = formatTime(endsAt);
+  return start && end ? `${start} - ${end}` : start;
+}
+
+/** Popover key for another user's slot; the `other-` prefix keeps it apart from own call ids. */
+const otherSlotPopoverId = (slot: OtherUserBusySlot): string =>
+  `other-${slot.userId}-${slot.id ?? slot.startsAt}`;
 
 function MonthOtherUserEventRow({
   color,
-  title,
-  startsAt,
+  slot,
+  userName,
   variant = 'cell',
+  open,
+  onOpenChange,
 }: {
   color: string;
-  title: string | undefined;
-  startsAt: number | undefined;
+  slot: OtherUserBusySlot;
+  userName: string;
   variant?: 'cell' | 'overflow';
-}) {
-  if (variant === 'overflow') {
-    return (
-      <div className='flex items-center gap-2 w-full px-4 py-2'>
-        <div className={`w-0.5 h-4 rounded-full shrink-0 bg-[${color}]`} />
-        <span className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'>
+  // Controlled by the view, so its open-popover guard stops the closing click creating a call.
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}): ReactElement {
+  const { title, startsAt, endsAt } = slot;
+  // A public calendar's slot carries a title and opens its details; a busy slot doesn't.
+  const showsDetails = title !== undefined;
+
+  // The colour is per person and only known at runtime, so it has to be an inline
+  // style — Tailwind can't generate a class for it.
+  const row =
+    variant === 'overflow' ? (
+      <div
+        className={cn(
+          'flex items-center gap-2 w-full px-4 py-2 text-left',
+          showsDetails && 'cursor-pointer hover:bg-muted/50 transition-colors',
+        )}
+      >
+        <div className='w-0.5 h-8 rounded-full shrink-0' style={{ backgroundColor: color }} />
+        <div className='flex min-w-0 flex-1 flex-col'>
+          <span className='truncate text-sm font-medium text-foreground'>{title ?? 'Busy'}</span>
+          <span className='truncate text-xs text-muted-foreground'>{userName}</span>
+        </div>
+        {startsAt && (
+          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
+            {formatMonthTimeRange(startsAt, endsAt)}
+          </span>
+        )}
+      </div>
+    ) : (
+      <div
+        title={`${userName} · ${title ?? 'Busy'}`}
+        className={cn(
+          'flex shrink-0 items-center gap-1 text-left w-full px-1 py-0.5 rounded',
+          showsDetails && 'cursor-pointer',
+        )}
+        style={{ backgroundColor: `${color}1a` }}
+      >
+        <div className='w-0.5 h-3.5 rounded-full shrink-0' style={{ backgroundColor: color }} />
+        <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-xs font-medium'>
           {title ?? 'Busy'}
         </span>
         {startsAt && (
-          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
-            {formatTime(startsAt)}
+          <span className='shrink-0 tabular-nums text-muted-foreground text-xs opacity-70 max-sm:hidden'>
+            {formatMonthTimeRange(startsAt, endsAt)}
           </span>
         )}
       </div>
     );
-  }
+
+  if (!showsDetails) return row;
+
   return (
-    <div className='flex items-center gap-1 text-left w-full px-1 py-0.5 rounded'>
-      <div className={`w-0.5 h-3.5 rounded-full shrink-0 bg-[${color}]`} />
-      <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-[12px] font-medium'>
-        {title ?? 'Busy'}
-      </span>
-      {startsAt && (
-        <span className='shrink-0 tabular-nums ml-1 text-muted-foreground text-[10px] opacity-70'>
-          {formatTime(startsAt)}
-        </span>
-      )}
-    </div>
+    <Popover
+      trigger={
+        <button
+          type='button'
+          // Keep the click off the day cell, which would start a new call on that day.
+          onClick={e => e.stopPropagation()}
+          data-track-category='CALENDAR'
+          data-track-name='calendar-month-other-user-call'
+          className='w-full focus:outline-none'
+        >
+          {row}
+        </button>
+      }
+      side='right'
+      align='start'
+      sideOffset={8}
+      collisionPadding={8}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      <OtherUserCallDetails details={slot} />
+    </Popover>
   );
 }
 
@@ -195,7 +261,12 @@ const CalendarMonthView = ({
             {week.map((day, di) => {
               const isToday = day ? isSameDay(day, today) : false;
               const dayEvents = day ? (eventsByDay.get(day.getDate()) ?? []) : [];
-              const visible = dayEvents.slice(0, MAX_EVENTS_PER_CELL);
+              // My own calls take the cell's few rows first, so other people's slots
+              // can't push them into "+N more".
+              const visible = [
+                ...dayEvents.filter(event => event.kind === 'own'),
+                ...dayEvents.filter(event => event.kind === 'other'),
+              ].slice(0, MAX_EVENTS_PER_CELL);
               const overflow = dayEvents.length - visible.length;
               const dayKey = day ? `${year}-${month}-${day.getDate()}` : null;
 
@@ -239,8 +310,12 @@ const CalendarMonthView = ({
                               <MonthOtherUserEventRow
                                 key={`other-${event.startsAt}-${ei}`}
                                 color={event.color}
-                                title={event.slot.title}
-                                startsAt={event.slot.startsAt}
+                                slot={event.slot}
+                                userName={event.userName}
+                                open={openCallId === otherSlotPopoverId(event.slot)}
+                                onOpenChange={open =>
+                                  setOpenCallId(open ? otherSlotPopoverId(event.slot) : null)
+                                }
                               />
                             );
                           }
@@ -251,7 +326,7 @@ const CalendarMonthView = ({
                           const isMaybe =
                             getCurrentUserMeetingStatus(call, currentUserId) ===
                             MeetingStatus.MAYBE;
-                          const joinable = isCallJoinableNow(call, variant, today);
+                          const joinable = isCallJoinableNow(call, today);
 
                           return (
                             <PopoverPrimitive.Root
@@ -273,6 +348,9 @@ const CalendarMonthView = ({
                                         : variant === 'highlighted'
                                           ? 'bg-primary text-primary-foreground'
                                           : 'bg-primary/10 text-foreground',
+                                    variant === 'highlighted' &&
+                                      hasCallEnded(call, today) &&
+                                      'opacity-60 hover:opacity-90',
                                   )}
                                 >
                                   {isMaybe && variant !== 'past' && (
@@ -329,7 +407,7 @@ const CalendarMonthView = ({
                                           isDeclined && 'line-through',
                                         )}
                                       >
-                                        {formatTime(call.startsAt)}
+                                        {formatMonthTimeRange(call.startsAt, call.endsAt)}
                                       </span>
                                     )}
                                   </div>
@@ -427,6 +505,7 @@ const CalendarMonthView = ({
                                     </span>
                                   </div>
                                   <button
+                                    aria-label='Close'
                                     onClick={() => {
                                       setOpenOverflowDay(null);
                                       setOpenOverflowCallId(null);
@@ -440,16 +519,24 @@ const CalendarMonthView = ({
                                 </div>
 
                                 {/* Event list */}
-                                <div className='flex flex-col pb-3'>
+                                <div className='flex max-h-80 flex-col overflow-y-auto pb-3'>
                                   {dayEvents.map((event, ei) => {
                                     if (event.kind === 'other') {
                                       return (
                                         <MonthOtherUserEventRow
                                           key={`overflow-other-${event.startsAt}-${ei}`}
                                           color={event.color}
-                                          title={event.slot.title}
-                                          startsAt={event.slot.startsAt}
+                                          slot={event.slot}
+                                          userName={event.userName}
                                           variant='overflow'
+                                          open={
+                                            openOverflowCallId === otherSlotPopoverId(event.slot)
+                                          }
+                                          onOpenChange={open =>
+                                            setOpenOverflowCallId(
+                                              open ? otherSlotPopoverId(event.slot) : null,
+                                            )
+                                          }
                                         />
                                       );
                                     }
@@ -504,7 +591,7 @@ const CalendarMonthView = ({
                                                     : 'none',
                                                 }}
                                               >
-                                                {formatTime(call.startsAt)}
+                                                {formatMonthTimeRange(call.startsAt, call.endsAt)}
                                               </span>
                                             )}
                                           </button>

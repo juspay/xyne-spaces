@@ -12,6 +12,9 @@ import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
+import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
+import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
+import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 
 /**
  * GitHub webhook event types for pull requests
@@ -119,9 +122,22 @@ export class GitHubWebhookService {
   }
 
   /**
-   * Main entry point for handling webhook events
+   * Main entry point for handling webhook events. Unauthenticated webhook (no req.user): the
+   * scope is opened explicitly before this runs — see runGitHubWebhook (bypassAcl/webhookIngestServices).
    */
   async handleWebhookEvent(
+    eventType: string,
+    payload: unknown,
+    workspaceId?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    return runGitHubWebhook(this, eventType, payload, workspaceId);
+  }
+
+  /**
+   * Runs one webhook event. Called only through runGitHubWebhook (bypassAcl/webhookIngestServices),
+   * which opens the tenant scope this needs.
+   */
+  async processWebhookEvent(
     eventType: string,
     payload: unknown,
     workspaceId?: string,
@@ -194,6 +210,39 @@ export class GitHubWebhookService {
           mergeCommitSha: context.pr.merge_commit_sha,
           source: 'GitHub-Webhook',
         }).catch(err => logger.error('[GitHub-Webhook] release sync failed:', err));
+
+        // Radar asks about this PR ("review/merge #42") are settled by the merge
+        // whether or not its title names a ticket, so this also fires before the
+        // gate. Fire-and-forget: it may call the LLM, and GitHub waits on us.
+        resolveRadarOnPrMerge({
+          workspaceId: context.workspace,
+          provider: 'GitHub',
+          prUrl: context.prUrl,
+          prNumber: context.prId,
+          prTitle: pr.title,
+          repoFullName: payload.repository.full_name,
+          baseBranch: context.destinationBranch,
+          mergedBy: payload.sender?.login ?? context.prAuthor ?? 'unknown',
+          mergedAt: pr.merged_at ? new Date(pr.merged_at) : new Date(),
+        }).catch(err => logger.error('[GitHub-Webhook] radar PR-merge pass failed:', err));
+      }
+
+      // Keep the PR card an agent posted for this PR in step with it. Not gated on
+      // PR-title validation either: the card belongs to the agent's thread, not
+      // to the ticket sync, so a PR whose title fails validation still updates.
+      const cardStatus = this.prCardStatusFor(action, pr);
+      if (cardStatus) {
+        forwardPrCardStatus(
+          {
+            provider: 'github',
+            status: cardStatus,
+            prUrl: context.prUrl,
+            number: context.prId,
+            repo: `${context.projectName}/${context.repoName}`,
+            title: pr.title,
+          },
+          '[GitHub-Webhook]',
+        );
       }
 
       // Validate PR title (same validation as Bitbucket)
@@ -264,6 +313,23 @@ export class GitHubWebhookService {
     } catch (error) {
       logger.error('[GitHub-Webhook] Error handling issue_comment event:', error);
       return { success: true, message: 'Comment event error acknowledged' };
+    }
+  }
+
+  /**
+   * PR card status for an action, or null when the card has nothing to show for
+   * it. `synchronize` (new commits) changes neither status nor title.
+   */
+  private prCardStatusFor(action: string, pr: GitHubPullRequest): PrCardStatus | null {
+    switch (action) {
+      case GitHubPREventType.PR_OPENED:
+      case GitHubPREventType.PR_REOPENED:
+      case GitHubPREventType.PR_EDITED:
+        return 'created';
+      case GitHubPREventType.PR_CLOSED:
+        return pr.merged ? 'merged' : 'declined';
+      default:
+        return null;
     }
   }
 

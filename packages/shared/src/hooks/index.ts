@@ -41,23 +41,29 @@ export {
   useUsers,
   useUsersById,
   useUser,
+  useUserLookup,
   useSelf,
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
   invalidateUsersMapCache,
 } from "./useUsers.js";
+export type { UserLookup } from "./useUsers.js";
 
 export {
   searchChannels,
   searchChannelsWithScores,
   useAllChannels,
+  getAllChannels,
   useAllVisibleChannels,
   useVisibleProjects,
   useChannel,
+  useChannelLookup,
   useVisibleChannel,
   useChannelByName,
   useChannelSearch,
+  useChannelMentionSearch,
+  searchMentionableChannels,
   useBrowsableChannels,
   useMigratedChannels,
   useEmailChannels,
@@ -69,7 +75,7 @@ export {
   getChannelConversationsSnapshot,
   useGetLatestConversation,
 } from "./useChannels.js";
-export type { VisibleChannel, VisibleProject } from "./useChannels.js";
+export type { VisibleChannel, VisibleProject, ChannelLookup } from "./useChannels.js";
 
 export {
   usePermissions,
@@ -95,7 +101,7 @@ export {
 export { useQuery, useRawQuery } from "./useQuery.js";
 
 export { useCachedQuery } from "./useCachedQuery.js";
-export type { UseCachedQueryOptions } from "./useCachedQuery.js";
+export type { UseCachedQueryOptions, UseCachedQueryMeta, CachedQueryResult } from "./useCachedQuery.js";
 
 export { useCurrentUserRoleIds } from "./useRoles.js";
 export type { Role } from "./useRoles.js";

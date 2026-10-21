@@ -1,4 +1,4 @@
-import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
+import { ReplyAll, Split, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -36,7 +36,7 @@ import {
   SUPPORT_SIDEBAR_MAX_WIDTH,
   SUPPORT_SIDEBAR_MIN_WIDTH,
 } from './supportSidebarWidth';
-import { useHasResourceAccess } from '../../hooks/usePermissions';
+import { useCanReadTicket } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
@@ -76,7 +76,6 @@ import {
   LinkChainHorizontal as LinkIcon,
   Settings02 as Settings,
   PlusDefault as Plus,
-  Spinner as Loader2,
   AlertCircle,
   UserThree as Users2,
   LockClose as Lock,
@@ -88,6 +87,8 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
+  File02Plus,
+  File02Text,
 } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -97,10 +98,13 @@ import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
+import { ChannelsDeskSourceChannel, ChannelsDeskSourceThread } from './ChannelsDeskSourceThread';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
+import { FetchSourcePicker } from '../../components/Chat/EmailRefetch/FetchSourcePicker';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
@@ -126,7 +130,17 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import { useDeskListColumns } from './useDeskListColumns';
+import { useDeskListColumnOrder } from './useDeskListColumnOrder';
+import { DeskListColumnsMenu } from './DeskListColumnsMenu';
+import {
+  DESK_LIST_TOGGLEABLE_COLUMNS,
+  dynamicFieldListColumn,
+  orderTicketListColumns,
+  TICKET_LIST_COLUMNS,
+} from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
+import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
@@ -153,8 +167,9 @@ import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { TicketListView } from '../../components/Tickets/TicketListView';
+import { TicketListView, type PageCursor } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import {
@@ -187,13 +202,19 @@ import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
-import CallThread from '../../components/xyne-desk/CallThread/CallThread';
+import CallThread, {
+  CallEmailRow,
+  isCallEmailBody,
+} from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import {
   connectAppStoreDesk,
-  startGooglePlayOAuth,
+  connectGooglePlayDesk,
+  startInstagramOAuth,
+  startFacebookOAuth,
 } from '../../services/clients/socialMediaDeskApi';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -219,6 +240,10 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
+import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
+import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
+import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
+import { useChannelPublishedApps } from '../../hooks/useChannelPublishedApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
@@ -229,12 +254,16 @@ import {
 } from '../../components/xyne-desk/DeskInsights/DeskInsightsPanel';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
+  fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
-import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
+import AddChannelForm, {
+  isOAuthSocialProvider,
+  type SocialProvider,
+} from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL } from '../../config';
@@ -255,6 +284,7 @@ import {
 } from './DeskFilterTrigger';
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { afterReturn, markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
@@ -269,9 +299,11 @@ import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzone
 import { CallButton } from '../../components/xyne-desk/CallButton/CallButton';
 import {
   CloudAgentDock,
-  setCloudAgentOpenTicket,
+  showCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { getOzonetelToolbar, getPhoneFieldNames } from '../../services/clients/telephonyApi';
+import { AddThreadToCanvasDialog } from '../../components/xyne-desk/AddThreadToCanvasDialog';
+import { DeskCanvasesPanel } from '../../components/xyne-desk/DeskCanvasesPanel';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -291,7 +323,7 @@ const ChannelInfoModal = ({
   if (!channel) return null;
   return (
     <Dialog
-      className='max-w-[620px] rounded-2xl overflow-hidden'
+      className='max-w-[760px] rounded-2xl overflow-hidden'
       open={isOpen}
       onOpenChange={open => {
         if (!open) onClose();
@@ -341,13 +373,16 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
   ChannelType.APP,
   ChannelType.SOCIAL_MEDIA,
+  // Channels desk threads start in their own channels, not from the desk.
+  ChannelType.CHANNELS,
 ]);
 
 const COMPOSE_INSTANCES_KEY_PREFIX = 'xyne:composeInstances:';
@@ -632,16 +667,21 @@ const SupportScreen = (): ReactElement => {
   const {
     workspaceId,
     channelId: channelIdParam,
-    ticketId,
+    ticketId: routeTicketId,
+    canvasId: routeCanvasId,
   } = useParams<{
     workspaceId?: string;
     channelId?: string;
     ticketId?: string;
+    canvasId?: string;
   }>();
+  // `canvases` in the :ticketId slot is the canvases view, not a ticket.
+  const showCanvases = routeTicketId === 'canvases';
+  const ticketId = showCanvases ? undefined : routeTicketId;
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
   // Gate the Tickets shortcut the same way the main rail gates '/projects'.
-  const canAccessProjects = useHasResourceAccess('PROJECTS');
+  const canAccessProjects = useCanReadTicket();
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
   const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
@@ -784,14 +824,88 @@ const SupportScreen = (): ReactElement => {
     [filters.dynamicFields, dynamicFieldTypesById],
   );
 
-  const { selectedColumnKeys, toggleColumn } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys,
+    toggleColumn,
+    setColumns: setTableColumns,
+  } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys: listColumnKeys,
+    toggleColumn: toggleListColumn,
+    setColumns: setListColumns,
+  } = useDeskListColumns(selectedChannelId);
+  const validListColumnKeys = useMemo(
+    () =>
+      new Set([
+        ...DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key),
+        ...deskDynamicFields.map(field => dynamicColumnKey(field.id)),
+      ]),
+    [deskDynamicFields],
+  );
   const tableVisibleColumns = useMemo(
     () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
     [selectedColumnKeys],
   );
+
+  // Snapshot of the active mode's columns. Intersection logic on apply handles
+  // cross-mode restoration by filtering to keys valid for the target mode.
+  const currentColumnSnapshot = useMemo((): ReadonlySet<string> => {
+    return viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+  }, [viewMode, listColumnKeys, selectedColumnKeys]);
+
+  const applyViewColumns = useCallback(
+    (columns: Set<string> | null): void => {
+      if (!columns) return;
+      const validTableKeys = new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+      const tableKeys = new Set(
+        [...columns].filter(k => validTableKeys.has(k) || k.startsWith('df:')),
+      );
+      if (tableKeys.size > 0) setTableColumns(tableKeys);
+      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key));
+      const listKeys = new Set(
+        [...columns].filter(k => validListKeys.has(k) || k.startsWith('df:')),
+      );
+      if (listKeys.size > 0) setListColumns(listKeys);
+    },
+    [setTableColumns, setListColumns],
+  );
+
+  // Persists list-view pagination across ticket-detail navigation (TicketListView unmounts
+  // when ticketId is set, so its local state is lost). Keyed to channel+filter+folder so
+  // a filter change while on the detail view doesn't restore a stale page.
+  const listPaginationCacheRef = useRef<{
+    key: string;
+    pageIndex: number;
+    pageCursors: Array<PageCursor | null>;
+    fetchLimit: number;
+  } | null>(null);
+
   const tableDynamicFieldColumns = useMemo(
     () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
     [deskDynamicFields, selectedColumnKeys],
+  );
+  const listDynamicFieldColumns = useMemo(
+    () => deskDynamicFields.filter(field => listColumnKeys.has(dynamicColumnKey(field.id))),
+    [deskDynamicFields, listColumnKeys],
+  );
+  const { columnOrder: listColumnOrder, moveColumn: moveListColumn } =
+    useDeskListColumnOrder(selectedChannelId);
+  const deskDynamicFieldByKey = useMemo(
+    () => new Map(deskDynamicFields.map(field => [dynamicColumnKey(field.id), field])),
+    [deskDynamicFields],
+  );
+  const listMenuColumns = useMemo(
+    () =>
+      orderTicketListColumns(
+        [
+          ...TICKET_LIST_COLUMNS,
+          ...Array.from(deskDynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        listColumnOrder,
+      ),
+    [deskDynamicFieldByKey, listColumnOrder],
   );
 
   const [tagFilterConversationIds, setTagFilterConversationIds] = useState<string[] | null>(null);
@@ -848,6 +962,38 @@ const SupportScreen = (): ReactElement => {
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
+  );
+
+  // Stable key that identifies the current list-view data context. When this changes
+  // while the user is on a ticket detail page, the stored page is stale and must not
+  // be restored.
+  const listFilterKey = useMemo(
+    () =>
+      JSON.stringify({
+        c: selectedChannelId,
+        f: ticketFilter,
+        m: selectedFolder?.key ?? null,
+      }),
+    [selectedChannelId, ticketFilter, selectedFolder],
+  );
+
+  const cachedListPagination =
+    listPaginationCacheRef.current?.key === listFilterKey ? listPaginationCacheRef.current : null;
+
+  const handleListPaginationChange = useCallback(
+    (
+      pageIndex: number,
+      pageCursors: ReadonlyArray<PageCursor | null>,
+      fetchLimit: number,
+    ): void => {
+      listPaginationCacheRef.current = {
+        key: listFilterKey,
+        pageIndex,
+        pageCursors: [...pageCursors],
+        fetchLimit,
+      };
+    },
+    [listFilterKey],
   );
 
   // Mode-B label counts drop the label scoping from the shared filter surface.
@@ -1002,7 +1148,7 @@ const SupportScreen = (): ReactElement => {
     updateView: updateDeskView,
     deleteView: deleteDeskView,
     applySavedView: applyDeskSavedView,
-  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters, applyViewColumns);
 
   // Self-heal: clear a stale activeViewId that no longer exists in the list.
   // Guard on savedViewsLoaded so we don't clear before the query returns data.
@@ -1020,11 +1166,11 @@ const SupportScreen = (): ReactElement => {
     name: string,
     visibility: SavedConfigVisibility,
   ): Promise<string | undefined> => {
-    return saveDeskView(name, filters, visibility);
+    return saveDeskView(name, filters, visibility, currentColumnSnapshot);
   };
 
   const handleUpdateDeskView = async (viewId: string): Promise<void> => {
-    await updateDeskView(viewId, filters);
+    await updateDeskView(viewId, filters, currentColumnSnapshot);
   };
 
   const isDeskViewDirty = useMemo(() => {
@@ -1050,8 +1196,28 @@ const SupportScreen = (): ReactElement => {
       }
       return v;
     };
-    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
-  }, [activeTicketViewId, deskSavedViews, filters]);
+    if (JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters))) return true;
+    // Also dirty when column selections differ from what was saved
+    // Only check column dirty state when the view actually saved column data; legacy views have no opinion.
+    const savedColumnKeys = columnKeysFromValues(activeView.values);
+    if (!savedColumnKeys) return false;
+    const modeColumnKeys = viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+    const validKeys =
+      viewMode === 'list'
+        ? validListColumnKeys
+        : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+    const savedForMode = new Set([...savedColumnKeys].filter(k => validKeys.has(k)));
+    const currentForMode = new Set([...modeColumnKeys].filter(k => validKeys.has(k)));
+    return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
+  }, [
+    activeTicketViewId,
+    deskSavedViews,
+    filters,
+    viewMode,
+    listColumnKeys,
+    selectedColumnKeys,
+    validListColumnKeys,
+  ]);
 
   const {
     rowRef: filterRowRef,
@@ -1064,7 +1230,7 @@ const SupportScreen = (): ReactElement => {
     collapsedFilterIds,
     hasCollapsedFilters,
     isFilterVisibleOnBar,
-  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' || viewMode === 'list' });
 
   // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
   // still announces itself instead of silently disappearing.
@@ -1304,6 +1470,7 @@ const SupportScreen = (): ReactElement => {
                   Math.abs(filters.lastEmailAtEnd - v.endDate.getTime()) < 1000;
                 return (
                   <button
+                    aria-current={isActive ? 'true' : undefined}
                     key={preset.label}
                     type='button'
                     data-track-category='Support'
@@ -1358,6 +1525,7 @@ const SupportScreen = (): ReactElement => {
                   Math.abs(filters.createdDateEnd - v.endDate.getTime()) < 1000;
                 return (
                   <button
+                    aria-current={isActive ? 'true' : undefined}
                     key={preset.label}
                     type='button'
                     data-track-category='Support'
@@ -1442,12 +1610,16 @@ const SupportScreen = (): ReactElement => {
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [isConnectingReviewDesk, setIsConnectingReviewDesk] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
       searchParams.get('deskIntegrations') === 'open' ||
       searchParams.get('workspaceMailboxConnected') === 'true',
   );
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [fetchTarget, setFetchTarget] = useState<
+    { sourceId?: string | undefined; sourceName?: string | undefined } | undefined
+  >(undefined);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -1747,6 +1919,88 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaProvider = searchParams.get('socialMediaProvider');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success' && socialMediaProvider === 'instagram') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaOAuth === 'success' && socialMediaProvider === 'facebook') {
+      toast.success('Facebook Page connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'facebook') {
+      // payload formats: "facebook_page_mismatch:Page name", "facebook_page_disconnected:<sentence>"
+      const separator = socialMediaError.indexOf(':');
+      const errorCode = separator === -1 ? socialMediaError : socialMediaError.slice(0, separator);
+      const expectedPage = separator === -1 ? '' : socialMediaError.slice(separator + 1);
+      const facebookErrorMessages: Record<string, string> = {
+        facebook_page_mismatch: `This connection belongs to ${expectedPage || 'a different Page'}. Select that Page in the Facebook dialog and try reconnecting.`,
+        facebook_auth_denied: 'Facebook authorization was denied. Please try again.',
+        facebook_no_pages:
+          'No Facebook Pages were shared. Select at least one Page in the Facebook dialog.',
+        facebook_page_disconnected: `${expectedPage || 'This Page is disconnected on another desk'}. Open that desk's settings and reconnect it there.`,
+        facebook_page_already_connected:
+          'The selected Facebook Pages are already connected to a desk.',
+        facebook_connection_failed: 'Failed to connect Facebook. Please try again.',
+        facebook_subscription_failed:
+          'Facebook did not allow this app to receive events for the selected Pages, so they were not connected. Check the app permissions and try again.',
+      };
+      toast.error(
+        facebookErrorMessages[errorCode] ?? 'Facebook connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'instagram') {
+      // mismatch error format: "instagram_account_mismatch:@handle"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected:
+          'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(
+        socialMediaErrorMessages[errorCode ?? ''] ??
+          'Instagram connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1784,6 +2038,26 @@ const SupportScreen = (): ReactElement => {
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const [socialSourceTypes, setSocialSourceTypes] = useState<Record<string, string | null>>({});
+  const socialChannelIds = useMemo(
+    () => sortedEmailChannels.filter(c => c.type === ChannelType.SOCIAL_MEDIA).map(c => c.id),
+    [sortedEmailChannels],
+  );
+  useEffect(() => {
+    if (socialChannelIds.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      socialChannelIds.map(id =>
+        fetchConnectedEmail(id).then(info => [id, info.sourceType] as const),
+      ),
+    ).then(entries => {
+      if (cancelled) return;
+      setSocialSourceTypes(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [socialChannelIds]);
   const userChannelStatuses = useUserChannelStatuses();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
@@ -1941,6 +2215,10 @@ const SupportScreen = (): ReactElement => {
     );
   }, [selectedChannelId, zero]);
 
+  // Full-page search covering the desk counts as leaving it (markWhenLeft), so what arrives while
+  // the user searches stays unread; coming back to it counts as opening it again (marked once the
+  // collapse is over).
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
     const markViewed = (): void => {
@@ -1954,14 +2232,61 @@ const SupportScreen = (): ReactElement => {
       );
     };
     markViewed();
-    return markViewed;
-  }, [selectedChannelId, isSelectedChannelJoined]);
+    const stopLeaving = markWhenLeft(pageCoverage, markViewed);
+    const stopReturning = afterReturn(pageCoverage, markViewed);
+    return (): void => {
+      stopReturning();
+      stopLeaving();
+    };
+  }, [selectedChannelId, isSelectedChannelJoined, pageCoverage]);
   const selectedChannelFull = useMemo(
     () => sortedEmailChannels.find(c => c.id === selectedChannelId),
     [sortedEmailChannels, selectedChannelId],
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const selectedChannelIntegration = useChannelIntegrationInfo(
+    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null,
+  );
+  const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
+  // Facebook is webhook-driven too, but its history can be pulled for a chosen time range.
+  const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
+  const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
+
+  // Artifact apps added to this desk (channel_published_tabs). Every member sees
+  // and opens them; the desk owner and channel admins add/remove them — the same
+  // rule the table's ACL enforces on the write (canPublishAppsTo).
+  const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);
+  const deskApps = useDeskApps(deskPublishedAppIds);
+  const canManageDeskApps =
+    canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
+  const requestedDeskAppId = searchParams.get('deskApp');
+  // A stale or foreign id in the URL (removed from the desk, or not visible to
+  // this viewer) opens nothing rather than an error panel.
+  const openDeskAppId =
+    requestedDeskAppId && deskApps.apps.some(app => app.id === requestedDeskAppId)
+      ? requestedDeskAppId
+      : null;
+  // Same URL discipline as showInsights: swap only our param, keep the filters.
+  const showDeskApp = (appId: string | null, replace = true): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('deskApp');
+    if (appId) params.set('deskApp', appId);
+    const qs = params.toString();
+    const path = `${supportBase}/${selectedChannelId}`;
+    void navigate(qs ? `${path}?${qs}` : path, { replace });
+  };
+
+  const canvasesPath = (sub: string): string => {
+    const qs = searchParams.toString();
+    const path = `${supportBase}/${selectedChannelId}${sub && `/${sub}`}`;
+    return qs ? `${path}?${qs}` : path;
+  };
+  const goCanvases = (sub: string): void => {
+    void navigate(canvasesPath(sub));
+  };
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -1970,14 +2295,27 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
     refetchChannelId,
     isSocialMediaDesk,
+    isCallDesk,
+    isFacebookDesk ? 'Facebook activity' : 'reviews',
   );
   const canRefetch = !!refetchChannelId;
+  const {
+    data: fetchSources,
+    isLoading: isFetchSourcesLoading,
+    isError: isFetchSourcesError,
+  } = useChannelFetchSources(refetchChannelId, canRefetch);
+  const anyFetchSource = (fetchSources?.length ?? 0) > 0;
+  const hasMultipleFetchSources = (fetchSources?.length ?? 0) > 1;
+  const dlHasApps = (fetchSources ?? []).some(source => source.sourceType === 'app-desk');
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
       handleChannelBoardIdResolved(channelPreference.boardId);
     }
   }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
+  useEffect(() => {
+    setFetchTarget(undefined);
+  }, [refetchChannelId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -2336,7 +2674,7 @@ const SupportScreen = (): ReactElement => {
   const createChannelMutation = useMutation({
     mutationFn: async (
       data: CreateChannelFormData & {
-        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | undefined;
+        channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'CHANNELS' | undefined;
         emailDeskOpts?: EmailDeskOpts;
       },
     ) => {
@@ -2364,15 +2702,16 @@ const SupportScreen = (): ReactElement => {
   const handleCreateEmailChannel = (
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
-      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | undefined;
+      channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       assigneeUserGroupId?: string;
-      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA';
+      deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS';
       callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
-      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
+      socialProvider?: SocialProvider;
       applications?: Array<{ displayName: string; packageName: string }>;
+      serviceAccountKey?: string;
       appStore?: {
         keyId: string;
         privateKey: string;
@@ -2389,6 +2728,7 @@ const SupportScreen = (): ReactElement => {
       installedAppId,
       socialProvider,
       applications,
+      serviceAccountKey,
       appStore,
       channelType: _submittedChannelType,
       ...rest
@@ -2396,7 +2736,7 @@ const SupportScreen = (): ReactElement => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
-      if (!rest.boardId) {
+      if (!isOAuthSocialProvider(socialProvider) && !rest.boardId) {
         toast.error('A board is required');
         return;
       }
@@ -2407,13 +2747,14 @@ const SupportScreen = (): ReactElement => {
           toast.error('At least one bundle ID is required');
           return;
         }
+        setIsConnectingReviewDesk(true);
         void connectAppStoreDesk({
           channelName: rest.name,
           keyId: appStore.keyId,
           privateKey: appStore.privateKey,
           applications: appStore.applications,
           projectId: rest.projectId,
-          boardId: rest.boardId,
+          boardId: rest.boardId!,
           ...(rest.assigneeUserGroupId && {
             assigneeUserGroupId: rest.assigneeUserGroupId,
           }),
@@ -2431,37 +2772,74 @@ const SupportScreen = (): ReactElement => {
               (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
                 (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
             );
-          });
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
 
-      if (!applications?.length) {
-        toast.error('At least one Google Play application is required');
+      if (socialProvider === 'GOOGLE_PLAY') {
+        if (!applications?.length) {
+          toast.error('At least one Google Play application is required');
+          return;
+        }
+        if (!serviceAccountKey) {
+          toast.error('A service account key is required');
+          return;
+        }
+        setIsConnectingReviewDesk(true);
+        void connectGooglePlayDesk({
+          serviceAccountKey,
+          channelName: rest.name,
+          applications,
+          projectId: rest.projectId,
+          boardId: rest.boardId!,
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        })
+          .then(channelId => {
+            setShowCreateChannelModal(false);
+            clearChannelConnectedEmailCache(channelId);
+            toast.success('Google Play desk connected');
+            void navigate(`${supportBase}/${channelId}`);
+          })
+          .catch(error => {
+            toast.error(getApiErrorMessage(error, 'Failed to connect Google Play desk'));
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
-      void startGooglePlayOAuth({
-        channelName: rest.name,
-        applications,
-        projectId: rest.projectId,
-        boardId: rest.boardId,
-        ...(rest.assigneeUserGroupId && {
-          assigneeUserGroupId: rest.assigneeUserGroupId,
-        }),
-        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
-      })
-        .then(authorizationUrl => {
-          setShowCreateChannelModal(false);
-          if (isElectron && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(authorizationUrl);
-          } else {
-            window.location.href = authorizationUrl;
-          }
+
+      if (socialProvider === 'INSTAGRAM' || socialProvider === 'FACEBOOK') {
+        const isFacebook = socialProvider === 'FACEBOOK';
+        void (isFacebook ? startFacebookOAuth : startInstagramOAuth)({
+          channelName: rest.name,
+          projectId: rest.projectId,
+          ...(rest.boardId ? { boardId: rest.boardId } : {}),
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+          platform: isElectron ? 'electron' : 'web',
         })
-        .catch(error => {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
-        });
-      return;
+          .then(authUrl => {
+            setShowCreateChannelModal(false);
+            if (isElectron && window.electronAPI?.openExternal) {
+              window.electronAPI.openExternal(authUrl);
+            } else {
+              window.location.href = authUrl;
+            }
+          })
+          .catch(error => {
+            toast.error(
+              error instanceof Error
+                ? error.message
+                : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
+            );
+          });
+        return;
+      }
     }
 
     if (deskType === 'SLACK') {
@@ -2486,6 +2864,19 @@ const SupportScreen = (): ReactElement => {
         ...rest,
         channelType: 'APP',
         emailDeskOpts: { deskType: DeskType.APP, installedAppId },
+      });
+      return;
+    }
+
+    if (deskType === 'CHANNELS') {
+      if (!installedAppId) {
+        toast.error('Please select an app');
+        return;
+      }
+      createChannelMutation.mutate({
+        ...rest,
+        channelType: 'CHANNELS',
+        emailDeskOpts: { deskType: DeskType.CHANNELS, installedAppId },
       });
       return;
     }
@@ -2606,34 +2997,6 @@ const SupportScreen = (): ReactElement => {
 
     createChannelMutation.mutate(rest);
   };
-
-  useEffect(() => {
-    const connected = searchParams.get('socialMediaOAuth') === 'success';
-    const error = searchParams.get('socialMediaError');
-    const failedPackage = searchParams.get('socialMediaPackage');
-    if (!connected && !error) return;
-    if (connected) {
-      toast.success('Google Play reviews connected successfully');
-      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
-    }
-    if (error === 'google_play_package_validation_failed' && failedPackage) {
-      toast.error('Google Play app connection failed', {
-        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
-      });
-    } else if (error) {
-      toast.error(error.replaceAll('_', ' '));
-    }
-    setSearchParams(
-      previous => {
-        const next = new URLSearchParams(previous);
-        next.delete('socialMediaOAuth');
-        next.delete('socialMediaError');
-        next.delete('socialMediaPackage');
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, selectedChannelId, setSearchParams]);
 
   // `trackSource` names the surface the open came from (kanban_card, inbox_row,
   // table_row, calendar); SUPPORT_TICKET_VIEWED reads it off the router state.
@@ -2772,26 +3135,42 @@ const SupportScreen = (): ReactElement => {
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
           : c.type === ChannelType.SOCIAL_MEDIA
-            ? {
-                label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-              }
+            ? socialSourceTypes[c.id] === 'instagram'
+              ? {
+                  label: 'Instagram',
+                  className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
+                }
+              : socialSourceTypes[c.id] === 'facebook'
+                ? {
+                    label: 'Facebook',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  }
+                : {
+                    label: 'Social',
+                    className:
+                      'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                  }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
                   className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
                 }
-              : {
-                  label: 'Mailbox',
-                  className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
-                };
+              : c.type === ChannelType.CHANNELS
+                ? {
+                    label: 'Channels',
+                    className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
+                  }
+                : {
+                    label: 'Mailbox',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  };
     const isJoined = joinedChannelIds.has(c.id);
-    // Labels apply to email and app desks; mailbox folders come in two forms — the
-    // full email set and a single "All items" entry for app desk channel
-    // type. Folders and labels share this one expandable subtree.
+    // Labels apply to every desk type; mailbox folders come in two forms — the full email
+    // set for email desks and a single "All items" entry for Slack, App, Call and social
+    // desks. Folders and labels share this one expandable subtree.
     const hasMailboxFolders = c.type === ChannelType.EMAIL;
-    const hasBasicFolders = !hasMailboxFolders && c.type === ChannelType.APP;
-    const canExpandDesk = isJoined && (hasMailboxFolders || hasBasicFolders);
+    const hasBasicFolders = !hasMailboxFolders;
+    const canExpandDesk = isJoined;
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2805,6 +3184,7 @@ const SupportScreen = (): ReactElement => {
     return (
       <div key={c.id}>
         <div
+          aria-current={isActive ? 'true' : undefined}
           role='button'
           tabIndex={0}
           className={cn(
@@ -2997,7 +3377,7 @@ const SupportScreen = (): ReactElement => {
                     </div>
                   </div>
                   {/* Tickets shortcut — jumps to the Projects/Tickets board.
-                    Replaces the old rail icon; gated on PROJECTS access. */}
+                    Replaces the old rail icon; gated on TICKETS READ access or above. */}
                   {canAccessProjects && (
                     <div className='shrink-0'>
                       <button
@@ -3079,6 +3459,7 @@ const SupportScreen = (): ReactElement => {
                           onClick={() => setIsSidebarOpen(true)}
                           className='p-1.5 rounded hover:bg-muted text-muted-foreground transition-colors mr-1'
                           title='Open Channels'
+                          aria-label='Open Channels'
                           data-track-category='Support'
                           data-track-name='OpenChannelsSidebar'
                         >
@@ -3151,6 +3532,17 @@ const SupportScreen = (): ReactElement => {
                     <div className='flex items-center gap-2 shrink-0'>
                       {selectedChannelId &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
+                        isSelectedChannelJoined && (
+                          <DeskAppsMenu
+                            channelId={selectedChannelId}
+                            deskApps={deskApps}
+                            canManage={canManageDeskApps}
+                            activeAppId={openDeskAppId}
+                            onOpenApp={appId => showDeskApp(appId, false)}
+                          />
+                        )}
+                      {selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
                         selectedChannelFull && (
                           <Button
                             variant='outline'
@@ -3171,12 +3563,19 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        !isInstagramDesk &&
+                        (isDlDesk ||
+                          isSocialMediaDesk ||
+                          isFetchSourcesLoading ||
+                          isFetchSourcesError ||
+                          anyFetchSource) &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <span>
                                 <Tooltip content={dlMemberSyncTooltip} side='bottom'>
                                   <button
+                                    aria-label={dlMemberSyncTooltip}
                                     disabled={isRefetching}
                                     className={cn(
                                       'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3197,15 +3596,26 @@ const SupportScreen = (): ReactElement => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
                               <DropdownMenuItem
-                                onClick={() => setShowRefetchDialog(true)}
+                                onClick={() => {
+                                  setFetchTarget(undefined);
+                                  setShowRefetchDialog(true);
+                                }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
                               >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
-                                  <span className='truncate'>Fetch latest emails</span>
+                                  <span className='truncate'>
+                                    {dlHasApps
+                                      ? 'Fetch latest emails & app data'
+                                      : 'Fetch latest emails'}
+                                  </span>
                                   <Tooltip
-                                    content='Fetch recent emails from the connected shared mailbox for this desk.'
+                                    content={
+                                      dlHasApps
+                                        ? 'Fetch recent emails from the connected shared mailbox and history from the connected apps for this desk.'
+                                        : 'Fetch recent emails from the connected shared mailbox for this desk.'
+                                    }
                                     side='left'
                                     className='max-w-72'
                                   >
@@ -3247,20 +3657,85 @@ const SupportScreen = (): ReactElement => {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                        ) : hasMultipleFetchSources || (isSocialMediaDesk && anyFetchSource) ? (
+                          <FetchSourcePicker
+                            sources={fetchSources ?? []}
+                            leadingAction={
+                              isSocialMediaDesk
+                                ? {
+                                    label: isFacebookDesk ? 'Fetch from Facebook' : 'Fetch reviews',
+                                    // No sourceId => the hook routes to the
+                                    // review sync; the dialog supplies the range.
+                                    onSelect: () => {
+                                      setFetchTarget(undefined);
+                                      setShowRefetchDialog(true);
+                                    },
+                                  }
+                                : undefined
+                            }
+                            onSelect={(sourceId, sourceName) => {
+                              setFetchTarget(sourceId ? { sourceId, sourceName } : undefined);
+                              setShowRefetchDialog(true);
+                            }}
+                          >
+                            <button
+                              disabled={isRefetching || isFetchSourcesLoading}
+                              aria-label='Fetch data'
+                              className={cn(
+                                'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                isRefetching && 'opacity-60 cursor-not-allowed',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='RefetchExternalSource'
+                              data-track-metadata={JSON.stringify({
+                                channelId: refetchChannelId,
+                              })}
+                            >
+                              <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                            </button>
+                          </FetchSourcePicker>
                         ) : (
                           <Tooltip
                             content={
                               isRefetching
                                 ? 'Fetching latest…'
-                                : isSocialMediaDesk
-                                  ? 'Fetch reviews'
-                                  : 'Fetch latest emails'
+                                : isFacebookDesk
+                                  ? 'Fetch from Facebook'
+                                  : isSocialMediaDesk
+                                    ? 'Fetch reviews'
+                                    : isCallDesk
+                                      ? 'Fetch missed calls'
+                                      : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
-                              disabled={isRefetching}
+                              aria-label={
+                                isRefetching
+                                  ? 'Fetching latest…'
+                                  : isFacebookDesk
+                                    ? 'Fetch from Facebook'
+                                    : isSocialMediaDesk
+                                      ? 'Fetch reviews'
+                                      : isCallDesk
+                                        ? 'Fetch missed calls'
+                                        : 'Fetch latest emails'
+                              }
+                              onClick={() => {
+                                // Single-source desks skip the picker but still
+                                // get a titled dialog (and exact-source fetch).
+                                // Review desks land here with no listed source
+                                // and fall through to the review sync, which
+                                // now takes a range like every other fetch.
+                                const only = fetchSources?.[0];
+                                setFetchTarget(
+                                  fetchSources?.length === 1 && only
+                                    ? { sourceId: only.sourceId, sourceName: only.displayName }
+                                    : undefined,
+                                );
+                                setShowRefetchDialog(true);
+                              }}
+                              disabled={isRefetching || isFetchSourcesLoading}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
                                 isRefetching && 'opacity-60 cursor-not-allowed',
@@ -3276,6 +3751,7 @@ const SupportScreen = (): ReactElement => {
                       {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Ask AI' side='bottom'>
                           <button
+                            aria-label='Ask AI'
                             onClick={() => {
                               if (!selectedChannelId) return;
                               xyneAIActor.send({
@@ -3297,6 +3773,7 @@ const SupportScreen = (): ReactElement => {
                         <Tooltip content='Insights' side='bottom'>
                           <button
                             type='button'
+                            aria-label='Insights'
                             onClick={() => {
                               if (activeInsightsSection) closeInsights();
                               else showInsights(insightsSections[0] ?? null, false);
@@ -3312,6 +3789,25 @@ const SupportScreen = (): ReactElement => {
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
                             <BarChart3 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      {isSelectedChannelJoined && selectedChannelId && (
+                        <Tooltip content='Canvases' side='bottom'>
+                          <button
+                            type='button'
+                            aria-label='Canvases'
+                            onClick={() => goCanvases(showCanvases ? '' : 'canvases')}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              showCanvases
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenChannelCanvases'
+                          >
+                            <File02Text size={16} />
                           </button>
                         </Tooltip>
                       )}
@@ -3334,6 +3830,7 @@ const SupportScreen = (): ReactElement => {
                               : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                           )}
                           title='Inbox settings'
+                          aria-label='Inbox settings'
                           data-track-category='Support'
                           data-track-name='ToggleInboxSettings'
                         >
@@ -3344,7 +3841,11 @@ const SupportScreen = (): ReactElement => {
                   </div>
                   <div
                     ref={filterRowRef}
-                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                    className={cn(
+                      'relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0',
+                      // Ticket filters mean nothing while a desk app stands in for the list.
+                      (openDeskAppId || showCanvases) && 'hidden',
+                    )}
                   >
                     {isSelectedChannelJoined && (
                       <div
@@ -3356,7 +3857,7 @@ const SupportScreen = (): ReactElement => {
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
                         </div>
-                        {viewMode === 'table' && (
+                        {(viewMode === 'table' || viewMode === 'list') && (
                           <>
                             <div ref={columnsWideTwinRef} className='flex items-center'>
                               <Button
@@ -3372,6 +3873,7 @@ const SupportScreen = (): ReactElement => {
                             </div>
                             <div ref={columnsNarrowTwinRef} className='flex items-center'>
                               <Button
+                                aria-label='Columns'
                                 variant='outline'
                                 size='sm'
                                 className='rounded-[10px] border-border text-muted-foreground'
@@ -3419,6 +3921,7 @@ const SupportScreen = (): ReactElement => {
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
+                            aria-label='Search emails'
                             onClick={() => invokeShortcut('mod+f')}
                             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='Support'
@@ -3669,6 +4172,7 @@ const SupportScreen = (): ReactElement => {
                                       !!filters.conversationLabelId);
                                   const menuButton = (
                                     <button
+                                      aria-current={isActive ? 'true' : undefined}
                                       ref={el => {
                                         menuItemRefs.current[item.id] = el;
                                       }}
@@ -3758,7 +4262,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {viewMode === 'table' && (
+                      {(viewMode === 'table' || viewMode === 'list') && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
                             <Button
@@ -3770,8 +4274,6 @@ const SupportScreen = (): ReactElement => {
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                {/* Label yields before any filter folds — this is secondary
-                                    chrome, and the icon plus tooltip carries it fine. */}
                                 {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
@@ -3782,74 +4284,92 @@ const SupportScreen = (): ReactElement => {
                             sideOffset={6}
                             className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
                           >
-                            {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
-                              const Icon =
-                                column.key === 'assignee'
-                                  ? User
-                                  : column.key === 'dueDate' || column.key === 'createdAt'
-                                    ? CalendarDays
-                                    : column.key === 'priority'
-                                      ? BarChart4Icon
-                                      : column.key === 'tags'
-                                        ? Tag
-                                        : Circle;
-                              const isSelected = selectedColumnKeys.has(column.key);
-                              return (
-                                <button
-                                  key={column.key}
-                                  type='button'
-                                  onClick={() => toggleColumn(column.key, !isSelected)}
-                                  className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
-                                  data-track-category='Support'
-                                  data-track-name='ToggleTableColumn'
-                                  data-track-metadata={JSON.stringify({
-                                    column: column.key,
-                                    visible: !isSelected,
-                                  })}
-                                >
-                                  <div className='flex items-center gap-3'>
-                                    <Icon className='w-4 h-4' />
-                                    <span>{column.label}</span>
-                                  </div>
-                                  {isSelected && <Check className='w-4 h-4 text-primary' />}
-                                </button>
-                              );
-                            })}
-                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                            {viewMode === 'table' ? (
                               <>
-                                <div className='my-1 border-t border-border' />
-                                <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
-                                  Custom fields
-                                </div>
-                                {deskDynamicFields.map(field => {
-                                  const key = dynamicColumnKey(field.id);
-                                  const Icon = getIconForFieldType(field.fieldType);
-                                  const isSelected = selectedColumnKeys.has(key);
+                                {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
+                                  const Icon =
+                                    column.key === 'assignee'
+                                      ? User
+                                      : column.key === 'dueDate' || column.key === 'createdAt'
+                                        ? CalendarDays
+                                        : column.key === 'priority'
+                                          ? BarChart4Icon
+                                          : column.key === 'tags'
+                                            ? Tag
+                                            : Circle;
+                                  const isSelected = selectedColumnKeys.has(column.key);
                                   return (
                                     <button
-                                      key={key}
+                                      key={column.key}
                                       type='button'
-                                      onClick={() => toggleColumn(key, !isSelected)}
+                                      onClick={() => toggleColumn(column.key, !isSelected)}
                                       className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                       data-track-category='Support'
                                       data-track-name='ToggleTableColumn'
                                       data-track-metadata={JSON.stringify({
-                                        column: key,
-                                        fieldName: field.fieldName,
+                                        column: column.key,
                                         visible: !isSelected,
                                       })}
                                     >
                                       <div className='flex items-center gap-3'>
                                         <Icon className='w-4 h-4' />
-                                        <span className='truncate'>{field.fieldName}</span>
+                                        <span>{column.label}</span>
                                       </div>
-                                      {isSelected && (
-                                        <Check className='w-4 h-4 text-primary shrink-0' />
-                                      )}
+                                      {isSelected && <Check className='w-4 h-4 text-primary' />}
                                     </button>
                                   );
                                 })}
+                                {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                                  <>
+                                    <div className='my-1 border-t border-border' />
+                                    <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
+                                      Custom fields
+                                    </div>
+                                    {deskDynamicFields.map(field => {
+                                      const key = dynamicColumnKey(field.id);
+                                      const Icon = getIconForFieldType(field.fieldType);
+                                      const isSelected = selectedColumnKeys.has(key);
+                                      return (
+                                        <button
+                                          key={key}
+                                          type='button'
+                                          onClick={() => toggleColumn(key, !isSelected)}
+                                          className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                          data-track-category='Support'
+                                          data-track-name='ToggleTableColumn'
+                                          data-track-metadata={JSON.stringify({
+                                            column: key,
+                                            fieldName: field.fieldName,
+                                            visible: !isSelected,
+                                          })}
+                                        >
+                                          <div className='flex items-center gap-3'>
+                                            <Icon className='w-4 h-4' />
+                                            <span className='truncate'>{field.fieldName}</span>
+                                          </div>
+                                          {isSelected && (
+                                            <Check className='w-4 h-4 text-primary shrink-0' />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
                               </>
+                            ) : (
+                              <DeskListColumnsMenu
+                                columns={listMenuColumns}
+                                dynamicFieldByKey={deskDynamicFieldByKey}
+                                selectedKeys={listColumnKeys}
+                                onToggle={toggleListColumn}
+                                onMove={(fromKey, toKey) =>
+                                  moveListColumn(
+                                    listMenuColumns.map(column => column.key),
+                                    fromKey,
+                                    toKey,
+                                  )
+                                }
+                              />
                             )}
                           </Popover.Content>
                         </Popover.Root>
@@ -3868,6 +4388,14 @@ const SupportScreen = (): ReactElement => {
                             onUpdate={handleUpdateDeskView}
                             onDelete={deleteDeskView}
                             currentFilters={filters}
+                            currentColumnKeys={
+                              viewMode === 'list' ? listColumnKeys : selectedColumnKeys
+                            }
+                            validColumnKeysForMode={
+                              viewMode === 'list'
+                                ? validListColumnKeys
+                                : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string))
+                            }
                             dynamicFieldDefs={deskDynamicFields}
                             trackCategory='Support'
                           />
@@ -3883,6 +4411,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Kanban View'
+                            aria-label='Kanban View'
                             data-track-category='Support'
                             data-track-name='SetKanbanView'
                             data-track-metadata={JSON.stringify({
@@ -3901,6 +4430,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='List View'
+                            aria-label='List View'
                             data-track-category='Support'
                             data-track-name='SetListView'
                             data-track-metadata={JSON.stringify({
@@ -3919,6 +4449,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Table View'
+                            aria-label='Table View'
                             data-track-category='Support'
                             data-track-name='SetTableView'
                             data-track-metadata={JSON.stringify({
@@ -3937,6 +4468,7 @@ const SupportScreen = (): ReactElement => {
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                             )}
                             title='Calendar View'
+                            aria-label='Calendar View'
                             data-track-category='Support'
                             data-track-name='SetCalendarView'
                             data-track-metadata={JSON.stringify({
@@ -3975,6 +4507,7 @@ const SupportScreen = (): ReactElement => {
                           )}
                         {ticketId && (
                           <Button
+                            aria-label='Close ticket panel'
                             size='sm'
                             variant='ghost'
                             onClick={() => {
@@ -4121,166 +4654,205 @@ const SupportScreen = (): ReactElement => {
                   )}
                 </DeskInsightsPanel>
               )}
-              <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
-                {!selectedChannelId ? (
-                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
-                    <Inbox size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>
-                      Select a channel to preview tickets
-                    </p>
-                    <p className='text-xs text-muted-foreground max-w-sm'>
-                      Pick a Desk channel from the sidebar to see its tickets here.
-                    </p>
-                  </div>
-                ) : !isSelectedChannelKnown ? (
-                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
-                    <Inbox size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>Channel not found</p>
-                    <p className='text-xs text-muted-foreground max-w-sm'>
-                      This channel either doesn&apos;t exist or is private and you don&apos;t have
-                      access. Pick a different channel from the sidebar.
-                    </p>
-                  </div>
-                ) : !isSelectedChannelJoined ? (
-                  <div className='h-full flex items-center justify-center'>
-                    <JoinChannel
-                      channelId={selectedChannelId}
-                      {...(selectedChannelName && selectedChannelName !== 'Xyne Desk'
-                        ? { channelTitle: selectedChannelName }
-                        : {})}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    {/* Drafts banner — visible when there are saved-but-closed drafts */}
-                    {savedDrafts.length > 0 && userID && (
-                      <div className='flex-shrink-0 border-b border-border'>
-                        <div className='px-4 py-2 flex items-center gap-1.5'>
-                          <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
-                            Drafts
-                          </span>
-                          <div className='flex items-center gap-2 flex-wrap'>
-                            {savedDrafts.map(draft => {
-                              const label = composeDraftLabel(draft);
-                              return (
-                                <div
-                                  key={draft.id}
-                                  className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
-                                >
-                                  <button
-                                    type='button'
-                                    onClick={() => reopenDraft(draft.id)}
-                                    className='text-xs text-foreground truncate hover:text-primary transition-colors'
-                                    title={`Reopen draft: ${label}`}
-                                    data-track-category='Support'
-                                    data-track-name='ReopenDraft'
+              {selectedChannelId && showCanvases ? (
+                <DeskCanvasesPanel
+                  channelId={selectedChannelId}
+                  canvasId={routeCanvasId}
+                  getCanvasRoute={id => canvasesPath(`canvases/${id}`)}
+                  onBack={() => goCanvases(routeCanvasId ? 'canvases' : '')}
+                />
+              ) : selectedChannelId && openDeskAppId ? (
+                // A desk app replaces the ticket list. Keyed on the app so switching
+                // apps boots a fresh sandbox; the host's back arrow returns to tickets.
+                // Apps see the `channel` surface with this desk, so a channel-scoped
+                // app scopes itself to the desk unchanged.
+                <div className='flex-1 min-h-0'>
+                  <ArtifactAppHost
+                    key={openDeskAppId}
+                    appId={openDeskAppId}
+                    onBack={() => showDeskApp(null)}
+                    placement={{
+                      surface: 'channel',
+                      channel: {
+                        id: selectedChannelId,
+                        name: selectedChannelFull?.name ?? '',
+                        scopeType: selectedChannelFull?.scopeType ?? '',
+                      },
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
+                  {!selectedChannelId ? (
+                    <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                      <Inbox size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>
+                        Select a channel to preview tickets
+                      </p>
+                      <p className='text-xs text-muted-foreground max-w-sm'>
+                        Pick a Desk channel from the sidebar to see its tickets here.
+                      </p>
+                    </div>
+                  ) : !isSelectedChannelKnown ? (
+                    <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                      <Inbox size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>Channel not found</p>
+                      <p className='text-xs text-muted-foreground max-w-sm'>
+                        This channel either doesn&apos;t exist or is private and you don&apos;t have
+                        access. Pick a different channel from the sidebar.
+                      </p>
+                    </div>
+                  ) : !isSelectedChannelJoined ? (
+                    <div className='h-full flex items-center justify-center'>
+                      <JoinChannel
+                        channelId={selectedChannelId}
+                        {...(selectedChannelName && selectedChannelName !== 'Xyne Desk'
+                          ? { channelTitle: selectedChannelName }
+                          : {})}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Drafts banner — visible when there are saved-but-closed drafts */}
+                      {savedDrafts.length > 0 && userID && (
+                        <div className='flex-shrink-0 border-b border-border'>
+                          <div className='px-4 py-2 flex items-center gap-1.5'>
+                            <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
+                              Drafts
+                            </span>
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              {savedDrafts.map(draft => {
+                                const label = composeDraftLabel(draft);
+                                return (
+                                  <div
+                                    key={draft.id}
+                                    className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
                                   >
-                                    {label}
-                                  </button>
-                                  <button
-                                    type='button'
-                                    onClick={() => discardDraft(draft.id)}
-                                    className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
-                                    title='Discard draft'
-                                    aria-label='Discard draft'
-                                    data-track-category='Support'
-                                    data-track-name='DiscardDraft'
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                </div>
-                              );
-                            })}
+                                    <button
+                                      type='button'
+                                      onClick={() => reopenDraft(draft.id)}
+                                      className='text-xs text-foreground truncate hover:text-primary transition-colors'
+                                      title={`Reopen draft: ${label}`}
+                                      data-track-category='Support'
+                                      data-track-name='ReopenDraft'
+                                    >
+                                      {label}
+                                    </button>
+                                    <button
+                                      type='button'
+                                      onClick={() => discardDraft(draft.id)}
+                                      className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
+                                      title='Discard draft'
+                                      aria-label='Discard draft'
+                                      data-track-category='Support'
+                                      data-track-name='DiscardDraft'
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    {viewMode === 'kanban' ? (
-                      <SupportKanbanBoard
-                        channelId={selectedChannelId}
-                        boardId={channelBoardId}
-                        onBoardIdResolved={handleChannelBoardIdResolved}
-                        ticketFilter={ticketFilter}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        onTicketClick={(e, ticket) => handleTicketClick(e, ticket, 'kanban_card')}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        {...(ticketId !== undefined && { activeTicketId: ticketId })}
-                      />
-                    ) : viewMode === 'calendar' && selectedChannelId ? (
-                      <DeskCalendarView
-                        channelId={selectedChannelId}
-                        isMember={isSelectedChannelJoined}
-                        ticketFilter={ticketFilter}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'calendar',
-                            },
-                          });
-                        }}
-                        onTicketsLoaded={handleTicketsLoaded}
-                      />
-                    ) : viewMode === 'table' ? (
-                      <SupportTicketTable
-                        channelId={selectedChannelId}
-                        ticketFilter={ticketFilter}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        visibleColumns={tableVisibleColumns}
-                        dynamicFieldColumns={tableDynamicFieldColumns}
-                        onBoardIdResolved={handleChannelBoardIdResolved}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        selectedIds={selectedTicketIds}
-                        onSelectionChange={handleTableSelectionChange}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'table_row',
-                            },
-                          });
-                        }}
-                      />
-                    ) : (
-                      <TicketListView
-                        isMember={isSelectedChannelJoined}
-                        mailboxFolder={
-                          selectedLabel || !selectedChannelHasMailboxFolders
-                            ? undefined
-                            : selectedFolder.key
-                        }
-                        filter={{
-                          channelId: selectedChannelId,
-                          ...ticketFilter,
-                        }}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        showExtraFields={true}
-                        activeTicketId={ticketId}
-                        selectedIds={selectedTicketIds}
-                        onToggleSelect={toggleTicketSelected}
-                        onBoardIdReady={handleChannelBoardIdResolved}
-                        onPageChange={clearTicketSelection}
-                        onToggleSelectAll={handleToggleSelectAll}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'inbox_row',
-                            },
-                          });
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
+                      )}
+                      {viewMode === 'kanban' ? (
+                        <SupportKanbanBoard
+                          channelId={selectedChannelId}
+                          boardId={channelBoardId}
+                          onBoardIdResolved={handleChannelBoardIdResolved}
+                          ticketFilter={ticketFilter}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          onTicketClick={(e, ticket) => handleTicketClick(e, ticket, 'kanban_card')}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          {...(ticketId !== undefined && { activeTicketId: ticketId })}
+                        />
+                      ) : viewMode === 'calendar' && selectedChannelId ? (
+                        <DeskCalendarView
+                          channelId={selectedChannelId}
+                          isMember={isSelectedChannelJoined}
+                          ticketFilter={ticketFilter}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'calendar',
+                              },
+                            });
+                          }}
+                          onTicketsLoaded={handleTicketsLoaded}
+                        />
+                      ) : viewMode === 'table' ? (
+                        <SupportTicketTable
+                          channelId={selectedChannelId}
+                          ticketFilter={ticketFilter}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          visibleColumns={tableVisibleColumns}
+                          dynamicFieldColumns={tableDynamicFieldColumns}
+                          onBoardIdResolved={handleChannelBoardIdResolved}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          selectedIds={selectedTicketIds}
+                          onSelectionChange={handleTableSelectionChange}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'table_row',
+                              },
+                            });
+                          }}
+                        />
+                      ) : (
+                        <TicketListView
+                          isMember={isSelectedChannelJoined}
+                          mailboxFolder={
+                            selectedLabel || !selectedChannelHasMailboxFolders
+                              ? undefined
+                              : selectedFolder.key
+                          }
+                          filter={{
+                            channelId: selectedChannelId,
+                            ...ticketFilter,
+                          }}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          showExtraFields={true}
+                          activeTicketId={ticketId}
+                          {...(channelPreference?.deskType !== undefined && {
+                            deskType: channelPreference.deskType,
+                          })}
+                          selectedIds={selectedTicketIds}
+                          onToggleSelect={toggleTicketSelected}
+                          onBoardIdReady={handleChannelBoardIdResolved}
+                          onPageChange={clearTicketSelection}
+                          onToggleSelectAll={handleToggleSelectAll}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          visibleColumnKeys={listColumnKeys}
+                          dynamicFieldColumns={listDynamicFieldColumns}
+                          columnOrder={listColumnOrder}
+                          initialPageIndex={cachedListPagination?.pageIndex}
+                          initialPageCursors={cachedListPagination?.pageCursors}
+                          initialFetchLimit={cachedListPagination?.fetchLimit}
+                          onPaginationChange={handleListPaginationChange}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'inbox_row',
+                              },
+                            });
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {/* Bulk field actions for the list view — the table view already gets
                   the same bar from TicketTable, driven by its own grid selection. */}
               {viewMode === 'list' && selectedTicketIds.size > 0 && (
@@ -4346,7 +4918,7 @@ const SupportScreen = (): ReactElement => {
             requireConnector={true}
             onSubmit={data => handleCreateEmailChannel(data)}
             onCancel={() => setShowCreateChannelModal(false)}
-            loading={createChannelMutation.isPending}
+            loading={createChannelMutation.isPending || isConnectingReviewDesk}
           />
         </div>
       </Dialog>
@@ -4412,14 +4984,41 @@ const SupportScreen = (): ReactElement => {
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
-          {...(isSocialMediaDesk && {
-            title: 'Fetch reviews',
-            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
-            summaryLabel: 'Will fetch reviews posted',
+          {...(fetchTarget?.sourceName
+            ? {
+                // A named source wins over the desk-type wording: on a review
+                // desk the picker can target an app binding, and that fetch is
+                // not a review sync.
+                title: `Fetch from ${fetchTarget.sourceName}`,
+                subtitle: 'Choose how much history to pull from this source.',
+              }
+            : isFacebookDesk
+              ? {
+                  title: 'Fetch from Facebook',
+                  subtitle:
+                    'Pull messages, comments and mentions from the connected Pages for a time range. Anything already on the desk is skipped. Messenger returns at most the 20 latest messages per conversation.',
+                  summaryLabel: 'Will fetch Facebook activity from',
+                }
+              : isSocialMediaDesk
+                ? {
+                    title: 'Fetch reviews',
+                    subtitle:
+                      'Pull new reviews or backfill a specific time range from the connected apps.',
+                    summaryLabel: 'Will fetch reviews posted',
+                  }
+                : {})}
+          {...(isCallDesk && {
+            ...(!fetchTarget?.sourceName && {
+              title: 'Fetch calls',
+              subtitle: 'Pull calls from Ozonetel that did not reach this workspace.',
+              summaryLabel: 'Will fetch calls made',
+            }),
+            maxDays: 15,
+            withTime: true,
           })}
           onConfirm={range => {
             setShowRefetchDialog(false);
-            handleRefetch(range);
+            handleRefetch(range, fetchTarget);
           }}
         />
       )}
@@ -4513,15 +5112,12 @@ const TicketMetaRow = ({
   return (
     <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
       <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-          Priority
-        </span>
         <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
       </div>
-      <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-          Assignee
-        </span>
+      <div
+        className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'
+        title='Assignee'
+      >
         <UserSelector
           selectedUserId={assignee.userId}
           assignedGroupId={assignee.groupId}
@@ -4533,9 +5129,6 @@ const TicketMetaRow = ({
       </div>
       {ticket.aiCategory && (
         <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
-          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
-            Type
-          </span>
           <span
             className='inline-flex items-center justify-center h-[18px] px-2 rounded-sm bg-blue-100 dark:bg-blue-950/50 text-[10px] font-medium text-blue-700 dark:text-blue-300 whitespace-nowrap'
             title={`AI Category: ${ticket.aiCategory}`}
@@ -4604,7 +5197,7 @@ type SupportTicketDetailProps = {
   host?: 'support' | 'activity' | 'search_panel';
 };
 
-type TicketReplyKind = 'app' | 'channel';
+type TicketReplyKind = 'app' | 'slack' | 'channel';
 
 /**
  * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
@@ -4612,9 +5205,13 @@ type TicketReplyKind = 'app' | 'channel';
  * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
  */
 const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
-  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
-    ?.deskSource;
-  return deskSource?.type === 'app' ? 'app' : 'channel';
+  const metadata = ticketMetadata as
+    | { deskSource?: { type?: string }; source?: string }
+    | null
+    | undefined;
+  if (metadata?.deskSource?.type === 'app') return 'app';
+  if (metadata?.source === 'slack') return 'slack';
+  return 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -4703,7 +5300,7 @@ export const SupportTicketDetail = ({
   // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
   // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
   // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
-  const [ticket] = useCachedQuery(
+  const [ticket] = useRacedQuery(
     queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
@@ -4736,6 +5333,8 @@ export const SupportTicketDetail = ({
 
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
+  // Without this a Slack ticket on an EMAIL desk falls through to EmailComposer below.
+  const isSlackSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'slack';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -4812,7 +5411,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
@@ -5229,12 +5828,6 @@ export const SupportTicketDetail = ({
   const [showEmailSummary, setShowEmailSummary] = useState(false);
   const emailSummaryAbortRef = useRef<AbortController | null>(null);
   const threadScrollRef = useRef<HTMLDivElement>(null);
-  const scrollThreadToTop = (): void => {
-    requestAnimationFrame(() => {
-      threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  };
-
   const composerOverlayRef = useRef<HTMLDivElement>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState<number>(96);
   useEffect(() => {
@@ -5321,13 +5914,35 @@ export const SupportTicketDetail = ({
 
   const openTicketId = ticket?.id;
   const channelType = channel?.type;
+  // Not the open ticket while full-page search covers it, out of sight there, as leaving the page
+  // made it not the open one; it is again, the latest one shown, once the route is back on the page
+  // — not as a collapse starts, while a ticket in full page's side panel is still the one in view.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!openTicketId || ticketPhoneNumbers.length === 0 || channelType !== ChannelType.APP) {
       return undefined;
     }
-    setCloudAgentOpenTicket({ ticketId: openTicketId, numbers: ticketPhoneNumbers });
-    return (): void => setCloudAgentOpenTicket(null);
-  }, [openTicketId, ticketPhoneNumbers, channelType]);
+    const ticket = { ticketId: openTicketId, numbers: ticketPhoneNumbers };
+    let hide: (() => void) | null = null;
+    const show = (): void => {
+      hide?.();
+      hide = showCloudAgentOpenTicket(ticket);
+    };
+    const stopShowing = (): void => {
+      hide?.();
+      hide = null;
+    };
+    if (!pageCoverage.isCovered()) show();
+    const stopWatching = pageCoverage.subscribe(covered => {
+      if (covered) stopShowing();
+    });
+    const stopWatchingReturn = pageCoverage.subscribeReturn(show);
+    return (): void => {
+      stopWatching();
+      stopWatchingReturn();
+      stopShowing();
+    };
+  }, [openTicketId, ticketPhoneNumbers, channelType, pageCoverage]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -5388,6 +6003,8 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  useRecheckTicketDuplicates(ticket && !ticket.isArchived ? ticket.id : null);
+  const [showAddToCanvasDialog, setShowAddToCanvasDialog] = useState(false);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -5418,13 +6035,7 @@ export const SupportTicketDetail = ({
                 {showAdjacentNav && (
                   <button
                     type='button'
-                    onClick={() => {
-                      if (onBack) {
-                        onBack();
-                        return;
-                      }
-                      goBackToTicketList();
-                    }}
+                    onClick={() => void navigate(-1)}
                     className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                     aria-label='Back to ticket list'
                     data-track-category='Support'
@@ -5437,9 +6048,12 @@ export const SupportTicketDetail = ({
                     <ArrowLeft size={18} />
                   </button>
                 )}
-                <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
-                  {ticketIdParam}
-                </span>
+                {/* The open thread panel already carries the ticket ID. */}
+                {!isRightPanelOpen && (
+                  <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
+                    {ticketIdParam}
+                  </span>
+                )}
                 {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                   <MailboxActions
                     ticketId={mailboxTicketId}
@@ -5476,6 +6090,7 @@ export const SupportTicketDetail = ({
                       >
                         <button
                           type='button'
+                          aria-label='Previous ticket'
                           onClick={() => void navigateAdjacent('backward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
@@ -5502,6 +6117,7 @@ export const SupportTicketDetail = ({
                       >
                         <button
                           type='button'
+                          aria-label='Next ticket'
                           onClick={() => void navigateAdjacent('forward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
@@ -5519,7 +6135,10 @@ export const SupportTicketDetail = ({
                   {ticket && channel?.type === ChannelType.APP && <CallButton />}
                   {/* Status pill */}
                   {ticket && (
-                    <div className='border border-border rounded-md overflow-hidden shrink-0'>
+                    <div
+                      className='border border-border rounded-md overflow-hidden shrink-0'
+                      title='Status'
+                    >
                       <StagePicker
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
@@ -5528,6 +6147,21 @@ export const SupportTicketDetail = ({
                         boardId={boardId}
                       />
                     </div>
+                  )}
+
+                  {!isRightPanelOpen && (
+                    <Tooltip content='Open thread' side='bottom'>
+                      <button
+                        type='button'
+                        onClick={() => setIsRightPanelOpen(true)}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label='Open thread'
+                        data-track-category='Support'
+                        data-track-name='OpenThreadPanel'
+                      >
+                        <PanelRight size={18} />
+                      </button>
+                    </Tooltip>
                   )}
 
                   {/* ··· overflow menu */}
@@ -5570,6 +6204,7 @@ export const SupportTicketDetail = ({
                                 <span>Labels</span>
                                 <button
                                   type='button'
+                                  aria-label='Close label picker'
                                   onClick={() => setLabelPickerOpen(false)}
                                   className='text-muted-foreground hover:text-foreground transition-colors'
                                   data-track-category='Support'
@@ -5590,22 +6225,6 @@ export const SupportTicketDetail = ({
                         </>
                       )}
                       <DropdownMenuSeparator />
-                      {!isRightPanelOpen && (
-                        <DropdownMenuItem
-                          onSelect={() => setIsRightPanelOpen(true)}
-                          data-track-category='Support'
-                          data-track-name='OpenThreadPanel'
-                          data-track-metadata={JSON.stringify(
-                            deskTicketTrackingMetadata(ticket, {
-                              deskType: channelPreference?.deskType ?? null,
-                              emailCount,
-                            }),
-                          )}
-                        >
-                          <PanelRight size={14} className='shrink-0' />
-                          Open Thread
-                        </DropdownMenuItem>
-                      )}
                       {emailCollapseState.canToggleAll && (
                         <DropdownMenuItem
                           onSelect={emailCollapseState.toggleAll}
@@ -5620,33 +6239,6 @@ export const SupportTicketDetail = ({
                             <ChevronsUpDown size={14} className='shrink-0' />
                           )}
                           {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                        </DropdownMenuItem>
-                      )}
-                      {emails.length > 0 && (
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                              setShowEmailSummary(true);
-                              scrollThreadToTop();
-                              void fetchEmailSummary();
-                            } else if (emailSummaryState === 'done') {
-                              setShowEmailSummary(prev => {
-                                const next = !prev;
-                                if (next) scrollThreadToTop();
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={emailSummaryState === 'loading'}
-                          data-track-category='Support'
-                          data-track-name='SummarizeEmailThread'
-                        >
-                          {emailSummaryState === 'loading' ? (
-                            <Loader2 size={14} className='animate-spin shrink-0' />
-                          ) : (
-                            <Wand2 size={14} className='shrink-0' />
-                          )}
-                          Summarize thread
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
@@ -5823,18 +6415,18 @@ export const SupportTicketDetail = ({
                           : `Initiated by ${initiator.name}`
                       }
                     >
-                      <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
-                        Requester
-                      </span>
                       <div className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground whitespace-nowrap h-[24px]'>
                         <Mail size={12} className='shrink-0 text-muted-foreground' />
                         <span className='truncate max-w-[160px]'>{initiator.name}</span>
                       </div>
                     </div>
                   )}
+                  {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+                    <ChannelsDeskSourceChannel sourceConversationId={emails[0].externalThreadId} />
+                  )}
 
                   {/* Mailbox chip + label chips.
-                      Only render the VIEW label row when there is at least one visible
+                      Only render the row when there is at least one visible
                       chip: MailboxActions returns null for ARCHIVED state, and
                       ConversationLabels chips returns null when there are no labels. */}
                   {channelId &&
@@ -5849,25 +6441,27 @@ export const SupportTicketDetail = ({
                       if (!hasMailboxChip && !hasLabelChips) return null;
                       return (
                         <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
-                          <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none shrink-0'>
-                            View
-                          </span>
                           {hasMailboxChip && mailboxTicketId && (
-                            <MailboxActions
-                              ticketId={mailboxTicketId}
-                              channelId={channelId}
-                              slot='chip'
-                              mailboxOverlay={mailboxOverlay}
-                            />
+                            <span className='inline-flex items-center gap-1.5'>
+                              <span className='text-xs text-muted-foreground'>Mailbox:</span>
+                              <MailboxActions
+                                ticketId={mailboxTicketId}
+                                channelId={channelId}
+                                slot='chip'
+                                mailboxOverlay={mailboxOverlay}
+                              />
+                            </span>
                           )}
                           {hasLabelChips && conversationId && (
-                            <ConversationLabels
-                              conversationId={conversationId}
-                              channelId={channelId}
-                              isMember={isMember}
-                              slot='chips'
-                              appliedMappings={conversationLabelMappings ?? []}
-                            />
+                            <span title='Label' className='inline-flex min-w-0'>
+                              <ConversationLabels
+                                conversationId={conversationId}
+                                channelId={channelId}
+                                isMember={isMember}
+                                slot='chips'
+                                appliedMappings={conversationLabelMappings ?? []}
+                              />
+                            </span>
                           )}
                         </div>
                       );
@@ -5880,9 +6474,18 @@ export const SupportTicketDetail = ({
                 )}
               </div>
             </div>
+            {/* A Channels desk ticket opens the merchant's thread in the regular thread view, composer included. */}
+            {channel?.type === ChannelType.CHANNELS && emails[0]?.externalThreadId && (
+              <div className='flex-1 min-h-0 flex flex-col'>
+                <ChannelsDeskSourceThread sourceConversationId={emails[0].externalThreadId} />
+              </div>
+            )}
             <div
               ref={threadScrollRef}
-              className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'
+              className={cn(
+                'flex-1 overflow-y-auto no-scrollbar px-6 py-4',
+                channel?.type === ChannelType.CHANNELS && 'hidden',
+              )}
               style={{
                 paddingBottom: composerOverlayHeight + 12,
                 transition: 'padding-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -5893,8 +6496,9 @@ export const SupportTicketDetail = ({
                   emailSummaryState === 'done' ||
                   emailSummaryState === 'error') && (
                   <div
-                    className='mb-4 rounded-2xl p-px'
+                    className='absolute right-6 z-10 w-[26rem] max-w-[calc(100%-3rem)] rounded-2xl p-px shadow-xl'
                     style={{
+                      bottom: composerOverlayHeight + 68,
                       background:
                         emailSummaryState === 'loading'
                           ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
@@ -5941,6 +6545,9 @@ export const SupportTicketDetail = ({
                             >
                               <button
                                 type='button'
+                                aria-label={
+                                  emailSummaryState === 'error' ? 'Retry' : 'Regenerate summary'
+                                }
                                 onClick={() => void fetchEmailSummary(true)}
                                 className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                                 data-track-category='Support'
@@ -5952,6 +6559,7 @@ export const SupportTicketDetail = ({
                           )}
                           <button
                             type='button'
+                            aria-label='Dismiss summary'
                             onClick={() => setShowEmailSummary(false)}
                             className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                             data-track-category='Support'
@@ -5963,7 +6571,7 @@ export const SupportTicketDetail = ({
                       </div>
 
                       {/* Content */}
-                      <div className='px-4 pb-3'>
+                      <div className='px-4 pb-3 max-h-[45vh] overflow-y-auto'>
                         {/* Loading state */}
                         {emailSummaryState === 'loading' && (
                           <div className='space-y-3'>
@@ -6072,13 +6680,71 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
-              {emails && emails.length > 0 && (
+              {emails.length > 0 && (
+                <Tooltip content='Summarize thread' side='left'>
+                  <button
+                    type='button'
+                    aria-label='Summarize thread'
+                    onClick={() => {
+                      if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                        setShowEmailSummary(true);
+                        void fetchEmailSummary();
+                      } else {
+                        setShowEmailSummary(prev => !prev);
+                      }
+                    }}
+                    className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
+                    style={{
+                      bottom: composerOverlayHeight + 12,
+                      background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
+                    }}
+                    data-track-category='Support'
+                    data-track-name='SummarizeEmailThread'
+                  >
+                    {emailSummaryState === 'loading' && (
+                      <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
+                    )}
+                    <Sparkles
+                      size={20}
+                      className={cn(
+                        'relative',
+                        emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
+                      )}
+                    />
+                  </button>
+                </Tooltip>
+              )}
+              {(emails.length > 0 || !!conversationId) && (
+                <Tooltip content='Add to canvas' side='left'>
+                  <button
+                    type='button'
+                    aria-label='Add to canvas'
+                    onClick={() => setShowAddToCanvasDialog(true)}
+                    className='absolute right-20 z-10 flex size-11 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg transition-transform hover:scale-105 active:scale-95'
+                    style={{ bottom: composerOverlayHeight + 12 }}
+                    data-track-category='Support'
+                    data-track-name='AddThreadToCanvas'
+                  >
+                    <File02Plus size={20} />
+                  </button>
+                </Tooltip>
+              )}
+              {channel?.type !== ChannelType.CHANNELS && emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
+                  isSlackSourcedTicket ||
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
-                    <SlackThread emails={emails} ticketId={ticket?.id} />
+                    <SlackThread
+                      emails={emails}
+                      ticketId={ticket?.id}
+                      showRecipient={
+                        !isAppSourcedTicket &&
+                        !isSlackSourcedTicket &&
+                        channel?.type === ChannelType.SOCIAL_MEDIA
+                      }
+                    />
                   ) : channel?.type === ChannelType.CALL ? (
                     <CallThread emails={emails} ticketId={ticket?.id} />
                   ) : (
@@ -6101,12 +6767,25 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {(channelIntegrationInfo.sourceType === 'instagram' ||
+              channelIntegrationInfo.sourceType === 'facebook') &&
+              channelId &&
+              conversationId && (
+                <InstagramCustomerHistory
+                  channelId={channelId}
+                  conversationId={conversationId}
+                  onTicketClick={xyneId => {
+                    void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                  }}
+                />
+              )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {isAppSourcedTicket ? (
+              {/* Channels desk tickets reply in the thread view above. */}
+              {channel?.type === ChannelType.CHANNELS ? null : isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
@@ -6119,30 +6798,45 @@ export const SupportTicketDetail = ({
                     recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              ) : !isSlackSourcedTicket && channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
+                    placeholder={
+                      channelIntegrationInfo.sourceType === 'instagram'
+                        ? 'Reply to this DM…'
+                        : channelIntegrationInfo.sourceType === 'facebook'
+                          ? 'Reply to this message…'
+                          : 'Reply to this review…'
+                    }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
-                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
-                      ? { maxLength: 350 }
-                      : {})}
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
+                      ? { maxLength: 1000 }
+                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.FACEBOOK
+                        ? { maxLength: 2000 }
+                        : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                          ? { maxLength: 350 }
+                          : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : isSlackSourcedTicket ||
+                channel?.type === ChannelType.SLACK ||
+                channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                    variant={
+                      !isSlackSourcedTicket && channel?.type === ChannelType.APP ? 'app' : 'slack'
+                    }
                     recordOnly={
-                      channel.type === ChannelType.APP &&
+                      !isSlackSourcedTicket &&
+                      channel?.type === ChannelType.APP &&
                       channelPreference?.appWebhookDeliveryEnabled === false
                     }
                   />
@@ -6236,21 +6930,23 @@ export const SupportTicketDetail = ({
                 data-thread-citation-host
               >
                 {conversationId && channelId ? (
-                  <ThreadMessages
-                    channelId={channelId}
-                    conversationId={conversationId}
-                    ticketId={ticket?.id ?? null}
-                    matchedMessageId={targetMessageId}
-                    skipInputAutoFocus
-                    onClose={() => setIsRightPanelOpen(false)}
-                    onAskAI={() => {
-                      if (isAIPanelOpen) {
-                        xyneAIActor.send({ type: 'CLOSE' });
-                      } else {
-                        void openDraftAgentSession();
-                      }
-                    }}
-                  />
+                  <>
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      ticketId={ticket?.id ?? null}
+                      matchedMessageId={targetMessageId}
+                      skipInputAutoFocus
+                      onClose={() => setIsRightPanelOpen(false)}
+                      onAskAI={() => {
+                        if (isAIPanelOpen) {
+                          xyneAIActor.send({ type: 'CLOSE' });
+                        } else {
+                          void openDraftAgentSession();
+                        }
+                      }}
+                    />
+                  </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>
@@ -6276,6 +6972,17 @@ export const SupportTicketDetail = ({
                   {...(channelId ? { channelId } : {})}
                   {...(conversationId ? { conversationId } : {})}
                 />
+                {ticket?.id && (
+                  <AddThreadToCanvasDialog
+                    open={showAddToCanvasDialog}
+                    onOpenChange={setShowAddToCanvasDialog}
+                    ticket={ticket}
+                    onSuccess={canvasId => {
+                      toast.success('Building canvas from this thread');
+                      void navigate(`${supportBase}/${ticket.channelId}/canvases/${canvasId}`);
+                    }}
+                  />
+                )}
                 {showArchiveConfirmDialog && (
                   <Dialog
                     open={showArchiveConfirmDialog}
@@ -6477,6 +7184,20 @@ const EmailThread = ({
   return (
     <div className='divide-y divide-gray-200 relative'>
       {sortedEmails.map((email, emailIndex) => {
+        // A call dialled from this ticket is a JSON call record, not mail: show the
+        // call card (recording + transcript controls) instead of the raw body.
+        if (isCallEmailBody(email.body)) {
+          return (
+            <CallEmailRow
+              key={email.id}
+              emailId={email.id}
+              body={email.body}
+              ticketId={ticketId}
+              attachments={email.attachments}
+              className='py-4'
+            />
+          );
+        }
         const mergedSource = mergedRootEmailSource.get(email.id);
         return (
           <EmailThreadItem

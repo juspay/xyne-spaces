@@ -6,6 +6,17 @@
  * they cover activity recorded since the desk-metrics feature was deployed.
  */
 
+/** Which tickets the range picks: created in it (default), or also older ones active in it. */
+export type DeskMetricsDateBasis = 'created' | 'active';
+
+/** One stage change on a ticket. `seconds` is the time spent in `from` before it. */
+export interface DeskMetricsStageMove {
+  from: string;
+  to: string;
+  at: number; // epoch ms
+  seconds: number | null;
+}
+
 /** Per-ticket drill-down row (newest cohort tickets). */
 export interface DeskMetricsTicketRow {
   ticketId: string;
@@ -20,6 +31,10 @@ export interface DeskMetricsTicketRow {
   assigneeName: string | null;
   frtSeconds: number | null;
   rtSeconds: number | null;
+  resolvedAt: number | null; // epoch ms; latest resolution, where rtSeconds ends
+  resolvedById: string | null; // who made the change resolvedAt marks; null for an automation
+  resolvedByName: string | null; // 'Automation' when an automation made that change
+  stageMoves: DeskMetricsStageMove[] | null; // oldest first
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD
   customFields: Record<string, string> | null; // form field name → value; only fields with non-empty values included

@@ -1,3 +1,4 @@
+import type { AssistantPart, FlowDefinition } from '@xyne/shared';
 import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
 import type { AttachedContextItem } from '../components/ContextPickerPanel';
 
@@ -104,6 +105,15 @@ export interface StoredMessage {
   reasoning?: string;
 
   /**
+   * The turn in order — thinking, text and tool calls as they happened (v2).
+   * Rendered as the step timeline; absent on messages saved before it existed,
+   * which render from `reasoning`, `toolInvocations` and `content` instead.
+   */
+  parts?: AssistantPart[];
+  /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
+  durationMs?: number;
+
+  /**
    * Tool invocations made during the response (v2)
    */
   toolInvocations?: ToolInvocation[];
@@ -189,6 +199,8 @@ export interface ToolInvocation {
   background?: boolean;
   backgroundState?: 'running' | 'completed' | 'error';
   backgroundTaskId?: string;
+  /** ISO time the call started. */
+  startedAt?: string;
 }
 
 /**
@@ -281,12 +293,19 @@ export interface ConversationHistory {
   sessionId: string;
   threadConversationId?: string;
   title: string;
+  titleGenerated?: boolean;
   messages: StoredMessage[];
   createdAt: Date;
   lastUpdated: Date;
   isStarred?: boolean;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
   lastInputContext?: LastInputContext;
+  /** Every agent that answered, in first-use order. The all-agents history
+   *  always sets it; the legacy per-agent list only for a switched chat. */
+  agentSlugs?: string[];
+  /** The agent to open and continue this conversation with — the one active
+   *  most recently. Set by the all-agents history. */
+  agentSlug?: string;
 }
 
 // ============================================================================
@@ -475,6 +494,75 @@ export interface SelectionContext {
   preview: string; // Truncated preview for display
 }
 
+const hasFlowToken = (flow: FlowDefinition): boolean => {
+  const token = flow.data?.['__xyneFlowToken'];
+  return typeof token === 'string' && token.length > 0;
+};
+
+export function flowPhaseKey(flows: FlowDefinition[] | undefined): string {
+  if (!flows?.length) return '';
+  const phases = flows.map(
+    flow => (flow.components?.[0]?.props as { phase?: string } | undefined)?.phase ?? '',
+  );
+  return phases.some(Boolean) ? `#${phases.join('|')}` : '';
+}
+
+/**
+ * Add a card to a message's list, keyed by `screenId`. Last write wins (pending
+ * → answered), except that an untokenized copy never overwrites a tokenized one
+ * — only the Spaces hop mints `__xyneFlowToken`, so a `/live` replay would
+ * otherwise strip the card's ability to submit.
+ */
+export function mergeUiFlows(
+  existing: FlowDefinition[] | undefined,
+  incoming: FlowDefinition,
+): FlowDefinition[] {
+  const list = existing ?? [];
+  const at = list.findIndex(flow => flow.screenId === incoming.screenId);
+  if (at < 0) return [...list, incoming];
+  const current = list[at];
+  if (current && hasFlowToken(current) && !hasFlowToken(incoming)) return list;
+  return list.map((flow, index) => (index === at ? incoming : flow));
+}
+
+/** Server-side chat_messages id the card's token was minted against. Mid-run
+ *  a Message.id is a client-side placeholder, and using it 403s every action. */
+export function flowMessageId(flow: FlowDefinition, fallback: string): string {
+  const stored = flow.data?.['chatMessageId'];
+  return typeof stored === 'string' && stored ? stored : fallback;
+}
+
+/** A card carrying an action's signature IS that approval; without one the row
+ *  stays, so a missing card can never make an action unapprovable. */
+export function unpresentedPendingActions(
+  actions: PendingAction[] | undefined,
+  flows: FlowDefinition[] | undefined,
+): PendingAction[] {
+  if (!actions?.length) return [];
+  if (!flows?.length) return actions;
+  const presented = new Set(
+    flows
+      .map(flow => flow.data?.['pendingSignature'])
+      .filter((signature): signature is string => typeof signature === 'string' && !!signature),
+  );
+  if (presented.size === 0) return actions;
+  return actions.filter(action => !presented.has(action.signature));
+}
+
+/** Position in the FULL list — the stored resolution id is keyed on it. Throws
+ *  rather than guessing: an index we cannot prove would resolve some OTHER
+ *  action on the message. */
+export function requirePendingActionIndex(
+  actions: PendingAction[] | undefined,
+  action: PendingAction,
+): number {
+  const at = actions?.indexOf(action) ?? -1;
+  if (at < 0) {
+    throw new Error('This request is no longer on the message — reload and try again.');
+  }
+  return at;
+}
+
 export interface PlanTodo {
   id?: string;
   title: string;
@@ -482,8 +570,13 @@ export interface PlanTodo {
 }
 
 export interface Message {
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message. Absent on v1 rows. */
+  agentSlug?: string;
   planTodos?: PlanTodo[];
   planTitle?: string;
+  /** FlowUI artifact cards posted on this message, deduped by `screenId`. */
+  uiFlows?: FlowDefinition[];
   id: string;
   type: 'user' | 'bot';
   content: string;
@@ -547,6 +640,15 @@ export interface Message {
    * Reasoning/thinking content from the agent (v2)
    */
   reasoning?: string;
+
+  /**
+   * The turn in order — thinking, text and tool calls as they happened (v2).
+   * Rendered as the step timeline; absent on messages saved before it existed,
+   * which render from `reasoning`, `toolInvocations` and `content` instead.
+   */
+  parts?: AssistantPart[];
+  /** How long the turn took to answer, start to finish ("Worked for 2m 31s"). */
+  durationMs?: number;
 
   /**
    * Tool invocations made during the response (v2)

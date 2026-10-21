@@ -362,6 +362,22 @@ export function bankIdForAgent(agentSlug: string): string {
   return `xyne-${sanitized}`;
 }
 
+export const DIGITAL_TWIN_SLUG = "digital-twin";
+export const DIGITAL_TWIN_BANK_ID = bankIdForAgent(DIGITAL_TWIN_SLUG);
+
+/**
+ * Twin gate — MUST be keyed on the bank id, not the raw slug. bankIdForAgent
+ * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs like
+ * "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the twin's
+ * bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let such an
+ * agent reach the shared twin bank WITHOUT the per-user `user:<id>` gating and
+ * leak every opted-in user's personal memories. Anything that lands in the twin
+ * bank gets twin treatment.
+ */
+export function isDigitalTwinAgent(agentSlug: string | null | undefined): boolean {
+  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK_ID;
+}
+
 /** Org-scoped bank id: `xyne-<org8>-<slug>`. org8 = first 8 lowercased alphanumeric chars of orgId. Multi-org fix (2026-07-17): slug-only bank ids made same-slug agents in different orgs share one memory bank. */
 export function bankIdForAgentOrg(agentSlug: string, orgId: string): string {
   const sanitized = agentSlug

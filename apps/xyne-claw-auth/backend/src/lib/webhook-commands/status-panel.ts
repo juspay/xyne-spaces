@@ -61,7 +61,7 @@ function secondsLabel(durationMs?: number): string {
 }
 
 function glyph(inv: StatusToolInvocation): string {
-  if (inv.status === "running") return "⏳";
+  if (inv.status === "running") return "·";
   if (inv.isError) return "✕";
   return "✓";
 }
@@ -83,7 +83,7 @@ export function formatStatusPanel(snapshot: StatusSnapshot): string {
   const run = snapshot.run;
   if (!run) {
     return [
-      `🔎 **Status** — \`${snapshot.agentSlug}\``,
+      `**Status** — \`${snapshot.agentSlug}\``,
       "",
       "No run has been dispatched in this thread recently.",
       `Mention @${snapshot.agentSlug} with a task to start one.`,
@@ -96,7 +96,7 @@ export function formatStatusPanel(snapshot: StatusSnapshot): string {
   const headerAge = terminal && finishedAt
     ? `finished ${ageLabel(nowMs - finishedAt)} ago`
     : `started ${ageLabel(nowMs - run.startedAt.getTime())} ago`;
-  lines.push(`🔎 **Status** — \`${snapshot.agentSlug}\` · \`${shortSession(run.sessionId)}\` · **${run.status}** · ${headerAge}`);
+  lines.push(`**Status** — \`${snapshot.agentSlug}\` · \`${shortSession(run.sessionId)}\` · **${run.status}** · ${headerAge}`);
 
   const providerBits = [run.provider, run.model].filter((v): v is string => Boolean(v));
   if (providerBits.length > 0) lines.push(`Provider/model: ${providerBits.join(" / ")}`);
@@ -123,8 +123,8 @@ export function formatStatusPanel(snapshot: StatusSnapshot): string {
     const newest = timed[0];
     lines.push(
       newest
-        ? `⚠️ **No tool activity in the last 5 minutes.** Newest tool call \`${newest.inv.toolName}\` was ${ageLabel(nowMs - newest.at)} ago.`
-        : "⚠️ **No tool activity in the last 5 minutes** — this run has not recorded any tool call yet.",
+        ? `**No tool activity in the last 5 minutes.** Newest tool call \`${newest.inv.toolName}\` was ${ageLabel(nowMs - newest.at)} ago.`
+        : "**No tool activity in the last 5 minutes** — this run has not recorded any tool call yet.",
     );
   } else if (run.toolInvocations.length === 0) {
     lines.push("");

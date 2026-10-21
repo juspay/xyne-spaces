@@ -48,6 +48,32 @@ function getDmFuse(docs: DmParticipantDoc[], sig: string): Fuse<DmParticipantDoc
   return _dmFuse.fuse;
 }
 
+// Cache docs+sig by `items` array identity: callers whose items are referentially stable
+// (e.g. useDmsSearch's hoisted groupItems) rebuild them only when the DM set changes.
+const _dmDocsCache = new WeakMap<
+  ReadonlyArray<unknown>,
+  { docs: DmParticipantDoc[]; sig: string }
+>();
+
+function getDmDocsForItems<
+  T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
+>(items: ReadonlyArray<T>, dmItems: T[]): { docs: DmParticipantDoc[]; sig: string } {
+  const cached = _dmDocsCache.get(items);
+  if (cached) return cached;
+  const docs: DmParticipantDoc[] = [];
+  for (const item of dmItems) {
+    // Prefer the search-only superset (displayName + raw name) when present; regular channels and
+    // callers without it fall back to searchableNames. `??` (not `||`) so a caller can't accidentally
+    // blank the fallback with an empty array — searchNames is only ever set (non-empty) on DM items.
+    const names = item.searchNames ?? item.searchableNames;
+    if (!names) continue;
+    for (const name of names) docs.push({ channelId: item.channel.id, name });
+  }
+  const sig = docs.map(d => d.channelId + '\x1f' + d.name).join('\x1e');
+  _dmDocsCache.set(items, { docs, sig });
+  return { docs, sig };
+}
+
 // Affinity weight for DM ranking. Fuse scores are [0, 1]; 0.5 means peak
 // affinity shifts a result by half the score range.
 const AFFINITY_WEIGHT = 0.5;
@@ -233,10 +259,18 @@ const matchNamesOf = (item: ChannelSearchItem): string[] =>
  *
  * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
  *   Slack-style quick switcher which should show only regular channels.
+ * @param options.regularFuseMatches  Regular-channel matches already computed in a web worker.
  */
 export function filterChannelsBySearchableNames<
   T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
->(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
+>(
+  items: T[],
+  query: string,
+  options: {
+    excludeDMs?: boolean;
+    regularFuseMatches?: ReadonlyArray<{ id: string; score?: number | undefined }>;
+  } = {},
+): T[] {
   const scoped = options.excludeDMs
     ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
     : items;
@@ -257,21 +291,13 @@ export function filterChannelsBySearchableNames<
   // Fuse per DM and searching each one per token. For P tokens and N DMs this
   // turns O(N) index constructions + O(N*P) searches per keystroke into a
   // cached single construction + O(P) searches.
-  const dmDocs: DmParticipantDoc[] = [];
-  for (const item of dmItems) {
-    // Prefer the search-only superset (displayName + raw name) when present; regular channels and
-    // callers without it fall back to searchableNames. `??` (not `||`) so a caller can't accidentally
-    // blank the fallback with an empty array — searchNames is only ever set (non-empty) on DM items.
-    const names = item.searchNames ?? item.searchableNames;
-    if (!names) continue;
-    for (const name of names) dmDocs.push({ channelId: item.channel.id, name });
-  }
+  const { docs: dmDocs, sig } =
+    dmItems.length > 0 ? getDmDocsForItems(scoped, dmItems) : { docs: [], sig: '' };
 
   let matchedDms: T[] = [];
   if (dmItems.length > 0 && queryParts.length > 0 && dmDocs.length > 0) {
     // Signature is stable across keystrokes for a fixed DM set, so the index is
     // constructed once per session and reused. Keyed on channel id + names.
-    const sig = dmDocs.map(d => d.channelId + '\x1f' + d.name).join('\x1e');
     const fuse = getDmFuse(dmDocs, sig);
 
     // For each token, record the best (lowest) Fuse score per channel plus the
@@ -314,11 +340,20 @@ export function filterChannelsBySearchableNames<
 
   const regularChannels = regularItems.map(item => item.channel);
   const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
+  const fuseMatches = options.regularFuseMatches?.flatMap(({ id, score }) => {
+    const item = regularItemsById.get(id);
+    return item ? [{ item: item.channel, score }] : [];
+  });
 
   // searchChannelsWithScores runs the same Fuse fuzzy match + prefix boosts
   // as searchChannels but returns { item, score }[] instead of just items,
   // so we can apply affinity on top before deciding the final order.
-  const matchedRegular = searchChannelsWithScores(regularChannels, query, regularChannels.length)
+  const matchedRegular = searchChannelsWithScores(
+    regularChannels,
+    query,
+    regularChannels.length,
+    fuseMatches,
+  )
     .flatMap(({ item: channel, score }) => {
       const item = regularItemsById.get(channel.id);
       if (!item) return [];

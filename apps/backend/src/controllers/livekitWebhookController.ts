@@ -23,7 +23,7 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { validateOwnerInChannel, resolveItemTrackId } from '@/sdlc/entityLinkService';
+import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner } from '@/sdlc/entityLinkService';
 import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
 
 /** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
@@ -36,11 +36,12 @@ const SDLC_CALL_OWNER_TYPES: readonly string[] = [
 ];
 import { activityService } from '@/services/activity/activityService';
 import { userActivityStatusService } from '@/services/userActivityStatusService';
+import { handleParticipantJoinedTx } from '@/bypassAcl/transactions/livekitWebhookController';
 
-class LiveKitWebhookController {
+export class LiveKitWebhookController {
   private receiver: WebhookReceiver;
 
-  private get db() {
+  get db() {
     return DatabaseClient.getInstance();
   }
 
@@ -290,7 +291,7 @@ class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
 
-        void userActivityStatusService.clearInCallForEndedCall(result.call.id);
+        void userActivityStatusService.clearInCallForEndedCall(result.call);
 
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
@@ -613,15 +614,48 @@ class LiveKitWebhookController {
                 await activityService.fillSdlcOwner(conversationId, channelId);
               }
               logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
+                `[LiveKit Webhook] sdlc_link_created | call=${roomName} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
             }
           } catch (sdlcLinkError) {
             // Linking must never break call creation.
             logger.warn('[LiveKit Webhook] sdlc_link_failed', {
-              room: roomName,
-              call: callId,
+              call: roomName,
               error: sdlcLinkError,
+            });
+          }
+        } else if (existingConversationId) {
+          // A call started inside a discussion belongs where the discussion does: its
+          // DISCUSSION link names the track, item or artifact, and the call is filed
+          // there too. The conversation already carries that link.
+          try {
+            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
+            const owner = await resolveInheritedOwner(this.db, existingConversationId, channelId);
+            if (linkWorkspaceId && owner) {
+              await this.db.sdlcEntityLink.createMany({
+                data: [
+                  {
+                    workspaceId: linkWorkspaceId,
+                    channelId,
+                    sourceType: owner.sourceType,
+                    sourceId: owner.sourceId,
+                    targetType: 'CALL',
+                    targetId: callId,
+                    relationType: 'CALL',
+                    createdBy,
+                  },
+                ],
+                skipDuplicates: true,
+              });
+              logger.info(
+                `[LiveKit Webhook] sdlc_call_link_inherited | call=${roomName} owner=${owner.sourceType}:${owner.sourceId}`,
+              );
+            }
+          } catch (inheritError) {
+            // Linking must never break call creation.
+            logger.warn('[LiveKit Webhook] sdlc_call_link_inherit_failed', {
+              call: roomName,
+              error: inheritError,
             });
           }
         }
@@ -721,14 +755,7 @@ class LiveKitWebhookController {
         } else {
           // Update participant to ACCEPTED with joinedAt timestamp using repository method
           const now = new Date();
-          await this.db.$transaction(async (tx) => {
-            await repositories.calls.updateParticipantResponse(
-              existingParticipant.id,
-              InvitationResponse.ACCEPTED,
-              now,
-              tx
-            );
-          });
+          await handleParticipantJoinedTx(this, existingParticipant, now);
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
 
           // Trigger side effects for participant response (dismiss notification, cleanup timeout).
@@ -751,7 +778,7 @@ class LiveKitWebhookController {
           }
         }
       }
-      void userActivityStatusService.markInCall(participant.identity);
+      void userActivityStatusService.markInCall(participant.identity, roomName);
 
       // Notify all connected clients that participants changed
       if (roomName) {
@@ -858,7 +885,7 @@ class LiveKitWebhookController {
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
 
-      void userActivityStatusService.clearInCall(participant.identity);
+      void userActivityStatusService.clearInCall(participant.identity, callId);
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
@@ -956,3 +983,4 @@ class LiveKitWebhookController {
 }
 
 export const livekitWebhookController = new LiveKitWebhookController();
+

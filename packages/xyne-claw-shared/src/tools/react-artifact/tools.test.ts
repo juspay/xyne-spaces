@@ -154,7 +154,7 @@ describe("buildReactArtifact", () => {
     });
 
     it("too many files", () => {
-      const files = Array.from({ length: 21 }, (_, i) => ({
+      const files = Array.from({ length: 101 }, (_, i) => ({
         path: `/F${i}.tsx`,
         content: "x",
       }));
@@ -164,14 +164,14 @@ describe("buildReactArtifact", () => {
     });
 
     it("oversized single file", () => {
-      const files = [{ path: "/App.tsx", content: "x".repeat(64 * 1024 + 1) }];
+      const files = [{ path: "/App.tsx", content: "x".repeat(512 * 1024 + 1) }];
       expect(() => buildReactArtifact(validParams({ files }))).toThrow(/per-file limit/);
     });
 
     it("oversized project total", () => {
-      const files = Array.from({ length: 5 }, (_, i) => ({
+      const files = Array.from({ length: 11 }, (_, i) => ({
         path: `/F${i}.tsx`,
-        content: "x".repeat(60 * 1024),
+        content: "x".repeat(500 * 1024),
       }));
       expect(() => buildReactArtifact(validParams({ entry: "/F0.tsx", files }))).toThrow(
         /total limit/,

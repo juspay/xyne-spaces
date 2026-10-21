@@ -1,5 +1,5 @@
-import { ReactElement } from 'react';
-import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { ReactElement, useContext } from 'react';
+import { useNavigate, Routes, Route, UNSAFE_RouteContext } from 'react-router-dom';
 import { X } from 'lucide-react';
 import ThreadMessages from '../../ThreadPannel';
 import { UserProfile } from '../../../ui/UserProfile/UserProfile';
@@ -7,6 +7,7 @@ import ConversationPanelV2 from '../../ConversationPannel/ConversationPanelV2';
 import CanvasScreen from '../../../Canvas/CanvasScreen';
 import ActivitySupportTicket from '../../../Activity/ActivitySupportTicket/ActivitySupportTicket';
 import { AttachmentPreviewPane } from '../../../FileViewer/AttachmentPreviewPane';
+import RecordingDetailRoute from '../../../../routes/RecordingDetailRoute/RecordingDetailRoute';
 import { useAuth } from '../../../../hooks/useAuth';
 import type {
   SidePanelState,
@@ -16,6 +17,7 @@ import type {
   CanvasPanelState,
   AttachmentPanelState,
   DeskTicketPanelState,
+  RecordingPanelState,
 } from './PanelTypes';
 
 // ————————————————————————————————————————————————————————————————
@@ -24,8 +26,17 @@ import type {
 
 // Every side-panel component is closable — the one shared prop across the whole family.
 // Each specific panel adds its own `panel` variant on top (below).
+/** How a host other than the search screen embeds the panes; the search screen passes none. */
+export interface PanelEmbedding {
+  /** Leave focus where the host put it: the panes' composers don't take it. */
+  suppressAutoFocus?: boolean;
+  /** A channel whose composer the host already shows, so its pane leaves its own out. */
+  composerChannelId?: string;
+}
+
 interface BasePanelProps {
   onClose: () => void;
+  embedding?: PanelEmbedding;
 }
 
 interface SearchResultsSidePanelProps extends BasePanelProps {
@@ -36,6 +47,7 @@ interface SearchResultsSidePanelProps extends BasePanelProps {
 export function SearchResultsSidePanel({
   panel,
   onClose,
+  embedding,
 }: SearchResultsSidePanelProps): ReactElement {
   // Single cast at the dispatch boundary is the standard idiom for a registry over a
   // discriminated union — each renderer is typed to its own panel variant in PANEL_RENDERERS.
@@ -44,7 +56,7 @@ export function SearchResultsSidePanel({
   ) => ReactElement;
   return (
     <div className='h-full flex flex-col min-h-0 bg-background'>
-      <Renderer panel={panel} onClose={onClose} />
+      <Renderer panel={panel} onClose={onClose} {...(embedding && { embedding })} />
     </div>
   );
 }
@@ -62,6 +74,7 @@ type PanelRegistry = {
   canvas: (props: CanvasPanelProps) => ReactElement;
   attachment: (props: AttachmentPanelProps) => ReactElement;
   deskTicket: (props: DeskTicketPanelProps) => ReactElement;
+  recording: (props: RecordingPanelProps) => ReactElement;
 };
 
 // kind → renderer. New panel kinds plug in here (mirrors the SidePanelState union).
@@ -72,6 +85,7 @@ const PANEL_RENDERERS: PanelRegistry = {
   canvas: CanvasPanel,
   attachment: AttachmentPanel,
   deskTicket: DeskTicketPanel,
+  recording: RecordingPanel,
 };
 
 // ————————————————————————————————————————————————————————————————
@@ -117,12 +131,14 @@ interface ChannelPanelProps extends BasePanelProps {
   panel: ChannelPanelState;
 }
 
-function ChannelPanel({ panel, onClose }: ChannelPanelProps): ReactElement {
+function ChannelPanel({ panel, onClose, embedding }: ChannelPanelProps): ReactElement {
   return (
     <ConversationPanelV2
       channelId={panel.channelId}
       previousChannelId={null}
       useLocalTabState
+      {...(embedding?.suppressAutoFocus && { suppressInputAutoFocus: true })}
+      {...(panel.channelId === embedding?.composerChannelId && { hideComposer: true })}
       {...(panel.conversationId !== undefined && {
         linkedConversationIdOverride: panel.conversationId,
       })}
@@ -136,10 +152,11 @@ interface ThreadPanelProps extends BasePanelProps {
   panel: ThreadPanelState;
 }
 
-function ThreadPanel({ panel, onClose }: ThreadPanelProps): ReactElement {
+function ThreadPanel({ panel, onClose, embedding }: ThreadPanelProps): ReactElement {
   const navigate = useNavigate();
   return (
     <ThreadMessages
+      {...(embedding?.suppressAutoFocus && { skipInputAutoFocus: true })}
       channelId={panel.thread.channelId}
       conversationId={panel.thread.conversationId}
       matchedMessageId={panel.thread.matchedMessageId ?? null}
@@ -220,9 +237,14 @@ interface DeskTicketPanelProps extends BasePanelProps {
 // useParams/useSearchParams/location.state, while useNavigate keeps hitting the real router — so the rare
 // in-ticket edit navigations (e.g. unmerge) open the full app instead of blanking the pane.
 function DeskTicketPanel({ panel, onClose }: DeskTicketPanelProps): ReactElement {
-  const { pathname } = useLocation();
+  // A descendant <Routes> matches what is left after its parent route's matched base,
+  // so the synthetic path hangs off that base. The full pathname can run past it — the
+  // composer's related-context popup sits under a route whose splat holds the open
+  // thread — and would leave a remainder the ticket route never matches.
+  const { matches } = useContext(UNSAFE_RouteContext);
+  const base = (matches[matches.length - 1]?.pathnameBase ?? '/').replace(/\/$/, '');
   const ticketLocation = {
-    pathname: `${pathname}/ticket/${panel.channelId}/${panel.ticketXyneId}`,
+    pathname: `${base}/ticket/${panel.channelId}/${panel.ticketXyneId}`,
     search: panel.mailId ? `?mail=${panel.mailId}` : '',
     hash: '',
     state: { conversationId: panel.conversationId, ticketId: panel.ticketId },
@@ -245,6 +267,28 @@ function DeskTicketPanel({ panel, onClose }: DeskTicketPanelProps): ReactElement
             element={<ActivitySupportTicket showAdjacentNav={false} />}
           />
         </Routes>
+      </div>
+    </>
+  );
+}
+
+interface RecordingPanelProps extends BasePanelProps {
+  panel: RecordingPanelState;
+}
+
+// The recording screen as the Activity panel embeds it, handed the id directly since
+// there is no /recordings route here, and told that "back" means closing the pane.
+function RecordingPanel({ panel, onClose }: RecordingPanelProps): ReactElement {
+  return (
+    <>
+      <PanelCloseHeader
+        label='Close recording'
+        trackName='CLOSE_RECORDING_PANEL'
+        title={panel.title}
+        onClose={onClose}
+      />
+      <div className='flex-1 min-h-0 overflow-hidden'>
+        <RecordingDetailRoute embedded recordingId={panel.externalId} onBack={onClose} />
       </div>
     </>
   );

@@ -3,6 +3,9 @@ import type { ConversationArtifact } from "@prisma/client";
 import { prisma } from "../db.js";
 import { orgIdForSpacesUser } from "./users-jit.js";
 import { createLogger } from "../logger.js";
+import { signalArtifacts } from "./panel-signals.js";
+import { baseConversationId, checkConversationAccess } from "./conversation-access.js";
+import { isDirectChatConversation } from "./conversation-kind.js";
 
 const log = createLogger("conversation-artifacts");
 
@@ -177,7 +180,7 @@ export async function recordConversationArtifact(
     orgId,
   });
 
-  return prisma.conversationArtifact.upsert({
+  const recorded = await prisma.conversationArtifact.upsert({
     where: {
       conversationId_kind_refId: { conversationId, kind: input.kind, refId },
     },
@@ -200,6 +203,9 @@ export async function recordConversationArtifact(
       status: "ACTIVE",
     },
   });
+  // A Xyne AI screen showing this conversation fetches its artifacts afresh.
+  signalArtifacts(conversationId);
+  return recorded;
 }
 
 /** Point an existing artifact row at a new version ref without touching its
@@ -221,29 +227,49 @@ export async function setArtifactVersionRef(args: {
       ...(args.messageId ? { messageId: args.messageId } : {}),
     },
   });
+  if (result.count > 0) signalArtifacts(args.conversationId);
   return result.count;
 }
 
 export async function listConversationArtifacts(
   conversationId: string,
-  userId: string,
+  userIds: string | string[],
+  spacesUserId?: string,
 ): Promise<ConversationArtifact[]> {
-  if (!conversationId || !userId) return [];
-  const owns = await userOwnsConversation(conversationId, userId);
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return [];
+  const canSeeAll = await canReadConversation(conversationId, ids, spacesUserId);
   return prisma.conversationArtifact.findMany({
     where: {
       conversationId,
       status: { not: "DELETED" },
-      ...(owns ? {} : { createdByUserId: userId }),
+      // Artifact/ownership rows may be keyed by EITHER id form of the user
+      // (canonical Claw id or the raw Spaces alias) — match all.
+      ...(canSeeAll ? {} : { createdByUserId: { in: ids } }),
     },
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
   });
 }
 
-export async function userOwnsConversation(conversationId: string, userId: string): Promise<boolean> {
-  if (!conversationId || !userId) return false;
+// XYNE-66344: anyone Spaces lets into the thread (channel member, or a public
+// channel in their workspace) sees every artifact, not just their own. Direct
+// chats have no Spaces row, and "denied"/"unknown" verdicts never widen access.
+export async function canReadConversation(
+  conversationId: string,
+  userIds: string[],
+  spacesUserId?: string,
+): Promise<boolean> {
+  if (await userOwnsConversation(conversationId, userIds)) return true;
+  const base = baseConversationId(conversationId);
+  if (!base || !spacesUserId || isDirectChatConversation(base)) return false;
+  return (await checkConversationAccess(base, spacesUserId)) === "ok";
+}
+
+export async function userOwnsConversation(conversationId: string, userIds: string | string[]): Promise<boolean> {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return false;
   const message = await prisma.chatMessage.findFirst({
-    where: { conversationId, userId },
+    where: { conversationId, userId: { in: ids } },
     select: { id: true },
   });
   return message !== null;

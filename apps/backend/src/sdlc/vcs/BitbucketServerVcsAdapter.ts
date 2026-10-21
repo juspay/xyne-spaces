@@ -9,7 +9,6 @@ import type {
   PullRequestResult,
   RepositoryInspection,
   RepositoryReach,
-  SourceLineRange,
   ValidatedCredential,
   VcsProviderAdapter,
 } from './types';
@@ -351,22 +350,6 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
     };
   }
 
-  async verifyRemoteCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    branch: string,
-    commitHash: string
-  ): Promise<void> {
-    const head = await this.resolveBranchHead(token, repository, branch);
-    if (head.toLowerCase() !== commitHash.toLowerCase()) {
-      throw new VcsProviderError(
-        'BITBUCKET_REMOTE_COMMIT_MISMATCH',
-        'Remote branch does not point to the submitted commit',
-        409
-      );
-    }
-  }
-
   async resolveBranchHead(
     token: string | undefined,
     repository: ParsedRepository,
@@ -412,66 +395,6 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
         : {}),
       errorPrefix: 'BITBUCKET',
     });
-  }
-
-  async verifyPathsAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    paths: string[]
-  ): Promise<void> {
-    this.requireCommit(commitHash);
-    for (const path of [...new Set(paths)]) {
-      this.requirePath(path);
-      try {
-        await this.request(
-          `${this.repoPath(repository)}/browse/${this.encodePath(path)}?at=${encodeURIComponent(commitHash)}&limit=1`,
-          token
-        );
-      } catch (error) {
-        if (error instanceof VcsProviderError && error.httpStatus === 404) {
-          throw new VcsProviderError(
-            'INVALID_SOURCE_PATH',
-            `[INVALID_SOURCE_PATH] Source path does not exist at the assigned ref: ${path}`,
-            400
-          );
-        }
-        throw error;
-      }
-    }
-  }
-
-  async verifySourceRangesAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    references: SourceLineRange[]
-  ): Promise<void> {
-    this.requireCommit(commitHash);
-    for (const reference of references) {
-      if (!reference.startLine) continue;
-      this.requirePath(reference.path);
-      const lastLine = Math.max(reference.startLine, reference.endLine ?? reference.startLine);
-      // Asking browse for just the last cited line proves the range without paging the file.
-      const page = await this.request<{ lines?: unknown[] }>(
-        `${this.repoPath(repository)}/browse/${this.encodePath(reference.path)}?at=${encodeURIComponent(commitHash)}&start=${lastLine - 1}&limit=1`,
-        token
-      );
-      if (!Array.isArray(page.lines)) {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] Source cannot be line-addressed: ${reference.path}`,
-          400
-        );
-      }
-      if (page.lines.length === 0) {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] ${reference.path} has fewer than ${lastLine} lines at the assigned ref`,
-          400
-        );
-      }
-    }
   }
 
   validatePullRequestUrl(repository: ParsedRepository, raw: string): boolean {
@@ -521,22 +444,6 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
 
   private repoPath(repository: ParsedRepository): string {
     return `/rest/api/1.0/projects/${encodeURIComponent(repository.owner)}/repos/${encodeURIComponent(repository.name)}`;
-  }
-
-  private encodePath(path: string): string {
-    return path.split('/').map(encodeURIComponent).join('/');
-  }
-
-  private requireCommit(commitHash: string): void {
-    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
-      throw new VcsProviderError('BITBUCKET_COMMIT_INVALID', 'Invalid Git commit identity', 400);
-    }
-  }
-
-  private requirePath(path: string): void {
-    if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
-      throw new VcsProviderError('BITBUCKET_PATH_INVALID', `Invalid repository path: ${path}`, 400);
-    }
   }
 
   private personalTokenRequired(): VcsProviderError {

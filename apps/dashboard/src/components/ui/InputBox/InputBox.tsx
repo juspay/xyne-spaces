@@ -76,6 +76,7 @@ import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
@@ -242,6 +243,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelId,
       conversationId,
       onSendMessage,
+      clearOnSend = true,
       onContentChange,
       onCancel,
       mentionItems = [],
@@ -292,6 +294,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      headerSlot,
+      borderActivity,
       slashCommandArtifactCommand,
       slashCommandArtifactChannelLabel,
       onCancelSlashCommandArtifact,
@@ -464,17 +468,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useShortcutById('composer.voiceInput', () => voiceInputRef.current?.toggle());
 
+    // Not while full-page search covers the composer: its Esc is full page's.
+    const coverage = usePageCoverage();
     useEffect(() => {
       if (!isVoiceRecording) return;
       const onKeyDown = (e: KeyboardEvent): void => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !coverage.isCovered()) {
           e.stopPropagation();
           voiceInputRef.current?.toggle();
         }
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [isVoiceRecording]);
+    }, [isVoiceRecording, coverage]);
 
     const artifactComposerDefinition = getSlashCommandArtifactDefinition(
       slashCommandArtifactCommand,
@@ -483,14 +489,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     useEffect(() => {
       if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
       const onKeyDown = (event: KeyboardEvent): void => {
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || coverage.isCovered()) return;
         event.preventDefault();
         event.stopPropagation();
         onCancelSlashCommandArtifact();
       };
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact, coverage]);
 
     const handleTyping = onTyping;
 
@@ -759,11 +765,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
       content: value || '',
       editable: !isSending,
-      onCreate: ({ editor }) => {
-        const initialText = editor.getText().trim();
-        setContent(initialText.length > 0 ? 'has-content' : '');
-        updateEmojiSizeClass(editor);
-      },
       autofocus: autoFocus ? autoFocus : null,
       onFocus: () => {
         setIsFocused(true);
@@ -1216,14 +1217,26 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
     });
 
+    // What the editor starts with, read once it exists. It is made during the first
+    // render, so onCreate would set this state before the component had mounted.
+    // Effects here can re-run on an editor TipTap has already destroyed (React
+    // re-runs effects when it re-shows a tree it hid, e.g. under Suspense, and
+    // useEditor destroys on cleanup), so each one skips a destroyed editor.
     useEffect(() => {
-      editor?.setEditable(!disabled && !isSending, false);
+      if (!editor || editor.isDestroyed) return;
+      setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, updateEmojiSizeClass]);
+
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+      editor.setEditable(!disabled && !isSending, false);
     }, [editor, disabled, isSending]);
 
     // Keep mounted, non-focused editors in sync when another InputBox updates
     // the shared draft value for this lookup id. Skip focused editors where change is happening.
     useEffect(() => {
-      if (!editor || editor.isFocused || value === undefined) return;
+      if (!editor || editor.isDestroyed || editor.isFocused || value === undefined) return;
 
       const nextValue = value;
       if (lastAppliedValueRef.current === nextValue) return;
@@ -1398,6 +1411,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
 
+          if (!clearOnSend) return;
+
           // Tracked here, not on the Send button: Enter, the button, the mobile
           // editor and shortcuts all land in this function, and only a send that
           // succeeded should count.
@@ -1429,6 +1444,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         editor,
         allAttachments,
         onSendMessage,
+        clearOnSend,
         isSending,
         attachedCanvas,
         hasSendableContent,
@@ -1722,12 +1738,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {dockSlot}
 
         <div
-          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          className={
+            isVoiceRecording
+              ? 'xyne-voice-border-wrap'
+              : borderActivity !== undefined && !isMobile
+                ? 'xyne-related-scan'
+                : undefined
+          }
+          data-active={borderActivity && !isVoiceRecording ? 'true' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative
+            overflow-hidden transition flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
@@ -1767,6 +1790,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 </button>
               </div>
             )}
+            {!isMobile && headerSlot}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
@@ -2007,7 +2031,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                             aria-label='Add content'
                             disabled={disabled || isSending}
                           >
@@ -2097,7 +2121,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
@@ -2121,7 +2145,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
                       >
@@ -2210,7 +2234,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2254,6 +2278,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             <DropdownMenuTrigger asChild>
                               <button
                                 type='button'
+                                aria-label='Send options'
                                 disabled={disabled || sendDisabled || isSending}
                                 className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                   hasSendableContent && !sendDisabled
@@ -2297,7 +2322,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2347,6 +2372,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <DropdownMenuTrigger asChild>
                                 <button
                                   type='button'
+                                  aria-label='Schedule for later'
                                   disabled={disabled || isSending || !hasSendableContent}
                                   className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                     hasSendableContent

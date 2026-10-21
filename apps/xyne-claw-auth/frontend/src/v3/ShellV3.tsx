@@ -114,6 +114,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Agents",    path: "/v3/agents",    icon: RobotIcon },
       { label: "MCPs",          path: "/v3/mcp",       icon: PlugsConnectedIcon },
+      { label: "MCP Registry",  path: "/v3/gateway-registry", icon: PlugsConnectedIcon },
       { label: "Skills",       path: "/v3/skills",    icon: WrenchIcon },
       { label: "Subagents",  path: "/v3/subagents", icon: TreeStructureIcon },
       { label: "Channels",     path: "/v3/gateways",  icon: ShareNetworkIcon },
@@ -370,11 +371,13 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
     });
   };
 
-  if (auth.status !== "authenticated") {
+  // While auth resolves, render the full layout with a placeholder profile:
+  // swapping bare `children` for the layout would remount the routed page.
+  if (auth.status === "unauthenticated") {
     return <>{children}</>;
   }
 
-  const user = auth.user;
+  const user = auth.status === "authenticated" ? auth.user : null;
   const pathname = location.pathname;
 
   const isRailActive = (_label: string, path: string) => pathname.startsWith(path);
@@ -442,7 +445,7 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
               <div className="flex justify-center py-[10px] border-b border-xyne-border-subtle">
                 <button
                   onClick={toggleCollapsed}
-                  title={`${user.name} — click to expand`}
+                  title={user ? `${user.name} — click to expand` : "Expand sidebar"}
                   className="w-[28px] h-[28px] flex items-center justify-center rounded-[6px] text-xyne-fg-muted hover:bg-xyne-surface hover:text-xyne-fg-secondary transition-colors"
                 >
                   <DotsThreeVerticalIcon size={16} weight="bold" />
@@ -451,10 +454,19 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
             ) : (
               /* Expanded: avatar + name + theme icon + collapse arrow inline */
               <div className="flex items-center gap-[6px] px-[12px] pt-[14px] pb-[10px] border-b border-xyne-border-subtle">
-                <Avatar name={user.name} size={26} shape="circle" />
-                <span className="flex-1 min-w-0 truncate text-[13px] font-medium text-xyne-fg-primary">
-                  {user.name}
-                </span>
+                {user ? (
+                  <>
+                    <Avatar name={user.name} size={26} shape="circle" />
+                    <span className="flex-1 min-w-0 truncate text-[13px] font-medium text-xyne-fg-primary">
+                      {user.name}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span aria-hidden className="h-[26px] w-[26px] shrink-0 animate-pulse rounded-full bg-xyne-surface" />
+                    <span aria-hidden className="h-3 flex-1 min-w-0 animate-pulse rounded bg-xyne-surface" />
+                  </>
+                )}
                 <button
                   onClick={toggleTheme}
                   title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}

@@ -361,6 +361,7 @@ export const ConditionBuilder = ({
           {condition ? 'Edit Condition' : 'Add Condition'}
         </span>
         <Button
+          aria-label='Close condition builder'
           onClick={onClose}
           variant='ghost'
           size='iconSm'

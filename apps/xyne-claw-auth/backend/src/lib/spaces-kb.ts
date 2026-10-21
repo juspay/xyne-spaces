@@ -49,9 +49,10 @@ export interface KbCollectionNode {
 /**
  * Build a SpacesAuthContext for `userId` from the live spaces session DB.
  * Returns null if the user has no active session (no read possible).
+ * `workspaceHint` disambiguates users holding two Spaces memberships.
  */
-async function authForUser(userId: string): Promise<SpacesAuthContext | null> {
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+async function authForUser(userId: string, workspaceHint?: string | null): Promise<SpacesAuthContext | null> {
+  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceHint);
   if (!auth) return null;
   return { token: auth.token, sessionId: auth.sessionId, workspaceId: auth.workspaceId };
 }
@@ -64,9 +65,9 @@ async function authForUser(userId: string): Promise<SpacesAuthContext | null> {
  */
 export async function fetchAccessibleKb(
   userId: string,
-  options: { includeItems?: boolean; scopeType?: string; scopeId?: string } = {},
+  options: { includeItems?: boolean; scopeType?: string; scopeId?: string; workspaceHint?: string | null | undefined } = {},
 ): Promise<KbCollectionNode[] | null> {
-  const auth = await authForUser(userId);
+  const auth = await authForUser(userId, options.workspaceHint);
   if (!auth) return null;
 
   const qs = new URLSearchParams();

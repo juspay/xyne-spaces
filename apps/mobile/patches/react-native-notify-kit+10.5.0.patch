@@ -1,0 +1,49 @@
+diff --git a/android/src/main/java/app/notifee/core/NotificationManager.java b/android/src/main/java/app/notifee/core/NotificationManager.java
+index 1549dce..ecbda45 100644
+--- a/android/src/main/java/app/notifee/core/NotificationManager.java
++++ b/android/src/main/java/app/notifee/core/NotificationManager.java
+@@ -327,6 +327,30 @@ class NotificationManager {
+ 
+             builder.setVisibility(androidModel.getVisibility());
+ 
++            // Xyne: private message and reminder notifications show a generic placeholder on a
++            // secure lock screen, so the alert is visible without its sender or text.
++            String lockScreenText = lockScreenPlaceholderFor(androidModel);
++            if (lockScreenText != null) {
++              Context context = getApplicationContext();
++              NotificationCompat.Builder publicBuilder =
++                  new NotificationCompat.Builder(context, androidModel.getChannelId())
++                      .setContentTitle(
++                          context.getApplicationInfo().loadLabel(context.getPackageManager()))
++                      .setContentText(lockScreenText)
++                      .setCategory(androidModel.getCategory())
++                      .setShowWhen(androidModel.getShowTimestamp())
++                      .setSmallIcon(
++                          smallIconId != null
++                              ? smallIconId
++                              : ResourceUtils.getFallbackSmallIconId(context));
++              if (androidModel.getColor() != null) {
++                publicBuilder.setColor(androidModel.getColor());
++              }
++              long publicTimestamp = androidModel.getTimestamp();
++              if (publicTimestamp > -1) publicBuilder.setWhen(publicTimestamp);
++              builder.setPublicVersion(publicBuilder.build());
++            }
++
+             long timestamp = androidModel.getTimestamp();
+             if (timestamp > -1) builder.setWhen(timestamp);
+ 
+@@ -1170,4 +1194,13 @@ class NotificationManager {
+             },
+             LISTENING_CACHED_THREAD_POOL);
+   }
++
++  /** Xyne: lock-screen placeholder for private chat and reminder notifications, else null. */
++  private static String lockScreenPlaceholderFor(NotificationAndroidModel androidModel) {
++    if (androidModel.getVisibility() != NotificationCompat.VISIBILITY_PRIVATE) return null;
++    String category = androidModel.getCategory();
++    if (NotificationCompat.CATEGORY_MESSAGE.equals(category)) return "New message";
++    if (NotificationCompat.CATEGORY_REMINDER.equals(category)) return "New reminder";
++    return null;
++  }
+ }

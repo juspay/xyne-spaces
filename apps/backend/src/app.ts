@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { ttsLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -22,7 +22,6 @@ import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
-import jiraCompatRoutes, { JIRA_COMPAT_MOUNT } from '@/routes/jiraCompat';
 import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
@@ -33,6 +32,7 @@ import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
+import secretsVaultRoutes from '@/routes/secretsVault';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
@@ -71,9 +71,11 @@ import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
+import callAdminRoutes from '@/routes/callAdmin';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
+import userContactsRoutes from '@/routes/userContacts';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
@@ -99,11 +101,17 @@ import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
+import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes from '@/routes/vespaSearch';
+import vespaSearchRoutes, {
+  discussionTitleRouter,
+  relatedContextRouter,
+} from '@/routes/vespaSearch';
+import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -113,7 +121,6 @@ import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
-import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
 import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
@@ -132,6 +139,7 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
@@ -146,6 +154,9 @@ import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInt
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
+import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
+import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -169,6 +180,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -178,11 +190,13 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
@@ -198,8 +212,10 @@ import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } fro
 import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
+import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
 import merchantRoutes from '@/routes/merchants';
+import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -207,7 +223,9 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
-import { encryptedFieldsConfig } from '@xyne/shared';
+import sdkSsoRoutes from '@/routes/sdk-sso';
+import { authenticateSdk } from '@/middleware/sdkAuth';
+import channelsDeskRoutes from '@/routes/channelsDesks';
 
 
 export class App {
@@ -321,26 +339,6 @@ export class App {
 
     this.app.use('/migrate/api/migration', migrationRoutes);
 
-    // JIRA-compatibility facade (public, read-only): lets Bitbucket linkify
-    // Spaces ticket keys (e.g. TTS-0001) and route /browse/<KEY> to the Spaces
-    // ticket instead of Atlassian JIRA. Mounted UNDER the existing per-workspace
-    // Bitbucket webhook path (the only path the ingress forwards), so the
-    // Application Link base URL is <host>/api/webhooks/bitbucket/<workspaceId>
-    // and Bitbucket appends /rest/* and /browse/*.
-    //
-    // Ordering matters: this must stay BEFORE the /api/webhooks raw-body mount.
-    // The shim defines only GET routes, so the webhook POST /bitbucket/:workspaceId
-    // matches no route here (Express matches method AND path) and falls through to
-    // the HMAC-verified handler below. Deliberately NO express.raw — buffering the
-    // body here would leave the webhook's raw parser with an empty stream and break
-    // its HMAC check. Endpoints are unauthenticated (Bitbucket is external, no
-    // client cert) and workspace-scoped; restrict to Bitbucket egress IPs at the
-    // ingress if the project-code / ticket-title exposure is a concern.
-    this.app.use(JIRA_COMPAT_MOUNT,
-      webhookLimiter,
-
-      jiraCompatRoutes);
-
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
       express.raw({ type: 'application/json' }),
@@ -370,10 +368,14 @@ export class App {
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
     if (config.sdk.enabled) {
+      // Xyne SSO device flow, mounted before authMiddleware: init/poll/consent
+      // are public, status/approve authenticate the dashboard session themselves.
+      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
-      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
     }
+    this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -395,6 +397,7 @@ export class App {
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -443,6 +446,7 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    this.app.use('/api/audit-logs', workspaceScopedRoute, auditLogRoutes);
     // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
@@ -524,15 +528,18 @@ export class App {
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
+    // Calls admin panel — must be before /api/calls, whose /:callId routes would shadow it
+    this.app.use('/api/calls/admin', authMiddleware.authenticate, callAdminRoutes);
     // Claw MCP route (user + app auth) — must be before /api/calls
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/oauth', calendarOAuthRoutes); // Calendar-only OAuth (init is authenticated; callbacks use bound state)
     this.app.use('/api/drive/oauth', driveOAuthRoutes); // KB Drive import OAuth (init is authenticated; callback uses bound state)
+    this.app.use('/api/user-contacts', userContactsRoutes); // Per-user contacts import (invite dialog; init is authenticated, callbacks use bound state)
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
-    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsLimiter, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -604,6 +611,48 @@ export class App {
         res.status(500).json({ error: 'Internal error' });
       }
     });
+    // Conversation-access check for claw: claw sessions are keyed by
+    // conversationId (not userId), so claw must verify the caller may access a
+    // conversation before binding its session. Returns whether the conversation
+    // exists and whether the user is a member of its channel (or it is a PUBLIC
+    // channel in the user's workspace). Spaces owns this ACL.
+    this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
+        if (!conversationId || !userId) {
+          res.status(400).json({ error: 'conversationId and userId are required' });
+          return;
+        }
+        const prisma = DatabaseClient.getInstance();
+        const conv = await prisma.conversation.findUnique({
+          where: { conversationId },
+          select: { channelId: true },
+        });
+        if (!conv) {
+          res.json({ exists: false, canAccess: false });
+          return;
+        }
+        const participant = await prisma.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId: conv.channelId, userId } },
+          select: { id: true },
+        });
+        let canAccess = participant !== null;
+        if (!canAccess) {
+          const channel = await prisma.channel.findUnique({
+            where: { id: conv.channelId },
+            select: { visibility: true, workspaceId: true },
+          });
+          if (channel?.visibility === 'PUBLIC') {
+            const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+            canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+          }
+        }
+        res.json({ exists: true, canAccess });
+      } catch (err) {
+        logger.error('[conversation-access] failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
@@ -624,19 +673,6 @@ export class App {
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
-
-    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
-    // encryption service fetches this and caches it instead of importing @xyne/shared.
-    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
-      const encryptedFields = Object.fromEntries(
-        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
-          table,
-          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
-        ]),
-      );
-      res.json({ encryptedFields });
-    });
-
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -648,9 +684,23 @@ export class App {
       validateS2SKey,
       handleDeskReportCallback,
     );
+    // Claw's terminal result for a call AI run (CALL_AI_USE_CLAW_AGENT); the
+    // dispatching worker picks it up from Redis.
+    this.app.post(
+      `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
+      validateS2SKey,
+      handleClawCallAiCallback,
+    );
+    this.app.post(
+      '/api/internal/desk-canvas/callback/:canvasId',
+      validateS2SKey,
+      handleDeskThreadCanvasCallback,
+    );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
+    // User deactivation cleanup, called by an out-of-cluster service (own secret)
+    this.app.use('/api/internal/users', userDeactivationRoutes);
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
@@ -663,6 +713,7 @@ export class App {
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
+    this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -677,6 +728,8 @@ export class App {
 
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
+
+    this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
@@ -742,6 +795,7 @@ export class App {
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
     this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
+    this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
@@ -772,10 +826,16 @@ export class App {
     this.app.use('/api/drafts', authMiddleware.authenticate, draftRoutes);
 
     // Vespa search routes (auth required)
+    // Ahead of the general mount, so a lookup is answered here and nothing else runs.
+    this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
+    this.app.use(
+      '/api/vespaSearch/discussion-title',
+      authMiddleware.authenticate,
+      discussionTitleRouter
+    );
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
-    // Product Insights routes (auth and ACL required)
-    this.app.use('/api/productInsights', authMiddleware.authenticate, productInsightsRoutes);
+    this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -904,6 +964,9 @@ export class App {
         (async () => {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
+          // A sweep job does nothing but enqueue classification jobs.
+          logger.info('Initializing auto-assign sweep queue...');
+          await autoAssignSweepQueue.initialize();
         })(),
       ]);
 
@@ -950,6 +1013,12 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      logger.info('Initializing auto-assign sweep queue...');
+      await autoAssignSweepQueue.initialize();
+
+      // Call transcription is producer-only here (lazy queue on enqueue); the consumer
+      // runs in the worker process — see ENABLE_CALL_TRANSCRIPTION_WORKER.
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
@@ -1044,11 +1113,15 @@ export class App {
       );
     }
 
-    try {
-      await registerAllExternalSources();
-    } catch (error) {
-      logger.error('Failed to register external sources:', error);
-      logger.warn('Continuing startup without external sources...');
+    if (config.enableExternalSourceRegistration) {
+      try {
+        await registerAllExternalSources();
+      } catch (error) {
+        logger.error('Failed to register external sources:', error);
+        logger.warn('Continuing startup without external sources...');
+      }
+    } else {
+      logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
 
     // Register workflow definitions
@@ -1119,6 +1192,11 @@ export class App {
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
 
+    if (config.decisionEval.enabled) {
+      logger.info('Initializing decision evaluation queue (producer)...');
+      await decisionEvaluationQueue.initialize();
+    }
+
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
     await heicRenditionQueue.initialize();
@@ -1179,6 +1257,9 @@ export class App {
       // Close on-call rotation queue
       await onCallRotationQueue.close();
 
+      // Close auto-assign sweep queue
+      await autoAssignSweepQueue.close();
+
       // Close scheduled message queue
       await scheduledMessageQueue.close();
 
@@ -1187,6 +1268,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close call transcription queue
+      await callTranscriptionQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');

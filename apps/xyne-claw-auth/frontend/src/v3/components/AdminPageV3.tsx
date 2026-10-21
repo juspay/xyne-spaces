@@ -38,6 +38,8 @@ import { Dialog } from "./ui/Dialog";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Menu, MenuItem } from "./ui/Menu";
 import { useSnackbar } from "./ui/Snackbar";
+import { SandboxReposTab } from "./SandboxReposTab";
+import { extensionAdminTabs } from "./extensionAdminTabs";
 
 import {
   listAdminRoles,
@@ -61,6 +63,9 @@ import {
   listAdminScheduledJobs,
   deleteScheduledJob,
   listMcpPublishRequests,
+  listGatewayRequests,
+  approveGatewayRequest,
+  rejectGatewayRequest,
   approveServerPublish,
   rejectServerPublish,
   listMcpEditRequests,
@@ -92,20 +97,23 @@ import {
   type AdminMcpGlobalCredsDetail,
   type SlackAgentStatus,
 } from "../../lib/api";
-import type { Agent, AgentLight, McpServer, CredentialField } from "../../lib/types";
+import type { Agent, AgentLight, McpServer, CredentialField, GatewayServiceRequest } from "../../lib/types";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
 type TabKey =
   | "requests"
   | "connectors"
+  | "gatewayreqs"
   | "workflowreqs"
   | "agents"
   | "admins"
   | "audit"
   | "usage"
   | "scheduled"
-  | "globalmcp";
+  | "globalmcp"
+  | "sandboxrepos"
+  | `ext:${string}`;
 
 interface Props {
   userId: string;
@@ -372,6 +380,52 @@ export function AdminPageV3({ userId }: Props) {
       loadMcpEditRequests();
     }
   }, [tab, loadMcpRequests, loadMcpEditRequests]);
+
+  /* MCP Gateway registration requests */
+  const [gatewayRequests, setGatewayRequests] = useState<GatewayServiceRequest[]>([]);
+  const [gatewayRequestsLoading, setGatewayRequestsLoading] = useState(false);
+  const [gatewayActioningId, setGatewayActioningId] = useState<string | null>(null);
+
+  const loadGatewayRequests = useCallback(async () => {
+    setGatewayRequestsLoading(true);
+    try {
+      setGatewayRequests(await listGatewayRequests());
+    } catch (err) {
+      console.error("[admin] gateway registry requests load error:", err);
+      showSnackbar({ variant: "error", title: "Failed to load gateway requests" });
+    } finally {
+      setGatewayRequestsLoading(false);
+    }
+  }, [showSnackbar]);
+  // Load once on mount so the "Gateway Registry (n)" tab shows its count upfront
+  // (not only after the tab is clicked), plus refresh when the tab is opened.
+  useEffect(() => { void loadGatewayRequests(); }, [loadGatewayRequests]);
+  useEffect(() => { if (tab === "gatewayreqs") loadGatewayRequests(); }, [tab, loadGatewayRequests]);
+
+  const handleApproveGateway = async (id: string) => {
+    setGatewayActioningId(id);
+    try {
+      await approveGatewayRequest(id);
+      showSnackbar({ variant: "success", title: "Approved — service is now live" });
+      await loadGatewayRequests();
+    } catch (err) {
+      showSnackbar({ variant: "error", title: "Approve failed", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGatewayActioningId(null);
+    }
+  };
+  const handleRejectGateway = async (id: string) => {
+    setGatewayActioningId(id);
+    try {
+      await rejectGatewayRequest(id);
+      showSnackbar({ variant: "success", title: "Request rejected" });
+      await loadGatewayRequests();
+    } catch (err) {
+      showSnackbar({ variant: "error", title: "Reject failed", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGatewayActioningId(null);
+    }
+  };
 
   const loadWorkflowRequests = useCallback(async () => {
     setWorkflowRequestsLoading(true);
@@ -1153,6 +1207,7 @@ export function AdminPageV3({ userId }: Props) {
     () => [
       { id: "requests", label: requests.length > 0 ? `Requests (${requests.length})` : "Requests" },
       { id: "connectors", label: (mcpRequests.length + mcpEditRequests.length) > 0 ? `MCP Publish (${mcpRequests.length + mcpEditRequests.length})` : "MCP Publish" },
+      { id: "gatewayreqs", label: gatewayRequests.length > 0 ? `Gateway Registry (${gatewayRequests.length})` : "Gateway Registry" },
       { id: "workflowreqs", label: workflowRequests.length > 0 ? `Workflow Requests (${workflowRequests.length})` : "Workflow Requests" },
       { id: "agents", label: `Agents (${agents.length})` },
       { id: "admins", label: `Admins (${admins.length})` },
@@ -1160,8 +1215,10 @@ export function AdminPageV3({ userId }: Props) {
       { id: "usage", label: "Usage" },
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
+      { id: "sandboxrepos", label: "Sandbox Repos" },
+      ...extensionAdminTabs.map((extensionTab): TabItem<TabKey> => ({ id: `ext:${extensionTab.id}`, label: extensionTab.label })),
     ],
-    [requests.length, mcpRequests.length, mcpEditRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
+    [requests.length, mcpRequests.length, mcpEditRequests.length, gatewayRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
 
   /* ── Render ───────────────────────────────────────────────────── */
@@ -1286,6 +1343,40 @@ export function AdminPageV3({ userId }: Props) {
                     onEditApprove={handleApproveMcpEdit}
                     onEditConfirmReject={handleRejectMcpEdit}
                   />
+                )}
+
+                {tab === "gatewayreqs" && (
+                  <div className="mx-auto w-full max-w-3xl px-[24px] py-4">
+                    {gatewayRequestsLoading ? (
+                      <p className="text-[13px] text-xyne-fg-secondary">Loading…</p>
+                    ) : gatewayRequests.length === 0 ? (
+                      <p className="text-[13px] text-xyne-fg-secondary">No pending gateway registration requests.</p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {gatewayRequests.map((r) => (
+                          <div key={r.id} className="flex items-center justify-between rounded-lg border border-xyne-border bg-xyne-surface px-4 py-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-[14px] font-medium text-xyne-fg-primary">{r.serviceName}</span>
+                                <Badge label={`${r.toolCount} tool${r.toolCount === 1 ? "" : "s"}`} />
+                              </div>
+                              <p className="truncate text-[12px] text-xyne-fg-secondary">
+                                {r.backendId} · {r.backendUrl} · token {r.tokenEndpointUrl ?? "—"} · by {r.requestedByUserId}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button variant="primary" size="sm" disabled={gatewayActioningId === r.id} onClick={() => void handleApproveGateway(r.id)}>
+                                {gatewayActioningId === r.id ? "…" : "Approve"}
+                              </Button>
+                              <Button variant="ghost" size="sm" disabled={gatewayActioningId === r.id} onClick={() => void handleRejectGateway(r.id)}>
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {tab === "workflowreqs" && (
@@ -1418,6 +1509,11 @@ export function AdminPageV3({ userId }: Props) {
                     onCancel={setCancelJobTarget}
                     showOrgLabels={allOrgs}
                   />
+                )}
+
+                {tab === "sandboxrepos" && <SandboxReposTab userId={userId} />}
+                {extensionAdminTabs.map((extensionTab) =>
+                  tab === `ext:${extensionTab.id}` ? <extensionTab.Component key={extensionTab.id} userId={userId} /> : null,
                 )}
 
                 {tab === "globalmcp" && (

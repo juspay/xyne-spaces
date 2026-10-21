@@ -15,7 +15,7 @@ for Argo CD and prints how to reach the install.
 
 The ingress addresses are reserved before the network and the cluster are
 built, so the records can be created and propagate while the slow part of the
-build runs. See docs/ingress.md.
+build runs. See docs/concepts/ingress.md.
 
   --env <env>              environment name: the directory <env-dir>/<env>/ with
                            env.conf, 01-infra.tfvars, 02-platform.tfvars and the
@@ -128,7 +128,8 @@ EOF
     log "no reservable address on $CLOUD in $mode mode, continuing"
     return 0
   fi
-  args=(-var-file "$INFRA_TFVARS" "${args[@]}")
+  infra_var_args
+  args=("${INFRA_ARGS[@]}" "${args[@]}")
 
   tf "$INFRA_STACK" init -reconfigure -input=false
   confirm "Reserve the public address(es) for $domain now?" || die "stopped before reserving addresses"
@@ -167,7 +168,8 @@ build_cluster_first() {
 
   log "stage cluster (cloud-lb on gcp needs the node pools before the load balancer)"
   tf "$INFRA_STACK" init -reconfigure -input=false
-  tf "$INFRA_STACK" apply -input=false -auto-approve -var-file "$INFRA_TFVARS" -target module.cluster
+  infra_var_args
+  tf "$INFRA_STACK" apply -input=false -auto-approve "${INFRA_ARGS[@]}" -target module.cluster
 }
 
 if [ "$DO_INFRA" = "1" ]; then
@@ -177,10 +179,15 @@ if [ "$DO_INFRA" = "1" ]; then
   fi
   build_cluster_first
   log "stage 01-infra"
-  tf_plan_apply "$INFRA_STACK" 01-infra -var-file "$INFRA_TFVARS"
+  infra_var_args
+  tf_plan_apply "$INFRA_STACK" 01-infra "${INFRA_ARGS[@]}"
 fi
 
 if [ "$DO_PLATFORM" = "1" ] || [ "$DO_OVERLAY" = "1" ]; then
+  if [ "$DO_INFRA" != "1" ]; then
+    write_backend "$INFRA_STACK" 01-infra
+    tf "$INFRA_STACK" init -reconfigure -input=false
+  fi
   fetch_kubeconfig
 fi
 
@@ -202,9 +209,46 @@ if [ "$DO_OVERLAY" = "1" ]; then
   fi
 fi
 
+argo_settle() {
+  local ns="$1" filter="$2" i
+  for i in $(seq 1 60); do
+    [ -z "$(kubectl -n "$ns" get applications -o json | jq -r "$filter")" ] && return 0
+    sleep 2
+  done
+  log "Argo CD did not settle within 120s; continuing"
+}
+
+restart_argo_syncs() {
+  local ns="$1" app revision stale phase
+  log "refreshing Argo CD Applications and restarting any sync pinned to an older revision"
+  run kubectl -n "$ns" annotate application --all argocd.argoproj.io/refresh=hard --overwrite
+  if [ "$DRY_RUN" = "1" ]; then
+    return 0
+  fi
+  argo_settle "$ns" '.items[] | select(.metadata.annotations["argocd.argoproj.io/refresh"]) | .metadata.name'
+  stale="$(kubectl -n "$ns" get applications -o json | jq -r '.items[]
+    | select(.status.operationState.phase == "Running")
+    | (.status.operationState.operation.sync.revision // "") as $r
+    | select(($r | test("^[0-9a-f]{40}$")) and $r != (.status.sync.revision // ""))
+    | .metadata.name')"
+  for app in $stale; do
+    run kubectl -n "$ns" patch application "$app" --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+  done
+  if [ -n "$stale" ]; then
+    argo_settle "$ns" '.items[] | select(.status.operationState.phase == "Terminating") | .metadata.name'
+  fi
+  phase="$(kubectl -n "$ns" get application xyne-root -o jsonpath='{.status.operationState.phase}')"
+  if [ "$phase" = "Running" ]; then
+    log "xyne-root is already syncing the current revision"
+    return 0
+  fi
+  revision="$(kubectl -n "$ns" get application xyne-root -o jsonpath='{.spec.source.targetRevision}')"
+  run kubectl -n "$ns" patch application xyne-root --type merge -p "$(jq -nc --arg r "$revision" '{operation: {initiatedBy: {username: "setup.sh"}, sync: {revision: $r, prune: true}}}')"
+}
+
 wait_for_argo() {
   local ns="$1" deadline now rows pending
-  run kubectl -n "$ns" wait --for="jsonpath={.status.health.status}=Healthy" application/xyne-root --timeout=600s
+  restart_argo_syncs "$ns"
   printf '+ %s\n' "kubectl -n $ns get applications -o json | jq -r '.items[] | [.metadata.name, .status.sync.status, .status.health.status] | @tsv'"
   if [ "$DRY_RUN" = "1" ]; then
     log "would poll every 30s until every Application is Synced and Healthy or ${ARGO_TIMEOUT}s pass"
@@ -220,9 +264,10 @@ wait_for_argo() {
       log "all Argo CD Applications are Synced and Healthy"
       return 0
     fi
+    kubectl -n "$ns" get applications -o json | jq -r '.items[] | select((.status.sync.status // "") != "Synced" or (.status.health.status // "") != "Healthy") | ([(.status.conditions // [])[].message] + [.status.operationState.message // empty] | map(select(. != "")) | join(" | ") | gsub("\n"; " ")) as $why | select($why != "") | "  \(.metadata.name): \($why[0:200])"'
     now=$(date +%s)
     if [ "$now" -ge "$deadline" ]; then
-      die "$pending Application(s) still not Synced and Healthy after ${ARGO_TIMEOUT}s"
+      die "$pending Application(s) still not Synced and Healthy after ${ARGO_TIMEOUT}s; the reasons are listed above"
     fi
     log "$pending Application(s) pending, checking again in 30s"
     sleep 30
@@ -314,7 +359,12 @@ if [ "$LIVEKIT_ENABLED" = "true" ]; then
   printf '%-22s %s\n' "livekit turn address" "${LIVEKIT_TURN_ADDRESS:-pending}"
 fi
 printf '%-22s %s\n' "argo cd password" "kubectl -n $ARGOCD_NS get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
-printf '%-22s %s\n' "argo cd ui" "kubectl -n $ARGOCD_NS port-forward svc/argocd-server 8080:80 (then http://localhost:8080, user admin)"
+if [ "$(tfvar_value "$PLATFORM_TFVARS" argocd_expose)" = "true" ]; then
+  ARGOCD_HOST="$(tfvar_value "$PLATFORM_TFVARS" argocd_host)"
+  printf '%-22s %s\n' "argo cd ui" "https://${ARGOCD_HOST:-argocd.$DOMAIN} (user admin)"
+else
+  printf '%-22s %s\n' "argo cd ui" "kubectl -n $ARGOCD_NS port-forward svc/argocd-server 8080:80 (then http://localhost:8080, user admin)"
+fi
 DNS_TARGET="${PUBLIC_ADDRESS:-<ingress address>}"
 if [ "$INGRESS_MODE" = "external" ]; then
   printf '\n%s\n' "ingress_mode is external, point these records at your load balancer:"

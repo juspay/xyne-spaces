@@ -451,8 +451,17 @@ export async function stopCallForReload(timeoutMs = 3000): Promise<void> {
   });
 }
 
+// A call hosted in the separate call window. Tracked apart from `callActive`:
+// that flag belongs to the main window's renderer and is cleared whenever it
+// reloads, while a call-window call survives a main-window reload untouched.
+let callWindowActive = false;
+
+export function setCallWindowActive(next: boolean): void {
+  callWindowActive = next;
+}
+
 export function isMicOwnedByXyne(): boolean {
-  return active || startingRecording || callActive;
+  return active || startingRecording || callActive || callWindowActive;
 }
 
 export function syncRecordingState(

@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Trash2, ChevronDown, ChevronRight, Link2, Save, X, Plus, Settings, Sparkles, Loader2, Share2, UserPlus, Brain, Plug, Cpu } from "lucide-react";
 import { listAgents, getAgentDetail, updateAgent, listScheduledJobs, deleteScheduledJob, updateScheduledJob, listScheduledJobRuns, getUserChainConfig, setUserChainConfig, listAgentShares, addAgentShare, removeAgentShare, listSandboxRepos, type SandboxRepoOption } from "../lib/api";
+import { isCurrentUser } from "../lib/identity";
 import { PromptVersionHistory } from "./PromptVersionHistory";
 import { ChainWorkflowEditor } from "./ChainWorkflowEditor";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { MemoryTab } from "../v2/components/MemoryTab";
-import { AgentMcpTab } from "./AgentMcpTab";
+import { AgentMcpTabV3 } from "../v3/components/agent-detail/tabs/AgentMcpTabV3";
 import { KnowledgeBasePicker } from "../v3/components/KnowledgeBasePicker";
 import type { Agent, AgentLight, AgentSkill, ScheduledJob, ScheduledJobRun } from "../lib/types";
 
@@ -81,10 +82,10 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
       setJobs(jobList);
       setRuns(runList);
       // Fetch my share record if I'm not the owner
-      if (agentDetail && agentDetail.ownerUserId !== userId) {
+      if (agentDetail && !isCurrentUser(agentDetail.ownerUserId)) {
         try {
           const shares = await listAgentShares(slug, userId);
-          const mine = shares.find((s) => s.userId === userId);
+          const mine = shares.find((s) => isCurrentUser(s.userId));
           setMyShare(mine ? { role: mine.role } : null);
         } catch {
           setMyShare(null);
@@ -103,7 +104,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
 
   // Default to configure tab for editable agents
   useEffect(() => {
-    if (agent && (agent.ownerUserId === userId || (agent.scope === "global" && isAdmin))) {
+    if (agent && (isCurrentUser(agent.ownerUserId) || (agent.scope === "global" && isAdmin))) {
       setActiveTab("configure");
     }
   }, [agent?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,7 +170,7 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
     );
   }
 
-  const isOwner = agent.ownerUserId === userId;
+  const isOwner = isCurrentUser(agent.ownerUserId);
   const isContributor = myShare?.role === "CONTRIBUTOR" || myShare?.role === "EDITOR";
   const canEdit = isOwner || (!!isAdmin) || isContributor;
   const canShare = isOwner || (!!isAdmin);
@@ -394,9 +395,13 @@ export function AgentDetailPage({ userId, isAdmin }: Props) {
         <MemoryTab agentSlug={agent.slug} canDelete={canEdit} />
       )}
 
-      {/* MCPs tab — pin per-agent MCP credentials. Gated on canEdit. */}
+      {/* MCPs tab — pin per-agent MCP credentials. Gated on canEdit.
+          This legacy page is always dark (hardcoded zinc classes), so scope the
+          V3 tab's xyne-* tokens to dark regardless of the global theme. */}
       {activeTab === "mcp" && canEdit && agent && (
-        <AgentMcpTab agentSlug={agent.slug} userId={userId} canEdit={canEdit} />
+        <div className="dark">
+          <AgentMcpTabV3 agentSlug={agent.slug} userId={userId} canEdit={canEdit} />
+        </div>
       )}
 
       {/* Provider tab — agent-level default LLM + shared API credentials.

@@ -104,7 +104,7 @@ If a question can only be answered by something outside Spaces, say so plainly.
 
 Most wrong answers come from one of three failures:
 
-1. Picking the wrong tool (e.g. \`spaces-search\` for tickets).
+1. Picking the wrong tool (e.g. \`spaces-vespa-search\` for tickets).
 2. Forgetting to scope (no \`channelId\`, no \`conversationId\`).
 3. Passing a name or email where the tool wants an ID — or worse, inventing an ID.
 
@@ -124,8 +124,8 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 |---|---|
 | Who am I / what's my user ID | \`spaces-whoami\` |
 | Resolving a person's name → ID | \`spaces-users\` |
-| A specific topic/keyword across messages, files, tickets | \`spaces-search\` |
-| Tickets — status, assignee, priority, board, stage, dates | \`spaces-tickets\` — NOT spaces-search |
+| A specific topic/keyword across messages, files, tickets | \`spaces-vespa-search\` |
+| Tickets — status, assignee, priority, board, stage, dates | \`spaces-tickets\` — NOT spaces-vespa-search |
 | Reading a specific thread | \`spaces-messages\` |
 | One message's reactions / attachments / metadata | \`spaces-message-detail\` |
 | Finding a channel | \`spaces-channels\` |
@@ -133,10 +133,11 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Projects | \`spaces-projects\` |
 | Who's on a project team | \`spaces-project-team-members\` |
 | Boards (for ticket creation) | \`spaces-boards\` |
+| What custom fields a board's tickets carry (a desk's MID, etc.) | \`spaces-board-fields\` |
 | Finding a doc | \`spaces-canvases\` |
 | Reading a doc's contents | \`spaces-read-canvas\` |
 | A call/meeting list — titles/times/status | \`spaces-calls\` |
-| Meeting/call content — decisions, action items, what someone said | \`spaces-meeting-insights\` — NOT spaces-search |
+| Meeting/call content — decisions, action items, what someone said | \`spaces-meeting-insights\` — NOT spaces-vespa-search |
 | The full verbatim transcript of one call — exact quotes, end-to-end read | \`spaces-calls\` with \`callId\` + \`includeTranscript=true\` |
 | Email threads on a desk ticket | \`spaces-emails\` |
 | Files on a thread | \`spaces-thread-attachments\`, then \`spaces-fetch-attachment\` |
@@ -144,6 +145,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | "How/why do we…", SOPs, policies, verified facts | \`memory-search\` **first** |
 | Creating a ticket | \`spaces-create-ticket\` (write) |
 | Updating a ticket | \`spaces-update-ticket\` (write) |
+| Emailing a customer/merchant from a desk ticket | \`spaces-send-ticket-email\` (write) |
 | Scheduling a meeting | \`spaces-schedule-call\` (write) |
 | Posting in a different thread/channel as the user | \`user-send-message\` (write) |
 | Creating a canvas | \`spaces-create-canvas\` (write) |
@@ -173,7 +175,7 @@ When the user attaches a channel/thread/ticket/canvas/call to their message, a "
 
 Always pass the attached IDs explicitly:
 
-- **Channel** attached → \`channelId=<id>\` for \`spaces-tickets\` / \`spaces-activity\` / \`spaces-canvases\` / \`spaces-calls\`; \`in=<id>\` for \`spaces-search\`.
+- **Channel** attached → \`channelId=<id>\` for \`spaces-tickets\` / \`spaces-activity\` / \`spaces-canvases\` / \`spaces-calls\`; \`filters={ channelId: { eq: <id> } }\` for \`spaces-vespa-search\`.
 - **Thread** attached → \`conversationId=<tid>\` for \`spaces-messages\` / \`spaces-emails\` / \`spaces-thread-attachments\`.
 - **Ticket** attached → read its \`conversationId\` with \`spaces-messages\`; narrow further with \`spaces-tickets\` if the user asks about related work.
 - **Canvas** attached → \`spaces-read-canvas\` with its \`viewAccessId\` **before** answering.
@@ -214,12 +216,16 @@ The org is full of look-alike content. Stay anchored to **exactly** what was ask
 
 - \`spaces-tickets\` + \`spaces-meeting-insights\` (different surfaces, same topic)
 - \`spaces-users\` + \`spaces-channels\` (resolving identities for a follow-up call)
-- \`spaces-canvases\` + \`spaces-emails\` + \`spaces-search\` (broad sweep across surfaces)
+- \`spaces-canvases\` + \`spaces-emails\` + \`spaces-vespa-search\` (broad sweep across surfaces)
 
 **Sequential — must wait:**
 
 - \`spaces-thread-attachments\` → \`spaces-fetch-attachment\` (need the ID first).
 - \`spaces-projects\` → \`spaces-boards\` → \`spaces-create-ticket\` (each step feeds the next).
+- \`spaces-boards\` → \`spaces-board-fields\` → \`spaces-create-ticket\` when the board has custom fields: the
+  field NAMES come from the board, and a name you guessed is refused rather than written.
+- \`spaces-tickets\` → \`spaces-send-ticket-email\` (the send needs the ticket's Internal ID). Ask the person
+  for the recipient addresses first — never infer a merchant's email from a domain or a name.
 - \`spaces-canvases\` → \`spaces-read-canvas\` (need viewAccessId first).
 
 # Drafting emails from a Spaces thread

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { xyneAIStreamManager } from '../../../services/XyneAI/XyneAIStreamManager';
+import { usePollWhenShown } from '../../../hooks/usePageCoverage';
 import {
   conversationArtifactsQueryKey,
   listConversationArtifacts,
@@ -9,8 +10,7 @@ import {
   type ConversationArtifact,
   type ConversationArtifactPatch,
 } from '../../../services/XyneAI/XyneAIArtifactsService';
-
-const STREAMING_POLL_MS = 6000;
+import { subscribeToArtifactChanges } from './pagePanelCalls';
 
 function useConversationStreaming(conversationId: string | null): boolean {
   const [streaming, setStreaming] = useState(false);
@@ -31,6 +31,30 @@ function useConversationStreaming(conversationId: string | null): boolean {
   return streaming;
 }
 
+/** Conversations whose list is to be fetched afresh this tick, and whether a part on screen asked. */
+const refreshing = new Map<string, boolean>();
+
+/**
+ * Fetches a conversation's artifacts afresh, once for every screen part showing
+ * them that heard the same news in the same tick. A fetch already running is
+ * replaced, not joined: it may have started before the change it is told of.
+ * With every part asking under full-page search (`shown` false), the list is only
+ * marked stale: it is fetched on the return to its page.
+ */
+function refreshSoon(queryClient: QueryClient, conversationId: string, shown: boolean): void {
+  const asked = refreshing.get(conversationId);
+  refreshing.set(conversationId, (asked ?? false) || shown);
+  if (asked !== undefined) return;
+  queueMicrotask(() => {
+    const fetchNow = refreshing.get(conversationId) ?? false;
+    refreshing.delete(conversationId);
+    void queryClient.invalidateQueries({
+      queryKey: conversationArtifactsQueryKey(conversationId),
+      refetchType: fetchNow ? 'active' : 'none',
+    });
+  });
+}
+
 export interface ConversationArtifactsResult {
   artifacts: ConversationArtifact[];
   isLoading: boolean;
@@ -43,14 +67,27 @@ export function useConversationArtifacts(
 ): ConversationArtifactsResult {
   const queryClient = useQueryClient();
   const streaming = useConversationStreaming(conversationId);
+  const queryKey = conversationArtifactsQueryKey(conversationId ?? '');
+  // Under full-page search the list is out of sight: what would fetch it afresh there only marks it
+  // stale, and it is fetched on the return.
+  const shown = usePollWhenShown(queryKey);
 
   const query = useQuery({
-    queryKey: conversationArtifactsQueryKey(conversationId ?? ''),
+    queryKey,
     queryFn: () => listConversationArtifacts(conversationId as string),
     enabled: Boolean(conversationId),
     staleTime: 15_000,
-    refetchInterval: streaming ? STREAMING_POLL_MS : false,
   });
+
+  // Fetched afresh when the server says the conversation's artifacts changed, and
+  // once more when a run ends.
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    return subscribeToArtifactChanges(changed => {
+      if (changed !== null && changed !== conversationId) return;
+      refreshSoon(queryClient, conversationId, shown());
+    });
+  }, [conversationId, queryClient, shown]);
 
   const wasStreaming = useRef(streaming);
   useEffect(() => {
@@ -59,8 +96,9 @@ export function useConversationArtifacts(
     if (!finished || !conversationId) return;
     void queryClient.invalidateQueries({
       queryKey: conversationArtifactsQueryKey(conversationId),
+      refetchType: shown() ? 'active' : 'none',
     });
-  }, [streaming, conversationId, queryClient]);
+  }, [streaming, conversationId, queryClient, shown]);
 
   const mutation = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: ConversationArtifactPatch }) =>

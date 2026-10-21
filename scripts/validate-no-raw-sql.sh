@@ -172,6 +172,10 @@ while IFS=$'\t' read -r status p1 p2; do
     [ "$new_path" = "$SELF_PATH" ] && continue
     printf '%s' "$new_path" | grep -qE "$EXCLUDED_RE" && continue
 
+    # Binary files (a tarball, an image) cannot hold a call site, and awk aborts
+    # on bytes that are not valid text. `grep -I` treats binary as no match.
+    show_at "$NEW_SPEC" "$new_path" | grep -qI . || continue
+
     new_count=$(count_raw "$NEW_SPEC" "$new_path")
     [ "$new_count" = "0" ] && continue
 

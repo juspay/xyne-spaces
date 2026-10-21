@@ -9,6 +9,10 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 
+// Files that predate the perf rules. They report as warnings until cleaned up;
+// remove a file from the list once it passes, and never add new ones.
+const perfBaseline = require('./eslint-rules/perf-baseline.json');
+
 const localRules = {
   rules: {
     'no-fetch-use-axios': require('./eslint-rules/no-fetch-use-axios.cjs'),
@@ -17,9 +21,12 @@ const localRules = {
     'no-rocicorp-use-zero': require('./eslint-rules/no-rocicorp-use-zero.cjs'),
     'no-date-now-or-uuid-in-mutators': require('./eslint-rules/no-date-now-or-uuid-in-mutators.cjs'),
     'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
+    'require-accessible-name-on-icon-control': require('./eslint-rules/require-accessible-name-on-icon-control.cjs'),
     'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
     'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
+    'no-slow-tailwind-classes': require('./eslint-rules/no-slow-tailwind-classes.cjs'),
+    'no-sync-layout-read-in-effect': require('./eslint-rules/no-sync-layout-read-in-effect.cjs'),
   }
 };
 
@@ -43,7 +50,9 @@ export default tseslint.config(
       "electron/preload.ts",
       // Node-side build/eval scripts. Outside tsconfig.app.json, so the
       // type-checked rules cannot resolve them.
-      "scripts/**/*"
+      "scripts/**/*",
+      // AudioWorklet global scope; plain JS so Vite serves it as a standalone asset.
+      "src/services/VoiceInput/pcmCaptureWorklet.js"
     ],
   },
 
@@ -84,6 +93,15 @@ export default tseslint.config(
       ...jsxA11yPlugin.configs.recommended.rules,
       // Autofocus is intentional for modals, comboboxes, and editors (see Canvas, chat input).
       "jsx-a11y/no-autofocus": "off",
+      "jsx-a11y/control-has-associated-label": ["error", {
+        labelAttributes: ["aria-label", "aria-labelledby", "title"],
+        ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "th", "td", "video", "select", "option"],
+        ignoreRoles: [
+          "grid", "listbox", "menu", "menubar", "radiogroup", "row", "tablist", "toolbar", "tree", "treegrid",
+          "separator", "option", "gridcell", "cell", "columnheader", "rowheader", "presentation", "none", "tabpanel",
+        ],
+        depth: 5,
+      }],
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
       "local-rules/no-fetch-use-axios": "error",
@@ -94,10 +112,24 @@ export default tseslint.config(
       "local-rules/require-is-deleted-filter": "error",
       "local-rules/require-initial-message-md-in-conversation-insert": "error",
       "local-rules/no-direct-message-lookup-in-mutators": "error",
+      "local-rules/no-slow-tailwind-classes": "error",
+      "local-rules/no-sync-layout-read-in-effect": "warn",
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],
         exemptDataTestIds: [],
       }],
+      // Icon-only controls, which the jsx-a11y rule above takes for labelled.
+      "local-rules/require-accessible-name-on-icon-control": ["error", {
+        nameAttributes: ["aria-label", "aria-labelledby"],
+        componentNameProps: ["label", "title"],
+      }],
+    },
+  },
+
+  {
+    files: perfBaseline["no-slow-tailwind-classes"],
+    rules: {
+      "local-rules/no-slow-tailwind-classes": "warn",
     },
   },
 

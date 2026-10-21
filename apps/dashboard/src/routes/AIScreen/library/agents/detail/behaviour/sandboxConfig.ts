@@ -6,6 +6,11 @@ export interface SandboxRepoOption {
   readonly key: string;
   readonly name: string;
   readonly description?: string;
+  readonly repoUrl?: string;
+  readonly defaultBranch?: string;
+  readonly template?: string;
+  readonly sessionTimeoutMs?: number;
+  readonly idleTimeoutMs?: number;
 }
 
 export function listSandboxRepos(): Promise<SandboxRepoOption[]> {
@@ -23,6 +28,9 @@ export function useSandboxRepos(): UseQueryResult<SandboxRepoOption[], Error> {
 export interface SandboxDraft {
   sandboxRepo: string;
   forceReadOnlySandbox: boolean;
+  allowWriteInReadOnlyJob: boolean;
+  /** Suppress the "Live preview" thread message when a sandbox starts (config.hideLivePreview). */
+  hideLivePreview: boolean;
   researchProductId: string;
   researchRepositoryId: string;
 }
@@ -30,6 +38,8 @@ export interface SandboxDraft {
 interface SandboxShape {
   sandboxRepo?: unknown;
   forceReadOnlySandbox?: unknown;
+  allowWriteInReadOnlyJob?: unknown;
+  hideLivePreview?: unknown;
   product_id?: unknown;
   repository_id?: unknown;
 }
@@ -41,6 +51,8 @@ export function readSandboxDraft(config: Record<string, unknown> | undefined): S
   return {
     sandboxRepo: str(c.sandboxRepo),
     forceReadOnlySandbox: c.forceReadOnlySandbox === true,
+    allowWriteInReadOnlyJob: c.allowWriteInReadOnlyJob === true,
+    hideLivePreview: c.hideLivePreview === true,
     researchProductId: str(c.product_id),
     researchRepositoryId: str(c.repository_id),
   };
@@ -57,6 +69,12 @@ export function applySandbox(
 
   if (draft.forceReadOnlySandbox) next['forceReadOnlySandbox'] = true;
   else delete next['forceReadOnlySandbox'];
+
+  if (draft.allowWriteInReadOnlyJob) next['allowWriteInReadOnlyJob'] = true;
+  else delete next['allowWriteInReadOnlyJob'];
+
+  if (draft.hideLivePreview) next['hideLivePreview'] = true;
+  else delete next['hideLivePreview'];
 
   if (draft.researchProductId) next['product_id'] = draft.researchProductId;
   else delete next['product_id'];

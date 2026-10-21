@@ -105,12 +105,18 @@ const StreamChoices = ({
  * existing. Every call site sits beside other items, so returning null here
  * never leaves an empty menu.
  */
-export const AddToStreamMenuItem = ({ source }: { source: ColumnSource }): ReactElement | null => {
+export const AddToStreamMenuItem = ({
+  source,
+  className,
+}: {
+  source: ColumnSource;
+  className?: string;
+}): ReactElement | null => {
   const { showStreams } = useStreamsVisibility();
   if (!showStreams) return null;
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger className='gap-2'>
+      <DropdownMenuSubTrigger className={cn('gap-2', className)}>
         <LayoutGridTwoVertical size={16} />
         Add to Stream
       </DropdownMenuSubTrigger>

@@ -138,9 +138,6 @@ export const agentRepository = {
   findByIds: (ids: string[]) =>
     ids.length === 0 ? Promise.resolve([]) : prisma.agent.findMany({ where: { id: { in: ids } } }),
 
-  findByAppUserId: (appUserId: string) =>
-    prisma.agent.findFirst({ where: { spacesAppUserId: appUserId } }),
-
   // Phase-2 §5a: resolve an agent by its globally-unique Spaces app id — the
   // org-agnostic routing key for the external webhook path (once webhook URLs
   // carry the appId instead of the org-ambiguous slug). Returns null for the

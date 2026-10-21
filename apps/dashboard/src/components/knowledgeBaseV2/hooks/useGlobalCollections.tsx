@@ -57,7 +57,11 @@ export const GlobalCollectionsProvider: React.FC<{ children: React.ReactNode }> 
   const channelById = useMemo(() => {
     const m = new Map<string, { name: string; projectId: string | null }>();
     for (const ch of channels) {
-      m.set(ch.id, { name: ch.name, projectId: ch.projectId ?? null });
+      // `||`, not `??`: a projectless channel stores projectId as '' (see
+      // channelRepository.create). Passing '' through left an empty
+      // `:projectId` segment in the file-viewer URL, which 404s instead of
+      // falling back to the '_' sentinel.
+      m.set(ch.id, { name: ch.name, projectId: ch.projectId || null });
     }
     return m;
   }, [channels]);

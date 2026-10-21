@@ -189,6 +189,27 @@ const LocalHarnessSection = (): ReactElement | null => {
     }
   };
 
+  const toggleComputer = async (connect: boolean): Promise<void> => {
+    const connectComputer = api?.connectComputer;
+    const disconnectComputer = api?.disconnectComputer;
+    if (!connectComputer || !disconnectComputer || busy) return;
+    setBusy('computer');
+    try {
+      const next: LocalHarnessStatus = await (connect ? connectComputer() : disconnectComputer());
+      setStatus(next);
+      toast.success(connect ? 'This computer is connected' : 'This computer is disconnected');
+    } catch (err) {
+      toast.error(
+        errText(
+          err,
+          connect ? 'Could not connect this computer' : 'Could not disconnect this computer',
+        ),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const toggleConnected = async (provider: HarnessProvider, connect: boolean): Promise<void> => {
     if (!api || busy) return;
     setBusy(provider);
@@ -281,6 +302,39 @@ const LocalHarnessSection = (): ReactElement | null => {
           <RefreshCw className={cn('size-4', busy === 'rescan' && 'animate-spin')} />
         </button>
       </div>
+
+      {api.connectComputer && (
+        <div
+          className='mb-3 flex items-center justify-between gap-3 rounded-2xl border border-border px-4 py-3'
+          data-testid='claw-settings-connect-computer'
+        >
+          <div className='flex min-w-0 items-start gap-3'>
+            <Laptop className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
+            <div className='min-w-0'>
+              <p className='text-sm font-medium text-foreground'>
+                {status.computerConnected ? 'This computer is connected' : 'Connect this computer'}
+              </p>
+              <p className='text-xs text-muted-foreground'>
+                Lets agents open and work with pages in your Xyne browser — the Xyne AI panel and
+                SDLC hub. Agents still run on Xyne’s servers; no coding CLI needed.
+              </p>
+            </div>
+          </div>
+          <Button
+            size='sm'
+            variant={status.computerConnected ? 'secondary' : 'default'}
+            loading={busy === 'computer'}
+            disabled={busy !== null}
+            onClick={() => void toggleComputer(!status.computerConnected)}
+            data-track-category='Claw Settings'
+            data-track-name={
+              status.computerConnected ? 'Disconnect this computer' : 'Connect this computer'
+            }
+          >
+            {status.computerConnected ? 'Disconnect' : 'Connect'}
+          </Button>
+        </div>
+      )}
 
       <div className='grid gap-3 sm:grid-cols-2'>
         {HARNESS_ORDER.map(provider => {

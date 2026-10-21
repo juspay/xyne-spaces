@@ -5,8 +5,11 @@ import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { cn } from '../../utils/classNames';
-import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
+import { isMac } from '../../hooks/usePlatform';
 import { roomActor } from '../../machines/roomMachine';
+
+const IS_ELECTRON_MAC = isElectronApp() && isMac() === true;
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
@@ -66,7 +69,10 @@ const AppNavigator = (): ReactElement => {
 
   return (
     <div
-      className='h-full w-full flex items-center justify-between gap-2 px-4'
+      className={cn(
+        'h-full w-full flex items-center justify-between gap-2 px-4',
+        IS_ELECTRON_MAC && 'pl-7',
+      )}
       style={APP_DRAG_STYLE}
     >
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>

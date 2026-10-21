@@ -13,7 +13,7 @@
  *                  affordance, not the access control.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClockCounterClockwiseIcon, ClockIcon, ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { useAdminStatus } from "../hooks/useAdminStatus";
 import { PageLayout } from "./ui/PageLayout";
@@ -29,6 +29,8 @@ import { RunRow } from "./runs/RunRow";
 import { RunDateRangeFilter } from "./runs/RunDateRangeFilter";
 import { RunListFooter } from "./runs/RunListFooter";
 import { looksLikeSessionId, runOwnerLabel, rangeToIso, type RunRangePreset } from "../lib/runFormat";
+import { runReplayPath } from "../../lib/runReplay";
+import { isCurrentUser } from "../../lib/identity";
 import {
   listAgents,
   listRunsPaged,
@@ -69,7 +71,9 @@ export function RunsPageV3({ userId }: { userId: string }) {
   const [userOptions, setUserOptions] = useState<RunUserFacet[]>([]);
   const [agentNames, setAgentNames] = useState<Map<string, string>>(new Map());
 
-  const [query, setQuery] = useState("");
+  // ?session=<id> (metrics drill-down) seeds the search box.
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("session") ?? "");
 
   // A role flip (or an admin check that resolves to false after first paint)
   // must not leave an elevated request in flight: without this reset, `allUsers`
@@ -107,7 +111,7 @@ export function RunsPageV3({ userId }: { userId: string }) {
   // client-side (the product decision was UI-only search for now); only a
   // session id round-trips, because that is the one query the loaded page
   // genuinely cannot answer.
-  const [idSearch, setIdSearch] = useState("");
+  const [idSearch, setIdSearch] = useState(() => (looksLikeSessionId(query) ? query.trim() : ""));
   useEffect(() => {
     const next = looksLikeSessionId(query) ? query.trim() : "";
     if (next === idSearch) return;
@@ -429,16 +433,10 @@ export function RunsPageV3({ userId }: { userId: string }) {
                 // API/scheduled runs without one stay non-clickable. Another
                 // user's run carries &allRuns=1 so the chat view opts into the
                 // cross-user read path (the backend gates that on admin + flag).
-                onOpen={
-                  run.conversationId
-                    ? () =>
-                        navigate(
-                          `/v3/chat?agent=${encodeURIComponent(run.agentSlug)}&conversation=${encodeURIComponent(run.conversationId!)}${
-                            run.userId !== userId ? "&allRuns=1" : ""
-                          }`,
-                        )
-                    : undefined
-                }
+                onOpen={(() => {
+                  const path = runReplayPath(run, { allRuns: !isCurrentUser(run.userId) });
+                  return path ? () => navigate(path) : undefined;
+                })()}
               />
             </div>
           </div>

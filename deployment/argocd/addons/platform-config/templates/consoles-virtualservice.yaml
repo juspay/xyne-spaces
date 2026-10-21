@@ -1,0 +1,34 @@
+{{- range $name, $c := dict "argocd" .Values.argocd "workflows" .Values.workflows }}
+{{- if $c.enabled }}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" $ | nindent 4 }}
+spec:
+  hosts:
+    - {{ $c.host | default (printf "%s.%s" $name $.Values.domain) }}
+  gateways:
+    - {{ $.Values.gateway.namespace }}/{{ $.Values.gateway.name }}
+  http:
+    {{- if $.Values.routes.health }}
+    - name: health
+      match:
+        - uri:
+            exact: {{ $.Values.routes.healthPath }}
+      directResponse:
+        status: 200
+        body:
+          string: "ok"
+    {{- end }}
+    - name: {{ $name }}
+      route:
+        - destination:
+            host: {{ printf "%s.%s.svc.cluster.local" $c.service $c.namespace }}
+            port:
+              number: {{ $c.port }}
+{{- end }}
+{{- end }}

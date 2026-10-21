@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { isCurrentUser } from "../lib/identity";
 import {
   listServers,
   listConnections,
@@ -622,11 +623,11 @@ export function DashboardPage({ userId, isAdmin }: Props) {
           ) : (
             <>
               {/* My Skills */}
-              {skills.filter((s) => s.ownerUserId === userId).length > 0 && (
+              {skills.filter((s) => isCurrentUser(s.ownerUserId)).length > 0 && (
                 <div>
                   <h3 className="mb-2 text-sm font-medium text-zinc-400">My Skills</h3>
                   <div className="space-y-2">
-                    {skills.filter((s) => s.ownerUserId === userId).map((skill) => (
+                    {skills.filter((s) => isCurrentUser(s.ownerUserId)).map((skill) => (
                       <SkillCard key={skill.id} skill={skill} canDelete canEdit canRequestGlobal={skill.scope !== "global"} deletingSkill={deletingSkill} savingSkill={editingSkill}
                         onDelete={async () => {
                           if (!confirm(`Delete skill "${skill.label || skill.name}"?`)) return;
@@ -655,7 +656,7 @@ export function DashboardPage({ userId, isAdmin }: Props) {
                   <h3 className="mb-2 text-sm font-medium text-zinc-400">Global Skills</h3>
                   <div className="space-y-2">
                     {skills.filter((s) => s.scope === "global").map((skill) => {
-                      const canManage = skill.ownerUserId === userId || !!isAdmin;
+                      const canManage = isCurrentUser(skill.ownerUserId) || !!isAdmin;
                       return (
                         <SkillCard key={skill.id} skill={skill} canDelete={canManage} canEdit={canManage} canRequestGlobal={false} deletingSkill={deletingSkill} savingSkill={editingSkill}
                           onDelete={async () => {

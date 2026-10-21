@@ -12,6 +12,7 @@
     "xyne-common.virtualService"
     "xyne-common.networkPolicy"
     "xyne-common.serviceMonitor"
+    "xyne-common.migrations"
 }}
 {{- with (include $template $ | trim) }}
 ---

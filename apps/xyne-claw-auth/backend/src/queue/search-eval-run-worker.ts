@@ -17,6 +17,7 @@ import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { searchEvalRepository, computeSearchEvalSummary, type SearchEvalTopResult } from "../repositories/index.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { searchEvalVespa } from "../mcp/servers/search-eval-vespa.js";
 import type { SearchEvalRunJobData, SearchEvalRunProgress } from "./search-eval-run-queue.js";
 
@@ -110,11 +111,19 @@ async function processJob(job: Job<SearchEvalRunJobData>): Promise<SearchEvalRun
   const progress: SearchEvalRunProgress = { phase: "running", queriesTotal: queries.length, queriesDone: 0 };
   await job.updateProgress(progress);
 
-  // Resolve once per run, not per query.
-  const workspaceId = await getWorkspaceIdForUser(userId, "unknown");
+  // Resolve once per run, not per query. The enqueue-request's verified
+  // workspace rides in job.data — without it a two-membership user's lookup
+  // is ambiguous and this throws spuriously.
+  const workspaceId =
+    (job.data.workspaceId && job.data.workspaceId.trim()) ||
+    (await getWorkspaceIdForUser(userId, "unknown"));
   if (!workspaceId) {
     throw new Error(`Could not resolve a workspaceId for user ${userId}.`);
   }
+  // Vespa `permissions contains` filters are keyed by Spaces' workspace-scoped
+  // user id, while the run was enqueued with the canonical Claw id — translate,
+  // or "with"-permission runs silently score public docs only.
+  const spacesUserId = await spacesUserIdForClawUser(userId, workspaceId).catch(() => userId);
 
   const typeParam = queryType.length > 0 ? queryType.join(",") : undefined;
   const beforeParam = asOfTimestamp ?? undefined;
@@ -129,7 +138,7 @@ async function processJob(job: Job<SearchEvalRunJobData>): Promise<SearchEvalRun
         workspaceId,
         limit: DEBUG_FETCH_LIMIT,
         permissionMode,
-        ...(permissionMode === "with" ? { userId } : {}),
+        ...(permissionMode === "with" ? { userId: spacesUserId } : {}),
         ...(typeParam ? { type: typeParam } : {}),
         ...(beforeParam ? { before: beforeParam } : {}),
         ...(rankProfileParam ? { rankProfile: rankProfileParam } : {}),

@@ -62,7 +62,7 @@ router.post("/commands", async (req: Request, res: Response) => {
       return;
     }
     // Slack's 3-second deadline: acknowledge ephemerally, then work async.
-    res.json({ response_type: "ephemeral", text: `⏳ Dispatching to ${surfaceAgent.agent.name}…` });
+    res.json({ response_type: "ephemeral", text: `Dispatching to ${surfaceAgent.agent.name}…` });
     void processSlackCommand({
       tenant,
       surfaceAgent: surfaceAgent as unknown as BoundSlackSurfaceAgent & { agent: { name: string } },
@@ -131,7 +131,7 @@ async function processSlackCommand(input: {
   // the echo message becomes the thread root for the reply + follow-ups.
   const echo = await postSlackMessage(botToken, {
     channel: input.channelId,
-    text: `💬 <@${input.slackUserId}> → *${surfaceAgent.agent.name}*: ${task}`,
+    text: `<@${input.slackUserId}> → *${surfaceAgent.agent.name}*: ${task}`,
   });
   const threadRootTs = echo.ts;
   if (!threadRootTs) throw new Error("Slack echo post returned no ts");

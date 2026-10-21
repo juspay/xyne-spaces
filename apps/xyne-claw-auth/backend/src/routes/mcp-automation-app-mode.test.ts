@@ -60,10 +60,19 @@ describe("entry-stage swap", () => {
     expect(swap).toContain("automation app-mode SKIPPED");
   });
 
+  it("checks the app token of the run's agent, not of the run user", () => {
+    const swap = mcpSrc.slice(
+      mcpSrc.indexOf("let automationAppSwap"),
+      mcpSrc.indexOf("Virtual xyne-spaces entry"),
+    );
+    expect(swap).toContain("getAppTokenCredentials(runCtx?.spacesAppUserId || userId)");
+    expect(swap).not.toContain("getAppTokenCredentials(userId)");
+  });
+
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {
     // Without this gate the fallback re-lists the user server (with app
     // creds) right after the swap removed it, resurrecting the duplicate.
-    expect(mcpSrc).toContain("if (!hasSpacesConnection && !automationAppSwap)");
+    expect(mcpSrc).toContain("!hasSpacesConnection && !automationAppSwap\n      ? (async () => {");
   });
 });
 
@@ -85,7 +94,18 @@ describe("non-automation runs", () => {
 describe("userOnly tools in app mode", () => {
   it("marks the tools whose handlers require a human session", () => {
     const userOnly = spacesTools.filter((t) => t.userOnly).map((t) => t.name).sort();
-    expect(userOnly).toEqual(["spaces-update-ticket", "spaces-upload-to-kb", "user-send-message"]);
+    expect(userOnly).toEqual([
+      ...["agents", "create", "get", "run", "runs", "schema", "submit", "update", "validate", "variables", "versions", "webhook", "webhook-issue"].map(
+        (t) => `spaces-automation-${t}`,
+      ),
+      // Sends as the desk on a human's behalf through a user-session-only
+      // Spaces route, so an automation run cannot reach it.
+      "spaces-send-ticket-email",
+      "spaces-update-bulk-tickets",
+      "spaces-update-ticket",
+      "spaces-upload-to-kb",
+      "user-send-message",
+    ]);
   });
 
   it("hides them from the app-tools listing and rejects calls", () => {

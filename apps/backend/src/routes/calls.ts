@@ -9,6 +9,7 @@ import { workspaceScopedRoute } from '@/database/tenant/context';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+import { callBackgroundController } from '@/controllers/callBackgroundController';
 
 const router = Router();
 
@@ -42,8 +43,11 @@ router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
+router.post('/summary-templates/bulk', summaryTemplateController.bulkCreate);
 router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
 router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
+router.post('/summary-templates/ai/test-output', summaryTemplateController.testOutput);
 router.post(
   '/summary-templates/ai/generate-system-prompt',
   summaryTemplateController.generateSystemPrompt
@@ -57,8 +61,11 @@ router.post(
 );
 router.patch('/summary-templates/:templateId', summaryTemplateController.update);
 router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
-// Pulse org list proxy (must be before /:callId wildcard)
+// Pulse org list proxy (must be before /:callId wildcard); requires ?channelId of a Pulse-enabled channel the user belongs to
 router.get('/pulse-orgs', callController.getPulseOrgs);
+// Preset backgrounds for the call background picker (Superposition-driven).
+router.get('/backgrounds', callBackgroundController.list);
+router.get('/backgrounds/:id/image', callBackgroundController.image);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
@@ -68,6 +75,7 @@ router.get('/chat/:externalId/participants', requireInternalCallParticipant, cal
 
 // Get another user's scheduled calls (must come before /:callId wildcard)
 router.get('/user/:userId/scheduled', scheduleCallController.getOtherUserScheduledCalls);
+router.get('/user/:userId/scheduled/:callId/participants', scheduleCallController.getOtherUserCallParticipants);
 
 // Edit a single scheduled call instance (must come after all static /... routes)
 router.patch('/:callId', scheduleCallController.updateScheduledCall);
@@ -78,6 +86,9 @@ router.post('/:callId/process-transcript', callController.processTranscript);
 
 // Download transcript endpoint (downloads transcript file from GCS)
 router.get('/:callId/download-transcript', callController.downloadTranscript);
+
+// Translate transcript endpoint (downloads transcript file from GCS)
+router.post('/:callId/translate-transcript', callController.translateTranscript);
 
 // Download recording endpoint (streams the call's latest recording — legacy/headless player)
 router.get('/:callId/download-recording', callController.downloadRecording);
@@ -112,6 +123,9 @@ router.post('/:callId/invite', callController.inviteUsers);
 
 // Decline call endpoint
 router.post('/:callId/decline', callController.declineCall);
+
+// Callee reports ring delivery (RINGING | BUSY) — HTTP twin of the Zero mutator
+router.post('/:callId/ring-status', callController.updateRingStatus);
 
 // RSVP endpoint for scheduled calls
 router.post('/:callId/rsvp', callController.updateMeetingStatus);

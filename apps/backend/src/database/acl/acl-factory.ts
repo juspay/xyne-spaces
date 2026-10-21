@@ -23,6 +23,7 @@ import {
   CanvasCommentThreadsACL,
   ChannelParticipantsACL,
   ChannelBoardMappingsACL,
+  ChannelPublishedTabsACL,
   ChannelsACL,
   ChannelStatsACL,
   ChannelUserStatusACL,
@@ -48,6 +49,7 @@ import {
   InvitationsACL,
   OrganizationDomainsACL,
   OrgLLMServiceAccountCredentialsACL,
+  OrgMemberCredentialsACL,
   LinkAccessACL,
   LinksACL,
   LookupValuesACL,
@@ -156,6 +158,13 @@ export class ACLFactory {
       return new ApplicationsACL(ctx, prisma)
     case 'applicationReleaseTicket':
       return new ApplicationReleaseTicketsACL(ctx, prisma)
+    case 'authSessionWorkspaceAccess':
+      // Child of authSession; same pre-workspace-context write path, so also unscoped.
+      return new UnscopedACL(ctx, prisma)
+    case 'authSession':
+      // Org-scoped device session table; written during login/refresh before any
+      // workspace context exists, so it is deliberately not workspace-scoped.
+      return new UnscopedACL(ctx, prisma)
     case 'board':
       return new BoardsACL(ctx, prisma)
     case 'boardComplexityScore':
@@ -191,6 +200,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
+    case 'radarPrLink':
+      return new BaseQueryACL(ctx, prisma)
     // Rules are per user, and every read is already scoped to (workspaceId,
     // userId) by radarRuleStore — there is no route that reads anyone else's.
     case 'radarRule':
@@ -199,6 +210,8 @@ export class ACLFactory {
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
       return new ChannelBoardMappingsACL(ctx, prisma)
+    case 'channelPublishedTab':
+      return new ChannelPublishedTabsACL(ctx, prisma)
     case 'channelParticipant':
       return new ChannelParticipantsACL(ctx, prisma)
     case 'channelStats':
@@ -381,6 +394,10 @@ export class ACLFactory {
       return new WorkspaceOrganizationsACL(ctx, prisma)
     case 'aCLAuditLog':
       return new BaseQueryACL(ctx, prisma)
+    case 'auditLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'auditLogChange':
+      return new BaseQueryACL(ctx, prisma)
     case 'activityAlias':
       return new UnscopedACL(ctx, prisma)
     case 'apiKey':
@@ -537,6 +554,8 @@ export class ACLFactory {
       return new UnscopedACL(ctx, prisma)
     case 'orgLLMServiceAccountCredential':
       return new OrgLLMServiceAccountCredentialsACL(ctx, prisma)
+    case 'orgMemberCredential':
+      return new OrgMemberCredentialsACL(ctx, prisma)
     case 'guestAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'entity':
@@ -546,6 +565,9 @@ export class ACLFactory {
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
+      return new BaseQueryACL(ctx, prisma)
+    case 'connectGroup':
+      // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
       return new BaseQueryACL(ctx, prisma)
     }
   }

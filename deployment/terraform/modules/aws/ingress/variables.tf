@@ -77,7 +77,7 @@ variable "http_listener" {
 
 variable "preserve_client_ip" {
   type    = bool
-  default = true
+  default = false
 }
 
 variable "dns_zone" {

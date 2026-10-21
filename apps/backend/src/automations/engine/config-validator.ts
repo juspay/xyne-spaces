@@ -6,7 +6,12 @@ import type {
   SwitchStepConfig,
   Condition,
 } from '../types/automation-config';
-import { getVariableRefInnerSchema } from '../types/automation-config';
+import {
+  getVariableRefInnerSchema,
+  ScheduleOffsetSchema,
+  scheduleOffsetMs,
+} from '../types/automation-config';
+import { BusinessHoursSchema, fitsWithinMaxWait } from '../util/business-hours';
 import { ControlFlowStepType } from '../types/known-types';
 import { ValidationIssueCode } from '../types/validation';
 import type { ValidationIssue, ValidationResult } from '../types/validation';
@@ -14,6 +19,7 @@ import type { TriggerRegistry } from '../triggers/trigger-registry';
 import type { StepRegistry } from '../steps/step-registry';
 import { collectRefs, isPureRef } from '../util/variable-ref';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
+import { buildAskJevOutputSchema } from '../steps/ask-jev.step';
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -266,6 +272,24 @@ export class ConfigValidator {
       }
     }
 
+    const schedule = config.schedule;
+    if (schedule?.type === 'SCHEDULED' && schedule.businessHoursOnly) {
+      const hours = BusinessHoursSchema.safeParse(schedule.businessHours);
+      const offset = ScheduleOffsetSchema.safeParse(schedule.offset);
+      if (
+        !hours.success ||
+        !offset.success ||
+        !fitsWithinMaxWait(scheduleOffsetMs(offset.data), hours.data)
+      ) {
+        issues.push({
+          path: 'schedule.businessHours',
+          code: ValidationIssueCode.SHAPE,
+          message:
+            'Business hours need a working day and an end time after the start, and the wait must fit within 30 calendar days.',
+        });
+      }
+    }
+
     this.walkSteps(config.steps, 'steps', outputSchemas, issues);
 
     return { valid: issues.length === 0, issues };
@@ -350,7 +374,9 @@ export class ConfigValidator {
           ? buildWebhookActionOutputSchema(step.config)
           : step.type === 'RUN_AGENT'
             ? buildRunAgentOutputSchema(step.config)
-            : stepImpl.outputSchema,
+            : step.type === 'ASK_JEV'
+              ? buildAskJevOutputSchema(step.config)
+              : stepImpl.outputSchema,
       );
     }
   }

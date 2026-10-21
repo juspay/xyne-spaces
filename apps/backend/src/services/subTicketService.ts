@@ -1,13 +1,9 @@
-import { Prisma } from '@prisma/client';
-import { ActivityType, BoardType, MessageType } from '@xyne/shared';
+import { BoardType } from '@xyne/shared';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
-import {
-  syncConversationSubTicketsMd,
-  linkSubTicketConversationToParent,
-} from '@/utils/ticketMd';
+import { createSubTicketTx } from '@/bypassAcl/transactions/subTicketService';
+import { createFlowSubTicketMappingsTx } from '@/bypassAcl/transactions/subTicketService';
 
 export interface CreateSubTicketInput {
   parentTicketId: string;
@@ -44,61 +40,7 @@ export async function createSubTicket(
     throw new Error(`Parent ticket "${input.parentTicketId}" not found`);
   }
 
-  await db.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.subTicket.create({
-      data: {
-        id: subTicketId,
-        title: input.title,
-        description: input.description ?? null,
-        mappedTicketId: input.mappedTicketId ?? null,
-        createdBy: input.createdBy,
-        updatedBy: input.createdBy,
-        conversationId: parent.conversationId,
-        workspaceId: parent.workspaceId,
-        assignedTo: input.assignedTo ?? null,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
-
-    await tx.ticketSubTicketMapping.create({
-      data: { id: mappingId, ticketId: parent.id, subTicketId, workspaceId: parent.workspaceId },
-    });
-
-    if (input.mappedTicketId) {
-      await syncConversationSubTicketsMd(tx, parent.id);
-      await linkSubTicketConversationToParent(tx, input.mappedTicketId, parent.id);
-    }
-
-    const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
-    await recordTicketTimelineEvent(
-      {
-        activity: {
-          ticketId: parent.id,
-          updatedBy: input.createdBy,
-          activityType: ActivityType.SUBTICKET_CREATED,
-          workspaceId: parent.workspaceId,
-          value: {
-            subTicketId,
-            subTicketTitle: input.title,
-            subTicketXyneId: input.subTicketXyneId ?? null,
-          },
-          timestamp: now,
-        },
-        message: parent.conversationId
-          ? {
-              conversationId: parent.conversationId,
-              senderId: input.createdBy,
-              content: `Subticket ${displayId} created: ${input.title}`,
-              activityType: ActivityType.SUBTICKET_CREATED,
-              workspaceId: parent.workspaceId,
-              createdAt: now,
-            }
-          : undefined,
-      },
-      tx,
-    );
-  });
+  await createSubTicketTx(subTicketId, input, parent, now, mappingId);
 
   logger.info(
     `[subTicketService] created subTicket=${subTicketId} parent=${parent.id} mapping=${mappingId}`,
@@ -112,7 +54,7 @@ export async function createSubTicket(
   };
 }
 
-const FLOW_MAPPING_NAMESPACE = 'f34ae343-9aa8-5bcb-8f52-6ea8304435d1';
+export const FLOW_MAPPING_NAMESPACE = 'f34ae343-9aa8-5bcb-8f52-6ea8304435d1';
 
 /**
  * Materialize one FLOW child under every effective parent. One SubTicket row
@@ -177,86 +119,7 @@ export async function createFlowSubTicketMappings(input: {
   );
   const primaryParent = parents[0]!;
 
-  await db.$transaction(async tx => {
-    await tx.subTicket.upsert({
-      where: { id: subTicketId },
-      create: {
-        id: subTicketId,
-        title: input.title,
-        description: input.description ?? null,
-        mappedTicketId: input.mappedTicketId,
-        createdBy: input.createdBy,
-        updatedBy: input.createdBy,
-        conversationId: primaryParent.conversationId,
-        workspaceId: primaryParent.workspaceId,
-        assignedTo: input.assignedTo ?? null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      update: {},
-    });
-
-    for (const parent of parents) {
-      const mappingId = uuidv5(`flow-mapping:${parent.id}:${subTicketId}`, FLOW_MAPPING_NAMESPACE);
-      const activityId = uuidv5(`flow-mapping-activity:${mappingId}`, FLOW_MAPPING_NAMESPACE);
-      const messageId = uuidv5(`flow-mapping-message:${mappingId}`, FLOW_MAPPING_NAMESPACE);
-      // Upserts avoid concurrent find/create P2002 failures and make retries idempotent.
-      await tx.ticketSubTicketMapping.upsert({
-        where: { id: mappingId },
-        create: {
-          id: mappingId,
-          workspaceId: parent.workspaceId,
-          ticketId: parent.id,
-          subTicketId,
-        },
-        update: {},
-      });
-      await tx.ticketActivity.upsert({
-        where: { id: activityId },
-        create: {
-          id: activityId,
-          workspaceId: parent.workspaceId,
-          ticketId: parent.id,
-          activityType: ActivityType.SUBTICKET_CREATED,
-          updatedBy: input.createdBy,
-          timestamp: now,
-          value: {
-            subTicketId,
-            subTicketTitle: input.title,
-            subTicketXyneId: input.subTicketXyneId ?? null,
-          },
-        },
-        update: {},
-      });
-      if (parent.conversationId) {
-        const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
-        await tx.message.upsert({
-          where: { messageId },
-          create: {
-            messageId,
-            conversationId: parent.conversationId,
-            workspaceId: parent.workspaceId,
-            senderId: input.createdBy,
-            content: `Subticket ${displayId} created: ${input.title}`,
-            msgType: MessageType.SYSTEM,
-            hasAttachment: false,
-            edited: false,
-            isDeleted: false,
-            isSent: true,
-            showInChannel: false,
-            createdAt: now,
-            metadata: { activityType: ActivityType.SUBTICKET_CREATED, isTicketActivity: true },
-          },
-          update: {},
-        });
-      }
-    }
-
-    for (const parent of parents) {
-      await syncConversationSubTicketsMd(tx, parent.id);
-    }
-    await linkSubTicketConversationToParent(tx, input.mappedTicketId, primaryParent.id);
-  });
+  await createFlowSubTicketMappingsTx(subTicketId, input, primaryParent, now, parents);
 
   return {
     subTicketId,
@@ -265,3 +128,4 @@ export async function createFlowSubTicketMappings(input: {
     conversationId: primaryParent.conversationId,
   };
 }
+

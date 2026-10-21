@@ -92,3 +92,42 @@ export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
+
+/** What in a track its conversations can be filed against, beside the track itself. */
+export type SdlcDiscussionItemType = 'FOLDER' | 'LINK' | 'ATTACHMENT' | 'CANVAS';
+export interface SdlcDiscussionItemRef {
+  type: SdlcDiscussionItemType;
+  id: string;
+}
+const DISCUSSION_ITEM_TYPES: readonly SdlcDiscussionItemType[] = [
+  'FOLDER',
+  'LINK',
+  'ATTACHMENT',
+  'CANVAS',
+];
+
+/**
+ * `?about=folder:<id>`: whose conversations the panel shows when they are an item's —
+ * a folder's, link's, file's or artifact's — rather than the track's. In the url, so
+ * a reload, a new tab or a shared link opens on the same ones.
+ */
+export const SDLC_ABOUT_PARAM = 'about';
+
+export function parseSdlcDiscussionItem(value: string | null): SdlcDiscussionItemRef | null {
+  if (!value) return null;
+  const at = value.indexOf(':');
+  if (at <= 0) return null;
+  const type = DISCUSSION_ITEM_TYPES.find(known => known === value.slice(0, at).toUpperCase());
+  const id = value.slice(at + 1);
+  return type && id ? { type, id } : null;
+}
+
+export const sdlcDiscussionItemParam = (item: SdlcDiscussionItemRef): string =>
+  `${item.type.toLowerCase()}:${item.id}`;
+
+/**
+ * `?threadOnly=1`: the open conversation came from outside the panel's list — a
+ * ticket opened from the board — so there is no list behind it to go back to, and
+ * closing it closes the panel.
+ */
+export const SDLC_THREAD_ONLY_PARAM = 'threadOnly';

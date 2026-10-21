@@ -14,9 +14,16 @@ export const isElectron = (): boolean => {
   return typeof window !== 'undefined' && window.electronAPI !== undefined;
 };
 
+/** Sent by the Electron main-process 401 interceptor alongside `auth:token-expired`. */
+export interface TokenExpiredPayload {
+  /** The backend URL whose 401 response triggered the session teardown. */
+  url?: string;
+  resourceType?: string;
+}
+
 export const setupElectronAuthListeners = (
   onSuccess: (data?: ElectronAuthData) => void,
-  onTokenExpired: () => void,
+  onTokenExpired: (payload?: TokenExpiredPayload) => void,
 ): (() => void) => {
   if (!isElectron() || !window.electronAPI) {
     return () => {};

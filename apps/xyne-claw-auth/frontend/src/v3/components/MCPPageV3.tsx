@@ -24,6 +24,7 @@ import {
   requestServerPublish,
 } from "../../lib/api";
 import { useMcpConnectors } from "../hooks/useMcpConnectors";
+import { useAdminStatus } from "../hooks/useAdminStatus";
 import { useSnackbar } from "./ui/Snackbar";
 import { Avatar } from "./ui/Avatar";
 import { Badge } from "./ui/Badge";
@@ -301,6 +302,7 @@ interface Props {
 }
 
 export function MCPPageV3({ userId }: Props) {
+  const { isAdmin } = useAdminStatus();
   const {
     connections,
     servers,
@@ -834,6 +836,7 @@ export function MCPPageV3({ userId }: Props) {
               healthMap={healthMap}
               healthCheckedAt={healthCheckedAt}
               userId={userId}
+              isAdmin={isAdmin}
               onConnect={handleConnect}
               onDisconnect={disconnect}
               onCheckHealth={checkHealth}

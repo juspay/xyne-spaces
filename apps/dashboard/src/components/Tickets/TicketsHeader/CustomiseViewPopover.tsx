@@ -10,7 +10,7 @@ import {
 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { Tooltip } from '../../ui/Tooltip';
-import { groupByChoices, groupByLabel, optionKey } from './groupBy';
+import { groupByLabel, optionKey, splitGroupByChoices } from './groupBy';
 import type { HeaderLayoutView, TicketsHeaderProps } from './TicketsHeader.types';
 
 type CustomiseViewPopoverProps = Pick<
@@ -35,6 +35,10 @@ type CustomiseViewPopoverProps = Pick<
 
 const rowClass =
   'flex h-[31px] w-full items-center rounded-[7px] px-[9px] text-left text-[12.5px] text-foreground/80 transition-colors hover:bg-muted';
+
+/** One indented choice under the expanded "Group by" row. */
+const groupChoiceClass =
+  'flex h-7 w-full items-center rounded-[7px] pl-5 pr-[9px] text-left text-[12.5px] text-foreground/80 transition-colors hover:bg-muted';
 
 const LAYOUT_TRACK_NAMES: Record<HeaderLayoutView, string> = {
   kanban: 'SetKanbanView',
@@ -74,6 +78,7 @@ const LayoutCard = ({
 }): ReactElement => (
   <button
     type='button'
+    aria-current={selected ? 'true' : undefined}
     onClick={onClick}
     className={cn(
       'flex flex-1 flex-col gap-[7px] rounded-[10px] border p-[9px] text-left transition-colors hover:border-muted-foreground/40',
@@ -99,6 +104,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<'main' | 'columns'>('main');
   const [groupOpen, setGroupOpen] = useState(false);
+  const [groupCustomOpen, setGroupCustomOpen] = useState(false);
   const [columnQuery, setColumnQuery] = useState('');
 
   const shownColumns = useMemo(() => {
@@ -112,8 +118,15 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
   const columnsLabel = props.layoutView === 'table' ? 'Columns' : 'Card fields';
 
   const groupLabel = groupByLabel(props.groupBy, props.groupingOptions);
-  const groupChoices = groupByChoices(props.groupingOptions);
   const activeGroupKey = optionKey(props.groupBy);
+  const {
+    standard: standardGroupChoices,
+    customFields: customGroupChoices,
+    activeCustom: activeCustomGroup,
+  } = useMemo(
+    () => splitGroupByChoices(props.groupingOptions, activeGroupKey),
+    [props.groupingOptions, activeGroupKey],
+  );
 
   const layouts: { id: HeaderLayoutView; label: string; thumb: ReactElement }[] = useMemo(
     () => [
@@ -243,28 +256,76 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                         )}
                       />
                     </button>
-                    {groupOpen &&
-                      groupChoices.map(choice => {
-                        const active = choice.key === activeGroupKey;
-                        return (
-                          <button
-                            key={choice.key}
-                            type='button'
-                            onClick={() => props.onGroupByChange(choice.value)}
-                            className={cn(
-                              'flex h-7 w-full items-center rounded-[7px] pl-5 pr-[9px] text-left text-[12.5px] text-foreground/80 transition-colors hover:bg-muted',
-                              active && 'bg-muted',
-                            )}
-                            data-testid={`group-by-${choice.testId}`}
-                            data-track-category='Tickets'
-                            data-track-name='SetGroupBy'
-                          >
-                            {choice.label}
-                            <span className='flex-1' />
-                            {active && <Check className='size-3 text-foreground' />}
-                          </button>
-                        );
-                      })}
+                    {groupOpen && (
+                      <>
+                        {standardGroupChoices.map(choice => {
+                          const active = choice.key === activeGroupKey;
+                          return (
+                            <button
+                              key={choice.key}
+                              type='button'
+                              onClick={() => props.onGroupByChange(choice.value)}
+                              className={cn(groupChoiceClass, active && 'bg-muted')}
+                              data-testid={`group-by-${choice.testId}`}
+                              data-track-category='Tickets'
+                              data-track-name='SetGroupBy'
+                            >
+                              {choice.label}
+                              <span className='flex-1' />
+                              {active && <Check className='size-3 text-foreground' />}
+                            </button>
+                          );
+                        })}
+                        {customGroupChoices.length > 0 && (
+                          <>
+                            <button
+                              type='button'
+                              onClick={() => setGroupCustomOpen(prev => !prev)}
+                              className={groupChoiceClass}
+                              data-testid='group-by-custom-fields'
+                              data-track-category='Tickets'
+                              data-track-name='ToggleGroupByCustomFields'
+                              data-track-metadata={JSON.stringify({
+                                fieldCount: customGroupChoices.length,
+                              })}
+                            >
+                              Custom fields
+                              <span className='flex-1' />
+                              {activeCustomGroup && (
+                                <span className='max-w-[90px] truncate text-[11.5px] font-medium text-foreground'>
+                                  {activeCustomGroup.label}
+                                </span>
+                              )}
+                              <ChevronRight
+                                className={cn(
+                                  'ml-[5px] size-[11px] text-muted-foreground/60 transition-transform',
+                                  groupCustomOpen && 'rotate-90',
+                                )}
+                              />
+                            </button>
+                            {groupCustomOpen &&
+                              customGroupChoices.map(choice => {
+                                const active = choice.key === activeGroupKey;
+                                return (
+                                  <button
+                                    key={choice.key}
+                                    type='button'
+                                    onClick={() => props.onGroupByChange(choice.value)}
+                                    className={cn(groupChoiceClass, 'pl-8', active && 'bg-muted')}
+                                    data-testid={`group-by-${choice.testId}`}
+                                    data-track-category='Tickets'
+                                    data-track-name='SetGroupBy'
+                                  >
+                                    {choice.label}
+                                    <span className='flex-1' />
+                                    {active && <Check className='size-3 text-foreground' />}
+                                  </button>
+                                );
+                              })}
+                          </>
+                        )}
+                      </>
+                    )}
                   </>
                 )}
                 <button
@@ -332,6 +393,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                           <button
                             type='button'
                             title='Delete saved filter'
+                            aria-label='Delete saved filter'
                             onClick={() => props.savedFilters?.onDelete(item)}
                             className='ml-1 hidden size-5 items-center justify-center rounded text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground group-hover:flex'
                             data-track-category='saved-views'
@@ -352,6 +414,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                 <button
                   type='button'
                   title='Back'
+                  aria-label='Back'
                   onClick={() => setStep('main')}
                   className='flex size-6 items-center justify-center rounded-md text-foreground/80 hover:bg-muted hover:text-foreground'
                   data-track-category='Tickets'

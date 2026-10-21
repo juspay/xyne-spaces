@@ -1,25 +1,25 @@
 import { memo, ReactElement, useState } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   Hashtag,
   PencilEdit,
-  Headphones,
   MultipleCrossCancelDefault,
   ThreeDotsMenuVertical,
   CheckTickSingle,
   FolderArrowRight,
   FolderRemove,
+  PhoneDefault,
 } from '@xyne/icons';
-import {
-  ChannelVisibility,
-  ChannelScopeType,
-  ChannelType,
-  NotificationLevel,
-  ChannelSection,
-} from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType, ChannelType, ChannelSection } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
+import {
+  isChannelBold,
+  isDMChannel,
+  isGroupDMChannel,
+  parseDMParticipantIds,
+} from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
@@ -75,7 +75,7 @@ const ChannelItemV2 = memo(
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
-    const navigate = useNavigate();
+    const navigate = useStableNavigate();
 
     const currentUserID = context.userID;
 
@@ -96,15 +96,7 @@ const ChannelItemV2 = memo(
     const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
     const status = useGetChannelUserStatus(channel.id);
-    const hasUnreadCount = unreadCount > 0;
-    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
-    const shouldShowBold = isDM
-      ? hasUnreadCount
-      : !isMuted &&
-        (hasUnreadCount ||
-          (!!status?.lastViewedAt &&
-            !!channel.channelStats?.lastActivityAt &&
-            channel.channelStats.lastActivityAt > status.lastViewedAt));
+    const shouldShowBold = isChannelBold(channel, unreadCount, status);
 
     const shouldShowCloseButton = isDM && !isActive && unreadCount === 0 && !isMobile;
 
@@ -180,12 +172,25 @@ const ChannelItemV2 = memo(
       </div>
     );
 
+    // The badge and incident dot have no text of their own, so screen readers hear them here; the
+    // name stays the label, the one people (and Buddy) know the conversation by.
+    const dmDescription = [
+      'Direct message',
+      unreadCount > 0 && !isActive && `${unreadCount > 9 ? '9+' : unreadCount} unread`,
+      hasSlashCommandArtifactSideEffect && 'Active incident',
+    ]
+      .filter(Boolean)
+      .join(', ');
+
     return (
       <Link
         className=''
         draggable={false}
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
+        aria-label={isDM ? displayName : undefined}
+        aria-description={isDM ? dmDescription : 'Channel'}
+        aria-current={isActive ? 'page' : undefined}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
         data-track-label='Open channel'
@@ -228,7 +233,7 @@ const ChannelItemV2 = memo(
           </span>
           {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
-              <Headphones size={14} />
+              <PhoneDefault size={14} />
             </span>
           )}
           {shouldShowDraft && !hideDraftIndicator && (
@@ -257,7 +262,7 @@ const ChannelItemV2 = memo(
                     e.stopPropagation();
                   }}
                   onPointerDown={e => e.stopPropagation()}
-                  aria-label='Channel section options'
+                  aria-label={`Sidebar options for ${displayName}`}
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='CHANNEL_SECTION_MENU'
                 >
@@ -329,6 +334,7 @@ const ChannelItemV2 = memo(
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              aria-label={`Close ${displayName}`}
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'

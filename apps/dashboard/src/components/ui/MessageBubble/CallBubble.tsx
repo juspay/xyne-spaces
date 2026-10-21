@@ -12,6 +12,7 @@ import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
 
@@ -63,6 +64,7 @@ export const GeneratePRDButton: React.FC<{
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
+        aria-label={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
       >
         {isLoading ? (
           <Loader2 className='h-4 w-4 animate-spin' />
@@ -114,6 +116,7 @@ const GenerateSummaryButton: React.FC<{
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
+        aria-label={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
       >
         {isLoading ? (
           <Loader2 className='h-4 w-4 animate-spin' />
@@ -203,6 +206,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
 }) => {
   const metadata = message.metadata;
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
+  const askAIAvailable = useAskAIAvailable();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
@@ -303,12 +307,14 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
                                 />
                               )}
-                              <ChatWithAskAIButton
-                                channelId={channelId}
-                                conversationId={conversationId}
-                                metadata={metadata}
-                                attachments={attachments}
-                              />
+                              {askAIAvailable && (
+                                <ChatWithAskAIButton
+                                  channelId={channelId}
+                                  conversationId={conversationId}
+                                  metadata={metadata}
+                                  attachments={attachments}
+                                />
+                              )}
                               {recordingAttachment && (
                                 <AudioPlayer
                                   onLoad={signal =>

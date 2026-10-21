@@ -1,4 +1,4 @@
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { DIGITAL_TWIN_BANK_ID, bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 
@@ -143,7 +143,7 @@ export async function runRetentionSweep(
   opts: RetentionSweepOptions = { dryRun: true },
 ): Promise<RetentionSweepSummary> {
   const bankId = bankIdForAgent(agentSlug);
-  if (bankId === bankIdForAgent("digital-twin")) {
+  if (bankId === DIGITAL_TWIN_BANK_ID) {
     throw new Error("Refusing memory retention sweep for the digital-twin bank");
   }
   if (!opts.dryRun) await assertLiveSweepEnabled(agentSlug);

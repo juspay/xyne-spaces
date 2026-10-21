@@ -8,7 +8,8 @@ resource "kubernetes_namespace_v1" "app" {
   }
 
   lifecycle {
-    ignore_changes = [metadata[0].annotations]
+    ignore_changes        = [metadata[0].annotations]
+    create_before_destroy = true
   }
 }
 

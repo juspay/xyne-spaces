@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { errMsg } from "../lib/errors.js";
-import { bankIdForAgent } from "xyne-claw-shared";
+import { DIGITAL_TWIN_BANK_ID } from "xyne-claw-shared";
 import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("memory-hygiene", createTraceId());
@@ -9,9 +9,9 @@ const DEFAULT_BANK_ALLOWLIST = ["xyne-xyne-spaces-architect"];
 // The digital twin bank holds per-user personal memories partitioned by
 // user:<id> tags. Cross-user duplicate collapse there would invalidate one
 // user's memory as a "duplicate" of another's — never touch it, even if the
-// env allowlist names it. Keyed on bank id (matches isDigitalTwinAgent in
-// routes/memory.ts) so sanitized slug variants can't slip through.
-const DIGITAL_TWIN_BANK = bankIdForAgent("digital-twin");
+// env allowlist names it. Keyed on bank id (DIGITAL_TWIN_BANK_ID, the same rule
+// as isDigitalTwinAgent in xyne-claw-shared) so sanitized slug variants can't
+// slip through.
 const DUPLICATE_THRESHOLD = 0.99;
 const DEFAULT_MAX_COLLAPSED_PER_RUN = 2_000;
 const MAX_ACTIVE_INGEST_OPERATIONS = 50;
@@ -115,7 +115,7 @@ export function configuredBanks(): string[] {
       ? DEFAULT_BANK_ALLOWLIST
       : [...new Set(configured.split(",").map((bank) => bank.trim()).filter(Boolean))];
   return banks.filter((bank) => {
-    if (bank !== DIGITAL_TWIN_BANK) return true;
+    if (bank !== DIGITAL_TWIN_BANK_ID) return true;
     logger.warn("[memory-hygiene] Digital twin bank excluded from hygiene — refusing", { bank });
     return false;
   });

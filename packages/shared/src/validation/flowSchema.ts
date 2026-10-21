@@ -158,6 +158,10 @@ export const dropdownComponentSchema = baseComponentSchema.extend({
     placeholder: z.string().optional(),
     options: selectOptionsField,
     required: z.boolean().optional(),
+    // Opt-in multi-select. Omitted or false keeps the single-select dropdown,
+    // whose field value is a string; true makes the field value a string[] and
+    // renders a searchable dropdown with removable pills.
+    multiple: z.boolean().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });
@@ -839,7 +843,18 @@ export const agentIdentitySchema = z
   })
   .strict();
 
-export const agentDraftPhaseSchema = z.enum(['pending', 'created', 'rejected']);
+export const agentDraftPhaseSchema = z.enum(['pending', 'created', 'rejected', 'superseded']);
+
+export const agentChangeSchema = z
+  .object({
+    field: z.enum(['name', 'description', 'modelId', 'color', 'systemPrompt', 'tools']),
+    label: z.string().min(1),
+    before: z.string().optional(),
+    after: z.string().optional(),
+    added: z.array(z.string().min(1)).optional(),
+    removed: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
 
 export const agentPropsSchema = z.discriminatedUnion('variant', [
   z
@@ -868,6 +883,15 @@ export const agentPropsSchema = z.discriminatedUnion('variant', [
       note: z.string().optional(),
     })
     .strict(),
+  z
+    .object({
+      variant: z.literal('update'),
+      agent: agentIdentitySchema,
+      changes: z.array(agentChangeSchema).min(1),
+      summary: z.string().optional(),
+      note: z.string().optional(),
+    })
+    .strict(),
 ]);
 
 export const agentComponentSchema = baseComponentSchema.extend({
@@ -890,6 +914,8 @@ export type AgentVariant = AgentProps['variant'];
 export type AgentDraftProps = Extract<AgentProps, { variant: 'draft' }>;
 export type AgentDraftPhase = AgentDraftProps['phase'];
 export type AgentProfileProps = Extract<AgentProps, { variant: 'profile' }>;
+export type AgentUpdateProps = Extract<AgentProps, { variant: 'update' }>;
+export type AgentChange = z.infer<typeof agentChangeSchema>;
 
 // ── Slash-command artifact ────────────────────────────────────────────────
 // A slash command can emit a persistent, structured message card. Message
@@ -1193,6 +1219,7 @@ export const actionRequestSchema = z.object({
     conversationId: z.string().min(1),
     token: z.string().optional(),
   }),
+  applyToDraft: z.boolean().optional(),
 });
 
 // ============================================================================
@@ -1228,6 +1255,8 @@ export const appActionResponseSchema = z.discriminatedUnion('type', [
     type: z.literal('error'),
     message: z.string(),
     code: z.string().optional(),
+    /** True when retrying the same action can succeed (see flowActionErrors.ts). */
+    retryable: z.boolean().optional(),
   }),
 ]);
 

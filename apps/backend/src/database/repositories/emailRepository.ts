@@ -27,14 +27,14 @@ export class EmailRepository {
     clientVersionName?: string;
     clientVersionCode?: string;
     createdAt?: Date;
-  }, tx?: Prisma.TransactionClient): Promise<Email> {
+  }, tx?: Prisma.TransactionClient, options?: { workspaceId?: string }): Promise<Email> {
     const db = tx ?? this.db;
     const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
-    const channel = await db.channel.findUnique({
+    const workspaceId = options?.workspaceId ?? (await db.channel.findUnique({
       where: { id: data.channelId },
       select: { workspaceId: true },
-    });
-    if (!channel?.workspaceId) {
+    }))?.workspaceId;
+    if (!workspaceId) {
       throw new Error(`Could not find workspaceId for channel ${data.channelId}`);
     }
     const email = await db.email.upsert({
@@ -47,7 +47,7 @@ export class EmailRepository {
       update: {},
       create: {
         type: data.type,
-        workspaceId: channel.workspaceId,
+        workspaceId,
         subject: data.subject,
         body: data.body,
         to: data.to,

@@ -1,5 +1,5 @@
 import { ComponentType, ReactElement, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PlusDefault, SearchDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button/index';
@@ -8,14 +8,18 @@ import SubagentsV2 from './subagents/SubagentsV2';
 import SkillsV2 from './skills/SkillsV2';
 import McpV2 from './mcp/McpV2';
 import AppsV2 from './apps/AppsV2';
+import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
+import { CreateAppDialog } from '@/routes/AppsMarketplaceScreen/CreateAppDialog';
+import { CreateAgentDialog } from './agents/create/CreateAgentDialog';
 
 interface LibraryTab {
   id: string;
   label: string;
   content: ComponentType<{ query: string }>;
   searchPlaceholder: string;
-  create: { label: string; path: string } | null;
+  /** A page to go to, or `dialog` for a create flow that opens in place. */
+  create: { label: string; path: string } | { label: string; dialog: 'app' } | null;
 }
 
 const LIBRARY_TABS = [
@@ -52,28 +56,44 @@ const LIBRARY_TABS = [
     label: 'Apps',
     content: AppsV2,
     searchPlaceholder: 'Search apps',
-    // Apps are created by saving one out of a chat, never from a blank form.
+    create: { label: 'Create app', dialog: 'app' },
+  },
+  {
+    id: 'developers',
+    label: 'Developers',
+    content: DevelopersV2,
+    searchPlaceholder: 'Search developer tools',
+    // Shipped products (the Spaces MCP and SDK), not something a user creates.
     create: null,
   },
 ] as const satisfies readonly LibraryTab[];
 
 /** Params owned by a tab — cleared on switch so filters never leak across tabs. */
-const TAB_SCOPED_PARAMS = ['q', 'category', 'source'];
+const TAB_SCOPED_PARAMS = ['q', 'category', 'source', 'hub'];
 
-const LibraryV2 = (): ReactElement => {
+/** `channelId` scopes the hub to one SDLC hub's agents: its members plus agents pending approval. */
+const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): ReactElement => {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const tabs = channelId ? LIBRARY_TABS.slice(0, 1) : LIBRARY_TABS;
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   // Every app route lives under `/:workspaceId`, so the create targets below
   // have to carry the prefix when we're inside a workspace.
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [searchParams, setSearchParams] = useSearchParams();
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+  const [createAppOpen, setCreateAppOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const rawTab = searchParams.get('tab');
-  const activeTab = LIBRARY_TABS.find(t => t.id === rawTab) ?? LIBRARY_TABS[0];
+  const activeTab = tabs.find(t => t.id === rawTab) ?? LIBRARY_TABS[0];
+  const createPath = (path: string): string =>
+    channelId
+      ? `${path}?${new URLSearchParams({ sdlcChannelId: channelId, returnTo: pathname })}`
+      : path;
   const TabContent = activeTab.content;
 
+  const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const query = searchParams.get('q') ?? '';
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
 
@@ -119,7 +139,13 @@ const LibraryV2 = (): ReactElement => {
             <Button
               type='button'
               className='shrink-0'
-              onClick={() => void navigate(prefixWs(activeTab.create.path))}
+              onClick={() => {
+                const { create } = activeTab;
+                if (!create) return;
+                if ('dialog' in create) setCreateAppOpen(true);
+                else if (activeTab.id === 'agents') setCreateAgentOpen(true);
+                else void navigate(prefixWs(createPath(create.path)));
+              }}
               data-track-category='Claw Agents'
               data-track-name={activeTab.create.label}
             >
@@ -132,7 +158,7 @@ const LibraryV2 = (): ReactElement => {
         <div className='mt-3 flex flex-col gap-5 pb-3 pt-2'>
           <div className='flex items-center justify-between gap-4'>
             <div className='flex items-start gap-1'>
-              {LIBRARY_TABS.map(tab => (
+              {tabs.map(tab => (
                 <button
                   key={tab.id}
                   type='button'
@@ -197,9 +223,16 @@ const LibraryV2 = (): ReactElement => {
 
       <LibraryToolbarSlotProvider value={toolbarSlot}>
         <div className='mt-5'>
-          <TabContent key={activeTab.id} query={query} />
+          {channelId ? (
+            <AgentsV2 query={query} channelId={channelId} />
+          ) : (
+            <TabContent key={activeTab.id} query={query} />
+          )}
         </div>
       </LibraryToolbarSlotProvider>
+
+      <CreateAppDialog open={createAppOpen} onOpenChange={setCreateAppOpen} />
+      <CreateAgentDialog open={createAgentOpen} onOpenChange={setCreateAgentOpen} />
     </div>
   );
 };

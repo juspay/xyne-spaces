@@ -98,6 +98,7 @@ export const BoardsChip = ({
         }}
         onClose={() => handleOpenChange(false)}
         boards={boardList}
+        alwaysOfferAllBoards={ctx.alwaysOfferAllBoards ?? false}
       />
     </div>
   );

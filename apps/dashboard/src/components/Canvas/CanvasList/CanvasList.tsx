@@ -33,7 +33,6 @@ import {
 import { CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
 import Input from '../../ui/Input';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Dialog } from '../../ui/Dialog';
 import { searchUsers, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import {
   DropdownMenu,
@@ -45,7 +44,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
@@ -70,10 +68,11 @@ import { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasMatchesSharedByFilter } from '../canvasListFilters';
 import {
+  getAvailableLabelCounts,
   getCanvasLabelDotClassName,
   getCanvasLabelKey,
   getCanvasLabels,
-  type CanvasLabelChip,
+  type CanvasLabelCount,
 } from '../canvasLabelUtils';
 import {
   mergeCanvasRestLabels,
@@ -87,7 +86,6 @@ type CanvasCursor = { id: string; updatedAt: number };
 type CanvasSearchScope = 'direct' | 'via_channel' | 'all';
 type CanvasSearchScopeMenuView = 'main' | 'channels';
 type CanvasFolderGroup = { folder: CanvasFolder };
-type CanvasLabelCount = { label: CanvasLabelChip; count: number };
 type CanvasEmptyStateCopy = {
   title: string;
   description: string;
@@ -468,23 +466,6 @@ const areCanvasItemsEqual = (left: Canvas, right: Canvas | undefined): boolean =
 const areCanvasItemListsEqual = (left: Canvas[], right: Canvas[]): boolean =>
   left.length === right.length &&
   left.every((canvas, index) => areCanvasItemsEqual(canvas, right[index]));
-
-const getAvailableLabelCounts = (labels: CanvasLabelChip[]): CanvasLabelCount[] => {
-  const labelCounts = new Map<string, CanvasLabelCount>();
-  for (const label of labels) {
-    const key = getCanvasLabelKey(label.name);
-    if (!key) continue;
-
-    const existing = labelCounts.get(key);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      labelCounts.set(key, { label, count: 1 });
-    }
-  }
-
-  return Array.from(labelCounts.values()).sort((a, b) => a.label.name.localeCompare(b.label.name));
-};
 
 const getAvailableCanvasLabelsFromMap = (
   canvases: Canvas[],
@@ -941,14 +922,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [sharedBySearchQuery, setSharedBySearchQuery] = useState('');
   const [selectedSharedByUserId, setSelectedSharedByUserId] = useState<string | null>(null);
   const [isSharedByDropdownOpen, setIsSharedByDropdownOpen] = useState(false);
-  const [searchScope, setSearchScope] = useState<CanvasSearchScope>('direct');
+  const [searchScope, setSearchScope] = useState<CanvasSearchScope>('all');
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const [scopeMenuView, setScopeMenuView] = useState<CanvasSearchScopeMenuView>('main');
   const [scopeChannelSearchQuery, setScopeChannelSearchQuery] = useState('');
   const [selectedScopeChannelId, setSelectedScopeChannelId] = useState<string | null>(null);
   const [openCanvasMenuId, setOpenCanvasMenuId] = useState<string | null>(null);
-  const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
-  const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('all');
+  const [locallyDeletedCanvasIds, setLocallyDeletedCanvasIds] = useState<Set<string>>(new Set());
+  const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('created_by_me');
   const [collapsedChannelFolderIds, setCollapsedChannelFolderIds] = useState<Set<string>>(
     new Set(),
   );
@@ -1047,8 +1028,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     [canvasItems, channelCanvasItems],
   );
   const selectedChannelRootCanvasItems = useMemo(
-    () => toCanvasArray<Canvas>(selectedChannelRootCanvasesResult),
-    [selectedChannelRootCanvasesResult],
+    () =>
+      toCanvasArray<Canvas>(selectedChannelRootCanvasesResult).filter(
+        canvas => !locallyDeletedCanvasIds.has(canvas.id),
+      ),
+    [locallyDeletedCanvasIds, selectedChannelRootCanvasesResult],
   );
   const canvasLabelIds = useMemo(
     () => [
@@ -1093,13 +1077,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const rawItems = useMemo(
     () =>
-      rawMergedCanvasItems.map(canvas =>
-        mergeCanvasRestLabels(
-          mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
-          labelsByCanvasId,
+      rawMergedCanvasItems
+        .filter(canvas => !locallyDeletedCanvasIds.has(canvas.id))
+        .map(canvas =>
+          mergeCanvasRestLabels(
+            mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+            labelsByCanvasId,
+          ),
         ),
-      ),
-    [labelsByCanvasId, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
+    [labelsByCanvasId, locallyDeletedCanvasIds, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
   );
   const archiveFilteredRawItems = useMemo(
     () => filterArchivedCanvases(rawItems, { includeArchived, onlyArchived }),
@@ -1220,11 +1206,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     (
       sourceChannelId: string,
       page: Canvas[],
-      _previousPageIds: Set<string>,
+      previousPageIds: Set<string>,
       pageSize: number,
     ): void => {
       setChannelCanvasItems(previousItems => {
-        const mergedItems = mergeCanvasItems(previousItems, page);
+        const nextPageIds = new Set(page.map(canvas => canvas.id));
+        const retainedItems = previousItems.filter(
+          canvas => !previousPageIds.has(canvas.id) || nextPageIds.has(canvas.id),
+        );
+        const mergedItems = mergeCanvasItems(retainedItems, page);
         return areCanvasItemListsEqual(previousItems, mergedItems) ? previousItems : mergedItems;
       });
       setChannelSourcePagination(previous => {
@@ -1880,7 +1870,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               key: 'delete',
               label: 'Delete',
               icon: <Trash2 className='size-3.5' strokeWidth={2.1} />,
-              onSelect: () => setDeletingCanvasId(canvas.id),
+              onSelect: () => {
+                setLocallyDeletedCanvasIds(previous => new Set(previous).add(canvas.id));
+                onDelete(canvas.id);
+              },
               variant: 'destructive' as const,
               separatorBefore: !onArchiveToggle,
               testId: 'canvas-delete-button',
@@ -1905,6 +1898,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             : 'text-sidebar-foreground',
         )}
         onClick={e => onSelect(e, canvas)}
+        aria-label={canvas.title || 'Untitled Canvas'}
+        aria-current={isSelected ? 'true' : undefined}
         data-track-category='CANVAS'
         data-track-name='Open_Canvas'
         data-track-metadata={JSON.stringify({
@@ -2037,7 +2032,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 data-track-category='CANVAS'
                 data-track-name='Open_Canvas_Menu'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                aria-label='Canvas actions'
+                aria-label={`More actions for ${canvas.title || 'Untitled Canvas'}`}
               >
                 <MoreVertical className='size-3.5' strokeWidth={2.5} />
               </button>
@@ -2665,23 +2660,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           />
         )}
       </div>
-
-      <Dialog
-        open={!!deletingCanvasId}
-        onOpenChange={open => !open && setDeletingCanvasId(null)}
-        title='Delete Canvas'
-      >
-        <CanvasDeleteModal
-          onClose={() => setDeletingCanvasId(null)}
-          onConfirm={() => {
-            if (deletingCanvasId && onDelete) {
-              onDelete(deletingCanvasId);
-              setDeletingCanvasId(null);
-            }
-          }}
-          canvasTitle={rawItems.find(c => c.id === deletingCanvasId)?.title}
-        />
-      </Dialog>
     </div>
   );
 };

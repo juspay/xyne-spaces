@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { isCurrentUser } from "../../lib/identity";
 import {
   ArrowLeft, Trash2, Link2, Brain,
   Save, X, Plus, Settings, Sparkles, Loader2, Upload, Globe,
@@ -561,7 +562,7 @@ export function AgentDetailPageV2({ userId, isAdmin }: Props) {
 
   useEffect(() => {
     if (!agent) return;
-    const canEdit = agent.ownerUserId === userId || (agent.scope === "global" && !!isAdmin);
+    const canEdit = isCurrentUser(agent.ownerUserId) || (agent.scope === "global" && !!isAdmin);
     if (canEdit) setActiveTab("configure");
   }, [agent?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -582,7 +583,7 @@ export function AgentDetailPageV2({ userId, isAdmin }: Props) {
     </div>
   );
 
-  const isOwner = agent.ownerUserId === userId;
+  const isOwner = isCurrentUser(agent.ownerUserId);
   const canEdit = isOwner || (agent.scope === "global" && !!isAdmin);
   const activeJobs = jobs.filter((j) => j.status === "active");
   const inactiveJobs = jobs.filter((j) => j.status !== "active");

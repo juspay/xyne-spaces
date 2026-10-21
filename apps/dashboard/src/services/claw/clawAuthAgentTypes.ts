@@ -135,6 +135,8 @@ export interface Agent {
   readonly skills?: AgentSkill[];
   readonly collections?: AgentCollection[];
   readonly kbScope?: 'COLLECTIONS' | 'USER';
+  /** Decides what "nothing selected" grants — see resolveAgentToolsConfig in xyne-claw-shared. */
+  readonly delegationTier?: 'standard' | 'orchestrator';
   readonly shares?: AgentShare[];
   readonly createdAt: string;
   readonly updatedAt: string;

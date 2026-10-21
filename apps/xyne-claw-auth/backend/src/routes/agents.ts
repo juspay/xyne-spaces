@@ -1,6 +1,8 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { notifySdlcAgentRegistered } from "../lib/sdlc-repository-context.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 import {
   extractProviderMessage,
   modelServedBy,
@@ -10,13 +12,15 @@ import {
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
+import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository, designSystemRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
+import { draftSpecFromCreateAgentParams, createAgentQueueError, createAgentNotGranted } from "../lib/agent-draft-card.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
+import { DEFAULT_NEW_AGENT_TOOL_SOURCES, mergeNewAgentToolDefaults } from "../lib/new-agent-tool-defaults.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
@@ -25,6 +29,7 @@ import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
+import { resolveClaudeModelsCredential } from "../lib/claude-models-credential.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
@@ -36,7 +41,8 @@ import {
   isClawAdmin,
   requireRequester,
 } from "../middleware/agent-acl.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { findUserByAnyId, resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -48,6 +54,7 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { agentRunDetail, agentRunHealth, closeLostRuns } from "../lib/agent-run-health.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -145,6 +152,14 @@ function readConfigToolSelection(config: unknown): string[] {
     for (const item of configArray(tools[key])) out.push(`${key}:${item}`);
   }
   return out;
+}
+
+async function applyNewAgentToolDefaults(config: Record<string, unknown> | undefined): Promise<Record<string, unknown>> {
+  const rows = await prisma.tool.findMany({
+    where: { source: { in: [...DEFAULT_NEW_AGENT_TOOL_SOURCES] } },
+    select: { slug: true },
+  });
+  return mergeNewAgentToolDefaults(config, rows.map((r) => r.slug));
 }
 
 function readTopLevelGatewaySelection(config: unknown): string[] {
@@ -357,7 +372,43 @@ router.get("/check-name", asyncHandler(async (req: Request, res: Response, next)
   ok(res, { slugAvailable: !slugTaken, nameAvailable: !nameTaken });
 }));
 
+// ── Optimization catalog ─────────────────────────────────────────────
+
+/**
+ * Every claw optimization switch, for the agent page's Optimizations section.
+ * Static: the same xyne-claw-shared catalog claw decides each run from, so a
+ * new switch shows up here without a UI change. An agent's choices are stored
+ * in its `config.optimizations` and saved through the normal agent update.
+ *
+ * GET /api/v1/agents/optimizations → { success, data: { groups, optimizations, tierDefaults } }
+ */
+router.get("/optimizations", (_req: Request, res: Response) => {
+  ok(res, {
+    groups: OPTIMIZATION_GROUPS,
+    optimizations: optimizationCatalog(),
+    tierDefaults: OPTIMIZATION_TIER_DEFAULTS,
+  });
+});
+
 // ── Agent CRUD ───────────────────────────────────────────────────────
+
+/** Union one name-sorted listVisible result per identity alias into a single
+ *  name-sorted list, dropping the global agents every alias call returns. */
+function mergeVisibleAgentLists(
+  lists: Array<Awaited<ReturnType<typeof agentRepository.listVisible>>>,
+): Awaited<ReturnType<typeof agentRepository.listVisible>> {
+  const seen = new Set<string>();
+  const merged = [];
+  for (const list of lists) {
+    for (const agent of list) {
+      if (seen.has(agent.id)) continue;
+      seen.add(agent.id);
+      merged.push(agent);
+    }
+  }
+  merged.sort((a, b) => a.name.localeCompare(b.name));
+  return merged;
+}
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // The caller-passed userId is honoured as a "scope" hint (lets a frontend
@@ -365,9 +416,46 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // the AUTHENTICATED user — requireAuth has already verified their cookie
   // and pinned the verified userId at req.headers["x-user-id"]. We never
   // trust the query string for that decision.
-  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
   const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+
+  // Dashboard auth exposes the workspace-scoped Spaces user ID, while
+  // Agent.ownerUserId stores the canonical Claw User ID. Resolve an explicit
+  // scope through UserSurfaceIdentity before applying the visibility filter.
+  // Non-admin callers may only request their own two equivalent identities.
+  if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw forbidden("userId does not match authenticated session");
+  }
+  const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
+  if (scopeUserId && !scopedUser) {
+    // If the caller is querying their OWN userId (matched by header aliases),
+    // fall through — canonicalScopeUserId will use authedUserId below.
+    // This handles the case where UserSurfaceIdentity isn't populated yet
+    // (e.g. the Surface migration hasn't run) but the user is authenticated.
+    if (!matchesAuthenticatedUserId(req, scopeUserId)) {
+      throw notFound("User not found");
+    }
+  }
+  const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
+
+  // Agent.ownerUserId / AgentShare.userId may be keyed by EITHER verified
+  // representation of the scoped caller — the canonical Claw id OR the raw
+  // workspace-scoped Spaces id (rows written before canonicalization, or by
+  // clients posting their raw dashboard id as ownerUserId). listVisible
+  // filters one id per call, so an OWN-scope read unions each alias's
+  // results; an admin's explicit foreign scope resolves to the target's
+  // canonical id only.
+  const visibilityUserIds = (() => {
+    if (scopedUser && !matchesAuthenticatedUserId(req, scopedUser.id)) {
+      return [scopedUser.id];
+    }
+    const ids = getRequesterAliases(req);
+    if (canonicalScopeUserId && !ids.includes(canonicalScopeUserId)) {
+      ids.push(canonicalScopeUserId);
+    }
+    return ids;
+  })();
 
   // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
   // list (e.g. the main "My Agents" view) stays filtered to
@@ -378,17 +466,32 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const wantAllAgents = req.query["scope"] === "all";
   const adminScope = getAdminOrgScope(req, "/agents", admin && wantAllAgents);
   const listOrgId = adminScope.orgId ?? getOrgId(req);
-  const agents = await agentRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
-    ...(listOrgId ? { orgId: listOrgId } : {}),
-    isAdmin: admin && wantAllAgents,
-  });
+  const agents = visibilityUserIds.length > 0
+    ? mergeVisibleAgentLists(
+        await Promise.all(
+          visibilityUserIds.map((id) =>
+            agentRepository.listVisible({
+              userId: id,
+              ...(listOrgId ? { orgId: listOrgId } : {}),
+              isAdmin: admin && wantAllAgents,
+            }),
+          ),
+        ),
+      )
+    : await agentRepository.listVisible({
+        ...(listOrgId ? { orgId: listOrgId } : {}),
+        isAdmin: admin && wantAllAgents,
+      });
   const orgNames = adminScope.allOrgs ? await getOrgNameMap(agents.map((a) => a.orgId)) : new Map();
 
   const view = req.query["view"] === "full" ? "full" : "light";
   const sanitized = agents.map((a: typeof agents[number]) => {
     if (view === "light") {
-      return lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined);
+      return {
+        ...lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined),
+        // ownerUserId is the canonical Claw id, which a Spaces caller cannot compare with its own id.
+        ...(scopeUserId ? { ownedByScopeUser: !!a.ownerUserId && visibilityUserIds.includes(a.ownerUserId) } : {}),
+      };
     }
     const row = sanitizeAgent(a as unknown as Record<string, unknown>);
     return adminScope.allOrgs ? { ...row, ...withOrgLabel({ orgId: a.orgId }, orgNames) } : row;
@@ -401,10 +504,12 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.query["userId"] as string | undefined)?.trim();
   if (!userId) throw badRequest("userId is required");
   const requesterId = requireRequester(req, "authenticated user required");
-  if (requesterId !== userId) throw forbidden("userId does not match authenticated session");
+  if (!matchesAuthenticatedUserId(req, userId)) throw forbidden("userId does not match authenticated session");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("Organization context is required");
-  const configs = await userAgentConfigRepository.listByUser(userId, orgId);
+  // The query id may be the caller's raw Spaces alias while config rows are
+  // keyed by Claw's canonical id — read with the verified canonical id.
+  const configs = await userAgentConfigRepository.listByUser(requesterId, orgId);
   ok(res, {
     configs: configs.map((config) => ({
       agentSlug: config.agentSlug,
@@ -412,6 +517,95 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
       chainConfig: config.chainConfig ?? null,
       updatedAt: config.updatedAt,
     })),
+  });
+}));
+
+// ── Plugin / CLI agent authoring (draft → approval) ──────────────────────────
+// Let an external client (the xyne-claw CLI plugin for Codex / Claude Code)
+// submit a NEW agent for creation WITHOUT minting a live agent. A submission
+// lands in the SAME pipeline the in-thread agent-authoring flow uses: a pending
+// `agent_create` AgentRequest whose `proposedContent` holds the full spec.
+// Nothing is created until the requester approves it (the decision route below,
+// or the Spaces draft card) — so "created only on approval" holds for CLI
+// drafts too, and the plugin can never create a live agent on its own.
+// Registered BEFORE GET "/:slug" so GET "/draft-requests" is not shadowed by it.
+
+/** Submit an agent draft for approval. Returns the pending request id. */
+router.post("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+
+  const params = (req.body ?? {}) as Record<string, unknown>;
+  const spec = draftSpecFromCreateAgentParams(params);
+  if (!spec) throw badRequest("A draft needs at least a name and a systemPrompt.");
+
+  // Slug validity + duplicate check, reusing the SAME guard the in-thread flow
+  // uses so a CLI draft can't persist a row the card flow would have rejected.
+  const queueError = await createAgentQueueError(params, orgId);
+  if (queueError) throw badRequest(queueError);
+
+  // Unresolved capabilities are reported (not fatal): the approver still
+  // decides, and unmatched tools are dropped when the agent is created.
+  const unmatchedCapabilities = await createAgentNotGranted(params, orgId, requesterId);
+
+  const proposedContent = JSON.stringify(spec);
+  const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
+    agentSlug: spec.slug,
+    requesterId,
+    orgId,
+    proposedContent,
+    proposedContentHash: hashSkillContent(proposedContent),
+  });
+
+  log.info(`[agents/draft-requests] queued agent_create slug=${spec.slug} request=${outcome.request.id} requester=${requesterId} org=${orgId}`);
+  res.status(201);
+  ok(
+    res,
+    { requestId: outcome.request.id, slug: spec.slug, status: "pending" },
+    {
+      ...(outcome.supersededCount > 0 ? { supersededCount: outcome.supersededCount } : {}),
+      ...(unmatchedCapabilities.length > 0 ? { unmatchedCapabilities } : {}),
+    },
+  );
+}));
+
+/** List the caller's own pending agent drafts awaiting approval. */
+router.get("/draft-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  if (!orgId) throw badRequest("orgId is required");
+  const rows = await agentRequestRepository.listPendingAgentCreates(requesterId, orgId);
+  ok(
+    res,
+    rows.map((r) => ({ requestId: r.id, slug: r.agentSlug, status: r.status, createdAt: r.createdAt })),
+  );
+}));
+
+/** Approve or reject one of the caller's own drafts. Approval MATERIALIZES the
+ *  agent through the exact resolver the Spaces draft card uses, so the
+ *  self-approval boundary ("only the requester can decide") and every capability
+ *  gate are enforced identically — this route grants no new authority. */
+router.post("/draft-requests/:requestId/decision", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("Authenticated user is required");
+  const body = (req.body ?? {}) as { decision?: unknown; keptCapabilityIds?: unknown };
+  const decision = body.decision === "approve" ? "approve" : body.decision === "reject" ? "reject" : null;
+  if (!decision) throw badRequest('decision must be "approve" or "reject"');
+  const keptCapabilityIds = Array.isArray(body.keptCapabilityIds)
+    ? body.keptCapabilityIds.filter((v): v is string => typeof v === "string")
+    : undefined;
+
+  const { resolveAgentDraft } = await import("../lib/agent-card.js");
+  const result = await resolveAgentDraft(req.params.requestId, requesterId, decision, keptCapabilityIds);
+  if (!result.ok) throw new HttpError(result.code, result.error);
+  ok(res, {
+    status: result.status,
+    slug: result.identity.slug,
+    alreadyResolved: result.alreadyResolved,
+    ...("note" in result && result.note ? { note: result.note } : {}),
   });
 }));
 
@@ -472,7 +666,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     kbScope?: string;
   };
 
-  const normalizedConfig = await normalizeGatewayServicesInConfig(config);
+  const normalizedConfig = await applyNewAgentToolDefaults(await normalizeGatewayServicesInConfig(config));
 
   if (!slug || typeof slug !== "string" || slug.trim().length === 0) {
     throw badRequest("slug is required");
@@ -496,11 +690,20 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const admin = requesterId ? await isClawAdmin(requesterId) : false;
   const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
-  if (ownerUserId && ownerUserId !== requesterId && !admin) {
+  // The auth boundary retains both representations of the caller, so accept
+  // either the canonical Claw id or the verified Spaces id from the session.
+  if (ownerUserId && !matchesAuthenticatedUserId(req, ownerUserId) && !admin) {
     throw forbidden("Only an admin can create an agent owned by another user");
   }
-  // For personal agents, owner is required
-  const effectiveOwner = ownerUserId ?? requesterId;
+  // For personal agents, owner is required.
+  // When ownerUserId is the caller's own Spaces workspace ID (which the frontend
+  // sends from auth.user.id), prefer requesterId — the canonical Claw user ID
+  // set by requireAuth — so the DB connect targets the correct User row.
+  const effectiveOwner = (() => {
+    if (!ownerUserId) return requesterId;
+    if (matchesAuthenticatedUserId(req, ownerUserId)) return requesterId ?? ownerUserId;
+    return ownerUserId; // admin setting a different owner
+  })();
   if (effectiveScope === "personal" && !effectiveOwner) {
     throw badRequest("ownerUserId or x-user-id header required for personal agents");
   }
@@ -514,6 +717,11 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (!createOrgId) {
     log.warn(`[agents/create] orgId is required requesterId=${requesterId ?? "none"} ownerUserId=${ownerUserId ?? "none"} slug=${slug.trim()} scope=${scope ?? "none"}`);
     throw badRequest("orgId is required");
+  }
+
+  const slugCollision = await agentRepository.findBySlug(slug.trim(), createOrgId);
+  if (slugCollision) {
+    throw conflict(`Handle "${slug.trim()}" is already taken.`, "SLUG_TAKEN");
   }
 
   const data: Prisma.AgentCreateInput = {
@@ -531,7 +739,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (effectiveOwner) {
     data.owner = { connect: { id: effectiveOwner } };
   }
-  const agent = await agentRepository.create(data);
+  let agent;
+  try {
+    agent = await agentRepository.create(data);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw conflict(`Handle "${data.slug}" is already taken.`, "SLUG_TAKEN");
+    }
+    throw e;
+  }
 
   // Attach skills by ID if provided
   if (skills && Array.isArray(skills) && skills.length > 0) {
@@ -585,13 +801,32 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     throw forbidden("Only the agent owner, contributors, or admins can edit its design system");
   }
 
-  const supplied = (req.body as { designSystem?: unknown }).designSystem;
-  if (supplied !== null && typeof supplied !== "string") {
+  // Two shapes share this route: `designSystem` is the pre-migration free text,
+  // `designSystemId` points at a DesignSystem row. A body carrying only the
+  // former behaves exactly as it did before.
+  const body = (req.body ?? {}) as { designSystem?: unknown; designSystemId?: unknown };
+  const hasText = "designSystem" in body;
+  const hasId = "designSystemId" in body;
+  if (!hasText && !hasId) {
+    throw badRequest("designSystem or designSystemId is required");
+  }
+
+  const supplied = body.designSystem;
+  if (hasText && supplied !== null && typeof supplied !== "string") {
     throw badRequest("designSystem must be a string or null");
   }
   const designSystem = typeof supplied === "string" ? supplied.trim() : "";
   if (designSystem.length > 32_000) {
     throw badRequest("designSystem must be at most 32,000 characters");
+  }
+
+  const suppliedId = body.designSystemId;
+  if (hasId && suppliedId !== null && typeof suppliedId !== "string") {
+    throw badRequest("designSystemId must be a string or null");
+  }
+  const designSystemId = typeof suppliedId === "string" ? suppliedId.trim() : "";
+  if (designSystemId && !(await designSystemRepository.findById(designSystemId, existing.orgId))) {
+    throw notFound("Design system not found");
   }
 
   // Optimistic retry prevents this narrow edit from replacing a concurrent
@@ -603,8 +838,14 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
       throw notFound("Agent not found");
     }
     const nextConfig = { ...(asRecord(fresh.config) ?? {}) };
-    if (designSystem) nextConfig["designSystem"] = designSystem;
-    else delete nextConfig["designSystem"];
+    if (hasText) {
+      if (designSystem) nextConfig["designSystem"] = designSystem;
+      else delete nextConfig["designSystem"];
+    }
+    if (hasId) {
+      if (designSystemId) nextConfig["designSystemId"] = designSystemId;
+      else delete nextConfig["designSystemId"];
+    }
 
     const configCheck = validateAgentModelConfig(nextConfig);
     if (!configCheck.ok) {
@@ -629,7 +870,10 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
     eventType: "AGENT_UPDATED",
     targetId: existing.id,
     description: `Agent "${existing.name}" (${existing.slug}) design system updated`,
-    metadata: { changed: ["designSystem"], orgId: existing.orgId },
+    metadata: {
+      changed: [...(hasText ? ["designSystem"] : []), ...(hasId ? ["designSystemId"] : [])],
+      orgId: existing.orgId,
+    },
   });
   ok(res, sanitizeAgent(updated as unknown as Record<string, unknown>));
 }));
@@ -963,8 +1207,11 @@ async function postDelegationDmWithCalleeIdentity(args: {
     return;
   }
 
+  // openDm is keyed by Spaces' workspace-scoped user id; targetUserId is the
+  // canonical Claw id — translate or the DM silently never opens.
+  const spacesTargetUserId = await spacesUserIdForClawUser(targetUserId, workspaceId).catch(() => targetUserId);
   const dm = (await spacesAppFetch("/channel/openDm", {
-    targetUserId,
+    targetUserId: spacesTargetUserId,
     workspaceId,
   }, token)) as { channelId: string };
 
@@ -997,7 +1244,7 @@ async function notifyOwnerOfDelegationRequestInSpaces(args: {
   await postDelegationDmWithCalleeIdentity({
     callee,
     targetUserId: callee.ownerUserId,
-    text: `🤝 Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}.${reasonLine}\n\nApprove or reject: ${dashboardLink}`,
+    text: `Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}.${reasonLine}\n\nApprove or reject: ${dashboardLink}`,
     logContext: `request caller=${caller.slug} callee=${callee.slug}`,
   });
 }
@@ -1018,11 +1265,11 @@ async function notifyDelegationRequesterOfDecisionInSpaces(args: {
   if (grant.status !== "approved" && grant.status !== "rejected") return;
   const decider = await userRepository.findById(deciderUserId).catch(() => null);
   const deciderName = decider?.name ?? decider?.email ?? deciderUserId;
-  const emoji = grant.status === "approved" ? "✅" : "❌";
+
   await postDelegationDmWithCalleeIdentity({
     callee,
     targetUserId: grant.createdByUserId,
-    text: `${emoji} your delegation request for ${caller.name} → ${callee.name} was ${grant.status} by ${deciderName}`,
+    text: `Your delegation request for ${caller.name} → ${callee.name} was ${grant.status} by ${deciderName}.`,
     logContext: `decision caller=${caller.slug} callee=${callee.slug}`,
   });
 }
@@ -1265,6 +1512,50 @@ router.post(
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
+);
+
+router.get(
+  "/:slug/monitor",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const days = Math.min(Math.max(Math.trunc(Number(req.query["days"]) || 7), 1), 90);
+    ok(res, await agentRunHealth(agent.slug, agent.orgId, days));
+  }),
+);
+
+router.get(
+  "/:slug/monitor/runs/:sessionId",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string; sessionId: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const detail = await agentRunDetail(agent.slug, agent.orgId, req.params.sessionId);
+    if (!detail) throw notFound("Run not found for this agent");
+    ok(res, detail);
+  }),
+);
+
+router.post(
+  "/:slug/monitor/close-lost",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const raw = (req.body as { sessionIds?: unknown } | undefined)?.sessionIds;
+    if (raw !== undefined && (!Array.isArray(raw) || raw.some((id) => typeof id !== "string") || raw.length > 500)) {
+      throw badRequest("sessionIds must be an array of at most 500 session ids");
+    }
+    const result = await closeLostRuns(agent.slug, agent.orgId, raw as string[] | undefined);
+    if (result.closed.length > 0) {
+      await writeAuditLog({
+        actorUserId: getRequesterId(req) ?? "unknown",
+        eventType: "AGENT_UPDATED",
+        targetId: agent.id,
+        description: `Closed ${result.closed.length} lost runs of agent "${agent.slug}" as failed`,
+        metadata: { action: "close-lost-runs", orgId: agent.orgId, sessionIds: result.closed },
+      });
+    }
+    ok(res, result);
+  }),
 );
 
 router.get(
@@ -1726,8 +2017,11 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
       return;
     }
 
+    // openDm is keyed by Spaces' workspace-scoped user id; ownerUserId is the
+    // canonical Claw id — translate or the DM silently never opens.
+    const spacesOwnerUserId = await spacesUserIdForClawUser(agent.ownerUserId, workspaceId).catch(() => agent.ownerUserId as string);
     const dm = (await spacesAppFetch("/channel/openDm", {
-      targetUserId: agent.ownerUserId,
+      targetUserId: spacesOwnerUserId,
       workspaceId,
     }, token)) as { channelId: string };
 
@@ -2122,14 +2416,17 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
-    if (userId === agent.ownerUserId) {
-      res.status(400).json({ success: false, error: "Cannot share with the agent owner" });
-      return;
-    }
 
-    const targetUser = await userRepository.findById(userId);
+    // The body userId may be a canonical Claw id OR a Spaces alias — resolve
+    // before keying the share row so it always references the canonical user.
+    const targetUser = await findUserByAnyId(userId);
     if (!targetUser) {
       res.status(404).json({ success: false, error: "Target user not found" });
+      return;
+    }
+    // Compare canonical forms: `userId` may be the owner's raw Spaces alias.
+    if (targetUser.id === agent.ownerUserId) {
+      res.status(400).json({ success: false, error: "Cannot share with the agent owner" });
       return;
     }
     // Phase-2 (Gap 4): reject cross-org shares. A user can only be granted access
@@ -2144,7 +2441,7 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
 
     const VALID_ROLES = ["VIEWER", "EDITOR", "CONTRIBUTOR"];
     const shareRole = VALID_ROLES.includes(role ?? "") ? (role as string) : "VIEWER";
-    const share = await agentShareRepository.upsert(agent.id, userId, shareRole, requesterId);
+    const share = await agentShareRepository.upsert(agent.id, targetUser.id, shareRole, requesterId);
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -2178,13 +2475,16 @@ router.delete("/:slug/shares/:userId", requireAgentOwnerContributorOrAdmin, asyn
       return;
     }
 
-    await agentShareRepository.delete(agent.id, req.params.userId);
+    // Share rows are keyed by the canonical Claw id; the URL param may be a
+    // Spaces alias — resolve (fail-open to the input → plain not-found).
+    const targetUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await agentShareRepository.delete(agent.id, targetUserId);
 
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "AGENT_UNSHARED",
       targetId: agent.id,
-      description: `Agent "${agent.name}" share removed for user ${req.params.userId}`,
+      description: `Agent "${agent.name}" share removed for user ${targetUserId}`,
     });
 
     res.json({ success: true });
@@ -2259,8 +2559,14 @@ router.post(
       throw badRequest("That user already owns this agent");
     }
 
-    const target = await userRepository.findById(newOwnerUserId);
+    // The body id may be a canonical Claw id OR a Spaces workspace alias —
+    // resolve through the identity ladder and persist the canonical id.
+    const target = await findUserByAnyId(newOwnerUserId);
     if (!target) throw notFound("Target user not found");
+    const canonicalNewOwnerUserId = target.id;
+    if (canonicalNewOwnerUserId === agent.ownerUserId) {
+      throw badRequest("That user already owns this agent");
+    }
 
     // Cross-org transfer would hand an agent to someone who cannot even see it
     // (every read path is org-scoped). Mirrors the guard on POST /:slug/shares.
@@ -2273,7 +2579,7 @@ router.post(
     await prisma.$transaction(async (tx) => {
       await tx.agent.update({
         where: { id: agent.id },
-        data: { ownerUserId: newOwnerUserId },
+        data: { ownerUserId: canonicalNewOwnerUserId },
       });
 
       // The owner is represented by `ownerUserId`, never by a share row — see
@@ -2281,7 +2587,7 @@ router.post(
       // owner previously held a share, drop it so the agent does not end up in a
       // state the ACL helper does not model.
       await tx.agentShare.deleteMany({
-        where: { agentId: agent.id, userId: newOwnerUserId },
+        where: { agentId: agent.id, userId: canonicalNewOwnerUserId },
       });
 
       // Keep the outgoing owner able to see and edit the agent. Without this the
@@ -2308,7 +2614,7 @@ router.post(
       metadata: {
         agentSlug: agent.slug,
         previousOwnerUserId: previousOwnerId,
-        newOwnerUserId,
+        newOwnerUserId: canonicalNewOwnerUserId,
         keepPreviousOwnerAsEditor,
         byAdmin: ctx.isAdmin && !ctx.isOwner,
       },
@@ -2653,6 +2959,12 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     });
 
     log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);
+    // The hub's Agents page also promotes on read, so a failed notice only delays the join.
+    if (appUserId) {
+      notifySdlcAgentRegistered(agent.id, appUserId).catch((err) =>
+        log.warn(`[agents] install-app: SDLC hub notice failed for ${req.params.slug} — ${errMsg(err)}`),
+      );
+    }
     res.json({ success: true, data: { spacesAppUserId: appUserId } });
   } catch (err) {
     log.error("[agents] install-app error:", err);
@@ -2885,7 +3197,10 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    // Config rows are keyed by Claw's canonical id; the URL param is pinned to
+    // the caller but may carry their raw Spaces alias — resolve before reading.
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.findByUserAndAgent(configUserId, agent.orgId, req.params.slug);
     res.json({
       success: true,
       // `inherited` separates "never picked one" from an explicit "spaces" pick.
@@ -2915,7 +3230,9 @@ router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider }, agent.orgId);
+    // Write under Claw's canonical id — provider-resolution reads it that way.
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.upsert(configUserId, req.params.slug, { provider }, agent.orgId);
     res.json({ success: true, data: { provider: config.provider } });
   } catch (err) {
     log.error("[agents] upsert user-config error:", err);
@@ -2929,7 +3246,8 @@ router.get("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.findByUserAndAgent(configUserId, agent.orgId, req.params.slug);
     res.json({ success: true, data: config?.chainConfig ?? null });
   } catch (err) {
     log.error("[agents] get chain-config error:", err);
@@ -2943,7 +3261,8 @@ router.put("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { chainConfig }, agent.orgId);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await userAgentConfigRepository.upsert(configUserId, req.params.slug, { chainConfig }, agent.orgId);
 
     res.json({ success: true, data: chainConfig });
   } catch (err) {
@@ -2956,7 +3275,8 @@ router.delete("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { res.json({ success: true }); return; }
-    await userAgentConfigRepository.delete(req.params.userId, agent.orgId, req.params.slug);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await userAgentConfigRepository.delete(configUserId, agent.orgId, req.params.slug);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
@@ -3001,12 +3321,7 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   } else {
     headers["x-api-key"] = apiKey;
   }
-  await assertSafeOutboundUrl(`${root}/v1/models`);
-  const res = await fetch(`${root}/v1/models`, {
-    method: "GET",
-    headers,
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await safeFetch(`${root}/v1/models`, { method: "GET", headers }, { timeoutMs: 10_000 });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -3104,7 +3419,10 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
       // Success — encrypt and store the token at user-level
       const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
 
-      await userProviderCredentialsRepository.upsert(req.params.userId, "copilot", {
+      // Credential + config rows key on Claw's canonical id; the URL param is
+      // pinned to the caller but may carry their raw Spaces alias.
+      const canonicalUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+      await userProviderCredentialsRepository.upsert(canonicalUserId, "copilot", {
         encryptedKey: encrypted.ciphertext,
         iv: encrypted.iv,
         authTag: encrypted.authTag,
@@ -3114,7 +3432,7 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
       // Also flip this agent's provider to copilot
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/copilot-login-poll", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider: "copilot" }, agent.orgId);
+      await userAgentConfigRepository.upsert(canonicalUserId, req.params.slug, { provider: "copilot" }, agent.orgId);
 
       // Cleanup Redis
       await redis.del(key);
@@ -3146,38 +3464,22 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
-    let resolvedApiKey = apiKey?.trim();
-    let resolvedAuthType: string | undefined = authType;
-    let resolvedBaseUrl: string | undefined = baseUrl;
-
-    // No key in the body → resolve a stored cred. Try the user's personal cred
-    // first, then fall back to the AGENT's cred (the /v1/models list is
-    // account-wide, so either works to populate the dropdown). Use
-    // extractClaudeBearer so an OAuth *bundle* ({access_token,…}) yields the
-    // bare token instead of the JSON blob.
-    if (!resolvedApiKey) {
-      const userCred = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
-      if (userCred?.encryptedKey && userCred.iv && userCred.authTag) {
-        resolvedApiKey = extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey));
-        if (!resolvedAuthType) resolvedAuthType = userCred.authType ?? undefined;
-        resolvedBaseUrl = resolvedBaseUrl ?? userCred.baseUrl ?? undefined;
-      } else {
-        const agentRow = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-        const agentCred = agentRow ? await agentProviderCredentialsRepository.findByAgentAndProvider(agentRow.id, "claude") : null;
-        if (agentCred?.encryptedKey && agentCred.iv && agentCred.authTag) {
-          resolvedApiKey = extractClaudeBearer(decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey));
-          if (!resolvedAuthType) resolvedAuthType = agentCred.authType ?? undefined;
-          resolvedBaseUrl = resolvedBaseUrl ?? agentCred.baseUrl ?? undefined;
-        }
-      }
-    }
-
-    if (!resolvedApiKey) {
+    const cred = await resolveClaudeModelsCredential({
+      // Credentials are stored under Claw's canonical id; the URL param may be
+      // the caller's raw Spaces alias, so canonicalize before the lookup.
+      userId: await resolveCanonicalUserIdOrSelf(req.params.userId),
+      agentSlug: req.params.slug,
+      orgId: getOrgId(req),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(authType !== undefined ? { authType } : {}),
+    });
+    if (!cred) {
       res.status(400).json({ success: false, error: "apiKey is required" });
       return;
     }
 
-    const models = await fetchAnthropicModels(resolvedApiKey, resolvedBaseUrl, resolvedAuthType);
+    const models = await fetchAnthropicModels(cred.apiKey, cred.baseUrl, cred.authType);
     res.json({ success: true, data: models });
   } catch (err) {
     log.error("[agents] claude-models error:", err);
@@ -4277,8 +4579,7 @@ router.get(
         headers["User-Agent"] = "codex-cli";
       }
 
-      await assertSafeOutboundUrl(url);
-      const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+      const upstream = await safeFetch(url, { headers }, { timeoutMs: 20_000 });
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
@@ -4344,11 +4645,11 @@ router.post(
 
       const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
-      await assertSafeOutboundUrl(`${root}/v1/models`);
-      const upstream = await fetch(`${root}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
-        signal: AbortSignal.timeout(20_000),
-      });
+      const upstream = await safeFetch(
+        `${root}/v1/models`,
+        { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" } },
+        { timeoutMs: 20_000 },
+      );
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         log.warn(`[agents] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);

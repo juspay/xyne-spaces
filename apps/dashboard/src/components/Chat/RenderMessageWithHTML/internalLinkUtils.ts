@@ -7,6 +7,7 @@ export type InternalXyneLinkKind =
   | 'message'
   | 'ticket'
   | 'call'
+  | 'app'
   | 'unknown';
 
 export interface ParsedInternalXyneLink {
@@ -20,6 +21,8 @@ export interface ParsedInternalXyneLink {
   messageId?: string;
   canvasId?: string;
   callId?: string;
+  /** An artifact app in the Agent Hub (`/ai/library/app/:appId`). */
+  appId?: string;
 }
 
 export type AnchorTargetProps = Pick<
@@ -102,6 +105,26 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     };
 
     const segments = url.pathname.split('/').filter(Boolean);
+
+    // An Agent Hub app: `/<workspace>/ai/library/app/<appId>`, or the bare form
+    // without the workspace. Checked before the `/chat` parsing below, which
+    // treats everything else as unknown.
+    const aiIndex = segments[0] === 'ai' ? 0 : segments[1] === 'ai' ? 1 : -1;
+    const appId = aiIndex >= 0 ? segments[aiIndex + 3] : undefined;
+    if (
+      aiIndex >= 0 &&
+      segments[aiIndex + 1] === 'library' &&
+      segments[aiIndex + 2] === 'app' &&
+      appId
+    ) {
+      return {
+        kind: 'app',
+        href,
+        ...(aiIndex === 1 && segments[0] ? { workspaceId: segments[0] } : {}),
+        appId,
+      };
+    }
+
     let linkWorkspaceId: string | undefined;
     if (segments[0] !== 'chat' && segments[1] === 'chat') {
       linkWorkspaceId = segments.shift();
@@ -161,6 +184,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     return {
       kind,
       href,
+      ...(linkWorkspaceId ? { workspaceId: linkWorkspaceId } : {}),
       channelId,
       ...(conversationId ? { conversationId } : {}),
       ...(ticketId ? { ticketId } : {}),
@@ -178,6 +202,18 @@ export const isExternalUrl = (url: string): boolean => {
     return new URL(url, window.location.origin).origin !== window.location.origin;
   } catch {
     return true;
+  }
+};
+
+export const isSandboxViewLink = (href: string): boolean => {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const isOurHost =
+      INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
+    return isOurHost && url.pathname.startsWith('/claw-');
+  } catch {
+    return false;
   }
 };
 
@@ -232,8 +268,11 @@ export const getInternalLinkLabel = (
   channelLabel: string | undefined,
   ticketXyneId: string | undefined,
   canvasTitle: string | undefined,
+  appTitle?: string,
 ): string => {
   switch (parsedLink.kind) {
+    case 'app':
+      return appTitle ? `App: ${appTitle}` : 'Open app';
     case 'canvas':
       return canvasTitle ? `Canvas: ${canvasTitle}` : 'Open canvas';
     case 'ticket':

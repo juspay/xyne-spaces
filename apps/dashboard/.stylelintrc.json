@@ -1,0 +1,21 @@
+{
+  "reportNeedlessDisables": true,
+  "rules": {
+    "selector-max-universal": [
+      0,
+      {
+        "ignoreAfterCombinators": [">", "+", "~"],
+        "message": "Avoid `*` as a key selector: it is matched against every element on every style recalc. Scope it to a class, or use a direct-child `> *`."
+      }
+    ],
+    "declaration-property-value-disallowed-list": [
+      {
+        "transition": ["/(^|[\\s,])all([\\s,]|$)/"],
+        "transition-property": ["/(^|[\\s,])all([\\s,]|$)/"]
+      },
+      {
+        "message": "Don't transition `all`: it also animates inherited properties (e.g. scrollbar-color) on the main thread and restyles whole subtrees every frame. List the properties you animate."
+      }
+    ]
+  }
+}

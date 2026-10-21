@@ -22,6 +22,7 @@ import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { requireSessionTokenForUserParam } from "../middleware/require-session-token.js";
+import { resolveCanonicalUserIdOrSelf } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 import { agentRunRepository } from "../repositories/index.js";
 
@@ -69,6 +70,20 @@ export interface OAuthTokenProvider {
    * accountId/baseUri (DocuSign) or domain (Egnyte).
    */
   responseData?(creds: BaseOAuthCreds): Record<string, unknown>;
+  /**
+   * Build the provider consent URL — the body of the connector's
+   * `POST /users/:userId/oauth/<type>/authorize` route, exposed so an internal
+   * caller (routes/app-connectors-internal.ts) can start the same flow without
+   * an HTTP hop to itself. `returnTo` is validated inside (lib/oauth-return.ts).
+   */
+  authorize?(userId: string, opts?: OAuthAuthorizeOptions): Promise<string>;
+}
+
+export interface OAuthAuthorizeOptions {
+  redirectUri?: string | undefined;
+  returnTo?: string | undefined;
+  /** Only honoured by providers whose route accepts a scope override. */
+  scope?: string | undefined;
 }
 
 const defaultResponseData = (creds: BaseOAuthCreds): Record<string, unknown> => ({
@@ -148,6 +163,16 @@ export function buildOAuthTokenRouter(providers: OAuthTokenProvider[]): Router {
             return;
           }
           throw err;
+        }
+
+        // The URL param is pinned and session-token-verified, but may be the
+        // caller's raw Spaces alias while the connection row is keyed by the
+        // canonical Claw id — resolve and retry once (fail-open to verbatim).
+        if (!creds) {
+          const canonicalId = await resolveCanonicalUserIdOrSelf(userId).catch(() => userId);
+          if (canonicalId !== userId) {
+            creds = await resolveFreshOAuthCreds(provider, canonicalId);
+          }
         }
 
         if (!creds) {

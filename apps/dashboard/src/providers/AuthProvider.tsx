@@ -314,9 +314,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           void bootstrapElectronSession();
         }
       },
-      () => {
+      payload => {
+        // The only silent LOGOUT path: the Electron main-process interceptor
+        // saw a 401. Log it renderer-side so the teardown is attributable in
+        // backend logs — main-process telemetry alone can be lost.
+        logger.warn(LoggerEvent.ELECTRON_TOKEN_EXPIRED_RECEIVED, {
+          triggerUrl: payload?.url,
+          resourceType: payload?.resourceType,
+        });
+        // The in-memory log buffer would be lost in the teardown ahead.
+        logger.pushlogs();
         localStorage.removeItem('user_id');
-        authActor.send({ type: 'LOGOUT' });
+        // The session already 401'd, so the /auth/logout POST would fail too.
+        authActor.send({ type: 'LOGOUT', skipApi: true });
       },
     );
 

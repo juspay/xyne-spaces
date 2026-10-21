@@ -104,7 +104,12 @@ export class OrganizationDomainService {
     return !!domain && !PERSONAL_EMAIL_DOMAINS.has(domain);
   }
 
-  async assertCanCreateOrgForEmail(email: string): Promise<void> {
+  /**
+   * Fails fast when the email uses a public/personal provider (gmail.com etc.).
+   * Use this on its own when only the public-domain rule applies — unlike
+   * assertCanCreateOrgForEmail it does not run the existing-org conflict check.
+   */
+  async assertNotPublicEmailDomain(email: string): Promise<void> {
     const domain = this.extractEmailDomain(email);
     if (!domain) {
       return;
@@ -113,6 +118,10 @@ export class OrganizationDomainService {
     if (PERSONAL_EMAIL_DOMAINS.has(domain)) {
       throw new PublicEmailDomainError(domain);
     }
+  }
+
+  async assertCanCreateOrgForEmail(email: string): Promise<void> {
+    await this.assertNotPublicEmailDomain(email);
 
     const existingOrg = await this.findExistingOrgByEmailDomain(email);
     if (existingOrg) {

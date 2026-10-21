@@ -109,7 +109,19 @@ export class GroupDmParticipantService {
     }
 
     const newUsers = await this.loadActiveUsers(newUserIds, workspaceId);
-    const allParticipantIds = [...new Set([...currentUserIds, ...newUserIds])].sort();
+
+    // Existing members are carried into the destination group, so they must be
+    // ACTIVE too. Deactivation does not remove channel participant rows, so the
+    // source DM can still list a deactivated user.
+    const activeExistingIds = await this.filterActiveUserIds(currentUserIds, workspaceId);
+    const allParticipantIds = [...new Set([...activeExistingIds, ...newUserIds])].sort();
+
+    if (allParticipantIds.length < 3) {
+      throw new AppError(
+        'Cannot create a group with a deactivated member. Start a new conversation instead.',
+        400,
+      );
+    }
 
     if (allParticipantIds.length > MAX_DM_PARTICIPANTS) {
       throw new AppError(
@@ -236,6 +248,15 @@ export class GroupDmParticipantService {
         { channelId, error: cleanupError },
       );
     }
+  }
+
+  private async filterActiveUserIds(userIds: string[], workspaceId: string): Promise<string[]> {
+    const active: string[] = [];
+    for (const userId of userIds) {
+      const user = await this.userRepository.findByIdInWorkspace(userId, workspaceId);
+      if (user && user.status === 'ACTIVE') active.push(userId);
+    }
+    return active;
   }
 
   private async loadActiveUsers(

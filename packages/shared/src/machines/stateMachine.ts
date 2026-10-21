@@ -52,6 +52,109 @@ export interface DraftMessages {
 
 const DRAFT_STORAGE_KEY = 'channel-draft-message';
 
+// The composer's related-context chips (threads, tickets, canvases and calls a
+// draft relates to), kept beside the draft they were found for so it brings them
+// back when you return to it. They quote other people's messages, so only a few
+// recent ones are kept, and they are cleared on sign-out (CLEAR_RELATED_CONTEXT).
+export interface DraftRelatedContext {
+  /** The draft text the items were found for, which the related-context popup quotes. */
+  draft: string;
+  /** The dashboard's related items, stored as given; the dashboard checks them on read. */
+  items: unknown[];
+  savedAt: number;
+}
+
+export interface DraftRelatedContexts {
+  [lookupId: string]: DraftRelatedContext | undefined;
+}
+
+const RELATED_CONTEXT_STORAGE_KEY = 'composer-related-context';
+const RELATED_CONTEXT_MAX_DRAFTS = 20;
+/** Items kept per draft: all a lookup returns at the default settings (10 of each kind). */
+const RELATED_CONTEXT_MAX_ITEMS = 40;
+/**
+ * The most the saved chips may take, in characters, oldest drafts dropped first. Drafts
+ * share this storage and the web fallback swallows a failed write, so staying well
+ * under the quota is the only way to be sure suggestions never cost a draft its save.
+ */
+const RELATED_CONTEXT_MAX_CHARS = 500_000;
+const RELATED_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The newest entries, within the age limit. */
+const pruneRelatedContext = (all: DraftRelatedContexts): DraftRelatedContexts => {
+  const now = Date.now();
+  return Object.fromEntries(
+    Object.entries(all)
+      .flatMap(([lookupId, entry]): Array<[string, DraftRelatedContext]> =>
+        entry && now - entry.savedAt < RELATED_CONTEXT_MAX_AGE_MS ? [[lookupId, entry]] : [],
+      )
+      .sort(([, a], [, b]) => b.savedAt - a.savedAt)
+      .slice(0, RELATED_CONTEXT_MAX_DRAFTS),
+  );
+};
+
+/** Oldest drafts dropped until what is left fits RELATED_CONTEXT_MAX_CHARS; its JSON too. */
+const withinBudget = (
+  all: DraftRelatedContexts,
+): { kept: DraftRelatedContexts; json: string } => {
+  // pruneRelatedContext leaves them newest first.
+  const entries = Object.entries(all);
+  let json = JSON.stringify(all);
+  while (json.length > RELATED_CONTEXT_MAX_CHARS && entries.length > 0) {
+    entries.pop();
+    json = JSON.stringify(Object.fromEntries(entries));
+  }
+  return { kept: Object.fromEntries(entries), json };
+};
+
+const persistRelatedContext = (json: string): void => {
+  try {
+    draftStorage().setItem(RELATED_CONTEXT_STORAGE_KEY, json);
+  } catch { /* storage unavailable */ }
+};
+
+/** The same draft with the same items, in order — nothing new to write. */
+const sameRelatedContext = (
+  saved: DraftRelatedContext | undefined,
+  draft: string,
+  items: unknown[],
+): boolean =>
+  !!saved &&
+  saved.draft === draft &&
+  saved.items.length === items.length &&
+  saved.items.every((item, i) => item === items[i]);
+
+/** A saved entry in the shape this machine writes; storage can hold anything. */
+const isDraftRelatedContext = (value: unknown): value is DraftRelatedContext => {
+  if (!value || typeof value !== 'object') return false;
+  const { draft, items, savedAt } = value as Record<string, unknown>;
+  return (
+    typeof draft === 'string' &&
+    Array.isArray(items) &&
+    typeof savedAt === 'number' &&
+    Number.isFinite(savedAt)
+  );
+};
+
+/**
+ * What was saved, keeping only well-formed entries. The actions below rely on that
+ * shape, and one of them throwing would stop this whole machine — drafts, channels
+ * and users with it — so nothing unchecked gets into its context.
+ */
+const loadRelatedContext = (): DraftRelatedContexts => {
+  try {
+    const parsed = JSON.parse(draftStorage().getItem(RELATED_CONTEXT_STORAGE_KEY) || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const valid = Object.entries(parsed).flatMap(
+        ([lookupId, entry]): Array<[string, DraftRelatedContext]> =>
+          isDraftRelatedContext(entry) ? [[lookupId, entry]] : [],
+      );
+      return pruneRelatedContext(Object.fromEntries(valid));
+    }
+  } catch { /* unreadable: start empty */ }
+  return {};
+};
+
 export type User = QueryResultType<typeof queries.getUsersV2>[number];
 export type Bookmarks = QueryResultType<typeof queries.userBookmarks>[number];
 export type VisibleChannel = NonNullable<QueryResultType<typeof queries.userVisibleChannelsV3>[number]['channel']>;
@@ -198,6 +301,8 @@ interface StateMachineContext {
   /** Per-route-keyword saved paths, populated by the SaveRoute HOC. */
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
+  /** Related-context chips per draft, keyed like `drafts`. */
+  relatedContext: DraftRelatedContexts;
   draftMessages: DraftMessageDB[];
   twinDrafts: TwinDraftDB[];
   delayedMessages: DelayedMessageDB[];
@@ -233,6 +338,9 @@ type StateMachineEvent =
   | { type: 'SET_SAVED_ROUTE'; keyword: string; path: string | null }
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
+  | { type: 'SAVE_RELATED_CONTEXT'; lookupId: string; draft: string; items: unknown[] }
+  | { type: 'REMOVE_RELATED_CONTEXT'; lookupId: string }
+  | { type: 'CLEAR_RELATED_CONTEXT' }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
   | { type: 'RESET_ALL_USER_GROUPS' }
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
@@ -453,6 +561,43 @@ export const stateMachine = setup({
           return rest;
         }
         return context.drafts;
+      },
+    }),
+    saveRelatedContext: assign({
+      relatedContext: ({ context, event }) => {
+        if (event.type === 'SAVE_RELATED_CONTEXT') {
+          const items = event.items.slice(0, RELATED_CONTEXT_MAX_ITEMS);
+          if (sameRelatedContext(context.relatedContext[event.lookupId], event.draft, items)) {
+            return context.relatedContext;
+          }
+          const { kept, json } = withinBudget(
+            pruneRelatedContext({
+              ...context.relatedContext,
+              [event.lookupId]: { draft: event.draft, items, savedAt: Date.now() },
+            }),
+          );
+          persistRelatedContext(json);
+          return kept;
+        }
+        return context.relatedContext;
+      },
+    }),
+    removeRelatedContext: assign({
+      relatedContext: ({ context, event }) => {
+        if (event.type === 'REMOVE_RELATED_CONTEXT' && context.relatedContext[event.lookupId]) {
+          const { [event.lookupId]: _, ...rest } = context.relatedContext;
+          persistRelatedContext(JSON.stringify(rest));
+          return rest;
+        }
+        return context.relatedContext;
+      },
+    }),
+    clearRelatedContext: assign({
+      relatedContext: () => {
+        try {
+          draftStorage().removeItem(RELATED_CONTEXT_STORAGE_KEY);
+        } catch { /* storage unavailable */ }
+        return {};
       },
     }),
     addAllUserGroups: assign({
@@ -751,6 +896,7 @@ export const stateMachine = setup({
       return {};
     })(),
     drafts: JSON.parse(draftStorage().getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
+    relatedContext: loadRelatedContext(),
     draftMessages: [],
     twinDrafts: [],
     delayedMessages: [],
@@ -808,6 +954,15 @@ export const stateMachine = setup({
         },
         REMOVE_DRAFT: {
           actions: 'removeDraft',
+        },
+        SAVE_RELATED_CONTEXT: {
+          actions: 'saveRelatedContext',
+        },
+        REMOVE_RELATED_CONTEXT: {
+          actions: 'removeRelatedContext',
+        },
+        CLEAR_RELATED_CONTEXT: {
+          actions: 'clearRelatedContext',
         },
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',

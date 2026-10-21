@@ -122,7 +122,8 @@ class VespaClient {
     }
   }
 
-  async search<T>(payload: any): Promise<T> {
+  /** `privateQuery`: the query is unsent text, so an error body, which can echo it, is not logged. */
+  async search<T>(payload: object, { privateQuery = false }: { privateQuery?: boolean } = {}): Promise<T> {
     const url = `${this.queryEndpoint}/search/`;
 
     try {
@@ -146,7 +147,7 @@ class VespaClient {
         this.logger.error(
           `Vespa search failed - Status: ${response.status}, StatusText: ${errorText}`,
         );
-        this.logger.error(`Vespa error body: ${errorBody}`);
+        this.logger.error(`Vespa error body: ${privateQuery ? '(private query, not logged)' : errorBody}`);
         throw new Error(`Failed to search: ${response.status} ${response.statusText}`);
       }
 

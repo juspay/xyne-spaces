@@ -19,11 +19,24 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, AlertTriangle } from '@xyne/icons';
+import {
+  StopSmall,
+  Spinner,
+  PauseBig,
+  PlayBig,
+  AlertTriangle,
+  Monitor01,
+  VideoCallDefault,
+  VideoCallOff,
+} from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
-import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import {
+  sendRecordingEvent,
+  useRecordingStore,
+  useRecordingVideoControls,
+} from '../../../hooks/useRecordingStore';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPlayback';
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
@@ -35,7 +48,7 @@ import {
   MarkerLegend,
   MomentFlag,
 } from '../../../components/CallTimeline/TimelineMarkers';
-import { isVideoRecordingType } from '../../../utils/recordingMedia';
+import { canShareScreen, isVideoRecordingType } from '../../../utils/recordingMedia';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
 import { useRecordingVideo } from '../useRecordingVideo';
 import { InlineRecordingVideo, RecordingVideoDialog, RecordingVideoToggle } from './RecordingVideo';
@@ -81,6 +94,8 @@ export const LiveRecordingControlBar = ({
   const pauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const accumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const markedMoments = useRecordingStore(context => context.markedMoments);
+  const { isCameraEnabled, isScreenShareEnabled, onToggleCamera, onToggleScreenShare } =
+    useRecordingVideoControls();
 
   const ownsSession =
     activeExternalId === recording.externalId &&
@@ -210,6 +225,66 @@ export const LiveRecordingControlBar = ({
       >
         {isPaused ? 'Paused' : 'Live'}
       </span>
+      {ownsSession && (
+        <div className='flex items-center gap-1.5'>
+          <span className='h-6 w-px shrink-0 bg-border' aria-hidden='true' />
+          <Tooltip content={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'} side='bottom'>
+            <span className='inline-flex shrink-0'>
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                onClick={onToggleCamera}
+                disabled={isPaused || isStopping}
+                className={cn(
+                  'size-9 shrink-0 rounded-xl border',
+                  isCameraEnabled
+                    ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+                aria-label={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+                aria-pressed={isCameraEnabled}
+                data-track-category='RecordingDetailV2'
+                data-track-name={`camera_${isCameraEnabled ? 'off' : 'on'}`}
+              >
+                {isCameraEnabled ? (
+                  <VideoCallDefault size={18} strokeWidth={2.2} />
+                ) : (
+                  <VideoCallOff size={18} strokeWidth={2} />
+                )}
+              </Button>
+            </span>
+          </Tooltip>
+          {canShareScreen() && (
+            <Tooltip
+              content={isScreenShareEnabled ? 'Stop recording screen' : 'Record screen'}
+              side='bottom'
+            >
+              <span className='inline-flex shrink-0'>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  onClick={onToggleScreenShare}
+                  disabled={isPaused || isStopping}
+                  className={cn(
+                    'size-9 shrink-0 rounded-xl border',
+                    isScreenShareEnabled
+                      ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                  aria-label={isScreenShareEnabled ? 'Stop sharing screen' : 'Share screen'}
+                  aria-pressed={isScreenShareEnabled}
+                  data-track-category='RecordingDetailV2'
+                  data-track-name={`screen_share_${isScreenShareEnabled ? 'off' : 'on'}`}
+                >
+                  <Monitor01 size={18} />
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </div>
+      )}
 
       <RecordingVisualizer
         isAnimated={!isPaused}

@@ -54,7 +54,7 @@ export async function checkHealth(
 
     const { name, params } = definition.healthCheck;
     if (name === "__list_tools__") {
-      const tools = await listToolsForUser(userId, serverType, _serverName, credentials);
+      const tools = await listToolsForUser(userId, serverType, _serverName, credentials, undefined, { fresh: true });
       const latencyMs = Date.now() - start;
       if (!tools || tools.tools.length === 0) {
         return { healthy: false, message: "Connected, but no tools were exposed by MCP server", latencyMs };
@@ -82,7 +82,7 @@ export async function checkHealth(
       } else if (isMissingHealthToolError(err)) {
         // Fallback for connectors where configured health tool doesn't exist:
         // if tools can be listed, connection/auth is considered healthy.
-        const tools = await listToolsForUser(userId, serverType, _serverName, credentials);
+        const tools = await listToolsForUser(userId, serverType, _serverName, credentials, undefined, { fresh: true });
         if (!tools || tools.tools.length === 0) throw err;
       } else {
         throw err;

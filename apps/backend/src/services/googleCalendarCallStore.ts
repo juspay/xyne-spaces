@@ -10,6 +10,7 @@
 import { logger } from '@/utils/logger';
 import { type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
+import { repositories } from '@/database/repositories';
 import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import { isXyneOriginatedEvent } from '@/services/calendarEventPayload';
 import {
@@ -64,7 +65,11 @@ export interface GCalEvent {
     conferenceSolution?: { name?: string; key?: { type?: string } };
     entryPoints?: { uri?: string; entryPointType?: string; label?: string }[];
   };
-  extendedProperties?: { private?: Record<string, string> };
+  extendedProperties?: {
+    private?: Record<string, string>;
+    /** Unlike `private`, present on every attendee's copy of the event. */
+    shared?: Record<string, string>;
+  };
 }
 
 export interface GCalListResponse {
@@ -102,6 +107,20 @@ function resolveRoomLink(event: GCalEvent): string | undefined {
   return event.htmlLink;
 }
 
+/**
+ * Withdraws the calendar-origin copy of a pushed call, stored by a sync that
+ * ran while the event was marked on the organizer's copy only. Only a
+ * still-scheduled row is touched; one that was joined has history of its own.
+ */
+async function cancelDuplicateOfPushedCall(externalId: string): Promise<void> {
+  const duplicate = await repositories.calls.findByExternalId(externalId);
+  if (duplicate?.callOrigin !== CallOrigin.GOOGLE_CALENDAR) return;
+  if (duplicate.status !== CallStatus.SCHEDULED) return;
+
+  await repositories.calls.cancelByIds([duplicate.id]);
+  logger.info(`${TAG} Cancelled calendar-origin duplicate of a pushed call`, { externalId });
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function storeGCalEventAsCall(
@@ -113,14 +132,18 @@ export async function storeGCalEventAsCall(
 
   if (isNonMeetingEvent(event)) return;
 
+  const externalId = buildCalendarExternalId('google', userId, event.id);
+
   // Xyne's own outbound mirror of a call scheduled inside Xyne. The Call row
   // already exists and Xyne owns it; storing this event too would produce a
   // second, calendar-origin duplicate of the same meeting.
-  if (isXyneOriginatedEvent(event.extendedProperties?.private)) return;
+  if (isXyneOriginatedEvent(event.extendedProperties)) {
+    await cancelDuplicateOfPushedCall(externalId);
+    return;
+  }
 
   const now = new Date();
   const calendarOwnerEmail = normalizeCalendarOwnerEmail(userEmail);
-  const externalId = buildCalendarExternalId('google', userId, event.id);
   const startsAt = parseGCalDateTime(event.start);
   const endsAt = parseGCalDateTime(event.end);
   const roomLink = resolveRoomLink(event);

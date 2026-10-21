@@ -1,11 +1,16 @@
-import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { SDLC_MEMBERSHIP_RELATION, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
-import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { newConnectId } from '@/database/connectGroup';
+import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
+import { NAMESPACE } from '@/vespa/vespaConfig';
 
 export interface CreateChannelInput {
   scopeType: ChannelScopeType;
@@ -64,26 +69,35 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       throw new Error(`Channel with name "${data.name}" already exists.`);
     }
 
-    const result = await this.db.channel.create({
-      data: {
+    // Slack Connect: mint a connectId, stamp it on the channel, and create its private
+    // connect_group row so every new channel has a group entry from creation.
+    const connectId = newConnectId();
+    // Atomic channel + connect_group (bypassAcl op): a channel with a connectId but no group row is
+    // invisible to connectReach and unrepairable via the app, so both must commit together.
+    const result = await createChannelWithConnectGroupTx(
+      {
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
-        visibility: data.visibility || 'PUBLIC',
+        visibility: isDMChannel ? 'PRIVATE' : (data.visibility || 'PUBLIC'),
         createdBy: data.createdBy,
         // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
         projectId: data.projectId ?? '',
         workspaceId: data.workspaceId,
+        connectId,
         ...(data.type && { type: data.type }),
-      }
-    });
+      },
+      data.workspaceId,
+      connectId,
+      this.db,
+    );
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
     // downstream consumers never read channel.projectId. Skipped entirely when the
     // channel has no project (nothing to map).
     if (data.projectId) {
       const boards = await this.db.board.findMany({
-        where: { projectId: data.projectId },
+        where: { projectId: data.projectId, boardType: { not: BoardType.RELEASE } },
         orderBy: { createdAt: 'asc' },
         select: { id: true },
       });
@@ -114,9 +128,30 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   /**
-   * Queue channel for Vespa ingestion with complete data
-   * Should be called AFTER participants are added to the channel
+   * Queue a feed of the channel's Vespa doc (chat_container). Repository writes don't reach the Zero Vespa handlers, so a
+   * caller that needs the channel searchable right away opts in — AFTER its participants are added (they become the
+   * doc's permissions). Never throws: a failed enqueue leaves a retryable vespaInsertionLogs row.
    */
+  async queueVespaFeed(channelId: string, workspaceId: string): Promise<void> {
+    try {
+      await vespaQueue.addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, workspaceId });
+    } catch (error) {
+      logger.error(`[ChannelRepository] Failed to queue Vespa feed for channel ${channelId}:`, error);
+      await this.db.vespaInsertionLogs.create({
+        data: {
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.INSERT,
+          entityId: channelId,
+          entityType: channelSchema,
+          namespace: NAMESPACE,
+          errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+          workspaceId,
+          createdAt: new Date(),
+        },
+      }).catch((dbError) => logger.error('[ChannelRepository] Failed to log the Vespa enqueue failure:', dbError));
+    }
+  }
+
 
   async findById(id: string): Promise<Channel | null> {
     return await this.db.channel.findUnique({
@@ -386,18 +421,17 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
    * @param invitedUserIds - Array of user IDs to include in the channel
    * @param channelParticipants - Channel participants repository for adding users
    * @param workspaceId - The workspace ID to get the DM project from
+   * @param options.indexInVespa - Make sure the returned channel is in Vespa: feed it whether created or found, since an
+   *   existing DM may come from a path that never indexed it (default false: Zero / the caller indexes it)
    * @returns The channel ID (either existing or newly created)
    */
   async findOrCreateDMChannel(
     userId: string,
     invitedUserIds: string[],
     channelParticipants: any, // We'll pass this from the controller to avoid circular dependency
-    workspaceId: string
+    workspaceId: string,
+    options: { indexInVespa?: boolean } = {}
   ): Promise<string> {
-    if (invitedUserIds.length === 0) {
-      throw new Error('No users to invite');
-    }
-
     // Get DM project for this workspace
     const dmProject = await this.db.project.findFirst({
       where: {
@@ -413,6 +447,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     const projectId = dmProject.id;
 
+    // Nobody else invited (e.g. a guest-only call): back it with the initiator's self-DM.
+    if (invitedUserIds.length === 0) {
+      return this.findOrCreateSelfDm(userId, projectId, channelParticipants, workspaceId, options);
+    }
+
     // Single user - create or find DM channel
     if (invitedUserIds.length === 1) {
       const targetUserId = invitedUserIds[0];
@@ -421,6 +460,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       let dmChannel = await this.getDMChannel(userId, targetUserId);
 
       if (dmChannel) {
+        if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
         return dmChannel.id;
       }
 
@@ -439,6 +479,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // Add both users as participants
       await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
       await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
+      if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
 
       return dmChannel.id;
     }
@@ -456,6 +497,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
 
       if (existingGroupDM) {
+        if (options.indexInVespa) await this.queueVespaFeed(existingGroupDM.id, workspaceId);
         return existingGroupDM.id;
       }
 
@@ -474,6 +516,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       for (const invitedId of invitedUserIds) {
         await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
       }
+      if (options.indexInVespa) await this.queueVespaFeed(groupDMChannel.id, workspaceId);
 
       return groupDMChannel.id;
     }
@@ -481,8 +524,20 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Large group: create nothing — back the group with the initiator's own self-DM
     // (the "Saved messages" DM, keyed on the bare userId). Calls get their access
     // from call_participants, so invitees still see and join without a channel.
+    return this.findOrCreateSelfDm(userId, projectId, channelParticipants, workspaceId, options);
+  }
+
+  /** The user's own "Saved messages" DM, keyed on the bare userId. */
+  private async findOrCreateSelfDm(
+    userId: string,
+    projectId: string,
+    channelParticipants: any,
+    workspaceId: string,
+    options: { indexInVespa?: boolean }
+  ): Promise<string> {
     const selfDm = await this.getDMChannel(userId, userId);
     if (selfDm) {
+      if (options.indexInVespa) await this.queueVespaFeed(selfDm.id, workspaceId);
       return selfDm.id;
     }
 
@@ -497,6 +552,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       workspaceId,
     });
     await channelParticipants.addParticipant(newSelfDm.id, userId, 'ADMIN', false);
+    if (options.indexInVespa) await this.queueVespaFeed(newSelfDm.id, workspaceId);
 
     return newSelfDm.id;
   }

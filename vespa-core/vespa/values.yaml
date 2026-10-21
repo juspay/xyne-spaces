@@ -1,0 +1,52 @@
+image:
+  registry: docker.io
+  repository: vespaengine/vespa
+  tag: ""
+  pullPolicy: IfNotPresent
+
+clusterDomain: cluster.local
+
+configserver:
+  name: vespa-configserver
+  service: vespa-configserver
+  port: 19071
+
+roles:
+  content:
+    name: vespa-content
+    service: vespa-content
+    replicas: 1
+  feed:
+    name: vespa-feed
+    service: vespa-feed-hosts
+    replicas: 1
+  query:
+    name: vespa-search
+    service: vespa-search-hosts
+    replicas: 1
+
+embedder:
+  model: BAAI/bge-base-en-v1.5
+  dimensions: 768
+  endpoint: http://tei-batch-proxy:8080/v1/embeddings
+  fileEndpoint: http://tei-batch-proxy:8080/v1/embeddings/file
+
+redundancy: 1
+
+globalDocuments:
+  - chat_attachment
+  - chat_container
+  - project
+
+deploy:
+  timeoutSeconds: 1800
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+nodeSelector: {}
+tolerations: []

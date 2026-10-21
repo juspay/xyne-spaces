@@ -29,6 +29,7 @@ import {
   getCurrentUserMeetingStatus,
   getCallPillVariant,
   getCallPillVariantClasses,
+  hasCallEnded,
   isCallJoinableNow,
   dayKey,
   computeEventPositions,
@@ -152,6 +153,10 @@ function WeekViewCallCard({
           className={cn(
             'group absolute right-1 overflow-hidden rounded-lg border text-left z-[5] transition-colors focus:outline-none',
             getCallPillVariantClasses(variant),
+            isMaybe && 'border-foreground/50',
+            variant === 'highlighted' &&
+              hasCallEnded(call, new Date()) &&
+              'opacity-60 hover:opacity-90',
           )}
           style={{
             top,
@@ -199,7 +204,7 @@ function WeekViewCallCard({
                 )}
                 <span
                   className={cn(
-                    'min-w-0 flex-1 truncate text-xs font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
+                    'min-w-0 flex-1 truncate text-[11px] font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
                     isDeclined && 'line-through',
                   )}
                 >
@@ -217,7 +222,7 @@ function WeekViewCallCard({
                 </span>
               </span>
               {showSecondaryInformation && (
-                <span className='mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap'>
+                <span className='flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap'>
                   <span
                     className={cn('shrink-0 text-xs font-normal leading-tight', secondaryTextClass)}
                   >
@@ -671,10 +676,34 @@ const CalendarWeekView = ({
 
                         const otherMeta = otherSlotMap.get(event.id);
                         if (otherMeta) {
-                          const { color, title, startsAt, endsAt } = otherMeta;
+                          const { color, title, startsAt, endsAt, details } = otherMeta;
                           const timeLabel = endsAt
                             ? `${formatTime(startsAt)} – ${formatTime(endsAt)}`
                             : formatTime(startsAt);
+                          const block = (
+                            <OtherUserEventBlock
+                              key={event.id}
+                              top={top}
+                              height={height}
+                              leftPct={leftPct}
+                              widthPct={widthPct}
+                              color={color}
+                              title={title}
+                              startsAt={startsAt}
+                              endsAt={endsAt}
+                              details={details}
+                              open={openCallId === event.id}
+                              onOpenChange={open => setOpenCallId(open ? event.id : null)}
+                              gutterPx={1}
+                              zClass='z-[3]'
+                              interactive
+                              onClick={e => e.stopPropagation()}
+                              onPointerDown={e => e.stopPropagation()}
+                            />
+                          );
+                          // A slot with a title opens its details on click, which covers
+                          // everything this hover tooltip would show.
+                          if (title !== undefined) return block;
                           return (
                             <Tooltip
                               key={event.id}
@@ -690,21 +719,7 @@ const CalendarWeekView = ({
                                 </div>
                               }
                             >
-                              <OtherUserEventBlock
-                                top={top}
-                                height={height}
-                                leftPct={leftPct}
-                                widthPct={widthPct}
-                                color={color}
-                                title={title}
-                                startsAt={startsAt}
-                                endsAt={endsAt}
-                                gutterPx={1}
-                                zClass='z-[3]'
-                                interactive
-                                onClick={e => e.stopPropagation()}
-                                onPointerDown={e => e.stopPropagation()}
-                              />
+                              {block}
                             </Tooltip>
                           );
                         }
@@ -713,7 +728,7 @@ const CalendarWeekView = ({
                         if (!call) return null;
                         const draggable = isCallDraggable(call, currentUserId);
                         const variant = getCallPillVariant(call, currentUserId, now);
-                        const joinable = isCallJoinableNow(call, variant, now);
+                        const joinable = isCallJoinableNow(call, now);
                         const channel = call.channelId
                           ? channelPresentationsById?.get(call.channelId)
                           : undefined;

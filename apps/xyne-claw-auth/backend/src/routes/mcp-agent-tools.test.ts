@@ -10,6 +10,7 @@ import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
   isMcpToolAllowedByAgentConfig,
+  mcpServerMayServeAgentConfig,
   shouldBypassMcpToolAgentFilter,
   subagentReferencingTool,
 } from "./mcp-agent-tools.js";
@@ -110,6 +111,23 @@ describe("MCP agent tool allow-set matcher", () => {
   });
 });
 
+describe("agent metrics System Tools (claw-builtin)", () => {
+  const builtin = (): McpServerTools => ({
+    serverType: "claw-builtin", serverName: "Built-in", writeTools: [],
+    tools: ["webfetch", "get_agent_metrics", "find_metric_sessions"].map((name) => ({ name, description: "", inputSchema: {}, selectionKey: name, readOnly: true })),
+  });
+  const names = (config: object) => filterMcpServerToolsForAgentConfig(builtin(), config as AgentToolsConfig, parseGatewayServerType)?.tools.map((t) => t.name);
+
+  it("a grant allows only its tool, in either spelling", () => {
+    expect(allowed({ custom: ["get-agent-metrics"] }, "claw-builtin", "Built-in", { name: "get_agent_metrics", selectionKey: "get_agent_metrics" })).toBe(true);
+    expect(names({ custom: ["get_agent_metrics"] })).toEqual(["get_agent_metrics"]);
+  });
+
+  it("a read open palette admits both without a grant", () => {
+    expect(names({ custom: [], openPalette: "read" })).toEqual(expect.arrayContaining(["get_agent_metrics", "find_metric_sessions"]));
+  });
+});
+
 describe("custom subagent tool references surviving enforcement", () => {
   // Mirrors prod: the subagent NAME (grafana-hyperswitch-india) differs from
   // the server type/name (grafana/Grafana), so the name-as-server allow key
@@ -185,5 +203,60 @@ describe("custom subagent tool references surviving enforcement", () => {
       { name: "null-tools", tools: null },
       { name: "junk", tools: "not-an-object" },
     ])).toEqual([]);
+  });
+});
+
+describe("mcpServerMayServeAgentConfig", () => {
+  const base = { serverName: "Server", parseGatewayServerType };
+
+  it("keeps every server when the agent has no tools config", () => {
+    expect(mcpServerMayServeAgentConfig({ ...base, config: undefined, serverType: "port", knownTools: [{ name: "x" }] })).toBe(true);
+  });
+
+  it("keeps a server the agent selects through a subagent", () => {
+    const config: AgentToolsConfig = { subagents: ["grafana"] };
+    expect(mcpServerMayServeAgentConfig({ ...base, config, serverType: "grafana", knownTools: [] })).toBe(true);
+  });
+
+  it("keeps a server whose known tools include a bare direct pick", () => {
+    const config: AgentToolsConfig = { direct: ["workflow_create"] };
+    expect(
+      mcpServerMayServeAgentConfig({ ...base, config, serverType: "workflows", knownTools: [{ name: "workflow_create" }] }),
+    ).toBe(true);
+  });
+
+  it("skips a server whose known tools the agent never picked", () => {
+    const config: AgentToolsConfig = { subagents: ["grafana"], direct: ["workflow_create"], custom: ["sandbox-pw-click"] };
+    expect(
+      mcpServerMayServeAgentConfig({ ...base, config, serverType: "port", knownTools: [{ name: "list_entities" }] }),
+    ).toBe(false);
+  });
+
+  it("lists a server whose tools are not known yet", () => {
+    const config: AgentToolsConfig = { direct: ["workflow_create"] };
+    expect(mcpServerMayServeAgentConfig({ ...base, config, serverType: "port", knownTools: null })).toBe(true);
+  });
+
+  it("keeps a server when a scoped pick names it", () => {
+    const config: AgentToolsConfig = { direct: ["port__list_entities"] };
+    expect(mcpServerMayServeAgentConfig({ ...base, config, serverType: "port", knownTools: [{ name: "other" }] })).toBe(true);
+  });
+
+  it("keeps a server when a custom subagent references one of its tools", () => {
+    const config: AgentToolsConfig = { direct: ["workflow_create"] };
+    const subagentRefs = buildSubagentToolRefs([{ name: "ports", tools: { direct: ["list_entities"] } }]);
+    expect(
+      mcpServerMayServeAgentConfig({ ...base, config, serverType: "port", knownTools: [{ name: "list_entities" }], subagentRefs }),
+    ).toBe(true);
+  });
+
+  it("keeps every server when the open palette is on", () => {
+    const config = { direct: ["workflow_create"], openPalette: "read" } as AgentToolsConfig;
+    expect(mcpServerMayServeAgentConfig({ ...base, config, serverType: "port", knownTools: [{ name: "list_entities" }] })).toBe(true);
+  });
+
+  it("keeps the knowledge base regardless of config", () => {
+    const config: AgentToolsConfig = { direct: ["workflow_create"] };
+    expect(mcpServerMayServeAgentConfig({ ...base, config, serverType: "knowledge-base", knownTools: [{ name: "kb" }] })).toBe(true);
   });
 });

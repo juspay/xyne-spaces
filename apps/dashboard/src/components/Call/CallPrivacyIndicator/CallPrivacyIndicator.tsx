@@ -4,6 +4,7 @@ import { Bot, Captions, ChevronDown, CircleDot, Info } from 'lucide-react';
 import { RecordingType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { roomActor } from '../../../machines/roomMachine';
+import { deriveTranscriptionDisplayStatus } from '../../../utils/livekitAgent';
 
 interface CallPrivacyIndicatorProps {
   isTranscriptionEnabled?: boolean | undefined;
@@ -86,7 +87,12 @@ export function CallPrivacyIndicator({
   const isOpen = useSelector(roomActor, state => state.context.privacyPopoverOpen);
   // A toggle is in-flight, awaiting the agent's authoritative confirmation.
   const isPending = useSelector(roomActor, state => state.context.transcriptionPending);
-  const isPaused = !isTranscriptionEnabled;
+  const agentPresent = useSelector(roomActor, state => state.context.agentPresent);
+  // Three display states: transcribing (agent live), connecting (meant to be on but the
+  // agent isn't here yet — self-heals), off (host turned it off).
+  const status = deriveTranscriptionDisplayStatus({ isTranscriptionEnabled, agentPresent });
+  const isPaused = status === 'off';
+  const isConnecting = status === 'connecting';
 
   const setOpen = (open: boolean): void => {
     roomActor.send({ type: 'SET_PRIVACY_POPOVER', open });
@@ -119,7 +125,13 @@ export function CallPrivacyIndicator({
         onClick={() => setOpen(!isOpen)}
         aria-expanded={isOpen}
         aria-label='Transcription status'
-        title={isPaused ? 'Transcription is off' : 'Xyne Automatic is transcribing'}
+        title={
+          isPaused
+            ? 'Transcription is off'
+            : isConnecting
+              ? 'Connecting to Xyne Automatic…'
+              : 'Xyne Automatic is transcribing'
+        }
         data-track-category='CALLS'
         data-track-name='OPEN_CALL_PRIVACY_INDICATOR'
         data-track-metadata={JSON.stringify(trackMetadata ?? {})}
@@ -130,17 +142,23 @@ export function CallPrivacyIndicator({
         )}
       >
         <span className='relative flex h-2.5 w-2.5 flex-shrink-0'>
-          {!isPaused && (
+          {status === 'transcribing' && (
             <span className='absolute inset-0 animate-ping rounded-full bg-[#f28b82] opacity-60' />
           )}
           <span
             className={cn(
               'relative h-2.5 w-2.5 rounded-full',
-              isPaused ? 'bg-[#9aa0a6]' : 'bg-[#ea4335]',
+              status === 'transcribing'
+                ? 'bg-[#ea4335]'
+                : isConnecting
+                  ? 'bg-[#fbbc04]'
+                  : 'bg-[#9aa0a6]',
             )}
           />
         </span>
-        <span className='hidden sm:inline'>{isPaused ? 'Transcription off' : 'Transcribing'}</span>
+        <span className='hidden sm:inline'>
+          {isPaused ? 'Transcription off' : isConnecting ? 'Connecting…' : 'Transcribing'}
+        </span>
         <ChevronDown
           className={cn('h-4 w-4 opacity-70 transition-transform', isOpen && 'rotate-180')}
         />
@@ -163,13 +181,21 @@ export function CallPrivacyIndicator({
               <span
                 className={cn(
                   'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#1e1f20]',
-                  isPaused ? 'bg-[#9aa0a6]' : 'bg-[#ea4335]',
+                  status === 'transcribing'
+                    ? 'bg-[#ea4335]'
+                    : isConnecting
+                      ? 'bg-[#fbbc04]'
+                      : 'bg-[#9aa0a6]',
                 )}
               />
             </div>
             <div className='min-w-0'>
               <h2 className='text-base font-medium leading-tight'>
-                {isPaused ? 'Transcription is off' : 'Xyne Automatic is transcribing'}
+                {isPaused
+                  ? 'Transcription is off'
+                  : isConnecting
+                    ? 'Connecting to Xyne Automatic…'
+                    : 'Xyne Automatic is transcribing'}
               </h2>
               <p className='mt-0.5 text-xs text-[#9aa0a6]'>Visible to everyone in this call</p>
             </div>
@@ -178,7 +204,9 @@ export function CallPrivacyIndicator({
           <p className='px-4 text-sm leading-relaxed text-[#c4c7c5]'>
             {isPaused
               ? 'No audio is being captured, and no new transcript or summary is created until it is turned back on. Anything captured earlier is kept.'
-              : 'Audio is processed and kept temporarily to create the items below.'}
+              : isConnecting
+                ? 'Waiting for the transcription agent to join. This reconnects automatically — transcription resumes as soon as it is back.'
+                : 'Audio is processed and kept temporarily to create the items below.'}
           </p>
 
           {/* What's being captured right now */}
@@ -187,7 +215,7 @@ export function CallPrivacyIndicator({
               icon={Captions}
               title='Live transcript'
               description='Speech turned into text'
-              isOn={!isPaused}
+              isOn={status === 'transcribing'}
             />
             {isRecordingActive && (
               <ActivityRow

@@ -1,5 +1,12 @@
 import { apiInstance } from './clients/apiClient';
-import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
+import {
+  DisplaySearchResult,
+  DiscussionTitleVerdict,
+  QueryIntent,
+  RelatedContext,
+  VespaSearchResponse,
+  VespaSearchFilters,
+} from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
 import { toSearchQuery } from '../utils/exactSearch';
 /**
@@ -129,6 +136,59 @@ export class SearchService {
 
       throw new Error('Vespa search request failed');
     }
+  }
+
+  /**
+   * Classify a cmd+K query as a keyword lookup or a question that needs AI.
+   * Separate from vespaSearch so a slow classifier never delays results.
+   * Null means "no verdict" (feature off, clearly lexical, or classifier down).
+   */
+  async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
+    // Kept with the handoff search (see cachedVespaSearch): the palette coming back from full page
+    // asks again for the query it just classified.
+    if (cachedQueryIntent?.query === query && cachedQueryIntent.expiresAt > Date.now()) {
+      return cachedQueryIntent.value;
+    }
+    const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
+      `${this.vespaBaseUrl}/intent`,
+      { params: { q: query }, ...(signal ? { signal } : {}) },
+    );
+    if (!response.data.success) return null;
+    cachedQueryIntent = {
+      query,
+      value: response.data.data,
+      expiresAt: Date.now() + VESPA_SEARCH_CACHE_TTL_MS,
+    };
+    return response.data.data;
+  }
+
+  /**
+   * What a composer draft relates to: threads, tickets, canvases and calls where it
+   * is answered, was asked before, or was discussed. POST so the unsent draft never
+   * lands in a URL. Null means "no verdict" (feature off or classifier down).
+   */
+  async getRelatedContext(
+    text: string,
+    conversationId: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<RelatedContext | null> {
+    const response = await apiInstance.post<{ success: boolean; data: RelatedContext | null }>(
+      `${this.vespaBaseUrl}/related`,
+      { text, ...(conversationId ? { conversationId } : {}) },
+      signal ? { signal } : {},
+    );
+    return response.data.success ? response.data.data : null;
+  }
+
+  async getDiscussionTitleVerdict(
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<DiscussionTitleVerdict | null> {
+    const response = await apiInstance.post<{
+      success: boolean;
+      data: DiscussionTitleVerdict | null;
+    }>(`${this.vespaBaseUrl}/discussion-title`, { text }, signal ? { signal } : {});
+    return response.data.success ? response.data.data : null;
   }
 
   /**
@@ -314,6 +374,10 @@ export class SearchService {
       params['onlyMyChannels'] = filters.onlyMyChannels.toString();
     }
 
+    if (filters.excludeArchived !== undefined) {
+      params['excludeArchived'] = filters.excludeArchived.toString();
+    }
+
     if (filters.groupBy !== undefined) {
       params['groupBy'] = filters.groupBy;
     }
@@ -384,12 +448,16 @@ type VespaSearchResult = Awaited<ReturnType<SearchService['vespaSearch']>>;
 // always fetches fresh — only the in-flight handoff survives. Module state is also wiped on
 // the hard reload a workspace switch triggers, so there is no cross-workspace leak.
 let cachedVespaSearch: { key: string; value: VespaSearchResult; expiresAt: number } | null = null;
+// The last query's intent verdict, kept and cleared with the handoff search.
+let cachedQueryIntent: { query: string; value: QueryIntent | null; expiresAt: number } | null =
+  null;
 
 // Drop the handoff entry so the next search fetches fresh. Called when the cmd+K palette is
 // opened anew (not on the back-navigation restore), so a reopened palette never serves a
 // result cached by an earlier session.
 export function clearVespaSearchCache(): void {
   cachedVespaSearch = null;
+  cachedQueryIntent = null;
 }
 
 // Export singleton instance

@@ -21,7 +21,8 @@
  * distinct and every shared row has a NULL userId.
  */
 
-import type { UserMemorySubsystem } from "xyne-claw-shared";
+import type { AgentMemoryFile, Prisma } from "@prisma/client";
+import { DIGITAL_TWIN_SLUG, type UserMemorySubsystem } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 
@@ -33,8 +34,11 @@ export const MAX_FILE_CHARS = 20_000;
 /** Max files injected into the system prompt per (agent, user). */
 export const MAX_LOADED_FILES = 3;
 
-/** The Digital Twin's agent slug (matches DIGITAL_TWIN_SLUG in xyne-claw). */
-export const TWIN_AGENT_SLUG = "digital-twin";
+/** The Digital Twin's agent slug. */
+export const TWIN_AGENT_SLUG = DIGITAL_TWIN_SLUG;
+
+/** Valid memory-file name: what the PUT/POST file routes accept. */
+export const MEMORY_FILE_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 
 /**
  * Who a memory file belongs to.
@@ -114,11 +118,7 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
     sortOrder: 1,
     description: "Who you work with and how your tone shifts per person.",
     subsystems: ["relationships"],
-    seed: [
-      "# People",
-      "",
-      "_Who you work with and how your tone shifts per person. Compiled from your approved relationship memories._",
-    ].join("\n"),
+    seed: "# People\n\n_Who you work with and how your tone shifts per person. Compiled from your approved relationship memories._",
   },
   {
     name: "projects.md",
@@ -126,11 +126,7 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
     sortOrder: 2,
     description: "What you're actively working on right now.",
     subsystems: ["projects"],
-    seed: [
-      "# Projects",
-      "",
-      "_What you're actively working on right now. Compiled from your approved project memories._",
-    ].join("\n"),
+    seed: "# Projects\n\n_What you're actively working on right now. Compiled from your approved project memories._",
   },
   {
     name: "playbook.md",
@@ -138,11 +134,7 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
     sortOrder: 3,
     description: "How you work — tools, conventions, and the judgment calls you make.",
     subsystems: ["preferences", "decisions"],
-    seed: [
-      "# Playbook",
-      "",
-      "_How you work — tools, conventions, and judgment calls. Compiled from your approved preference & decision memories._",
-    ].join("\n"),
+    seed: "# Playbook\n\n_How you work — tools, conventions, and judgment calls. Compiled from your approved preference & decision memories._",
   },
   {
     name: "expertise.md",
@@ -150,13 +142,11 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
     sortOrder: 4,
     description: "Domains, systems, and tools you know deeply.",
     subsystems: ["expertise"],
-    seed: [
-      "# Expertise",
-      "",
-      "_Domains, systems, and tools you know deeply. Compiled from your approved expertise memories._",
-    ].join("\n"),
+    seed: "# Expertise\n\n_Domains, systems, and tools you know deeply. Compiled from your approved expertise memories._",
   },
 ];
+
+const DEFAULT_FILE_DESCRIPTIONS = new Map(DEFAULT_TWIN_FILES.map((f) => [f.name, f.description]));
 
 function isUserOwned(owner: FileOwner): owner is string {
   return typeof owner === "string";
@@ -181,20 +171,7 @@ function clampContent(content: string): string {
   return (content ?? "").slice(0, MAX_FILE_CHARS);
 }
 
-interface FileRow {
-  id: string;
-  orgId: string;
-  agentSlug: string;
-  userId: string | null;
-  name: string;
-  content: string;
-  loadInPrompt: boolean;
-  sortOrder: number;
-  updatedBy: string | null;
-  updatedAt: Date;
-}
-
-function toDTO(row: FileRow): AgentMemoryFileDTO {
+function toDTO(row: AgentMemoryFile): AgentMemoryFileDTO {
   return {
     id: row.id,
     orgId: row.orgId,
@@ -211,17 +188,13 @@ function toDTO(row: FileRow): AgentMemoryFileDTO {
 
 /** Seed any missing default files for (agent, user). Idempotent — existing
  *  files (even edited ones) are left untouched. Called on twin enable. */
-export async function ensureDefaultFiles(
-  agentSlug: string,
-  userId: string,
-  defaults: readonly DefaultFileSpec[] = DEFAULT_TWIN_FILES,
-): Promise<void> {
+export async function ensureDefaultFiles(agentSlug: string, userId: string): Promise<void> {
   const existing = await prisma.agentMemoryFile.findMany({
     where: { agentSlug, userId },
     select: { name: true },
   });
   const have = new Set(existing.map((e) => e.name));
-  const missing = defaults.filter((d) => !have.has(d.name));
+  const missing = DEFAULT_TWIN_FILES.filter((d) => !have.has(d.name));
   if (missing.length === 0) return;
 
   const scope = await newRowScope(userId);
@@ -240,18 +213,29 @@ export async function ensureDefaultFiles(
   logger.info("[agent-memory-files] seeded defaults", { agentSlug, userId, seeded: missing.map((m) => m.name) });
 }
 
-export async function listFiles(agentSlug: string, owner: FileOwner): Promise<AgentMemoryFileDTO[]> {
-  const rows = (await prisma.agentMemoryFile.findMany({
-    where: { agentSlug, ...ownerWhere(owner) },
+/** An (agent, owner)'s files in display order; `extraWhere` narrows, `take` caps. */
+function findOrdered(
+  agentSlug: string,
+  owner: FileOwner,
+  extraWhere: Prisma.AgentMemoryFileWhereInput = {},
+  take?: number,
+) {
+  return prisma.agentMemoryFile.findMany({
+    where: { agentSlug, ...ownerWhere(owner), ...extraWhere },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-  })) as FileRow[];
+    ...(take === undefined ? {} : { take }),
+  });
+}
+
+export async function listFiles(agentSlug: string, owner: FileOwner): Promise<AgentMemoryFileDTO[]> {
+  const rows = await findOrdered(agentSlug, owner);
   return rows.map(toDTO);
 }
 
-async function getFileRow(agentSlug: string, owner: FileOwner, name: string): Promise<FileRow | null> {
-  return (await prisma.agentMemoryFile.findFirst({
+async function getFileRow(agentSlug: string, owner: FileOwner, name: string): Promise<AgentMemoryFile | null> {
+  return prisma.agentMemoryFile.findFirst({
     where: { agentSlug, ...ownerWhere(owner), name },
-  })) as FileRow | null;
+  });
 }
 
 export async function getFile(agentSlug: string, owner: FileOwner, name: string): Promise<AgentMemoryFileDTO | null> {
@@ -275,13 +259,13 @@ export async function upsertFile(args: {
   const content = clampContent(args.content);
   const existing = await getFileRow(agentSlug, owner, name);
   if (existing) {
-    const updated = (await prisma.agentMemoryFile.update({
+    const updated = await prisma.agentMemoryFile.update({
       where: { id: existing.id },
       data: { content, updatedBy },
-    })) as FileRow;
+    });
     return toDTO(updated);
   }
-  const created = (await prisma.agentMemoryFile.create({
+  const created = await prisma.agentMemoryFile.create({
     data: {
       ...(await newRowScope(owner)),
       agentSlug,
@@ -291,7 +275,7 @@ export async function upsertFile(args: {
       loadInPrompt: args.loadInPrompt ?? false,
       sortOrder: args.sortOrder ?? 100,
     },
-  })) as FileRow;
+  });
   return toDTO(created);
 }
 
@@ -316,10 +300,10 @@ export async function setLoadInPrompt(
     }
   }
 
-  const updated = (await prisma.agentMemoryFile.update({
+  const updated = await prisma.agentMemoryFile.update({
     where: { id: row.id },
     data: { loadInPrompt: load },
-  })) as FileRow;
+  });
   return toDTO(updated);
 }
 
@@ -334,10 +318,30 @@ export async function deleteFile(agentSlug: string, owner: FileOwner, name: stri
  *  capped at MAX_LOADED_FILES, each already ≤ MAX_FILE_CHARS. This is what claw
  *  fetches at run start. Skips empty files (nothing useful to inject). */
 export async function getPromptFiles(agentSlug: string, owner: FileOwner): Promise<AgentMemoryFileDTO[]> {
-  const rows = (await prisma.agentMemoryFile.findMany({
-    where: { agentSlug, ...ownerWhere(owner), loadInPrompt: true },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    take: MAX_LOADED_FILES,
-  })) as FileRow[];
+  const rows = await findOrdered(agentSlug, owner, { loadInPrompt: true }, MAX_LOADED_FILES);
   return rows.map(toDTO).filter((f) => f.content.trim().length > 0);
+}
+
+/** Max files offered to claw's per-task picker (jev_memory_file_pick). */
+const MAX_CANDIDATE_FILES = 8;
+
+/**
+ * Every non-empty file for (agent, user) — the pool claw's classifier picks the
+ * ≤MAX_LOADED_FILES to load from, per task. Each carries its loadInPrompt flag
+ * (the user's toggled set is the fallback when the classifier is unavailable)
+ * and the default-file description when it is one of the seeded files.
+ */
+export async function getCandidatePromptFiles(
+  agentSlug: string,
+  owner: FileOwner,
+): Promise<Array<AgentMemoryFileDTO & { description?: string }>> {
+  const rows = await findOrdered(agentSlug, owner, {}, MAX_CANDIDATE_FILES * 2);
+  return rows
+    .map(toDTO)
+    .filter((f) => f.content.trim().length > 0)
+    .slice(0, MAX_CANDIDATE_FILES)
+    .map((f) => {
+      const description = DEFAULT_FILE_DESCRIPTIONS.get(f.name);
+      return description ? { ...f, description } : f;
+    });
 }

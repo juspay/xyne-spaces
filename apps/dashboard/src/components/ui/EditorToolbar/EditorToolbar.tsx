@@ -202,10 +202,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const buttonClass = (active: boolean): string =>
     variant === 'compact'
-      ? `pt-[6px] pr-[8px] pb-[7px] pl-[8px] rounded transition-all duration-200 ease-in-out ${
+      ? `pt-[6px] pr-[8px] pb-[7px] pl-[8px] rounded transition duration-200 ease-in-out ${
           active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
         }`
-      : `p-1.5 rounded transition-all duration-200 ease-in-out ${
+      : `p-1.5 rounded transition duration-200 ease-in-out ${
           active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
         }`;
 

@@ -35,9 +35,13 @@
 {{- $controllerValues := include "xyne-root.merge" (dict "base" $controllerBase "layers" (list $sb.controller.values)) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $ "name" "agent-sandbox-controller" "namespace" $controllerNs "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $sb.controller.repoURL "targetRevision" $sb.controller.targetRevision "path" $sb.controller.path "releaseName" "agent-sandbox" "values" $controllerValues) | fromYaml)) }}
 {{- end }}
+{{- $template := merge (deepCopy ($sb.template | default dict)) (dict "runtimeClassName" (printf "kata-%s" $shim)) }}
+{{- if and (not $template.image) .Values.global.imageTag }}
+{{- $_ := set $template "image" (printf "%s/juspay/xyne-spaces-agent-workspace:%s" (.Values.global.imageRegistry | default "ghcr.io") .Values.global.imageTag) }}
+{{- end }}
 {{- $policyBase := dict
   "namespace" $ns
-  "template" (merge (deepCopy ($sb.template | default dict)) (dict "runtimeClassName" (printf "kata-%s" $shim)))
+  "template" $template
   "warmPool" $sb.warmPool
   "policy" $sb.policy
   "router" (dict "name" "xyne-sandbox-router" "port" 8080)
@@ -48,7 +52,8 @@
 {{- $policyValues := include "xyne-root.merge" (dict "base" $policyBase "layers" (list $sb.values.policy)) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $ "name" "sandbox" "namespace" $ns "wave" 2 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "deployment/argocd/addons/sandbox" "targetRevision" .Values.platformRevision "releaseName" "sandbox" "values" $policyValues) | fromYaml)) }}
 {{- $svcBase := mergeOverwrite (dict "istio" (dict "destinationRule" (dict "enabled" true) "virtualService" (dict "enabled" false))) $global }}
-{{- $routerValues := include "xyne-root.merge" (dict "base" $svcBase "layers" (list $generalPool $sb.values.router)) | fromYaml }}
+{{- $routerBase := mergeOverwrite (deepCopy $svcBase) (include "xyne-root.image" (dict "root" $ "xyneImage" true) | fromYaml | default dict) (dict "env" (dict "CLAW_PREVIEW_NAMESPACE" $ns)) }}
+{{- $routerValues := include "xyne-root.merge" (dict "base" $routerBase "layers" (list $generalPool $sb.values.router)) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $ "name" "xyne-sandbox-router" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-sandbox-router" "releaseName" "xyne-sandbox-router" "values" $routerValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
 {{- $proxyValues := include "xyne-root.merge" (dict "base" $svcBase "layers" (list $generalPool $sb.values.egressProxy)) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $ "name" "xyne-egress-proxy" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-egress-proxy" "releaseName" "xyne-egress-proxy" "values" $proxyValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}

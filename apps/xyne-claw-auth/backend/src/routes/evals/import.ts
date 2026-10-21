@@ -5,7 +5,7 @@
 import { Router, type Request, type Response } from "express";
 import { evalRepository } from "../../repositories/index.js";
 import { getRequesterId } from "../../middleware/agent-acl.js";
-import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
+import { getSpacesAuthForUser, requestWorkspaceHint } from "../../lib/spaces-db.js";
 import { listSpacesChannels, type ImportKind } from "../../services/spacesEvalImport.js";
 import {
   enqueueEvalImport,
@@ -28,7 +28,7 @@ router.get("/spaces-channels", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const spacesAuth = await getSpacesAuthForUser(userId, "unknown");
+    const spacesAuth = await getSpacesAuthForUser(userId, "unknown", requestWorkspaceHint(req));
     if (!spacesAuth) {
       res.json({ success: true, channels: [], spacesAuth: false });
       return;
@@ -86,7 +86,7 @@ router.post("/folders/:id/import-from-spaces", async (req: Request<{ id: string 
     return;
   }
   // Fail fast if there's no Spaces session — better than a job that errors later.
-  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job");
+  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job", requestWorkspaceHint(req));
   if (!spacesAuth) {
     res.status(400).json({
       success: false,
@@ -103,6 +103,7 @@ router.post("/folders/:id/import-from-spaces", async (req: Request<{ id: string 
       ...(channelId ? { channelId } : {}),
       ...(conversationId ? { conversationId } : {}),
       ...(model ? { model } : {}),
+      ...(requestWorkspaceHint(req) ? { workspaceId: requestWorkspaceHint(req) } : {}),
     };
     if (kind !== "thread") {
       const { from, to } = rangeToWindow(range ?? "30d");
@@ -141,7 +142,7 @@ router.post("/import-from-channel", async (req: Request, res: Response) => {
     res.status(401).json({ success: false, error: "Unauthenticated" });
     return;
   }
-  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job");
+  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job", requestWorkspaceHint(req));
   if (!spacesAuth) {
     res.status(400).json({
       success: false,
@@ -168,6 +169,7 @@ router.post("/import-from-channel", async (req: Request, res: Response) => {
       from: from.toISOString(),
       to: to.toISOString(),
       ...(model ? { model } : {}),
+      ...(requestWorkspaceHint(req) ? { workspaceId: requestWorkspaceHint(req) } : {}),
     };
     const jobId = await enqueueEvalImport(data);
     res.json({ success: true, jobId, folderId: folder.id, folderName: folder.name });

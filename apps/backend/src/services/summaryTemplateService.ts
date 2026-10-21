@@ -1,15 +1,14 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import {
-  DefaultOutlet,
-  EntityUserAccess,
-  ShareableEntityType,
-  SummaryTemplateVisibility,
-} from '@xyne/shared';
+import { DefaultOutlet, ShareableEntityType, SummaryTemplateVisibility } from '@xyne/shared';
 import { DEFAULT_RECORDING_SUMMARY_TEMPLATE } from './recordingSummaryTemplates';
 import { summaryTemplateAiService } from './summaryTemplateAiService';
 import { summaryTemplatePublicationService } from './summaryTemplatePublicationService';
+import {
+  summaryTemplateSharingService,
+  type SummaryTemplateShareLevel,
+} from './summaryTemplateSharingService';
 import {
   getDisabledMandatorySummarySectionIds,
   getEnabledSummaryTemplateSections,
@@ -35,10 +34,18 @@ const DEFAULT_TEMPLATE_CREATED_AT = new Date(0);
 export class SummaryTemplateError extends Error {
   constructor(
     message: string,
-    readonly statusCode: 400 | 403 | 404 | 502
+    readonly statusCode: 400 | 403 | 404 | 409 | 502
   ) {
     super(message);
     this.name = 'SummaryTemplateError';
+  }
+}
+
+/** Carries the clashing names so the uploader can see which rows to drop. */
+export class SummaryTemplateNamesTakenError extends SummaryTemplateError {
+  constructor(readonly names: string[]) {
+    super(`Already used in this workspace: ${names.join(', ')}`, 409);
+    this.name = 'SummaryTemplateNamesTakenError';
   }
 }
 
@@ -144,49 +151,27 @@ export class SummaryTemplateService {
     );
   }
 
-  private async getAccessibleSharedIds(
-    workspaceId: string,
-    actorUserId: string
-  ): Promise<Set<string>> {
-    const [groupMappings, channelParticipations] = await Promise.all([
-      this.db.userGroupMapping.findMany({
-        where: { userId: actorUserId },
-        select: { userGroupId: true },
-      }),
-      this.db.channelParticipant.findMany({
-        where: { userId: actorUserId },
-        select: { channelId: true },
-      }),
-    ]);
-    const userGroupIds = groupMappings.map((mapping) => mapping.userGroupId);
-    const channelIds = channelParticipations.map((participation) => participation.channelId);
-    const shares = await this.db.entityAccess.findMany({
-      where: {
-        workspaceId,
-        shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
-        entityUserAccess: { not: EntityUserAccess.REVOKED },
-        OR: [
-          { userId: actorUserId },
-          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
-          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
-        ],
-      },
-      select: { entityId: true },
-    });
-    return new Set(shares.map((share) => share.entityId));
-  }
-
-  private toView(template: SummaryTemplate, actorUserId: string): SummaryTemplateView {
+  /** The creator, or anyone holding an EDIT share, can edit. */
+  private toView(
+    template: SummaryTemplate,
+    actorUserId: string,
+    sharedLevels: ReadonlyMap<string, SummaryTemplateShareLevel>
+  ): SummaryTemplateView {
     const isSystem = template.createdBy === SYSTEM_TEMPLATE_CREATOR;
     return {
       ...template,
-      canEdit: !isSystem && template.createdBy === actorUserId,
+      canEdit:
+        !isSystem &&
+        (template.createdBy === actorUserId || sharedLevels.get(template.id) === 'edit'),
       isSystem,
     };
   }
 
   async list(workspaceId: string, actorUserId: string): Promise<SummaryTemplateView[]> {
-    const accessibleSharedIds = await this.getAccessibleSharedIds(workspaceId, actorUserId);
+    const sharedLevels = await summaryTemplateSharingService.findSharedTemplateLevels(
+      workspaceId,
+      actorUserId
+    );
     const templates = await this.db.summaryTemplate.findMany({
       where: {
         workspaceId,
@@ -194,12 +179,12 @@ export class SummaryTemplateService {
         OR: [
           { visibility: SummaryTemplateVisibility.PUBLIC },
           { createdBy: actorUserId },
-          { id: { in: [...accessibleSharedIds] } },
+          { id: { in: [...sharedLevels.keys()] } },
         ],
       },
       orderBy: [{ name: 'asc' }, { version: 'desc' }, { id: 'asc' }],
     });
-    return templates.map((template) => this.toView(template, actorUserId));
+    return templates.map((template) => this.toView(template, actorUserId, sharedLevels));
   }
 
   async findAccessibleById(
@@ -226,8 +211,13 @@ export class SummaryTemplateService {
       return template;
     }
 
-    const accessibleSharedIds = await this.getAccessibleSharedIds(workspaceId, actorUserId);
-    return accessibleSharedIds.has(template.id) ? template : null;
+    // Any live share is enough to see and apply the template.
+    const sharedLevels = await summaryTemplateSharingService.findSharedTemplateLevels(
+      workspaceId,
+      actorUserId,
+      template.id
+    );
+    return sharedLevels.has(template.id) ? template : null;
   }
 
   async ensureGeneratedSystemPrompt(template: SummaryTemplate): Promise<SummaryTemplate | null> {
@@ -249,6 +239,26 @@ export class SummaryTemplateService {
     if (!systemPrompt) return null;
 
     return repositories.summaryTemplates.update(template.id, { systemPrompt });
+  }
+
+  /**
+   * The system prompt a template would summarize with, generating one in memory (never
+   * persisted) when it has none of its own, as create/ensureGeneratedSystemPrompt would.
+   */
+  async resolveDraftSystemPrompt(
+    draft: Pick<SummaryTemplate, 'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+    requestId: string
+  ): Promise<string | null> {
+    const own = draft.systemPrompt.trim();
+    if (own && own !== DEFAULT_SYSTEM_PROMPT) return own;
+    return summaryTemplateAiService.generateSystemPrompt(
+      {
+        name: draft.name,
+        meetingContext: draft.autoTriggerPrompt,
+        sections: toPromptSections(draft.sections),
+      },
+      requestId
+    );
   }
 
   async create(
@@ -284,7 +294,70 @@ export class SummaryTemplateService {
         defaultOutlet: input.defaultOutlet ?? DefaultOutlet.EMAIL,
       },
     });
-    return this.toView(template, createdBy);
+    return this.toView(template, createdBy, new Map());
+  }
+
+  /** Scribe admins only. Creates every template, or none. */
+  async bulkCreate(
+    workspaceId: string,
+    createdBy: string,
+    inputs: SummaryTemplateCreateInput[]
+  ): Promise<SummaryTemplateView[]> {
+    const isAdmin = await summaryTemplatePublicationService.isAdmin(workspaceId, createdBy);
+    if (!isAdmin) {
+      throw new SummaryTemplateError('Only a Scribe admin can bulk upload templates', 403);
+    }
+
+    const seen = new Set<string>();
+    for (const input of inputs) {
+      const key = input.name.trim().toLowerCase();
+      if (seen.has(key)) {
+        throw new SummaryTemplateError(`"${input.name}" appears more than once`, 400);
+      }
+      seen.add(key);
+      await this.assertMandatorySectionChangesAllowed(input.sections, null, workspaceId, createdBy);
+    }
+
+    // Names are unique across the workspace, including templates the uploader cannot see.
+    const existing = await this.db.summaryTemplate.findMany({
+      where: { workspaceId },
+      select: { name: true },
+    });
+    const existingKeys = new Set(existing.map((template) => template.name.trim().toLowerCase()));
+    const taken = inputs
+      .map((input) => input.name)
+      .filter((name) => existingKeys.has(name.trim().toLowerCase()));
+    if (taken.length > 0) throw new SummaryTemplateNamesTakenError(taken);
+
+    try {
+      // A blank prompt is generated on first use, see ensureGeneratedSystemPrompt.
+      const templates = await this.db.$transaction(
+        inputs.map((input) =>
+          this.db.summaryTemplate.create({
+            data: {
+              workspaceId,
+              createdBy,
+              name: input.name,
+              autoTriggerPrompt: input.autoTriggerPrompt,
+              sections: input.sections,
+              version: input.version ?? 1,
+              systemPrompt: input.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT,
+              defaultOutlet: input.defaultOutlet ?? DefaultOutlet.EMAIL,
+            },
+          })
+        )
+      );
+      return templates.map((template) => this.toView(template, createdBy, new Map()));
+    } catch (error) {
+      // Someone created one of these names between the check above and the insert.
+      if ((error as { code?: string } | null)?.code === 'P2002') {
+        throw new SummaryTemplateError(
+          'A template name was taken while uploading. Nothing was created; try again.',
+          409
+        );
+      }
+      throw error;
+    }
   }
 
   async update(
@@ -297,8 +370,19 @@ export class SummaryTemplateService {
     if (!existing || existing.workspaceId !== workspaceId) {
       throw new SummaryTemplateError('Summary template not found', 404);
     }
-    if (existing.createdBy !== actorUserId || existing.createdBy === SYSTEM_TEMPLATE_CREATOR) {
-      throw new SummaryTemplateError('Only the template creator can update it', 403);
+    if (existing.createdBy === SYSTEM_TEMPLATE_CREATOR) {
+      throw new SummaryTemplateError('Starter templates cannot be edited', 403);
+    }
+    const sharedLevels =
+      existing.createdBy === actorUserId
+        ? new Map<string, SummaryTemplateShareLevel>()
+        : await summaryTemplateSharingService.findSharedTemplateLevels(
+            workspaceId,
+            actorUserId,
+            templateId
+          );
+    if (existing.createdBy !== actorUserId && sharedLevels.get(templateId) !== 'edit') {
+      throw new SummaryTemplateError('You do not have edit access to this template', 403);
     }
     await this.assertMandatorySectionChangesAllowed(
       input.sections,
@@ -335,7 +419,7 @@ export class SummaryTemplateService {
       ...updates,
       ...(systemPrompt ? { systemPrompt } : {}),
     });
-    return this.toView(template, actorUserId);
+    return this.toView(template, actorUserId, sharedLevels);
   }
 
   async delete(templateId: string, workspaceId: string, actorUserId: string): Promise<void> {

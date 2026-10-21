@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Share01 } from '@xyne/icons';
 import type { ActivityWithRelated } from '../../types/activity';
 import { useUser } from '../../hooks/useUsers';
+import { buildSummaryTemplateLink } from '../../routes/RecordingsV2Screen/utils/summaryTemplateLink';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ActivityItemCard } from './ActivityItemCard';
 
@@ -19,7 +20,7 @@ export function SummaryTemplateSharedActivity({
   if (!templateId) return null;
 
   const isRevoked = activity.actorAction === 'summary_template_access_revoked';
-  const targetPath = `/recordings?templates=1&summaryTemplateId=${encodeURIComponent(templateId)}`;
+  const targetPath = buildSummaryTemplateLink(templateId);
 
   return (
     <ActivityItemCard

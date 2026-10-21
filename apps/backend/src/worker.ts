@@ -43,6 +43,7 @@ import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue'
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
@@ -53,6 +54,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
 
@@ -207,6 +209,11 @@ class WorkerService {
         await messageClassificationQueue.initialize()
         messageClassificationQueue.startProcessing()
       }
+      // Runs the comparisons decisions queue with the other engines.
+      if (appConfig.decisionEval.enabled) {
+        logger.info('Starting decision evaluation worker...');
+        await decisionEvaluationWorker.start();
+      }
 
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Initializing workflow step GCS sync queue...');
@@ -240,6 +247,13 @@ class WorkerService {
         logger.info('Starting recording stitch worker...');
         const { stitchWorker } = await import('@/workers/stitchWorker');
         stitchWorker.start();
+      }
+
+      // Ozonetel call-recording transcription consumer. Holds a Bull job for up to ~45 min
+      // while the Python agent works, so it runs only on pods with this flag set.
+      if (appConfig.enableCallTranscriptionWorker) {
+        logger.info('Starting call transcription worker...');
+        callTranscriptionQueue.startConsumer();
       }
 
       // HEIC → WebP renditions. Always consumed here: the decode runs on a
@@ -500,6 +514,9 @@ class WorkerService {
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
       }
+      if (appConfig.decisionEval.enabled) {
+        await decisionEvaluationWorker.shutdown();
+      }
 
       if (workflowsEnabled) {
         await workflowsWorker.stop()
@@ -546,6 +563,10 @@ class WorkerService {
 
       if (appConfig.enableEmailClassificationWorker) {
         await emailClassificationWorker.shutdown();
+      }
+
+      if (appConfig.enableCallTranscriptionWorker) {
+        await callTranscriptionQueue.close();
       }
 
       if (appConfig.radar.enabled) {

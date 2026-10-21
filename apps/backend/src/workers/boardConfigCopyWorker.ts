@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { copyBoardConfig } from '@/bypassAcl/boardServices';
 import {
   boardConfigCopyQueue,
   BoardConfigCopyJobData,
@@ -28,7 +28,7 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
  * ticket on the board may need its stage rewritten, and every ticket may hold custom-field
  * values that must follow the new form.
  */
-class BoardConfigCopyWorker {
+export class BoardConfigCopyWorker {
   private isStarted = false;
 
   /**
@@ -46,7 +46,7 @@ class BoardConfigCopyWorker {
     // acl-extension.ts's no-context fallback). runAsServiceActor opens one bound to the
     // job's own workspace, matching etaDeadlineWorker.ts / autoDraftWorker.ts.
     queue.process(async job =>
-      runAsServiceActor(job.data.actorUserId, job.data.workspaceId, () => this.processJob(job.data)),
+      copyBoardConfig(this, job.data),
     );
     this.isStarted = true;
     logger.info(`${TAG} Started, ready to process jobs`);
@@ -156,7 +156,7 @@ class BoardConfigCopyWorker {
     return movedInPass;
   }
 
-  private async processJob(data: BoardConfigCopyJobData): Promise<BoardConfigCopySummary> {
+  async processJob(data: BoardConfigCopyJobData): Promise<BoardConfigCopySummary> {
     const jobStartedAt = Date.now();
     logger.info(`${TAG} Starting ticket migration for board ${data.targetBoardId}`, {
       retiredStageCount: data.ticketRemap.length,

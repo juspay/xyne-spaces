@@ -15,10 +15,13 @@
 
 import crypto from 'crypto';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
+import { SlackDeskTriggerMode } from '@xyne/shared';
 import { BaseAuthenticator } from '../../core/baseAuthenticator';
 import { AuthResult } from '../../core/types';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../../database/repositories/externalMessageRepository';
+import { DESK_SOURCE_PREFIXES } from '../../core/deskSources';
 import { SlackWebhookPayload, SlackEventType } from './types';
 
 export class SlackAuthenticator extends BaseAuthenticator {
@@ -99,6 +102,16 @@ export class SlackAuthenticator extends BaseAuthenticator {
     const source = await this.externalSourceRepo.findByName(sourceName);
     if (!source) {
       return false;
+    }
+    // MENTION_ONLY desks: SlackDeskFlow decides (a mid-thread @mention backfills the thread).
+    if (sourceName.startsWith(DESK_SOURCE_PREFIXES.SLACK) && source.channelId) {
+      const pref = await db.emailChannelPreference.findUnique({
+        where: { channelId: source.channelId },
+        select: { slackDeskTriggerMode: true },
+      });
+      if (pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY) {
+        return false;
+      }
     }
     const threadAnchor = await this.externalMessageRepo.findByThreadId(source.id, event.thread_ts);
     return !threadAnchor;

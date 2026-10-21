@@ -1,6 +1,8 @@
 import { db } from '@/database/client';
-import { EmailType } from '@xyne/shared';
+import { z } from 'zod';
+import { EmailType, ExternalEntityType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { logger } from '@/utils/logger';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
@@ -68,13 +70,67 @@ interface EmailRow {
   to: string[];
   cc: string[];
   bcc: string[];
+  replyTo: string[];
   type: EmailType;
   conversationId: string;
   channelId: string;
   externalThreadId: string;
   externalMessageId: string;
+  rating: number | null;
   createdAt: Date;
   hasAttachments?: boolean;
+}
+
+/** Flat, source-agnostic origin fields; null where the source has no such notion. */
+export const EmailOriginSchema = z.object({
+  sourceType: z.string().nullable(),
+  sourceName: z.string().nullable(),
+  sourceDisplayName: z.string().nullable(),
+  externalChannelId: z.string().nullable(),
+  externalChannelName: z.string().nullable(),
+  /** Sender of the first email in the thread: who opened the ticket. */
+  externalCreatorName: z.string(),
+  externalCreatorEmail: z.string(),
+});
+
+/** Which integration ingested this email (via its ExternalMessage link) and who started the thread. */
+async function loadEmailOrigin(email: {
+  id: string;
+  channelId: string;
+  externalThreadId: string;
+  from: string;
+}): Promise<z.infer<typeof EmailOriginSchema>> {
+  const link = await db.externalMessage
+    .findFirst({
+      where: { entityType: ExternalEntityType.EMAIL, entityId: email.id },
+      select: { externalSourceId: true },
+      orderBy: { createdAt: 'asc' },
+    })
+    .catch(() => null);
+  const source = link
+    ? await db.externalSource
+        .findUnique({
+          where: { id: link.externalSourceId },
+          select: { sourceType: true, name: true, displayName: true, externalIdentifier: true },
+        })
+        .catch(() => null)
+    : null;
+  const root = email.externalThreadId
+    ? await repositories.emails
+        .findFirstByThreadAndChannel(email.externalThreadId, email.channelId)
+        .catch(() => null)
+    : null;
+  const creator = root?.from ?? email.from;
+  return {
+    sourceType: source?.sourceType ?? null,
+    sourceName: source?.name ?? null,
+    sourceDisplayName: source?.displayName ?? null,
+    // Slack desk keeps its channel id only in the source name; other sources use externalIdentifier
+    externalChannelId: source ? (extractSlackChannelId(source.name) ?? source.externalIdentifier) : null,
+    externalChannelName: source?.displayName ?? null,
+    externalCreatorName: extractDisplayName(creator),
+    externalCreatorEmail: extractEmailAddress(creator),
+  };
 }
 
 async function loadTicketContextForEmail(
@@ -125,11 +181,13 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     to: email.to,
     cc: email.cc,
     bcc: email.bcc,
+    replyTo: email.replyTo,
     type: email.type,
     conversationId: email.conversationId,
     channelId: email.channelId,
     externalThreadId: email.externalThreadId,
     externalMessageId: email.externalMessageId,
+    rating: email.rating,
     createdAt: email.createdAt,
     hasAttachments: email.hasAttachments,
   };
@@ -175,6 +233,7 @@ export async function hydrateEmailReceivedPayload(
       name: extractDisplayName(email.from),
     },
     fromDomain: extractDomain(email.from),
+    ...(await loadEmailOrigin(email)),
     ...deriveAddressFields(email as EmailRow),
     isReply,
   };
@@ -216,6 +275,7 @@ export async function hydrateEmailSentPayload(
       name: extractDisplayName(email.from),
     },
     senderDomain: extractDomain(email.from),
+    ...(await loadEmailOrigin(email)),
     ...deriveAddressFields(email as EmailRow),
     isFirstReply,
   };

@@ -14,9 +14,14 @@
  *   3. Fill arguments that are required by a schema but meaningless to a caller:
  *      ACL hints like `isMember`, page defaults, `null` placeholders for optional
  *      filters that are nullable rather than omissible.
+ *
+ * Message bodies also get their mention shorthand (`@Name[userId]`) expanded to
+ * the markup that makes a mention notify — see `mentions.ts`.
  */
 
 import { randomUUID } from 'crypto';
+import { SdkApiError } from '../errors';
+import { expandMentions } from './mentions';
 import type { V1Parsed, V1Parser } from './types';
 
 /** Server-side row id, in the same format Zero's own clients generate. */
@@ -28,6 +33,9 @@ function newId(): string {
 function now(): number {
   return Date.now();
 }
+
+/** Most rows one ticket-table page may ask for; deeper reads follow the `start` cursor. */
+const TICKET_PAGE_MAX = 500;
 
 /**
  * One fresh id per key, for mutators that create a row per element of a list —
@@ -232,32 +240,31 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       participantId: args.participantId ?? null,
     },
   }),
+  'calls.listParticipatedHistory': (args): V1Parsed => ({
+    args: { limit: args.limit ?? 50, start: args.start ?? null },
+  }),
+  'calls.getByExternalId': (args): V1Parsed => ({
+    // The catalog names the external id `callId`; the SDK names it for what it is.
+    args: { callId: args.externalId ?? args.callId },
+  }),
+  // initiate / join / leave are direct routes onto the calls controller, which
+  // provisions the room and mints its own ids. A caller-supplied callId,
+  // externalId or roomLink from the old mutator has nothing left to bind to and
+  // is dropped; the response carries the ids the server chose.
   'calls.initiate': (args): V1Parsed => ({
     args: {
-      callId: args.callId,
       channelId: args.channelId,
       callType: args.callType,
-      externalId: args.externalId,
-      roomLink: args.roomLink,
-      timestamp: now(),
-      creatorParticipantId: newId(),
-      ...(args.targetUserIds
-        ? {
-            targetUserIds: args.targetUserIds,
-            targetParticipantIds: newIdMap(args.targetUserIds),
-          }
-        : {}),
+      ...(args.targetUserIds ? { invitedUserIds: args.targetUserIds } : {}),
+      ...(args.conversationId ? { conversationId: args.conversationId } : {}),
     },
   }),
   'calls.join': (args): V1Parsed => ({
-    args: {
-      callId: args.callId,
-      timestamp: now(),
-      participantId: newId(),
-    },
+    // The controller resolves this as the call's external id.
+    args: { callId: args.callId },
   }),
   'calls.leave': (args): V1Parsed => ({
-    args: { callId: args.callId, timestamp: now() },
+    args: { callId: args.callId },
   }),
   'calls.reject': (args): V1Parsed => ({
     args: { callId: args.callId, timestamp: now() },
@@ -347,7 +354,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       userIds: args.userIds,
       role: args.role,
       timestamp: now(),
-      participantIds: args.userIds.map(() => newId()),
+      participantIds: newIdMap(Array.isArray(args.userIds) ? args.userIds : []),
     },
   }),
   'canvases.addGroupParticipant': (args): V1Parsed => ({
@@ -529,6 +536,42 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       start: args.start ?? null,
     },
   }),
+  'channels.listHumanParticipants': (args): V1Parsed => ({
+    args: {
+      channelId: args.channelId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    },
+  }),
+  'channels.listUserStatuses': (args): V1Parsed => ({
+    args: {},
+    mapResult: (data) =>
+      (data as Array<{ channelId: string }>).filter((row) => row.channelId === args.channelId),
+  }),
+  'channels.hasBoards': (args): V1Parsed => ({
+    args: { channelId: args.channelId },
+    // The query is a one-row probe; the caller asked a yes-or-no question.
+    mapResult: (data) => Array.isArray(data) ? data.length > 0 : Boolean(data),
+  }),
+  'channels.listDmsWithLatestMessage': (args): V1Parsed => ({
+    args: {
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      ...(args.direction ? { direction: args.direction } : {}),
+    },
+  }),
+  'channels.linkBoards': (args): V1Parsed => {
+    // Keyed by board id, so the caller can tell which mapping is which board's.
+    const mappingIds = newIdMap(Array.isArray(args.boardIds) ? args.boardIds : []);
+    return {
+      args: {
+        channelId: args.channelId,
+        boards: Object.entries(mappingIds).map(([boardId, mappingId]) => ({ mappingId, boardId })),
+        timestamp: now(),
+      },
+      generated: mappingIds,
+    };
+  },
 
   // ----- collections -----
   'collections.list': (args): V1Parsed => ({
@@ -611,7 +654,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'conversations.create': (args): V1Parsed => ({
     args: {
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       conversationId: args.conversationId,
       messageId: args.messageId,
@@ -654,7 +697,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
   'conversations.listForUser': (args): V1Parsed => ({
     args: {
-      userId: args.userId,
+      userId: args.userId ?? '',
       limit: args.limit ?? 50,
       start: args.start ?? null,
     },
@@ -673,7 +716,19 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: { ...args, timestamp: now() },
   }),
   'dashboards.updateLayout': (args): V1Parsed => ({
-    args: { updates: args.updates, timestamp: now() },
+    args: {
+      // A tile's position is stored as its serialized grid cell, keyed by query id.
+      updates: (Array.isArray(args.updates) ? args.updates : []).map(
+        (update: { id: string; position: unknown }) => ({
+          id: update.id,
+          position:
+            update.position && typeof update.position === 'object'
+              ? JSON.stringify(update.position)
+              : update.position,
+        }),
+      ),
+      timestamp: now(),
+    },
   }),
   'dashboards.upsertQuery': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
@@ -683,6 +738,13 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
 
   // ----- email -----
+  'email.setChannelPreference': (args): V1Parsed => ({
+    args: {
+      ...args,
+      // Stored as one comma-separated string.
+      ...(Array.isArray(args.defaultCc) ? { defaultCc: args.defaultCc.join(',') } : {}),
+    },
+  }),
   'email.listForConversations': (args): V1Parsed => ({
     args: {
       conversationIds: args.conversationIds,
@@ -791,8 +853,20 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
         limit: Math.min(args.limit ?? 50, 100),
       },
   }),
+  'incidents.listReleaseTicketsForBoards': (args): V1Parsed => ({
+    args: {
+      boardIds: args.boardIds,
+      limit: Math.min(args.limit ?? 100, 1000),
+    },
+  }),
 
   // ----- messages -----
+  'messages.getLatestInChannel': (args): V1Parsed => ({
+    args: { channelId: args.channelId, isMember: args.isMember ?? true },
+    // The successor returns the latest conversation with its opening message
+    // attached; the operation has always answered with the message itself.
+    mapResult: (data) => (data as { initialMessage?: unknown } | null | undefined)?.initialMessage ?? null,
+  }),
   'messages.listMine': (args): V1Parsed => ({
     args: {
         limit: args.limit ?? 50,
@@ -802,7 +876,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.send': (args): V1Parsed => ({
     args: {
       conversationId: args.conversationId,
-      content: args.content,
+      content: expandMentions(args.content),
       type: args.type ?? 'USER',
       messageId: args.messageId,
       timestamp: now(),
@@ -811,6 +885,9 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
         : {}),
       ...(args.attachmentIds ? { attachmentIds: args.attachmentIds } : {}),
     },
+  }),
+  'messages.update': (args): V1Parsed => ({
+    args: { ...args, content: expandMentions(args.content) },
   }),
   'messages.react': (args): V1Parsed => ({
     args: {
@@ -835,9 +912,6 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.closeSlashCommandArtifact': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
-  'messages.listDrafts': (args): V1Parsed => ({
-    args: { limit: args?.limit ?? 50 },
-  }),
   'messages.editDraft': (args): V1Parsed => ({
     args: { id: args.id, content: args.content, timestamp: now() },
   }),
@@ -848,7 +922,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: {
       id: args.id,
       channelId: args.channelId,
-      content: args.content,
+      content: expandMentions(args.content),
       scheduledFor: args.scheduledFor,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
       timestamp: now(),
@@ -865,7 +939,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       },
   }),
   'messages.editScheduled': (args): V1Parsed => ({
-    args: { id: args.id, content: args.content, updatedAt: now() },
+    args: { id: args.id, content: expandMentions(args.content), updatedAt: now() },
   }),
   'messages.sendScheduledNow': (args): V1Parsed => ({
     args: { id: args.id, timestamp: now() },
@@ -947,6 +1021,22 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'preferences.updateSavedView': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
+  'preferences.shareSavedView': (args): V1Parsed => {
+    const accessId = newId();
+    return {
+      args: {
+        id: accessId,
+        viewId: args.viewId,
+        entityType: args.entityType,
+        entityId: args.entityId,
+        timestamp: now(),
+      },
+      generated: { accessId },
+    };
+  },
+  'preferences.unshareSavedView': (args): V1Parsed => ({
+    args: { id: args.accessId },
+  }),
 
   // ----- projects -----
   'projects.update': (args): V1Parsed => ({
@@ -988,7 +1078,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       ...args,
       isMember: args.isMember ?? true,
       // Required by the query even when empty.
-      dynamicFieldFilters: [],
+      dynamicFieldFilters: args.dynamicFieldFilters ?? [],
     },
   }),
   'supportTickets.get': (args): V1Parsed => ({
@@ -1016,7 +1106,17 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     },
   }),
   'supportTickets.listForEmailChannels': (args): V1Parsed => ({
-    args: { ...(args ?? {}) },
+    args: {
+      ...(args.channelId ? { channelId: args.channelId } : {}),
+      ...(args.merchantMid ? { merchantMid: args.merchantMid } : {}),
+    },
+  }),
+  'supportTickets.listKanban': (args): V1Parsed => ({
+    args: {
+      ...args,
+      isMember: args.isMember ?? true,
+      limit: args.limit ?? 50,
+    },
   }),
 
   // ----- tickets -----
@@ -1045,6 +1145,24 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       ...(args.excludeFlowSteps !== undefined
         ? { excludeFlowSteps: args.excludeFlowSteps }
         : {}),
+    },
+  }),
+  'tickets.listTable': (args): V1Parsed => ({
+    args: {
+      ...args,
+      limit: Math.min(args.limit ?? 50, TICKET_PAGE_MAX),
+      start: args.start ?? null,
+    },
+  }),
+  'tickets.listByProject': (args): V1Parsed => ({
+    // The project list is gone; the table page scoped to one project is the same
+    // rows, newest first and without archived tickets. A page rather than the
+    // whole project, so it takes an optional cursor.
+    args: {
+      viewMode: 'project',
+      projectId: args.projectId,
+      limit: Math.min(args.limit ?? TICKET_PAGE_MAX, TICKET_PAGE_MAX),
+      start: args.start ?? null,
     },
   }),
   'tickets.listByChannelInWindow': (args): V1Parsed => ({
@@ -1095,6 +1213,14 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'tickets.setStageEta': (args): V1Parsed => ({
     args: { ...args, updatedAt: now() },
   }),
+  'tickets.acknowledgeEtaRisk': (args): V1Parsed => ({
+    args: {
+      ticketId: args.ticketId,
+      expectedFingerprint: args.expectedFingerprint,
+      reason: args.reason,
+      clientTimestamp: now(),
+    },
+  }),
   'tickets.addTag': (args): V1Parsed => ({
     args: {
         ticketId: args.ticketId,
@@ -1136,9 +1262,24 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
 
   // ----- userGroups -----
-  'userGroups.search': (args): V1Parsed => ({
-    args: { query: args.query, limit: args.limit ?? null },
+  'userGroups.getMany': (args): V1Parsed => ({
+    args: { groupIds: Array.isArray(args.groupIds) ? args.groupIds : [] },
   }),
+  'userGroups.search': (args): V1Parsed => {
+    const needle = String(args.query ?? '').trim().toLowerCase();
+    const limit: number | undefined = args.limit ?? undefined;
+    return {
+      args: {},
+      mapResult: (data) => {
+        const matches = (data as Array<{ name: string; alias?: string | null }>).filter(
+          (group) =>
+            group.name.toLowerCase().includes(needle) ||
+            (group.alias ?? '').toLowerCase().includes(needle),
+        );
+        return limit === undefined ? matches : matches.slice(0, limit);
+      },
+    };
+  },
   'userGroups.update': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
@@ -1168,9 +1309,20 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'workspace.shareLink': (args): V1Parsed => ({
     args: { ...args, createdAt: now() },
   }),
-  'workspace.createSdlcTrack': (args): V1Parsed => ({
-    args: { id: newId(), timestamp: now(), ...args },
-  }),
+  'workspace.createSdlcTrack': (args): V1Parsed => {
+    const trackId = newId();
+    return {
+      args: {
+        id: trackId,
+        linkId: newId(),
+        channelId: args.channelId,
+        name: args.name,
+        ...(args.description !== undefined ? { description: args.description } : {}),
+        timestamp: now(),
+      },
+      generated: { trackId },
+    };
+  },
   'workspace.updateSdlcTrack': (args): V1Parsed => ({
     args: { timestamp: now(), ...args },
   }),
@@ -1190,7 +1342,13 @@ export function parseV1Args(op: string, args: unknown): V1Parsed {
     ? V1_PARSERS[op]
     : undefined;
   if (!parser) return { args: args ?? {} };
-  return parser((args ?? {}) as Record<string, unknown>);
+  try {
+    return parser((args ?? {}) as Record<string, unknown>);
+  } catch (err) {
+    // A parser only throws when an argument it reshapes is missing or the wrong
+    // shape — a caller mistake, not a server fault.
+    throw new SdkApiError('validation_failed', `Invalid arguments for "${op}".`, { cause: err });
+  }
 }
 
 export { newId, newIdMap, now };

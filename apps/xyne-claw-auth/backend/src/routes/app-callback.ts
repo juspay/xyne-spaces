@@ -18,6 +18,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
@@ -178,7 +179,7 @@ async function escalateWriteActionFailure(opts: {
     `      userId: "${writeUserId}"`,
     "---",
     "",
-    `❌ **Action failed**: ${errorReason}`,
+    `**Action failed**: ${errorReason}`,
     "",
     `The agent wanted to execute **${humanizeToolName(tool)}**. Click **Retry** to let the agent try again.`,
   ].join("\n");
@@ -468,7 +469,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     if (appToken && (conversationId || channelId)) {
       try {
         const body: Record<string, unknown> = {
-          markdownText: `🔄 Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
+          markdownText: `Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
           userId: (await findAgent(agentSlug, spacesAppId))?.spacesAppUserId ?? "",
           metadata: { contentFormat: "markdown" },
         };
@@ -505,6 +506,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     const actionChannelId = context["channelId"] as string | undefined;
     const actionConversationId = context["conversationId"] as string | undefined;
     const actionOriginalTask = context["originalTask"] as string | undefined;
+    const subagentId = typeof context["subagentId"] === "string" && context["subagentId"] ? context["subagentId"] : undefined;
 
     if (!serverType || !tool || !paramsStr || !writeUserId || !signature) {
       log.error("[app-callback] Missing write action fields");
@@ -514,8 +516,8 @@ router.post("/callback", async (req: Request, res: Response) => {
     const params = JSON.parse(paramsStr) as Record<string, unknown>;
 
     // Verify HMAC signature
-    const { verifyActionSignature } = await import("./mcp.js");
-    const action = { serverType, tool, params, userId: writeUserId };
+    const { verifyActionSignature, writeActionPayload } = await import("./mcp.js");
+    const action = writeActionPayload({ serverType, tool, params, userId: writeUserId, subagentId });
     if (!verifyActionSignature(action, signature)) {
       log.error("[app-callback] HMAC verification failed — action may have been tampered with");
       return;
@@ -572,7 +574,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           // 403 with "private" in the message means private channel — report and bail
           // (other 403s like "bot/app users" from the join endpoint are logged and we still attempt the post)
           if (errText.includes("private")) {
-            const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
+            const failMsg = `I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
             if (sourceConversationId) {
               await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }, appToken).catch(() => {});
             }
@@ -587,7 +589,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content }, appToken);
 
         // Confirm in source thread
-        const confirmMsg = `✅ Posted in #${channelName}`;
+        const confirmMsg = `Posted in #${channelName}`;
         if (sourceConversationId) {
           await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: confirmMsg }, appToken).catch((e) => {
             log.error("[app-callback] spaces-send-message: failed to send confirmation:", e);
@@ -722,13 +724,19 @@ router.post("/callback", async (req: Request, res: Response) => {
       // MCP-based tools — execute via MCP runner
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
-      const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
+      const { loadApprovedWriteCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
       if (!(await hasConnectorDefinition(serverType))) {
         log.error(`[app-callback] No adapter for ${serverType}`);
         return;
       }
 
-      const effective = await loadEffectiveCredentials(writeUserId, serverType, agentSlug);
+      const effective = await loadApprovedWriteCredentials({
+        userId: writeUserId,
+        serverType,
+        agentSlug,
+        spacesAppId,
+        subagentId,
+      });
       if (!effective) {
         log.error(`[app-callback] No connection for user ${writeUserId} / ${serverType}`);
         return;
@@ -738,7 +746,16 @@ router.post("/callback", async (req: Request, res: Response) => {
       // (excludes the ambient Spaces session — see isPrivateUserCredential).
       if (isPrivateUserCredential(serverType, effective.source)) flagUserTokenRun(actionConversationId, agentSlug);
 
-      const result = await callTool(writeUserId, serverType, effective.credentials, tool, params, agentSlug);
+      const result = await callTool(
+        writeUserId,
+        serverType,
+        effective.credentials,
+        tool,
+        params,
+        agentSlug,
+        undefined,
+        effective.instance,
+      );
       log.info(`[app-callback] Write action approved: ${tool} → ${result.content.slice(0, 100)}`);
     } catch (err) {
       const errText = errMsg(err);
@@ -774,7 +791,11 @@ router.post("/callback", async (req: Request, res: Response) => {
 
   if (targetConversationId && messageContent && targetChannelId && mentionedUserId && workspaceId) {
     // Verify caller is the intended user (XYNE-12145). Fail closed.
-    if (!callerUserId || callerUserId !== mentionedUserId) {
+    // The card bakes the raw Spaces id (kept for the postAsUser body below),
+    // while callerUserId is the canonical Claw id — resolve before comparing
+    // or post-canonicalization users can never approve their own twin card.
+    const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedUserId).catch(() => undefined);
+    if (!callerUserId || (callerUserId !== mentionedUserId && callerUserId !== mentionedClawUserId)) {
       log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
       return;
     }

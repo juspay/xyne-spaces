@@ -1037,7 +1037,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1147,9 +1147,10 @@ class NotificationService {
       notificationContext,
     });
 
+    const mentionRouteBase = `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}`;
     const mentionActionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `${mentionRouteBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `${mentionRouteBase}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1249,8 +1250,8 @@ class NotificationService {
     });
 
     const actionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1480,14 +1481,68 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createViewSharedNotifications(
+    recipientUserIds: string[],
+    viewId: string,
+    viewName: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'view_shared' | 'view_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'saved_view' });
+
+    const title = actorAction === 'view_shared'
+      ? `${actorName} shared a view with you`
+      : `Your access to a view was revoked`;
+    const message = actorAction === 'view_shared'
+      ? `${actorName} shared "${viewName}" with you`
+      : `Your access to "${viewName}" was revoked by ${actorName}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'VIEW_SHARED' as NotificationType,
+          relatedEntityType: 'saved_view',
+          relatedEntityId: viewId,
+          // Opens the view directly (ProjectViewBuilder). NotificationHandler
+          // prefixes the workspace and navigates here on click; without it the
+          // popup falls back to /chat.
+          actionUrl: `/projects/views/${viewId}`,
+          metadata: {
+            viewId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      })
+    );
+
+    const deliveredUserIds = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    return { deliveredUserIds };
+  }
+
   async createRecordingSharedNotifications(
     recipientUserIds: string[],
     callId: string,
     recordingTitle: string,
     actorId: string,
     actorName: string,
-    actorAction: 'recording_shared' | 'recording_access_revoked',
+    actorAction: 'recording_shared' | 'recording_access_changed' | 'recording_access_revoked',
     subject: string = 'recording',
+    accessLabel?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1501,12 +1556,21 @@ class NotificationService {
     });
 
     const isRevoked = actorAction === 'recording_access_revoked';
+    const isChanged = actorAction === 'recording_access_changed';
     const title = isRevoked
       ? `${actorName} removed your access to a ${subject}`
-      : `${actorName} shared a ${subject} with you`;
+      : isChanged
+        ? `${actorName} changed your access to a ${subject}`
+        : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
-      : `${actorName} shared "${recordingTitle}" with you`;
+      : isChanged
+        ? accessLabel
+          ? `${actorName} made you ${accessLabel} on "${recordingTitle}"`
+          : `${actorName} changed your access to "${recordingTitle}"`
+        : accessLabel
+          ? `${actorName} shared "${recordingTitle}" with you as ${accessLabel}`
+          : `${actorName} shared "${recordingTitle}" with you`;
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
@@ -1521,6 +1585,7 @@ class NotificationService {
             actorId,
             actorName,
             actorAction,
+            ...(accessLabel ? { accessLabel } : {}),
           },
         });
         return userId;
@@ -1635,7 +1700,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -2308,6 +2373,76 @@ class NotificationService {
       );
     } catch (error) {
       logger.error('[NotificationService] Failed to send max workload reached notification:', error);
+    }
+  }
+
+  /**
+   * Tells the people who can reconnect it that the system disconnected a desk account.
+   * `channelId` is absent for the workspace shared mailbox, which belongs to no desk.
+   */
+  async sendDeskAccountDisconnectedNotification(params: {
+    sourceId: string;
+    accountLabel: string;
+    deskName?: string;
+    workspaceId: string;
+    channelId?: string;
+    actionUrl: string;
+    recipientUserIds: string[];
+  }): Promise<void> {
+    const { sourceId, accountLabel, deskName, workspaceId, channelId, actionUrl, recipientUserIds } = params;
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const title = 'Account disconnected';
+      const message = `${accountLabel} was disconnected${deskName ? ` from ${deskName}` : ''}. Reconnect it in desk settings.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.DESK_ACCOUNT_DISCONNECTED,
+        'mention',
+      );
+
+      await realTimeNotificationService.initialize();
+
+      const notify = (userId: string, sendDesktop: boolean, sendMobile: boolean) =>
+        this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.DESK_ACCOUNT_DISCONNECTED,
+          relatedEntityType: 'external_source',
+          relatedEntityId: sourceId,
+          actionUrl,
+          workspaceId,
+          metadata: { sourceId, ...(channelId && { channelId }) },
+        }, { sendDesktop, sendMobile });
+
+      const results = await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          await activityService.createActivity({
+            userId,
+            actorId: userId,
+            workspaceId,
+            actorAction: 'desk_account_disconnected',
+            actionSource: channelId ? 'channel' : 'workspace',
+            actionSourceId: channelId ?? workspaceId,
+            ...(channelId && { channelId }),
+            classification: ActivityClassification.ACTIONABLE,
+          });
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await notify(userId, receiveDesktop, receiveMobile);
+        }),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          logger.error('[NotificationService] Desk account disconnected notification failed for a recipient:', result.reason);
+        }
+      }
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send desk account disconnected notification:', error);
     }
   }
 

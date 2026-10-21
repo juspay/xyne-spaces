@@ -8,12 +8,13 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
+import { CREATE_AGENT_TOOL, checkCreateAgent, createAgentDroppedToolsNote, createAgentRefusedText, createAgentUnknownToolsText } from "./create-agent-check.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -53,6 +54,10 @@ const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
 // is also stripped from the text handed back to the model — the model just
 // authored the project and re-reading a listing of it buys nothing.
 const REACT_ARTIFACT_RE = /REACT_ARTIFACT_START\s*([\s\S]+?)\s*REACT_ARTIFACT_END/;
+// create-app's "App id: …" line. Meant for the MODEL — it is how the next
+// read/update/publish names the app — so it stays in the tool result but is
+// stripped from the user-visible summary.
+const APP_NOTE_RE = /\s*APP_NOTE_START\s*([\s\S]*?)\s*APP_NOTE_END/g;
 
 // PLATFORM_ONLY_CONFIG_KEYS is imported from xyne-claw-shared (single source of
 // truth — also enforced at the xyne-claw-auth /run boundary). See that module
@@ -152,6 +157,7 @@ export function loadCustomTools(
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
   const userId = meta?.["userId"] ?? "";
+  let createAgentToolsSentBack = false;
   const allCustomTools = getAllCustomTools();
   const config = agentConfig ?? {};
 
@@ -182,24 +188,45 @@ export function loadCustomTools(
   // is gone; nothing writes that anymore.)
   const hasSandboxSelected = [...selectedCustom].some((s) => s.startsWith("sandbox-"));
 
+  // The open palette exists to "let an agent reach tools nobody granted it"
+  // (see open-palette.ts). That only works if un-granted tools survive long
+  // enough for the palette to judge them: routes/run.ts admits per tool by risk
+  // and routes whatever it admits into the CATALOG, never into the always-active
+  // set (`paletteAdmittedNames`).
+  //
+  // The selection gates below used to drop whole sources here, one layer above
+  // that decision, so the palette had nothing left to admit — an agent with
+  // `openPalette: "all"` saw exactly what `"off"` saw, and `load-tools
+  // sandbox-read-file` came back "Unknown" for a source the deployment has.
+  // When the palette is on, a failed selection gate therefore means
+  // "not granted" (palette decides), not "does not exist".
+  const paletteMode = openPaletteModeFromTools(toolsConfig ?? undefined);
+  const paletteOpen = paletteMode !== "off";
+
   // Filter tools by agent — google/microsoft/research-agent are allowed
   // for any agent whose config selects at least one of those tools (or the
   // built-in agent slugs for backward compat).
   const customTools = allCustomTools.filter((ct) => {
-    let allowed = true;
+    // Hard exclusions: these are correctness rules, not grants, so the palette
+    // never overrides them. Loading them in-process would duplicate tool names
+    // that claw-auth already executes.
     // Google + Microsoft migrated to claw-auth stdio MCP connectors — never
     // load them as in-process custom tools anymore.
-    if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
+    if (ct.source === "custom:google" || ct.source === "custom:microsoft") return false;
     // Auth-executed System Tools are surfaced via /mcp/tools with selectionKey
     // gating; loading them in-process would create duplicate tool names.
-    else if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") allowed = false;
-    else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
+    if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") return false;
+
+    // Selection gates: a miss means "this agent was not granted it", which the
+    // open palette is allowed to reconsider.
+    let selected = true;
+    if (ct.source === "custom:research-agent") selected = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
-    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
-    else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
+    else if (ct.source === "custom:generate-image") selected = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
+    else if (ct.source === "custom:sandbox") selected = hasSandboxSelected;
 
-    return allowed;
+    return selected || paletteOpen;
   });
   const allAttachments: Attachment[] = [];
   const allPendingQuestions: PendingQuestion[] = [];
@@ -285,7 +312,16 @@ export function loadCustomTools(
       description: ct.description,
       source: ct.source,
       slug: ct.slug,
-      isWriteTool: ct.isWriteTool === true,
+      // Tri-state on purpose, matching mcp.ts: `false` is a CLAIM that the tool
+      // is read-only, and `classifyToolRisk` trusts it ("absence is not evidence
+      // of read" — tool-risk.ts). Flattening undefined to false told the open
+      // palette that every undeclared custom tool was a read tool, which would
+      // have let `openPalette: "read"` admit sandbox-write-file and
+      // sandbox-edit-file. Undeclared now falls through to name-pattern
+      // classification instead. Every other consumer tests `=== true`, so this
+      // changes nothing for them — including the write-approval branch below,
+      // which reads the registry value directly.
+      ...(ct.isWriteTool !== undefined ? { isWriteTool: ct.isWriteTool } : {}),
       parameters: Type.Unsafe(ct.inputSchema),
       async execute(_toolCallId: string, params: unknown) {
         // Pass the framework-assigned tool call ID into the context
@@ -303,12 +339,28 @@ export function loadCustomTools(
                 details: {},
               };
             }
+            let droppedToolsNote = "";
+            if (ct.slug === CREATE_AGENT_TOOL) {
+              const check = await checkCreateAgent(userId, params as Record<string, unknown>);
+              if (check.refusal) {
+                log.info(`[custom-tool] ${ct.slug} refused before queueing: ${check.refusal}`);
+                return { content: [{ type: "text" as const, text: createAgentRefusedText(check.refusal) }], details: {} };
+              }
+              if (check.notGranted.length > 0) {
+                if (!createAgentToolsSentBack) {
+                  createAgentToolsSentBack = true;
+                  log.info(`[custom-tool] ${ct.slug} sent back for unknown tools: ${check.notGranted.join(", ")}`);
+                  return { content: [{ type: "text" as const, text: createAgentUnknownToolsText(check.notGranted) }], details: {} };
+                }
+                droppedToolsNote = createAgentDroppedToolsNote(check.notGranted);
+              }
+            }
             const serverType = ct.source.replace("custom:", "");
             const signedAction = await signWriteAction(sessionId, sessionToken, serverType, ct.slug, params as Record<string, unknown>);
             allPendingActions.push(signedAction);
             log.info(`[custom-tool] ${ct.slug} is a write tool — queued for approval`);
             return {
-              content: [{ type: "text" as const, text: `Action queued for user approval: ${ct.name}. The user will see an Approve/Decline prompt.` }],
+              content: [{ type: "text" as const, text: writeToolQueuedText(ct) + droppedToolsNote }],
               details: {},
             };
           } catch (err) {
@@ -436,12 +488,18 @@ export function loadCustomTools(
           // any SLIDE_JSON block so the fallback text doesn't include
           // metadata the user shouldn't see.
           if (trailingText && trailingText.length > 0) {
-            const visibleSummary = trailingText.replace(SLIDE_JSON_RE, "").replace(REACT_ARTIFACT_RE, "").trim();
+            const visibleSummary = trailingText
+              .replace(SLIDE_JSON_RE, "")
+              .replace(REACT_ARTIFACT_RE, "")
+              .replace(APP_NOTE_RE, "")
+              .trim();
             if (visibleSummary.length > 0) lastAttachmentSummary = visibleSummary;
           }
           // No-op for every existing tool (only create-react-artifact emits the
           // marker), so the model-facing text is unchanged for create-ppt et al.
-          const modelFacingText = trailingText ? trailingText.replace(REACT_ARTIFACT_RE, "").trim() : "";
+          const modelFacingText = trailingText
+            ? trailingText.replace(REACT_ARTIFACT_RE, "").replace(APP_NOTE_RE, "\n$1").trim()
+            : "";
           const responseText = modelFacingText.length > 0
             ? `Rendered and attached ${singleMatch[1]}\n\n${modelFacingText}`
             : `Rendered and attached ${singleMatch[1]}`;
@@ -514,4 +572,8 @@ export function loadCustomTools(
     getPendingResponses: () => allPendingResponses,
     getLastAttachmentSummary: () => lastAttachmentSummary,
   };
+}
+
+export function writeToolQueuedText(tool: { name: string; queuedForApprovalText?: string | undefined }): string {
+  return tool.queuedForApprovalText ?? `Action queued for user approval: ${tool.name}. The user will see an Approve/Decline prompt.`;
 }

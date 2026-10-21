@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { cn } from '../../../utils/classNames';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
-import { ActivityBlock } from '../../Chat/XyneAISidebar/components/ActivityBlock';
+import { TurnTimeline } from '../../Chat/XyneAISidebar/components/TurnTimeline';
 import { PendingActionBlock } from '../../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../../services/XyneAI/XyneAIPendingActionService';
 import { useClawConversation } from '../ClawConversationContext';
@@ -21,10 +21,6 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
   const rawText = message.isStreaming ? (message.streamingContent ?? '') : (message.content ?? '');
 
   const displayText = message.isStreaming ? rawText + '\n' : rawText;
-  const showThinking = message.isStreaming && rawText.trim().length === 0;
-  const showActivity =
-    !isUser &&
-    (message.isStreaming || !!message.reasoning?.length || !!message.toolInvocations?.length);
 
   return (
     <motion.div
@@ -64,23 +60,26 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
               )}
             </div>
           </div>
-        ) : showThinking ? (
-          <div className='flex items-center gap-2 text-muted-foreground'>
-            <Loader2 className='size-3.5 animate-spin' />
-            <span>
-              {typeof message.statusMessage === 'string' ? message.statusMessage : 'Thinking'}
-            </span>
-          </div>
+        ) : isUser ? (
+          <ClawMarkdown content={displayText} toolInvocations={message.toolInvocations} />
         ) : (
           <div className='flex flex-col gap-1'>
-            {showActivity && (
-              <ActivityBlock
-                reasoning={message.reasoning}
-                toolInvocations={message.toolInvocations}
-                streaming={message.isStreaming}
-                messageAborted={!!message.isAborted}
-              />
-            )}
+            {/* The turn in order — thinking, text, tool calls, … answer —
+                shared with the AI screen and the sidebar. */}
+            <TurnTimeline
+              message={message}
+              renderText={(text, { streaming }) => (
+                <ClawMarkdown
+                  content={streaming ? text + '\n' : text}
+                  toolInvocations={message.toolInvocations}
+                />
+              )}
+              legacyAnswer={
+                rawText.trim() ? (
+                  <ClawMarkdown content={displayText} toolInvocations={message.toolInvocations} />
+                ) : null
+              }
+            />
             {message.pendingActions && message.pendingActions.length > 0 && (
               <PendingActionBlock
                 actions={message.pendingActions}
@@ -105,12 +104,6 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
                   resolvePendingAction(message.id, index, 'declined');
                 }}
               />
-            )}
-            <div className={cn(showActivity && 'pl-[22px]')}>
-              <ClawMarkdown content={displayText} toolInvocations={message.toolInvocations} />
-            </div>
-            {message.isStreaming && rawText.trim().length > 0 && (
-              <span className='inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
             )}
           </div>
         )}

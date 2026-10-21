@@ -31,7 +31,7 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { matchesAttachmentType, VIDEO_ATTACHMENT, VIDEO_MIME_PREFIX } from "xyne-claw-shared";
 
 import { createLogger } from "./logger.js";
@@ -172,7 +172,7 @@ async function rollWindow(
     `${priorState || "(nothing yet — these are the first frames)"}\n\n` +
     `Here are the next ${windowFrames.length} frame(s) in order. Update the description.`;
 
-  const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+  const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

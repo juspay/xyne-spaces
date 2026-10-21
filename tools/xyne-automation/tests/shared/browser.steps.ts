@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Step } from 'gauge-ts';
 import { config } from '@/config';
@@ -17,6 +19,7 @@ import {
   assertValidUrlPath,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { clickHoverActionOnMessage as hoverAndClickActionOnMessage } from '@/tests/shared/support/message-hover';
 
 function resolvePathValue(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((currentValue, segment) => {
@@ -48,6 +51,34 @@ function resolveStoredText(text: unknown): string {
   });
 }
 
+function resolveStoredMessageText(
+  userAlias: string,
+  conversationKind: 'channels' | 'dms',
+  conversationAlias: string,
+  messageAlias: string
+): string {
+  return resolveStoredText(
+    `user:${userAlias}.${conversationKind}.${conversationAlias}.messages.${messageAlias}.text`
+  );
+}
+
+// Every chat message bubble inside the first <selector> match. Scope matters: a thread's
+// root message renders both in the channel list and in the open thread panel.
+function messageBubblesIn(selector: string): Locator {
+  return testContext.activePage.locator(selector).first().locator('[data-testid^="chat-message-"]');
+}
+
+function messageBubbleIn(selector: string, messageText: string): Locator {
+  return testContext.activePage
+    .locator(selector)
+    .first()
+    .locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
+    .last();
+}
+
+// Sample uploads (image, video, PDF, ...) checked into the automation package.
+const FIXTURE_FILES_DIR = path.resolve(__dirname, '../../fixtures/files');
+
 const SIDEBAR_NAVIGATION_TIMEOUT_MS = 10000;
 
 async function getSidebarDestinationPath(page: Page, item: Locator): Promise<string> {
@@ -57,18 +88,83 @@ async function getSidebarDestinationPath(page: Page, item: Locator): Promise<str
   return new URL(href, page.url()).pathname;
 }
 
-function isAtPath(page: Page, expectedPath: string): boolean {
-  return new URL(page.url()).pathname === expectedPath;
+// Pins a "More" overflow item to the sidebar toolbar through
+// More -> Customize toolbar -> Preferences > Toolbar -> "+ Add".
+// Toolbar items are stored in localStorage, so this only affects the current
+// browser context and is safe for parallel scenarios.
+async function addSidebarItemToToolbar(
+  page: Page,
+  moreTrigger: Locator,
+  itemId: string
+): Promise<void> {
+  await moreTrigger.click();
+  const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+  try {
+    await moreItem.waitFor({ state: 'visible', timeout: 5000 });
+  } catch {
+    throw new Error(
+      `Sidebar item "${itemId}" is neither on the toolbar (nav-${itemId}) nor under ` +
+        `"More" (more-${itemId}). It may have moved into another screen.`
+    );
+  }
+  const togglePath = await getMoreItemPath(moreItem, itemId);
+
+  await page.locator("[data-testid='more-customize-toolbar']").click();
+  const preferences = page.getByRole('dialog', { name: 'Preferences' });
+  await preferences.waitFor({ state: 'visible' });
+
+  // "Available" rows tag their "+ Add" button with the item's toolbar path.
+  const addButton = preferences.locator(
+    `button[data-track-name='AddBarItem'][data-track-metadata*='"id":"${togglePath}"']`
+  );
+  await addButton.click();
+  await expect(addButton).toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await preferences.waitFor({ state: 'hidden' });
 }
 
+// "More" items carry their toolbar path in data-track-metadata ({"path": ...}).
+async function getMoreItemPath(moreItem: Locator, itemId: string): Promise<string> {
+  const metadata = await moreItem.getAttribute('data-track-metadata');
+  assert.ok(metadata, `Expected "More" item "${itemId}" to have data-track-metadata.`);
+  const parsed: unknown = JSON.parse(metadata);
+  const togglePath =
+    typeof parsed === 'object' && parsed !== null && 'path' in parsed ? parsed.path : undefined;
+  assert.ok(
+    typeof togglePath === 'string' && togglePath.length > 0,
+    `Expected "More" item "${itemId}" metadata to contain a path, got ${metadata}.`
+  );
+  return togglePath;
+}
+
+// Some destinations redirect to a child route (e.g. /chat/dir -> /chat/dir/<id>).
 async function waitForPath(page: Page, expectedPath: string): Promise<void> {
-  await page.waitForURL((url) => url.pathname === expectedPath, {
-    timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
-  });
+  await page.waitForURL(
+    (url) => url.pathname === expectedPath || url.pathname.startsWith(`${expectedPath}/`),
+    {
+      timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+    }
+  );
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+// Navigates through a sidebar toolbar link, first pinning it to the toolbar
+// when it currently lives in the "More" overflow.
+async function navigateViaSidebar(page: Page, itemId: string): Promise<void> {
+  // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
+  const moreTrigger = page.locator("[data-testid='nav-more']").first();
+  await moreTrigger.waitFor({ state: 'visible' });
+
+  // Scope to links: the bottom Support popover button also uses nav-support.
+  const toolbarItem = page.locator(`a[data-testid='nav-${itemId}']`).first();
+  if (!(await toolbarItem.isVisible())) {
+    await addSidebarItemToToolbar(page, moreTrigger, itemId);
+    await toolbarItem.waitFor({ state: 'visible' });
+  }
+
+  const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
+  await toolbarItem.click();
+  await waitForPath(page, expectedPath);
 }
 
 export default class BrowserSteps {
@@ -184,7 +280,7 @@ export default class BrowserSteps {
 
     await containers.first().waitFor({ state: 'visible' });
     // Search every matching container, not just the first: with prefix
-    // selectors (e.g. [data-testid^='project-item-']) the target text may
+    // selectors (e.g. [data-testid^='project-card-']) the target text may
     // live in any of the matched elements.
     await containers.getByText(resolvedText, { exact: false }).first().click();
   }
@@ -228,55 +324,7 @@ export default class BrowserSteps {
 
   @Step('navigating via sidebar to <itemId>')
   public async navigateViaSidebar(itemId: string): Promise<void> {
-    const page = testContext.activePage;
-    // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
-    const moreTrigger = page.locator("[data-testid='nav-more']").first();
-    await moreTrigger.waitFor({ state: 'visible' });
-
-    const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-    if (await toolbarItem.isVisible()) {
-      const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
-      await toolbarItem.click();
-      await waitForPath(page, expectedPath);
-      return;
-    }
-
-    // Item is not in the toolbar — open the "More" overflow menu and click it there.
-    await moreTrigger.click();
-    let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-    await moreItem.waitFor({ state: 'visible' });
-    const expectedPath = await getSidebarDestinationPath(page, moreItem);
-
-    try {
-      await moreItem.click({ timeout: 2000 });
-      await waitForPath(page, expectedPath);
-      return;
-    } catch (initialError) {
-      // A click can close the Radix popover before Playwright dispatches the final
-      // click event. Treat it as successful only if the URL actually changed.
-      if (isAtPath(page, expectedPath)) {
-        return;
-      }
-
-      // The popover item may have been unmounted by the failed click. Reopen the
-      // menu if necessary and resolve a fresh locator before the forced retry.
-      if (!(await moreItem.isVisible())) {
-        await moreTrigger.click();
-      }
-
-      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-      await moreItem.waitFor({ state: 'visible' });
-
-      try {
-        await moreItem.click({ force: true, timeout: 5000 });
-        await waitForPath(page, expectedPath);
-      } catch (retryError) {
-        throw new Error(
-          `Sidebar navigation to "${itemId}" did not reach "${expectedPath}". ` +
-            `Initial attempt: ${errorMessage(initialError)} Retry: ${errorMessage(retryError)}`
-        );
-      }
-    }
+    await navigateViaSidebar(testContext.activePage, itemId);
   }
 
   @Step('typing <text> in <selector>')
@@ -285,6 +333,16 @@ export default class BrowserSteps {
     const element = testContext.activePage.locator(selector).first();
     await element.waitFor({ state: 'visible' });
     await element.fill(resolvedText);
+  }
+
+  // Real keystrokes appended at the caret: unlike `fill`, they fire the editor's
+  // input handlers, so typing "@name" opens the mention picker.
+  @Step('typing <text> key by key in <selector>')
+  public async typeKeyByKeyOnElement(text: string, selector: string): Promise<void> {
+    const resolvedText = resolveStoredText(text);
+    const element = testContext.activePage.locator(selector).first();
+    await element.waitFor({ state: 'visible' });
+    await element.pressSequentially(resolvedText);
   }
 
   @Step('typing stored user <userAlias> project <projectAlias> field <fieldName> in <selector>')
@@ -500,6 +558,17 @@ export default class BrowserSteps {
     }
   }
 
+  @Step('clicking on <selector> if visible')
+  public async clickOnSelectorIfVisible(selector: string): Promise<void> {
+    const element = testContext.activePage.locator(selector).first();
+    try {
+      await element.waitFor({ state: 'visible', timeout: 5000 });
+      await element.click();
+    } catch {
+      // Element not visible — skip
+    }
+  }
+
   @Step('waiting for network to be idle')
   public async waitForNetworkIdle(): Promise<void> {
     // 'load' not 'networkidle' — the real-time app never goes idle (would time out).
@@ -593,9 +662,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -631,9 +702,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -783,9 +856,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -822,9 +897,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -833,6 +910,117 @@ export default class BrowserSteps {
       },
       { sel: selector, text: resolvedText },
       { timeout: 60000 }
+    );
+  }
+
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is not visible in <selector>'
+  )
+  public async verifyStoredUserChannelMessageNotVisible(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    await expect(messageBubblesIn(selector).filter({ hasText: messageText })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  }
+
+  @Step(
+    'verifying stored user <userAlias> dm <dmAlias> message <messageAlias> is not visible in <selector>'
+  )
+  public async verifyStoredUserDmMessageNotVisible(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias);
+    await expect(messageBubblesIn(selector).filter({ hasText: messageText })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  }
+
+  @Step(
+    'verifying <elementSelector> is visible on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async verifyElementVisibleOnStoredUserChannelMessage(
+    elementSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    await expect(
+      messageBubbleIn(selector, messageText).locator(elementSelector).first()
+    ).toBeVisible({ timeout: 60000 });
+  }
+
+  @Step(
+    'verifying <elementSelector> is visible on stored user <userAlias> dm <dmAlias> message <messageAlias> in <selector>'
+  )
+  public async verifyElementVisibleOnStoredUserDmMessage(
+    elementSelector: string,
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    const messageText = resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias);
+    await expect(
+      messageBubbleIn(selector, messageText).locator(elementSelector).first()
+    ).toBeVisible({ timeout: 60000 });
+  }
+
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> message <messageAlias> appears before stored user <laterUserAlias> channel <laterChannelAlias> message <laterMessageAlias> in <selector>'
+  )
+  public async verifyStoredUserChannelMessageOrder(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    laterUserAlias: string,
+    laterChannelAlias: string,
+    laterMessageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    assertValidUserAlias(laterUserAlias);
+    assertValidChannelAlias(laterChannelAlias);
+    assertValidMessageAlias(laterMessageAlias);
+    const earlierText = resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias);
+    const laterText = resolveStoredMessageText(
+      laterUserAlias,
+      'channels',
+      laterChannelAlias,
+      laterMessageAlias
+    );
+    await messageBubbleIn(selector, earlierText).waitFor({ state: 'visible', timeout: 60000 });
+    await messageBubbleIn(selector, laterText).waitFor({ state: 'visible', timeout: 60000 });
+
+    const texts = await messageBubblesIn(selector).allTextContents();
+    const earlierIndex = texts.findIndex((text) => text.includes(earlierText));
+    const laterIndex = texts.findIndex((text) => text.includes(laterText));
+    assert.ok(
+      earlierIndex >= 0 && earlierIndex < laterIndex,
+      `Expected "${earlierText}" (index ${earlierIndex}) before "${laterText}" (index ${laterIndex}) in "${selector}".`
     );
   }
 
@@ -849,9 +1037,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -888,9 +1078,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -927,9 +1119,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -986,6 +1180,8 @@ export default class BrowserSteps {
       message = page.locator('[data-testid^="chat-message-"]').last();
     }
     await message.waitFor({ state: 'visible' });
+    // Start off the list so the hover always fires a fresh pointerover.
+    await page.mouse.move(0, 0);
     await message.scrollIntoViewIfNeeded();
     await message.hover();
     // Wait for hover actions toolbar to appear instead of hardcoded timeout
@@ -1001,61 +1197,103 @@ export default class BrowserSteps {
       });
   }
 
-  /**
-   * Atomic hover-and-click for hover action toolbars.
-   *
-   * Why this exists:
-   * The HoverActionsToolbar in the dashboard is rendered ONLY while the parent
-   * message has hover state (`if (!isVisible && !isDropdownOpen) return null`).
-   * The toolbar is positioned at `-top-7 right-4` - outside the message's
-   * bounding box. When Playwright tries to do separate hover + click steps,
-   * the mouse path from message to button can leave the message's bbox,
-   * triggering `onMouseLeave`, which UNMOUNTS the toolbar mid-click.
-   *
-   * The fix: dispatch synthetic `mouseover`/`mouseenter` events directly on
-   * the message DOM node (this triggers React's onMouseEnter handler, sets
-   * state, mounts the toolbar) and then click the action via JavaScript.
-   * No physical mouse involved = no mouseleave race = bulletproof.
-   */
+  // Real pointer hover with retries (tests/shared/support/message-hover.ts): synthetic
+  // mouseover events no longer reliably open the message hover toolbar.
   @Step('clicking hover action <hoverActionSelector> on message with text <messageText>')
   public async clickHoverActionOnMessage(
     hoverActionSelector: string,
     messageText: string
   ): Promise<void> {
-    const page = testContext.activePage;
+    await hoverAndClickActionOnMessage(hoverActionSelector, messageText);
+  }
 
-    // Locate the message bubble; fall back to last message if text match fails
-    let message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
-    if (!(await message.isVisible().catch(() => false))) {
-      message = page.locator('[data-testid^="chat-message-"]').last();
-    }
-    await message.waitFor({ state: 'visible' });
+  @Step(
+    'clicking hover action <hoverActionSelector> on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async clickHoverActionOnStoredUserChannelMessage(
+    hoverActionSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    await hoverAndClickActionOnMessage(
+      hoverActionSelector,
+      resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias),
+      selector
+    );
+  }
+
+  @Step(
+    'clicking hover action <hoverActionSelector> on stored user <userAlias> dm <dmAlias> message <messageAlias> in <selector>'
+  )
+  public async clickHoverActionOnStoredUserDmMessage(
+    hoverActionSelector: string,
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    await hoverAndClickActionOnMessage(
+      hoverActionSelector,
+      resolveStoredMessageText(userAlias, 'dms', dmAlias, messageAlias),
+      selector
+    );
+  }
+
+  @Step(
+    'clicking on <elementSelector> on stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async clickElementOnStoredUserChannelMessage(
+    elementSelector: string,
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    const message = messageBubbleIn(
+      selector,
+      resolveStoredMessageText(userAlias, 'channels', channelAlias, messageAlias)
+    );
     await message.scrollIntoViewIfNeeded();
+    await message.locator(elementSelector).first().click();
+  }
 
-    // Trigger hover programmatically. We dispatch BOTH `mouseover` and
-    // `mouseenter` because React's synthetic event system listens to
-    // mouseover (delegated) but some components also listen to mouseenter.
-    // Using bubbles:true on mouseover ensures it propagates up to the
-    // ChatBubble parent that holds the onMouseEnter handler.
-    // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context
-    // @ts-ignore - Element and MouseEvent exist in browser context
-    await message.evaluate((el) => {
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-      // biome-ignore lint/suspicious/noTsIgnore: browser context
-      // @ts-ignore - MouseEvent exists in browser context
-      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }));
-    });
+  @Step('attaching fixture file <fileName> to <selector>')
+  public async attachFixtureFile(fileName: string, selector: string): Promise<void> {
+    const filePath = path.join(FIXTURE_FILES_DIR, fileName);
+    assert.ok(
+      fs.existsSync(filePath),
+      `Fixture file "${fileName}" not found in ${FIXTURE_FILES_DIR}.`
+    );
+    const input = testContext.activePage.locator(selector).first();
+    await input.waitFor({ state: 'attached' });
+    await input.setInputFiles(filePath);
+  }
 
-    // Wait for the specific action button to mount (React re-render must complete)
-    const actionButton = page.locator(hoverActionSelector).first();
-    await actionButton.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Click the button. Use force:true so Playwright doesn't try to scroll
-    // or move the physical mouse (which would risk triggering mouseleave on
-    // the message and unmounting the toolbar between scroll and click).
-    await actionButton.click({ force: true });
+  // The composer shows a "Remove attachment <name>" button only once that upload finishes.
+  @Step('waiting for attachment <fileName> to finish uploading')
+  public async waitForAttachmentUpload(fileName: string): Promise<void> {
+    const removeButton = testContext.activePage
+      .getByRole('button', { name: `Remove attachment ${fileName}`, exact: true })
+      .first();
+    await removeButton.waitFor({ state: 'visible', timeout: 60000 });
+    // The tile (and its remove button) shows as soon as the file is picked; the
+    // composer keeps its send button disabled until the bytes finish uploading.
+    const sendButton = removeButton
+      .locator('xpath=ancestor::*[.//*[@data-testid="send-message-button"]][1]')
+      .locator('[data-testid="send-message-button"]')
+      .first();
+    await expect(sendButton).toBeEnabled({ timeout: 60000 });
   }
 
   @Step('attaching file to <selector>')
@@ -1129,14 +1367,9 @@ export default class BrowserSteps {
   // NAVIGATION
   // ===========================================
 
-  @Step('clicking on "[data-testid=\'nav-chat\']"')
-  public async clickNavChat(): Promise<void> {
-    await testContext.activePage.locator("[data-testid='nav-chat']").first().click();
-  }
-
   @Step('Navigating to chat')
   public async navigateToChat(): Promise<void> {
-    await testContext.activePage.locator("[data-testid='nav-chat']").first().click();
+    await navigateViaSidebar(testContext.activePage, 'chat');
     await testContext.activePage
       .locator("[data-testid='chat-list-loading']")
       .first()

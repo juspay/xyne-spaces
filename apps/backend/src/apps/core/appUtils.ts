@@ -7,6 +7,9 @@ import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { claimAppSigningSecret } from '@/bypassAcl/appServices';
+import { syncInstalledCommandsTx } from '@/bypassAcl/transactions/appUtils';
+import { isSpacesAppClawAgent } from '@/services/clawAgentService';
 
 /**
  * Install an external app
@@ -23,51 +26,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 async function syncInstalledCommands(installedAppId: string, appId: string, workspaceId: string): Promise<void> {
   // One transaction so the install never ends up with a half-synced command snapshot if the
   // process dies mid-loop (partial create/update/delete).
-  await db.$transaction(async (tx) => {
-    const now = new Date();
-    const [templateCommands, existing] = await Promise.all([
-      tx.appCommand.findMany({ where: { appId } }),
-      tx.installedAppCommand.findMany({ where: { installedAppId } }),
-    ]);
-    const existingBySource = new Map(existing.map(e => [e.sourceCommandId, e]));
-    const templateIds = new Set(templateCommands.map(c => c.id));
-
-    for (const c of templateCommands) {
-      const prev = existingBySource.get(c.id);
-      if (prev) {
-        await tx.installedAppCommand.update({
-          where: { id: prev.id },
-          data: {
-            commandName: c.commandName,
-            description: c.description,
-            commandType: c.commandType,
-            commandAccessibility: c.commandAccessibility,
-            updatedAt: now,
-          },
-        });
-      } else {
-        await tx.installedAppCommand.create({
-          data: {
-            installedAppId,
-            workspaceId,
-            sourceCommandId: c.id,
-            commandName: c.commandName,
-            description: c.description,
-            commandType: c.commandType,
-            commandAccessibility: c.commandAccessibility,
-            createdAt: now,
-            updatedAt: now,
-          },
-        });
-      }
-    }
-
-    for (const e of existing) {
-      if (!templateIds.has(e.sourceCommandId)) {
-        await tx.installedAppCommand.delete({ where: { id: e.id } });
-      }
-    }
-  });
+  await syncInstalledCommandsTx(appId, installedAppId, workspaceId);
 }
 
 /**
@@ -88,9 +47,7 @@ export async function installApp(appId: string, workspaceId: string) {
     let signingSecretEnc = app.signingSecret;
     if (!signingSecretEnc) {
       const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
-      const rows = await db.$queryRaw<{ signingSecret: string | null }[]>`
-        UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
-        WHERE id = ${appId} RETURNING "signingSecret"`;
+      const rows = await claimAppSigningSecret(appId, fresh);
       signingSecretEnc = rows[0]?.signingSecret ?? fresh;
     }
     const signingSecret = decrypt(signingSecretEnc);
@@ -140,12 +97,14 @@ export async function installApp(appId: string, workspaceId: string) {
     });
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
+      // AGENT vs APP is set once at creation; a failed lookup throws so the install can be retried.
+      const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
       appUser = await repositories.users.create({
         name: app.name,
         email,
         providerUserId: `xyne-app-${appId}`,
         authProvider: AuthProvider.API_KEY,
-        userType: UserType.APP,
+        userType,
         status: 'ACTIVE',
         workspace: { connect: { id: workspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },

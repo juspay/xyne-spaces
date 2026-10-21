@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/utils/logger';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { ApiResponse } from '@/types/express';
+import type { ZodError } from 'zod';
 
 export class AppError extends Error {
   public statusCode: number;
@@ -14,6 +15,13 @@ export class AppError extends Error {
 
     Error.captureStackTrace(this, this.constructor);
   }
+}
+
+/** A 400 naming the first bad field, e.g. "markdown: Required", instead of zod's JSON dump. */
+export function zodErrorToAppError(error: ZodError, fallback = 'Invalid request'): AppError {
+  const issue = error.issues[0];
+  const location = issue?.path.length ? `${issue.path.join('.')}: ` : '';
+  return new AppError(`${location}${issue?.message ?? fallback}`, 400);
 }
 
 export const errorHandler = (

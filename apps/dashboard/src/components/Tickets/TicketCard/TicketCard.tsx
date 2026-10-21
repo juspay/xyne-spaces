@@ -36,6 +36,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { SubTicketsToggle } from '../SubTickets/SubTickets';
+import type { SubTicketProgress } from '../SubTickets/SubTickets.types';
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
 
@@ -215,6 +217,8 @@ interface TicketCardProps {
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
   slaPolicies?: BoardSlaPolicy[] | undefined;
+  /** Sub-ticket counts from the column; when given, the compact card can open its sub-tickets. */
+  subProgress?: SubTicketProgress | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -232,6 +236,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   activeTicketId,
   showEmailReads = false,
   slaPolicies: slaPoliciesProp,
+  subProgress,
 }) => {
   const zero = useZero();
   const { userID } = useAuthContextValues();
@@ -614,7 +619,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           onClick={e => onClick?.(e)}
           data-testid={`ticket-card-${ticket.id}`}
           className={cn(
-            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition-all cursor-pointer group shadow-sm`,
+            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition cursor-pointer group shadow-sm`,
           )}
           data-track-category='Tickets'
           data-track-name='OpenTicketCard'
@@ -654,13 +659,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   }
 
   return (
-    <button
-      type='button'
+    // Not a <button>: the card holds buttons of its own (assignee, priority, stage),
+    // and a button can't contain another. It still behaves as one.
+    <div
+      role='button'
+      tabIndex={0}
       onClick={e => onClick?.(e)}
+      onKeyDown={e => {
+        // The card's own keys only; the controls inside it handle theirs.
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        onClick?.(e.nativeEvent);
+      }}
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
-        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
+        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
         isCompact && isEmailRead && 'email-read-card shadow-none',
       )}
@@ -975,6 +989,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         </Tooltip>
                       </button>
                     ) : null)}
+                  {isCompact && subProgress && subProgress.total > 0 && (
+                    <SubTicketsToggle ticketId={ticket.id} progress={subProgress} />
+                  )}
                 </div>
                 {/* Priority - mobile */}
                 {!isCompact && showPriority && (
@@ -1075,6 +1092,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 };

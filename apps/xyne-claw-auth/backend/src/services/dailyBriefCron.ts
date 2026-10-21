@@ -7,7 +7,7 @@
  * the bounded worker (daily-brief-worker.ts) drains the queue at a controlled
  * concurrency so a large fan-out never rate-limits the provider.
  *
- * Mirrors services/digitalTwinDaily.ts (setTimeout + cron-leader-lock), which is
+ * Mirrors services/digitalTwinDailyCron.ts (setTimeout + cron-leader-lock), which is
  * resilient to Redis wipes (no per-user Redis scheduler to lose) — enable/disable
  * is a plain boolean column read fresh on each run.
  */

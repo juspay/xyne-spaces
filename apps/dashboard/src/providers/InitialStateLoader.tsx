@@ -17,7 +17,6 @@ import { apiInstance } from '../services/clients/apiClient';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
-import { ZeroConnectionFailureModal } from '../components/ZeroConnectionStatus/ZeroConnectionFailureModal';
 import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
@@ -40,6 +39,13 @@ import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
+  /**
+   * Render children right away instead of behind the app loader, with the
+   * workspace data (users, channels, permissions) filling in as it arrives.
+   * For the desktop call window, whose call UI needs none of it to start and
+   * reads it reactively. The providers below do not depend on that data.
+   */
+  renderBeforeLoaded?: boolean;
 }
 
 interface PermissionsApiResponse {
@@ -79,10 +85,10 @@ const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
   return obj.every(isQueryCompleted);
 };
 
-// Show modal after 60 seconds of disconnected/error state
-const MODAL_DELAY_MS = 60000;
-
-const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
+const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
+  children,
+  renderBeforeLoaded = false,
+}): ReactNode => {
   const isRefreshing = useRef(false);
   const persistenceSetup = useRef(false);
 
@@ -99,10 +105,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   // Durable pending-message queue: reconciles server-confirmed sends and
   // auto-retries messages queued while the socket was reconnecting.
   usePendingQueue();
-
-  // Connection failure modal state — in-memory only
-  const [showModal, setShowModal] = useState(false);
-  const modalTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const schemaVersion = zero.schemaVersion;
 
@@ -309,10 +311,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           }, delay);
         } else {
           // Track max retries reached
-          modalTimerRef.current = setTimeout(() => {
-            setShowModal(true);
-            modalTimerRef.current = null;
-          }, MODAL_DELAY_MS);
           logger.info(LoggerEvent.ZERO_ERROR_RELOAD_LIMIT_REACHED, {
             trigger: 'ZERO_ERROR_RELOAD_INITIATED',
             count: retryCountRef.current,
@@ -320,11 +318,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         }
         break;
       case 'connected':
-        if (modalTimerRef.current) {
-          clearTimeout(modalTimerRef.current);
-          modalTimerRef.current = null;
-        }
-        setShowModal(false);
         handlePostErrorReset(previousState);
         break;
       case 'disconnected':
@@ -343,10 +336,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     return () => {
       if (resetTimerRef.current) {
         clearTimeout(resetTimerRef.current);
-      }
-      if (modalTimerRef.current) {
-        clearTimeout(modalTimerRef.current);
-        modalTimerRef.current = null;
       }
     };
   }, [state.name]);
@@ -503,7 +492,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     permissionsQuery.data?.success === true &&
     permissionsHydrated;
 
-  if (areAllQueriesCompleted) {
+  if (areAllQueriesCompleted || renderBeforeLoaded) {
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
@@ -513,8 +502,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
                 channelService.getVespaParticipants(id)
               }
             >
-              {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
-              <DeferredLoader />
+              {areAllQueriesCompleted && <DeferredLoader />}
               {children}
             </ChannelServiceProvider>
           </AffinityServiceProvider>

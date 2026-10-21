@@ -12,9 +12,8 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { bankIdForAgent, getMemoryProvider, USER_MEMORY_SUBSYSTEMS } from "xyne-claw-shared";
+import { bankIdForAgent, getMemoryProvider, isDigitalTwinAgent, isUserMemorySubsystem, USER_MEMORY_SUBSYSTEMS } from "xyne-claw-shared";
 import { HINDSIGHT } from "./config.js";
-import { isDigitalTwinAgent } from "./memory.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("memory-write");
@@ -77,7 +76,7 @@ export function buildMemoryWriteTool(
       const text = typeof p["text"] === "string" ? p["text"].trim() : "";
       const subsystem = typeof p["subsystem"] === "string" ? p["subsystem"].trim() : "";
       if (!text) return fail("Error: text is required.");
-      if (!(USER_MEMORY_SUBSYSTEMS as readonly string[]).includes(subsystem)) {
+      if (!isUserMemorySubsystem(subsystem)) {
         return fail(`Error: subsystem must be one of ${USER_MEMORY_SUBSYSTEMS.join(", ")}.`);
       }
 

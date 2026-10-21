@@ -8,7 +8,6 @@ import type {
   RepositoryInspection,
   RepositoryReach,
   RepositoryVisibility,
-  SourceLineRange,
   ValidatedCredential,
   VcsProviderAdapter,
 } from './types';
@@ -314,22 +313,6 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     };
   }
 
-  async verifyRemoteCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    branch: string,
-    commitHash: string
-  ): Promise<void> {
-    const head = await this.resolveBranchHead(token, repository, branch);
-    if (head.toLowerCase() !== commitHash.toLowerCase()) {
-      throw new VcsProviderError(
-        'GITHUB_REMOTE_COMMIT_MISMATCH',
-        'Remote branch does not point to the submitted commit',
-        409
-      );
-    }
-  }
-
   async resolveBranchHead(
     token: string | undefined,
     repository: ParsedRepository,
@@ -367,78 +350,6 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
         : {}),
       errorPrefix: 'GITHUB',
     });
-  }
-
-  async verifyPathsAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    paths: string[]
-  ): Promise<void> {
-    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
-      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
-    }
-    for (const path of [...new Set(paths)]) {
-      if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
-        throw new VcsProviderError('GITHUB_PATH_INVALID', `Invalid repository path: ${path}`, 400);
-      }
-      try {
-        await this.request(
-          `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${path
-            .split('/')
-            .map(encodeURIComponent)
-            .join('/')}?ref=${encodeURIComponent(commitHash)}`,
-          token
-        );
-      } catch (error) {
-        if (error instanceof VcsProviderError && error.httpStatus === 404) {
-          throw new VcsProviderError(
-            'INVALID_SOURCE_PATH',
-            `[INVALID_SOURCE_PATH] Source path does not exist at the assigned ref: ${path}`,
-            400
-          );
-        }
-        throw error;
-      }
-    }
-  }
-
-  async verifySourceRangesAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    references: SourceLineRange[]
-  ): Promise<void> {
-    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
-      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
-    }
-    for (const reference of references) {
-      if (!reference.startLine) continue;
-      const response = await this.request<{ type?: string; content?: string; encoding?: string }>(
-        `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${reference.path
-          .split('/')
-          .map(encodeURIComponent)
-          .join('/')}?ref=${encodeURIComponent(commitHash)}`,
-        token
-      );
-      if (response.type !== 'file' || response.encoding !== 'base64' || typeof response.content !== 'string') {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] Source cannot be line-addressed: ${reference.path}`,
-          400
-        );
-      }
-      const content = Buffer.from(response.content.replace(/\s/g, ''), 'base64').toString('utf8');
-      const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
-      const endLine = reference.endLine ?? reference.startLine;
-      if (reference.startLine > lineCount || endLine > lineCount) {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] ${reference.path} has ${lineCount} lines at the assigned ref`,
-          400
-        );
-      }
-    }
   }
 
   validatePullRequestUrl(repository: ParsedRepository, raw: string): boolean {

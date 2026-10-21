@@ -5,8 +5,6 @@ import {
   ChannelVisibility,
   FLOW_STAGE_NAMES,
   FlowPlanModel,
-  MessageType,
-  TicketPriority,
   TicketStatusV2,
   deserializeFlowPlan,
   flowDecisionOutcomeKey,
@@ -22,14 +20,16 @@ import { createFlowSubTicketMappings } from '@/services/subTicketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { logger } from '@/utils/logger';
-import { TicketIdService } from '@/services/ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { AppError } from '@/middleware/errorHandler';
 import {
+  FLOW_DETERMINISTIC_NAMESPACE,
+  ensureFlowSkippedStage,
   ensureFlowStageTransition,
-  findBackloggedCascadeTicketId,
+  findSettledCascadeTicketId,
 } from '@/services/flowStageTransitionRecovery';
+import { createFlowStepTicketTx } from '@/bypassAcl/transactions/flowCascadeService';
 
 export interface FlowTicketMetadata {
   planNodeId?: string;
@@ -39,23 +39,79 @@ export interface FlowTicketMetadata {
   decisionOutcomes?: Record<string, FlowDecisionOutcome>;
 }
 
-const ticketRepository = new TicketRepository();
-const FLOW_BACKLOGGABLE_STATUSES = [
+export const ticketRepository = new TicketRepository();
+const FLOW_SETTLEABLE_STATUSES = [
   TicketStatusV2.TODO,
   TicketStatusV2.STARTED,
   TicketStatusV2.PAUSED,
 ] as const;
 
-async function assertActiveFlowRun(rootTicketId: string): Promise<void> {
+const FLOW_GROUP_TARGETS = {
+  BACKLOG: {
+    stageName: FLOW_STAGE_NAMES.BACKLOG,
+    gerund: 'moving a group to backlog',
+    imperative: 'move a group to backlog',
+    thisGroup: 'moving this group to backlog',
+    verb: 'move to backlog',
+  },
+  SKIPPED: {
+    stageName: FLOW_STAGE_NAMES.SKIPPED,
+    gerund: 'skipping a group',
+    imperative: 'skip a group',
+    thisGroup: 'skipping this group',
+    verb: 'skip',
+  },
+} as const;
+
+async function assertActiveFlowRun(
+  rootTicketId: string,
+  target: FlowGroupTarget
+): Promise<void> {
+  const t = FLOW_GROUP_TARGETS[target];
   const root = await db.ticket.findUnique({
     where: { id: rootTicketId },
     select: { statusV2: true },
   });
   if (root?.statusV2 === TicketStatusV2.PAUSED) {
-    throw new AppError('Resume the Flow run before moving a group to backlog', 409);
+    throw new AppError(`Resume the Flow run before ${t.gerund}`, 409);
   }
   if (root?.statusV2 !== TicketStatusV2.STARTED) {
-    throw new AppError('Only an active Flow run can move a group to backlog', 409);
+    throw new AppError(`Only an active Flow run can ${t.imperative}`, 409);
+  }
+}
+
+/**
+ * Guards every write path that skips a flow STEP (zero mutator, REST update):
+ * the run root cannot be skipped, a decision-parent step cannot be skipped,
+ * and a paused run rejects step moves. Group settles are covered separately:
+ * members exclude the root, and unresolved decisions reject the whole group.
+ */
+export async function assertFlowStepSkippable(params: {
+  metadata: unknown;
+  flowPlan: string | null;
+}): Promise<void> {
+  const flow = (
+    params.metadata as { flow?: { planNodeId?: string; rootTicketId?: string } } | null
+  )?.flow;
+  if (!flow?.planNodeId) {
+    throw new Error('The main Flow ticket cannot be skipped');
+  }
+  if (params.flowPlan) {
+    const plan = deserializeFlowPlan(params.flowPlan);
+    if (plan.decisions?.some((decision) => decision.parentNodeId === flow.planNodeId)) {
+      throw new Error(
+        'Conditional form steps cannot be skipped. Submit the form to choose a path.'
+      );
+    }
+  }
+  if (flow.rootTicketId) {
+    const root = await db.ticket.findUnique({
+      where: { id: flow.rootTicketId },
+      select: { statusV2: true },
+    });
+    if (root?.statusV2 === TicketStatusV2.PAUSED) {
+      throw new Error('Flow run is paused');
+    }
   }
 }
 
@@ -102,6 +158,13 @@ function stepSatisfied(step: InstantiatedStep | undefined): boolean {
   );
 }
 
+/** A step in Backlog or Skipped is identified by its stage, otherwise by its status. */
+function flowRuntimeStatus(step: InstantiatedStep) {
+  if (step.stageName === FLOW_STAGE_NAMES.BACKLOG) return FLOW_STAGE_NAMES.BACKLOG;
+  if (step.stageName === FLOW_STAGE_NAMES.SKIPPED) return FLOW_STAGE_NAMES.SKIPPED;
+  return step.statusV2;
+}
+
 function resolveFlowParentTicketIds(
   model: FlowPlanModel,
   instantiated: ReadonlyMap<string, InstantiatedStep>,
@@ -122,11 +185,17 @@ function resolveFlowParentTicketIds(
   return ticketId ? [ticketId] : [];
 }
 
-export interface BacklogFlowGroupResult {
+export interface FlowGroupSettleResult {
   createdCount: number;
-  backloggedCount: number;
+  movedCount: number;
   unchangedCount: number;
 }
+
+export interface BacklogFlowGroupResult extends FlowGroupSettleResult {
+  backloggedCount: number;
+}
+
+type FlowGroupTarget = 'BACKLOG' | 'SKIPPED';
 
 function materializeRunModel(
   latest: FlowPlanModel,
@@ -307,20 +376,41 @@ export async function onFlowStepBacklogged(params: {
   });
 }
 
-/**
- * Materialize and backlog every live descendant of a run group.
- *
- * The command is intentionally idempotent: flow ticket/mapping ids are
- * deterministic, and terminal/backlogged steps are left unchanged. Conditions
- * are validated before any write because an unresolved route cannot tell us
- * which descendants belong to the live path.
- */
 export async function backlogFlowGroup(params: {
   rootTicketId: string;
   groupId: string;
   actorUserId: string;
   workspaceId: string;
 }): Promise<BacklogFlowGroupResult> {
+  const result = await settleFlowGroup({ ...params, target: 'BACKLOG' });
+  return { ...result, backloggedCount: result.movedCount };
+}
+
+export async function skipFlowGroup(params: {
+  rootTicketId: string;
+  groupId: string;
+  actorUserId: string;
+  workspaceId: string;
+}): Promise<FlowGroupSettleResult> {
+  return settleFlowGroup({ ...params, target: 'SKIPPED' });
+}
+
+/**
+ * Materialize and settle (backlog or skip) every live descendant of a run
+ * group.
+ *
+ * The command is intentionally idempotent: flow ticket/mapping ids are
+ * deterministic, and terminal/settled steps are left unchanged. Conditions
+ * are validated before any write because an unresolved route cannot tell us
+ * which descendants belong to the live path.
+ */
+async function settleFlowGroup(params: {
+  rootTicketId: string;
+  groupId: string;
+  actorUserId: string;
+  workspaceId: string;
+  target: FlowGroupTarget;
+}): Promise<FlowGroupSettleResult> {
   const rootTicket = await db.ticket.findUnique({
     where: { id: params.rootTicketId },
     select: {
@@ -330,7 +420,6 @@ export async function backlogFlowGroup(params: {
       projectId: true,
       channelId: true,
       workspaceId: true,
-      statusV2: true,
       metadata: true,
       board: { select: { boardType: true, flowPlan: true } },
       channel: {
@@ -360,12 +449,10 @@ export async function backlogFlowGroup(params: {
   if (rootTicket.board.boardType !== BoardType.FLOW || !rootTicket.board.flowPlan) {
     throw new AppError('Ticket is not a Flow run', 400);
   }
-  if (rootTicket.statusV2 === TicketStatusV2.PAUSED) {
-    throw new AppError('Resume the Flow run before moving a group to backlog', 409);
-  }
-  if (rootTicket.statusV2 !== TicketStatusV2.STARTED) {
-    throw new AppError('Only an active Flow run can move a group to backlog', 409);
-  }
+  const target = params.target;
+  const t = FLOW_GROUP_TARGETS[target];
+  const targetStageName = t.stageName;
+  await assertActiveFlowRun(rootTicket.id, target);
 
   const instantiated = await getInstantiatedSteps(rootTicket.boardId, rootTicket.id);
   const rootFlow = (rootTicket.metadata as { flow?: FlowTicketMetadata } | null)?.flow;
@@ -388,10 +475,7 @@ export async function backlogFlowGroup(params: {
   model = model.withResolvedDecisionTargets(decisionOutcomes);
 
   const statusByNodeId = new Map(
-    [...instantiated].map(([nodeId, step]) => [
-      nodeId,
-      step.stageName === FLOW_STAGE_NAMES.BACKLOG ? FLOW_STAGE_NAMES.BACKLOG : step.statusV2,
-    ])
+    [...instantiated].map(([nodeId, step]) => [nodeId, flowRuntimeStatus(step)])
   );
   const skipped = model.skippedPlanNodeIds(statusByNodeId, false, decisionOutcomes);
   const members = model.descendantMembersOf(group.id);
@@ -412,15 +496,16 @@ export async function backlogFlowGroup(params: {
   });
   if (unresolvedDecision) {
     const stepName = model.getNode(unresolvedDecision.parentNodeId)?.title ?? 'conditional step';
-    throw new AppError(
-      `Resolve conditional step "${stepName}" before moving this group to backlog.`,
-      409
-    );
+    throw new AppError(`Resolve conditional step "${stepName}" before ${t.thisGroup}.`, 409);
   }
 
   const liveMembers = members.filter((member) => !skipped.has(member.id));
   if (liveMembers.length === 0) {
-    throw new AppError('This group has no live steps to move to backlog', 409);
+    throw new AppError(`This group has no live steps to ${t.verb}`, 409);
+  }
+
+  if (target === 'SKIPPED') {
+    await ensureFlowSkippedStage(rootTicket.boardId, params.workspaceId, params.actorUserId);
   }
 
   const existingBefore = new Set(instantiated.keys());
@@ -438,7 +523,7 @@ export async function backlogFlowGroup(params: {
 
   // Existing members do not pass through createFlowStepTicket's locked root
   // check, so revalidate before adding mappings or changing their stages.
-  await assertActiveFlowRun(rootTicket.id);
+  await assertActiveFlowRun(rootTicket.id, target);
 
   const refreshed = await getInstantiatedSteps(rootTicket.boardId, rootTicket.id);
   for (const node of liveMembers) {
@@ -465,13 +550,13 @@ export async function backlogFlowGroup(params: {
     });
   }
 
-  let backloggedCount = 0;
+  let movedCount = 0;
   let unchangedCount = 0;
-  let lastBackloggedTicketId = findBackloggedCascadeTicketId(
+  let lastMovedTicketId = findSettledCascadeTicketId(
     liveMembers
       .map((member) => refreshed.get(member.id))
       .filter((step): step is InstantiatedStep => step !== undefined),
-    FLOW_STAGE_NAMES.BACKLOG
+    targetStageName
   );
   const readStageName = async (ticketId: string): Promise<string | null> =>
     (
@@ -486,17 +571,19 @@ export async function backlogFlowGroup(params: {
       throw new Error(`Flow step "${node.title}" could not be materialized`);
     }
     if (
-      step.stageName === FLOW_STAGE_NAMES.BACKLOG ||
+      step.stageName === targetStageName ||
       step.statusV2 === TicketStatusV2.COMPLETED ||
       step.statusV2 === TicketStatusV2.CANCELLED
     ) {
-      if (step.stageName === FLOW_STAGE_NAMES.BACKLOG) {
-        lastBackloggedTicketId = step.ticketId;
+      if (step.stageName === targetStageName) {
+        lastMovedTicketId = step.ticketId;
       }
       unchangedCount += 1;
       continue;
     }
-    if (step.stageName === FLOW_STAGE_NAMES.TODO) {
+    // TODO has no direct BACKLOG transition, so backlog hops through STARTED;
+    // SKIPPED is reachable from TODO directly and never started-looking.
+    if (target === 'BACKLOG' && step.stageName === FLOW_STAGE_NAMES.TODO) {
       const started = await ensureFlowStageTransition({
         targetStageName: FLOW_STAGE_NAMES.STARTED,
         transition: () =>
@@ -508,54 +595,57 @@ export async function backlogFlowGroup(params: {
             undefined,
             {
               cascadeFlow: false,
-              allowedCurrentStatuses: FLOW_BACKLOGGABLE_STATUSES,
+              allowedCurrentStatuses: FLOW_SETTLEABLE_STATUSES,
               requiredActiveFlowRootId: rootTicket.id,
             }
           ),
         readStageName: () => readStageName(step.ticketId),
       });
       if (!started) {
-        await assertActiveFlowRun(rootTicket.id);
+        await assertActiveFlowRun(rootTicket.id, target);
         unchangedCount += 1;
         continue;
       }
     }
-    const backlogged = await ensureFlowStageTransition({
-      targetStageName: FLOW_STAGE_NAMES.BACKLOG,
+    const moved = await ensureFlowStageTransition({
+      targetStageName,
       transition: () =>
         ticketRepository.updateTicketStage(
           step.ticketId,
-          FLOW_STAGE_NAMES.BACKLOG,
+          targetStageName,
           params.actorUserId,
           undefined,
           undefined,
           {
             cascadeFlow: false,
-            allowedCurrentStatuses: FLOW_BACKLOGGABLE_STATUSES,
+            allowedCurrentStatuses: FLOW_SETTLEABLE_STATUSES,
             requiredActiveFlowRootId: rootTicket.id,
           }
         ),
       readStageName: () => readStageName(step.ticketId),
     });
-    if (!backlogged) {
-      await assertActiveFlowRun(rootTicket.id);
+    if (!moved) {
+      await assertActiveFlowRun(rootTicket.id, target);
       unchangedCount += 1;
       continue;
     }
-    backloggedCount += 1;
-    lastBackloggedTicketId = step.ticketId;
+    movedCount += 1;
+    lastMovedTicketId = step.ticketId;
   }
 
-  if (lastBackloggedTicketId) {
-    await onFlowStepBacklogged({
-      ticketId: lastBackloggedTicketId,
+  if (lastMovedTicketId) {
+    await onFlowTicketStatusChanged({
+      ticketId: lastMovedTicketId,
       actorUserId: params.actorUserId,
+      ...(target === 'SKIPPED'
+        ? { newStatus: TicketStatusV2.COMPLETED }
+        : { newStatus: TicketStatusV2.PAUSED, evaluateSatisfiedStep: true }),
     });
   }
 
   return {
     createdCount: liveMembers.filter((member) => !existingBefore.has(member.id)).length,
-    backloggedCount,
+    movedCount,
     unchangedCount,
   };
 }
@@ -766,10 +856,7 @@ function evaluateFlowReadiness(
   options: FlowReadinessOptions = {}
 ) {
   const statusByNodeId = new Map(
-    [...instantiated.entries()].map(([nodeId, step]) => [
-      nodeId,
-      step.stageName === FLOW_STAGE_NAMES.BACKLOG ? FLOW_STAGE_NAMES.BACKLOG : step.statusV2,
-    ])
+    [...instantiated.entries()].map(([nodeId, step]) => [nodeId, flowRuntimeStatus(step)])
   );
   const decisionOutcomeById = new Map(
     model.decisions.flatMap((decision) => {
@@ -878,7 +965,7 @@ async function createFlowStepTicket(params: {
   const { node, model, rootTicket, rootTicketId, actorUserId, requireActiveRoot } = params;
   const deterministicTicketId = uuidv5(
     `flow-ticket:${rootTicketId}:${node.id}`,
-    '98175b0b-310d-50de-852f-0f6df9be4c30'
+    FLOW_DETERMINISTIC_NAMESPACE
   );
   const group = node.groupId ? model.getGroup(node.groupId) : undefined;
   const parentGroup = group?.groupId ? model.getGroup(group.groupId) : undefined;
@@ -900,100 +987,7 @@ async function createFlowStepTicket(params: {
   };
 
   try {
-    const ticket = await db.$transaction(async (tx) => {
-      if (requireActiveRoot) {
-        const [lockedRoot] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
-          SELECT "statusV2"
-          FROM "tickets"
-          WHERE "id" = ${rootTicketId}
-          FOR UPDATE
-        `;
-        if (lockedRoot?.statusV2 !== TicketStatusV2.STARTED) {
-          throw new AppError('Only an active Flow run can move a group to backlog', 409);
-        }
-      }
-      const conversationId = uuidv5(
-        `flow-conversation:${rootTicketId}:${node.id}`,
-        '98175b0b-310d-50de-852f-0f6df9be4c30'
-      );
-      const initialMessageId = uuidv5(
-        `flow-message:${rootTicketId}:${node.id}`,
-        '98175b0b-310d-50de-852f-0f6df9be4c30'
-      );
-      await tx.conversation.create({
-        data: {
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          channelId: rootTicket.channelId,
-          createdBy: actorUserId,
-          initialMessageId,
-          pinned: false,
-          doNotPostToChannel: false,
-        },
-      });
-      const xyneId = await TicketIdService.generateTicketId(tx, rootTicket.projectId);
-      const created = await ticketRepository.createTicket(
-        {
-          id: deterministicTicketId,
-          title: node.title,
-          description: node.description || node.title,
-          createdBy: actorUserId,
-          updatedBy: actorUserId,
-          conversationId,
-          channelId: rootTicket.channelId,
-          projectId: rootTicket.projectId,
-          workspaceId: rootTicket.workspaceId,
-          boardId: rootTicket.boardId,
-          statusV2: TicketStatusV2.TODO,
-          stageName: FLOW_STAGE_NAMES.TODO,
-          priority: TicketPriority.LOW,
-          xyneId,
-          ...(node.assignedTo && { assignedTo: node.assignedTo }),
-          rootId: rootTicketId,
-          metadata: { flow: { planNodeId: node.id, rootTicketId, nodeSnapshot } },
-        },
-        tx
-      );
-      await tx.message.create({
-        data: {
-          messageId: initialMessageId,
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          senderId: actorUserId,
-          content: `Flow step created: ${node.title}`,
-          msgType: MessageType.SYSTEM,
-          hasAttachment: false,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: true,
-          createdAt: new Date(),
-          metadata: { ticketId: created.id },
-        },
-      });
-      await tx.conversation.update({
-        where: { conversationId },
-        data: { ticketId: created.id },
-      });
-      await tx.conversationParticipant.upsert({
-        where: { conversationId_userId: { conversationId, userId: actorUserId } },
-        create: {
-          id: uuidv5(
-            `flow-participant:${conversationId}:${actorUserId}`,
-            '98175b0b-310d-50de-852f-0f6df9be4c30'
-          ),
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          userId: actorUserId,
-          participationType: 'MENTIONED',
-          isSubscribed: true,
-          joinedAt: new Date(),
-          channelId: rootTicket.channelId,
-        },
-        update: { participationType: 'MENTIONED', isSubscribed: true },
-      });
-      return created;
-    });
+    const ticket = await createFlowStepTicketTx(requireActiveRoot, rootTicketId, node, rootTicket, actorUserId, deterministicTicketId, nodeSnapshot);
     await messageMetadataService.syncInitialMessageMd(ticket.conversationId);
     await syncConversationTicketMdFromPrismaTicket(db, ticket);
     return { id: ticket.id, xyneId: ticket.xyneId };

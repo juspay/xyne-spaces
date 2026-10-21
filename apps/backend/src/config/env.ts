@@ -92,9 +92,11 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  CONNECT_QUERY_ENABLED_CANVAS: Joi.boolean().default(false),
   MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
+  MIGRATION_APP_CREATOR_EMAIL: Joi.string().allow('').default(''), // existing user's email to own bot/app rows created during migration (alert/webhook channels)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -107,6 +109,7 @@ const envSchema = Joi.object({
   ENABLE_WORKFLOW_STEP_GCS_SYNC: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_QUEUE: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_WORKER: Joi.boolean().default(false),
+  ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
@@ -145,6 +148,12 @@ const envSchema = Joi.object({
   RADAR_BOOTSTRAP_LOOKBACK_MINUTES: Joi.number().integer().min(1).max(10_080).default(120),
   RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(1),
   RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).max(365).default(3),
+  // Duplicate check on the parser's creates, scored by Jev (JEV_* below). Off
+  // by default: it adds one Jev call per create on every window that has open
+  // items.
+  ENABLE_RADAR_DEDUP: Joi.boolean().default(false),
+  RADAR_DEDUP_THRESHOLD: Joi.number().min(0.5).max(1).default(0.75),
+  RADAR_DEDUP_TIMEOUT_MS: Joi.number().integer().min(500).max(60_000).default(5_000),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
   TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
@@ -153,6 +162,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
@@ -174,6 +184,13 @@ const envSchema = Joi.object({
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
+  META_APP_ID: Joi.string().allow('').default(''), // Meta (Facebook/Instagram) App ID
+  META_APP_SECRET: Joi.string().allow('').default(''), // Meta App Secret for webhook HMAC verification
+  META_WEBHOOK_VERIFY_TOKEN: Joi.string().allow('').default(''), // Meta webhook hub.verify_token
+  META_IG_APP_ID: Joi.string().allow('').default(''), // Instagram App ID (for Instagram Login OAuth)
+  META_IG_APP_SECRET: Joi.string().allow('').default(''), // Instagram App Secret (for Instagram Login OAuth)
+  META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
+  ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(false),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -266,9 +283,10 @@ const envSchema = Joi.object({
   // Same CALL_LITELLM_API_KEY for both; both fall back to CALL_LITELLM_MODEL.
   CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
   CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
+  // Run call/recording/summary-template LLM tasks on the Claw `call-intelligence`
+  // agent instead of calling LiteLLM directly.
+  CALL_AI_USE_CLAW_AGENT: Joi.boolean().default(false),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
-  PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
-  PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
@@ -317,6 +335,36 @@ const envSchema = Joi.object({
   LANGFUSE_BASE_URL: Joi.string().allow('').default(''),
   MESSAGE_CLASSIFIER_URL: Joi.string().uri().default('http://localhost:8082'),
   MESSAGE_CLASSIFIER_TIMEOUT_MS: Joi.number().default(5000),
+  // Jev — the typed classifier behind the cmd+K AI overview (services/queryIntent).
+  // Unset key => never called. Point URL/model at any service speaking the same wire
+  // format. The model is pinned, not a floating alias: the probability thresholds in
+  // services/queryIntent and services/radar are only valid for the model they were
+  // tuned on.
+  JEV_API_KEY: Joi.string().allow('').default(''),
+  JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
+  JEV_MODEL: Joi.string().default('jev-1.13.0'),
+  // XOR — same wire format as Jev, on LiteLLM's /v1/decisions. Unset XOR_URL => XOR is
+  // whatever JEV_URL points at when set explicitly, as before these existed.
+  XOR_URL: Joi.string().uri().allow('').default(''),
+  // Required with XOR_URL: without it every XOR feature would switch off silently.
+  XOR_API_KEY: Joi.when('XOR_URL', {
+    is: Joi.string().min(1),
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
+  XOR_MODEL: Joi.string().default('xor-latest'),
+  // The engine that answers typed decision questions live (services/decision): xor or jev. The
+  // LLM is only ever asked to compare: the features gate on probabilities it does not give.
+  DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
+  // Decision evaluation: every decision is also queued for the other engines, to compare them.
+  DECISION_EVAL_ENABLED: Joi.boolean().default(false),
+  ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
+  ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
+  ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
+  ELEVENLABS_TTS_MODEL: Joi.string().default('eleven_flash_v2_5'),
+  ELEVENLABS_TTS_VOICE_ID: Joi.string().allow('').default(''),
+  VOICE_INPUT_STT_STREAM_PROVIDER: Joi.string().valid('google', 'elevenlabs').default('google'),
+  TTS_PROVIDER: Joi.string().valid('azure', 'elevenlabs').default('azure'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -418,11 +466,17 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ENCRYPTION_KEY: Joi.string().allow('').default(''),
   ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
+  ENABLE_DB_DECRYPTION: Joi.boolean().default(false),
+  // How long the encrypted-fields config fetched from the encryption service is
+  // cached before a background refresh; the rollout latency of a config change.
+  ENCRYPTED_FIELDS_CACHE_TTL_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  SECRETS_VAULT_CACHE_TTL_MS: Joi.number().integer().min(0).default(5 * 60 * 1000),
   JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
     .allow('')
     .default(''),
@@ -483,6 +537,9 @@ const envSchema = Joi.object({
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
   INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // Dedicated secret for POST /internal/users/deactivate, sent in the standard
+  // X-Internal-Service-Secret header.
+  USER_DEACTIVATION_SERVICE_SECRET: Joi.string().allow('').default(''),
   // mTLS certificate service (s2s). Empty url disables cert revocation.
   MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
   MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -612,7 +669,13 @@ const envSchema = Joi.object({
   // are unaffected either way (always strict).
   WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
+  // Continuous CPU + heap profiling pushed to Grafana Pyroscope. Off by default;
+  // needs PYROSCOPE_SERVER_ADDRESS (e.g. http://localhost:4040) to do anything.
+  PYROSCOPE_ENABLED: Joi.boolean().default(false),
+  PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
+  PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
+  DEEP_RESEARCH_BASE_URL: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -736,6 +799,9 @@ export const config = {
     callRecordingThinkingLitellmModel:
       envVars.CALL_RECORDING_THINKING_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
   },
+  callAi: {
+    useClawAgent: envVars.CALL_AI_USE_CLAW_AGENT as boolean,
+  },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
     model: envVars.ACTIVITY_CLASSIFICATION_MODEL,
@@ -751,10 +817,12 @@ export const config = {
     activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  connectQueryEnabledCanvas: envVars.CONNECT_QUERY_ENABLED_CANVAS as boolean,
   slackMigration: {
     ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
     workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
     ingestControlEnabled: envVars.MIGRATION_INGEST_CONTROL, // gate for the start/stop-ingestion routes + dashboard button
+    appCreatorEmail: envVars.MIGRATION_APP_CREATOR_EMAIL, // createdBy for migrated bot/app rows
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
@@ -773,6 +841,7 @@ export const config = {
   enableWorkflowStepGcsSync: envVars.ENABLE_WORKFLOW_STEP_GCS_SYNC,
   enableConversationIngestionQueue: envVars.ENABLE_CONVERSATION_INGESTION_QUEUE,
   enableConversationIngestionWorker: envVars.ENABLE_CONVERSATION_INGESTION_WORKER,
+  enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
@@ -811,6 +880,13 @@ export const config = {
     // execution_run_logs is the fastest-growing table here — one row per
     // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
     runLogRetentionDays: envVars.RADAR_RUN_LOG_RETENTION_DAYS as number,
+    // A create Jev rates at or above the threshold as the same ask as an open
+    // item is sent back to the parser once. Tuned on jev-trained, where a
+    // labelled set scored duplicates >= 0.84 and distinct asks <= 0.66 —
+    // re-tune when JEV_MODEL changes.
+    dedupEnabled: envVars.ENABLE_RADAR_DEDUP as boolean,
+    dedupThreshold: envVars.RADAR_DEDUP_THRESHOLD as number,
+    dedupTimeoutMs: envVars.RADAR_DEDUP_TIMEOUT_MS as number,
   },
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   teamIntelligence: {
@@ -828,6 +904,7 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
@@ -860,6 +937,13 @@ export const config = {
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
+  META_APP_ID: envVars.META_APP_ID as string,
+  META_APP_SECRET: envVars.META_APP_SECRET as string,
+  META_WEBHOOK_VERIFY_TOKEN: envVars.META_WEBHOOK_VERIFY_TOKEN as string,
+  META_IG_APP_ID: envVars.META_IG_APP_ID as string,
+  META_IG_APP_SECRET: envVars.META_IG_APP_SECRET as string,
+  META_IG_REDIRECT_URI: envVars.META_IG_REDIRECT_URI as string,
+  enableInstagramTokenRefreshWorker: envVars.ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER as boolean,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')
@@ -951,15 +1035,39 @@ export const config = {
     pgConnectionTimeoutMs: envVars.DASHBOARD_PG_CONNECTION_TIMEOUT_MS,
     chRequestTimeoutMs: envVars.DASHBOARD_CH_REQUEST_TIMEOUT_MS,
   },
-  productInsights: {
-    recluster: {
-      cron: envVars.PRODUCT_INSIGHTS_RECLUSTER_CRON,
-      windowDays: envVars.PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS,
-    },
-  },
   messageClassifier: {
     url: envVars.MESSAGE_CLASSIFIER_URL,
     timeoutMs: envVars.MESSAGE_CLASSIFIER_TIMEOUT_MS,
+  },
+  jev: {
+    apiKey: envVars.JEV_API_KEY,
+    url: envVars.JEV_URL,
+    model: envVars.JEV_MODEL,
+    // Set by the deployer, not the public default: required before customer content goes to it.
+    urlIsExplicit: Boolean(process.env.JEV_URL?.trim()),
+  },
+  xor: {
+    apiKey: envVars.XOR_API_KEY,
+    url: envVars.XOR_URL,
+    model: envVars.XOR_MODEL,
+  },
+  decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
+  decisionEval: {
+    enabled: envVars.DECISION_EVAL_ENABLED,
+  },
+  elevenLabs: {
+    apiKey: envVars.ELEVENLABS_API_KEY as string,
+    apiUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, ''),
+    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, '').replace(/^http/, 'ws'),
+    sttModel: envVars.ELEVENLABS_STT_MODEL as string,
+    ttsModel: envVars.ELEVENLABS_TTS_MODEL as string,
+    ttsVoiceId: envVars.ELEVENLABS_TTS_VOICE_ID as string,
+  },
+  voiceInputStream: {
+    provider: envVars.VOICE_INPUT_STT_STREAM_PROVIDER as 'google' | 'elevenlabs',
+  },
+  tts: {
+    provider: envVars.TTS_PROVIDER as 'azure' | 'elevenlabs',
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,
@@ -1139,8 +1247,14 @@ export const config = {
     clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
     apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
     enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
+    enableDbDecryption: envVars.ENABLE_DB_DECRYPTION as boolean,
+    encryptedFieldsCacheTtlMs: envVars.ENCRYPTED_FIELDS_CACHE_TTL_MS as number,
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
+  },
+  encryptionKey: envVars.ENCRYPTION_KEY as string,
+  secretsVault: {
+    cacheTtlMs: envVars.SECRETS_VAULT_CACHE_TTL_MS as number,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,
@@ -1174,6 +1288,7 @@ export const config = {
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  userDeactivationServiceSecret: envVars.USER_DEACTIVATION_SERVICE_SECRET as string,
   mtlsService: {
     url: envVars.MTLS_SERVICE_URL as string,
     // Reuses the shared internal-service secret (X-Internal-Service-Secret).
@@ -1314,4 +1429,10 @@ export const config = {
   webhooks: {
     allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
+  pyroscope: {
+    enabled: envVars.PYROSCOPE_ENABLED as boolean,
+    serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
+    flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
+  },
+  deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
 };

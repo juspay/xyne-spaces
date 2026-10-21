@@ -18,6 +18,7 @@ import {
   type PanelSize,
 } from '../ui/Resizable/Resizable';
 import { useSidebarResizeShortcut } from '../../hooks/useSidebarResizeShortcut';
+import { usePageCoverage } from '../../hooks/usePageCoverage';
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -155,6 +156,8 @@ interface AIShellProps {
   /** Reports the sidebar's collapsed state, so a header toggle can pick its
    *  icon. Fired from the Panel's own onResize — the ground truth. */
   onSidebarCollapsedChange?: ((collapsed: boolean) => void) | undefined;
+  /** Collapses the sidebar from its own header, mirroring ticket views. */
+  onToggleCollapse?: (() => void) | undefined;
   /** Receives a toggle function for the sidebar, for the chat header button. */
   sidebarToggleRef?: React.MutableRefObject<(() => void) | null> | undefined;
   children: ReactNode;
@@ -176,6 +179,7 @@ export function AIShell({
   workspaceControlsRef,
   collapseSignal,
   onSidebarCollapsedChange,
+  onToggleCollapse,
   sidebarToggleRef,
   children,
 }: AIShellProps): ReactElement {
@@ -238,14 +242,16 @@ export function AIShell({
     if (!overlayMode && drawerOpen) setDrawerOpen(false);
   }, [overlayMode, drawerOpen]);
 
+  // Not while full-page search covers the page: its Esc is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!overlayMode || !drawerOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setDrawerOpen(false);
+      if (event.key === 'Escape' && !coverage.isCovered()) setDrawerOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [overlayMode, drawerOpen]);
+  }, [overlayMode, drawerOpen, coverage]);
 
   useEffect(() => {
     if (!workspaceControlsRef) return;
@@ -359,6 +365,7 @@ export function AIShell({
             onAccount={onAccount}
             mobileOpen={mobileOpen}
             onMobileOpenChange={onMobileOpenChange}
+            onToggleCollapse={onToggleCollapse}
           />
         </aside>
       </Panel>

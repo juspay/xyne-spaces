@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { getMe, getLoginUrl, upsertUser } from "../lib/api";
+import { getClawIdentity, getMe, getLoginUrl, upsertUser } from "../lib/api";
 import { frontendConfig } from "../lib/config";
+import { setCurrentUserIds } from "../lib/identity";
 import type { User } from "../lib/types";
 
 type AuthState =
@@ -57,28 +58,65 @@ async function completeAuthV2HandshakeIfNeeded(): Promise<void> {
   });
 }
 
-export function useAuth() {
-  const [state, setState] = useState<AuthState>({ status: "loading" });
+/** One validate/identity round per page load, shared by every `useAuth()` instance; dropped on failure or logout. */
+type ResolvedAuth = { status: "authenticated"; user: User } | { status: "unauthenticated" };
 
-  useEffect(() => {
+let sharedAuth: Promise<ResolvedAuth> | null = null;
+let settledAuth: ResolvedAuth | null = null;
+
+function resolveAuth(): Promise<ResolvedAuth> {
+  if (sharedAuth) return sharedAuth;
+  const attempt: Promise<ResolvedAuth> = (async () => {
     const params = new URLSearchParams(window.location.search);
     const justLoggedIn = USE_AUTH_V2 && params.get("success") === "true";
+    if (justLoggedIn) {
+      await completeAuthV2HandshakeIfNeeded().catch(() => {});
+      // Strip auth params from URL so a refresh doesn't re-trigger the handshake.
+      window.history.replaceState(null, "", window.location.pathname);
+    }
 
-    (async () => {
-      if (justLoggedIn) {
-        await completeAuthV2HandshakeIfNeeded().catch(() => {});
-        // Strip auth params from URL so a refresh doesn't re-trigger the handshake.
-        window.history.replaceState(null, "", window.location.pathname);
-      }
+    try {
+      const user = await getMe();
+      await upsertUser(user).catch(() => {});
+      // Both id forms of "me" (canonical Claw id + raw Spaces id) — Claw-owned
+      // rows may store either, so ownership comparisons check the whole set.
+      const identity = await getClawIdentity();
+      setCurrentUserIds([user.id, identity?.userId, identity?.spacesUserId]);
+      return { status: "authenticated", user } as const;
+    } catch {
+      setCurrentUserIds([]);
+      return { status: "unauthenticated" } as const;
+    }
+  })();
+  sharedAuth = attempt;
+  void attempt.then((result) => {
+    if (sharedAuth !== attempt) return;
+    if (result.status === "authenticated") {
+      settledAuth = result;
+    } else {
+      sharedAuth = null;
+      settledAuth = null;
+    }
+  });
+  return attempt;
+}
 
-      try {
-        const user = await getMe();
-        await upsertUser(user).catch(() => {});
-        setState({ status: "authenticated", user });
-      } catch {
-        setState({ status: "unauthenticated" });
-      }
-    })();
+function forgetSharedAuth(): void {
+  sharedAuth = null;
+  settledAuth = null;
+}
+
+export function useAuth() {
+  const [state, setState] = useState<AuthState>(() => settledAuth ?? { status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    void resolveAuth().then((result) => {
+      if (active) setState(result);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = useCallback(() => {
@@ -88,6 +126,8 @@ export function useAuth() {
   const logout = useCallback(() => {
     document.cookie = "google_access_token=; Max-Age=0; path=/";
     document.cookie = "user_session_id=; Max-Age=0; path=/";
+    setCurrentUserIds([]);
+    forgetSharedAuth();
     setState({ status: "unauthenticated" });
   }, []);
 

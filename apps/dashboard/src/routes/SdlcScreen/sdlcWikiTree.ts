@@ -9,6 +9,12 @@ export interface SdlcWikiPage {
   archived: boolean;
 }
 
+/** A page with the Wiki it is in, for lists that span the hub's Wikis. */
+export interface SdlcWikiHubPage extends SdlcWikiPage {
+  scopeFolderId: string;
+  scopeName: string;
+}
+
 export interface HubItemEdge {
   sourceId: string;
   targetType: string;
@@ -26,6 +32,8 @@ export interface WikiScope {
   folderId: string;
   name: string;
   hub: boolean;
+  /** Null on the Hub Wiki, which belongs to no single repository. */
+  repoId: string | null;
 }
 
 /**
@@ -55,6 +63,7 @@ export function wikiScopes(input: {
         folderId: edge.targetId,
         name: hub ? 'Relationships' : (input.folderNames.get(edge.targetId) ?? 'Repository'),
         hub,
+        repoId: hub ? null : edge.targetId.slice(repositoryPrefix.length),
       };
     });
   return scopes.sort((left, right) =>

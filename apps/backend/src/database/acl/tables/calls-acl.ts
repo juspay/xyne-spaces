@@ -19,7 +19,7 @@ export class CallsACL extends BaseQueryACL<
    * Prisma relation and is resolved as a separate lookup instead — mirrors the
    * Zero-side `CallsACL.canSelect` `exists('shares', ...)` clauses.
    */
-  private async getSharedCallIds(): Promise<{ recordingIds: string[]; callIds: string[] }> {
+  private async getShareTargetOr(): Promise<Prisma.EntityAccessWhereInput[]> {
     const [groupMappings, channelParticipations] = await Promise.all([
       this.prisma.userGroupMapping.findMany({
         where: { userId: this.ctx.userId },
@@ -33,6 +33,14 @@ export class CallsACL extends BaseQueryACL<
     const userGroupIds = groupMappings.map((m) => m.userGroupId)
     const channelIds = channelParticipations.map((p) => p.channelId)
 
+    return [
+      { userId: this.ctx.userId },
+      ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+      ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+    ]
+  }
+
+  private async getSharedCallIds(): Promise<{ recordingIds: string[]; callIds: string[] }> {
     const shares = await this.prisma.entityAccess.findMany({
       where: {
         workspaceId: this.ctx.workspaceId,
@@ -40,11 +48,7 @@ export class CallsACL extends BaseQueryACL<
           in: [ShareableEntityType.NOTE_TAKER, ShareableEntityType.CALL],
         },
         entityUserAccess: { not: EntityUserAccess.REVOKED },
-        OR: [
-          { userId: this.ctx.userId },
-          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
-          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
-        ],
+        OR: await this.getShareTargetOr(),
       },
       select: { entityId: true, shareableEntityType: true },
     })
@@ -94,12 +98,36 @@ export class CallsACL extends BaseQueryACL<
     }
   }
 
+  /**
+   * Recordings the caller may write to: a live EDIT grant, direct or through a
+   * userGroup/channel. VIEW never writes and neither does a public link, so EDIT
+   * is the only grant value that counts. Deletion stays creator-only — the route
+   * handlers enforce that; this only widens what the tenant filter permits.
+   */
+  private async getEditableRecordingIds(): Promise<string[]> {
+    const shares = await this.prisma.entityAccess.findMany({
+      where: {
+        workspaceId: this.ctx.workspaceId,
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
+        entityUserAccess: EntityUserAccess.EDIT,
+        OR: await this.getShareTargetOr(),
+      },
+      select: { entityId: true },
+    })
+    return shares.map((s) => s.entityId)
+  }
+
   async getMutateWhere(): Promise<Prisma.CallWhereInput> {
+    const editableRecordingIds = await this.getEditableRecordingIds()
+
     return {
       workspaceId: this.ctx.workspaceId,
       OR: [
         { createdByUserId: this.ctx.userId },
         { participants: { some: { userId: this.ctx.userId } } },
+        ...(editableRecordingIds.length
+          ? [{ callType: CallType.HEADLESS, id: { in: editableRecordingIds } }]
+          : []),
       ],
     }
   }

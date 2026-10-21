@@ -218,6 +218,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
       threadType,  // Thread classification type(s) - comma-separated; matches thread roots
       entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
+      hasLink,     // 'true'|'false' - chat messages with / without links
       messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
@@ -238,6 +239,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
       onlyMyChannels,      // 'true'|'false' string from cmd-K toggle; default behavior includes public channels
+      excludeArchived,     // 'true' => drop results resolving to an archived ticket (cmd+k + full-page Desk)
       includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Chunk-level KB drill-in mode used by claw-auth's kb-get-chunks /
@@ -257,6 +259,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // Joi validateQuery (convert: true) coerces includeDebugInfo to a boolean,
     // so normalize before comparing
     const wantDebugInfo = String(includeDebugInfo) === 'true';
+    const wantExcludeArchived = String(excludeArchived) === 'true';
 
     const userId = (req as any).user?.id;
     const userEmail = (req as any).user?.email;
@@ -865,13 +868,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.boardId = toFilterValues(board, 'board');
     }
 
-    // One `tags` filter, two schemas: a ticket's labels live in `tags`, a message's in
-    // `messageActs`. Callers ask for "tagged X" once; each schema applies it to its own
-    // field, so on a mixed search tagged tickets and tagged messages both come back.
+    // One `tags` filter, three schemas: a ticket's labels live in `tags`, a message's in
+    // `messageActs`, a recording transcript's in `labels`. Callers ask for "tagged X" once;
+    // each schema applies it to its own field, so on a mixed search every tagged kind comes back.
     if (tags) {
       const tagValues = toFilterValues(tags, 'tags');
       options.ticket.tags = tagValues;
       options.slack.messageActs = tagValues;
+      options.file.labels = tagValues;
     }
 
     // Entity filter — same values for both schemas; AND-ed inside YqlBuilder so a doc must
@@ -880,6 +884,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       const entityNames = toFilterValues(entity, 'entity');
       options.slack.entityNames = entityNames;
       options.ticket.entityNames = entityNames;
+    }
+
+    // Link filter — chat_message only (`hasLinks`). Unset means no filter, so only map it
+    // when sent. String() so the SDK route's zod-coerced booleans match too.
+    if (hasLink !== undefined) {
+      options.slack.hasLinks = String(hasLink) === 'true';
     }
 
     if (dynamicFieldValues) {
@@ -955,13 +965,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     // Bot-message toggle: default OFF (exclude). Frontend opts-in by sending
     // includeBotMessages=true. Anything else → exclude bot messages.
-    if (includeBotMessages !== 'true') {
+    // String() so the SDK route's zod-coerced booleans match too.
+    if (String(includeBotMessages) !== 'true') {
       options.slack.excludeBotMessages = true;
     }
 
     // My-channels toggle: when true, scope chat results to channels the user is a
     // member of (drop the public-non-member access branch in YqlBuilder).
-    options.slack.onlyMyChannels = onlyMyChannels === 'true';
+    options.slack.onlyMyChannels = String(onlyMyChannels) === 'true';
 
     // Sort by timestamp: force flat (ungrouped) results so ORDER BY applies cleanly.
     if (orderBy === 'newest' || orderBy === 'oldest') {
@@ -1028,6 +1039,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
               hitsWithMatchFeatures,
               db,
               wantDebugInfo,
+              wantExcludeArchived,
             ),
           );
           return {
@@ -1058,6 +1070,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         parsedResults.hits || [],
         db,
         wantDebugInfo,
+        wantExcludeArchived,
       );
 
       res.json({

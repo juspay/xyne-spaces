@@ -295,7 +295,6 @@ export class TestAuthController {
             { name: 'USERS', description: 'User management endpoints' },
             { name: 'FORMS', description: 'Form management' },
             { name: 'SUPPORT', description: 'Support ticket management' },
-            { name: 'PRODUCT-INSIGHTS', description: 'Product insights and analytics' },
             { name: 'PROJECTS', description: 'Project board management' },
             { name: 'WORKSPACE', description: 'Workspace management access' },
             { name: 'ORGANIZATIONS', description: 'Organization management access' },

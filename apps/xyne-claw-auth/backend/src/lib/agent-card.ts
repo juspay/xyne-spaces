@@ -526,7 +526,18 @@ export type AgentDraftResolution =
       /** True when someone/something already decided this draft (replay, race). */
       alreadyResolved: boolean;
     }
-  | { ok: false; code: 400 | 403 | 404 | 409 | 500; error: string };
+  | {
+      ok: false;
+      code: 400 | 403 | 404 | 409 | 500;
+      error: string;
+      /**
+       * The draft row is still `pending`, so this card can be clicked again once
+       * the reason is addressed (rename the slug, let the right person decide).
+       * The caller must leave the card intact and surface `error` some other
+       * way — replacing it with text strands a draft that is still approvable.
+       */
+      retryable?: boolean;
+    };
 
 export interface AgentDraftEdits {
   toolSelection?: {
@@ -539,10 +550,19 @@ export interface AgentDraftEdits {
   /** "" clears the pin back to the workspace default. */
   modelId?: string;
   providerOrder?: string[];
+  /** Identity retyped on the draft card. Absent ⇒ keep what the draft proposed. */
+  name?: string;
+  slug?: string;
+  description?: string;
+  systemPrompt?: string;
 }
 
 const MAX_MODEL_ID = 120;
 const MAX_EDITED_TOOLS = 120;
+const MAX_EDITED_NAME = 100;
+const MAX_EDITED_DESCRIPTION = 2_000;
+const MAX_EDITED_PROMPT = 100_000;
+const MAX_EDITED_SLUG = 80;
 
 const stringArray = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim()) : [];
@@ -574,7 +594,39 @@ export function parseAgentDraftEdits(raw: unknown): AgentDraftEdits | undefined 
   const rawProviders = record["providerOrder"];
   if (Array.isArray(rawProviders)) edits.providerOrder = stringArray(rawProviders).slice(0, 8);
 
+  const text = (key: string, max: number): string | undefined =>
+    typeof record[key] === "string" ? (record[key] as string).trim().slice(0, max) : undefined;
+
+  const name = text("name", MAX_EDITED_NAME);
+  if (name !== undefined) edits.name = name;
+  // Identifiers are lowercase everywhere else, so accept a retyped one in any case.
+  const slug = text("slug", MAX_EDITED_SLUG);
+  if (slug !== undefined) edits.slug = slug.toLowerCase();
+  const description = text("description", MAX_EDITED_DESCRIPTION);
+  if (description !== undefined) edits.description = description;
+  const systemPrompt = text("systemPrompt", MAX_EDITED_PROMPT);
+  if (systemPrompt !== undefined) edits.systemPrompt = systemPrompt;
+
   return Object.keys(edits).length > 0 ? edits : undefined;
+}
+
+/**
+ * Why a retyped identity can't be created, or undefined when it is fine.
+ *
+ * Checked BEFORE the pending row is claimed: a rejected edit must leave the
+ * draft approvable rather than burning the claim and relying on the revert.
+ * An empty description is allowed — it clears the field.
+ */
+export function agentDraftIdentityError(edits?: AgentDraftEdits): string | undefined {
+  if (!edits) return undefined;
+  if (edits.name !== undefined && edits.name.length === 0) return "The agent needs a name.";
+  if (edits.slug !== undefined && !isValidAgentSlug(edits.slug)) {
+    return `"${edits.slug}" isn't a valid identifier — use lowercase letters, numbers and single hyphens.`;
+  }
+  if (edits.systemPrompt !== undefined && edits.systemPrompt.length === 0) {
+    return "The agent needs a system prompt.";
+  }
+  return undefined;
 }
 
 export function flattenToolSelection(selection: AgentDraftEdits["toolSelection"]): string[] {
@@ -604,6 +656,23 @@ export interface AppliedDraftEdits {
   modelId?: string;
   providerOrder: string[];
   unknownProviders: string[];
+  name?: string;
+  slug?: string;
+  description?: string;
+  systemPrompt?: string;
+}
+
+/** The draft as edited — what gets created, and what the decided card shows. */
+export function specWithAppliedEdits(spec: DraftAgentSpec, applied?: AppliedDraftEdits): DraftAgentSpec {
+  if (!applied) return spec;
+  return {
+    ...spec,
+    ...(applied.name !== undefined ? { name: applied.name } : {}),
+    ...(applied.slug !== undefined ? { slug: applied.slug } : {}),
+    ...(applied.description !== undefined ? { description: applied.description } : {}),
+    ...(applied.systemPrompt !== undefined ? { systemPrompt: applied.systemPrompt } : {}),
+    modelId: applied.modelId ? applied.modelId : "",
+  };
 }
 
 export function applyDraftEdits(
@@ -627,6 +696,11 @@ export function applyDraftEdits(
   }
 
   if (edits?.modelId !== undefined) applied.modelId = edits.modelId;
+
+  if (edits?.name !== undefined) applied.name = edits.name;
+  if (edits?.slug !== undefined) applied.slug = edits.slug;
+  if (edits?.description !== undefined) applied.description = edits.description;
+  if (edits?.systemPrompt !== undefined) applied.systemPrompt = edits.systemPrompt;
 
   if (edits?.providerOrder !== undefined) {
     const { providers, unknown } = normalizeProviderOrder(edits.providerOrder);
@@ -725,12 +799,24 @@ export async function resolveAgentDraft(
   // Self-approval (the drafter's own request), re-checked against the row and
   // not just the card — the card is client-supplied.
   if (request.requesterId !== callerUserId) {
-    return { ok: false, code: 403, error: "Only the person who requested this agent can decide it." };
+    return {
+      ok: false,
+      code: 403,
+      error: "Only the person who requested this agent can decide it.",
+      retryable: true,
+    };
   }
 
   const spec = parseDraftSpec(request.proposedContent);
   if (!spec) {
     return { ok: false, code: 400, error: "This draft is unreadable and can't be created. Ask for the agent again." };
+  }
+
+  // Approve only, and before the claim: a malformed edit must leave the draft
+  // approvable rather than burning the claim, and must never block a decline.
+  if (decision === "approve") {
+    const identityError = agentDraftIdentityError(edits);
+    if (identityError) return { ok: false, code: 400, error: identityError, retryable: true };
   }
 
   const catalog = await buildCatalogFor(request.orgId);
@@ -752,7 +838,7 @@ export async function resolveAgentDraft(
       request.requesterId,
       callableOptions,
     );
-    const effectiveSpec = applied ? { ...spec, ...(applied.modelId ? { modelId: applied.modelId } : { modelId: "" }) } : spec;
+    const effectiveSpec = specWithAppliedEdits(spec, applied);
     const effectiveExtras = applied
       ? { ...extras, providerOrder: applied.providerOrder, unknownProviders: applied.unknownProviders }
       : extras;
@@ -805,17 +891,22 @@ export async function resolveAgentDraft(
 
   // ── Approve: create the agent ──────────────────────────────────────────────
   try {
-    const existing = await agentRepository.findBySlug(spec.slug, request.orgId);
+    // Edits first: the identifier checked for collision has to be the one that
+    // will actually be written, not the one the draft proposed.
+    const applied = applyDraftEdits(spec, extras, edits);
+    const draft = specWithAppliedEdits(spec, applied);
+
+    const existing = await agentRepository.findBySlug(draft.slug, request.orgId);
     if (existing) {
       await agentRequestRepository.revertAgentCreateToPending(requestId).catch(() => {});
       return {
         ok: false,
         code: 409,
-        error: `An agent with the identifier "${spec.slug}" now exists — nothing was created.`,
+        error: `The identifier "${draft.slug}" is already taken — rename it and create again.`,
+        retryable: true,
       };
     }
 
-    const applied = applyDraftEdits(spec, extras, edits);
     const full = await buildIdentity(specTools, applied);
     const grantedIds =
       applied.requestedTools ??
@@ -831,23 +922,23 @@ export async function resolveAgentDraft(
     // Global agents are org-wide, so the same admin gate the REST create route
     // applies has to apply here — a drafted spec must not be a way around it.
     const admin = await isClawAdmin(callerUserId).catch(() => false);
-    const effectiveScope = spec.scope === "global" && admin ? "global" : "personal";
-    if (spec.scope === "global" && !admin) {
-      log.info(`[agent-card] draft ${spec.slug} asked for global scope; downgraded to personal (approver is not an admin)`);
+    const effectiveScope = draft.scope === "global" && admin ? "global" : "personal";
+    if (draft.scope === "global" && !admin) {
+      log.info(`[agent-card] draft ${draft.slug} asked for global scope; downgraded to personal (approver is not an admin)`);
     }
     // Anything other than USER falls back to COLLECTIONS, matching the route —
     // a typo must not hand the agent the approver's whole knowledge base.
-    const effectiveKbScope = spec.knowledge?.scope === "USER" ? "USER" : "COLLECTIONS";
+    const effectiveKbScope = draft.knowledge?.scope === "USER" ? "USER" : "COLLECTIONS";
     const providerOrder = applied.providerOrder;
 
     const created = await agentRepository.create({
-      slug: spec.slug,
-      name: spec.name,
-      description: spec.description ?? "",
-      systemPrompt: spec.systemPrompt,
+      slug: draft.slug,
+      name: draft.name,
+      description: draft.description ?? "",
+      systemPrompt: draft.systemPrompt,
       scope: effectiveScope,
       kbScope: effectiveKbScope,
-      color: spec.color?.trim() || "#6366f1",
+      color: draft.color?.trim() || "#6366f1",
       modelId: applied.modelId?.trim() ?? "",
       config: {
         tools: toConfigTools(resolved),
@@ -862,7 +953,7 @@ export async function resolveAgentDraft(
     // attach is logged and skipped rather than thrown.
     for (const skill of extras.skills ?? []) {
       await agentRepository.upsertSkill(created.id, skill.id).catch((err: unknown) => {
-        log.warn(`[agent-card] could not attach skill ${skill.id} to ${spec.slug}: ${errMsg(err)}`);
+        log.warn(`[agent-card] could not attach skill ${skill.id} to ${draft.slug}: ${errMsg(err)}`);
       });
     }
 
@@ -871,9 +962,10 @@ export async function resolveAgentDraft(
       actorUserId: callerUserId,
       eventType: "AGENT_CREATED",
       targetId: created.id,
-      description: `agent-authored agent "${spec.name}" (${spec.slug}) approved from a draft card`,
+      description: `agent-authored agent "${draft.name}" (${draft.slug}) approved from a draft card`,
       metadata: {
         requestId,
+        ...(draft.slug !== spec.slug || draft.name !== spec.name ? { renamedFrom: { name: spec.name, slug: spec.slug } } : {}),
         subagents: resolved.subagents,
         custom: resolved.custom,
         callableAgents: resolved.callableAgents,
@@ -883,7 +975,7 @@ export async function resolveAgentDraft(
       },
     });
     log.info(
-      `[agent-card] created agent ${spec.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length}`,
+      `[agent-card] created agent ${draft.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length}`,
     );
 
     const note = draftNote(
@@ -905,7 +997,13 @@ export async function resolveAgentDraft(
     log.error(
       `[agent-card] create failed for ${spec.slug} (request=${requestId}): ${errMsg(err)}`,
     );
-    return { ok: false, code: 500, error: "Couldn't create the agent just now — please try approving again." };
+
+    return {
+      ok: false,
+      code: 500,
+      error: "Couldn't create the agent just now — please try again.",
+      retryable: true,
+    };
   }
 }
 

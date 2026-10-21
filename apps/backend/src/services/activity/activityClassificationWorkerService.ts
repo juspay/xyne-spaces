@@ -1,9 +1,10 @@
 import { Activity } from '@prisma/client';
-import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
+import { ActivityClassification } from '@xyne/shared';
 import { db } from '@/database/client';
 import { activityClassificationService } from '@/services/activity/activityClassificationService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { claimSingleActivitiesQuery, claimSpecialMentionAudienceActivitiesQuery } from '@/bypassAcl/activityServices';
 const MIN_INTERVAL_MS = 5000;
 const MAX_INTERVAL_MS = 15000;
 const BATCH_SIZE = 25;
@@ -95,51 +96,11 @@ class ActivityClassificationWorkerService {
   }
 
   private async claimSingleActivities(): Promise<Activity[]> {
-    return db.$queryRaw<Activity[]>`
-      WITH cte AS (
-        SELECT "id"
-        FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}
-          AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE})
-        ORDER BY "createdAt" ASC
-        LIMIT ${BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED
-      )
-      UPDATE "activities" a
-      SET "classification" = ${ActivityClassification.PROCESSING}
-      FROM cte
-      WHERE a."id" = cte."id"
-      RETURNING a.*;
-    `;
+    return claimSingleActivitiesQuery(BATCH_SIZE);
   }
 
   private async claimSpecialMentionAudienceActivities(): Promise<Activity[]> {
-    return db.$queryRaw<Activity[]>`
-      WITH batch AS (
-        SELECT "actionSourceId", "channelId"
-        FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}
-          AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
-        ORDER BY "createdAt" ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      ),
-      claimed AS (
-        SELECT "id"
-        FROM "activities" a
-        JOIN batch b
-          ON a."actionSourceId" = b."actionSourceId"
-         AND a."channelId" = b."channelId"
-        WHERE a."classification" = ${ActivityClassification.PENDING}
-          AND a."classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
-        FOR UPDATE SKIP LOCKED
-      )
-      UPDATE "activities" a
-      SET "classification" = ${ActivityClassification.PROCESSING}
-      FROM claimed
-      WHERE a."id" = claimed."id"
-      RETURNING a.*;
-    `;
+    return claimSpecialMentionAudienceActivitiesQuery();
   }
 
   private async processSingleActivity(activity: Activity): Promise<void> {

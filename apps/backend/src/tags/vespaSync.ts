@@ -1,6 +1,8 @@
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { queueRecordingTranscriptRefresh } from '@/services/callVespaQueue';
+import { CALL_TAG_SOURCE_TYPE } from '@/services/callLabelService';
 import { logger } from '@/utils/logger';
 import { DESK_EMAIL_SOURCE_TYPE } from './deskEmail';
 
@@ -9,6 +11,12 @@ import { DESK_EMAIL_SOURCE_TYPE } from './deskEmail';
  * Fire-and-forget: callers use `void enqueueTagVespaRefeed(...)`.
  */
 export async function enqueueTagVespaRefeed(sourceType: string, sourceId: string): Promise<void> {
+  // A recording's transcript doc carries its confirmed label slugs, so confirming, renaming
+  // or deleting one of its Tags refreshes them. sourceId is the Call id (the doc id).
+  if (sourceType === CALL_TAG_SOURCE_TYPE) {
+    await queueRecordingTranscriptRefresh({ id: sourceId }, ['labels']);
+    return;
+  }
   if (sourceType !== DESK_EMAIL_SOURCE_TYPE) return;
 
   try {

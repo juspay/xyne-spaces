@@ -59,9 +59,6 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
 
   return (
     <div className='flex items-center gap-2 flex-wrap'>
-      <span className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0'>
-        Auto-tagged
-      </span>
       <InlineTagGroups groups={displayGroups} />
       {hiddenCount > 0 && (
         <button

@@ -1,10 +1,16 @@
 import crypto from "node:crypto";
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
+import { parseArgMarkup } from "./leaked-tool-call.js";
 import { createLogger } from "./logger.js";
 import type { PendingQuestion } from "xyne-claw-shared";
 
 const log = createLogger("follow-up-generator");
 const FOLLOW_UP_TIMEOUT_MS = 60_000;
+/** Budget for the agent's final answer inside the follow-up prompt. Head and
+ *  tail are both kept: the head carries the direct answer, the tail usually
+ *  carries the closing recommendation / next steps the user reacts to. */
+const FINAL_RESPONSE_HEAD_CHARS = 6_000;
+const FINAL_RESPONSE_TAIL_CHARS = 2_000;
 
 const FOLLOW_UP_TOOL = {
   type: "function",
@@ -65,6 +71,64 @@ export function normalizeFollowUpConversationHistory(
   }).slice(-12);
 }
 
+/**
+ * Clip the agent's final answer for the follow-up prompt without losing its
+ * conclusion. Long answers keep the opening and the closing section joined by
+ * an explicit elision marker so the model knows content was dropped.
+ */
+export function clipFinalResponseForFollowUps(finalResponse: string | undefined): string {
+  const trimmed = (finalResponse ?? "").trim();
+  if (trimmed.length <= FINAL_RESPONSE_HEAD_CHARS + FINAL_RESPONSE_TAIL_CHARS) return trimmed;
+  return [
+    trimmed.slice(0, FINAL_RESPONSE_HEAD_CHARS).trimEnd(),
+    "[… middle of the response omitted …]",
+    trimmed.slice(-FINAL_RESPONSE_TAIL_CHARS).trimStart(),
+  ].join("\n\n");
+}
+
+export type FollowUpGenerationInput =
+  | "prompt_only"
+  | "conversation_history_and_prompt"
+  | "prompt_and_response"
+  | "conversation_history_prompt_and_response";
+
+export function describeFollowUpGenerationInput(
+  conversationMessageCount: number,
+  hasFinalResponse: boolean,
+): FollowUpGenerationInput {
+  if (hasFinalResponse) {
+    return conversationMessageCount > 0
+      ? "conversation_history_prompt_and_response"
+      : "prompt_and_response";
+  }
+  return conversationMessageCount > 0 ? "conversation_history_and_prompt" : "prompt_only";
+}
+
+export function buildFollowUpUserMessage(args: {
+  task: string;
+  finalResponse?: string | undefined;
+  agentContext?: FollowUpAgentContext | undefined;
+  conversationHistory?: FollowUpConversationMessage[] | undefined;
+}): string {
+  const history = args.conversationHistory ?? [];
+  const finalResponse = clipFinalResponseForFollowUps(args.finalResponse);
+  return [
+    history.length > 0
+      ? `Previous conversation:\n${history.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join("\n")}`
+      : "",
+    `Current user request:\n${args.task.slice(0, 4_000)}`,
+    finalResponse
+      ? `Assistant's final response to the current request:\n${finalResponse}`
+      : "",
+    args.agentContext
+      ? [
+          `Selected agent: ${args.agentContext.name ?? "Unnamed agent"}`,
+          args.agentContext.description ? `Agent description: ${args.agentContext.description.slice(0, 1_500)}` : "",
+        ].filter(Boolean).join("\n\n")
+      : "No agent metadata was provided. Keep suggestions domain-neutral and do not assume coding, research, or any other specialty.",
+  ].filter(Boolean).join("\n\n");
+}
+
 export function normalizeFollowUpAgentContext(value: unknown): FollowUpAgentContext | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -109,7 +173,21 @@ export function parseFollowUpPayload(value: unknown): string[] | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
 
   const trimmed = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  for (const candidate of [trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0]]) {
+  // GLM via LiteLLM intermittently leaks the forced tool call into content as
+  // native markup (sometimes with a doubled opening tag):
+  //   <tool_call><tool_call>record_follow_up_suggestions<arg_key>options</arg_key><arg_value>[…]</arg_value></tool_call>
+  const markup = parseArgMarkup(trimmed);
+  for (const key of ["options", "suggestions", "questions"]) {
+    const raw = markup[key];
+    if (raw === undefined) continue;
+    try {
+      const parsed = parseFollowUpPayload(JSON.parse(raw));
+      if (parsed) return parsed;
+    } catch {
+      // Not a JSON array — fall through to the generic recoveries below.
+    }
+  }
+  for (const candidate of [trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0], trimmed.match(/\[[\s\S]*\]/)?.[0]]) {
     if (!candidate) continue;
     try {
       const parsed = parseFollowUpPayload(JSON.parse(candidate));
@@ -250,7 +328,7 @@ interface FollowUpLifecycleContext {
   at: string;
   sessionId: string;
   model: string;
-  generationInput: string;
+  generationInput: FollowUpGenerationInput;
   conversationMessageCount: number;
   agentContext?: FollowUpAgentContext;
 }
@@ -334,12 +412,24 @@ function describeRequestError(error: unknown): string {
   return [...new Set([error.message, causeMessage].filter(Boolean))].join(": ").slice(0, 300);
 }
 
-export async function generateFollowUpSuggestions(
-  task: string,
-  agentContext?: FollowUpAgentContext,
-  conversationHistory: FollowUpConversationMessage[] = [],
-  abortSignal?: AbortSignal,
-): Promise<FollowUpGenerationResult> {
+export interface GenerateFollowUpSuggestionsArgs {
+  /** The user's message for this turn. */
+  task: string;
+  /** The agent's final answer for this turn. When present, suggestions are
+   *  grounded in what was actually answered instead of only the question. */
+  finalResponse?: string | undefined;
+  agentContext?: FollowUpAgentContext | undefined;
+  conversationHistory?: FollowUpConversationMessage[] | undefined;
+  abortSignal?: AbortSignal | undefined;
+}
+
+export async function generateFollowUpSuggestions({
+  task,
+  finalResponse,
+  agentContext,
+  conversationHistory = [],
+  abortSignal,
+}: GenerateFollowUpSuggestionsArgs): Promise<FollowUpGenerationResult> {
   if (!LITELLM.apiKey) {
     return fallbackResult(task, agentContext, conversationHistory, {
       failureCode: "missing_api_key",
@@ -348,7 +438,7 @@ export async function generateFollowUpSuggestions(
   }
 
   try {
-    const response = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+    const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -364,7 +454,7 @@ export async function generateFollowUpSuggestions(
 Requirements:
 - Write every suggestion in the user's voice as an immediately sendable message.
 - Ask the assistant to perform a task, explain something, evaluate something, or continue the current work.
-- Predict natural and useful next turns primarily from the conversation history.
+- Predict natural and useful next turns from the current request and, above all, the assistant's final response to it.
 - Make all three suggestions meaningfully different and advance the conversation in distinct directions.
 - Keep each suggestion concise and specific.
 - Do not answer the suggested messages.
@@ -379,7 +469,11 @@ Do not:
 - Produce overlapping suggestions that differ only in wording.
 
 Context handling:
-- Treat conversation history as the primary source of intent.
+- When the assistant's final response is provided, treat it as the primary source: suggest what the user would naturally ask AFTER reading it — acting on its recommendations, drilling into a specific item it named, verifying a claim it made, or taking the next step it points to.
+- Reference concrete names, items, and findings that appear in the final response or the request when that makes a suggestion more specific. Never invent ones that do not appear.
+- Do not suggest something the final response already fully answered or already did.
+- If the final response asked the user for missing information or a decision, write suggestions that supply a plausible answer in the user's voice only when the options are evident from the response; otherwise suggest reasonable ways to proceed.
+- Use the previous conversation to understand the broader intent behind the current request.
 - Use the selected agent's name and description only to understand its capabilities and expected role.
 - For a clear active task, suggest logical next actions related to that task.
 - When a prior response explains a concept, suggest a deeper explanation, concrete example, practical implementation, comparison, validation, or troubleshooting where relevant.
@@ -404,18 +498,12 @@ Call record_follow_up_suggestions exactly once with exactly three strings.`,
           },
           {
             role: "user",
-            content: [
-              conversationHistory.length > 0
-                ? `Previous conversation:\n${conversationHistory.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join("\n")}`
-                : "",
-              `Current user request:\n${task.slice(0, 4_000)}`,
-              agentContext
-                ? [
-                    `Selected agent: ${agentContext.name ?? "Unnamed agent"}`,
-                    agentContext.description ? `Agent description: ${agentContext.description.slice(0, 1_500)}` : "",
-                  ].filter(Boolean).join("\n\n")
-                : "No agent metadata was provided. Keep suggestions domain-neutral and do not assume coding, research, or any other specialty.",
-            ].join("\n\n"),
+            content: buildFollowUpUserMessage({
+              task,
+              finalResponse,
+              agentContext,
+              conversationHistory,
+            }),
           },
         ],
         tools: [FOLLOW_UP_TOOL],

@@ -6,7 +6,9 @@ import { prisma } from "../db.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
+import { systemNote } from "../lib/notice-format.js";
 import { createLogger } from "../logger.js";
+import { isRunWaitingInQueue } from "./run-execution-queue.js";
 const log = createLogger("run-recovery-worker");
 
 const RECOVERY_PREFIX = "run-recovery:";
@@ -90,6 +92,13 @@ export interface RecoverySessionContext {
   channelName: string;
   conversationId: string;
   task: string;
+  /** Agent identity. MUST be carried here: xyne-claw can mint its own
+   *  sessionId (e.g. when the dispatch id is not a valid internal id), so
+   *  callbacks like /webhook/progress resolve ctx from THIS recovery context
+   *  rather than the Redis session. Without agentId, per-agent config reads
+   *  (e.g. `hideLivePreview`) silently fall back to defaults. */
+  agentId?: string;
+  agentOrgId?: string | null;
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";
@@ -300,9 +309,11 @@ async function notifySandboxDeferred(state: RunRecoveryState): Promise<void> {
   await spacesAppFetch("/chat/postMessage", {
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-    markdownText:
-      "⏳ Waiting for a dev sandbox — all of them are busy right now. " +
-      `I'll pick this up automatically as soon as one frees (up to ~${waitMinutes} min); no need to re-tag me.`,
+    markdownText: [
+      systemNote("**Waiting for a sandbox**"),
+      "",
+      systemNote(`Every dev sandbox is busy. This will start automatically as soon as one frees up, for up to ${waitMinutes} minutes — no need to tag me again.`),
+    ].join("\n"),
     userId: ctx.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, ctx.appToken);
@@ -511,13 +522,15 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
       ? `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`
       : "This request was interrupted and could not be resumed automatically.";
   const message = [
-    "⚠️ **Run recovery exhausted**",
+    systemNote("**Could not finish this run**"),
     "",
-    headline,
-    `Session ID: \`${state.activeSessionId}\``,
-    `Root Session ID: \`${state.rootSessionId}\``,
+    systemNote(headline),
     "",
-    tail,
+    systemNote(tail),
+    "",
+    // Session ids are support-desk detail, not part of the explanation — kept,
+    // but demoted below the human-readable part instead of interrupting it.
+    systemNote(`Session \`${state.activeSessionId}\` (root \`${state.rootSessionId}\`)`),
   ].join("\n");
 
   await spacesAppFetch("/chat/postMessage", {
@@ -664,6 +677,8 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
   }
 }
 
+const QUEUED_RECHECK_MS = 60_000;
+
 async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const data = job.data;
 
@@ -680,6 +695,12 @@ async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   const age = Date.now() - state.lastHeartbeatAt;
   if (age < state.timeoutMs) {
     await scheduleWatchdog(state.rootSessionId, state.activeSessionId, state.timeoutMs - age);
+    return;
+  }
+
+  if (await isRunWaitingInQueue(state.activeSessionId).catch(() => false)) {
+    log.info(`[run-recovery] root=${state.rootSessionId} session=${state.activeSessionId} is still waiting in the run queue — not retrying`);
+    await scheduleWatchdog(state.rootSessionId, state.activeSessionId, QUEUED_RECHECK_MS);
     return;
   }
 

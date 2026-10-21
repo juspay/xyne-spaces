@@ -15,6 +15,9 @@ export interface SearchEvalRunJobData {
   rankProfileInputs: Record<string, number> | null;
   asOfTimestamp: string | null; // ISO string (Date isn't JSON-safe across the Redis boundary)
   userId: string;
+  /** Verified workspace at enqueue time — disambiguates two-membership users
+   *  during the request-less worker pass. */
+  workspaceId?: string | undefined;
 }
 
 export interface SearchEvalRunProgress {

@@ -42,6 +42,7 @@ import type {
   DeskMetricKey,
   DeskMetricsAggregateResponse,
   DeskMetricsCustomFieldBreakdown,
+  DeskMetricsDateBasis,
   DeskMetricsDeskListResponse,
   DeskMetricsDeskSummary,
   DeskMetricsPartial,
@@ -115,6 +116,7 @@ export class DeskMetricsController {
     | {
         ok: true;
         timeRange: string;
+        dateBasis: DeskMetricsDateBasis;
         assigneeIds: string[];
         stageNames: string[];
         priorities: TicketPriority[];
@@ -145,6 +147,8 @@ export class DeskMetricsController {
         };
       }
       const timeRange = rawTimeRange;
+      const dateBasis: DeskMetricsDateBasis =
+        getStringQueryParam(req, 'dateBasis') === 'active' ? 'active' : 'created';
 
       const parseJsonStringArray = (raw?: string): string[] => {
         if (!raw) return [];
@@ -217,6 +221,7 @@ export class DeskMetricsController {
       return {
         ok: true,
         timeRange,
+        dateBasis,
         assigneeIds,
         stageNames,
         priorities,
@@ -232,6 +237,7 @@ export class DeskMetricsController {
     preference: { frtStageNames?: string | null },
     query: {
       timeRange: string;
+      dateBasis: DeskMetricsDateBasis;
       assigneeIds: string[];
       stageNames: string[];
       priorities: TicketPriority[];
@@ -244,6 +250,7 @@ export class DeskMetricsController {
     return deskMetricsRepository.getMetrics({
       channelId,
       timeRange: query.timeRange,
+      dateBasis: query.dateBasis,
       frtStageNames: this.parseFrtStageNames(preference),
       assigneeIds: query.assigneeIds,
       stageNames: query.stageNames,

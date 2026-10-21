@@ -1,33 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom-actual';
 import { useCallback } from 'react';
 import type { NavigateFunction, NavigateOptions, To } from 'react-router-dom-actual';
-
-/**
- * Paths that must NOT receive the workspace prefix.
- * These are top-level routes that live outside the /:workspaceId layout.
- */
-const WORKSPACE_EXEMPT_PREFIXES = [
-  '/auth',
-  '/invite',
-  '/launch',
-  '/newWindow',
-  '/redirected',
-  '/call/',
-  '/api/',
-];
-
-function normalizeSameOriginPath(to: string): string {
-  if (typeof window === 'undefined' || !/^https?:\/\//i.test(to)) return to;
-  try {
-    const url = new URL(to);
-    if (url.origin === window.location.origin) {
-      return `${url.pathname}${url.search}${url.hash}`;
-    }
-  } catch {
-    return to;
-  }
-  return to;
-}
+import { prefixWorkspacePath } from '../lib/workspacePath';
 
 /**
  * Drop-in replacement for `useNavigate` from react-router-dom.
@@ -55,20 +29,7 @@ export const useWorkspaceNavigate = (): NavigateFunction => {
         return;
       }
 
-      const normalizedTo = typeof to === 'string' ? normalizeSameOriginPath(to) : to;
-
-      if (
-        workspaceId &&
-        typeof normalizedTo === 'string' &&
-        normalizedTo.startsWith('/') &&
-        !normalizedTo.startsWith(`/${workspaceId}`) &&
-        !WORKSPACE_EXEMPT_PREFIXES.some(prefix => normalizedTo.startsWith(prefix))
-      ) {
-        void navigate(`/${workspaceId}${normalizedTo}`, options);
-        return;
-      }
-
-      void navigate(normalizedTo, options);
+      void navigate(prefixWorkspacePath(to, workspaceId), options);
     },
     [navigate, workspaceId],
   ) as NavigateFunction;

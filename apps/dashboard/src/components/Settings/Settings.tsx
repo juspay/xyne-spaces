@@ -28,6 +28,7 @@ import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
 import { usePath } from '../../hooks/usePath';
+import { notificationsArePaused } from '../../utils/notificationsPause';
 
 interface SettingsProps {
   onClose: () => void;
@@ -92,9 +93,10 @@ const Settings = ({
   };
 
   const notificationsPausedUntil = user?.notificationsPausedUntil;
-  const isNotificationsPaused = useMemo(() => {
-    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
-  }, [notificationsPausedUntil]);
+  const isNotificationsPaused = useMemo(
+    () => notificationsArePaused(notificationsPausedUntil),
+    [notificationsPausedUntil],
+  );
 
   const pauseOptions = useMemo(
     () => [
@@ -278,6 +280,7 @@ const Settings = ({
                 trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
+                aria-label='Clear status'
                 data-track-category='Settings'
                 data-track-name='ClearUserStatus'
               >
@@ -310,6 +313,7 @@ const Settings = ({
                 size='lg'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
+                aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
                 trackId='resume_notifications'
                 data-track-category='Settings'

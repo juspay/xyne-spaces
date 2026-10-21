@@ -25,7 +25,10 @@
  *      the model re-checks rather than anchoring on it.
  */
 
-import { LITELLM } from "./config.js";
+import type { XorAnswer, XorQuestion } from "./xor.js";
+import { runJudgeSite } from "./judge-site.js";
+import { optEnabled } from "./optimizations.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("prefetch");
@@ -199,13 +202,46 @@ function asStringList(v: unknown, max = 5): string[] {
  */
 export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | null> {
   if (!LITELLM.apiKey || !task.trim()) return Promise.resolve(null);
+  if (!optEnabled("jev_prefetch_gate")) return startPrefetchExtractionLlm(task);
+  return (async (): Promise<PrefetchSpec | null> => {
+    const gate = await runJudgeSite<"skip" | "extract">({
+      site: "prefetch-gate",
+      enabled: true,
+      state: `## The user's first message (data)\n<<<DATA\n${task.slice(0, 2_000)}\nDATA>>>`,
+      questions: PREFETCH_GATE_QUESTIONS,
+      decide: prefetchGateFromJev,
+      fallback: async () => "extract",
+      describe: (d) => d,
+    });
+    if (gate.decision === "skip") return { intent: "conversational", entities: [] };
+    return startPrefetchExtractionLlm(task);
+  })();
+}
+
+export const PREFETCH_GATE_QUESTIONS: Record<string, XorQuestion> = {
+  names_entity: {
+    type: "noul",
+    instructions:
+      "The message names a specific person, channel, project, ticket, document or service whose details would need to be looked up to answer it.",
+  },
+};
+
+/** Pure: a clear "names nothing to look up" skips the LLM extractor; anything else extracts. */
+export function prefetchGateFromJev(answers: Record<string, XorAnswer>): "skip" | "extract" | null {
+  const p = answers["names_entity"]?.noul;
+  if (typeof p !== "number") return null;
+  return p <= 0.2 ? "skip" : "extract";
+}
+
+function startPrefetchExtractionLlm(task: string): Promise<PrefetchSpec | null> {
+  if (!LITELLM.apiKey) return Promise.resolve(null);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), EXTRACT_TIMEOUT_MS);
 
   return (async (): Promise<PrefetchSpec | null> => {
     try {
-      const res = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+      const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` },
         signal: controller.signal,
@@ -257,7 +293,7 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
 }
 
 /** Pull the plain text out of a tool result without assuming the exact envelope. */
-function toolResultText(result: unknown): string {
+export function toolResultText(result: unknown): string {
   const r = result as { content?: Array<{ type?: string; text?: string }> } | undefined;
   if (!r?.content) return "";
   return r.content
@@ -291,14 +327,16 @@ function toolResultText(result: unknown): string {
  * that matched 8 channels showed the model 2, because 6 of its 12 lines were
  * spent on the above.
  */
-export function scrub(text: string): string {
+export function scrub(text: string, opts: { keepCitations?: boolean } = {}): string {
   const out: string[] = [];
   let lastCreatedBy: string | null = null;
   for (const raw of text.split("\n")) {
     if (/^\s*\[Executed YQL/.test(raw)) continue;
     if (/^\s*Found \d+ result\(s\):\s*$/.test(raw)) continue;
 
-    let line = raw.replace(/\[clf-[^\]\s]*#[\d#-]+\]\s*/g, "");
+    // Citation tokens are dead handles unless the caller registers the invocation they
+    // point at (prefetch does not; answer-context does — see buildAnswerContext).
+    let line = opts.keepCitations ? raw : raw.replace(/\[clf-[^\]\s]*#[\d#-]+\]\s*/g, "");
     line = line.replace(/\s*·\s*score:\s*0\.000\s*$/, "");
     if (!line.trim()) continue;
 
@@ -425,7 +463,7 @@ async function runResolver(
 }
 
 /** Tools are mounted under a server-prefixed name (`Xyne_Spaces__spaces-vespa-search`). */
-function findTool(tools: ExecutableTool[], bareName: string): ExecutableTool | undefined {
+export function findTool(tools: ExecutableTool[], bareName: string): ExecutableTool | undefined {
   return tools.find((t) => t.name === bareName || t.name.endsWith(`__${bareName}`));
 }
 

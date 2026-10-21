@@ -1,8 +1,8 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { CallType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -123,7 +123,7 @@ export async function emitCallEvent(
     });
     if (!channel?.workspaceId) {
       logger.warn('[automations] Cannot emit call event: no workspace found', {
-        callId: call.id,
+        callId: call.externalId,
         channelId: call.channelId,
       });
       return;
@@ -133,7 +133,7 @@ export async function emitCallEvent(
       ? Math.round((call.endedAt.getTime() - call.startedAt.getTime()) / 1000)
       : null;
 
-    await eventRouter.emit(
+    await emitDomainEvent(
       {
         type: CALL_EVENT,
         payload: {
@@ -156,7 +156,7 @@ export async function emitCallEvent(
   } catch (err) {
     logger.error('[automations] emitCallEvent failed', {
       callEventType,
-      callId: call.id,
+      callId: call.externalId,
       error: err,
     });
   }
@@ -194,7 +194,7 @@ export async function emitCallEnded(call: {
   return emitCallEvent(CALL_ENDED, call);
 }
 
-async function hydrateCallEventPayload(
+export async function hydrateCallEventPayload(
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const callId = payload.callId as string;
@@ -230,7 +230,7 @@ async function hydrateCallEventPayload(
     };
   } catch (err) {
     logger.error('[automations] hydrateCallEventPayload failed', {
-      callId,
+      callId: payload.externalId,
       error: err,
     });
     // Return the original payload with an empty participant list so the automation

@@ -10,6 +10,7 @@ import {
 } from '../../../shared/primitives/DetailPrimitives';
 import { BrowseSkillsDialog } from '../../../shared/pickers/skill/BrowseSkillsDialog';
 import { useSkillCatalog } from '../../../shared/pickers/skill/useSkillCatalog';
+import { useOptimisticSave } from '../../../shared/hooks/useOptimisticSave';
 import { useSaveSubagent } from './subagentUpdate';
 
 const LOCK_NOTE =
@@ -48,12 +49,18 @@ export function SubagentKnowledgeTabV2({
   isBuiltIn: boolean;
 }): ReactElement {
   const skills = useSkillCatalog();
-  const { save, saving } = useSaveSubagent(subagent);
+  const { save } = useSaveSubagent(subagent);
 
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [draftIds, setDraftIds] = useState<string[] | null>(null);
 
-  const attachedIds = useMemo(() => subagent.skills.map(skill => skill.id), [subagent.skills]);
+  const committedIds = useMemo(() => subagent.skills.map(skill => skill.id), [subagent.skills]);
+  const selection = useOptimisticSave<string[]>(committedIds);
+  const attachedIds = selection.value;
+  const saving = selection.saving;
+
+  const applySkills = (next: string[], message: string): void => {
+    selection.save(next, () => save({ skillIds: next }, message));
+  };
 
   const items = useMemo<DetailListItem[]>(() => {
     const byId = new Map(skills.entries.map(entry => [entry.id, entry]));
@@ -76,16 +83,6 @@ export function SubagentKnowledgeTabV2({
     <DetailLockedNote>{isBuiltIn ? BUILT_IN_NOTE : LOCK_NOTE}</DetailLockedNote>
   );
 
-  const closeBrowse = (): void => {
-    const next = draftIds;
-    setBrowseOpen(false);
-    setDraftIds(null);
-    if (!next) return;
-    const unchanged =
-      next.length === attachedIds.length && next.every(id => attachedIds.includes(id));
-    if (!unchanged) void save({ skillIds: next }, 'Skills updated');
-  };
-
   return (
     <div className='flex w-full flex-col gap-8'>
       <DetailSection
@@ -93,13 +90,7 @@ export function SubagentKnowledgeTabV2({
         info='Playbooks this subagent can consult while it runs'
         trailing={
           canEdit ? (
-            <ManageButton
-              label='Manage skills'
-              onClick={() => {
-                setDraftIds(attachedIds);
-                setBrowseOpen(true);
-              }}
-            />
+            <ManageButton label='Manage skills' onClick={() => setBrowseOpen(true)} />
           ) : (
             <ReadOnlyBadge />
           )
@@ -114,8 +105,8 @@ export function SubagentKnowledgeTabV2({
           note={note}
           removeLabel={item => `Remove ${item.name}`}
           onRemove={item =>
-            void save(
-              { skillIds: attachedIds.filter(id => id !== item.key) },
+            applySkills(
+              attachedIds.filter(id => id !== item.key),
               `${item.name} removed`,
             )
           }
@@ -131,15 +122,13 @@ export function SubagentKnowledgeTabV2({
 
       <BrowseSkillsDialog
         open={browseOpen}
-        onOpenChange={open => {
-          if (!open) closeBrowse();
-        }}
+        onOpenChange={setBrowseOpen}
         catalog={skills.entries}
         loading={skills.loading}
         isError={skills.isError}
         onRetry={skills.refetch}
-        selectedIds={draftIds ?? attachedIds}
-        onChange={setDraftIds}
+        selectedIds={attachedIds}
+        onChange={next => applySkills(next, 'Skills updated')}
       />
     </div>
   );

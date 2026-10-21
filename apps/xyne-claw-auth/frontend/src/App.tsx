@@ -11,6 +11,7 @@ import { DigitalTwinPage } from "./components/DigitalTwinPage";
 import { AppV2 } from "./v2/AppV2";
 import { AppV3 } from "./v3/AppV3";
 import { PublicDesignSharePage } from "./v3/components/PublicDesignSharePage";
+import { LinkChannelPage } from "./v3/components/LinkChannelPage";
 import { checkIsAdmin } from "./lib/api";
 
 function AdminLink() {
@@ -57,11 +58,13 @@ export function App() {
   const location = useLocation();
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // AppV3 runs its own admin check; this flag is only read by the v1 shell.
+  const onV3 = location.pathname.startsWith("/v3");
   useEffect(() => {
-    if (auth.status === "authenticated") {
+    if (auth.status === "authenticated" && !onV3) {
       checkIsAdmin(auth.user.id).then(setIsAdmin).catch(() => {});
     }
-  }, [auth.status, auth.status === "authenticated" ? auth.user.id : ""]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : "", onV3]);
 
   // Public Design links deliberately bypass every auth shell. The bearer is
   // kept in the URL fragment and validated by claw-auth's public share API.
@@ -127,6 +130,10 @@ export function App() {
         <Routes>
           {/* V3 is the main surface — root drops users into the V3 home. */}
           <Route path="/" element={<Navigate to="/v3/home" replace />} />
+          {/* Landing page for the "connect your account" link a messaging
+              channel sends to an unknown sender. Sits outside /v3 because it
+              is the first page such a person ever opens. */}
+          <Route path="/link" element={<LinkChannelPage userEmail={auth.user.email} />} />
           {/* V1 dashboard kept reachable for the "Switch to v1" affordance
               in the V3 top nav. Other V1 sub-routes below are unchanged. */}
           <Route path="/v1" element={<DashboardPage userId={auth.user.id} isAdmin={isAdmin} />} />

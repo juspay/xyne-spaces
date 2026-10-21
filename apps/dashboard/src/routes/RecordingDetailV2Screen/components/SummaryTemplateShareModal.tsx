@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import {
-  CheckTickSingle,
-  ClockDefault,
-  Globe,
-  Hashtag,
-  MultipleCrossCancelDefault,
-  Spinner,
-  UserTwo,
-} from '@xyne/icons';
+import { CheckTickSingle, ClockDefault, Globe } from '@xyne/icons';
+import { EntityUserAccess } from '@xyne/shared';
 import { toast } from 'sonner';
-import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
-import { UnifiedParticipantSearch } from '../../../components/ui/UnifiedParticipantSearch/UnifiedParticipantSearch';
+import {
+  EntityShareModal,
+  type EntityShareEntry,
+  type EntityShareTarget,
+} from '../../../components/Share/EntityShareModal';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   recordingService,
@@ -19,7 +15,6 @@ import {
   type SummaryTemplatePublicationAdmin,
   type SummaryTemplatePublicationAction,
   type SummaryTemplateShare,
-  type SummaryTemplateShareTarget,
 } from '../../../services/Recording/recordingService';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -27,14 +22,9 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 interface SummaryTemplateShareModalProps {
   template: SummaryTemplate;
   onTemplateChange?: (template: SummaryTemplate) => void;
-  onSharesChange?: (count: number) => void;
 }
 
-/** Section caption shared by the popover's grouped lists. */
-const SECTION_LABEL_CLASS =
-  'mb-1 mt-3 shrink-0 px-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground';
-
-/** Row action sized for the popover rather than the old full-width dialog. */
+/** Row action sized for the popover rather than a full-width dialog. */
 const INLINE_ACTION_CLASS = 'h-7 gap-1.5 rounded-lg px-2.5 text-xs font-medium';
 
 /** Success copy per publication action; keyed so the union stays exhaustive. */
@@ -47,20 +37,43 @@ const PUBLICATION_TOAST: Record<SummaryTemplatePublicationAction, string> = {
   unpublish: 'Template is now private',
 };
 
+const toShareTarget = (share: SummaryTemplateShare): EntityShareTarget =>
+  share.userGroupId
+    ? { type: 'user_group', id: share.userGroupId }
+    : share.channelId
+      ? { type: 'channel', id: share.channelId }
+      : { type: 'user', id: share.userId! };
+
+const toShareEntry = (share: SummaryTemplateShare): EntityShareEntry => ({
+  id: share.id,
+  label: share.userGroupId
+    ? (share.userGroup?.name ?? share.userGroupId)
+    : share.channelId
+      ? (share.channel?.name ?? share.channelId)
+      : share.user
+        ? getUserDisplayName(share.user)
+        : (share.userId ?? ''),
+  userId: share.userId,
+  target: toShareTarget(share),
+  // A template share is silent: it grants access and notifies, and posts nothing.
+  post: null,
+  // Shares made before sharing meant editing are still VIEW.
+  access:
+    share.entityUserAccess === EntityUserAccess.EDIT
+      ? EntityUserAccess.EDIT
+      : EntityUserAccess.VIEW,
+});
+
+/** Summary templates binding for {@link EntityShareModal}, plus publication controls. */
 export function SummaryTemplateShareModal({
   template,
   onTemplateChange,
-  onSharesChange,
 }: SummaryTemplateShareModalProps): ReactElement {
   const { user: currentUser } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedValues, setSelectedValues] = useState<string[]>([]);
   const [shares, setShares] = useState<SummaryTemplateShare[]>([]);
   const [admins, setAdmins] = useState<SummaryTemplatePublicationAdmin[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [sharing, setSharing] = useState(false);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [publicationAction, setPublicationAction] =
     useState<SummaryTemplatePublicationAction | null>(null);
   const [showAdmins, setShowAdmins] = useState(true);
@@ -94,67 +107,15 @@ export function SummaryTemplateShareModal({
     };
   }, [isOwner, template.id]);
 
-  useEffect(() => {
-    if (!loading) onSharesChange?.(shares.length);
-  }, [loading, onSharesChange, shares.length]);
+  const shareEntries = useMemo(() => shares.map(toShareEntry), [shares]);
 
-  const sharedUserIds = useMemo(
-    () => new Set(shares.flatMap(share => (share.userId ? [share.userId] : []))),
-    [shares],
-  );
-  const sharedUserGroupIds = useMemo(
-    () => new Set(shares.flatMap(share => (share.userGroupId ? [share.userGroupId] : []))),
-    [shares],
-  );
-  const sharedChannelIds = useMemo(
-    () => new Set(shares.flatMap(share => (share.channelId ? [share.channelId] : []))),
-    [shares],
-  );
-
-  const excludedUserIds = useMemo(
-    () => new Set([template.createdBy, ...sharedUserIds]),
-    [sharedUserIds, template.createdBy],
-  );
-
-  const toTarget = (value: string): SummaryTemplateShareTarget =>
-    value.startsWith('user_group:')
-      ? { type: 'user_group', id: value.slice('user_group:'.length) }
-      : value.startsWith('channel:')
-        ? { type: 'channel', id: value.slice('channel:'.length) }
-        : { type: 'user', id: value.slice('user:'.length) };
-
-  const handleShare = async (): Promise<void> => {
-    if (selectedValues.length === 0 || sharing) return;
-    setSharing(true);
-    try {
-      const result = await recordingService.grantSummaryTemplateAccess(
-        template.id,
-        selectedValues.map(toTarget),
-      );
-      setShares(result.shares);
-      toast.success(
-        selectedValues.length === 1
-          ? 'Template shared'
-          : `Shared with ${selectedValues.length} recipients`,
-      );
-      setSelectedValues([]);
-      setSearchQuery('');
-    } catch (error) {
-      toast.error('Failed to share', {
-        description: getApiErrorMessage(error, 'Unable to share this template'),
-      });
-    } finally {
-      setSharing(false);
-    }
+  // EntityShareModal owns the success and failure toasts for a grant.
+  const handleGrant = async (targets: EntityShareTarget[]): Promise<void> => {
+    const result = await recordingService.grantSummaryTemplateAccess(template.id, targets);
+    setShares(result.shares);
   };
 
-  const handleRevoke = async (share: SummaryTemplateShare): Promise<void> => {
-    const target: SummaryTemplateShareTarget = share.userGroupId
-      ? { type: 'user_group', id: share.userGroupId }
-      : share.channelId
-        ? { type: 'channel', id: share.channelId }
-        : { type: 'user', id: share.userId! };
-    setRevokingId(share.id);
+  const handleRevoke = async (target: EntityShareTarget): Promise<void> => {
     try {
       const result = await recordingService.revokeSummaryTemplateAccess(template.id, [target]);
       setShares(result.shares);
@@ -163,8 +124,6 @@ export function SummaryTemplateShareModal({
       toast.error('Failed to remove access', {
         description: getApiErrorMessage(error, 'Unable to remove template access'),
       });
-    } finally {
-      setRevokingId(null);
     }
   };
 
@@ -189,109 +148,16 @@ export function SummaryTemplateShareModal({
 
   if (!currentUser || (!isOwner && !canReview && !canUnpublish)) {
     return (
-      <p className='px-0.5 py-1 text-xs text-muted-foreground'>
+      <p className='p-5 text-xs text-muted-foreground'>
         Only the template creator or a Scribe admin can manage this template.
       </p>
     );
   }
 
-  return (
-    <div className='flex min-h-0 w-full flex-1 flex-col'>
-      <p className='mb-2 shrink-0 px-0.5 text-sm font-semibold'>Share template</p>
-
-      {isOwner && (
-        <>
-          <UnifiedParticipantSearch
-            selectedValues={selectedValues}
-            onMultiSelect={setSelectedValues}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            excludedUserIds={excludedUserIds}
-            excludedUserGroupIds={sharedUserGroupIds}
-            excludedChannelIds={sharedChannelIds}
-            exclusiveSelection={false}
-          />
-          {selectedValues.length > 0 && (
-            <Button
-              size='sm'
-              onClick={() => void handleShare()}
-              disabled={sharing}
-              className='mt-2 h-8 w-full rounded-lg text-xs font-medium'
-              data-track-category='SummaryTemplates'
-              data-track-name='ShareTemplateConfirm'
-            >
-              {sharing
-                ? 'Sharing…'
-                : selectedValues.length === 1
-                  ? 'Share with 1 recipient'
-                  : `Share with ${selectedValues.length} recipients`}
-            </Button>
-          )}
-
-          <p className={SECTION_LABEL_CLASS}>Who has access</p>
-          <div className='thin-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain'>
-            <div className='flex items-center gap-2 px-0.5 py-1'>
-              <Avatar userId={template.createdBy} size='sm' rounded showActiveStatus={false} />
-              <span className='min-w-0 flex-1 truncate text-sm'>
-                {getUserDisplayName(currentUser)} (me)
-              </span>
-              <span className='shrink-0 text-xs text-muted-foreground'>Owner</span>
-            </div>
-
-            {loading ? (
-              <p className='flex items-center gap-2 px-0.5 py-1 text-xs text-muted-foreground'>
-                <Spinner className='size-3.5 animate-spin' /> Loading…
-              </p>
-            ) : (
-              shares.map(share => {
-                const label = share.userGroupId
-                  ? (share.userGroup?.name ?? share.userGroupId)
-                  : share.channelId
-                    ? (share.channel?.name ?? share.channelId)
-                    : share.user
-                      ? getUserDisplayName(share.user)
-                      : share.userId;
-                const icon = share.userGroupId ? (
-                  <UserTwo className='size-4 shrink-0 text-muted-foreground' />
-                ) : share.channelId ? (
-                  <Hashtag className='size-4 shrink-0 text-muted-foreground' />
-                ) : (
-                  <Avatar userId={share.userId} size='sm' rounded showActiveStatus={false} />
-                );
-                return (
-                  <div key={share.id} className='group flex items-center gap-2 px-0.5 py-1'>
-                    {icon}
-                    <span className='min-w-0 flex-1 truncate text-sm'>{label}</span>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='iconSm'
-                      onClick={() => void handleRevoke(share)}
-                      disabled={revokingId === share.id}
-                      className='size-6 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
-                      aria-label='Remove access'
-                      data-track-category='SummaryTemplates'
-                      data-track-name='RevokeTemplateShare'
-                    >
-                      {revokingId === share.id ? (
-                        <Spinner className='size-3 animate-spin' />
-                      ) : (
-                        <MultipleCrossCancelDefault className='size-3' />
-                      )}
-                    </Button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Full-bleed rule, matching the reference's negative side margins. */}
-      <div className='-mx-3 my-2.5 h-px shrink-0 bg-border' />
-
+  const publication = (
+    <>
       {template.visibility === 'PRIVATE' && isOwner && (
-        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+        <div className='flex shrink-0 items-start gap-2'>
           <span className='mt-px shrink-0 text-muted-foreground'>
             <Globe className='size-4' />
           </span>
@@ -325,7 +191,7 @@ export function SummaryTemplateShareModal({
       )}
 
       {template.visibility === 'WAITING_FOR_APPROVAL' && (
-        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+        <div className='flex shrink-0 items-start gap-2'>
           <span className='mt-px shrink-0 text-status-pending'>
             <ClockDefault className='size-4' />
           </span>
@@ -409,7 +275,7 @@ export function SummaryTemplateShareModal({
       )}
 
       {template.visibility === 'PUBLIC' && (
-        <div className='flex shrink-0 items-start gap-2 px-0.5'>
+        <div className='flex shrink-0 items-start gap-2'>
           <span className='mt-px shrink-0 text-status-success'>
             <CheckTickSingle className='size-4' />
           </span>
@@ -441,7 +307,24 @@ export function SummaryTemplateShareModal({
           </div>
         </div>
       )}
-    </div>
+    </>
+  );
+
+  // Sharing is owner-only, so a reviewing admin gets just the publication controls.
+  if (!isOwner) return <div className='p-5'>{publication}</div>;
+
+  return (
+    <EntityShareModal
+      ownerId={template.createdBy}
+      ownerLabel={`${getUserDisplayName(currentUser)} (me)`}
+      shares={shareEntries}
+      onGrant={handleGrant}
+      onRevoke={handleRevoke}
+      subject='template'
+      trackCategory='SummaryTemplates'
+      withMessage={false}
+      generalAccess={<div className='border-t border-border pt-3'>{publication}</div>}
+    />
   );
 }
 

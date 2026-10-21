@@ -144,6 +144,32 @@ export const formatTimeUntil = (startsAt: number, now: number): string => {
 };
 
 /**
+ * Day + time label shown above a turn in an AI chat ("Today 3:06 PM",
+ * "Friday 3:06 PM", "May 22, 3:06 PM").
+ *
+ * AI chats are usually one sitting, so a bare day divider would render a lone
+ * "Today" and say nothing. The time is the useful part when a thread is
+ * reopened from Recents days later.
+ */
+export const formatChatTurnSeparator = (date: Date | number): string => {
+  const turnDate = new Date(date);
+  const time = format(turnDate, 'h:mm a');
+  if (isToday(turnDate)) return `Today ${time}`;
+  if (isYesterday(turnDate)) return `Yesterday ${time}`;
+  const now = new Date();
+  // Inside a week a weekday name reads faster than a date.
+  if (now.getTime() - turnDate.getTime() < 7 * 24 * 60 * 60 * 1000) {
+    return `${format(turnDate, 'EEEE')} ${time}`;
+  }
+  // Older turns keep the weekday too — "Sat, Aug 22 at 11:03 PM" places the
+  // day of week without making the reader work it out from the date.
+  if (now.getFullYear() === turnDate.getFullYear()) {
+    return `${format(turnDate, 'EEE, MMM d')} at ${time}`;
+  }
+  return `${format(turnDate, 'EEE, MMM d, yyyy')} at ${time}`;
+};
+
+/**
  * Format date for file browser listings (Google Drive-style).
  * - "Just now" for < 1 min
  * - "X min ago" for < 1 hour

@@ -25,6 +25,8 @@ import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
+import { NoTranscriptError, recordingService } from '../../services/Recording/recordingService';
+import { copyFetchedTextToClipboard } from '../../utils/clipboardUtils';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
@@ -33,7 +35,7 @@ import { EditCallData } from '../../components/Call/ScheduleCallModal/ScheduleCa
 import { useQuery } from '@xyne/shared/hooks';
 
 type ScheduledCall = Omit<
-  QueryResultType<typeof queries.userScheduledCallsV2>[number],
+  QueryResultType<typeof queries.userUpcomingScheduledCalls>[number],
   'participants'
 > & {
   participants?: CallParticipants;
@@ -42,7 +44,7 @@ type ScheduledCall = Omit<
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
-  calendarScheduledCalls: ScheduledCall[] | undefined;
+  calendarRangeCalls: Call[] | undefined;
   missedCalls: Call[];
   isLoading: boolean;
   isScheduledCallsLoading: boolean;
@@ -58,6 +60,7 @@ interface UseCallHistoryReturn {
   handleGotoTranscript: (call: Call) => void;
   getGotoTranscriptHandler: (call: Call) => (() => void) | undefined;
   handleDownloadTranscript: (call: Call) => void;
+  handleCopyTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
     title: string;
@@ -74,7 +77,7 @@ interface UseCallHistoryReturn {
   handleDeleteClick: (call: ScheduledCall) => void;
   deleteModalOpen: boolean;
   deleteModalCall: ScheduledCall | null;
-  handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
+  handleDeleteConfirm: (cancelEntireSeries: boolean, notifyParticipantsByEmail: boolean) => void;
   closeDeleteModal: () => void;
   /** Hide a call (participant-only, irreversible) */
   handleHideClick: (call: ScheduledCall, options?: { isSeries?: boolean }) => void;
@@ -89,15 +92,14 @@ interface UseCallHistoryReturn {
 }
 
 interface UseCallHistoryOptions {
-  /** When true, loads all scheduled calls for calendar view */
-  isCalendarView?: boolean;
+  calendarWindow?: { from: number; to: number } | undefined;
 }
 
 export function useCallHistory(
   userId: string | undefined,
   options: UseCallHistoryOptions = {},
 ): UseCallHistoryReturn {
-  const { isCalendarView = false } = options;
+  const { calendarWindow } = options;
   const zero = useZero();
 
   // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
@@ -130,16 +132,17 @@ export function useCallHistory(
     queries.userUpcomingScheduledCalls({ startsBefore: upcomingWindowEnd.current }),
   );
 
-  // All scheduled calls for calendar view (only loaded when calendar is active)
-  const [allScheduledCalls] = useCachedQuery(queries.userScheduledCallsV2(), {
-    enabled: isCalendarView,
-  });
+  const [calendarRangeRows] = useCachedQuery(
+    queries.userCallsInRange({
+      from: calendarWindow?.from ?? 0,
+      to: calendarWindow?.to ?? 0,
+    }),
+    { enabled: Boolean(calendarWindow) },
+  );
 
   const calls = accumulatedCalls as Call[] | undefined;
   // For normal view: use optimized 2-day window query
   const upcomingScheduledCallRows = upcomingScheduledCalls as ScheduledCall[] | undefined;
-  // For calendar view: use full scheduled calls query
-  const scheduledCallRows = allScheduledCalls as ScheduledCall[] | undefined;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -237,39 +240,29 @@ export function useCallHistory(
     return filtered;
   }, [upcomingScheduledCallRows, activeCalls, userId]);
 
-  const calendarScheduledCalls = useMemo(() => {
-    if (!scheduledCallRows) return undefined;
+  // Visibility pass over the windowed rows. The query already settled reachability and
+  // ordering, so this only applies the two viewer-level rules the grid shares with the
+  // lists: calls the viewer hid, and channel-reachable calls they were never invited to
+  // (opt-in behind the same showChannelCalls toggle the list uses).
+  const calendarRangeCalls = useMemo(() => {
+    if (!calendarRangeRows) return undefined;
 
-    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
-    const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
-
-    const filtered = scheduledCallRows.filter(call => {
-      if (call.status === CallStatus.ACTIVE) {
-        return false;
-      }
-      if (activeCallIds.has(call.id) || activeExternalIds.has(call.externalId)) {
-        return false;
-      }
+    return (calendarRangeRows as Call[]).filter(call => {
       const currentUserParticipant = getCurrentUserParticipant(call);
+
       if (userId && currentUserParticipant?.meetingStatus === MeetingStatus.HIDDEN) {
         return false;
       }
 
+      // External calendar events carry no CallParticipant rows — attendees live in
+      // metadata, so the owning user id is what identifies them.
       if (isExternalCalendarEvent(call)) {
         return isExternalCalendarEventForUser(call, userId);
       }
 
-      return Boolean(currentUserParticipant);
+      return showChannelCalls || Boolean(currentUserParticipant);
     });
-
-    filtered.sort((a, b) => {
-      const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
-      const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
-      return aTime - bTime;
-    });
-
-    return filtered;
-  }, [scheduledCallRows, activeCalls, userId]);
+  }, [calendarRangeRows, showChannelCalls, userId]);
 
   const recentCalls = useMemo(() => {
     const baseCalls = calls;
@@ -279,16 +272,10 @@ export function useCallHistory(
 
     // Build lookup sets for stale-ACTIVE detection.
     // activeCalls (userActiveCalls) is the live source of truth: if a call is no longer
-    // in this set it has ended. allScheduledCalls covers the ACTIVE→SCHEDULED reversion
+    // in this set it has ended. The upcoming rows cover the ACTIVE→SCHEDULED reversion
     // (call ended before endsAt) where the call leaves userCallHistory but the
     // cumulative accumulator still holds an ACTIVE entry.
-    // Must follow isCalendarView, NOT `scheduledCallRows ?? ...`. The calendar query is
-    // gated behind `enabled: isCalendarView`, and a disabled useCachedQuery still returns
-    // its (IndexedDB-persisted) cache entry while nothing can ever refresh it — Zero never
-    // subscribes, so the cache-update effect never fires. Falling back to it here meant one
-    // visit to Calendar view froze a snapshot that then shadowed the live upcoming query,
-    // resurrecting calls that had since ended as joinable rows.
-    const scheduledSource = isCalendarView ? scheduledCallRows : upcomingScheduledCallRows;
+    const scheduledSource = upcomingScheduledCallRows;
     const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
     const scheduledCallIds = new Set(scheduledSource?.map(c => c.id) ?? []);
 
@@ -337,15 +324,7 @@ export function useCallHistory(
       const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [
-    calls,
-    scheduledCallRows,
-    upcomingScheduledCallRows,
-    isCalendarView,
-    activeCalls,
-    showChannelCalls,
-    userId,
-  ]);
+  }, [calls, upcomingScheduledCallRows, activeCalls, showChannelCalls, userId]);
 
   const missedCalls = useMemo(() => {
     if (!recentCalls || !userId) return [];
@@ -656,7 +635,10 @@ export function useCallHistory(
     setFullParticipantAction(null);
   }, [actionParticipants, actionParticipantsDetails.type, fullParticipantAction]);
 
-  const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
+  const handleDeleteConfirm = (
+    cancelEntireSeries: boolean,
+    notifyParticipantsByEmail: boolean,
+  ): void => {
     if (!deleteModalCall) return;
 
     const isCancelSeries = cancelEntireSeries && !!deleteModalCall.recurringSeriesId;
@@ -666,7 +648,7 @@ export function useCallHistory(
       // as CANCELLED and removes their Bull jobs. The Zero mutator only updates two
       // records (the clicked call + the series) and never touches the other future instances.
       void callService
-        .cancelRecurringSeries(deleteModalCall.recurringSeriesId)
+        .cancelRecurringSeries(deleteModalCall.recurringSeriesId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Recurring series cancelled');
         })
@@ -678,7 +660,7 @@ export function useCallHistory(
       // Cancel a single instance via backend API — this also triggers buffer replenishment
       // so the 60-day buffer is maintained for the recurring series.
       void callService
-        .cancelScheduledCall(deleteModalCall.externalId)
+        .cancelScheduledCall(deleteModalCall.externalId, notifyParticipantsByEmail)
         .then(() => {
           toast.success('Call cancelled successfully');
         })
@@ -800,10 +782,31 @@ export function useCallHistory(
     })();
   };
 
+  const handleCopyTranscript = (call: Call): void => {
+    void (async () => {
+      try {
+        await copyFetchedTextToClipboard(() =>
+          recordingService.getCopyableTranscript(call.externalId),
+        );
+        toast.success('Transcript copied', { id: 'copy-transcript' });
+      } catch (error) {
+        if (error instanceof NoTranscriptError) {
+          toast.error('No transcript to copy', { id: 'copy-transcript' });
+          return;
+        }
+        logger.error(Logger.API_CALL_FAILED, {
+          message: 'Failed to copy transcript',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        toast.error('Could not copy the transcript', { id: 'copy-transcript' });
+      }
+    })();
+  };
+
   return {
     calls: recentCalls,
     scheduledCalls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading: upcomingScheduledQueryDetails.type === 'unknown',
@@ -819,6 +822,7 @@ export function useCallHistory(
     handleGotoTranscript,
     getGotoTranscriptHandler,
     handleDownloadTranscript,
+    handleCopyTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,

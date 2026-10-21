@@ -1,8 +1,9 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Phone, Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { formatDuration } from '../../../utils/dateUtils';
+import { PhoneDefault } from '@xyne/icons';
 
 interface ParticipantInfo {
   identity: string;
@@ -78,6 +79,7 @@ export function MobileCallHeader({
             isMicEnabled ? 'bg-muted' : 'bg-destructive/10 hover:bg-destructive/20',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
+          aria-label={isMicEnabled ? 'Mute' : 'Unmute'}
           data-track-category='CALLS'
           data-track-name='Mobile_Toggle_Mic'
           data-track-metadata={JSON.stringify({ enabled: isMicEnabled })}
@@ -113,10 +115,11 @@ export function MobileCallHeader({
           size='icon'
           className='flex-shrink-0 rounded-full'
           title='End call'
+          aria-label='End call'
           data-track-category='CALLS'
           data-track-name='Mobile_End_Call'
         >
-          <Phone size={18} className='rotate-[135deg]' />
+          <PhoneDefault size={18} className='rotate-[135deg]' />
         </Button>
       </div>
     </div>

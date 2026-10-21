@@ -3,6 +3,7 @@ import { listAgents } from "../../lib/api";
 import type { AgentLight } from "../../lib/types";
 import { AgentCard } from "./common/AgentCard";
 import { CreateAgentModal } from "../../components/CreateAgentModal";
+import { isCurrentUser } from "../../lib/identity";
 
 interface Props {
   userId: string;
@@ -28,7 +29,7 @@ export function DashboardPageV2({ userId, isAdmin }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  const myAgents = agents.filter((a) => a.ownerUserId === userId);
+  const myAgents = agents.filter((a) => isCurrentUser(a.ownerUserId));
   const globalAgents = agents.filter((a) => a.scope === "global");
 
   return (

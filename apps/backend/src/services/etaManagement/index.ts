@@ -34,7 +34,7 @@ export {
 export { writeEtaActivitiesPrisma } from './etaActivityWriters';
 export type { EtaActivityWriteContext } from './etaActivityWriters';
 export type { EtaActivityIntent, BuildActivityIntentsContext } from './activityIntents';
-export { loadBoardEtaContext, isTerminalStatus } from './prismaContext';
+export { isTerminalStatus } from './prismaContext';
 export type { LoadedBoardEtaContext } from './prismaContext';
 export { loadZeroEtaContext } from './zeroContext';
 export type { LoadedZeroEtaContext } from './zeroContext';

@@ -12,12 +12,14 @@ import { ticketSchema } from '@/vespa/src/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2 } from '@xyne/shared';
+import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2, FLOW_STAGE_NAMES } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
-import { dualWriteTicketTags, dualDeleteTicketTag } from '@/services/ticketTagDualWriteService';
+import { assertFlowStepSkippable } from '@/services/flowCascadeService';
+import { updateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
+import { bulkUpdateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 
 
-const prisma = DatabaseClient.getInstance();
+export const prisma = DatabaseClient.getInstance();
 
 const sanitizeFilename = (filename: string): string => {
   return filename
@@ -95,6 +97,12 @@ export class TicketService {
         if (!transition) {
           logger.warn(`[TicketService] FLOW transition rejected for ${ticketId} → "${stage}"`);
           return;
+        }
+        if (stage === FLOW_STAGE_NAMES.SKIPPED) {
+          await assertFlowStepSkippable({
+            metadata: ticket.metadata,
+            flowPlan: ticket.board.flowPlan,
+          });
         }
         await this.ticketRepository.updateTicketStage(ticketId, stage, userId, source, prActivityData);
         return;
@@ -221,6 +229,14 @@ export class TicketService {
       const targetStageName = params.stage ?? params.status;
       if (!targetStageName || (params.status && params.status !== targetStageName)) {
         throw new Error('Flow status must match its target stage');
+      }
+      // Step skip is terminal and irreversible, so the mutator's guards
+      // (run root, decision-parent step, paused run) gate this path too.
+      if (targetStageName === FLOW_STAGE_NAMES.SKIPPED) {
+        await assertFlowStepSkippable({
+          metadata: existingTicket.metadata,
+          flowPlan: existingTicket.board.flowPlan,
+        });
       }
       const [currentStage, targetStage] = await Promise.all([
         prisma.stage.findFirst({
@@ -457,22 +473,7 @@ export class TicketService {
       return { added: [], removed: [] };
     }
 
-    await prisma.$transaction(async tx => {
-      if (toRemove.length > 0) {
-        await tx.ticketTag.deleteMany({
-          where: { ticketId, name: { in: toRemove } },
-        });
-        for (const name of toRemove) {
-          await dualDeleteTicketTag(ticketId, name, tx);
-        }
-      }
-      if (toAdd.length > 0) {
-        await tx.ticketTag.createMany({
-          data: toAdd.map(name => ({ name, ticketId, workspaceId: ticket.workspaceId })),
-        });
-        await dualWriteTicketTags(ticketId, toAdd, tx);
-      }
-    });
+    await updateTicketTagsTx(toRemove, ticketId, toAdd, ticket);
 
     logger.info(
       `[TicketService] Updated tags for ticket ${ticketId}: +${toAdd.length} -${toRemove.length}`,
@@ -554,22 +555,7 @@ export class TicketService {
       }
 
       try {
-        await prisma.$transaction(async tx => {
-          if (toRemove.length > 0) {
-            await tx.ticketTag.deleteMany({
-              where: { ticketId, name: { in: toRemove } },
-            });
-            for (const name of toRemove) {
-              await dualDeleteTicketTag(ticketId, name, tx);
-            }
-          }
-          if (toAdd.length > 0) {
-            await tx.ticketTag.createMany({
-              data: toAdd.map(name => ({ name, ticketId, workspaceId })),
-            });
-            await dualWriteTicketTags(ticketId, toAdd, tx);
-          }
-        });
+        await bulkUpdateTicketTagsTx(toRemove, ticketId, toAdd, workspaceId);
       } catch (error) {
         logger.error(
           `[TicketService] bulkUpdateTicketTags failed for ticket ${ticketId}:`,
@@ -672,3 +658,5 @@ export class TicketService {
 
 // Export a singleton instance
 export const ticketService = new TicketService();
+
+

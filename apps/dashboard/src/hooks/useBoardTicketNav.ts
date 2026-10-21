@@ -8,6 +8,7 @@ import type {
   KanbanTicketsPageRow,
   KanbanTicketsPageBaseArgs,
 } from '../routes/KanbanBoardScreen/useKanbanTicketsPage';
+import { kanbanPageQuery } from '../routes/KanbanBoardScreen/useKanbanTicketsPage';
 import { useTicketKeysetWindow } from './useTicketKeysetWindow';
 import { useBoardNavParams } from '../components/Tickets/boardNavStore';
 
@@ -73,10 +74,9 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
         dir,
         limit,
       };
+      // A track's view steps through the track's tickets only (kanbanPageQuery picks).
       const rows = (await zero.run(
-        queries.kanbanTicketsPageV3({
-          ...queryArgs,
-        } as Parameters<typeof queries.kanbanTicketsPageV3>[0]),
+        kanbanPageQuery(queryArgs as Parameters<typeof kanbanPageQuery>[0]),
         { type: 'complete' },
       )) as KanbanTicketsPageRow[];
       return rows.map(r => ({

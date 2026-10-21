@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useContext, useEffect, useMemo } from 'react';
 import { FileText, X } from 'lucide-react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -13,6 +13,7 @@ import { resolveFileUrl, removeUnknownBlocks } from '../../../utils/canvasUtils'
 import { queries } from '../../../zero/queries';
 import { Canvas } from '../Canvas.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { ThreadNavigationContext } from '../../Chat/ThreadNavigationContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
@@ -33,6 +34,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { baseRoute } = useRouteContext();
+  const { openCanvas } = useContext(ThreadNavigationContext);
   const { isMobile } = usePlatform();
   const { theme } = useTheme();
   const blockNoteTheme = theme === 'midnight' ? 'dark' : 'light';
@@ -85,6 +87,11 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
     if (!isMobile && isCmdClick && canvasId) {
       const canvasUrl = `${shareableOrigin}/chat/canvas/${canvasId}`;
       window.open(canvasUrl, '_blank');
+      return;
+    }
+
+    if (canvasId && openCanvas) {
+      openCanvas(canvasId);
       return;
     }
 

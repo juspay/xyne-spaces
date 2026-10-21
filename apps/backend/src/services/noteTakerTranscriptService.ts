@@ -22,13 +22,15 @@ import {
   ActivityClassification,
 } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { callSubject, isRecording } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
+import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 // Activity.actorAction for "the AI summary for this recording is ready".
 // Rendered by the dashboard's RecordingSummaryActivity.
@@ -38,6 +40,8 @@ interface DetailedSummaryCanvasResult {
   canvasId: string;
   summaryTemplateId: string;
   markedItems: RecordingSummaryMarkedItem[];
+  // The untouched model output of a bot-created call's template summary.
+  rawSummary?: string;
 }
 
 /**
@@ -96,6 +100,14 @@ class NoteTakerTranscriptService {
           reason: 'agent_reported_no_transcript',
           path: 'note_taker',
         });
+        return;
+      }
+
+      // Admin unlink keeps the GCS files, so without this a late webhook or the
+      // reconcile would re-attach the transcript. Read fresh: the unlink takes this
+      // same lock, so `call` may predate it.
+      if (isTranscriptUnlinked(await repositories.calls.findByExternalId(callId))) {
+        logger.info(`[${callId}] note_taker_process_skipped`, { reason: 'transcript_unlinked' });
         return;
       }
 
@@ -179,7 +191,7 @@ class NoteTakerTranscriptService {
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
       if (detailedSummary) {
-        await this.notifySummaryReady(call);
+        await this.notifySummaryReady(call, detailedSummary.rawSummary);
       }
       await this.queueVespaIndexing(call);
 
@@ -198,11 +210,12 @@ class NoteTakerTranscriptService {
 
   /**
    * Regenerate only the detailed-summary canvas with an explicitly selected
-   * built-in template. The normal Call.aiSummary remains untouched.
+   * built-in template (the default template when none is given). The normal
+   * Call.aiSummary remains untouched.
    */
   async regenerateSummary(
     call: Call,
-    templateId: string,
+    templateId: string | undefined,
     modelType?: SummaryModelType,
   ): Promise<{
     summaryTemplateId: string;
@@ -210,7 +223,10 @@ class NoteTakerTranscriptService {
     detailedSummaryReady: boolean;
     summaryModelUsed: SummaryModelType;
   } | null> {
-    const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
+    // An admin-unlinked transcript still sits in storage; treat it as absent.
+    const formattedTranscript = isTranscriptUnlinked(call)
+      ? null
+      : await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) {
       // No transcript at all is a terminal 'failed' state — the button offer
       // should still surface so the user isn't left staring at a stale 'ready'.
@@ -269,7 +285,7 @@ class NoteTakerTranscriptService {
       markedItems,
     });
 
-    await this.notifySummaryReady(call);
+    await this.notifySummaryReady(call, detailedSummary.rawSummary);
 
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
@@ -285,10 +301,10 @@ class NoteTakerTranscriptService {
    * Best-effort: neither may fail the generation flow, so each is wrapped
    * independently and its errors are logged and swallowed.
    */
-  private async notifySummaryReady(call: Call): Promise<void> {
+  private async notifySummaryReady(call: Call, rawSummary?: string): Promise<void> {
     const actionUrl = isRecording(call)
       ? `/recordings/${call.externalId}`
-      : `/calls/${call.id}/detail`;
+      : `/calls/${call.externalId}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —
@@ -314,6 +330,14 @@ class NoteTakerTranscriptService {
     }
 
     await this.recordSummaryReadyActivity(call);
+
+    // App-scheduled calls get the summary pushed to their app's webhook. This
+    // covers the note-taker pipeline and every regeneration (both call types
+    // route through regenerateSummary); regular calls are covered from
+    // transcriptService.processCallWithSummary. No-ops unless the call carries
+    // an initiatedByInstalledAppId, and never throws.
+    // A bot-created call's template output goes out untouched, not via the canvas.
+    await emitCallSummaryReadyToApp(call.externalId, rawSummary);
   }
 
   /**
@@ -325,6 +349,8 @@ class NoteTakerTranscriptService {
   private async recordSummaryReadyActivity(call: Call): Promise<void> {
     try {
       if (!call.workspaceId) return;
+      // 'recording' vs 'call' — drives the dashboard's Recordings sidebar dot.
+      const actionSource = callSubject(call);
 
       const existing = await db.activity.findFirst({
         where: {
@@ -339,7 +365,7 @@ class NoteTakerTranscriptService {
         // re-sorts the row to the top rather than stacking a second entry.
         await db.activity.update({
           where: { id: existing.id },
-          data: { isRead: false, updatedAt: new Date() },
+          data: { isRead: false, updatedAt: new Date(), actionSource },
         });
         return;
       }
@@ -350,7 +376,7 @@ class NoteTakerTranscriptService {
         // notional actor and the only recipient.
         actorId: call.createdByUserId,
         actorAction: RECORDING_SUMMARY_READY_ACTION,
-        actionSource: 'call',
+        actionSource,
         actionSourceId: call.id,
         callId: call.id,
         workspaceId: call.workspaceId,
@@ -371,6 +397,7 @@ class NoteTakerTranscriptService {
    * (list-view "Generate labels" action).
    */
   async regenerateLabels(call: Call): Promise<string[] | null> {
+    if (isTranscriptUnlinked(call)) return null;
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
 
@@ -416,7 +443,7 @@ class NoteTakerTranscriptService {
           : {};
       return canvasMeta.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
     } catch (error) {
-      logger.warn('summary_model_preference_lookup_failed', { callId: call.id, error });
+      logger.warn('summary_model_preference_lookup_failed', { callId: call.externalId, error });
       return 'fast';
     }
   }
@@ -454,11 +481,12 @@ class NoteTakerTranscriptService {
 
   /**
    * Grants the thread's channel VIEW access to this recording (same
-   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses),
-   * so every thread/channel member can see the recording message card and
-   * open /recordings/:callId. No-op for recordings not started from a thread
-   * (no channelId on Call.metadata). Best-effort — a failure here must never
-   * block transcript/summary processing. Public so
+   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses,
+   * minus the share post), so every thread/channel member can see the
+   * recording message card and open /recordings/:callId. No-op for
+   * recordings not started from a thread (no channelId on Call.metadata).
+   * Best-effort — a failure here must never block transcript/summary
+   * processing. Public so
    * noteTakerWebhookController can call this immediately once the recording
    * ends (handleParticipantLeft / handleRoomFinished) — both canvases
    * already exist by then via eager creation, so there's no reason to wait
@@ -480,6 +508,9 @@ class NoteTakerTranscriptService {
           action: 'grant',
           targets: [{ type: 'channel', id: channelId }],
           access: EntityUserAccess.VIEW,
+          // Access only: the thread anchor message is already the recording's
+          // post, so a share post here would duplicate it at the channel's top level.
+          post: false,
         },
       );
     } catch (error) {
@@ -787,6 +818,7 @@ class NoteTakerTranscriptService {
           undefined,
           citationCtx.segments,
           modelType,
+          formattedTranscript,
         );
         if (!generated) {
           logDetailedSummaryFailed(callId, 'generation_failed');
@@ -816,6 +848,7 @@ class NoteTakerTranscriptService {
           freshCallTitle,
           citationCtx,
           workspaceId,
+          true,
         );
         if (!canvasId) {
           logDetailedSummaryFailed(callId, 'canvas_update_failed');
@@ -826,6 +859,7 @@ class NoteTakerTranscriptService {
           canvasId,
           summaryTemplateId: generated.template.id,
           markedItems: generated.markedItems,
+          rawSummary: generated.rawSummary,
         };
       }
 
@@ -905,7 +939,7 @@ class NoteTakerTranscriptService {
             resolvedCallTitle,
             citationCtx,
             workspaceId,
-            { deferInsertSideEffects: true },
+            { deferInsertSideEffects: true, isRecording: true },
           );
           if (!canvasId) {
             throw new Error('Failed to create detailed summary canvas');
@@ -954,6 +988,7 @@ class NoteTakerTranscriptService {
           },
           citationCtx.segments,
           modelType,
+          formattedTranscript,
         );
       } finally {
         writerActive = false;
@@ -1000,6 +1035,8 @@ class NoteTakerTranscriptService {
         call.startedAt,
         freshCallTitle,
         citationCtx,
+        undefined,
+        true,
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
@@ -1010,6 +1047,7 @@ class NoteTakerTranscriptService {
         canvasId: newCanvasId,
         summaryTemplateId: generated.template.id,
         markedItems: generated.markedItems,
+        rawSummary: generated.rawSummary,
       };
     } catch (error) {
       logDetailedSummaryFailed(callId, 'unexpected_error', error);
@@ -1054,9 +1092,9 @@ class NoteTakerTranscriptService {
         app: SubApp.TRANSCRIPT,
         ...(call.workspaceId ? { workspaceId: call.workspaceId } : {}),
       });
-      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.id}`, { path: 'note_taker' });
+      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.externalId}`, { path: 'note_taker' });
     } catch (vespaError) {
-      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.externalId}:`, vespaError);
     }
   }
 }

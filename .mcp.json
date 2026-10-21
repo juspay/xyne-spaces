@@ -11,6 +11,14 @@
     "xyne-victoria-metrics": {
       "type": "http",
       "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
+    },
+    "xyne-spaces": {
+      "command": "node",
+      "args": ["packages/xyne-spaces-mcp/dist/index.js"]
+    },
+    "xyne-claw": {
+      "command": "node",
+      "args": ["packages/xyne-claw-mcp/dist/index.js"]
     }
   }
 }

@@ -9,7 +9,7 @@
  *
  * Storage layout: gs://{bucket}/claw-sessions/{conversationId}/{relativePath}
  *
- * Both endpoints are gated by `requireS2S` at the mount point in main.ts.
+ * Both endpoints are gated by `requireStrictS2S` at the mount point.
  */
 
 import { Router } from "express";

@@ -14,8 +14,11 @@ import { AssignmentPauseActivity } from './AssignmentPauseActivity';
 import { TicketAssignmentActivity } from './TicketAssignmentActivity';
 import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
+import { MissedCallActivity } from './MissedCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
+import { DeskAccountDisconnectedActivity } from './DeskAccountDisconnectedActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
+import { ViewSharedActivity } from './ViewSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { RecordingSummaryActivity } from './RecordingSummaryActivity';
 import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
@@ -121,16 +124,27 @@ export const ActivityItem = memo(function ActivityItem({
     case 'meeting_declined':
       return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'missed_call':
+      return <MissedCallActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'email_fetch_completed':
     case 'email_fetch_failed':
       return <EmailFetchActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'desk_account_disconnected':
+      return <DeskAccountDisconnectedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'canvas_shared':
     case 'canvas_role_changed':
     case 'canvas_access_revoked':
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'view_shared':
+    case 'view_access_revoked':
+      return <ViewSharedActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'recording_shared':
+    case 'recording_access_changed':
     case 'recording_access_revoked':
       return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
 

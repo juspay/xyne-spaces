@@ -1,7 +1,7 @@
 /**
  * Pure destination-routing for a Digital Twin reply — no config/IO imports, so
  * it is unit-testable in isolation. Used by the shared delivery in
- * `twin-delivery.ts` (which re-exports it).
+ * `twin-approval-delivery.ts`.
  */
 
 /** Resolve a Twin reply destination descriptor to a Spaces post target.

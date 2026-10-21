@@ -2,7 +2,7 @@ import { ReactElement, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { ActivityBlock } from '../../Chat/XyneAISidebar/components/ActivityBlock';
+import { TurnTimeline } from '../../Chat/XyneAISidebar/components/TurnTimeline';
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
@@ -30,6 +30,13 @@ export const AssistantBubble = ({
   isStreaming,
 }: AssistantBubbleProps): ReactElement => {
   const markdownComponents = useMemo(() => createMarkdownComponents(id), [id]);
+  const renderMarkdown = (text: string): ReactElement => (
+    <div className='bot-markdown-content text-sm text-foreground leading-6'>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 
   return (
     <div className='flex gap-3 justify-start'>
@@ -37,24 +44,11 @@ export const AssistantBubble = ({
         <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
       </div>
       <div className='flex-1 min-w-0 max-w-full overflow-hidden'>
-        <ActivityBlock
-          toolInvocations={toolInvocations}
-          reasoning={reasoning}
-          streaming={isStreaming}
+        <TurnTimeline
+          message={{ toolInvocations, ...(reasoning ? { reasoning } : {}), isStreaming }}
+          renderText={text => renderMarkdown(text)}
+          legacyAnswer={content ? renderMarkdown(content) : null}
         />
-        {content && (
-          <div className='bot-markdown-content text-sm text-foreground leading-6'>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkBreaks]}
-              components={markdownComponents}
-            >
-              {content}
-            </ReactMarkdown>
-            {isStreaming && (
-              <span className='inline-block w-1 h-3.5 ml-0.5 bg-foreground/60 align-middle animate-pulse' />
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

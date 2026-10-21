@@ -7,9 +7,12 @@ import { TicketHoverCard } from './TicketHoverCard';
 import { PriorityPicker } from '../TicketListView/PriorityPicker';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
-import { StatusPicker, DueDatePicker, LabelPicker } from './TicketListRowPickers';
-
-export type SubTicketProgress = { done: number; total: number };
+import { StagePicker } from '../TicketListView/StagePicker';
+import { DueDatePicker, LabelPicker } from './TicketListRowPickers';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
+import { SubTicketsToggle } from '../SubTickets/SubTickets';
+import type { SubTicketProgress } from '../SubTickets/SubTickets.types';
+import { useSubTicketsShown } from '../SubTickets/useSubTickets';
 
 type TicketListRowProps = {
   ticket: Ticket;
@@ -22,7 +25,13 @@ type TicketListRowProps = {
   /** Board the ticket belongs to — shown as the row's capsule with a hover preview. */
   boardName?: string | undefined;
   isComfortView?: boolean;
+  /** Screen-specific pills (e.g. a release's QA owner), shown before the assignee. */
+  extras?: React.ReactNode;
   onOpen: (ticket: Ticket) => void;
+  /** The sub-ticket count opens the sub-tickets under the row, instead of only counting them. */
+  expandableSubTickets?: boolean;
+  /** A sub-ticket row's tree line, placed before its status. */
+  treeConnector?: React.ReactNode;
 };
 
 const shortDate = (value: number | string | Date): string | null => {
@@ -46,7 +55,7 @@ const fullTimestamp = (value: number | string | Date): string =>
     hour12: true,
   });
 
-export const TicketListRow: React.FC<TicketListRowProps> = ({
+const TicketListRowBase: React.FC<TicketListRowProps> = ({
   ticket,
   isSelected,
   onToggleSelect,
@@ -56,8 +65,14 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
   subProgress,
   boardName,
   isComfortView = false,
+  extras,
   onOpen,
+  expandableSubTickets = false,
+  treeConnector,
 }) => {
+  const noun = useTicketNoun();
+  const subTicketsOpen =
+    useSubTicketsShown(ticket.id) > 0 && expandableSubTickets && (subProgress?.total ?? 0) > 0;
   const createdShort = shortDate(ticket.createdAt);
   const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
   const onAssign = useTicketAssignee(ticket.id, assignee);
@@ -83,6 +98,7 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
       }}
       role='button'
       tabIndex={0}
+      data-testid={`ticket-row-${ticket.id}`}
       data-track-category='Tickets'
       data-track-name='TicketListRow'
     >
@@ -93,7 +109,9 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
       >
         {isSelected ? (
           <button
-            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded bg-blue-600'
+            aria-label={`Deselect ${ticket.title}`}
+            // The app's checkbox colours (see ui/Checkbox): primary fill, primary-foreground tick.
+            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-primary bg-primary'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);
@@ -101,12 +119,12 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
             data-track-category='Tickets'
             data-track-name='DeselectRow'
           >
-            <Check className='h-3 w-3 text-white' strokeWidth={3} />
+            <Check className='h-3 w-3 text-primary-foreground' strokeWidth={3} />
           </button>
         ) : (
           <button
-            aria-label='Select ticket'
-            className='h-4 w-4 cursor-pointer rounded border border-border bg-transparent transition-colors hover:border-muted-foreground'
+            aria-label={`Select ${noun.singular}`}
+            className='h-4 w-4 cursor-pointer rounded border border-border bg-card transition-colors hover:border-muted-foreground'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);
@@ -127,9 +145,25 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
         {ticket.xyneId}
       </span>
 
+      {treeConnector}
+
       {visibleColumns.has('status') && (
-        <span className='flex w-5 flex-shrink-0 items-center justify-center'>
-          <StatusPicker ticketId={ticket.id} statusV2={ticket.statusV2 as string} />
+        <span className='relative flex w-5 flex-shrink-0 items-center justify-center self-stretch'>
+          <StagePicker
+            ticketId={ticket.id}
+            stageName={ticket.stageName}
+            stageLabel={ticket.stageName || '—'}
+            statusV2={ticket.statusV2}
+            boardId={ticket.boardId}
+            iconOnly
+          />
+          {/* The open sub-tickets' tree starts under the status. */}
+          {subTicketsOpen && (
+            <span
+              aria-hidden
+              className='absolute bottom-0 left-[9px] top-[calc(50%+9px)] border-l-[1.5px] border-border'
+            />
+          )}
         </span>
       )}
 
@@ -141,14 +175,20 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
         {ticket.title}
       </span>
 
-      {subProgress && subProgress.total > 0 && (
-        <Tooltip content={`${subProgress.done} of ${subProgress.total} sub-tickets completed`}>
-          <span className='flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground'>
-            <Subtask className='h-3.5 w-3.5' />
-            {subProgress.done}/{subProgress.total}
-          </span>
-        </Tooltip>
-      )}
+      {subProgress &&
+        subProgress.total > 0 &&
+        (expandableSubTickets ? (
+          <SubTicketsToggle ticketId={ticket.id} progress={subProgress} />
+        ) : (
+          <Tooltip
+            content={`${subProgress.done} of ${subProgress.total} sub-${noun.plural} completed`}
+          >
+            <span className='flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground'>
+              <Subtask className='h-3.5 w-3.5' />
+              {subProgress.done}/{subProgress.total}
+            </span>
+          </Tooltip>
+        ))}
 
       <span className='ml-auto flex flex-shrink-0 items-center gap-2.5 pl-3'>
         {visibleColumns.has('tags') && tags.length > 0 && (
@@ -210,6 +250,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
           />
         )}
 
+        {extras}
+
         {visibleColumns.has('assignee') && (
           <UserSelector
             selectedUserId={assignee.userId}
@@ -222,10 +264,38 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
         {createdShort && (
           <Tooltip content={`Created ${fullTimestamp(ticket.createdAt)}`}>
-            <span className='text-xs text-muted-foreground'>{createdShort}</span>
+            <span className='min-w-[7ch] whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+              {createdShort}
+            </span>
           </Tooltip>
         )}
       </span>
     </div>
   );
 };
+
+// Memoised: the virtual list re-renders on every scroll and re-measure; unchanged rows skip it.
+export const TicketListRow = React.memo(TicketListRowBase);
+
+type TicketListRowLineProps = {
+  visibleColumns: Set<string>;
+  isComfortView?: boolean;
+  connector: React.ReactNode;
+  children: React.ReactNode;
+};
+
+/** A line under a row's sub-tickets that lines its content up with the rows' status column. */
+export const TicketListRowLine: React.FC<TicketListRowLineProps> = ({
+  visibleColumns,
+  isComfortView = false,
+  connector,
+  children,
+}) => (
+  <div className={`flex h-full min-w-0 items-center px-3 ${isComfortView ? 'gap-2.5' : 'gap-2'}`}>
+    <span className='w-4 flex-shrink-0' />
+    {visibleColumns.has('priority') && <span className='w-5 flex-shrink-0' />}
+    <span className='w-[4.5rem] flex-shrink-0' />
+    {connector}
+    {children}
+  </div>
+);

@@ -3,6 +3,8 @@ import { Reaction } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 import { UserRepository } from './users';
 import {logger} from '@/utils/logger';
+import { addReactionTx } from '@/bypassAcl/transactions/reactionRepository';
+import { removeReactionTx } from '@/bypassAcl/transactions/reactionRepository';
 
 export interface ReactionData {
   messageId: string;
@@ -140,96 +142,14 @@ export class ReactionRepository extends BaseRepository<Reaction, CreateReactionI
    */
   async addReaction(data: ReactionData): Promise<void> {
     const workspaceId = await this.getMessageWorkspaceId(data.messageId);
-    await this.db.$transaction(async (tx) => {
-      // Insert the reaction (will fail if already exists due to unique constraint)
-      await tx.reaction.create({
-        data: {
-          messageId: data.messageId,
-          workspaceId,
-          userId: data.userId,
-          emojiName: data.emojiName,
-        },
-      });
-
-      // Update or create the reaction count
-      await tx.reactionCount.upsert({
-        where: {
-          messageId_emojiName: {
-            messageId: data.messageId,
-            emojiName: data.emojiName,
-          },
-        },
-        update: {
-          count: {
-            increment: 1,
-          },
-        },
-        create: {
-          messageId: data.messageId,
-          workspaceId,
-          emojiName: data.emojiName,
-          count: 1,
-        },
-      });
-    });
+    await addReactionTx(this, data, workspaceId);
   }
 
   /**
    * Remove a reaction from a message
    */
   async removeReaction(data: ReactionData): Promise<void> {
-    await this.db.$transaction(async (tx) => {
-      // Delete the reaction
-      const deletedReaction = await tx.reaction.deleteMany({
-        where: {
-          messageId: data.messageId,
-          userId: data.userId,
-          emojiName: data.emojiName,
-        },
-      });
-
-      // Only update count if a reaction was actually deleted
-      if (deletedReaction.count > 0) {
-        // Get current count
-        const reactionCount = await tx.reactionCount.findUnique({
-          where: {
-            messageId_emojiName: {
-              messageId: data.messageId,
-              emojiName: data.emojiName,
-            },
-          },
-        });
-
-        if (reactionCount) {
-          if (reactionCount.count <= 1) {
-            // Remove the count record if this was the last reaction
-            await tx.reactionCount.delete({
-              where: {
-                messageId_emojiName: {
-                  messageId: data.messageId,
-                  emojiName: data.emojiName,
-                },
-              },
-            });
-          } else {
-            // Decrement the count
-            await tx.reactionCount.update({
-              where: {
-                messageId_emojiName: {
-                  messageId: data.messageId,
-                  emojiName: data.emojiName,
-                },
-              },
-              data: {
-                count: {
-                  decrement: 1,
-                },
-              },
-            });
-          }
-        }
-      }
-    });
+    await removeReactionTx(this, data);
   }
 
   /**
@@ -389,3 +309,5 @@ export class ReactionRepository extends BaseRepository<Reaction, CreateReactionI
     }
   }
 }
+
+
