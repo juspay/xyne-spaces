@@ -93,7 +93,7 @@ export interface CallAdminSeriesRow {
 export interface ListCallsInput {
   mineOnly: boolean;
   statuses?: CallStatus[];
-  callType?: CallType;
+  callTypes?: CallType[];
   search?: string;
   summaryStatuses?: SummaryStatus[];
   hasTranscript?: boolean;
@@ -183,7 +183,7 @@ class CallAdminService {
         workspaceId: actor.workspaceId,
         ...(input.mineOnly ? { participantUserId: actor.userId } : {}),
         statuses: input.statuses,
-        callType: input.callType,
+        callTypes: input.callTypes,
         search: input.search,
         summaryStatuses: input.summaryStatuses,
         hasTranscript: input.hasTranscript,

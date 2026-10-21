@@ -25,6 +25,8 @@ import { useAllChannels } from '../../hooks/useChannels';
 import { useActiveCalls } from '../../hooks/useCalls';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { callService } from '../../services/Call/callService';
+import { NoTranscriptError, recordingService } from '../../services/Recording/recordingService';
+import { copyFetchedTextToClipboard } from '../../utils/clipboardUtils';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
@@ -58,6 +60,7 @@ interface UseCallHistoryReturn {
   handleGotoTranscript: (call: Call) => void;
   getGotoTranscriptHandler: (call: Call) => (() => void) | undefined;
   handleDownloadTranscript: (call: Call) => void;
+  handleCopyTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
     title: string;
@@ -779,6 +782,27 @@ export function useCallHistory(
     })();
   };
 
+  const handleCopyTranscript = (call: Call): void => {
+    void (async () => {
+      try {
+        await copyFetchedTextToClipboard(() =>
+          recordingService.getCopyableTranscript(call.externalId),
+        );
+        toast.success('Transcript copied', { id: 'copy-transcript' });
+      } catch (error) {
+        if (error instanceof NoTranscriptError) {
+          toast.error('No transcript to copy', { id: 'copy-transcript' });
+          return;
+        }
+        logger.error(Logger.API_CALL_FAILED, {
+          message: 'Failed to copy transcript',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        toast.error('Could not copy the transcript', { id: 'copy-transcript' });
+      }
+    })();
+  };
+
   return {
     calls: recentCalls,
     scheduledCalls,
@@ -798,6 +822,7 @@ export function useCallHistory(
     handleGotoTranscript,
     getGotoTranscriptHandler,
     handleDownloadTranscript,
+    handleCopyTranscript,
     showConfirmModal,
     confirmModalConfig,
     handleConfirmCall,

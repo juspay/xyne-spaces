@@ -300,7 +300,7 @@ const adminListPaging = {
 export const CallAdminListCallsQuerySchema = z.object({
   ...adminListPaging,
   status: csvQueryList(z.nativeEnum(CallStatus)),
-  type: z.nativeEnum(CallType).optional(),
+  type: csvQueryList(z.nativeEnum(CallType)),
   summaryStatus: csvQueryList(z.enum(['pending', 'ready', 'failed'])),
   hasTranscript: z
     .enum(['true', 'false'])
