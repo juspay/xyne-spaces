@@ -23,6 +23,7 @@ import {
   useTicketMailboxStar,
 } from '../hooks';
 import { getDeskChannelKind, shouldShowEmailHeaderChrome } from '../utils/desk-channel-kind';
+import { parseDeskTicketTab } from '../utils/desk-ticket-route';
 import { clearTicketDetailPaintCache } from '../utils/ticket-detail-paint-cache';
 import { ArchiveTicketSheet } from './archive-ticket-sheet';
 import { DetailsTab } from './details-tab';
@@ -52,6 +53,7 @@ export default function TicketDetailScreen() {
     channelId: string;
     ticketId: string;
     id?: string;
+    tab?: string;
   }>();
 
   const channelId = paramString(params.channelId);
@@ -78,7 +80,7 @@ export default function TicketDetailScreen() {
     detail?.deskSource,
   );
 
-  const tabs = useTicketDetailTabs('email');
+  const tabs = useTicketDetailTabs(parseDeskTicketTab(params.tab) ?? 'email');
   const { starred, toggleStar } = useTicketMailboxStar({
     ticketId: detail?.id,
     channelId,
@@ -148,7 +150,13 @@ export default function TicketDetailScreen() {
 
   const handleHeaderBack = useCallback(() => {
     if (dismissOverlayOrGoBack()) return;
-    router.back();
+    // Opened from a notification on cold start, this screen can be the only
+    // entry in the stack — fall back to home instead of a no-op back.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
   }, [dismissOverlayOrGoBack, router]);
 
   const handleMarkUnread = useCallback(() => {

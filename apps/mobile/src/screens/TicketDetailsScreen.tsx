@@ -21,7 +21,11 @@ import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-i
 import { UnreadCountBadge } from '@/src/components/ui/unread-count-badge';
 import { useBoards } from '@/src/hooks/useBoards';
 import { useCachedQuery } from '@/src/hooks/useCachedQuery';
-import { useChannelById, useChannelDisplayName } from '@/src/hooks/useChannels';
+import {
+  useChannelById,
+  useChannelDisplayName,
+  useUserChannelStatuses,
+} from '@/src/hooks/useChannels';
 import { useSelf, useUser } from '@/src/hooks/useUsers';
 import { useUserGroups } from '@/src/hooks/useUserGroups';
 import { useZero } from '@/src/hooks/useZero';
@@ -58,6 +62,7 @@ import {
 import { firstNonEmptyId, resolveEffectiveTicketId } from './ticket-details/resolve-ticket-ids';
 import { runTicketMutation } from './ticket-details/run-ticket-mutation';
 import { isChatV3Enabled } from '@/src/features/chat/v3/flag';
+import { resolveDeskTicketRoute } from '@/src/features/xyne-desks/detail/utils/desk-ticket-route';
 import { TicketThreadPane } from '@/src/features/chat/v3/screens/TicketThreadPane';
 import { OverviewTab } from './ticket-details/tabs/OverviewTab';
 import { TicketDetailsPickers } from './ticket-details/ticket-details-pickers';
@@ -279,6 +284,37 @@ export function TicketDetailsScreen({
     setActiveTab(selectedTab);
   }, [selectedTab, ticketId]);
 
+  // Desk tickets (EMAIL / SLACK / APP desks) belong in the Desk ticket screen —
+  // the one opened from Desk Channels — not this generic view. Every entry point
+  // (push taps, Activity rows, ticket links, chat thread redirects) lands here,
+  // so redirect once the ticket's channel is known. Non-members of the desk stay
+  // here: the Desk screen hides the thread from them.
+  const userChannelStatuses = useUserChannelStatuses();
+  const isDeskMember = useMemo(
+    () => !!channelId && userChannelStatuses.some(status => status.channelId === channelId),
+    [channelId, userChannelStatuses],
+  );
+  const channelType = typeof channel?.type === 'string' ? channel.type : null;
+  const deskXyneId = ticket?.xyneId ?? fallbackTicket?.xyneId ?? fallbackTicketMd?.xyneId ?? null;
+  const deskTicketRoute = useMemo(
+    () =>
+      resolveDeskTicketRoute({
+        ticketUuid: ticket?.id ?? effectiveTicketId,
+        xyneId: deskXyneId,
+        channelId,
+        channelType,
+        isDeskMember,
+        requestedTab: selectedTab,
+      }),
+    [channelId, channelType, deskXyneId, effectiveTicketId, isDeskMember, selectedTab, ticket?.id],
+  );
+  const deskRedirectedRef = useRef(false);
+  useEffect(() => {
+    if (!deskTicketRoute || deskRedirectedRef.current) return;
+    deskRedirectedRef.current = true;
+    router.replace(deskTicketRoute);
+  }, [deskTicketRoute, router]);
+
   const statusLabel =
     ticket?.stageName ||
     fallbackTicket?.stageName ||
@@ -455,6 +491,11 @@ export function TicketDetailsScreen({
     onOpenStatusDeadline: editors.handleOpenStatusDeadlinePicker,
     onAcknowledgeEtaRisk: editors.handleAcknowledgeEtaRisk,
   });
+
+  // Hand-off to the Desk screen is in flight; don't paint the generic view.
+  if (deskTicketRoute) {
+    return <View className='flex-1 bg-primary-bg' />;
+  }
 
   return (
     <View className='flex-1 bg-primary-bg'>
