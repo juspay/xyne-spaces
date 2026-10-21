@@ -302,6 +302,9 @@ const envSchema = Joi.object({
   WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
   WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
   WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
+  ENABLE_CONVERSATIONAL_FLOW_WORKER: Joi.boolean().default(false),
+  CONVERSATIONAL_FLOW_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(50),
+  CONVERSATIONAL_FLOW_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(60_000),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -1130,6 +1133,11 @@ export const config = {
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
     lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
     baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+    conversationalFlow: {
+      workerEnabled: envVars.ENABLE_CONVERSATIONAL_FLOW_WORKER as boolean,
+      workerConcurrency: envVars.CONVERSATIONAL_FLOW_WORKER_CONCURRENCY as number,
+      lockDurationMs: envVars.CONVERSATIONAL_FLOW_LOCK_DURATION_MS as number,
+    },
   },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
