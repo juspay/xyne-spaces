@@ -9,4 +9,6 @@ export abstract class BaseTransformer<TCredentials = unknown> {
 
   /** Spaces HTML → provider text. `mentions` maps Spaces user ids to provider user ids. */
   abstract toProvider(html: string, mentions: ReadonlyMap<string, string>): string;
+
+  abstract prefixAuthor(authorName: string, text: string): string;
 }

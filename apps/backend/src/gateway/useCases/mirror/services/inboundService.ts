@@ -1,5 +1,6 @@
 import {
   ExternalAttachmentService,
+  type DownloadedAttachment,
   MessageDirection,
   MessagesSideEffectHandler,
   acquireLock,
@@ -16,7 +17,13 @@ import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
 import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
 import { SourceRepository } from '../../../core/repositories/sourceRepository';
-import type { ProviderConfig, ProviderEvent, ProviderMessage } from '../../../core/types';
+import type {
+  JobContext,
+  ProviderConfig,
+  ProviderEvent,
+  ProviderFile,
+  ProviderMessage,
+} from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import type { MirrorLink } from '../types';
 
@@ -38,6 +45,7 @@ interface InboundContext {
   sourceName: string;
   sourceId: string;
   sourceIds: string[];
+  job: JobContext;
 }
 
 /** Applies provider message events to Spaces. Every write is idempotent through the message map. */
@@ -54,7 +62,8 @@ export class InboundService {
   async applyMessageEvent(
     link: MirrorLink,
     config: ProviderConfig,
-    event: MessageEvent
+    event: MessageEvent,
+    job: JobContext
   ): Promise<void> {
     const source = this.provider.buildMessageSource(
       link.externalId,
@@ -70,6 +79,7 @@ export class InboundService {
       sourceName: source.name,
       sourceId,
       sourceIds,
+      job,
     };
 
     if (event.type === 'message_created') await this.createSpacesMessage(ctx, event.message);
@@ -94,16 +104,16 @@ export class InboundService {
       return null;
     }
 
-    const [html, uploadedFiles] = await Promise.all([
+    const [html, { uploadedFiles, missing }] = await Promise.all([
       this.provider.transformer.toSpaces(message, ctx.config),
       this.downloadFiles(ctx, message),
     ]);
-    // Same placeholder as self-serve migration when no file made it and there is no text.
-    const content =
-      html.trim() || uploadedFiles.length > 0
-        ? html
-        : message.files.map((file) => `📎 ${file.name}`).join(' ');
-    if (!content.trim() && uploadedFiles.length === 0) return null;
+    // Same placeholder as self-serve migration for a file that didn't make it.
+    const placeholders = missing.map((file) => `📎 ${escapeHtml(file.name)}`).join(' ');
+    const content = [html.trim() && html, placeholders && `<p>${placeholders}</p>`]
+      .filter(Boolean)
+      .join('');
+    if (!content && uploadedFiles.length === 0) return null;
 
     const conversationId = message.threadId
       ? await this.findOrCopyThreadConversation(ctx, message.threadId)
@@ -214,23 +224,39 @@ export class InboundService {
     return (await repositories.messages.findById(messageId))?.conversationId ?? null;
   }
 
-  private async downloadFiles(ctx: InboundContext, message: ProviderMessage) {
-    if (message.files.length === 0) return [];
-    return await this.attachments.downloadAttachmentsForSource(
-      ctx.sourceName,
-      message.files.map((file) => ({
-        fileName: file.name,
-        fileUrl: file.url,
-        mimeType: file.mimeType,
-        size: file.size,
-      })),
-      {
-        maxFileSize: gatewayConfig.maxFileBytes,
-        timeout: gatewayConfig.fileTimeoutMs,
-        scopeType: 'EXTERNAL_MESSAGE',
-        scopeId: ctx.sourceName,
+  private async downloadFiles(
+    ctx: InboundContext,
+    message: ProviderMessage
+  ): Promise<{ uploadedFiles: DownloadedAttachment[]; missing: ProviderFile[] }> {
+    const key = `files:${message.id}`;
+    const saved = { ...ctx.job.getProgress<Record<string, DownloadedAttachment>>(key) };
+    const missing: ProviderFile[] = [];
+    for (const file of message.files) {
+      if (saved[file.url]) continue;
+      if (file.size > gatewayConfig.maxFileBytes) {
+        missing.push(file);
+        continue;
       }
-    );
+      const [downloaded] = await this.attachments.downloadAttachmentsForSource(
+        ctx.sourceName,
+        [{ fileName: file.name, fileUrl: file.url, mimeType: file.mimeType, size: file.size }],
+        {
+          maxFileSize: gatewayConfig.maxFileBytes,
+          timeout: gatewayConfig.fileTimeoutMs,
+          scopeType: 'EXTERNAL_MESSAGE',
+          scopeId: ctx.sourceName,
+        }
+      );
+      if (downloaded) {
+        saved[file.url] = downloaded;
+        await ctx.job.setProgress(key, saved);
+      } else if (ctx.job.lastAttempt) {
+        missing.push(file);
+      } else {
+        throw new GatewayError('PROVIDER_ERROR', `Couldn't download ${file.name}`);
+      }
+    }
+    return { uploadedFiles: message.files.flatMap((file) => saved[file.url] ?? []), missing };
   }
 
   /** Notifications, mentions and automations, as for any service-written message. */
@@ -243,3 +269,6 @@ export class InboundService {
     }
   }
 }
+
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

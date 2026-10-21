@@ -99,8 +99,8 @@ export class UserAuthService {
 
   /**
    * Runs a call with a person's token. Null means the bot should do it instead: the token was rejected
-   * (and is dropped), the person can't reach the channel, or they didn't post that message. Never a
-   * failure the call may have half-done, so nothing is sent twice.
+   * (and is dropped), it lacks a permission, the person can't reach the channel, or they didn't post
+   * that message. Never a failure the call may have half-done, so nothing is sent twice.
    */
   async callAsUser<T>(
     user: UserApi,
@@ -114,7 +114,7 @@ export class UserAuthService {
         await this.tokens.deleteByUser(user.spacesUserId, this.tokenProvider);
         return null;
       }
-      if (error.code === 'CHANNEL_GONE' || error.code === 'NOT_MESSAGE_AUTHOR') return null;
+      if (['CHANNEL_GONE', 'NOT_MESSAGE_AUTHOR', 'NOT_PERMITTED'].includes(error.code)) return null;
       throw error;
     }
   }

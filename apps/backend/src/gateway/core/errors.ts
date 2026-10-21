@@ -16,6 +16,8 @@ export type GatewayErrorCode =
   | 'PROVIDER_AUTH'
   | 'CHANNEL_GONE'
   | 'NOT_MESSAGE_AUTHOR'
+  | 'NOT_PERMITTED'
+  | 'JOB_NOT_FOUND'
   | 'PROVIDER_ERROR'
   | 'INTERNAL';
 
@@ -35,6 +37,8 @@ const STATUS: Record<GatewayErrorCode, number> = {
   PROVIDER_AUTH: 502,
   CHANNEL_GONE: 502,
   NOT_MESSAGE_AUTHOR: 403,
+  NOT_PERMITTED: 403,
+  JOB_NOT_FOUND: 404,
   PROVIDER_ERROR: 502,
   INTERNAL: 500,
 };
@@ -66,4 +70,15 @@ export function isPausingError(error: unknown): error is GatewayError {
     error instanceof GatewayError &&
     (error.code === 'PROVIDER_AUTH' || error.code === 'CHANNEL_GONE')
   );
+}
+
+const RETRYABLE: ReadonlySet<GatewayErrorCode> = new Set<GatewayErrorCode>([
+  'RATE_LIMITED',
+  'LOCK_HELD',
+  'PROVIDER_ERROR',
+  'INTERNAL',
+]);
+
+export function isRetryable(error: unknown): boolean {
+  return !(error instanceof GatewayError) || RETRYABLE.has(error.code);
 }

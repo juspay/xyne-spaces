@@ -1,4 +1,5 @@
 import type { BaseProvider } from './base/baseProvider';
+import type { GatewayQueue } from './queue/gatewayQueue';
 import type { ConfigService } from './services/configService';
 import type { IdentityService } from './services/identityService';
 import type { UserAuthService } from './services/userAuthService';
@@ -112,12 +113,20 @@ export interface OutboundMessage {
   text: string;
   senderName?: string;
   senderAvatarUrl?: string;
+  originId?: string;
 }
 
 export interface OutboundFile {
+  id: string;
   name: string;
   mimeType: string;
   content: Buffer;
+}
+
+export interface PostedMessageMatch {
+  originId: string;
+  authorId?: string;
+  text: string;
 }
 
 /** A Spaces message change, as the messages side-effect handler reports it. */
@@ -140,11 +149,30 @@ export interface ProviderServices {
   config: ConfigService;
   identity: IdentityService;
   userAuth: UserAuthService;
+  jobs: GatewayQueue;
+}
+
+export interface GatewayJob {
+  handler: string;
+  type: string;
+  provider: ProviderId;
+  workspaceId: string;
+  refs: Record<string, string>;
+  payload: unknown;
+  progress?: Record<string, unknown>;
+}
+
+export interface JobContext {
+  lastAttempt: boolean;
+  getProgress<T>(key: string): T | undefined;
+  setProgress(key: string, value: unknown): Promise<void>;
 }
 
 /** What core hands verified provider events and Spaces changes to, e.g. Mirror. Core never imports it. */
 export interface GatewayHandler {
+  readonly name: string;
   onProviderEvent(config: ProviderConfig, event: ProviderEvent): Promise<void>;
   onSpacesMessageChanged(change: SpacesMessageChange): Promise<void>;
   onSpacesMemberChanged(change: SpacesMemberChange): Promise<void>;
+  runJob?(job: GatewayJob, context: JobContext): Promise<void>;
 }

@@ -8,6 +8,9 @@ const SPAN_TAG = /<span[^<>]*>/g;
 const USER_MENTION = /data-mention-type=["']user["']/;
 const USER_ID = /data-user-id=(["'])([^"']+)\1/;
 
+const escapeMrkdwn = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** Slack text ⇄ Spaces HTML, with the same converters desk uses. */
 export class SlackTransformer extends BaseTransformer<SlackCredentials> {
   private readonly blockKitParser = new SlackBlockKitParser();
@@ -41,5 +44,10 @@ export class SlackTransformer extends BaseTransformer<SlackCredentials> {
       return slackId ? tag.replace(USER_ID, `data-user-id="${slackId}"`) : '<span>';
     });
     return htmlToSlackMrkdwn(withSlackIds);
+  }
+
+  prefixAuthor(authorName: string, text: string): string {
+    const author = `*${escapeMrkdwn(authorName)}*`;
+    return text ? `${author}: ${text}` : author;
   }
 }

@@ -6,21 +6,25 @@ import {
   db,
   extractUserMentions,
   releaseLock,
+  renewLock,
   repositories,
 } from '../../../re-exports';
+import type { LockHandle } from '../../../re-exports';
 import { gatewayConfig } from '../../../config';
 import type { BaseApi } from '../../../core/base/baseApi';
 import type { BaseProvider } from '../../../core/base/baseProvider';
+import { GatewayError } from '../../../core/errors';
 import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
 import { SourceRepository } from '../../../core/repositories/sourceRepository';
 import type {
+  JobContext,
   OutboundFile,
   OutboundMessage,
   ProviderConfig,
   SpacesMessageChange,
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
-import type { UserAuthService } from '../../../core/services/userAuthService';
+import type { UserApi, UserAuthService } from '../../../core/services/userAuthService';
 import type { MirrorLink } from '../types';
 
 interface OutboundContext {
@@ -28,6 +32,27 @@ interface OutboundContext {
   api: BaseApi;
   sourceId: string;
   sourceIds: string[];
+  job: JobContext;
+}
+
+interface FileRef {
+  id: string;
+  name: string;
+}
+
+interface Draft {
+  messageId: string;
+  message: OutboundMessage;
+  files: FileRef[];
+  notes: string[];
+  sendLock: LockHandle;
+}
+
+interface Delivery {
+  poster?: string;
+  uploaded?: Record<string, string>;
+  startedAt?: number;
+  sharedFileId?: string;
 }
 
 const sendLockKey = (messageId: string): string => `mirror:send:${messageId}`;
@@ -37,6 +62,16 @@ export const sendAsLockKey = (linkId: string, externalUserId: string): string =>
   `mirror:send-as:${linkId}:${externalUserId}`;
 
 const SEND_AS_WAIT_MS = 10_000;
+const SEND_WAIT_MS = 10_000;
+const BOT_POSTER = 'bot';
+const CLOCK_SKEW_MS = 5_000;
+const SHARE_CHECKS = 10;
+const SHARE_CHECK_INTERVAL_MS = 1_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const couldNotCopy = (fileName: string): string => `📎 ${fileName} (couldn't copy)`;
+const withNotes = (text: string, notes: string[]): string =>
+  [text, ...notes].filter(Boolean).join('\n');
 
 /** Sends Spaces message changes to the provider. Only Mirror's own posts are edited or deleted there. */
 export class OutboundService {
@@ -53,7 +88,8 @@ export class OutboundService {
   async sendMessageChange(
     link: MirrorLink,
     config: ProviderConfig,
-    change: SpacesMessageChange
+    change: SpacesMessageChange,
+    job: JobContext
   ): Promise<void> {
     const source = this.provider.buildMessageSource(
       link.externalId,
@@ -67,6 +103,7 @@ export class OutboundService {
       api: this.provider.createApi(config.credentials),
       sourceId,
       sourceIds,
+      job,
     };
 
     if (change.operation === 'insert') {
@@ -88,9 +125,14 @@ export class OutboundService {
       );
     } else if (message.content !== change.previousContent) {
       const text = await this.toProviderText(ctx, message.content);
-      await this.asPoster(ctx, message.senderId, (api) =>
-        api.updateMessage(link.externalId, row.externalId, text)
-      );
+      await this.asPoster(ctx, message.senderId, async (api, asBot) => {
+        const hasFiles =
+          asBot &&
+          (await repositories.messageAttachments.findByMessageId(change.messageId)).length > 0;
+        const name = hasFiles ? (await this.findSenderIdentity(ctx, message.senderId)).name : '';
+        const update = hasFiles ? this.provider.transformer.prefixAuthor(name, text) : text;
+        await api.updateMessage(link.externalId, row.externalId, update);
+      });
     }
   }
 
@@ -98,19 +140,20 @@ export class OutboundService {
   private async asPoster(
     ctx: OutboundContext,
     senderId: string | undefined,
-    fn: (api: BaseApi) => Promise<void>
+    fn: (api: BaseApi, asBot: boolean) => Promise<void>
   ): Promise<void> {
     const sender = senderId ? await this.userAuth.findUserApi(senderId) : null;
-    if (sender && (await this.userAuth.callAsUser(sender, fn))) return;
-    await fn(ctx.api);
+    if (sender && (await this.userAuth.callAsUser(sender, (api) => fn(api, false)))) return;
+    await fn(ctx.api, true);
   }
 
   /** Posts a message once and returns its provider id; a reply's parent from before the link is posted first. */
   private async postToProvider(ctx: OutboundContext, messageId: string): Promise<string | null> {
     const lock = await acquireLock(sendLockKey(messageId), {
       ttlSeconds: gatewayConfig.lockTtlSeconds,
+      waitTimeoutMs: SEND_WAIT_MS,
     });
-    if (!lock) return null;
+    if (!lock) throw new GatewayError('LOCK_HELD', 'This message is still being sent');
     try {
       const existing = await this.messageMap.findByMessageId(ctx.sourceIds, messageId);
       if (existing)
@@ -138,36 +181,57 @@ export class OutboundService {
           ? await this.findOrPostThreadParent(ctx, parentId)
           : undefined;
 
-      const [files, html] = await Promise.all([
-        this.loadMessageFiles(messageId),
+      const [{ files, skipped }, text] = await Promise.all([
+        this.listMessageFiles(messageId),
         this.toProviderText(ctx, message.content),
       ]);
-      const text = html || files.map((file) => `📎 ${file.name}`).join(' ');
-      if (!text) return null;
+      if (!text && files.length === 0 && skipped.length === 0) return null;
 
-      const outbound = {
-        channelId: ctx.link.externalId,
-        threadId: threadId ?? undefined,
-        text,
+      const draft: Draft = {
+        messageId,
+        message: {
+          channelId: ctx.link.externalId,
+          threadId: threadId ?? undefined,
+          text,
+          originId: messageId,
+        },
+        files,
+        notes: skipped.map(couldNotCopy),
+        sendLock: lock,
       };
-      const record = async (externalId: string): Promise<void> => {
-        await this.messageMap.create({
-          sourceId: ctx.sourceId,
-          externalId,
-          threadId: threadId ?? externalId,
-          messageId,
-          direction: MessageDirection.OUTGOING,
-        });
-      };
-      const externalId =
-        (await this.postAsSender(ctx, message.senderId, outbound, record)) ??
-        (await this.postAsBot(ctx, message.senderId, outbound, record));
-      if (files.length > 0)
-        await ctx.api.uploadFiles(ctx.link.externalId, threadId ?? externalId, files);
-      return externalId;
+      const sender = await this.userAuth.findUserApi(message.senderId);
+      const earlier = await this.findEarlierPost(ctx, draft, sender);
+      if (earlier) {
+        await this.record(ctx, draft, earlier);
+        return earlier;
+      }
+      return (
+        (sender ? await this.postAsSender(ctx, sender, draft) : null) ??
+        (await this.postAsBot(ctx, draft, message.senderId))
+      );
     } finally {
       await releaseLock(lock);
     }
+  }
+
+  private async findEarlierPost(
+    ctx: OutboundContext,
+    draft: Draft,
+    sender: UserApi | null
+  ): Promise<string | null> {
+    const delivery = ctx.job.getProgress<Delivery>(draft.messageId);
+    if (!delivery?.startedAt) return null;
+    if (delivery.sharedFileId) return await this.waitForFileMessage(ctx, delivery.sharedFileId);
+    return await ctx.api.findPostedMessage(
+      draft.message.channelId,
+      draft.message.threadId,
+      new Date(delivery.startedAt - CLOCK_SKEW_MS),
+      {
+        originId: draft.messageId,
+        text: withNotes(draft.message.text, draft.notes),
+        ...(sender && { authorId: sender.externalUserId }),
+      }
+    );
   }
 
   /**
@@ -176,45 +240,142 @@ export class OutboundService {
    */
   private async postAsSender(
     ctx: OutboundContext,
-    senderId: string,
-    message: OutboundMessage,
-    record: (externalId: string) => Promise<void>
+    sender: UserApi,
+    draft: Draft
   ): Promise<string | null> {
-    const sender = await this.userAuth.findUserApi(senderId);
-    if (!sender) return null;
-    const lock = await acquireLock(sendAsLockKey(ctx.link.id, sender.externalUserId), {
-      ttlSeconds: gatewayConfig.lockTtlSeconds,
-      waitTimeoutMs: SEND_AS_WAIT_MS,
+    const posted = await this.userAuth.callAsUser(sender, async (api) => {
+      const { fileIds, notes } = await this.uploadFiles(ctx, api, sender.externalUserId, draft);
+      const lock = await acquireLock(sendAsLockKey(ctx.link.id, sender.externalUserId), {
+        ttlSeconds: gatewayConfig.lockTtlSeconds,
+        waitTimeoutMs: SEND_AS_WAIT_MS,
+      });
+      if (!lock)
+        throw new GatewayError('LOCK_HELD', 'Another message from this person is being sent');
+      try {
+        const message = { ...draft.message, text: withNotes(draft.message.text, notes) };
+        return await this.publish(ctx, api, draft, message, fileIds);
+      } finally {
+        await releaseLock(lock);
+      }
     });
-    if (!lock) return null;
-    try {
-      const posted = await this.userAuth.callAsUser(sender, (api) => api.postMessage(message));
-      if (posted) await record(posted.value);
-      return posted?.value ?? null;
-    } finally {
-      await releaseLock(lock);
-    }
+    return posted?.value ?? null;
   }
 
-  /** The bot posts under the sender's provider name and photo when they have an account there, else their Spaces ones. */
-  private async postAsBot(
+  /**
+   * The bot posts under the sender's provider name and photo when they have an account there, else their
+   * Spaces ones. Files can't carry those, so a message with files starts with the sender's name.
+   */
+  private async postAsBot(ctx: OutboundContext, draft: Draft, senderId: string): Promise<string> {
+    const { name, avatarUrl } = await this.findSenderIdentity(ctx, senderId);
+    const { fileIds, notes } = await this.uploadFiles(ctx, ctx.api, BOT_POSTER, draft);
+    const text = withNotes(draft.message.text, notes);
+    const message: OutboundMessage =
+      fileIds.length > 0
+        ? { ...draft.message, text: this.provider.transformer.prefixAuthor(name, text) }
+        : { ...draft.message, text, senderName: name, senderAvatarUrl: avatarUrl };
+    return await this.publish(ctx, ctx.api, draft, message, fileIds);
+  }
+
+  private async findSenderIdentity(
     ctx: OutboundContext,
-    senderId: string,
-    message: OutboundMessage,
-    record: (externalId: string) => Promise<void>
-  ): Promise<string> {
+    senderId: string
+  ): Promise<{ name: string; avatarUrl: string | undefined }> {
     const [sender, externalSender] = await Promise.all([
       repositories.users.findById(senderId),
       // A failed lookup only costs the provider's name and photo; the Spaces ones are used instead.
       this.identity.findExternalUser(ctx.api, senderId).catch(() => null),
     ]);
-    const externalId = await ctx.api.postMessage({
-      ...message,
-      senderName: externalSender?.name ?? sender?.name ?? 'Spaces',
-      senderAvatarUrl: externalSender?.avatarUrl ?? sender?.picture ?? undefined,
+    return {
+      name: externalSender?.name ?? sender?.name ?? 'Spaces',
+      avatarUrl: externalSender?.avatarUrl ?? sender?.picture ?? undefined,
+    };
+  }
+
+  private async uploadFiles(
+    ctx: OutboundContext,
+    api: BaseApi,
+    poster: string,
+    draft: Draft
+  ): Promise<{ fileIds: string[]; notes: string[] }> {
+    const notes = [...draft.notes];
+    if (draft.files.length === 0) return { fileIds: [], notes };
+    const saved = ctx.job.getProgress<Delivery>(draft.messageId);
+    const uploaded = saved?.poster === poster ? { ...saved.uploaded } : {};
+    for (const ref of draft.files) {
+      if (uploaded[ref.id]) continue;
+      const ttlSeconds = gatewayConfig.lockTtlSeconds + gatewayConfig.fileTimeoutMs / 1_000;
+      if (!(await renewLock(draft.sendLock, ttlSeconds))) {
+        throw new GatewayError('LOCK_HELD', 'This message is being sent elsewhere');
+      }
+      try {
+        const file = await this.loadFile(ref);
+        if (!file) {
+          notes.push(couldNotCopy(ref.name));
+          continue;
+        }
+        uploaded[ref.id] = await api.uploadFile(file);
+        await ctx.job.setProgress(draft.messageId, { poster, uploaded });
+      } catch (error) {
+        const failedUpload = error instanceof GatewayError && error.code === 'PROVIDER_ERROR';
+        if (!ctx.job.lastAttempt || !failedUpload) throw error;
+        notes.push(couldNotCopy(ref.name));
+      }
+    }
+    return { fileIds: draft.files.flatMap((ref) => uploaded[ref.id] ?? []), notes };
+  }
+
+  private async publish(
+    ctx: OutboundContext,
+    api: BaseApi,
+    draft: Draft,
+    message: OutboundMessage,
+    fileIds: string[]
+  ): Promise<string> {
+    const [sharedFileId] = fileIds;
+    const saved = ctx.job.getProgress<Delivery>(draft.messageId);
+    await ctx.job.setProgress(draft.messageId, {
+      ...saved,
+      startedAt: Date.now(),
+      ...(sharedFileId && { sharedFileId }),
     });
-    await record(externalId);
+    const externalId = sharedFileId
+      ? await this.shareFiles(ctx, api, message, fileIds, sharedFileId)
+      : await api.postMessage(message);
+    await this.record(ctx, draft, externalId);
     return externalId;
+  }
+
+  private async shareFiles(
+    ctx: OutboundContext,
+    api: BaseApi,
+    message: OutboundMessage,
+    fileIds: string[],
+    sharedFileId: string
+  ): Promise<string> {
+    await api.shareFiles(message, fileIds);
+    const externalId = await this.waitForFileMessage(ctx, sharedFileId);
+    if (!externalId)
+      throw new GatewayError('PROVIDER_ERROR', 'The shared files have not shown up yet');
+    return externalId;
+  }
+
+  private async waitForFileMessage(ctx: OutboundContext, fileId: string): Promise<string | null> {
+    for (let check = 0; check < SHARE_CHECKS; check++) {
+      if (check > 0) await sleep(SHARE_CHECK_INTERVAL_MS);
+      const externalId = await ctx.api.findFileMessage(ctx.link.externalId, fileId);
+      if (externalId) return externalId;
+    }
+    return null;
+  }
+
+  private async record(ctx: OutboundContext, draft: Draft, externalId: string): Promise<void> {
+    await this.messageMap.create({
+      sourceId: ctx.sourceId,
+      externalId,
+      threadId: draft.message.threadId ?? externalId,
+      messageId: draft.messageId,
+      direction: MessageDirection.OUTGOING,
+    });
   }
 
   private async findOrPostThreadParent(
@@ -234,19 +395,30 @@ export class OutboundService {
     return this.provider.transformer.toProvider(html, mentions);
   }
 
-  private async loadMessageFiles(messageId: string): Promise<OutboundFile[]> {
+  private async listMessageFiles(
+    messageId: string
+  ): Promise<{ files: FileRef[]; skipped: string[] }> {
     const rows = await repositories.messageAttachments.findByMessageId(messageId);
-    const attachmentIds = rows
-      .filter((row) => row.size <= gatewayConfig.maxFileBytes)
-      .map((row) => row.id);
-    if (attachmentIds.length === 0) return [];
-    const { attachments } = await this.attachments.prepareOutboundAttachments({ attachmentIds });
-    return attachments.map((attachment) => ({
+    const fits = (row: { size: number }): boolean => row.size <= gatewayConfig.maxFileBytes;
+    return {
+      files: rows.filter(fits).map((row) => ({ id: row.id, name: row.originalFilename })),
+      skipped: rows.filter((row) => !fits(row)).map((row) => row.originalFilename),
+    };
+  }
+
+  private async loadFile(ref: FileRef): Promise<OutboundFile | null> {
+    const { attachments } = await this.attachments.prepareOutboundAttachments({
+      attachmentIds: [ref.id],
+    });
+    const [attachment] = attachments;
+    if (!attachment) return null;
+    return {
+      id: ref.id,
       name: attachment.name,
       mimeType: attachment.contentType,
       content: Buffer.isBuffer(attachment.content)
         ? attachment.content
         : Buffer.from(attachment.content),
-    }));
+    };
   }
 }

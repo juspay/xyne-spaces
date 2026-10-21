@@ -1,5 +1,5 @@
-import type { Pair, ProviderChannel } from '../../core/types';
-import type { InboundService } from './services/inboundService';
+import type { Pair, ProviderChannel, SpacesMessageChange } from '../../core/types';
+import type { InboundService, MessageEvent } from './services/inboundService';
 import type { LinkRequestService } from './services/linkRequestService';
 import type { LinkService } from './services/linkService';
 import type { MemberSyncService } from './services/memberSyncService';
@@ -19,6 +19,23 @@ export const MIRROR_SOURCE_SUFFIX = '-mirror';
 
 /** A Mirror link: one provider channel (`externalId`) ⇄ one Spaces channel (`spacesId`). */
 export type MirrorLink = Pair;
+
+export type MirrorJobType = 'outbound' | 'inbound';
+
+export interface OutboundJobPayload {
+  linkId: string;
+  change: SpacesMessageChange;
+}
+
+export interface InboundJobPayload {
+  linkId: string;
+  event: MessageEvent;
+}
+
+export const outboundJobId = (messageId: string): string => `out:${messageId}`;
+
+export const inboundJobId = (linkId: string, externalId: string): string =>
+  `in:${linkId}:${externalId}`;
 
 export type SyncRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 

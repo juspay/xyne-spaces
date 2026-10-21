@@ -54,7 +54,7 @@ export function buildSlackUserAuthUrl(
 ): string {
   const params = new URLSearchParams({
     client_id: clientId,
-    user_scope: 'chat:write',
+    user_scope: 'chat:write,files:write',
     redirect_uri: redirectUri,
     state,
   });

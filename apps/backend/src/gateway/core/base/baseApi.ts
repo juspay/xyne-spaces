@@ -2,6 +2,7 @@ import { GatewayError } from '../errors';
 import type {
   OutboundFile,
   OutboundMessage,
+  PostedMessageMatch,
   ProviderChannel,
   ProviderMessage,
   ProviderUser,
@@ -52,7 +53,15 @@ export abstract class BaseApi {
   abstract postMessage(message: OutboundMessage): Promise<string>;
   abstract updateMessage(channelId: string, messageId: string, text: string): Promise<void>;
   abstract deleteMessage(channelId: string, messageId: string): Promise<void>;
-  abstract uploadFiles(channelId: string, threadId: string, files: OutboundFile[]): Promise<void>;
+  abstract uploadFile(file: OutboundFile): Promise<string>;
+  abstract shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void>;
+  abstract findFileMessage(channelId: string, fileId: string): Promise<string | null>;
+  abstract findPostedMessage(
+    channelId: string,
+    threadId: string | undefined,
+    since: Date,
+    match: PostedMessageMatch
+  ): Promise<string | null>;
   abstract findThreadParent(channelId: string, threadId: string): Promise<ProviderMessage | null>;
   abstract getChannel(channelId: string): Promise<ProviderChannel>;
   /** Channels the user and the bot are both in. */

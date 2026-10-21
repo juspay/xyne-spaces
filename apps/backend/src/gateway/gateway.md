@@ -9,7 +9,7 @@ The gateway carries everything between Spaces and an external app (a provider). 
 - Only `re-exports.ts` imports from outside `gateway/`. Need repo code? Re-export it there. npm packages are imported directly.
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
-- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler` (`onProviderEvent`, `onSpacesMessageChanged`, `onSpacesMemberChanged`) and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler` (`onProviderEvent`, `onSpacesMessageChanged`, `onSpacesMemberChanged`, and `runJob` only if it queues work) and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
 - `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories over the tables every use case shares stay in `core/repositories/`, and a use case's own stores (Mirror's Redis sync requests) in `useCases/<name>/repositories/`.
 
 ## Steps
@@ -22,9 +22,10 @@ The gateway carries everything between Spaces and an external app (a provider). 
    const teamsMirror = createMirror(teams);
    gatewayRouter.use('/teams', teamsRoutes(teams, [teamsMirror.handler]));
    gatewayRouter.use('/teams', teamsMirror.router);
-   // and add teamsMirror.handler to gatewayHooks
+   // and add teamsMirror.handler to gatewayHooks and jobs.register()
    ```
 4. Point the provider's webhook at `<backend>/api/gateway/<id>/events`.
+5. Add the handler's name (e.g. `teams-mirror`) to `GATEWAY_WORKER_HANDLERS` on the worker that should run its jobs.
 
 ## The six files
 
@@ -60,7 +61,7 @@ The gateway carries everything between Spaces and an external app (a provider). 
 
 A person signs in once per Spaces workspace (`GET /user/connect`, then the provider redirects to `/user/callback`). The token lands in `UserExternalToken` under the provider's CONNECTION sourceType, e.g. `slack-connection`, and only if it is for the configured provider workspace. Removing the config deletes that workspace's tokens.
 
-- Outbound posts, edits and deletes use the sender's token when there is one. Otherwise the bot posts under the sender's provider name and photo (`findUser()`), or their Spaces ones when they have no provider account.
+- Outbound posts, edits and deletes use the sender's token when there is one. Otherwise the bot posts under the sender's provider name and photo (`findUser()`), or their Spaces ones when they have no provider account. A message with files is one post with the text and files; from the bot, its text starts with the sender's name (`prefixAuthor()`), since files can't carry a custom name.
 - A rejected token is dropped, and a person who can't reach the channel or didn't post that message falls back to the bot. These never pause a link.
 - The provider echoes their post back as theirs. A lock per link and person is held until the post is mapped; an echo that arrives first gets 503 and is skipped on retry.
 - Edits and deletes made in the provider to messages that came from Spaces are not copied back, so a change never bounces between the two.
@@ -86,23 +87,35 @@ The gateway stores its rows in `ExternalSource`, with `kind` set. Every older ro
 - 1:1 is enforced by the database: the unique `name` allows one link per provider channel, and the unique `(spacesId, sourceType)` one per Spaces channel.
 - The message map stays in `ExternalMessage`, under the channel's self-serve migration source (`buildMessageSource()`), so a migration and Mirror each skip what the other copied. Older migrations' rows (`legacyMessageSourceNames()`) are read too.
 
+## Jobs
+
+`core/queue/gatewayQueue.ts` gives each handler that implements `runJob()` its own Bull queue, `gateway-<handler name>` (Mirror on Slack: `gateway-slack-mirror`). A handler with no `runJob()` never touches it. API pods add jobs; a worker process runs the handlers listed in `GATEWAY_WORKER_HANDLERS`, e.g. `slack-mirror` (`generic-worker` in the cluster, `pnpm dev:worker` locally), so each use case can run in its own deployment.
+
+- Queued: every Spaces message change, and provider messages with files. Messages without files and member changes still run inside the request.
+- An edit, delete or reply whose message is still queued is queued too, and waits for it.
+- Retries: 3 s, 1 min, 5 min, 2 h, 6 h, 12 h for `RATE_LIMITED`, `LOCK_HELD`, `PROVIDER_ERROR` and unexpected errors. Other gateway errors fail at once.
+- A job is removed when it succeeds. One that fails every retry is kept 7 days: `GET /jobs`, `POST /jobs/:handler/:id/retry`, `DELETE /jobs/:handler/:id` (workspace admins).
+- No double posts: a job saves its progress before posting. A retry first looks for the earlier post: `findFileMessage()` for files, `findPostedMessage()` otherwise (our metadata id, or author and text for a person's token).
+- Files go one at a time, each uploaded file id is saved, and on the last try a file that still fails becomes a "📎 name (couldn't copy)" line.
+
 ## Events
 
 `parseEvent()` emits only `message_created`, `message_edited`, `message_deleted`, `member_joined` and `member_left`. In `ProviderMessage`, set `threadId` only on replies, and give files a URL the bot token can download.
 
 ## BaseApi
 
-Implement `postMessage`, `updateMessage`, `deleteMessage`, `uploadFiles`, `findThreadParent`, `getChannel`, `listSharedChannels` (channels the user and the bot share), `listMembers`, `inviteMembers`, `removeMember`, `findUser`, `findUserIdByEmail` and `toGatewayError`. Names follow one rule: `find…` may return `null`, `get…` throws when missing, `list…` returns an array.
+Implement `postMessage`, `updateMessage`, `deleteMessage`, `uploadFile`, `shareFiles`, `findFileMessage`, `findPostedMessage`, `findThreadParent`, `getChannel`, `listSharedChannels` (channels the user and the bot share), `listMembers`, `inviteMembers`, `removeMember`, `findUser`, `findUserIdByEmail` and `toGatewayError`. Names follow one rule: `find…` may return `null`, `get…` throws when missing, `list…` returns an array.
 
 Run every call through `this.call()`: it maps failures with `toGatewayError()` and retries only `RATE_LIMITED`. Use `this.callIgnoring(fn, codes)` for errors that mean "already done", like already in channel.
 
-| `toGatewayError()` returns | When                                     | Then                                    |
-| -------------------------- | ---------------------------------------- | --------------------------------------- |
-| `RATE_LIMITED`             | 429; set `retryAfterMs`                  | Retried up to 3 times                   |
-| `PROVIDER_AUTH`            | Token revoked or invalid                 | Every link on the config pauses         |
-| `CHANNEL_GONE`             | Channel deleted or archived, bot removed | That link pauses                        |
-| `NOT_MESSAGE_AUTHOR`       | The token didn't post that message       | A person's edit falls back to the bot   |
-| `PROVIDER_ERROR`           | Anything else; set `providerCode`        | Events answer 5xx, the provider retries |
+| `toGatewayError()` returns | When                                     | Then                                  |
+| -------------------------- | ---------------------------------------- | ------------------------------------- |
+| `RATE_LIMITED`             | 429; set `retryAfterMs`                  | Retried up to 3 times                 |
+| `PROVIDER_AUTH`            | Token revoked or invalid                 | Every link on the config pauses       |
+| `CHANNEL_GONE`             | Channel deleted or archived, bot removed | That link pauses                      |
+| `NOT_MESSAGE_AUTHOR`       | The token didn't post that message       | A person's edit falls back to the bot |
+| `NOT_PERMITTED`            | The token lacks a scope                  | A person's call falls back to the bot |
+| `PROVIDER_ERROR`           | Anything else; set `providerCode`        | Events answer 5xx; jobs retry         |
 
 Never retry anything else yourself: a timed-out post may already be sent.
 
@@ -110,6 +123,7 @@ Never retry anything else yourself: a timed-out post may already be sent.
 
 - `toSpaces(message, config)`: provider message → Spaces HTML.
 - `toProvider(html, mentions)`: Spaces HTML → provider text. `mentions` maps Spaces user ids to provider user ids; anyone unmapped stays plain `@Name`.
+- `prefixAuthor(name, text)`: the sender's name in front of a bot post that can't show it otherwise.
 
 ## Provider app setup
 
@@ -117,4 +131,5 @@ Never retry anything else yourself: a timed-out post may already be sent.
 - Bot permissions to post (with a custom name and avatar), edit, delete and upload; read channel info and members; invite and remove members; read users and look them up by email.
 - The bot is in every channel to sync.
 - The admin also enters the app's name in the config; people's instructions use it.
-- The app's OAuth client id and secret go in the config with the bot token, plus a user scope to post as the user and the redirect URL `<backend>/api/gateway/<id>/user/callback`, so people can post as themselves.
+- The app's OAuth client id and secret go in the config with the bot token, plus user scopes to post and upload files as the user and the redirect URL `<backend>/api/gateway/<id>/user/callback`, so people can post as themselves.
+- Slack: turn on Event Subscriptions → Delayed Events, so Slack keeps retrying missed events for 24 hours.

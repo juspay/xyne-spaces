@@ -1,10 +1,12 @@
 import { ErrorCode, WebClient } from '@slack/web-api';
 import type { WebAPICallError } from '@slack/web-api';
+import { gatewayConfig } from '../../config';
 import { BaseApi } from '../../core/base/baseApi';
 import { GatewayError } from '../../core/errors';
 import type {
   OutboundFile,
   OutboundMessage,
+  PostedMessageMatch,
   ProviderChannel,
   ProviderMessage,
   ProviderUser,
@@ -23,12 +25,14 @@ const AUTH_ERRORS = new Set([
 ]);
 const CHANNEL_GONE_ERRORS = new Set(['channel_not_found', 'is_archived', 'not_in_channel']);
 const NOT_AUTHOR_ERRORS = new Set(['cant_update_message', 'cant_delete_message']);
+const NOT_PERMITTED_ERRORS = new Set(['missing_scope', 'not_allowed_token_type']);
 
 const CHANNEL_TYPES = 'public_channel,private_channel';
 const PAGE_SIZE = 200;
 const MAX_PAGES = 10;
 const INVITE_BATCH = 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const HISTORY_LIMIT = 15;
 
 /** Same synthetic email self-serve migration gives a Slack user without one, so both map to one Spaces user. */
 const fallbackEmail = (slackUserId: string): string => `${slackUserId}@cross-platform.in`;
@@ -78,7 +82,13 @@ export class SlackApi extends BaseApi {
         ...(!this.options.asUser && {
           username: message.senderName,
           icon_url: message.senderAvatarUrl,
-          metadata: { event_type: 'xyne_mirror', event_payload: { origin: 'xyne' } },
+          metadata: {
+            event_type: 'xyne_mirror',
+            event_payload: {
+              origin: 'xyne',
+              ...(message.originId && { spaces_message_id: message.originId }),
+            },
+          },
         }),
       })
     );
@@ -123,14 +133,72 @@ export class SlackApi extends BaseApi {
     );
   }
 
-  async uploadFiles(channelId: string, threadId: string, files: OutboundFile[]): Promise<void> {
+  async uploadFile(file: OutboundFile): Promise<string> {
+    const { upload_url: uploadUrl, file_id: fileId } = await this.call(() =>
+      this.client.files.getUploadURLExternal({ filename: file.name, length: file.content.length })
+    );
+    if (!uploadUrl || !fileId) {
+      throw new GatewayError('PROVIDER_ERROR', 'Slack returned no upload URL');
+    }
+    await this.call(async () => {
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        body: file.content,
+        signal: AbortSignal.timeout(gatewayConfig.fileTimeoutMs),
+      });
+      if (!response.ok) {
+        throw new GatewayError('PROVIDER_ERROR', `Slack file upload returned ${response.status}`);
+      }
+    });
+    return fileId;
+  }
+
+  async shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void> {
+    const [first, ...rest] = fileIds.map((id) => ({ id }));
+    if (!first) return;
+    const destination = message.threadId
+      ? { channel_id: message.channelId, thread_ts: message.threadId }
+      : { channel_id: message.channelId };
     await this.call(() =>
-      this.client.files.uploadV2({
-        channel_id: channelId,
-        thread_ts: threadId,
-        file_uploads: files.map((file) => ({ file: file.content, filename: file.name })),
+      this.client.files.completeUploadExternal({
+        ...destination,
+        files: [first, ...rest],
+        ...(message.text && { initial_comment: message.text }),
       })
     );
+  }
+
+  async findFileMessage(channelId: string, fileId: string): Promise<string | null> {
+    const result = await this.callIgnoring(
+      () => this.client.files.info({ file: fileId }),
+      ['file_not_found', 'file_deleted']
+    );
+    const shares = result?.file?.shares;
+    return shares?.public?.[channelId]?.[0]?.ts ?? shares?.private?.[channelId]?.[0]?.ts ?? null;
+  }
+
+  async findPostedMessage(
+    channelId: string,
+    threadId: string | undefined,
+    since: Date,
+    match: PostedMessageMatch
+  ): Promise<string | null> {
+    const window = {
+      channel: channelId,
+      oldest: (since.getTime() / 1000).toFixed(6),
+      limit: HISTORY_LIMIT,
+      include_all_metadata: true,
+    };
+    const { messages } = threadId
+      ? await this.call(() => this.client.conversations.replies({ ...window, ts: threadId }))
+      : await this.call(() => this.client.conversations.history(window));
+    const found = messages?.find(
+      (message) =>
+        (message.metadata?.event_payload as Record<string, unknown> | undefined)
+          ?.spaces_message_id === match.originId ||
+        (!!match.authorId && message.user === match.authorId && message.text === match.text)
+    );
+    return found?.ts ?? null;
   }
 
   async findThreadParent(channelId: string, threadId: string): Promise<ProviderMessage | null> {
@@ -240,6 +308,9 @@ export class SlackApi extends BaseApi {
     }
     if (providerCode && NOT_AUTHOR_ERRORS.has(providerCode)) {
       return new GatewayError('NOT_MESSAGE_AUTHOR', providerCode, { providerCode });
+    }
+    if (providerCode && NOT_PERMITTED_ERRORS.has(providerCode)) {
+      return new GatewayError('NOT_PERMITTED', providerCode, { providerCode });
     }
     return new GatewayError('PROVIDER_ERROR', providerCode ?? error.message, { providerCode });
   }
