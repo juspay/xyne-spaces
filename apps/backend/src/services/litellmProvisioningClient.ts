@@ -5,8 +5,7 @@ const KEY_MODELS = ['all-team-models'];
 const KEY_TYPE = 'llm_api';
 const USER_ROLE = 'internal_user';
 const TEAM_USER_ROLE = 'user';
-const TEAM_MAX_BUDGET = 1000;
-const BUDGET = 50;
+const DEFAULT_TEAM_BUDGET = 50;
 const DURATION = '30d';
 const TEAM_RPM_LIMIT = 1000;
 const TEAM_TPM_LIMIT = 1000000;
@@ -27,9 +26,17 @@ export class LiteLLMProvisioningError extends Error {
   }
 }
 
+export interface LiteLLMBudgetInfo {
+  maxBudget: number | null;
+  spend: number;
+  budgetDuration: string | null;
+  budgetResetAt: string | null;
+}
+
 export interface CreateTeamParams {
   orgId: string;
   teamAlias: string;
+  maxBudget?: number;
 }
 
 export interface CreateTeamResult {
@@ -108,12 +115,10 @@ class LiteLLMProvisioningClient {
     const body = {
       team_alias: truncate(params.teamAlias, 180),
       models: config.aiProvisioning.orgDefaultModels,
-      max_budget: TEAM_MAX_BUDGET,
+      max_budget: params.maxBudget ?? DEFAULT_TEAM_BUDGET,
       budget_duration: DURATION,
       rpm_limit: TEAM_RPM_LIMIT,
       tpm_limit: TEAM_TPM_LIMIT,
-      team_member_budget: BUDGET,
-      team_member_budget_duration: DURATION,
       metadata: {
         external_org_id: params.orgId,
       },
@@ -132,6 +137,39 @@ class LiteLLMProvisioningClient {
       teamId,
       teamAlias: stringField(response, 'team_alias'),
     };
+  }
+
+  /** Budget and spend of a team; null when LiteLLM has no such team. */
+  async getTeamBudgetInfo(teamId: string): Promise<LiteLLMBudgetInfo | null> {
+    return this.getBudgetInfo(`/team/info?team_id=${encodeURIComponent(teamId)}`, 'team_info');
+  }
+
+  /** Budget and spend of a user; null when LiteLLM has no such user. */
+  async getUserBudgetInfo(litellmUserId: string): Promise<LiteLLMBudgetInfo | null> {
+    return this.getBudgetInfo(`/user/info?user_id=${encodeURIComponent(litellmUserId)}`, 'user_info');
+  }
+
+  private async getBudgetInfo(path: string, infoField: string): Promise<LiteLLMBudgetInfo | null> {
+    let response: unknown;
+    try {
+      response = await this.postLiteLLM(path, undefined, 'GET');
+    } catch (error) {
+      if (error instanceof LiteLLMProvisioningError && error.statusCode === 404) return null;
+      throw error;
+    }
+    const info = (response as JsonRecord | null)?.[infoField] as JsonRecord | null | undefined;
+    if (!info || typeof info !== 'object') return null;
+    const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+    return {
+      maxBudget: typeof info.max_budget === 'number' ? info.max_budget : null,
+      spend: typeof info.spend === 'number' ? info.spend : 0,
+      budgetDuration: text(info.budget_duration),
+      budgetResetAt: text(info.budget_reset_at),
+    };
+  }
+
+  async updateTeamBudget(teamId: string, maxBudget: number): Promise<void> {
+    await this.postLiteLLM('/team/update', { team_id: teamId, max_budget: maxBudget });
   }
 
   async createUser(params: CreateUserParams): Promise<CreateUserResult> {
@@ -250,7 +288,11 @@ class LiteLLMProvisioningClient {
     });
   }
 
-  private async postLiteLLM(path: string, payload: JsonRecord): Promise<unknown> {
+  private async postLiteLLM(
+    path: string,
+    payload?: JsonRecord,
+    method: 'GET' | 'POST' = 'POST',
+  ): Promise<unknown> {
     const baseUrl = config.aiProvisioning.litellmManagementBaseUrl.replace(/\/+$/, '');
     if (!baseUrl) {
       throw new LiteLLMProvisioningError('LITELLM_MANAGEMENT_BASE_URL is not configured', {
@@ -272,6 +314,7 @@ class LiteLLMProvisioningClient {
         'litellm-changed-by': config.aiProvisioning.litellmChangedBy,
       },
       payload,
+      method,
       path,
       service: 'LiteLLM management',
       retryableStatus: status => status >= 500 || status === 408 || status === 429,
@@ -310,12 +353,15 @@ class LiteLLMProvisioningClient {
   private async post(params: {
     url: string;
     headers: Record<string, string>;
-    payload: JsonRecord;
+    payload?: JsonRecord;
+    method?: 'GET' | 'POST';
     path: string;
     service: string;
     retryableStatus: (status: number) => boolean;
     summarizePayload: (payload: JsonRecord) => string;
   }): Promise<unknown> {
+    const method = params.method ?? 'POST';
+    const requestSummary = params.payload ? params.summarizePayload(params.payload) : '{}';
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -324,16 +370,16 @@ class LiteLLMProvisioningClient {
 
     try {
       const response = await fetch(params.url, {
-        method: 'POST',
+        method,
         headers: params.headers,
-        body: JSON.stringify(params.payload),
+        ...(method === 'POST' ? { body: JSON.stringify(params.payload ?? {}) } : {}),
         signal: controller.signal,
       });
       const responseBody = await safeParseBody(response);
 
       if (!response.ok) {
         throw new LiteLLMProvisioningError(
-          `${params.service} ${params.path} failed with ${response.status}: ${summarizeBody(redactKeyResponse(responseBody))} request=${params.summarizePayload(params.payload)}`,
+          `${params.service} ${params.path} failed with ${response.status}: ${summarizeBody(redactKeyResponse(responseBody))} request=${requestSummary}`,
           {
             statusCode: response.status,
             retryable: params.retryableStatus(response.status),
@@ -343,7 +389,7 @@ class LiteLLMProvisioningClient {
 
       if (isFailureBody(responseBody)) {
         throw new LiteLLMProvisioningError(
-          `${params.service} ${params.path} returned success=false: ${summarizeBody(responseBody)} request=${params.summarizePayload(params.payload)}`,
+          `${params.service} ${params.path} returned success=false: ${summarizeBody(responseBody)} request=${requestSummary}`,
           { statusCode: response.status, retryable: false },
         );
       }
