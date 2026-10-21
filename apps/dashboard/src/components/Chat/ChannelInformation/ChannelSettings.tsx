@@ -3,7 +3,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
-import { ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import {
+  ChannelAddUserPolicy,
+  ChannelScopeType,
+  ChannelVisibility,
+  isDeskChannelType,
+} from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -19,6 +24,7 @@ import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
 import { ChannelFields } from '../Info/ChannelFields';
+import { SlackSyncCard } from '../../SlackSync/SlackSyncCard';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { stateMachineActor } from '../../../machines/stateMachine';
 
@@ -317,6 +323,8 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             </div>
           </div>
         )}
+
+        {!isDeskChannelType(channel.type) && <SlackSyncCard channelId={channel.id} />}
 
         <div className='bg-card p-[12px] rounded-[12px] border border-border'>
           <div className='flex items-start justify-between gap-3'>

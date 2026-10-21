@@ -55,6 +55,15 @@ export class PairRepository {
     return row && toPair(row);
   }
 
+  /** Uses the (workspaceId, sourceType) index. */
+  async listActiveSpacesIds(workspaceId: string): Promise<string[]> {
+    const rows = await db.externalSource.findMany({
+      where: { workspaceId, isActive: true, ...this.scope },
+      select: { spacesId: true },
+    });
+    return rows.flatMap((row) => (row.spacesId ? [row.spacesId] : []));
+  }
+
   async listByConnection(connectionId: string): Promise<Pair[]> {
     const rows = await db.externalSource.findMany({
       where: { parentId: connectionId, ...this.scope },

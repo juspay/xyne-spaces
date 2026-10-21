@@ -52,7 +52,6 @@ The gateway carries everything between Spaces and an external app (a provider). 
 | `buildMessageSource()`             | Name, `sourceType` and credentials of the `ExternalSource` row that scopes the link's message map. `sourceType` picks the file-download auth in `ExternalAttachmentService` |
 | `deskSourceName()`                 | The desk source that owns a channel, or `null` if the provider has no desk                                                                                                  |
 | `legacyMessageSourceNames()`       | Optional: names older migrations gave a pair's history, so Mirror finds it too. Defaults to none                                                                            |
-| `canAuthorizeUsers()`              | True when the config can sign people in, so their messages are posted as them                                                                                               |
 | `buildUserAuthUrl()`               | The provider's sign-in page for a person's own token                                                                                                                        |
 | `exchangeUserAuthCode()`           | Trades the sign-in code for the token, the person's provider id and their provider workspace                                                                                |
 | `createUserApi()`                  | An `<Id>Api` acting as that person; their name and photo are never overridden                                                                                               |
@@ -118,4 +117,4 @@ Never retry anything else yourself: a timed-out post may already be sent.
 - Bot permissions to post (with a custom name and avatar), edit, delete and upload; read channel info and members; invite and remove members; read users and look them up by email.
 - The bot is in every channel to sync.
 - The admin also enters the app's name in the config; people's instructions use it.
-- To let people post as themselves: the app's OAuth client id and secret in the config, user scope to post as the user, and redirect URL `<backend>/api/gateway/<id>/user/callback`.
+- The app's OAuth client id and secret go in the config with the bot token, plus a user scope to post as the user and the redirect URL `<backend>/api/gateway/<id>/user/callback`, so people can post as themselves.

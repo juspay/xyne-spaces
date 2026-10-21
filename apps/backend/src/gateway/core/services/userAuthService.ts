@@ -18,7 +18,6 @@ export interface UserAuthSession {
 }
 
 export interface UserAuthStatus {
-  available: boolean;
   connected: boolean;
   connectedAt: Date | null;
 }
@@ -42,26 +41,13 @@ export class UserAuthService {
     private readonly config: ConfigService
   ) {}
 
-  async getStatus(workspaceId: string, userId: string): Promise<UserAuthStatus> {
-    const [config, token] = await Promise.all([
-      this.config.getConfigByWorkspace(workspaceId),
-      this.tokens.findByUser(userId, this.tokenProvider),
-    ]);
-    return {
-      available: this.provider.canAuthorizeUsers(config.credentials),
-      connected: !!token,
-      connectedAt: token?.connectedAt ?? null,
-    };
+  async getStatus(userId: string): Promise<UserAuthStatus> {
+    const token = await this.tokens.findByUser(userId, this.tokenProvider);
+    return { connected: !!token, connectedAt: token?.connectedAt ?? null };
   }
 
   async buildConnectUrl(session: UserAuthSession, redirectUri: string): Promise<string> {
     const config = await this.config.getConfigByWorkspace(session.workspaceId);
-    if (!this.provider.canAuthorizeUsers(config.credentials)) {
-      throw new GatewayError(
-        'NOT_CONFIGURED',
-        `Signing in with ${this.provider.displayName} is not set up for this workspace`
-      );
-    }
     const state = randomBytes(24).toString('hex');
     await redisService.set(stateKey(state), JSON.stringify(session), STATE_TTL_SECONDS);
     return this.provider.buildUserAuthUrl(config.credentials, state, redirectUri);

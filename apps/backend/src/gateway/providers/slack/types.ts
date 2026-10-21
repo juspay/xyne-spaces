@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const SlackCredentialsSchema = z.object({
   botToken: z.string().trim().startsWith('xoxb-', 'Must be a Slack bot token (xoxb-…)'),
   signingSecret: z.string().trim().min(1),
-  clientId: z.string().trim().min(1).optional(),
-  clientSecret: z.string().trim().min(1).optional(),
+  clientId: z.string().trim().min(1),
+  clientSecret: z.string().trim().min(1),
 });
 export type SlackCredentials = z.infer<typeof SlackCredentialsSchema>;
 

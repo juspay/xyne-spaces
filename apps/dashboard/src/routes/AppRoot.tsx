@@ -195,6 +195,7 @@ import {
   RepositoryCredentialsTab,
   ToolbarTab,
 } from './WorkspaceManagementScreen';
+import { SlackConnectionTab, SyncRequestsTab } from './SlackMirrorScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
   OrganisationsIndexRedirect,
@@ -1897,6 +1898,26 @@ export const router = createBrowserRouter(
                         <OrganisationsSectionGuard section='toolbar'>
                           <OrganisationsPage>
                             <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'slack-mirror-requests',
+                      element: (
+                        <OrganisationsSectionGuard section='slack-mirror-requests'>
+                          <OrganisationsPage wide>
+                            <SyncRequestsTab />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'slack-mirror-connection',
+                      element: (
+                        <OrganisationsSectionGuard section='slack-mirror-connection'>
+                          <OrganisationsPage>
+                            <SlackConnectionTab />
                           </OrganisationsPage>
                         </OrganisationsSectionGuard>
                       ),

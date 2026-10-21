@@ -106,6 +106,7 @@ import { RelatedContextStrip } from './RelatedContextStrip';
 import { RelatedContextDialog } from './RelatedContextDialog';
 import { openSearchResult } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
+import { SlackSyncComposerRow } from '../../SlackSync/SlackSyncComposerRow';
 import type { RelatedItem } from '../../../types/search';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
@@ -1294,6 +1295,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 </span>
               </div>
             )}
+            {!messageId && <SlackSyncComposerRow channelId={channelId} />}
             <InputBox
               id={currentSessionId}
               channelId={channelId}

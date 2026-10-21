@@ -25,7 +25,7 @@ export class UserAuthController {
   constructor(private readonly userAuth: UserAuthService) {}
 
   getStatus: RequestHandler = asyncRoute(async (req, res) => {
-    res.json(await this.userAuth.getStatus(req.user!.workspaceId!, req.user!.id));
+    res.json(await this.userAuth.getStatus(req.user!.id));
   });
 
   /** A browser navigation, so failures go back to the dashboard instead of showing JSON. */

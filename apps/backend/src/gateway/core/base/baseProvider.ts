@@ -41,9 +41,6 @@ export abstract class BaseProvider<TCredentials = unknown> {
   /** Name of the desk source that already owns this channel, if desks can use the provider. */
   abstract deskSourceName(externalChannelId: string): string | null;
 
-  /** True when the config can sign people in, so their messages are posted as them. */
-  abstract canAuthorizeUsers(credentials: TCredentials): boolean;
-
   /** The provider's sign-in page for a person's own token. */
   abstract buildUserAuthUrl(credentials: TCredentials, state: string, redirectUri: string): string;
 

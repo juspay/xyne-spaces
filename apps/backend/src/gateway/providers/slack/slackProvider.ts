@@ -72,12 +72,8 @@ export class SlackProvider extends BaseProvider<SlackCredentials> {
     return buildSlackDeskSourceName(externalChannelId);
   }
 
-  canAuthorizeUsers(credentials: SlackCredentials): boolean {
-    return !!credentials.clientId && !!credentials.clientSecret;
-  }
-
   buildUserAuthUrl(credentials: SlackCredentials, state: string, redirectUri: string): string {
-    return buildSlackUserAuthUrl(credentials.clientId ?? '', state, redirectUri);
+    return buildSlackUserAuthUrl(credentials.clientId, state, redirectUri);
   }
 
   async exchangeUserAuthCode(
@@ -86,8 +82,8 @@ export class SlackProvider extends BaseProvider<SlackCredentials> {
     redirectUri: string
   ): Promise<ProviderUserToken> {
     return await new SlackApi().exchangeUserCode(
-      credentials.clientId ?? '',
-      credentials.clientSecret ?? '',
+      credentials.clientId,
+      credentials.clientSecret,
       code,
       redirectUri
     );

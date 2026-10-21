@@ -89,11 +89,6 @@ export class ConfigService {
     await this.pairs.pauseByConnection(source.id, 'NOT_CONFIGURED');
   }
 
-  /** The config can sign people in, so their messages are posted as them. */
-  canAuthorizeUsers(config: ProviderConfig): boolean {
-    return this.provider.canAuthorizeUsers(config.credentials);
-  }
-
   async getConfigByWorkspace(workspaceId: string): Promise<ProviderConfig> {
     const source = await this.sources.findActiveConfig(workspaceId, this.provider.configSourceType);
     if (!source) throw this.notConfiguredError();

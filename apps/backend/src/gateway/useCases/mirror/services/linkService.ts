@@ -58,6 +58,17 @@ export class LinkService {
     return link?.status === 'ACTIVE' ? link : null;
   }
 
+  /** The synced Spaces channels the user is in, so every message box checks one cached list. */
+  async listSyncedChannelIds(workspaceId: string, userId: string): Promise<string[]> {
+    const channelIds = await this.pairs.listActiveSpacesIds(workspaceId);
+    if (channelIds.length === 0) return [];
+    const memberships = await db.channelParticipant.findMany({
+      where: { userId, channelId: { in: channelIds } },
+      select: { channelId: true },
+    });
+    return memberships.map((membership) => membership.channelId);
+  }
+
   /** Provider channels the user and the bot share, minus linked, requested and desk channels. */
   async listLinkableChannels(workspaceId: string, userId: string): Promise<ProviderChannel[]> {
     const config = await this.config.getConfigByWorkspace(workspaceId);

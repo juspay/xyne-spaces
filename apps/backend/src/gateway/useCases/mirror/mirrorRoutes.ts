@@ -23,6 +23,7 @@ export function mirrorRoutes(mirror: MirrorServices): Router {
   const requests = new LinkRequestController(mirror.linkRequests);
 
   router.get('/links', memberAuth, links.getChannelStatus);
+  router.get('/links/synced', authMiddleware.authenticate, links.listSyncedChannels);
   router.get('/links/candidates', channelAdminAuth, links.listLinkableChannels);
   router.post('/links/:id/pause', linkManagerAuth, links.pauseLink);
   router.post('/links/:id/resume', linkManagerAuth, links.resumeLink);

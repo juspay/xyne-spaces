@@ -50,16 +50,22 @@ export class SlackApi extends BaseApi {
     });
   }
 
+  /** `auth.test` has no app id, so it comes from the bot's own record (`bots.info`, `users:read`). */
   async verifyBotToken(): Promise<ProviderWorkspace> {
     const result = await this.call(() => this.client.auth.test());
-    if (!result.team_id || !result.user_id || !result.app_id) {
+    const { team_id: teamId, user_id: botUserId, bot_id: botId } = result;
+    if (!teamId || !botUserId || !botId) {
       throw new GatewayError('VALIDATION_ERROR', 'The token is not a Slack bot token');
     }
+    const { bot } = await this.call(() => this.client.bots.info({ bot: botId }));
+    if (!bot?.app_id) {
+      throw new GatewayError('VALIDATION_ERROR', 'Slack returned no app for this bot token');
+    }
     return {
-      externalWorkspaceId: result.team_id,
-      name: result.team ?? result.team_id,
-      botUserId: result.user_id,
-      appId: result.app_id,
+      externalWorkspaceId: teamId,
+      name: result.team ?? teamId,
+      botUserId,
+      appId: bot.app_id,
     };
   }
 

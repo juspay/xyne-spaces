@@ -27,6 +27,14 @@ export class LinkController {
     );
   });
 
+  listSyncedChannels: RequestHandler = asyncRoute(async (req, res) => {
+    const channelIds = await this.linkService.listSyncedChannelIds(
+      req.user!.workspaceId!,
+      req.user!.id
+    );
+    res.json({ channelIds });
+  });
+
   listLinkableChannels: RequestHandler = asyncRoute(async (req, res) => {
     ChannelQuerySchema.parse(req.query);
     const channels = await this.linkService.listLinkableChannels(
