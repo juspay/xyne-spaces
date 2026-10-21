@@ -738,7 +738,7 @@ const ConversationHeader = ({
       </div>
       <Tabs.Root defaultValue={activeTab || 'chat'}>
         <Tabs.List
-          className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
+          className='group flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
           {tabsStore && isEditingTabs ? (
@@ -841,7 +841,12 @@ const ConversationHeader = ({
                     data-testid='channel-tabs-edit'
                     data-track-category='CHANNELS'
                     data-track-name='EDIT_TABS'
-                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
+                    // Hidden until the strip is hovered: it's a rare action and
+                    // shouldn't read as another tab. Opacity (not `hidden`) keeps
+                    // its slot reserved, so the tabs don't shift when it appears.
+                    // Keyboard reveals it on focus; touch, which has no hover,
+                    // always shows it.
+                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100'
                   >
                     <PencilEdit size={14} />
                   </button>
