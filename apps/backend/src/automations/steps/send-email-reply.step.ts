@@ -13,6 +13,11 @@ import { ExternalSourcePlatform } from '@/integrations/core/types';
 import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender';
 import { appendReplyQuote } from '@/utils/replyQuote';
 import { reattachTrailImages } from '@/utils/reattachTrailImages';
+import {
+  fileAttachmentsField,
+  loadAttachmentFiles,
+  saveEmailAttachmentRows,
+} from '../services/trigger-attachment.service';
 
 const SendEmailReplyConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -26,6 +31,7 @@ const SendEmailReplyConfigSchema = z.object({
     .optional()
     .describe('Optional email addresses to blind-copy on the reply.'),
   replyAll: z.boolean().optional(),
+  fileAttachments: fileAttachmentsField,
 });
 
 const SendEmailReplyOutputSchema = z.object({
@@ -80,6 +86,11 @@ export class SendEmailReplyStep extends BaseActionStep<
         });
       }
     }
+    const forwardedFiles = await loadAttachmentFiles(
+      config.fileAttachments,
+      context.automation.workspaceId,
+    );
+    fileAttachments.push(...forwardedFiles);
 
     const result = await emailService.sendReplyOnConversation({
       conversationId,
@@ -89,6 +100,22 @@ export class SendEmailReplyStep extends BaseActionStep<
       bcc: config.bcc as string[] | undefined,
       ...(fileAttachments.length > 0 && { fileAttachments }),
     });
+
+    if (conversation && forwardedFiles.length > 0) {
+      await saveEmailAttachmentRows({
+        files: forwardedFiles,
+        emailId: result.emailId,
+        conversationId,
+        channelId: conversation.channelId,
+        workspaceId: context.automation.workspaceId,
+        userId: context.automation.createdById,
+      }).catch(err =>
+        logger.warn(
+          `[automations] SEND_EMAIL_REPLY attachment rows failed email=${result.emailId}:`,
+          err,
+        ),
+      );
+    }
 
     logger.info(
       `[automations] SEND_EMAIL_REPLY ${type} via ${result.externalSourceType} conv=${conversationId} email=${result.emailId}`,

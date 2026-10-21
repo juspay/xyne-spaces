@@ -15,11 +15,17 @@ import {
   uploadAgentAttachments,
 } from '../services/agent-attachment.service';
 import { removeUnclaimedAutomationDeliveryFiles } from '../services/automation-template.service';
+import {
+  fileAttachmentsField,
+  loadAttachmentFiles,
+  uploadAttachmentFiles,
+} from '../services/trigger-attachment.service';
 
 const ReplyOnMessageConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
   content: variableRef(z.string().min(1)),
   senderId: variableRef(z.string()).optional(),
+  fileAttachments: fileAttachmentsField,
 });
 
 const ReplyOnMessageOutputSchema = z.object({
@@ -72,6 +78,10 @@ export class ReplyOnMessageStep extends BaseActionStep<
       }
     }
 
+    const forwardedFiles = await loadAttachmentFiles(
+      config.fileAttachments,
+      context.automation.workspaceId,
+    );
     const uploadedFiles = await uploadAgentAttachments({
       attachments: agentAttachmentsFromContext(context),
       automationId: context.automation.id,
@@ -79,6 +89,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
 
     let result: Awaited<ReturnType<typeof conversationService.addMessageToConversation>>;
     try {
+      uploadedFiles.push(...(await uploadAttachmentFiles(forwardedFiles)));
       result = await conversationService.addMessageToConversation({
         conversationId: config.conversationId as string,
         userId: senderId,

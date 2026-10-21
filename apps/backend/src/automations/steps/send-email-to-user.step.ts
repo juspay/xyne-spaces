@@ -8,6 +8,7 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { extractEmailAddress } from '@/utils/email';
 import { logger } from '@/utils/logger';
 import type { AutomationContext } from '../types/context';
+import { fileAttachmentsField, loadAttachmentFiles } from '../services/trigger-attachment.service';
 
 const SendEmailToUserConfigSchema = z.object({
   userId: variableRef(z.string().min(1)),
@@ -15,6 +16,7 @@ const SendEmailToUserConfigSchema = z.object({
   body: variableRef(z.string().min(1)),
   cc: z.array(variableRef(z.string().email())).optional(),
   bcc: z.array(variableRef(z.string().email())).optional(),
+  fileAttachments: fileAttachmentsField,
 });
 
 const SendEmailToUserOutputSchema = z.object({
@@ -89,6 +91,7 @@ export class SendEmailToUserStep extends BaseActionStep<
     }
 
     const fromEmail = extractEmailAddress(externalSource.displayName) || externalSource.displayName;
+    const fileAttachments = await loadAttachmentFiles(config.fileAttachments, workspaceId);
 
     try {
       await adapter.sendMailNew({
@@ -100,6 +103,7 @@ export class SendEmailToUserStep extends BaseActionStep<
         cc: (config.cc as string[] | undefined) ?? [],
         bcc: (config.bcc as string[] | undefined) ?? [],
         ...(fromEmail && { fromEmailAddress: fromEmail }),
+        ...(fileAttachments.length > 0 && { fileAttachments }),
       });
     } catch (error) {
       logger.error(
