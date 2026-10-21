@@ -655,7 +655,7 @@ export function EnvironmentsView({
   channelId?: string | undefined;
   /** The hub's live repository ids; a change refetches the list. */
   hubRepoIds?: string[];
-  onAddRepository?: () => void;
+  onAddRepository?: (() => void) | undefined;
 }): ReactElement {
   const [selection, setSelection] = useState<{ repoId: string; key: string } | null>(null);
   const [query, setQuery] = useState('');

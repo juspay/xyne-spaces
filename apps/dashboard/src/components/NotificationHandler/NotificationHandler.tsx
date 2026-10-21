@@ -32,9 +32,8 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 import { prefixWorkspacePath } from '../../lib/workspacePath';
-import { postToSdlcFrame } from '../AIScreen/Workspace/sdlcBrowserTarget';
-import { isSdlcResourceKind, SDLC_FRAME_MESSAGE } from '../../routes/SdlcScreen/sdlcFrameMessages';
-import { invalidateSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
+import { isSdlcResourceKind } from '../../routes/SdlcScreen/sdlcFrameMessages';
+import { refreshSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -818,9 +817,7 @@ export const NotificationHandler: React.FC = () => {
   });
   // Main-lane views refetch here; the SDLC frame has no socket, so it hears it from us.
   const sdlcResourceChangedListenerRef = useRef(({ kind }: { kind?: unknown }): void => {
-    if (!isSdlcResourceKind(kind)) return;
-    invalidateSdlcResource(kind);
-    postToSdlcFrame({ type: SDLC_FRAME_MESSAGE.resourceChanged, kind });
+    if (isSdlcResourceKind(kind)) refreshSdlcResource(kind);
   });
 
   useEffect(() => {

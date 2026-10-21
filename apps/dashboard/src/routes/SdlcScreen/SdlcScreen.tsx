@@ -4385,7 +4385,7 @@ export default function SdlcScreen(): ReactElement {
                     key={channelId}
                     channelId={channelId}
                     hubRepoIds={channelRepos.map(repo => repo.id)}
-                    onAddRepository={() => setHubDialog('manage')}
+                    onAddRepository={isHubAdmin ? () => setHubDialog('manage') : undefined}
                   />
                 </div>
               ) : (
