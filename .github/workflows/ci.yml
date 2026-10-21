@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 env:
   NODE_VERSION: "22"
@@ -19,59 +18,12 @@ env:
   PNPM_FLAGS: "--frozen-lockfile --prod=false"
 
 jobs:
-  changes:
-    name: Detect changes
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      backend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.backend == 'true' }}
-      dashboard: ${{ github.event_name != 'pull_request' || steps.filter.outputs.dashboard == 'true' }}
-      claw: ${{ github.event_name != 'pull_request' || steps.filter.outputs.claw == 'true' }}
-      framework: ${{ github.event_name != 'pull_request' || steps.filter.outputs.framework == 'true' }}
-    steps:
-      - uses: dorny/paths-filter@v3
-        id: filter
-        if: github.event_name == 'pull_request'
-        with:
-          filters: |
-            global: &global
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - 'package.json'
-              - '.npmrc'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/CI-pr.yml'
-            backend:
-              - *global
-              - 'apps/backend/**'
-              - 'packages/**'
-              - 'scripts/validate-zero-column-parity.mjs'
-            dashboard:
-              - *global
-              - 'apps/dashboard/**'
-              - 'packages/**'
-            claw:
-              - *global
-              - 'apps/xyne-claw/**'
-              - 'packages/xyne-claw-shared/**'
-              - 'packages/kata-sdk/**'
-              - 'packages/litellm-client/**'
-              - 'packages/storage/**'
-              - 'packages/icons/**'
-            framework:
-              - *global
-              - 'packages/framework/**'
-
   # ---------------------------------------------------------------------------
   # Backend: depends on @xyne/shared and agentic-framework, which are workspace
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -79,11 +31,23 @@ jobs:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
+      # Early exit: skip every step below when nothing this job builds changed
+      # (pull requests only; push/merge queue always run). The action is pinned to
+      # main so a PR cannot edit it to skip its own checks.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: xyne-spaces-backend
+          extra-paths: apps/backend/eslint-rules scripts/validate-zero-column-parity.mjs
+
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI != 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -96,14 +60,14 @@ jobs:
       # public registry is already fast and this secret/step is unneeded.
       - name: Authenticate to GCP (npm mirror)
         id: gcp-auth
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
           token_format: access_token
 
       - name: Configure pnpm for Artifact Registry npm mirror
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         run: |
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
@@ -115,15 +79,18 @@ jobs:
       # ubuntu-latest — don't want to hammer npmjs.org with 64 concurrent
       # requests.
       - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
         run: >-
           pnpm install ${{ env.PNPM_FLAGS }}
           ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
           --filter xyne-spaces-backend...
 
       - name: Build workspace libraries
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter agentic-framework run build
 
       - name: Prisma generate (app + common schemas)
+        if: steps.affected.outputs.run == 'true'
         run: |
           pnpm --filter xyne-spaces-backend run db:generate
           pnpm --filter xyne-spaces-backend run db:common:generate
@@ -131,10 +98,12 @@ jobs:
       # The hand-maintained Zero client schema must not declare a column that
       # schema.prisma does not have (the drift that caused a runtime mismatch).
       - name: Validate Zero <> Prisma column parity
+        if: steps.affected.outputs.run == 'true'
         run: node scripts/validate-zero-column-parity.mjs --ci-mode
 
       # backend lint intentionally omitted (~259 pre-existing errors — separate cleanup).
       - name: Typecheck + build
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-backend run build
 
   # ---------------------------------------------------------------------------
@@ -142,8 +111,6 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard
-    needs: changes
-    if: needs.changes.outputs.dashboard == 'true'
     # TEST: merged from 3 matrix legs (lint/typecheck/build) into one job.
     # Each leg used to run its own Install dependencies in parallel — 3
     # concurrent installs against the mirror per PR. Trades wall-clock time
@@ -156,11 +123,22 @@ jobs:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
+      # Early exit: skip every step below when nothing this job builds changed
+      # (pull requests only; push/merge queue always run). The action is pinned to
+      # main so a PR cannot edit it to skip its own checks.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: xyne-spaces-dashboard
+
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI != 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -169,14 +147,14 @@ jobs:
       # same steps/comment on the backend job above.
       - name: Authenticate to GCP (npm mirror)
         id: gcp-auth
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
           token_format: access_token
 
       - name: Configure pnpm for Artifact Registry npm mirror
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         run: |
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
@@ -184,6 +162,7 @@ jobs:
       # TEST: higher network concurrency against our own mirror — see the same
       # comment on the backend job above.
       - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
         run: >-
           pnpm install ${{ env.PNPM_FLAGS }}
           ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
@@ -197,12 +176,15 @@ jobs:
 
       # errors-only (warnings ignored).
       - name: Lint (errors only)
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run lint:errors-only:ci
 
       - name: Format check
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
       - name: Restore tsc incremental state
+        if: steps.affected.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
@@ -211,9 +193,11 @@ jobs:
             dashboard-tsbuildinfo-${{ runner.os }}-
 
       - name: Typecheck
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
 
       - name: Build
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run build
 
   test:
@@ -313,16 +297,25 @@ jobs:
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
-    needs: changes
-    if: needs.changes.outputs.framework == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
+      # Early exit: skip every step below when nothing this job builds changed
+      # (pull requests only; push/merge queue always run). The action is pinned to
+      # main so a PR cannot edit it to skip its own checks.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: agentic-framework
+
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI != 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -331,22 +324,24 @@ jobs:
       # steps/comment on the backend job above.
       - name: Authenticate to GCP (npm mirror)
         id: gcp-auth
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
           token_format: access_token
 
       - name: Configure pnpm for Artifact Registry npm mirror
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         run: |
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
       - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
 
       - name: Lint
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter agentic-framework run lint
 
   # ---------------------------------------------------------------------------
@@ -356,35 +351,45 @@ jobs:
   # ---------------------------------------------------------------------------
   xyne-claw:
     name: xyne-claw typecheck
-    needs: changes
-    if: needs.changes.outputs.claw == 'true'
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
+      # Early exit: skip every step below when nothing this job builds changed
+      # (pull requests only; push/merge queue always run). The action is pinned to
+      # main so a PR cannot edit it to skip its own checks.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: xyne-claw
+
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI != 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Authenticate to GCP (npm mirror)
         id: gcp-auth
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
           token_format: access_token
 
       - name: Configure pnpm for Artifact Registry npm mirror
-        if: vars.USE_SELF_HOSTED_CI == 'true'
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
         run: |
           pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
           echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
 
       - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: >-
@@ -393,9 +398,11 @@ jobs:
           --filter xyne-claw...
 
       - name: Typecheck xyne-claw-shared
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-claw-shared run typecheck
 
       - name: Typecheck xyne-claw
+        if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-claw run typecheck
 
   # ---------------------------------------------------------------------------
