@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { isChannelQueryMember } from '@/src/hooks/useJoinableChannel';
-import { useChannelById, useGetChannelUserStatus } from '@/src/hooks/useChannels';
-
 import { conversationRefFor } from '../data/conversationRef';
 import type { ConversationWindow } from '../data/normalizeConversationWindow';
 import { useConversationWindow } from '../data/useConversationWindow';
@@ -73,9 +70,6 @@ export const useChatOpen = (
   warmWindow: WarmWindow | null;
   target: ReturnType<typeof classifyOpen>;
 } => {
-  const channel = useChannelById(intent.surface.channelId);
-  const membership = useGetChannelUserStatus(intent.surface.channelId);
-  const isMember = isChannelQueryMember(channel, membership);
   const [warmWindow] = useState<WarmWindow | null>(() => {
     hydratePersistedWindow(intent);
     return readWarmWindow(intent, productionWarmDeps());
@@ -189,7 +183,7 @@ export const useChatOpen = (
   return {
     state,
     dispatch,
-    ref: conversationRefFor(intent, isMember),
+    ref: conversationRefFor(intent),
     warmWindow,
     target,
   };

@@ -1,10 +1,10 @@
 import { useCallback, useState, type ReactElement } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { UserRoundPlus } from 'lucide-react-native';
 import { v4 as uuidv4 } from 'uuid';
 import { useCSSVariable } from 'uniwind';
 
+import { SafeAreaView } from '@/src/components/ui/safe-area-view';
 import { useZero } from '@/src/hooks/useZero';
 import { mutators } from '@/src/zero/mutators';
 import { cn } from '@/src/utils/cn';
@@ -17,7 +17,6 @@ type JoinChannelCardProps = {
 
 export function JoinChannelCard({ channelId, channelTitle }: JoinChannelCardProps): ReactElement {
   const zero = useZero();
-  const insets = useSafeAreaInsets();
   const foregroundColor = useCSSVariable('--color-foreground') as string;
   const {
     selectedBubbleBg,
@@ -49,10 +48,7 @@ export function JoinChannelCard({ channelId, channelTitle }: JoinChannelCardProp
   }, [channelId, isJoining, zero]);
 
   return (
-    <View
-      className='px-3 pb-3'
-      style={Platform.OS === 'android' ? { marginBottom: insets.bottom } : undefined}
-    >
+    <SafeAreaView edges={['bottom']} className='px-3 pb-3'>
       <View className='rounded-2xl border border-border bg-card px-4 py-4 shadow-[0_1px_2px_0] shadow-black/5'>
         <View className='flex-row items-start gap-3'>
           <View className='size-10 items-center justify-center rounded-full bg-muted'>
@@ -85,6 +81,6 @@ export function JoinChannelCard({ channelId, channelTitle }: JoinChannelCardProp
           </Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
