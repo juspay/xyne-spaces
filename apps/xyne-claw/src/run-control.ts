@@ -28,6 +28,12 @@ import { ownershipClient, podName } from "./run-ownership.js";
 const clog = createLogger("run-control");
 
 export const RUN_CONTROL_CHANNEL = "claw:run-control";
+/** claw-auth publishes every kill-switch set or clear here; governance-kill.ts refreshes on it. */
+export const KILL_CHANNEL = "claw:governance-kill";
+let killHandler: ((raw: string) => void) | null = null;
+export function registerKillMessageHandler(fn: ((raw: string) => void) | null): void {
+  killHandler = fn;
+}
 export const RUN_CONTROL_MAX_AGE_MS = 60_000;
 
 export type RunControlType = "cancel" | "interrupt";
@@ -177,6 +183,10 @@ export function startRunControlSubscriber(): Redis | null {
     clog.warn(`[run-control] subscriber connection error: ${err.message}`);
   });
   conn.on("message", (channel: string, raw: string) => {
+    if (channel === KILL_CHANNEL) {
+      killHandler?.(raw);
+      return;
+    }
     if (channel !== RUN_CONTROL_CHANNEL) return;
     try {
       handleRunControlMessage(raw);
@@ -184,7 +194,7 @@ export function startRunControlSubscriber(): Redis | null {
       clog.warn(`[run-control] apply failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
-  void conn.subscribe(RUN_CONTROL_CHANNEL).then(
+  void conn.subscribe(RUN_CONTROL_CHANNEL, KILL_CHANNEL).then(
     () => clog.info(`[run-control] subscribed pod=${podName()} channel=${RUN_CONTROL_CHANNEL}`),
     (err: Error) => clog.warn(`[run-control] subscribe failed: ${err.message}`),
   );

@@ -42,6 +42,7 @@ import { initMessagingAccountManager, closeMessagingAccountManager } from "../su
 import { initDigitalTwinDaily } from "../services/digitalTwinDailyCron.js";
 import { startMcpRestartListener } from "../lib/mcp-restart-signal.js";
 import { startGovernanceSequencer, stopGovernanceSequencer } from "../lib/governance-audit.js";
+import { startKillSwitchSync, stopKillSwitchSync } from "../lib/governance-kill.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -110,6 +111,8 @@ const WORKERS: WorkerEntry[] = [
   { name: "proactive-queues", close: closeProactiveQueues },
   // Chains governance audit rows per org and flushes the queued ones on close.
   { name: "governance-audit", init: startGovernanceSequencer, close: stopGovernanceSequencer },
+  // Keeps this pod's kill-switch snapshot current: a 2 s epoch poll plus the Redis push.
+  { name: "governance-kill", init: startKillSwitchSync, close: stopKillSwitchSync },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
@@ -136,6 +139,7 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "awakening-queues",
   "proactive-workers",
   "proactive-queues",
+  "governance-kill",
   "governance-audit",
   "scheduled-jobs-queue",
   "daily-brief-worker",

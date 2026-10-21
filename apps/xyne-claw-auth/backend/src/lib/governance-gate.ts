@@ -21,6 +21,7 @@ import {
 import { prisma } from "../db.js";
 import { orgIdForUser } from "./audit.js";
 import { queueGovernanceEvent, recordGovernanceEvent, type GovernanceEventInput } from "./governance-audit.js";
+import { currentKillSnapshot, killForTool } from "./governance-kill.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("governance-gate");
@@ -119,8 +120,8 @@ function conversationFrom(c1: C1Handoff | undefined): ConversationState {
 }
 
 /** Server and tool switches, checked inside runner.callTool as well. Kill switches arrive with PR-12. */
-export function killSwitchForTool(_serverType: string, _tool: string): KillSwitch | null {
-  return null;
+export function killSwitchForTool(serverType: string, tool: string): KillSwitch | null {
+  return killForTool(serverType, tool);
 }
 
 export function blockedToolResultText(gate: Pick<GateResult, "reasonCode" | "reasonText">): string {
@@ -144,17 +145,18 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
     const grant = own === "deny" ? "deny" : input.writeTool ? "ask" : own;
     const level = input.c1?.criticLevel;
     const critic: CriticVerdict = level === "low" || level === "medium" || level === "high" || level === "critical" ? { status: "decided", level } : input.c1?.criticStatus === "unavailable" ? { status: "unavailable" } : { status: "not_needed" };
+    const run = await runContextForSession(input.sessionId);
+    const orgId = input.orgId ?? run.orgId ?? (await orgIdForUser(input.userId));
     const nowMs = Date.now();
+    const killMode = componentMode("kill");
     const verdict = decide({
       call: { toolName: input.tool, mcpServerId: input.serverType, effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
-      kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { user: input.userId, mcp_server: input.serverType, tool: input.tool, ...(input.agentSlug ? { agent: input.agentSlug } : {}), ...(input.sessionId ? { run: input.sessionId } : {}) }, nowMs },
+      kill: { snapshot: killMode === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot(), scopes: { user: input.userId, mcp_server: input.serverType, tool: input.tool, ...(input.agentSlug ? { agent: input.agentSlug } : {}), ...(input.sessionId ? { run: input.sessionId } : {}), ...(orgId ? { org: orgId } : {}) }, nowMs },
       conversation,
       critic,
       policy: { ...(grant ? { grant } : {}), ...(hint ? { permissionHint: hint } : {}), judgeAvailable: Boolean(input.c1), auditAvailable: true },
     });
 
-    const run = await runContextForSession(input.sessionId);
-    const orgId = input.orgId ?? run.orgId ?? (await orgIdForUser(input.userId));
     const result: GateResult = {
       decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: verdict.reasonText, policyVersion: verdict.policyVersion,
       mode, enforce: mode === "enforce", effect: descriptor.effect, destinationKind: descriptor.destination.kind, recorded: false,
@@ -162,6 +164,9 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
     if (!orgId) {
       log.warn(`[governance-gate] no org for user=${input.userId} site=${input.site}; decision not recorded`);
       return result;
+    }
+    if (verdict.killSwitch) {
+      queueGovernanceEvent({ orgId, eventType: "kill_switch_enforced", actorKind: "system", subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, runId: run.runId ?? null, toolName: input.tool, mcpServerId: input.serverType, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: mode === "enforce" ? "enforced at C2" : "shadow: would enforce at C2" });
     }
     const event: GovernanceEventInput = {
       orgId,

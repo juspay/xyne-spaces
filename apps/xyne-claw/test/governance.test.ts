@@ -11,6 +11,7 @@ vi.mock("../src/governance-client.js", () => ({
 
 const { createRunGovernance, governanceDecisionFor, governanceForRun, toolMetaOf } = await import("../src/governance.js");
 const { resetCritic } = await import("../src/governance-critic.js");
+const { setKillSnapshotForTests } = await import("../src/governance-kill.js");
 const { resetComponentModes } = await import("xyne-claw-shared/governance");
 const client = await import("../src/governance-client.js");
 
@@ -33,6 +34,7 @@ const findings = () => posted.flatMap((p) => p.findings as Array<Record<string, 
 beforeEach(() => {
   posted.length = now.length = 0;
   resetCritic();
+  setKillSnapshotForTests({ epoch: 0, takenAtMs: Date.now(), switches: [] });
   vi.clearAllMocks();
   delete process.env["GOVERNANCE_MODE"];
   delete process.env["GOVERNANCE_COMPONENT_MODES"];
@@ -40,6 +42,19 @@ beforeEach(() => {
 });
 
 describe("governance hooks", () => {
+  it("C1 blocks on a matching stop switch in enforce and records the enforcement in shadow", async () => {
+    const { agent } = fakeAgent();
+    run({ orgId: "org-1" }).install(agent as never);
+    setKillSnapshotForTests({ epoch: 9, takenAtMs: Date.now(), switches: [{ scopeKind: "org", scopeId: "org-1", mode: "read_only", epoch: 9, reason: "incident" }] });
+    expect(await agent.beforeToolCall(toolCall("read", "r0"))).toBeUndefined();
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w0", { content: "x" }))).toBeUndefined();
+    expect(governanceDecisionFor("w0")).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-READ-ONLY" });
+    expect(events().find((e) => e["eventType"] === "kill_switch_enforced")).toMatchObject({ subjectKind: "kill:org", subjectId: "org-1", reasonText: "shadow: would enforce at C1" });
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "C1=enforce";
+    resetComponentModes();
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w1", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-KILL-READ-ONLY") });
+  });
+
   it("C1 asks the critic only after untyped content, records its verdict and B records the outcome", async () => {
     const ask = vi.fn(async () => ({ destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: 0.9 }, injected: { type: "noul", noul: 0.2 }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }));
     const { agent } = fakeAgent();

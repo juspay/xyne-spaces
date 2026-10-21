@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { registerKillableRuns } from "../governance-kill.js";
 import { governanceForRun } from "../governance.js";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -233,6 +234,9 @@ export interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
+  orgId?: string;
+  /** Set when a kill switch aborted the run, with the reason the user sees. */
+  killReason?: string;
   /** For inflight-kill forensics: who/what this run is + when it began. */
   agentSlug?: string;
   startedAtMs?: number;
@@ -267,13 +271,14 @@ const activeRuns = new Map<string, ActiveRunControl>();
 
 export function ensureActiveRun(
   sessionId: string,
-  payload: { userId?: string; agentSlug?: string; callbackUrl?: string },
+  payload: { userId?: string; agentSlug?: string; callbackUrl?: string; orgId?: string },
 ): ActiveRunControl {
   const existing = activeRuns.get(sessionId);
   if (existing) return existing;
   const activeRun: ActiveRunControl = {
     abortController: new AbortController(),
     userId: (payload.userId ?? "").trim(),
+    ...(payload.orgId ? { orgId: payload.orgId } : {}),
     agentSlug: payload.agentSlug ?? "unknown",
     startedAtMs: Date.now(),
     hasCallbackUrl: typeof payload.callbackUrl === "string" && !!payload.callbackUrl.trim(),
@@ -383,6 +388,13 @@ function expandCustomSelection(custom: string[] | undefined): Set<string> {
   }
   return selected;
 }
+
+// The kill-switch sync aborts the runs this pod owns that a stop switch matches.
+registerKillableRuns(() =>
+  [...activeRuns.entries()]
+    .filter(([, a]) => !a.abortController.signal.aborted)
+    .map(([sessionId, a]) => ({ sessionId, userId: a.userId, agentSlug: a.agentSlug, orgId: a.orgId, abort: (reason: string) => { a.killReason = reason; a.abortController.abort(); } })),
+);
 
 export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
   const now = Date.now();

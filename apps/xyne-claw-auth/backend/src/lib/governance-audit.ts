@@ -7,7 +7,6 @@ import { createHmac } from "node:crypto";
 import type { GovernanceAuditEvent, Prisma } from "@prisma/client";
 import { canonicalJson, sha256Hex } from "xyne-claw-shared/governance";
 import { governanceAuditEventRepository as repo } from "../repositories/governanceRepository.js";
-import { gcsService } from "../services/storageService.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("governance-audit");
@@ -61,6 +60,7 @@ function toRow(e: GovernanceEventInput): Prisma.GovernanceAuditEventCreateManyIn
     loadedVersionIds: loadedVersionIds ?? [],
   };
 }
+export const governanceEventRow = toRow;
 
 /** Writes before the side effect runs; a throw means the caller must refuse with "audit unavailable". */
 export async function recordGovernanceEvent(e: GovernanceEventInput): Promise<GovernanceAuditEvent> {
@@ -209,6 +209,7 @@ async function writeAuditCheckpoints(): Promise<void> {
     const cp = await buildAuditCheckpoint(orgId).catch(() => null);
     if (!cp) continue;
     const path = `governance/audit-checkpoints/${orgId}/${cp.takenAt}.json`;
+    const { gcsService } = await import("../services/storageService.js");
     await gcsService.uploadFile(Buffer.from(JSON.stringify(cp)), path, "application/json").catch((err) => {
       log.warn(`[governance-audit] checkpoint for org ${orgId} not stored:`, err instanceof Error ? err.message : err);
     });

@@ -1,4 +1,6 @@
 import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
+import { componentMode } from "xyne-claw-shared/governance";
+import { killForAdmission } from "./governance-kill.js";
 import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
@@ -769,6 +771,16 @@ export async function prepareRun(
     const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       return { ok: false, status: 400, error: agent.error };
+    }
+    // A stop switch refuses the run at the door; read-only and ask-all bite at each call instead.
+    const kill = killForAdmission({ orgId: agent.orgId, agentSlug: agentSlug ?? undefined, userId: resolved.userId });
+    if (kill) {
+      const stopped = `Stopped by a kill switch (${kill.scopeKind}): ${kill.reason ?? "no reason given"}`;
+      if (componentMode("kill") === "enforce") {
+        log.warn(`[run] refused: ${stopped} agentSlug=${agentSlug ?? "default"} userId=${resolved.userId}`);
+        return { ok: false, status: 403, error: stopped };
+      }
+      log.warn(`[run] shadow: would refuse (${stopped}) agentSlug=${agentSlug ?? "default"} userId=${resolved.userId}`);
     }
 
     // Invocation whitelist — the universal chokepoint for CLI / service-token /
@@ -1566,6 +1578,7 @@ export async function prepareRun(
         : {}),
       ...(cwd ? { cwd } : {}),
       ...(mergedSkills.length > 0 ? { skills: mergedSkills } : {}),
+      orgId: agent.orgId,
       ...(awakeningBlock ? { awakening: awakeningBlock } : {}),
       ...(progressUrl ? { progressUrl } : {}),
       ...(attachments?.length ? { attachments } : {}),

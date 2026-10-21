@@ -32,6 +32,7 @@ import {
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 import { flushGovernance, queueGovernance, recordGovernanceNow, type GovernanceEvent, type GovernanceFinding } from "./governance-client.js";
+import { currentKillSnapshot } from "./governance-kill.js";
 import { criticEnabled, criticFor, dropCritic, preclassify, type CriticCallInput, type CriticDeps } from "./governance-critic.js";
 
 const log = createLogger("governance");
@@ -59,6 +60,7 @@ export function toolMetaOf(tool: { name: string } & Record<string, unknown>): To
 export interface RunGovernanceOptions {
   sessionId: string;
   userId: string;
+  orgId?: string | undefined;
   conversationId?: string | undefined;
   agentSlug?: string | undefined;
   channel?: Channel | undefined;
@@ -107,6 +109,7 @@ export interface RunGovernanceStats {
 export interface RunGovernance {
   readonly state: ConversationState;
   readonly stats: RunGovernanceStats;
+  readonly orgId: string | undefined;
   install(agent: GovernedAgent): void;
   /** D: the parser plus the link check on the final answer. */
   inspectAnswer(text: string): { verdict: Verdict; removed: number; text: string };
@@ -117,6 +120,12 @@ const SCAN_BUDGET_MS = 200;
 const ARGS_BUDGET_MS = 50;
 const SCANNED_CAP = 5_000;
 const decisions = new Map<string, C1Decision>();
+const runOrgs = new Map<string, string>();
+/** run-execution records the run's org so C1 can match org-scoped kill switches. */
+export function registerRunOrg(sessionId: string, orgId: string): void {
+  if (runOrgs.size >= 5_000) runOrgs.clear();
+  runOrgs.set(sessionId, orgId);
+}
 const started = new Map<string, number>();
 const byRun = new Map<string, RunGovernance>();
 
@@ -165,6 +174,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   const state: ConversationState = opts.parent?.state ?? { risk: "none", privateData: false, pendingVerdicts: 0, readUntypedContent: false };
   const stats: RunGovernanceStats = { scanned: 0, coverageMisses: 0, findings: 0, decisions: 0, blocks: 0, auditFailures: 0 };
   const toolMeta = new Map((opts.toolMeta ?? []).map((t) => [t.name, t]));
+  const orgId = opts.orgId ?? runOrgs.get(sessionId) ?? opts.parent?.orgId;
   const scanned = new Set<string>();
   const seen = (text: string): boolean => {
     const h = sha256Hex(text);
@@ -300,8 +310,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const hint = grantOf(meta?.permission);
     const verdict = decide({
       call: { toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
-      // Kill switches arrive with PR-12; until then every snapshot is fresh and empty.
-      kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
+      kill: { snapshot: componentMode("kill") === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot(), scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(orgId ? { org: orgId } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
       conversation: state,
       critic: critic.verdict,
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
@@ -309,6 +318,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const decision: C1Decision = { decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id, criticStatus: critic.verdict.status, ...(critic.verdict.level ? { criticLevel: critic.verdict.level } : {}) };
     decisions.set(ctx.toolCall.id, decision);
     stats.decisions++;
+    if (verdict.killSwitch) queueGovernance({ ...base(), eventType: "kill_switch_enforced", toolCallId: ctx.toolCall.id, toolName: name, subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: mode === "enforce" ? "enforced at C1" : "shadow: would enforce at C1" });
     const event: GovernanceEvent = {
       ...base(),
       eventType: "tool_call",
@@ -357,6 +367,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   const run: RunGovernance = {
     state,
     stats,
+    orgId,
     install(agent) {
       const baseStream = agent.streamFn as StreamFn | undefined;
       if (typeof baseStream === "function") {
@@ -414,7 +425,10 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       return { verdict: r.verdict, removed: check.links.length, text: componentMode("D") === "enforce" ? check.text : text };
     },
     async finish() {
-      if (opts.role !== "subagent") byRun.delete(sessionId);
+      if (opts.role !== "subagent") {
+        byRun.delete(sessionId);
+        runOrgs.delete(sessionId);
+      }
       log.info(`[governance] session=${sessionId} risk=${state.risk} private=${state.privateData} scanned=${stats.scanned} misses=${stats.coverageMisses} findings=${stats.findings} decisions=${stats.decisions} blocks=${stats.blocks} auditFailures=${stats.auditFailures}`);
       await flushGovernance();
     },
