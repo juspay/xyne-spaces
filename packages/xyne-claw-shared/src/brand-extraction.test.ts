@@ -122,3 +122,77 @@ describe("parseBrandSummary", () => {
     expect(parseBrandSummary("")).toBeNull();
   });
 });
+
+describe("optional fields the card renders — a shape slip here crashes the thread", () => {
+  /**
+   * The card maps `gaps`, joins `fallbacks` and renders the source fields. A
+   * validator that only checked the REQUIRED fields let these through, and the
+   * resulting throw took down MessageThread — permanently, because the message
+   * is persisted and the throw repeated on every reload.
+   */
+  it('refuses gaps as a string — "none".map is not a function', () => {
+    expect(isBrandSummary({ ...valid, gaps: "none" })).toBe(false);
+  });
+
+  it("refuses gaps as objects — React cannot render an object child", () => {
+    expect(isBrandSummary({ ...valid, gaps: [{ field: "shadows" }] })).toBe(false);
+  });
+
+  it('refuses fallbacks as a string — "Arial".join is not a function', () => {
+    expect(
+      isBrandSummary({ ...valid, fonts: [{ family: "Inter", role: "body", fallbacks: "Arial" }] }),
+    ).toBe(false);
+  });
+
+  it("refuses non-numeric font weights", () => {
+    expect(
+      isBrandSummary({ ...valid, fonts: [{ family: "Inter", role: "body", weights: ["400"] }] }),
+    ).toBe(false);
+  });
+
+  it("refuses a non-string sourceUrl, sourceRepo or sourceCommit", () => {
+    expect(isBrandSummary({ ...valid, sourceUrl: { evil: 1 } })).toBe(false);
+    expect(isBrandSummary({ ...valid, sourceRepo: 42 })).toBe(false);
+    expect(isBrandSummary({ ...valid, sourceCommit: ["a"] })).toBe(false);
+  });
+
+  it("refuses a non-numeric type-step weight — it becomes a fontWeight style", () => {
+    expect(
+      isBrandSummary({ ...valid, typeScale: [{ name: "h1", sizePx: 48, weight: "bold" }] }),
+    ).toBe(false);
+  });
+
+  it("refuses non-numeric colour occurrences", () => {
+    expect(
+      isBrandSummary({
+        ...valid,
+        colors: [{ hex: "#635BFF", token: "p", role: "primary", occurrences: "many" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses malformed assets and scale entries", () => {
+    expect(isBrandSummary({ ...valid, assets: [{ kind: "logo" }] })).toBe(false);
+    expect(isBrandSummary({ ...valid, assets: "logo.svg" })).toBe(false);
+    expect(isBrandSummary({ ...valid, radii: [{ token: "r" }] })).toBe(false);
+    expect(isBrandSummary({ ...valid, shadows: [{ token: "s", value: 1 }] })).toBe(false);
+  });
+
+  it("still accepts every optional field correctly formed", () => {
+    expect(
+      isBrandSummary({
+        ...valid,
+        sourceCommit: "a1b2c3d",
+        fonts: [{ family: "Inter", role: "body", fallbacks: ["system-ui"], weights: [400, 700] }],
+        typeScale: [{ name: "h1", sizePx: 48, lineHeightPx: 56, weight: 700, letterSpacingPx: -0.5 }],
+        assets: [{ kind: "logo", file: "logo.svg", mimeType: "image/svg+xml", width: 100, height: 20 }],
+        radii: [{ token: "radius-lg", value: "0.75rem" }],
+        gaps: ["no webfont file found"],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts a payload that omits every optional field", () => {
+    expect(isBrandSummary(valid)).toBe(true);
+  });
+});

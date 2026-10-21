@@ -3197,18 +3197,52 @@ export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
  * Returns null when the attachment is not a valid summary (422) — the card
  * then says so rather than rendering a half-understood payload.
  */
+export interface BrandSummaryResult {
+  summary: BrandSummary;
+  /** Set once this brand.json has been saved, so the card stays saved across
+   *  a reload instead of offering to create a duplicate. */
+  savedDesignSystemId: string | null;
+}
+
 export async function fetchBrandSummary(
   attachmentId: string,
   userId: string,
-): Promise<BrandSummary | null> {
+): Promise<BrandSummaryResult | null> {
   const res = await fetch(
     `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/brand-summary`,
     { credentials: "include", headers: { "x-user-id": userId } },
   );
   if (res.status === 422) return null;
   if (!res.ok) throw new ApiError(res.status, `Could not read brand summary: HTTP ${res.status}`);
-  const body = (await res.json()) as { success: boolean; data: BrandSummary };
-  return body.data ?? null;
+  const body = (await res.json()) as {
+    success: boolean;
+    data: BrandSummary;
+    savedDesignSystemId?: string | null;
+  };
+  if (!body.data) return null;
+  return { summary: body.data, savedDesignSystemId: body.savedDesignSystemId ?? null };
+}
+
+/** Record the DesignSystem a brand.json was saved as. Returns the id that is
+ *  now recorded — which may be an EARLIER one if this attachment was already
+ *  saved, so the caller shows that rather than its own duplicate. */
+export async function recordBrandSaved(
+  attachmentId: string,
+  designSystemId: string,
+  userId: string,
+): Promise<string> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/brand-saved`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "x-user-id": userId },
+      body: JSON.stringify({ designSystemId }),
+    },
+  );
+  if (!res.ok) throw new ApiError(res.status, `Could not record the save: HTTP ${res.status}`);
+  const body = (await res.json()) as { data: { savedDesignSystemId: string } };
+  return body.data.savedDesignSystemId;
 }
 
 // --- Design systems (XYNE-66817) -------------------------------------------

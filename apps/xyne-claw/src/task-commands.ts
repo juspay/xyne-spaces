@@ -111,7 +111,12 @@ export const TASK_COMMANDS: TaskCommand[] = [
       "sandbox-pw-wait-for",
       "sandbox-pw-close",
     ],
-    skillPaths: ["design-skills"],
+    // brand-skills is /brand's own folder. The extraction skills used to sit in
+    // design-skills, which /design and /dashboard also load wholesale — so those
+    // runs were being told "measure, never improve" and "deliver brand.json",
+    // which can pull a design run off course. design-skills stays for the token
+    // and QA guidance a brand run still benefits from.
+    skillPaths: ["brand-skills", "design-skills"],
     sandboxProfile: "browser",
     instruction:
       "This is a Xyne brand-extraction run. The /brand prefix is an internal command, not part of the user's " +

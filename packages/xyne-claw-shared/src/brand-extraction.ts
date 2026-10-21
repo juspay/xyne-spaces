@@ -126,10 +126,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isHex = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 
+const isStringArray = (value: unknown): boolean =>
+  value === undefined || (Array.isArray(value) && value.every((v) => typeof v === "string"));
+
+const isNumberArray = (value: unknown): boolean =>
+  value === undefined || (Array.isArray(value) && value.every((v) => typeof v === "number"));
+
+const isOptionalString = (value: unknown): boolean =>
+  value === undefined || typeof value === "string";
+
+const isOptionalNumber = (value: unknown): boolean =>
+  value === undefined || typeof value === "number";
+
 /**
  * Validate a payload before the card renders it. The file is written by a
- * model inside a sandbox, so it is untrusted input: a malformed colour would
- * otherwise reach the DOM as a style value.
+ * model inside a sandbox, so it is untrusted input.
+ *
+ * EVERY field the card reads is checked, not just the required ones. An
+ * earlier version validated only the required fields, which let
+ * `gaps: "none"` or `fallbacks: "Arial"` through — both pass a shape check and
+ * then throw inside render (`.map`/`.join` of a string, or an object as a
+ * React child). Because the message is persisted, that throw repeats on every
+ * reload and the conversation cannot be opened again. A field that is cheap to
+ * check here is expensive to get wrong there.
  */
 export function isBrandSummary(value: unknown): value is BrandSummary {
   if (!isRecord(value)) return false;
@@ -140,6 +159,11 @@ export function isBrandSummary(value: unknown): value is BrandSummary {
   }
   if (typeof value["extractedAt"] !== "string") return false;
 
+  // Rendered verbatim by the card's source line.
+  if (!isOptionalString(value["sourceUrl"])) return false;
+  if (!isOptionalString(value["sourceRepo"])) return false;
+  if (!isOptionalString(value["sourceCommit"])) return false;
+
   const colors = value["colors"];
   if (!Array.isArray(colors)) return false;
   const colorsOk = colors.every(
@@ -147,7 +171,8 @@ export function isBrandSummary(value: unknown): value is BrandSummary {
       isRecord(color) &&
       isHex(color["hex"]) &&
       typeof color["token"] === "string" &&
-      (BRAND_COLOR_ROLES as readonly string[]).includes(String(color["role"])),
+      (BRAND_COLOR_ROLES as readonly string[]).includes(String(color["role"])) &&
+      isOptionalNumber(color["occurrences"]),
   );
   if (!colorsOk) return false;
 
@@ -157,16 +182,55 @@ export function isBrandSummary(value: unknown): value is BrandSummary {
     (font) =>
       isRecord(font) &&
       typeof font["family"] === "string" &&
-      (font["role"] === "heading" || font["role"] === "body" || font["role"] === "mono"),
+      (font["role"] === "heading" || font["role"] === "body" || font["role"] === "mono") &&
+      // The card joins this into a font-family stack.
+      isStringArray(font["fallbacks"]) &&
+      isNumberArray(font["weights"]) &&
+      isOptionalString(font["sourceUrl"]),
   );
   if (!fontsOk) return false;
 
   const typeScale = value["typeScale"];
   if (!Array.isArray(typeScale)) return false;
-  return typeScale.every(
+  const typeScaleOk = typeScale.every(
     (step) =>
-      isRecord(step) && typeof step["name"] === "string" && typeof step["sizePx"] === "number",
+      isRecord(step) &&
+      typeof step["name"] === "string" &&
+      typeof step["sizePx"] === "number" &&
+      isOptionalNumber(step["lineHeightPx"]) &&
+      // Becomes a fontWeight style value.
+      isOptionalNumber(step["weight"]) &&
+      isOptionalNumber(step["letterSpacingPx"]),
   );
+  if (!typeScaleOk) return false;
+
+  // The card maps over gaps and renders each as a list item.
+  if (!isStringArray(value["gaps"])) return false;
+
+  const assets = value["assets"];
+  if (assets !== undefined) {
+    if (!Array.isArray(assets)) return false;
+    const assetsOk = assets.every(
+      (asset) =>
+        isRecord(asset) &&
+        typeof asset["kind"] === "string" &&
+        typeof asset["file"] === "string" &&
+        isOptionalString(asset["mimeType"]) &&
+        isOptionalNumber(asset["width"]) &&
+        isOptionalNumber(asset["height"]),
+    );
+    if (!assetsOk) return false;
+  }
+
+  const radiiOk = [value["radii"], value["spacing"], value["shadows"]].every((scale) => {
+    if (scale === undefined) return true;
+    if (!Array.isArray(scale)) return false;
+    return scale.every(
+      (entry) =>
+        isRecord(entry) && typeof entry["token"] === "string" && typeof entry["value"] === "string",
+    );
+  });
+  return radiiOk;
 }
 
 /** Parse the delivered brand.json. Returns null for anything that is not a

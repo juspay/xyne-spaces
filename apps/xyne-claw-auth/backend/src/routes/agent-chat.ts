@@ -8,9 +8,6 @@ import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand, parseBrandSummary } from "xyne-claw-shared";
-
-/** A brand summary is a few KB of JSON; anything larger is not one. */
-const BRAND_SUMMARY_MAX_BYTES = 256 * 1024;
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
 import {
@@ -53,9 +50,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { brandAttachmentsRouter } from "./brand-attachments.js";
 import { chatProjectsRouter } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { Prisma } from "@prisma/client";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -820,6 +819,8 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
 // `/:slug/...` route below, so `/chat/projects*` is resolved before any
 // slug pattern gets a chance at it.
 router.use(chatProjectsRouter);
+// Brand-extraction attachment routes (routes/brand-attachments.ts).
+router.use(brandAttachmentsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({
@@ -885,52 +886,6 @@ router.post(
 );
 
 // GET /agents/attachments/:id/download — stream the full file
-/**
- * A delivered `brand.json`, validated against the BrandSummary contract.
- *
- * The Brand Review Card reads this rather than the raw attachment: the payload
- * is model-written inside a sandbox and its colours become inline style values
- * in the browser, so it is validated with the canonical implementation in
- * xyne-claw-shared. The claw-auth frontend deliberately has no workspace
- * dependencies (see SettingsTab's note that shared constants are fetched at
- * runtime), so duplicating the validator there would have meant two copies of
- * a security check drifting apart.
- *
- * Same ACL as the download route below — this exposes the same bytes.
- */
-router.get("/attachments/:id/brand-summary", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
-
-    const att = await chatAttachmentRepository.findById(req.params.id);
-    if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
-
-    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
-    if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
-
-    // A brand summary is a few KB. Refusing anything larger keeps a malformed
-    // or hostile upload from being read wholly into memory to be parsed.
-    if (att.size && att.size > BRAND_SUMMARY_MAX_BYTES) {
-      res.status(413).json({ success: false, error: "Brand summary is too large to parse" });
-      return;
-    }
-
-    const buffer = await gcsService.getFileBuffer(att.url);
-    const summary = parseBrandSummary(buffer.toString("utf8"));
-    if (!summary) {
-      // 422, not 500: the file was read fine, it just is not a brand summary.
-      res.status(422).json({ success: false, error: "Not a valid brand summary" });
-      return;
-    }
-
-    res.json({ success: true, data: summary });
-  } catch (err) {
-    log.error("[agent-chat] brand summary error:", err);
-    if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
 router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);

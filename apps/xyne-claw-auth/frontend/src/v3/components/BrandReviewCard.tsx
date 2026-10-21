@@ -8,6 +8,7 @@ import {
   createDesignSystem,
   fetchBrandSummary,
   fetchChatAttachmentText,
+  recordBrandSaved,
   type BrandColor,
   type BrandSummary,
   type ChatAttachmentMeta,
@@ -33,7 +34,9 @@ interface BrandFiles {
   tokensCss: ChatAttachmentMeta | undefined;
 }
 
-/** Newest-first: a conversation that re-ran `/brand` should review the latest. */
+/** Last match wins within THIS message's attachments — a run that
+ *  re-delivered brand.json appends, so the later entry is the current one.
+ *  This does not search other messages. */
 function findBrandFiles(attachments: ChatAttachmentMeta[]): BrandFiles {
   const byName = (name: string): ChatAttachmentMeta | undefined =>
     [...attachments].reverse().find(
@@ -99,14 +102,17 @@ export function BrandReviewCard({
         // Validated server-side against the canonical contract. brand.json is
         // model-written inside a sandbox and its hex values become inline
         // style values below, so the card never parses it itself.
-        const parsed = await fetchBrandSummary(summaryId, userId);
+        const result = await fetchBrandSummary(summaryId, userId);
         if (cancelled) return;
-        if (!parsed) {
+        if (!result) {
           setLoadFailed(true);
           return;
         }
-        setSummary(parsed);
-        setName(parsed.name.slice(0, MAX_NAME_CHARS));
+        setSummary(result.summary);
+        setName(result.summary.name.slice(0, MAX_NAME_CHARS));
+        // Already saved in an earlier session: show that instead of a Save
+        // button, which would mint a duplicate for the whole org.
+        if (result.savedDesignSystemId) setSavedName(result.summary.name);
       } catch {
         if (!cancelled) setLoadFailed(true);
       }
@@ -141,6 +147,11 @@ export function BrandReviewCard({
           ? { extracted: summary.assets, storage: "unresolved" }
           : null,
       });
+      // Record it against the attachment before showing success: that record
+      // is what stops a reload offering to create the same system again.
+      if (files.summary) {
+        await recordBrandSaved(files.summary.id, created.id, userId).catch(() => undefined);
+      }
       setSavedName(created.name);
     } catch (err) {
       setError(
@@ -149,7 +160,7 @@ export function BrandReviewCard({
     } finally {
       setSaving(false);
     }
-  }, [summary, files.designMd, files.tokensCss, name, userId]);
+  }, [summary, files.designMd, files.tokensCss, files.summary, name, userId]);
 
   // Not a brand run — render nothing rather than an empty shell.
   if (!files.summary) return null;

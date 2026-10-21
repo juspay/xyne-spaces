@@ -353,8 +353,11 @@ describe("/brand task command", () => {
   it("claims the browser sandbox and the Playwright tools extraction needs", () => {
     const command = parseTaskCommand("/brand https://stripe.com");
     expect(command?.sandboxProfile).toBe("browser");
-    expect(command?.skillPaths).toEqual(["design-skills"]);
     expect(command?.requiredTool).toBe("sandbox-deliver-files");
+    // brand-skills is /brand's own folder. The extraction skills must NOT sit
+    // in design-skills, which /design and /dashboard load wholesale — those
+    // runs would be told "measure, never improve" and "deliver brand.json".
+    expect(command?.skillPaths).toEqual(["brand-skills", "design-skills"]);
     // Computed styles are read through evaluate; screenshots and navigation
     // are what makes this a browser run rather than a fetch.
     for (const tool of ["sandbox-pw-navigate", "sandbox-pw-evaluate", "sandbox-pw-screenshot"]) {
@@ -377,5 +380,22 @@ describe("/brand task command", () => {
       designSystem: "# Brand",
     });
     expect(injection.status).toBe("injected");
+  });
+});
+
+describe("skill isolation between /brand and /design", () => {
+  it("keeps the brand skills out of /design and /dashboard", () => {
+    // Both load design-skills wholesale, so a brand skill living there told a
+    // design run to "measure, never improve" and "deliver brand.json".
+    for (const task of ["/design a page", "/dashboard revenue"]) {
+      expect(parseTaskCommand(task)?.skillPaths).toEqual(["design-skills"]);
+    }
+  });
+
+  it("gives /brand its own folder first, then the shared design guidance", () => {
+    expect(parseTaskCommand("/brand https://x.com")?.skillPaths).toEqual([
+      "brand-skills",
+      "design-skills",
+    ]);
   });
 });
