@@ -67,6 +67,9 @@ const ROW_CLASS =
 const HOVER_ACTION_CLASS =
   'hidden group-hover:flex items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent disabled:opacity-40';
 
+const FOLDER_CREATE_ACTION_CLASS =
+  'flex items-center justify-center p-1 rounded-md shrink-0 hover:bg-sidebar-accent disabled:opacity-40';
+
 const SearchLoadingRow: React.FC<{ indentClassName?: string }> = ({ indentClassName = 'pl-2' }) => (
   <div
     className={`flex items-center gap-3 ${indentClassName} px-3 h-9 text-sm text-sidebar-foreground`}
@@ -280,7 +283,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             </button>
           )}
           <button
-            className={HOVER_ACTION_CLASS}
+            className={FOLDER_CREATE_ACTION_CLASS}
             onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
             disabled={isCreatingCanvas}
             title='Create canvas in folder'
