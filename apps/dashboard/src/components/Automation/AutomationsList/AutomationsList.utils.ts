@@ -44,6 +44,8 @@ export function statusPillClasses(status: AutomationStatus): string {
   switch (status) {
     case 'ACTIVE':
       return 'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-400 dark:border-green-500/40';
+    case 'PLAYGROUND':
+      return 'bg-sky-500/10 text-sky-700 border-sky-500/30 dark:text-sky-400 dark:border-sky-500/40';
     case 'PENDING_APPROVAL':
       return 'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40';
     case 'REJECTED':

@@ -11,7 +11,7 @@ import {
 } from '../services/webhook-secret.service';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 import type { AutomationConfig } from '../types/automation-config';
-import { AutomationRunStatus } from '../types/status';
+import { AutomationRunStatus, isPlaygroundRun } from '../types/status';
 import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
@@ -22,6 +22,7 @@ import {
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
+  parseAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
 } from '../types/workflow-adapter';
@@ -30,7 +31,12 @@ import {
   getExecutionState,
   stitchExecutionContextMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
-import { approvalService, ApprovalError } from '../services/approval.service';
+import {
+  approvalService,
+  ApprovalError,
+  assertIsOwnerOrAutomationsAdmin,
+} from '../services/approval.service';
+import { automationQueue } from '../queue/automation.queue';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
 import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
 import { uploadAutomationTemplates } from '@/middleware/upload';
@@ -662,7 +668,13 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
         : auth.userId,
     });
 
-    if (existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId) {
+    // A DRAFT with any run (e.g. a demoted recording) is frozen: edits fork a new version
+    // so its held runs keep playing the config that captured them.
+    const editableInPlace =
+      existing.status === AutomationStatus.DRAFT &&
+      existingAutomation.createdById === auth.userId &&
+      (await db.workflowExecution.count({ where: { workflowId: existing.id } })) === 0;
+    if (editableInPlace) {
       const updated = await putTx(prepared, auth, existing, parsed, metadata);
       res.json({
         success: true,
@@ -856,6 +868,11 @@ router.get(
           workflowExecutionToRunSummary(row, { context: row.context }),
         ),
         nextCursor,
+        // Lets the Runs page decide whether ▶ Play is enabled (PLAYGROUND + owner/admin).
+        automation: {
+          status: workflow.status,
+          createdById: parseAutomationMetadata(workflow.metadata).createdById,
+        },
       },
       timestamp: new Date().toISOString(),
     });
@@ -885,12 +902,16 @@ router.get(
       return;
     }
 
-    const [state, pauseState, stepRows] = await Promise.all([
+    const [state, pauseState, stepRows, workflow] = await Promise.all([
       getExecutionState(executionId),
       getAutomationPauseState(executionId),
       db.workflowStep.findMany({
         where: { workflowExecutionId: executionId },
         orderBy: { createdAt: 'asc' },
+      }),
+      db.workflow.findFirst({
+        where: { id: execution.workflowId, workspaceId: auth.workspaceId },
+        select: { status: true, metadata: true },
       }),
     ]);
 
@@ -907,9 +928,127 @@ router.get(
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
         })),
+        automation: workflow
+          ? {
+              status: workflow.status,
+              createdById: parseAutomationMetadata(workflow.metadata).createdById,
+            }
+          : null,
       },
       timestamp: new Date().toISOString(),
     });
+  },
+);
+
+// POST /runs/:executionId/play — move a HELD playground run to PENDING and queue it.
+// Owner or Automations admin only, and only while the version is PLAYGROUND. The
+// HELD→PENDING move is a guarded update so a double click or a second user can't
+// queue the same capture twice. Played runs always use default priority.
+router.post(
+  '/runs/:executionId/play',
+  async (req: Request<{ executionId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const { executionId } = req.params;
+    try {
+      const execution = await db.workflowExecution.findFirst({
+        where: {
+          id: executionId,
+          workflowType: AUTOMATION_WORKFLOW_TYPE,
+          workspaceId: auth.workspaceId,
+        },
+        select: {
+          status: true,
+          tag: true,
+          workflow: { select: { status: true, metadata: true } },
+        },
+      });
+      if (!execution) {
+        res.status(404).json({ success: false, error: 'Run not found' });
+        return;
+      }
+      const { workflow } = execution;
+
+      await assertIsOwnerOrAutomationsAdmin(workflow, auth.userId);
+
+      if (workflow.status !== AutomationStatus.PLAYGROUND) {
+        res.status(409).json({
+          success: false,
+          error: `Held runs can only be played while this version is in Playground (it is now ${workflow.status}).`,
+        });
+        return;
+      }
+      if (execution.status !== AutomationRunStatus.HELD || !isPlaygroundRun(execution)) {
+        res
+          .status(409)
+          .json({ success: false, error: 'This run is not held, so it cannot be played.' });
+        return;
+      }
+
+      // Guarded transition: exactly one caller moves the run out of HELD, and only if
+      // the version is still PLAYGROUND at claim time (a Stop recording can race the check above).
+      const claimed = await db.workflowExecution.updateMany({
+        where: {
+          id: executionId,
+          workspaceId: auth.workspaceId,
+          status: AutomationRunStatus.HELD,
+          workflow: { status: AutomationStatus.PLAYGROUND },
+        },
+        data: { status: AutomationRunStatus.PENDING },
+      });
+      if (claimed.count !== 1) {
+        res.status(409).json({ success: false, error: 'This run has already been played.' });
+        return;
+      }
+
+      try {
+        // No options: played runs always use default priority, and no Bull jobId.
+        await automationQueue.enqueueRun({ executionId });
+      } catch (enqueueErr) {
+        // Never strand the run in PENDING — nothing re-picks automation runs.
+        await db.workflowExecution
+          .updateMany({
+            where: {
+              id: executionId,
+              workspaceId: auth.workspaceId,
+              status: AutomationRunStatus.PENDING,
+            },
+            data: { status: AutomationRunStatus.HELD },
+          })
+          .catch(revertErr =>
+            logger.error(
+              `[automations] play revert to HELD failed runId=${executionId}`,
+              revertErr,
+            ),
+          );
+        logger.error(
+          `[automations] play enqueue failed runId=${executionId} by userId=${auth.userId}`,
+          enqueueErr,
+        );
+        res
+          .status(503)
+          .json({ success: false, error: 'Failed to queue the run. It is still held; try again.' });
+        return;
+      }
+
+      logger.info(`[automations] play runId=${executionId} by userId=${auth.userId}`);
+      res.json({
+        success: true,
+        data: { runId: executionId, status: AutomationRunStatus.PENDING },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      if (err instanceof ApprovalError) {
+        const status = err.code === 'not-owner' || err.code === 'not-admin' ? 403 : 409;
+        res.status(status).json({ success: false, error: err.message });
+        return;
+      }
+      logger.error('[automations] play failed:', err);
+      res.status(500).json({ success: false, error: 'Failed to play run' });
+    }
   },
 );
 
