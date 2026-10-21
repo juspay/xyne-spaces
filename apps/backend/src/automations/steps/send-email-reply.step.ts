@@ -19,17 +19,40 @@ import {
   saveEmailAttachmentRows,
 } from '../services/trigger-attachment.service';
 
+/** A CC/BCC entry resolves to one string (maybe comma-separated) or a list of such strings. */
+const addressEntry = z.union([z.string().min(1), z.array(z.string())]);
+
+/** Flatten entries, split comma/semicolon-separated strings, trim, and drop blanks and case-insensitive duplicates. */
+function mergeAddresses(...lists: Array<ReadonlyArray<string | string[]> | undefined>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of lists.flatMap(l => (l ?? []).flat())) {
+    for (const addr of raw.split(/[,;]/)) {
+      const a = addr.trim();
+      if (a && !seen.has(a.toLowerCase())) {
+        seen.add(a.toLowerCase());
+        out.push(a);
+      }
+    }
+  }
+  return out;
+}
+
 const SendEmailReplyConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
   body: variableRef(z.string().min(1)),
   cc: z
-    .array(variableRef(z.string().email()))
+    .array(variableRef(addressEntry))
     .optional()
-    .describe('Optional email addresses to copy on the reply.'),
+    .describe(
+      'Optional email addresses to copy on the reply. Each entry may be an address, a comma/semicolon-separated list, or a list of those. Added to, never replacing, the default copy list.',
+    ),
   bcc: z
-    .array(variableRef(z.string().email()))
+    .array(variableRef(addressEntry))
     .optional()
-    .describe('Optional email addresses to blind-copy on the reply.'),
+    .describe(
+      'Optional email addresses to blind-copy on the reply. Each entry may be an address, a comma/semicolon-separated list, or a list of those. Added to, never replacing, the default blind-copy list.',
+    ),
   replyAll: z.boolean().optional(),
   fileAttachments: fileAttachmentsField,
 });
@@ -75,8 +98,8 @@ export class SendEmailReplyStep extends BaseActionStep<
     const source = conversation
       ? await new ChannelExternalSourceResolver().resolveForChannel(conversation.channelId)
       : null;
+    const emails = await repositories.emails.findByConversationId(conversationId); // newest first
     if (source?.sourceType === ExternalSourcePlatform.GOOGLE) {
-      const emails = await repositories.emails.findByConversationId(conversationId); // newest first
       if (emails[0]) {
         replyBody = appendReplyQuote(body, emails[0]);
         fileAttachments = await reattachTrailImages({
@@ -92,12 +115,19 @@ export class SendEmailReplyStep extends BaseActionStep<
     );
     fileAttachments.push(...forwardedFiles);
 
+    // Configured addresses extend the default lists (REPLY_ALL keeps the original CCs); they never replace them.
+    const configCc = config.cc as Array<string | string[]> | undefined;
+    const configBcc = config.bcc as Array<string | string[]> | undefined;
+    const defaultCc = type === 'REPLY_ALL' ? emails[emails.length - 1]?.cc : undefined;
+    const cc = configCc?.length ? mergeAddresses(defaultCc, configCc) : undefined;
+    const bcc = configBcc?.length ? mergeAddresses(configBcc) : undefined;
+
     const result = await emailService.sendReplyOnConversation({
       conversationId,
       body: replyBody,
       type,
-      cc: config.cc as string[] | undefined,
-      bcc: config.bcc as string[] | undefined,
+      cc,
+      bcc,
       ...(fileAttachments.length > 0 && { fileAttachments }),
     });
 

@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { TicketContextSchema } from './ticket-context';
 import { TriggerAttachmentSchema } from '../services/trigger-attachment.service';
 import {
+  EmailOriginSchema,
   extractEmailAddress,
   extractDomain,
   hydrateEmailReceivedPayload,
@@ -130,6 +131,7 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     name: z.string(),
   }),
   fromDomain: z.string(),
+  ...EmailOriginSchema.shape,
   toAddresses: z.array(z.string()),
   toDomains: z.array(z.string()),
   ccAddresses: z.array(z.string()),

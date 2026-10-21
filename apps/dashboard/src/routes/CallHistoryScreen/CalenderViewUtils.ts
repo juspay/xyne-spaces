@@ -484,6 +484,7 @@ export type OtherSlotMeta = {
   title: string | undefined;
   startsAt: number;
   endsAt: number | null;
+  details: OtherUserBusySlot;
 };
 
 /**
@@ -518,6 +519,7 @@ export function buildDayEventPool(
         title: slot.title,
         startsAt: slot.startsAt,
         endsAt: slot.endsAt,
+        details: slot,
       });
     }
   }
