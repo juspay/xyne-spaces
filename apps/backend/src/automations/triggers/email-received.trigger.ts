@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { TicketContextSchema } from './ticket-context';
 import {
+  EmailOriginSchema,
   extractEmailAddress,
   extractDomain,
   hydrateEmailReceivedPayload,
@@ -128,6 +129,7 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     name: z.string(),
   }),
   fromDomain: z.string(),
+  ...EmailOriginSchema.shape,
   toAddresses: z.array(z.string()),
   toDomains: z.array(z.string()),
   ccAddresses: z.array(z.string()),
