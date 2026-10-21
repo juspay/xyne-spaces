@@ -3,6 +3,7 @@ export { agentShareRepository } from "./agentShareRepository.js";
 export { agentRequestRepository } from "./agentRequestRepository.js";
 export { userRoleRepository } from "./userRoleRepository.js";
 export { auditLogRepository } from "./auditLogRepository.js";
+export { governanceAuditEventRepository, staticContentVersionRepository, contentScanFindingRepository } from "./governanceRepository.js";
 export { chatMessageRepository } from "./chatMessageRepository.js";
 export { chatConversationMetaRepository } from "./chatConversationMetaRepository.js";
 export { chatProjectRepository } from "./chatProjectRepository.js";

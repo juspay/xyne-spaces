@@ -41,6 +41,7 @@ import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDailyCron.js";
 import { startMcpRestartListener } from "../lib/mcp-restart-signal.js";
+import { startGovernanceSequencer, stopGovernanceSequencer } from "../lib/governance-audit.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -107,6 +108,8 @@ const WORKERS: WorkerEntry[] = [
   { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
   { name: "proactive-workers", init: initProactiveWorkers, close: closeProactiveWorkers },
   { name: "proactive-queues", close: closeProactiveQueues },
+  // Chains governance audit rows per org and flushes the queued ones on close.
+  { name: "governance-audit", init: startGovernanceSequencer, close: stopGovernanceSequencer },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
@@ -133,6 +136,7 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "awakening-queues",
   "proactive-workers",
   "proactive-queues",
+  "governance-audit",
   "scheduled-jobs-queue",
   "daily-brief-worker",
   "daily-brief-queue",

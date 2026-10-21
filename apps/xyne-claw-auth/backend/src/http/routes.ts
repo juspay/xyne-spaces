@@ -57,6 +57,8 @@ import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
+import { governanceInternalRouter } from "../routes/governance-internal.js";
+import { runWithAuditContext } from "../lib/audit-context.js";
 import { agentCreateCheckRouter } from "../routes/agent-create-check.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
@@ -140,6 +142,11 @@ function mountRequestContext(app: Express): void {
     res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
   });
 
+  // Repository-layer audit writers read the actor from this context; the auth middleware fills x-user-id later in the chain.
+  app.use(BASE, (req: Request, _res: Response, next: NextFunction) => {
+    const actor = { get actorUserId(): string | undefined { const v = req.headers["x-user-id"]; return typeof v === "string" && v !== "" ? v : undefined; } };
+    runWithAuditContext(actor, next);
+  });
   app.use(BASE, (req: Request, res: Response, next: NextFunction) => {
     if (SIGNED_INGRESS_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))) {
       next();
@@ -312,6 +319,7 @@ function mountRunAndWebhooks(app: Express): void {
   // allowlist + elevated-delivery scope — see routes/run.ts, `accessToken` in
   // res.locals). Every other requireAuth mount carries the barrier. Do not "fix"
   // this asymmetry by adding the barrier — it would break every service token.
+  app.use(`${BASE}/internal/governance`, requireStrictS2S, governanceInternalRouter); // findings + audit events from xyne-claw (S2S only)
   app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
   // IMPORTANT: more-specific runStreamRouter MUST be mounted BEFORE the broader
   // runRouter at BASE. runRouter has `POST /run/:sessionId/cancel`, which would
