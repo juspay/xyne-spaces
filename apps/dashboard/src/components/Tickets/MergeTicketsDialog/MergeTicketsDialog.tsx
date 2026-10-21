@@ -93,7 +93,9 @@ const MergeTicketAssignee: React.FC<{
   );
 };
 
-const MergeTicketSource: React.FC<{ ticket?: { channelId: string; metadata?: unknown } }> = ({
+const MergeTicketSource: React.FC<{
+  ticket: { channelId: string; metadata?: unknown } | undefined;
+}> = ({
   ticket,
 }) => {
   const channel = useChannel(ticket?.channelId ?? '');
