@@ -1349,7 +1349,9 @@ export function createMutators(
             throw new Error('You are not a participant of this channel');
           }
 
-          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          const existingChannel = await tx.run(
+            zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+          );
           if (existingChannel && existingChannel.id !== channelId) {
             throw new Error('A channel with this name already exists');
           }
@@ -2211,7 +2213,9 @@ export function createMutators(
 
 
           // Check for duplicate name
-          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          const existingChannel = await tx.run(
+            zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+          );
           if (existingChannel && existingChannel.id !== channelId) {
             throw new Error('A channel with this name already exists');
           }

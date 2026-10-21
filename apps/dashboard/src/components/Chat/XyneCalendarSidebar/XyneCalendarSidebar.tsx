@@ -1035,6 +1035,7 @@ const XyneCalendarDayView = memo(
                     title={slot.title}
                     startsAt={slot.startsAt}
                     endsAt={slot.endsAt}
+                    details={slot.details}
                   />
                 );
               })}

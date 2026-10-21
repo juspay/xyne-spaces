@@ -4,6 +4,7 @@ import { TagMethod } from '@xyne/shared';
 import {
   Ai01,
   ChevronRight,
+  CopyDefault,
   DeleteDustbin02,
   DownloadBarDown,
   MusicQuaverNote,
@@ -27,6 +28,7 @@ import {
 } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
 import {
+  NoTranscriptError,
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
@@ -42,6 +44,7 @@ import {
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
+import { copyFetchedTextToClipboard } from '../../../utils/clipboardUtils';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
@@ -222,6 +225,7 @@ const RecordingsV2Pill = ({
   const canDownloadTranscript = Boolean(recording.transcript);
   const canDownloadRecording = Boolean(menuDetail?.hasRecording);
   const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
+  const [isCopyingTranscript, setIsCopyingTranscript] = useState(false);
   const [isDownloadingRecording, setIsDownloadingRecording] = useState(false);
 
   const handleDownloadTranscript = async (): Promise<void> => {
@@ -248,6 +252,25 @@ const RecordingsV2Pill = ({
       toast.error('Failed to download transcript');
     } finally {
       setIsDownloadingTranscript(false);
+    }
+  };
+  const handleCopyTranscript = async (): Promise<void> => {
+    if (!canDownloadTranscript || isCopyingTranscript) return;
+    setIsCopyingTranscript(true);
+    try {
+      await copyFetchedTextToClipboard(() =>
+        recordingService.getCopyableTranscript(recording.externalId),
+      );
+      toast.success('Transcript copied');
+    } catch (err) {
+      if (err instanceof NoTranscriptError) {
+        toast.error("Transcript isn't available right now");
+        return;
+      }
+      logRecordingError('RecordingsV2Pill.copyTranscript', err);
+      toast.error('Could not copy the transcript');
+    } finally {
+      setIsCopyingTranscript(false);
     }
   };
   const handleDownloadRecording = async (): Promise<void> => {
@@ -416,6 +439,16 @@ const RecordingsV2Pill = ({
                 >
                   <DownloadBarDown size={16} className='shrink-0' />
                   <span className='flex-1'>Download transcript</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className='gap-2 rounded-lg'
+                  disabled={!canDownloadTranscript || isCopyingTranscript}
+                  onClick={() => void handleCopyTranscript()}
+                  data-track-category='RecordingsV2'
+                  data-track-name='copy_transcript'
+                >
+                  <CopyDefault size={16} className='shrink-0' />
+                  <span className='flex-1'>Copy transcript</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className='gap-2 rounded-lg'
