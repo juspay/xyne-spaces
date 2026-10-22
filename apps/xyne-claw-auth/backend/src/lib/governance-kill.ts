@@ -45,6 +45,9 @@ export interface SetKillInput {
 }
 
 let snapshot: KillSnapshot = { epoch: 0, takenAtMs: 0, switches: [] };
+/** The last rows Postgres gave us; they keep serving, with the break-glass entry, while it is away. */
+let lastRows: SharedKillSwitch[] = [];
+let lastDbEpoch = 0;
 let pollTimer: NodeJS.Timeout | null = null;
 let subscriber: Redis | null = null;
 
@@ -64,10 +67,24 @@ const toShared = (r: { scopeKind: string; scopeId: string; mode: string; epoch: 
   ...(r.expiresAt ? { expiresAtMs: r.expiresAt.getTime() } : {}),
 });
 
-/** The platform-wide epoch: the newest set or clear, so one integer says whether anything changed. */
-export async function currentKillEpoch(): Promise<number> {
+async function dbKillEpoch(): Promise<number> {
   const top = await governancePrisma.killSwitch.findFirst({ orderBy: { epoch: "desc" }, select: { epoch: true } });
   return Number(top?.epoch ?? 0);
+}
+
+async function readBreakGlass(nowMs: number): Promise<{ switches: SharedKillSwitch[]; ok: boolean }> {
+  try {
+    return { switches: parseBreakGlass(await redisService.getConnection().get(BREAK_GLASS_KEY), process.env["GOVERNANCE_BREAK_GLASS_KEY"], nowMs), ok: true };
+  } catch (err) {
+    log.warn(`[governance-kill] break-glass read failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { switches: [], ok: false };
+  }
+}
+
+/** The platform-wide epoch: the newest set, clear or break-glass entry, so one integer says whether anything changed. */
+export async function currentKillEpoch(): Promise<number> {
+  const [db, bg] = await Promise.all([dbKillEpoch(), readBreakGlass(Date.now())]);
+  return Math.max(db, ...bg.switches.map((s) => s.epoch));
 }
 
 export function signBreakGlass(switches: readonly SharedKillSwitch[], key: string): string {
@@ -85,26 +102,34 @@ export function parseBreakGlass(raw: string | null, key: string | undefined, now
       log.error("[governance-kill] break-glass entry has a bad signature; ignored");
       return [];
     }
-    return (switches as SharedKillSwitch[]).filter((s) => (KILL_SCOPE_KINDS as readonly string[]).includes(s?.scopeKind) && (KILL_MODES as readonly string[]).includes(s?.mode) && !(typeof s.expiresAtMs === "number" && s.expiresAtMs <= nowMs));
+    return (switches as SharedKillSwitch[]).filter((s) => (KILL_SCOPE_KINDS as readonly string[]).includes(s?.scopeKind) && (KILL_MODES as readonly string[]).includes(s?.mode) && typeof s.epoch === "number" && !(typeof s.expiresAtMs === "number" && s.expiresAtMs <= nowMs));
   } catch {
     return [];
   }
 }
 
-/** Reads every live switch plus the break-glass entry; the epoch counts cleared rows too. */
+/**
+ * Every live switch plus the break-glass entry. Postgres away: the last rows it gave us keep serving
+ * with a fresh break-glass read, so a break-glass stop still lands. Only when both Redis and Postgres
+ * fail does the snapshot age, and decide() then refuses side effects after 10 s.
+ */
 export async function loadKillSnapshot(): Promise<KillSnapshot> {
   const now = new Date();
-  const [rows, epoch] = await Promise.all([
-    governancePrisma.killSwitch.findMany({ where: { clearedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }, select: { scopeKind: true, scopeId: true, mode: true, epoch: true, reason: true, expiresAt: true } }),
-    currentKillEpoch(),
-  ]);
-  let breakGlass: SharedKillSwitch[] = [];
+  const bg = await readBreakGlass(now.getTime());
+  let dbOk = true;
   try {
-    breakGlass = parseBreakGlass(await redisService.getConnection().get(BREAK_GLASS_KEY), process.env["GOVERNANCE_BREAK_GLASS_KEY"], now.getTime());
+    const [rows, epoch] = await Promise.all([
+      governancePrisma.killSwitch.findMany({ where: { clearedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }, select: { scopeKind: true, scopeId: true, mode: true, epoch: true, reason: true, expiresAt: true } }),
+      dbKillEpoch(),
+    ]);
+    lastRows = rows.map(toShared);
+    lastDbEpoch = epoch;
   } catch (err) {
-    log.warn(`[governance-kill] break-glass read failed: ${err instanceof Error ? err.message : String(err)}`);
+    dbOk = false;
+    log.warn(`[governance-kill] postgres read failed; serving the last ${lastRows.length} switch(es) plus break-glass: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return { epoch, takenAtMs: now.getTime(), switches: [...rows.map(toShared), ...breakGlass] };
+  if (!dbOk && !bg.ok) throw new Error("neither postgres nor redis answered");
+  return { epoch: Math.max(lastDbEpoch, ...bg.switches.map((s) => s.epoch)), takenAtMs: now.getTime(), switches: [...lastRows, ...bg.switches] };
 }
 
 export async function refreshKillSnapshot(): Promise<KillSnapshot> {
@@ -190,10 +215,11 @@ export function startKillSwitchSync(): void {
   const tick = (): void => {
     pollTimer = setTimeout(async () => {
       try {
-        if ((await currentKillEpoch()) !== snapshot.epoch || Date.now() - snapshot.takenAtMs > 30_000) await refreshKillSnapshot();
+        if ((await currentKillEpoch()) !== snapshot.epoch) await refreshKillSnapshot();
         else snapshot = { ...snapshot, takenAtMs: Date.now() };
-      } catch (err) {
-        log.warn(`[governance-kill] poll failed: ${err instanceof Error ? err.message : String(err)}`);
+      } catch {
+        // The epoch could not be read: a full load decides what still answers.
+        await refreshKillSnapshot();
       }
       tick();
     }, POLL_MS + Math.floor(Math.random() * 500));
