@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SERVER } from "./config.js";
-import { loopCommandFor, type LoopCloseCheck, type LoopKind } from "xyne-claw-shared";
+import { resolveLoop, type LoopCloseCheck, type LoopCommandDef, type LoopKind } from "xyne-claw-shared";
 
 export interface ExperimentContext {
   id: string;
@@ -19,6 +19,7 @@ export interface ExperimentContext {
    *  them (proved/refuted, with evidence) is the exit. The deadline still applies
    *  as a hard safety cap so the loop stays bounded. */
   kind?: LoopKind;
+  loop?: LoopCommandDef;
 }
 
 /** Minimum closed paths before an "exhausted" frontier is believed. Guards the
@@ -409,7 +410,7 @@ export function buildExperimentTools(
             if (typeof title !== "string" || typeof hypothesis !== "string") {
               return textResult("Missing required title or hypothesis.", { error: true });
             }
-            const closeCheck = loopCommandFor(ctx.kind).closeCheck;
+            const closeCheck = resolveLoop(ctx).closeCheck;
             if (closeCheck && status === "proved") {
               const refusal = CLOSE_CHECKS[closeCheck](typeof p["note"] === "string" ? p["note"] : "");
               if (refusal) return refusal;
@@ -496,7 +497,7 @@ export function buildExperimentTools(
         // is the commit batches ahead of the cursor, so `open === 0` means the
         // walk has reached HEAD (nothing left to enumerate). Same exit + .md
         // deliverable gate as framework.
-        const loop = loopCommandFor(ctx.kind);
+        const loop = resolveLoop(ctx);
         if (loop.exit === "frontier") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock

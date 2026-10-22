@@ -6,7 +6,8 @@ import { setSession, type SessionContext } from "./session-context.js";
 import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
-import { loopCommandFor, loopCommandForWord, withLoopKind, type LoopKey, type LoopKind } from "xyne-claw-shared";
+import { loopCommandFor, loopCommandForWord, withLoopKind, type LoopCommandDef, type LoopKey, type LoopKind } from "xyne-claw-shared";
+import { loopDefForRun } from "./loop-command-defs.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
 
 const log = createLogger("experiment");
@@ -17,7 +18,7 @@ const MAX_DURATION_MS = Number(
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
-  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: LoopKind; droppedFocus?: string }
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: LoopKind; droppedFocus?: string; commandId?: string }
   | { sub: "status" }
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
@@ -31,10 +32,25 @@ export const EXPERIMENT_PROVIDERS = new Set(["spaces", "litellm", "claude", "cod
 
 const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 
-export function parseExperimentCommand(text: string | undefined | null): ExperimentCommand | null {
+export interface CustomCommandMatch {
+  def: LoopCommandDef;
+  commandId: string;
+  maxDurationMs: number;
+  provider?: string | null;
+  modelId?: string | null;
+}
+
+export function slashWord(text: string | undefined | null): string | null {
+  if (!text) return null;
+  const m = /^\/([a-z][a-z0-9-]*)(?:\s|$)/i.exec(text.trim().replace(LEADING_MENTIONS, ""));
+  return m ? m[1]!.toLowerCase() : null;
+}
+
+export function parseExperimentCommand(text: string | undefined | null, custom?: CustomCommandMatch | null): ExperimentCommand | null {
   if (!text) return null;
   const trimmed = text.trim().replace(LEADING_MENTIONS, "");
   const lower = trimmed.toLowerCase();
+  if (custom && slashWord(trimmed) === custom.def.command.slice(1)) return parseCustomCommand(trimmed.slice(custom.def.command.length).trim(), custom);
   // /understanding is /experiment's coverage-gated sibling: identical epoch loop
   // and subcommands, but the run is tagged so end-experiment stays locked until
   // the open-conjecture frontier is exhausted (the epoch runtime keys off the
@@ -86,6 +102,35 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
     ...(invalidProvider !== undefined ? { invalidProvider } : {}),
     ...(droppedFocus ? { droppedFocus } : {}),
     ...(kind ? { kind } : {}),
+  };
+}
+
+function parseCustomCommand(rest: string, custom: CustomCommandMatch): ExperimentCommand {
+  const [first, ...tail] = rest.split(/\s+/).filter(Boolean);
+  const firstLower = first?.toLowerCase() ?? "";
+  if (firstLower === "status") return { sub: "status" };
+  if (firstLower === "stop") return { sub: "stop" };
+  if (firstLower === "findings") return { sub: "findings", ...(tail[0] ? { id: tail[0] } : {}) };
+  let durationMs = custom.maxDurationMs;
+  let focusParts = first ? [first, ...tail] : [];
+  const durationMatch = /^(\d+)(m|h|d)$/i.exec(firstLower);
+  if (durationMatch) {
+    const amount = Number(durationMatch[1]);
+    const unit = durationMatch[2]!.toLowerCase();
+    durationMs = unit === "d" ? amount * 86_400_000 : unit === "h" ? amount * 3_600_000 : amount * 60_000;
+    focusParts = tail;
+  }
+  durationMs = Math.min(Math.max(durationMs, 60_000), custom.maxDurationMs);
+  const { focus, dropped: droppedFocus } = normalizeFocus(focusParts.join(" "));
+  return {
+    sub: "start",
+    durationMs,
+    kind: "custom",
+    commandId: custom.commandId,
+    ...(focus ? { focus } : {}),
+    ...(custom.provider ? { provider: custom.provider } : {}),
+    ...(custom.modelId ? { model: custom.modelId } : {}),
+    ...(droppedFocus ? { droppedFocus } : {}),
   };
 }
 
@@ -317,10 +362,12 @@ const EPOCH_FINISH: Record<LoopKey, string> = {
   framework: DEADLINE_FINISH,
   security: DEADLINE_FINISH,
   "repo-history": DEADLINE_FINISH,
+  custom: DEADLINE_FINISH,
   "ui-test": "\n\nThe judge found no fixture problems left, or the retries ran out - write the final report now: one line per variation with its verdict, the real UI defects you found with their screenshots, and which videos were delivered. The harness already delivered the videos and failing screenshots; deliver anything still missing with sandbox-deliver-files, then call end-experiment with the report.",
 };
 
 const EPOCH_EXIT: Record<LoopKey, string> = {
+  custom: `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
   "ui-test": `EXIT: this is a /ui-test run. A judge reads your reply after every pass. If the reply reports fixture or harness problems (requests served by the fallback mock, wrong or missing fixtures, a harness error, a dev server that was not up), the loop sends you back to fix them, a few times at most. When the reply shows a clean harness run, the loop asks you for the final report. So END EVERY PASS with a short status: the pass/fail/unsure counts, and say explicitly whether any requests hit the fallback mock.`,
   experiment: `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
   understanding: `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`,
@@ -330,6 +377,7 @@ const EPOCH_EXIT: Record<LoopKey, string> = {
 };
 
 const EPOCH_INSTRUCTIONS: Record<LoopKey, string> = {
+  custom: `Read the ledger below before doing anything. Record every conjecture, proof and refutation with the experiment-ledger tool.`,
   "ui-test": `Read the ledger below before doing anything. The route under test is the focus.
 
 FIRST PASS (no harness run recorded in the ledger yet): find the page's code for that route and list the states worth seeing — empty, loading, error, long text, many items, missing permissions, a narrow viewport. Write a ui-tester spec with one variation per state and a mock for every API the page calls. Start the app in your sandbox (sandbox-run-detached), then ask the ui-tester subagent to run ui-test-variations with that spec.
@@ -367,8 +415,26 @@ RECONCILE AGAINST HEAD — this is the correctness bar. History is full of dead 
 Deliver ONE self-contained .html decision-log (no network, no JavaScript — it must render offline) with a STABLE filename, extended every epoch, three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced/changed each) / GRAVEYARD (tried-and-abandoned, with why). Send it with sandbox-deliver-files.`,
 };
 
-export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
-  const loop = loopCommandFor(run.kind);
+function customInstruction(loop: LoopCommandDef): string {
+  const c = loop.custom!;
+  return [
+    `This is the ${loop.command} loop command (${c.description}). Read the ledger below before doing anything, and record every item, conjecture, proof and refutation with the experiment-ledger tool.`,
+    ``,
+    `THE TASK, written by the person who built this command:`,
+    c.instruction,
+    ...((loop.subagents ?? []).length > 0 ? [``, `SUBAGENTS: delegate the work they are built for to ${(loop.subagents ?? []).join(", ")} instead of doing it yourself. If one is not in your tools, say so in your status and carry on without it.`] : []),
+    ...(loop.deliverable ? [``, `DELIVERABLE: ONE ${loop.deliverable === "html" ? "self-contained .html document (no network, no JavaScript)" : "markdown report"} with a STABLE filename you reuse every pass. Extend the same file each pass and send it with sandbox-deliver-files; the run cannot end until it is delivered.`] : []),
+  ].join("\n");
+}
+
+function customFinish(loop: LoopCommandDef): string {
+  return loop.exit === "judge"
+    ? `\n\nThe judge says the loop is finished (or the retries ran out) - write the final report now: what was done, what is still open, and the evidence. Deliver anything not yet attached with sandbox-deliver-files, then call end-experiment with the report.`
+    : DEADLINE_FINISH;
+}
+
+export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string, custom?: LoopCommandDef | null): string {
+  const loop = custom ?? loopCommandFor(run.kind);
   const remaining = formatRemaining(run.deadlineAt);
   const sandboxId = /(?:^|\s)sandboxId=([^\s]+)/.exec(run.sandboxNote ?? "")?.[1];
   // The sandbox is ephemeral and WILL recycle across a multi-hour run, taking
@@ -384,15 +450,15 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   const sandboxInstruction = sandboxId
     ? `YOUR SANDBOX: ${sandboxId}. This experiment has ONE machine. Reuse this sandbox for every command — do NOT create a new one. Only create a new sandbox if this one is provably unreachable, and if you do, immediately record the new id with experiment-ledger action=sandbox-note.`
     : "";
-  const finalInstruction = run.status === "finishing" ? EPOCH_FINISH[loop.key] : "";
+  const finalInstruction = run.status === "finishing" ? (loop.custom ? customFinish(loop) : EPOCH_FINISH[loop.key]) : "";
   // EXIT RULE — must match what end-experiment actually enforces for this run's
   // kind. It did not: every epoch was told the time-boxed rule, so an
   // understanding run whose frontier had closed kept looping to the safety cap
   // instead of ending. The agent was obeying the prompt, not being refused —
   // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
-  const exitInstruction = EPOCH_EXIT[loop.key];
+  const exitInstruction = loop.custom ? loop.custom.exitText : EPOCH_EXIT[loop.key];
   return [
-    `You are in /experiment mode, epoch ${run.epoch}.`,
+    loop.custom ? `You are running the ${loop.command} loop, pass ${run.epoch}.` : `You are in /experiment mode, epoch ${run.epoch}.`,
     sandboxInstruction,
     `Deadline: ${run.deadlineAt.toISOString()} (${remaining} remaining).`,
     ``,
@@ -406,7 +472,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     // testing, because a script asserting that a vulnerable PATTERN exists in
     // source was being recorded as proof. So this prompt separates the two
     // tiers explicitly and the ledger refuses `proved` without an observation.
-    EPOCH_INSTRUCTIONS[loop.key],
+    loop.custom ? customInstruction(loop) : EPOCH_INSTRUCTIONS[loop.key],
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
     deliveredLine,
@@ -423,9 +489,22 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
  *  experiment's currentSessionId. A checker that claimed it would make
  *  continueExperimentAfterResult chain the next epoch off the CHECKER's
  *  completion, double-running the experiment. */
+export function loopPayload(def: LoopCommandDef): Record<string, unknown> {
+  return {
+    command: def.command,
+    graph: def.graph,
+    exit: def.exit,
+    deadlineReleases: def.deadlineReleases,
+    deliverable: def.deliverable,
+    skills: def.skills,
+    subagents: def.subagents ?? [],
+    custom: def.custom,
+  };
+}
+
 async function dispatchExperimentRun(
   run: ExperimentRun,
-  opts: { task: string; mode?: "review"; claimAsCurrent: boolean; recover: boolean; silent?: boolean },
+  opts: { task: string; mode?: "review"; claimAsCurrent: boolean; recover: boolean; silent?: boolean; loop?: LoopCommandDef | null },
 ): Promise<{ sessionId: string }> {
   const traceId = createTraceId();
   const agent = run.orgId
@@ -463,6 +542,7 @@ async function dispatchExperimentRun(
       // Understanding runs advertise their coverage-gated intent to the epoch
       // runtime, which keeps end-experiment locked until the frontier empties.
       ...withLoopKind(run.kind),
+      ...(opts.loop?.custom ? { loop: loopPayload(opts.loop) } : {}),
     },
   };
 
@@ -531,8 +611,10 @@ export async function dispatchExperimentEpoch(run: ExperimentRun): Promise<{ ses
     experimentRepository.listFindings(run.id),
     experimentRepository.listReviews(run.id),
   ]);
-  const task = buildEpochTask(run, buildLedgerMarkdown(run, findings, reviews));
-  const result = await dispatchExperimentRun(run, { task, claimAsCurrent: true, recover: true });
+  const custom = await loopDefForRun(run);
+  if (run.kind === "custom" && !custom) throw new Error(`the loop command for experiment ${run.id} no longer exists`);
+  const task = buildEpochTask(run, buildLedgerMarkdown(run, findings, reviews), custom);
+  const result = await dispatchExperimentRun(run, { task, claimAsCurrent: true, recover: true, loop: custom });
   log.info(`[experiment] dispatched epoch=${run.epoch} id=${run.id} session=${result.sessionId}`);
   return result;
 }
@@ -547,6 +629,7 @@ export async function dispatchExperimentChecker(run: ExperimentRun, epoch: numbe
   try {
     const result = await dispatchExperimentRun(run, {
       task,
+      loop: await loopDefForRun(run),
       mode: "review",
       claimAsCurrent: false,
       recover: false,

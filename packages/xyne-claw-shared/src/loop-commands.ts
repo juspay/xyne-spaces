@@ -1,6 +1,7 @@
 import type { DecideQuestion } from "./tools/xor/questions.js";
+import { LOOP_SKILL_BUNDLE_IDS } from "./loop-templates.js";
 
-export const LOOP_KINDS = ["understanding", "framework", "security", "repo-history", "ui-test"] as const;
+export const LOOP_KINDS = ["understanding", "framework", "security", "repo-history", "ui-test", "custom"] as const;
 
 export type LoopKind = (typeof LOOP_KINDS)[number];
 
@@ -23,12 +24,21 @@ export interface LoopCommandDef {
   positional?: "route";
   judge?: LoopJudge;
   modeLog: string;
+  custom?: CustomLoopInfo;
   start: {
     title: string;
     mode: string;
     durationLabel: string;
     seedFrontier: boolean;
   };
+}
+
+export interface CustomLoopInfo {
+  id: string;
+  template: string;
+  instruction: string;
+  description: string;
+  exitText: string;
 }
 
 export interface LoopJudge {
@@ -180,4 +190,45 @@ export function loopCommandForWord(text: string): LoopCommandDef | undefined {
 
 export function loopModeLog(def: LoopCommandDef, vars: { epoch: number; remaining: string }): string {
   return def.modeLog.replace("{epoch}", String(vars.epoch)).replace("{remaining}", vars.remaining);
+}
+
+const GRAPHS = new Set(["timeboxed", "progress", "fix-retry"]);
+const EXITS = new Set(["deadline", "frontier", "judge"]);
+const strings = (v: unknown, max: number): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 120).slice(0, max) : [];
+
+export function loopFromPayload(raw: unknown): LoopCommandDef | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const custom = o["custom"] as Record<string, unknown> | undefined;
+  const command = typeof o["command"] === "string" && /^\/[a-z][a-z0-9-]{1,40}$/.test(o["command"]) ? o["command"] : null;
+  if (!command || !custom || typeof custom["id"] !== "string" || typeof custom["instruction"] !== "string") return undefined;
+  if (!GRAPHS.has(String(o["graph"])) || !EXITS.has(String(o["exit"]))) return undefined;
+  const deliverable = o["deliverable"] === "md" || o["deliverable"] === "html" ? o["deliverable"] : null;
+  return {
+    key: "custom",
+    command,
+    kind: "custom",
+    graph: o["graph"] as LoopCommandDef["graph"],
+    exit: o["exit"] as LoopCommandDef["exit"],
+    deadlineReleases: o["deadlineReleases"] !== false,
+    deliverable,
+    proofRule: "delivered-artifact",
+    closeCheck: null,
+    skills: strings(o["skills"], 10).filter((s) => LOOP_SKILL_BUNDLE_IDS.has(s)),
+    subagents: strings(o["subagents"], 8),
+    modeLog: `${command} — injected experiment tools (epoch {epoch}, remaining {remaining})`,
+    custom: {
+      id: custom["id"],
+      template: typeof custom["template"] === "string" ? custom["template"] : "",
+      instruction: custom["instruction"].slice(0, 8_000),
+      description: typeof custom["description"] === "string" ? custom["description"].slice(0, 300) : "",
+      exitText: typeof custom["exitText"] === "string" ? custom["exitText"].slice(0, 2_000) : "",
+    },
+    start: { title: `**${command} started**`, mode: "", durationLabel: "Duration", seedFrontier: false },
+  };
+}
+
+export function resolveLoop(ctx: { kind?: unknown; loop?: LoopCommandDef | undefined } | undefined | null): LoopCommandDef {
+  return ctx?.loop ?? loopCommandFor(ctx?.kind);
 }

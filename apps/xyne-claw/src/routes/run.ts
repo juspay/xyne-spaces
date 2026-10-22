@@ -1,4 +1,4 @@
-import { loopCommandFor, loopModeLog, withLoopKind, type LoopKey } from "xyne-claw-shared";
+import { loopFromPayload, loopModeLog, resolveLoop, withLoopKind, type LoopKey } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -331,6 +331,7 @@ export function normalizeExperimentContext(raw: unknown): ExperimentContext | un
     ...(focus ? { focus } : {}),
     ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
     ...withLoopKind(obj["kind"]),
+    ...(obj["kind"] === "custom" && loopFromPayload(obj["loop"]) ? { loop: loopFromPayload(obj["loop"])! } : {}),
   };
 }
 
@@ -2354,7 +2355,7 @@ export async function processTask(
     const uiTesterTools =
       !fastModeEnabled &&
       ((toolsConfigEarly?.subagents ?? []).includes("ui-tester") ||
-        (experiment ? (loopCommandFor(experiment.kind).subagents ?? []).includes("ui-tester") : false)) &&
+        (experiment ? (resolveLoop(experiment).subagents ?? []).includes("ui-tester") : false)) &&
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
@@ -3101,7 +3102,7 @@ export async function processTask(
       log(
         experiment.mode === "review"
           ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
-          : loopModeLog(loopCommandFor(experiment.kind), { epoch: experiment.epoch, remaining: experimentRemaining(experiment.deadlineAt) }),
+          : loopModeLog(resolveLoop(experiment), { epoch: experiment.epoch, remaining: experimentRemaining(experiment.deadlineAt) }),
       );
     }
 
@@ -4157,7 +4158,7 @@ export async function processTask(
     // and no JS) and the file:line citation discipline the ledger enforces.
     const extraSkillPathNames = [
       ...(taskCommand?.skillPaths ?? []),
-      ...(experiment ? loopCommandFor(experiment.kind).skills : []),
+      ...(experiment ? resolveLoop(experiment).skills : []),
     ];
 
     const securityGuide = `\n\n## Security mode\nYou are in a security run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). Keep TWO TIERS apart, because mixing them is what makes a security report untrustworthy.\n\nLEAD (status=conjecture) — you read the code and the defect looks real. Cite file:line. Most findings belong here, and there is no shame in it.\nCONFIRMED (status=proved) — you EXECUTED it and captured the result: the request you sent, the status or output you got back, and where you verified the effect. The ledger refuses a close without an observation, so do not try to word around it. A script that greps source and asserts a vulnerable pattern is present is not a confirmation — it re-proves what you already read.\n\nDEFENDED is a real result. If you try it and a guard stops you, close it refuted and name the guard. Also check whether a SAFE SIBLING already exists — the same operation done correctly elsewhere in the repo. That has been the single most common shape, and it is the cheapest fix to recommend.\n\nDo not promote a lead because it looks obvious. Confirming a wrong finding is expensive: it becomes a ticket someone has to disprove.\n\nThis run is TIME-BOXED: end-experiment refuses until the deadline, because attack surface cannot be exhausted — there is always one more endpoint. When a surface runs dry, move to a different one rather than restating closed findings.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename, extended EVERY epoch (so a run that ends at the deadline still delivers everything found), with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry. The sandbox recycles — if the file is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
@@ -4172,12 +4173,15 @@ export async function processTask(
       framework: frameworkGuide,
       security: securityGuide,
       "repo-history": repoHistoryGuide,
+      custom: run.loop?.custom
+        ? `\n\n## ${run.loop.command} loop\n${run.loop.custom.description}\n\nThis is a loop command someone in your org built from the "${run.loop.custom.template}" template (pass ${run.epoch}; deadline ${run.deadlineAt}; focus ${run.focus ?? "unspecified"}). The task and its exit rule are in your instructions; follow them exactly. Record your work in the ledger with experiment-ledger, deliver files with sandbox-deliver-files, and end with end-experiment only when the exit rule allows.\n\n${run.loop.custom.exitText}`
+        : "",
       "ui-test": `\n\n## UI-test mode\nYou are in a /ui-test run (epoch ${run.epoch}; route ${run.focus ?? "unspecified"}). You test ONE route by rendering every state worth seeing with mocked APIs, through the ui-tester subagent (ui-test-variations), which screenshots, records a video, audits the DOM and runs visual checks on each variation. A judge reads your reply after each pass: fixture or harness problems send you back to fix them, and a clean run moves on to the final report. End every pass with the pass/fail/unsure counts and say explicitly whether any requests hit the fallback mock. Never drop variations to get a clean run; a failing variation is a finding, not a problem to hide.`,
     });
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
       : experiment
-      ? loopGuides(experiment)[loopCommandFor(experiment.kind).key]
+      ? loopGuides(experiment)[resolveLoop(experiment).key]
       : "";
     const authoritativeSdlcContext = trustedSdlcContext
       ? buildSdlcRunContextSection(trustedSdlcContext)

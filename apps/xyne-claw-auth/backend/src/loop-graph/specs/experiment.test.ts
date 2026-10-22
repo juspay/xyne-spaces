@@ -36,11 +36,16 @@ vi.mock("../../services/xorTryClient.js", () => ({
     return xor.reply ?? { ok: false, status: 503, error: "xor is not configured" };
   }),
 }));
+const customDefs = vi.hoisted(() => ({ byId: new Map<string, unknown>() }));
+vi.mock("../../lib/loop-command-defs.js", () => ({
+  loopDefForRun: vi.fn(async (r: { kind?: string; commandId?: string }) => (r.kind === "custom" && r.commandId ? customDefs.byId.get(r.commandId) ?? null : null)),
+}));
 vi.mock("../../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 const { continueExperimentAfterResult, superviseExperiment, experimentLoop, EPOCH_LOOPS, epochLoopFor } = await import("./experiment.js");
+const sharedModule = await import("xyne-claw-shared");
 const { validateLoopSpec } = await import("../engine.js");
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
@@ -221,5 +226,56 @@ describe("/ui-test fix-and-retry loop", () => {
     expect(validateLoopSpec(epochLoopFor("ui-test") as never)).toEqual([]);
     expect(Object.keys(epochLoopFor("ui-test").nodes)).toContain("judge");
     expect(Object.keys(epochLoopFor("ui-test").nodes)).not.toContain("checker");
+  });
+});
+
+describe("custom loop commands from templates", () => {
+  const { buildCustomLoopDef } = sharedModule;
+  const make = (template: string, extra: Record<string, unknown> = {}) =>
+    buildCustomLoopDef({ id: `lc-${template}`, name: `my-${template}`, description: "d", template, instruction: "Do the thing carefully and record evidence.", skills: [], subagents: [], deliverable: "md", judgeQuestion: null, maxPasses: null, ...extra } as never);
+  const customRun = (id: string, overrides: Record<string, unknown> = {}) => run({ kind: "custom", commandId: id, epoch: 1, ...overrides });
+  const answer = (value: boolean, confidence = 0.95) => ({ ok: true as const, answers: { condition: { value, confidence, unsure: confidence < 0.7 } }, unavailable: false, ms: 2 });
+
+  it("builds a valid graph for every template", async () => {
+    const { customEpochLoop } = await import("./experiment.js");
+    for (const t of ["deadline-checker", "frontier", "cursor-walk", "until-condition", "fix-retry"]) {
+      const spec = customEpochLoop(make(t, t === "until-condition" || t === "fix-retry" ? { judgeQuestion: "Is it done yet?" } : {}));
+      expect(validateLoopSpec(spec as never)).toEqual([]);
+      expect(Object.keys(spec.nodes)).toContain(t.endsWith("retry") || t === "until-condition" ? "judge" : "checker");
+    }
+  });
+
+  it("until-condition repeats while the judge says the condition is NOT met, then reports", async () => {
+    const def = make("until-condition", { judgeQuestion: "Does the reply show p95 under 200 ms?" });
+    customDefs.byId.set("lc-until-condition", def);
+    repo.active = customRun("lc-until-condition");
+    xor.reply = answer(false);
+    expect(await continueExperimentAfterResult("conv", "s-3", "p95 is 340 ms after the index change")).toBe(true);
+    expect(lib.epochs.map((e) => [e["epoch"], e["status"]])).toEqual([[2, "running"]]);
+    lib.epochs.length = 0;
+    repo.active = customRun("lc-until-condition", { epoch: 2 });
+    xor.reply = answer(true);
+    await continueExperimentAfterResult("conv", "s-3", "p95 is 180 ms");
+    expect(lib.epochs.map((e) => e["status"])).toEqual(["finishing"]);
+  });
+
+  it("fix-retry loops back while problems remain and stops at its own pass limit", async () => {
+    customDefs.byId.set("lc-fix-retry", make("fix-retry", { judgeQuestion: "Does the reply report failing tests?", maxPasses: 2 }));
+    repo.active = customRun("lc-fix-retry", { epoch: 2 });
+    xor.reply = answer(true);
+    await continueExperimentAfterResult("conv", "s-3", "2 tests still failing");
+    expect(lib.epochs.map((e) => e["epoch"])).toEqual([3]);
+    lib.epochs.length = 0;
+    repo.active = customRun("lc-fix-retry", { epoch: 3 });
+    await continueExperimentAfterResult("conv", "s-3", "1 test still failing");
+    expect(lib.epochs.map((e) => e["status"])).toEqual(["finishing"]);
+  });
+
+  it("a deadline loop runs the checker and the next pass, like /experiment", async () => {
+    customDefs.byId.set("lc-deadline-checker", make("deadline-checker"));
+    repo.active = customRun("lc-deadline-checker", { epoch: 3 });
+    await continueExperimentAfterResult("conv", "s-3", "recorded 2 findings");
+    expect(lib.checkers).toEqual([3]);
+    expect(lib.epochs.map((e) => e["epoch"])).toEqual([4]);
   });
 });

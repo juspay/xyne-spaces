@@ -1,5 +1,6 @@
 import { parseSlashCommand } from "../parseSlashCommand.js";
-import { parseExperimentCommand } from "../experiment.js";
+import { parseExperimentCommand, slashWord, type CustomCommandMatch } from "../experiment.js";
+import { findRunnableLoopCommand, toLoopDef } from "../loop-command-defs.js";
 import { handleExperimentCommand } from "./experiment.js";
 import { handleQueueClear, handleQueueShow } from "./queue.js";
 import { handleHelp } from "./help.js";
@@ -24,6 +25,23 @@ export type {
   WebhookCommandPayload,
 } from "./context.js";
 
+async function resolveCustomLoopCommand(ctx: WebhookCommandCtx): Promise<CustomCommandMatch | null> {
+  const word = slashWord(ctx.userText);
+  if (!word || !ctx.agent.orgId) return null;
+  const row = await findRunnableLoopCommand(ctx.agent.orgId, ctx.payload.userId, word).catch((err: unknown) => {
+    ctx.log.warn("[loop-commands] lookup failed", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  });
+  if (!row) return null;
+  return {
+    def: toLoopDef(row),
+    commandId: row.id,
+    maxDurationMs: row.maxDurationMinutes * 60_000,
+    provider: row.provider,
+    modelId: row.modelId,
+  };
+}
+
 export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<CommandOutcome> {
   // ── /goal slash command interception ─────────────────────────────────────
   // Parse the RAW message first: an explicit command in the raw text (e.g.
@@ -33,10 +51,11 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   const slash =
     rawSlash ??
     (ctx.autoGoalEnabled && !ctx.immediateTaskCommand ? parseSlashCommand(`/goal ${ctx.userText}`) : null);
-  const experimentCommand = parseExperimentCommand(ctx.userText);
+  const custom = await resolveCustomLoopCommand(ctx);
+  const experimentCommand = parseExperimentCommand(ctx.userText, custom);
 
   if (experimentCommand) {
-    await handleExperimentCommand(ctx, experimentCommand);
+    await handleExperimentCommand(ctx, experimentCommand, custom);
     return { kind: "handled" };
   }
 
