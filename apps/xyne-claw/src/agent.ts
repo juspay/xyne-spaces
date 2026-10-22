@@ -1,3 +1,4 @@
+import { detectStall, firstTokenLimitMs } from "./stall-check.js";
 import {
   createAgentSession,
   AuthStorage,
@@ -2747,6 +2748,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   let modelActive = false;
   const stallController = new AbortController();
   const STALL_TIMEOUT_MS = Number(process.env["AGENT_STALL_TIMEOUT_MS"] ?? 120_000);
+  const FIRST_TOKEN_STALL_MS = firstTokenLimitMs(provider);
+  let awaitingFirstTokenSince: number | null = null;
+  let stallIdleMs: number | null = null;
   let stallWatchdog: ReturnType<typeof setInterval> | null = null;
   let turnStreamChars = 0;
   let turnStreamThinkingChars = 0;
@@ -3169,6 +3173,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     lastActivityAt = Date.now();
     if (event.type === "turn_start") {
       modelActive = true; // awaiting/receiving model output until message_end
+      awaitingFirstTokenSince = Date.now();
       llmCallSeq += 1;
       pushDebugEvent("session_prompt", {
         kind: currentPromptKind,
@@ -3185,6 +3190,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Don't carry turnStartedAt forward — the next turn begins on tool_end.
       turnStartedAt = null;
       firstDeltaAt = null;
+      awaitingFirstTokenSince = null;
       // Tools can legitimately run for minutes — pause the stall watchdog so a
       // slow tool isn't mistaken for a hung model.
       modelActive = false;
@@ -3342,6 +3348,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const partId = TurnParts.partId(llmCallSeq, ame?.contentIndex);
       if (ame?.type === "thinking_end") turnParts.endReasoning(partId);
       if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
+        awaitingFirstTokenSince = null;
         if (firstDeltaAt == null && turnStartedAt != null) {
           firstDeltaAt = Date.now();
           const wait = firstDeltaAt - turnStartedAt;
@@ -3582,7 +3589,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     new RunCancelledError("Run cancelled by user", snapshotAbortProgress());
   const buildProviderStallError = (): ProviderStallError => new ProviderStallError(
     provider ?? "spaces",
-    Date.now() - lastActivityAt,
+    stallIdleMs ?? Date.now() - lastActivityAt,
     snapshotAbortProgress(),
   );
 
@@ -3704,16 +3711,27 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Start the stall watchdog (cleared in the finally at runTask's end). Fires
   // only while awaiting/receiving model output (modelActive) so slow tools and
   // idle turn-boundaries don't trip it. STALL_TIMEOUT_MS=0 disables it.
-  if (STALL_TIMEOUT_MS > 0) {
+  if (STALL_TIMEOUT_MS > 0 || FIRST_TOKEN_STALL_MS > 0) {
     stallWatchdog = setInterval(() => {
       if (stallController.signal.aborted || abortSignal?.aborted || !modelActive) return;
-      const idle = Date.now() - lastActivityAt;
-      if (idle > STALL_TIMEOUT_MS) {
-        log.warn(`[agent] LLM stall (provider=${provider ?? "spaces"}): no model activity for ${Math.round(idle / 1000)}s — aborting attempt so the fallback chain can advance`);
-        metric.count("agent_llm_stall", { provider: provider ?? "spaces" });
+      const stall = detectStall({
+        now: Date.now(),
+        lastActivityAt,
+        awaitingFirstTokenSince,
+        idleLimitMs: STALL_TIMEOUT_MS,
+        firstTokenLimitMs: FIRST_TOKEN_STALL_MS,
+      });
+      if (stall) {
+        stallIdleMs = stall.waitedMs;
+        log.warn(
+          stall.kind === "first-token"
+            ? `[agent] LLM stall (provider=${provider ?? "spaces"}): no first token after ${Math.round(stall.waitedMs / 1000)}s — aborting attempt so the fallback chain can advance`
+            : `[agent] LLM stall (provider=${provider ?? "spaces"}): no model activity for ${Math.round(stall.waitedMs / 1000)}s — aborting attempt so the fallback chain can advance`,
+        );
+        metric.count("agent_llm_stall", { provider: provider ?? "spaces", kind: stall.kind });
         stallController.abort();
       }
-    }, Math.min(15_000, STALL_TIMEOUT_MS));
+    }, FIRST_TOKEN_STALL_MS > 0 ? 5_000 : Math.min(15_000, STALL_TIMEOUT_MS));
   }
 
   const attachmentContext = fileAttachments?.length
