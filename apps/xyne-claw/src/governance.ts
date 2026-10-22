@@ -41,6 +41,8 @@ export interface ToolMetaEntry {
   serverType?: string | undefined;
   mcpToolName?: string | undefined;
   isWriteTool?: boolean | undefined;
+  /** Under the server's declared write policy: true a write, false a read; absent when nothing was declared. */
+  declaredWrite?: boolean | undefined;
   permission?: string | undefined;
 }
 
@@ -53,6 +55,7 @@ export function toolMetaOf(tool: { name: string } & Record<string, unknown>): To
     ...(serverType ? { serverType } : {}),
     ...(typeof tool["mcpToolName"] === "string" ? { mcpToolName: tool["mcpToolName"] } : {}),
     ...(typeof tool["isWriteTool"] === "boolean" ? { isWriteTool: tool["isWriteTool"] } : {}),
+    ...(typeof tool["declaredWrite"] === "boolean" ? { declaredWrite: tool["declaredWrite"] } : {}),
   };
 }
 
@@ -267,7 +270,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   // C1: one decision per call, recorded before a side effect runs.
   const criticCall = (id: string, toolName: string, args: unknown): CriticCallInput | null => {
     const meta = toolMeta.get(toolName);
-    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args });
+    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args });
     if (!criticNeeded(d.effect, state.readUntypedContent)) return null;
     const argsText = safeJson(args, 65_536);
     const scan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
@@ -293,7 +296,9 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const t0 = performance.now();
     const name = ctx.toolCall.name;
     const meta = toolMeta.get(name);
-    const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? name, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args: ctx.args });
+    // Records and kill scopes use the tool's own name, the one claw-auth records, not pi's prefixed one.
+    const toolLabel = meta?.mcpToolName ?? name;
+    const descriptor = resolveToolDescriptor({ toolName: toolLabel, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args: ctx.args });
     const argsText = safeJson(ctx.args, 65_536);
     const argScan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");
@@ -305,9 +310,9 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const nowMs = Date.now();
     const hint = grantOf(meta?.permission);
     const decideWith = (c: CriticVerdict) => decide({
-      call: { toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
+      call: { toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
       // Kill switches arrive with PR-12; until then every snapshot is fresh and empty.
-      kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
+      kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: toolLabel }, nowMs },
       conversation: state,
       critic: c,
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
@@ -324,7 +329,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       void criticVerdict(ctx, current).then((r) => {
         if (!r.risk) return;
         const would = decideWith(r.verdict);
-        queueGovernance({ ...base(), eventType: "critic_verdict", toolCallId: ctx.toolCall.id, toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: "c1", subjectId: decision.decisionId, decision: would.decision, reasonCode: would.reasonCode, reasonText: `shadow: would decide ${would.decision} (${would.reasonCode}); critic ${r.risk.source} ${r.risk.level}${r.risk.reasons.length > 0 ? `: ${r.risk.reasons.join("; ")}` : ""}`.slice(0, 1_900), checkTierReached: r.risk.source === "xor" ? "xor_judge" : "parser", ...(r.ms !== undefined ? { judgeMs: r.ms } : {}), matchedRuleIds: criticTags(r.risk) });
+        queueGovernance({ ...base(), eventType: "critic_verdict", toolCallId: ctx.toolCall.id, toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: "c1", subjectId: decision.decisionId, decision: would.decision, reasonCode: would.reasonCode, reasonText: `shadow: would decide ${would.decision} (${would.reasonCode}); critic ${r.risk.source} ${r.risk.level}${r.risk.reasons.length > 0 ? `: ${r.risk.reasons.join("; ")}` : ""}`.slice(0, 1_900), checkTierReached: r.risk.source === "xor" ? "xor_judge" : "parser", ...(r.ms !== undefined ? { judgeMs: r.ms } : {}), matchedRuleIds: criticTags(r.risk) });
       }).catch((err) => log.warn(`[governance] critic failed session=${sessionId}: ${err instanceof Error ? err.message : String(err)}`));
     }
     decisions.set(ctx.toolCall.id, decision);
@@ -333,7 +338,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       ...base(),
       eventType: "tool_call",
       toolCallId: ctx.toolCall.id,
-      toolName: name,
+      toolName: toolLabel,
       ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}),
       decision: verdict.decision,
       reasonCode: verdict.reasonCode,

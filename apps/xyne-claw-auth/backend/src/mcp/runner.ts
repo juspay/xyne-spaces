@@ -571,7 +571,7 @@ export async function listToolsForUser(
   const writeTools = definition?.writePolicy
     ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
     : (definition?.writeTools ?? []);
-  return { serverType, serverName, tools, writeTools };
+  return { serverType, serverName, tools, writeTools, writePolicyDeclared: Boolean(definition?.writePolicy || definition?.writeTools) };
 }
 
 async function fetchToolsFromServer(
