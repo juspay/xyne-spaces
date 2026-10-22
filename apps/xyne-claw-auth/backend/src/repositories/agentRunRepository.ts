@@ -616,7 +616,7 @@ export const agentRunRepository = {
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { id: true, orgId: true, toolInvocations: true, toolsUsed: true, userId: true, agentSlug: true, metadata: true },
+      select: { id: true, orgId: true, toolInvocations: true, toolsUsed: true, userId: true, agentSlug: true, metadata: true, model: true },
     });
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
@@ -729,6 +729,7 @@ export const agentRunRepository = {
             agentSlug: existingRow.agentSlug,
             completedAt,
             error: input.error ?? null,
+            model: modelBackstop ?? input.model ?? existingRow.model ?? null,
           },
           invocations: cleanInvocations ?? [],
           answer: input.result ?? null,

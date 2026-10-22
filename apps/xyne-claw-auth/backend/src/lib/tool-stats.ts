@@ -335,6 +335,7 @@ export interface RunStatsTarget {
   agentSlug: string;
   completedAt: Date;
   error?: string | null;
+  model?: string | null;
 }
 
 export interface RunStatsItem {

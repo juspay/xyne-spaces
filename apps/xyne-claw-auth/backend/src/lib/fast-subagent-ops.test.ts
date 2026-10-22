@@ -20,6 +20,7 @@ describe("rows from a finished run", () => {
       model: "open-fast",
       tokensIn: 1200,
       tokensOut: 300,
+      tokensCacheRead: 400,
       turns: 3,
       fallbacks: 1,
       xor: { calls: 1, items: 50, answers: 150, unsure: 12, unavailable: 2, cached: 5, quotaBlocked: 0 },
@@ -33,7 +34,8 @@ describe("rows from a finished run", () => {
   it("keeps only top-level fast subagent wrappers", () => {
     const rows = fastSubagentCallRows(RUN, invocations);
     expect(rows.map((r) => r.subagentName)).toEqual(["log-triage", "ui-tester"]);
-    expect(rows[0]).toMatchObject({ runId: "run1", orgId: "org1", agentSlug: "architect", durationMs: 4200, fast: true, model: "open-fast", tokensIn: 1200, fallbacks: 1, xorItems: 50, xorAnswers: 150, xorUnsure: 12, xorUnavailable: 2, xorCached: 5 });
+    expect(fastSubagentCallRows({ ...RUN, model: "claude-opus-5-5" }, invocations)[0]).toMatchObject({ parentModel: "claude-opus-5-5", tokensCacheRead: 400, tokensCacheWrite: 0 });
+    expect(rows[0]).toMatchObject({ runId: "run1", orgId: "org1", agentSlug: "architect", durationMs: 4200, fast: true, model: "open-fast", parentModel: null, tokensIn: 1200, fallbacks: 1, xorItems: 50, xorAnswers: 150, xorUnsure: 12, xorUnavailable: 2, xorCached: 5 });
     expect(rows[1]).toMatchObject({ fast: false, xorCalls: 0, xorUnsure: 3 });
   });
 
@@ -69,6 +71,7 @@ describe("dashboard rollup", () => {
     const rows = [call("log-triage", 1, 100, 10, { durationMs: 900 }), call("log-triage", 30, 100, 20, { durationMs: 3000, fallbacks: 2, xorCached: 25 }), call("ui-tester", 2, 10, 1, { fast: false })];
     const [lt, ui] = aggregateCalls(rows, 7, NOW);
     expect(lt).toMatchObject({ subagentName: "log-triage", calls: 2, p50Ms: 3000, unsureRate: 15, cacheHitRate: 12.5, escalations: 2, tokensOffloaded: 300 });
+    expect(lt!.costRows).toEqual([{ model: "open-fast", parentModel: null, calls: 2, xorCalls: 2, tokensIn: 200, tokensOut: 100, cacheRead: 0, cacheWrite: 0 }]);
     expect(lt!.daily).toHaveLength(7);
     expect(lt!.daily.at(-1)).toMatchObject({ calls: 1, unsureRate: 10 });
     expect(ui).toMatchObject({ subagentName: "ui-tester", fast: false, calls: 1 });

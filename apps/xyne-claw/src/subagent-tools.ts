@@ -1708,8 +1708,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             fastSubagent: {
               fast: Boolean(def.fast),
               model: childModelId,
-              tokensIn: childTokenUsage.input + childTokenUsage.cacheRead,
+              tokensIn: childTokenUsage.input,
               tokensOut: childTokenUsage.output,
+              tokensCacheRead: childTokenUsage.cacheRead,
+              tokensCacheWrite: childTokenUsage.cacheWrite,
               turns: childTurns,
               fallbacks,
               xor: xorAgg,

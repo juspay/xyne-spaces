@@ -192,7 +192,7 @@ router.get("/fast/stats", asyncHandler(async (req: Request, res: Response) => {
   const now = Date.now();
   const rows = await prisma.fastSubagentCall.findMany({
     where: { orgId, completedAt: { gte: new Date(now - days * 86_400_000) } },
-    select: { subagentName: true, completedAt: true, durationMs: true, isError: true, fast: true, model: true, tokensIn: true, tokensOut: true, fallbacks: true, xorCalls: true, xorItems: true, xorAnswers: true, xorUnsure: true, xorUnavailable: true, xorCached: true, quotaBlocked: true },
+    select: { subagentName: true, completedAt: true, durationMs: true, isError: true, fast: true, model: true, parentModel: true, tokensIn: true, tokensOut: true, tokensCacheRead: true, tokensCacheWrite: true, fallbacks: true, xorCalls: true, xorItems: true, xorAnswers: true, xorUnsure: true, xorUnavailable: true, xorCached: true, quotaBlocked: true },
     orderBy: { completedAt: "desc" },
     take: 50_000,
   });

@@ -4599,6 +4599,7 @@ export interface FastSubagentStats {
   escalations: number;
   quotaBlocked: number;
   daily: Array<{ day: string; calls: number; unsureRate: number | null }>;
+  costRows: Array<{ model: string | null; parentModel: string | null; calls: number; xorCalls: number; tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number }>;
 }
 
 export interface FastSubagentRow {

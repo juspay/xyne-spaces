@@ -3513,8 +3513,11 @@ model FastSubagentCall {
   isError        Boolean
   fast           Boolean
   model          String?
+  parentModel    String?
   tokensIn       Int
   tokensOut      Int
+  tokensCacheRead  Int     @default(0)
+  tokensCacheWrite Int     @default(0)
   turns          Int
   fallbacks      Int
   xorCalls       Int

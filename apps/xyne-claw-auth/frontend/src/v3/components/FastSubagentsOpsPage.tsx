@@ -4,12 +4,14 @@ import { CheckIcon, LightningIcon, WarningIcon, XIcon } from "@phosphor-icons/re
 import { ackFastSubagentAlert, getFastSubagentStats, listXorReviews, runFastDriftCheck, submitXorReview } from "../../lib/api";
 import type { FastSubagentAlert, FastSubagentRow, XorReviewItem } from "../../lib/api";
 import { Button } from "./ui/Button";
+import { computeFastSubagentCost, type FastSubagentCost } from "../lib/modelPricing";
 import { useSnackbar } from "./ui/Snackbar";
 
 const DAYS = [1, 7, 30];
 
 const fmtPct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
 const fmtMs = (v: number | null | undefined) => (v === null || v === undefined ? "—" : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`);
+const fmtUsd = (v: number) => (Math.abs(v) >= 100 ? `$${v.toFixed(0)}` : Math.abs(v) >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(3)}`);
 const fmtNum = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v));
 
 function Spark({ points }: { points: Array<number | null> }) {
@@ -80,6 +82,8 @@ export function FastSubagentsOpsPage({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const open = alerts.filter((a) => !a.acknowledgedAt);
+  const costs = new Map<string, FastSubagentCost>((rows ?? []).map((r) => [r.subagentName, computeFastSubagentCost(r.stats?.costRows ?? [])]));
+  const total = [...costs.values()].reduce((t, c) => ({ spent: t.spent + c.spent, saved: t.saved + c.saved, unpriced: t.unpriced + c.unpricedCalls }), { spent: 0, saved: 0, unpriced: 0 });
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-xyne-surface" data-id="fast-subagents-ops">
@@ -126,18 +130,26 @@ export function FastSubagentsOpsPage({ isAdmin }: { isAdmin: boolean }) {
           </section>
         )}
 
+        {rows && rows.some((r) => r.calls > 0) && (
+          <p className="text-[13px] text-xyne-fg-secondary" data-id="fast-cost-total">
+            Spent <span className="font-medium text-xyne-fg-primary">{fmtUsd(total.spent)}</span> on fast subagents (cheap model + xor) ·
+            about <span className="font-medium text-xyne-success-fg">{fmtUsd(total.saved)}</span> saved vs the parent model doing the same work inline
+            {total.unpriced > 0 && <span className="text-xyne-fg-muted"> · {total.unpriced} calls on models with no price</span>}
+          </p>
+        )}
+
         <section className="overflow-x-auto rounded-xl border border-xyne-border">
           <table className="w-full min-w-[980px] text-[12px]" data-id="fast-stats">
             <thead className="bg-xyne-surface-subtle text-left text-xyne-fg-muted">
               <tr>
-                {["Subagent", "Calls", "p50 / p95", "Unsure", `Unsure (${days === 1 ? "24h" : "daily"})`, "xor down", "Cache", "Escalations", "Tokens offloaded", "Eval", "Reviews", "Quota"].map((h) => (
+                {["Subagent", "Calls", "p50 / p95", "Unsure", `Unsure (${days === 1 ? "24h" : "daily"})`, "xor down", "Cache", "Escalations", "Tokens offloaded", "Cost / saved", "Eval", "Reviews", "Quota"].map((h) => (
                   <th key={h} className="px-3 py-2 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows === null && (
-                <tr><td colSpan={12} className="px-3 py-6 text-center text-xyne-fg-muted">Loading…</td></tr>
+                <tr><td colSpan={13} className="px-3 py-6 text-center text-xyne-fg-muted">Loading…</td></tr>
               )}
               {rows?.map((r) => (
                 <tr key={r.subagentName} className="border-t border-xyne-border" data-id="fast-stats-row">
@@ -155,6 +167,17 @@ export function FastSubagentsOpsPage({ isAdmin }: { isAdmin: boolean }) {
                   <td className="px-3 py-2">{fmtPct(r.stats?.cacheHitRate)}</td>
                   <td className="px-3 py-2">{r.stats?.escalations ?? 0}</td>
                   <td className="px-3 py-2">{r.stats ? fmtNum(r.stats.tokensOffloaded) : "—"}</td>
+                  <td className="px-3 py-2">
+                    {(() => {
+                      const c = costs.get(r.subagentName);
+                      if (!c || c.pricedCalls === 0) return <span className="text-xyne-fg-muted">{c?.unpricedCalls ? "no price" : "—"}</span>;
+                      return (
+                        <span title={`Inline on the parent model: ${fmtUsd(c.inline)}`}>
+                          {fmtUsd(c.spent)} <span className={c.saved >= 0 ? "text-xyne-success-fg" : "text-xyne-error-fg"}>/ {c.saved >= 0 ? "" : "−"}{fmtUsd(Math.abs(c.saved))}</span>
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="px-3 py-2">
                     {r.eval ? (
                       <span>{fmtPct(r.eval.accuracy)}{r.eval.stale ? <span className="text-[11px] text-xyne-fg-muted"> (stale)</span> : null}</span>
@@ -176,7 +199,7 @@ export function FastSubagentsOpsPage({ isAdmin }: { isAdmin: boolean }) {
           </table>
         </section>
         <p className="text-[11px] text-xyne-fg-muted">
-          Unsure = xor answers below the confidence threshold. Escalations = times the cheap model fell back to the standard one. Tokens offloaded = tokens the subagent's cheap model read and wrote instead of the parent.
+          Unsure = xor answers below the confidence threshold. Escalations = times the cheap model fell back to the standard one. Tokens offloaded = tokens the subagent's cheap model read and wrote instead of the parent. Cost = the cheap model's tokens plus xor calls at the Metrics page's prices; saved = the same tokens priced at the parent's model (Opus when unknown) minus that cost, an estimate.
         </p>
 
         <section className="space-y-2" data-id="fast-reviews">

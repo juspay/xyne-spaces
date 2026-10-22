@@ -12,6 +12,7 @@ interface RunKeys {
   orgId: string;
   agentSlug: string;
   completedAt: Date;
+  model?: string | null;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(2_147_483_647, Math.round(v))) : 0);
@@ -44,8 +45,11 @@ export function fastSubagentCallRows(run: RunKeys, invocations: unknown): Prisma
       isError: r["isError"] === true,
       fast: fs["fast"] === true,
       model: typeof fs["model"] === "string" ? fs["model"].slice(0, 120) : null,
+      parentModel: run.model ? run.model.slice(0, 120) : null,
       tokensIn: num(fs["tokensIn"]),
       tokensOut: num(fs["tokensOut"]),
+      tokensCacheRead: num(fs["tokensCacheRead"]),
+      tokensCacheWrite: num(fs["tokensCacheWrite"]),
       turns: num(fs["turns"]),
       fallbacks: num(fs["fallbacks"]),
       xorCalls: num(xor["calls"]),
@@ -91,8 +95,11 @@ export interface CallRow {
   isError: boolean;
   fast: boolean;
   model: string | null;
+  parentModel?: string | null;
   tokensIn: number;
   tokensOut: number;
+  tokensCacheRead?: number;
+  tokensCacheWrite?: number;
   fallbacks: number;
   xorCalls: number;
   xorItems: number;
@@ -131,7 +138,8 @@ export function aggregateCalls(rows: CallRow[], days: number, now = Date.now()) 
         errorRate: pct(list.filter((r) => r.isError).length, list.length),
         p50Ms: percentile(durations, 50),
         p95Ms: percentile(durations, 95),
-        tokensOffloaded: sum("tokensIn") + sum("tokensOut"),
+        tokensOffloaded: sum("tokensIn") + sum("tokensOut") + list.reduce((n, r) => n + (r.tokensCacheRead ?? 0), 0),
+        costRows: costRows(list),
         xorCalls: sum("xorCalls"),
         xorItems: sum("xorItems"),
         unsureRate: pct(sum("xorUnsure"), sum("xorAnswers")),
@@ -143,6 +151,33 @@ export function aggregateCalls(rows: CallRow[], days: number, now = Date.now()) 
       };
     })
     .sort((a, b) => b.calls - a.calls);
+}
+
+export interface CostRow {
+  model: string | null;
+  parentModel: string | null;
+  calls: number;
+  xorCalls: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+function costRows(list: CallRow[]): CostRow[] {
+  const by = new Map<string, CostRow>();
+  for (const r of list) {
+    const key = `${r.model ?? ""}\u0000${r.parentModel ?? ""}`;
+    const c = by.get(key) ?? { model: r.model, parentModel: r.parentModel ?? null, calls: 0, xorCalls: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0 };
+    c.calls += 1;
+    c.xorCalls += r.xorCalls;
+    c.tokensIn += r.tokensIn;
+    c.tokensOut += r.tokensOut;
+    c.cacheRead += r.tokensCacheRead ?? 0;
+    c.cacheWrite += r.tokensCacheWrite ?? 0;
+    by.set(key, c);
+  }
+  return [...by.values()];
 }
 
 export interface DriftAlert {
