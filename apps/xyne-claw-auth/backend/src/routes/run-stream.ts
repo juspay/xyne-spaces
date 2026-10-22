@@ -5,9 +5,10 @@ import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
-import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveProjectInstructions } from "../lib/project-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -1427,8 +1428,26 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     // Composed here so both the base field and the design/page override use it.
-    const aiScreenInstructions = withAiScreenPresentationInstructions(
+    // Project instructions ride in on additionalInstructions, appended last so
+    // precedence stays agent prompt -> user instructions -> project -> message.
+    // Folded in here rather than at the dispatch body because aiScreenInstructions
+    // feeds the design/page override and the local-harness block as well, and
+    // adding it in one place would leave the others without it.
+    const projectInstructions = await resolveProjectInstructions(
+      convId,
+      // Aliases, not the canonical id alone: a chat filed under the caller's
+      // raw Spaces id is still theirs, and a single-id lookup would miss it.
+      [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+      orgId,
+    );
+    const baseInstructions = [
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
+      projectInstructions ?? undefined,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const aiScreenInstructions = withAiScreenPresentationInstructions(
+      baseInstructions || undefined,
     );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
