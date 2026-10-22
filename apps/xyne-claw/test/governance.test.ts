@@ -68,7 +68,7 @@ describe("governance hooks", () => {
     let exfil = 0.9;
     let injected = 0.2;
     // The kill poller stamps a newer snapshot while the critic runs; the deferred decision must not read that as stale.
-    const ask = vi.fn(async () => { setKillSnapshotForTests({ epoch: 0, takenAtMs: Date.now() + 100, switches: [] }); return { destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: exfil }, injected: { type: "noul", noul: injected }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }; });
+    const ask = vi.fn(async () => { setKillSnapshotForTests({ epoch: 0, takenAtMs: Date.now() + 1, switches: [] }); return { destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: exfil }, injected: { type: "noul", noul: injected }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }; });
     const { agent } = fakeAgent();
     agent.afterToolCall = vi.fn(async () => undefined) as unknown as Hook;
     const g = run({ critic: { ask }, request: { text: "post hello in #general", typedByPerson: true } });
