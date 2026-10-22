@@ -130,7 +130,7 @@ pub struct Config {
     /// told to start over (262144; 0 keeps none).
     pub group_log_bytes: usize,
     /// `STREAMGRES_MAX_MESSAGE_BYTES`: the largest inbound WebSocket message
-    /// accepted (16 MiB).
+    /// accepted (16 MiB). Must be a positive number of bytes.
     pub max_message_bytes: usize,
     /// `STREAMGRES_BYTES_PER_PART`: how many bytes of serialized row
     /// operations one poke part carries at most (768000, i.e. 750 KiB).
@@ -384,9 +384,15 @@ impl Config {
                 None => 256 * 1024,
             },
             max_message_bytes: match first(&["STREAMGRES_MAX_MESSAGE_BYTES"]) {
-                Some(text) => text.parse().map_err(|_| {
-                    format!("STREAMGRES_MAX_MESSAGE_BYTES must be a number, got `{text}`")
-                })?,
+                Some(text) => text
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|bytes| *bytes > 0)
+                    .ok_or_else(|| {
+                        format!(
+                            "STREAMGRES_MAX_MESSAGE_BYTES must be a positive number of bytes, got `{text}`"
+                        )
+                    })?,
                 None => 16 * 1024 * 1024,
             },
             bytes_per_part: match first(&["STREAMGRES_BYTES_PER_PART"]) {
@@ -666,6 +672,13 @@ mod tests {
                 retries: 5,
             }
         );
+    }
+
+    /// Zero disables the message size cap, so it is refused.
+    #[test]
+    fn zero_max_message_bytes_is_refused() {
+        let error = config(&[("STREAMGRES_MAX_MESSAGE_BYTES", "0")]).unwrap_err();
+        assert!(error.contains("STREAMGRES_MAX_MESSAGE_BYTES"), "{error}");
     }
 
     /// A value that is not a number is refused by the variable's name.
