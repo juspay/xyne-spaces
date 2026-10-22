@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-sync
 description: Streamgres sync engine for Xyne Spaces - streams Postgres logical replication to clients, replacing the Zero view-syncer
 type: application
-version: 0.1.0-app.1.513.0
+version: 0.1.0-app.1.516.0
 appVersion: "cd0df8b"
 keywords:
   - xyne
