@@ -40,7 +40,14 @@ export async function deliverNudge(input: {
   for (const account of accounts) {
     if (!isMessagingChannelKey(account.surface.key)) continue;
     const identity = await prisma.userSurfaceIdentity.findFirst({
-      where: { surfaceId: account.surfaceId, userId: input.userId, orgId: account.orgId, status: "ACTIVE" },
+      // Verified numbers only: an unverified link may be somebody else's phone.
+      where: {
+        surfaceId: account.surfaceId,
+        userId: input.userId,
+        orgId: account.orgId,
+        status: "ACTIVE",
+        verifiedAt: { not: null },
+      },
       orderBy: { lastSeenAt: "desc" },
       select: { surfaceUserId: true, lastSeenAt: true },
     });

@@ -327,7 +327,7 @@ export interface NotifyTarget {
   template?: MessageTemplate;
 }
 
-function isRunning(account: ChannelAccount): boolean {
+export function isRunning(account: ChannelAccount): boolean {
   return account.config.desiredState === "running" && account.config.connState !== "logged_out";
 }
 
@@ -340,7 +340,14 @@ export async function findNotifyTarget(userId: string, orgId?: string | null): P
   if (!userId) return null;
   const identities = await prisma.userSurfaceIdentity
     .findMany({
-      where: { userId, status: "ACTIVE", surface: { key: "whatsapp-cloud" }, ...(orgId ? { orgId } : {}) },
+      // Verified numbers only: an unverified link may be somebody else's phone.
+      where: {
+        userId,
+        status: "ACTIVE",
+        verifiedAt: { not: null },
+        surface: { key: "whatsapp-cloud" },
+        ...(orgId ? { orgId } : {}),
+      },
       select: { orgId: true, surfaceUserId: true },
       orderBy: { lastSeenAt: { sort: "desc", nulls: "last" } },
     })

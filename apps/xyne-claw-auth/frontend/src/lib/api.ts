@@ -8367,6 +8367,9 @@ export interface LinkedChannelNumber {
   senderId: string;
   linkedAt: string;
   lastSeenAt: string | null;
+  /** False for a link made before numbers were verified: it does nothing
+   *  until its owner confirms a code sent to it. */
+  verified: boolean;
 }
 
 export interface ChannelNumberLink {
@@ -8381,10 +8384,24 @@ export async function listMyChannelNumbers(channel: MessagingChannelKey): Promis
   return data.numbers;
 }
 
-export async function linkChannelNumber(channel: MessagingChannelKey, phone: string): Promise<ChannelNumberLink> {
-  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
+/** Step one of linking: sends a one-time code to the number on WhatsApp. */
+export async function requestChannelNumberCode(channel: MessagingChannelKey, phone: string): Promise<{ expiresAt: string }> {
+  const data = await request<{ success: boolean; verification: { expiresAt: string } }>(`${channelBase(channel)}/my-numbers`, {
     method: "POST",
     body: JSON.stringify({ phone }),
+  });
+  return data.verification;
+}
+
+/** Step two: the code typed back. Links the number on every channel that can see it. */
+export async function confirmChannelNumber(
+  channel: MessagingChannelKey,
+  phone: string,
+  code: string,
+): Promise<ChannelNumberLink> {
+  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ phone, code }),
   });
   return data.linked;
 }

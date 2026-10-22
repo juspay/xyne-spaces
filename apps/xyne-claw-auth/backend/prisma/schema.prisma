@@ -380,6 +380,11 @@ model UserSurfaceIdentity {
   surfaceMemberId    String?
   lastSeenAt         DateTime?
   linkedAt           DateTime?
+  /// When the person proved they control this sender id. Messaging channels
+  /// set it once a one-time code sent to the number is entered back, and act
+  /// only on rows that have it; links made before that (null) must be
+  /// re-verified. Other surfaces do not read it.
+  verifiedAt         DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -1831,6 +1836,12 @@ enum AgentAuditEvent {
   DESIGN_SYSTEM_CREATED
   DESIGN_SYSTEM_UPDATED
   DESIGN_SYSTEM_DELETED
+  // Messaging number links (WhatsApp). Added by migration
+  // 20261023100100_channel_number_audit_events (ALTER TYPE ADD VALUE) — kept
+  // here so a fresh `prisma generate` accepts them.
+  CHANNEL_NUMBER_LINKED
+  CHANNEL_NUMBER_UNLINKED
+  CHANNEL_NUMBER_RECLAIMED
 }
 
 model AgentAuditLog {
