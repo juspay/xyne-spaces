@@ -89,6 +89,16 @@ export function enabledFlagKeys(): FlagKey[] {
 }
 
 /**
+ * Whether the user has ever set this flag, on or off.
+ *
+ * Key presence, not value: an explicit `false` is a decision, and only a key
+ * storage has never held means the user has not looked at the switch yet.
+ */
+export function isFlagTouched(key: FlagKey): boolean {
+  return lotusStorage.contains(storageKey(key));
+}
+
+/**
  * Forgets a flag entirely, so it falls back to its registry default.
  *
  * Not `setFlag(key, false)`: that writes an explicit `false`, which reads as

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   effectiveGrants,
   revokedFlagKeys,
+  untouchedBetaFlags,
   visibleBetaFlags,
 } from '@/src/features/beta-flags/resolve';
 import type { FlagKey } from '@/src/flags/registry';
@@ -82,5 +83,39 @@ describe('effectiveGrants', () => {
     const allowed = effectiveGrants(['ui.shell'], { force: [], disabled: true });
 
     assert.deepEqual(revokedFlagKeys(allowed, ['ui.shell'] as FlagKey[]), ['ui.shell']);
+  });
+});
+
+describe('untouchedBetaFlags', () => {
+  const flags = [
+    { key: 'ui.shell' as FlagKey, label: 'New navigation', description: '' },
+    { key: 'ui.dms' as FlagKey, label: 'New DMs screen', description: '' },
+    { key: 'ui.channels' as FlagKey, label: 'New Channels screen', description: '' },
+  ];
+
+  it('lists every flag when none has been set', () => {
+    assert.equal(untouchedBetaFlags(flags, () => false).length, 3);
+  });
+
+  it('lists only the flags never set, whatever the set ones hold', () => {
+    const touched = new Set<FlagKey>(['ui.shell', 'ui.dms']);
+    assert.deepEqual(
+      untouchedBetaFlags(flags, key => touched.has(key)).map(f => f.key),
+      ['ui.channels'],
+    );
+  });
+
+  it('is empty once every flag has been set', () => {
+    assert.deepEqual(
+      untouchedBetaFlags(flags, () => true),
+      [],
+    );
+  });
+
+  it('is empty when the user may try nothing', () => {
+    assert.deepEqual(
+      untouchedBetaFlags([], () => false),
+      [],
+    );
   });
 });
