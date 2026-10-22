@@ -1220,6 +1220,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     selectedScopeChannelId,
     selectedSharedByUserId,
     showStarredOnly,
+    selectedLabel,
+    includePublicChannelCanvases,
+    serverCreatorFilter,
   ]);
 
   useEffect(() => {
@@ -1463,7 +1466,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     onlyRecordingGeneratedCanvases ||
     onlyArchived ||
     showStarredOnly ||
-    (activeFilter !== 'all' && !serverCreatorFilter) ||
+    activeFilter !== 'all' ||
     effectiveSearchScope !== 'all' ||
     Boolean(effectiveSelectedScopeChannelId) ||
     Boolean(selectedLabel) ||
@@ -1488,15 +1491,21 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const shouldShowStarredSection = isStarredSectionVisible;
   const hasClientSideResultFilters =
     effectiveSearchScope === 'direct' ||
+    (effectiveSearchScope === 'via_channel' && !isSpecificChannelScope) ||
     (activeFilter !== 'all' && !serverCreatorFilter) ||
     Boolean(selectedLabel) ||
     trimmedSearchQuery.length > 0 ||
     showStarredOnly ||
     onlyCallGeneratedCanvases ||
     onlyRecordingGeneratedCanvases;
+  // Browser-only filters (call / recording exclusions, which default on) can hide every row
+  // of a server-filtered page. Keep paging until a minimum number of rows is visible so a
+  // tab never shows an empty state, or stalls, while matching canvases exist further down.
+  const needsMinimumVisibleRows =
+    hasPrimaryCanvasFilters && filteredCanvases.length < CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
   const shouldScanFilteredUserPages =
-    hasClientSideResultFilters &&
-    effectiveSearchScope !== 'via_channel' &&
+    (hasClientSideResultFilters || needsMinimumVisibleRows) &&
+    !isSpecificChannelScope &&
     hasMore &&
     Boolean(nextCursor);
   const shouldScanFilteredChannelSources =
@@ -1780,12 +1789,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }, [requestNextChannelSourcePages, requestNextPage]);
 
   useEffect(() => {
-    if (
-      !paginated ||
-      shouldRenderChannelFolderGroups ||
-      !hasClientSideResultFilters ||
-      isLoadingNext
-    ) {
+    if (!paginated || shouldRenderChannelFolderGroups || isLoadingNext) {
       return;
     }
 
@@ -1793,7 +1797,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
     requestNextResults();
   }, [
-    hasClientSideResultFilters,
     isLoadingNext,
     paginated,
     requestNextResults,

@@ -12,13 +12,15 @@ vi.mock('../../api/canvasLabelsApi', () => ({
 import {
   CANVAS_LABEL_BULK_CHUNK_SIZE,
   getCachedCanvasLabels,
+  invalidateCanvasLabelsForTests,
   loadCanvasLabels,
   resetCanvasLabelCacheForTests,
+  trackCanvasIdsForTests,
 } from './useCanvasLabels';
 
-const labelsFor = (ids: string[]): CanvasLabelsByCanvasId =>
+const labelsFor = (ids: string[], name = 'tag'): CanvasLabelsByCanvasId =>
   Object.fromEntries(
-    ids.map(id => [id, [{ id: `label-${id}`, canvasId: id, name: 'tag', createdAt: 1 }]]),
+    ids.map(id => [id, [{ id: `label-${id}`, canvasId: id, name, createdAt: 1 }]]),
   );
 
 describe('canvas label store', () => {
@@ -28,13 +30,13 @@ describe('canvas label store', () => {
     getCanvasLabels.mockImplementation((ids: string[]) => Promise.resolve(labelsFor(ids)));
   });
 
-  it('coalesces 200 single-row requests in the same tick into one bulk call', async () => {
+  it('coalesces 200 single-row requests in the same tick into bulk calls', async () => {
     const ids = Array.from({ length: 200 }, (_, index) => `canvas-${index}`);
 
     await Promise.all(ids.map(id => loadCanvasLabels([id])));
 
-    expect(getCanvasLabels).toHaveBeenCalledTimes(1);
-    expect(getCanvasLabels.mock.calls[0]?.[0]).toHaveLength(200);
+    expect(getCanvasLabels).toHaveBeenCalledTimes(2);
+    expect(getCanvasLabels.mock.calls.map(([chunk]) => chunk.length)).toEqual([100, 100]);
     expect(getCachedCanvasLabels('canvas-7')?.[0]?.name).toBe('tag');
   });
 
@@ -43,8 +45,9 @@ describe('canvas label store', () => {
 
     await loadCanvasLabels(ids);
 
-    expect(getCanvasLabels).toHaveBeenCalledTimes(3);
-    expect(getCanvasLabels.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 50]);
+    expect(getCanvasLabels.mock.calls.map(([chunk]) => chunk.length)).toEqual([
+      100, 100, 100, 100, 50,
+    ]);
   });
 
   it('only fetches ids that were never loaded when the id set grows page by page', async () => {
@@ -59,9 +62,7 @@ describe('canvas label store', () => {
   });
 
   it('does not request an id twice while it is in flight', async () => {
-    const first = loadCanvasLabels(['a', 'b']);
-    const second = loadCanvasLabels(['a', 'b']);
-    await Promise.all([first, second]);
+    await Promise.all([loadCanvasLabels(['a', 'b']), loadCanvasLabels(['a', 'b'])]);
 
     expect(getCanvasLabels).toHaveBeenCalledTimes(1);
   });
@@ -73,6 +74,36 @@ describe('canvas label store', () => {
 
     await loadCanvasLabels(['a'], { force: true });
     expect(getCanvasLabels).toHaveBeenCalledTimes(2);
+  });
+
+  it('a forced load during an in-flight request fetches again after it settles', async () => {
+    getCanvasLabels
+      .mockImplementationOnce(ids => Promise.resolve(labelsFor(ids, 'before')))
+      .mockImplementationOnce(ids => Promise.resolve(labelsFor(ids, 'after')));
+
+    const first = loadCanvasLabels(['a']);
+    const forced = loadCanvasLabels(['a'], { force: true });
+    await Promise.all([first, forced]);
+
+    expect(getCanvasLabels).toHaveBeenCalledTimes(2);
+    expect(getCachedCanvasLabels('a')?.[0]?.name).toBe('after');
+  });
+
+  it('drops untracked ids on a label change and re-fetches tracked ones', async () => {
+    await loadCanvasLabels(['shown', 'hidden']);
+    const untrack = trackCanvasIdsForTests(['shown']);
+
+    invalidateCanvasLabelsForTests('hidden');
+    expect(getCachedCanvasLabels('hidden')).toBeUndefined();
+    expect(getCanvasLabels).toHaveBeenCalledTimes(1);
+
+    getCanvasLabels.mockImplementationOnce(ids => Promise.resolve(labelsFor(ids, 'renamed')));
+    invalidateCanvasLabelsForTests('shown');
+    await loadCanvasLabels(['shown']);
+    expect(getCanvasLabels).toHaveBeenCalledTimes(2);
+    expect(getCachedCanvasLabels('shown')?.[0]?.name).toBe('renamed');
+
+    untrack();
   });
 
   it('never rejects and leaves failed ids with no labels', async () => {

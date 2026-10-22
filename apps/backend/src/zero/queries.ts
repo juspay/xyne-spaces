@@ -1017,16 +1017,12 @@ const applyUserAndPublicChannelCanvasFilter = (query: any, userId: string) => {
   return query.where((helpers: any) =>
     helpers.or(
       ...privateCanvasVisibilityArms(helpers, userId),
+      // Canvases shared into one of my channels already match the last private arm
+      // (participants -> channel -> participants = me), so only canvases owned by one of
+      // my regular channels need the extra public arm.
       helpers.and(
         helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-        helpers.or(
-          helpers.exists('channel', myRegularChannel, flip),
-          helpers.exists(
-            'participants',
-            (p: any) => p.whereExists('channel', myRegularChannel, flip),
-            flip,
-          ),
-        ),
+        helpers.exists('channel', myRegularChannel, flip),
       ),
     ),
   );
@@ -1034,6 +1030,8 @@ const applyUserAndPublicChannelCanvasFilter = (query: any, userId: string) => {
 
 // "Created by me" / "Shared" tabs. Filtering here means the tabs no longer page through
 // every canvas just to filter in the browser.
+// 'me' is handled before the visibility filter in userCanvasesPaginated (createdBy = me is
+// already visible), so this only narrows the 'others' case.
 const applyCanvasCreatorFilter = (
   query: any,
   userId: string,
@@ -1042,7 +1040,6 @@ const applyCanvasCreatorFilter = (
     createdByUserId,
   }: { creatorFilter?: 'me' | 'others' | undefined; createdByUserId?: string | undefined },
 ) => {
-  if (creatorFilter === 'me') return query.where('createdBy', userId);
   if (creatorFilter === 'others') {
     return createdByUserId && createdByUserId !== userId
       ? query.where('createdBy', createdByUserId)
@@ -3354,9 +3351,15 @@ export const queries: AnyQueryRegistry = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = args.includePublicChannelCanvases
-        ? applyUserAndPublicChannelCanvasFilter(zql.canvases, ctx.userID)
-        : applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
+      // "Created by me": every canvas the viewer created is visible to them, so skip the
+      // visibility OR and read canvases_createdBy_updatedAt_id_idx directly. The ACL still
+      // applies on top.
+      let query =
+        args.creatorFilter === 'me'
+          ? zql.canvases.where('createdBy', ctx.userID)
+          : args.includePublicChannelCanvases
+            ? applyUserAndPublicChannelCanvasFilter(zql.canvases, ctx.userID)
+            : applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
 
       query = applyCanvasCreatorFilter(query, ctx.userID, args);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { canvasLabelsApi, type CanvasLabelsByCanvasId } from '../../api/canvasLabelsApi';
 import type { Canvas } from './Canvas.types';
 
@@ -8,8 +8,9 @@ export type CanvasLabelMap = Record<string, CanvasLabelList>;
 
 const CANVAS_LABELS_CHANGED_EVENT = 'canvas-labels-changed';
 export const CANVAS_LABEL_REFRESH_STALE_MS = 10_000;
-// Matches MAX_CANVAS_LABEL_BULK_IDS on GET /canvas/labels.
-export const CANVAS_LABEL_BULK_CHUNK_SIZE = 200;
+// GET /canvas/labels takes ids in the query string. 100 UUIDs is ~3.7KB of URL, well
+// under proxy request-line limits; 200 (the server maximum) gets close to them.
+export const CANVAS_LABEL_BULK_CHUNK_SIZE = 100;
 
 export interface CanvasLabelMapResult {
   labelsByCanvasId: CanvasLabelMap;
@@ -30,32 +31,54 @@ const toCanvasLabelList = (labels: CanvasLabelsByCanvasId[string]): CanvasLabelL
     createdAt: label.createdAt,
   }));
 
+const isLabelableCanvasId = (canvasId: string | null | undefined): canvasId is string =>
+  Boolean(canvasId) && canvasId !== 'new';
+
 const getCanvasIdKey = (canvasIds: string[]): string =>
-  Array.from(new Set(canvasIds.filter(id => Boolean(id) && id !== 'new')))
+  Array.from(new Set(canvasIds.filter(isLabelableCanvasId)))
     .sort()
     .join(',');
 
 // ---------------------------------------------------------------------------
 // Shared label store.
 //
-// Every list and row reads labels through this module-level cache, so each canvas id is
+// Every list and row reads labels through this module-level store, so each canvas id is
 // fetched once and requests made in the same tick are coalesced into bulk calls of up to
 // CANVAS_LABEL_BULK_CHUNK_SIZE ids. Before this, the list refetched every id whenever its
 // id set changed (each new page), and each row fetched its own labels while the list's
 // call was in flight -- ~1,000 requests per scan for users with many canvases.
+//
+// Components read it with useSyncExternalStore, and label changes are handled by one
+// module-level listener, so an entry is invalidated even when no list showing it is mounted.
 // ---------------------------------------------------------------------------
 
 const labelCache = new Map<string, CanvasLabelList>();
 const labelFetchedAt = new Map<string, number>();
 const inFlightById = new Map<string, Promise<void>>();
-const cacheListeners = new Set<(updatedIds: Set<string>) => void>();
+// Ids that were force-refreshed while a request for them was already in flight. That
+// request may have been sent before the change, so they are fetched again once it settles.
+const refetchAfterInFlight = new Map<string, Promise<void>>();
+// How many mounted hooks / rows currently show each id.
+const trackedCounts = new Map<string, number>();
+const storeListeners = new Set<() => void>();
+let storeVersion = 0;
 
 let pendingBatch: { ids: Set<string>; promise: Promise<void>; resolve: () => void } | null = null;
 
-const notifyCacheListeners = (updatedIds: Set<string>): void => {
-  if (updatedIds.size === 0) return;
-  cacheListeners.forEach(listener => listener(updatedIds));
+const emitStoreChange = (): void => {
+  storeVersion += 1;
+  storeListeners.forEach(listener => listener());
 };
+
+const subscribeToStore = (listener: () => void): (() => void) => {
+  ensureLabelsChangedListener();
+  storeListeners.add(listener);
+  return () => {
+    storeListeners.delete(listener);
+  };
+};
+
+const getStoreVersion = (): number => storeVersion;
 
 const flushPendingBatch = async (): Promise<void> => {
   const batch = pendingBatch;
@@ -68,7 +91,7 @@ const flushPendingBatch = async (): Promise<void> => {
     chunks.push(ids.slice(index, index + CANVAS_LABEL_BULK_CHUNK_SIZE));
   }
 
-  const updatedIds = new Set<string>();
+  let changed = false;
   await Promise.allSettled(
     chunks.map(async chunk => {
       try {
@@ -77,7 +100,7 @@ const flushPendingBatch = async (): Promise<void> => {
         for (const canvasId of chunk) {
           labelCache.set(canvasId, toCanvasLabelList(labelsByCanvasId[canvasId] ?? []));
           labelFetchedAt.set(canvasId, now);
-          updatedIds.add(canvasId);
+          changed = true;
         }
       } catch {
         // Keep whatever we had; a canvas never fetched shows no labels and is retried on
@@ -85,7 +108,7 @@ const flushPendingBatch = async (): Promise<void> => {
         for (const canvasId of chunk) {
           if (!labelCache.has(canvasId)) {
             labelCache.set(canvasId, []);
-            updatedIds.add(canvasId);
+            changed = true;
           }
         }
       } finally {
@@ -95,7 +118,7 @@ const flushPendingBatch = async (): Promise<void> => {
   );
 
   batch.resolve();
-  notifyCacheListeners(updatedIds);
+  if (changed) emitStoreChange();
 };
 
 const enqueueCanvasLabelFetch = (canvasIds: string[]): Promise<void> => {
@@ -114,8 +137,10 @@ const enqueueCanvasLabelFetch = (canvasIds: string[]): Promise<void> => {
 };
 
 /**
- * Load labels for `canvasIds` into the shared cache. Ids already cached (unless `force`)
- * or already in flight are not requested again. Never rejects.
+ * Load labels for `canvasIds` into the shared store. Ids already cached (unless `force`)
+ * or already in flight are not requested again. With `force`, an id that is in flight is
+ * fetched once more after that request settles, so a refresh after a label mutation never
+ * settles on a response sent before the mutation. Never rejects.
  */
 export const loadCanvasLabels = (
   canvasIds: string[],
@@ -125,10 +150,22 @@ export const loadCanvasLabels = (
   const toFetch: string[] = [];
 
   for (const canvasId of new Set(canvasIds)) {
-    if (!canvasId || canvasId === 'new') continue;
+    if (!isLabelableCanvasId(canvasId)) continue;
     const inFlight = inFlightById.get(canvasId);
     if (inFlight) {
-      waits.push(inFlight);
+      if (!force) {
+        waits.push(inFlight);
+        continue;
+      }
+      let refetch = refetchAfterInFlight.get(canvasId);
+      if (!refetch) {
+        refetch = inFlight.then(() => {
+          refetchAfterInFlight.delete(canvasId);
+          return loadCanvasLabels([canvasId], { force: true });
+        });
+        refetchAfterInFlight.set(canvasId, refetch);
+      }
+      waits.push(refetch);
       continue;
     }
     if (!force && labelCache.has(canvasId)) continue;
@@ -147,79 +184,74 @@ export const loadCanvasLabels = (
 export const getCachedCanvasLabels = (canvasId: string): CanvasLabelList | undefined =>
   labelCache.get(canvasId);
 
+/**
+ * A label change for `canvasId` (or for every canvas when omitted). Ids shown by a mounted
+ * list or row are re-fetched; the rest are dropped so the next mount fetches them fresh.
+ */
+const invalidateCanvasLabels = (canvasId?: string): void => {
+  const ids = canvasId ? [canvasId] : Array.from(labelCache.keys());
+  const toRefetch: string[] = [];
+  let dropped = false;
+  for (const id of ids) {
+    if ((trackedCounts.get(id) ?? 0) > 0) {
+      toRefetch.push(id);
+    } else if (labelCache.delete(id)) {
+      labelFetchedAt.delete(id);
+      dropped = true;
+    }
+  }
+  if (dropped) emitStoreChange();
+  if (toRefetch.length > 0) void loadCanvasLabels(toRefetch, { force: true });
+};
+
+let isLabelsChangedListenerInstalled = false;
+const ensureLabelsChangedListener = (): void => {
+  if (isLabelsChangedListenerInstalled || typeof window === 'undefined') return;
+  isLabelsChangedListenerInstalled = true;
+  window.addEventListener(CANVAS_LABELS_CHANGED_EVENT, (event: Event) => {
+    invalidateCanvasLabels((event as CustomEvent<{ canvasId?: string }>).detail?.canvasId);
+  });
+};
+
+const trackCanvasIds = (ids: string[]): (() => void) => {
+  for (const id of ids) trackedCounts.set(id, (trackedCounts.get(id) ?? 0) + 1);
+  return () => {
+    for (const id of ids) {
+      const next = (trackedCounts.get(id) ?? 1) - 1;
+      if (next <= 0) trackedCounts.delete(id);
+      else trackedCounts.set(id, next);
+    }
+  };
+};
+
 /** Test-only: reset the shared label store. */
 export const resetCanvasLabelCacheForTests = (): void => {
   labelCache.clear();
   labelFetchedAt.clear();
   inFlightById.clear();
+  refetchAfterInFlight.clear();
+  trackedCounts.clear();
   pendingBatch = null;
 };
+
+/** Test-only: apply a label-change event without a DOM. */
+export const invalidateCanvasLabelsForTests = invalidateCanvasLabels;
+/** Test-only: mark ids as shown by a mounted component. */
+export const trackCanvasIdsForTests = trackCanvasIds;
 
 export const useCanvasLabelMapResult = (canvasIds: string[]): CanvasLabelMapResult => {
   const canvasIdsKey = useMemo(() => getCanvasIdKey(canvasIds), [canvasIds]);
   const ids = useMemo(() => (canvasIdsKey ? canvasIdsKey.split(',') : []), [canvasIdsKey]);
-  const [cacheVersion, setCacheVersion] = useState(0);
-  const [pendingCount, setPendingCount] = useState(0);
+  const version = useSyncExternalStore(subscribeToStore, getStoreVersion, getStoreVersion);
 
-  // Re-render when any tracked id is (re)loaded, by this hook or anyone else.
-  useEffect(() => {
-    if (ids.length === 0) return;
-    const tracked = new Set(ids);
-    const listener = (updatedIds: Set<string>): void => {
-      for (const canvasId of updatedIds) {
-        if (tracked.has(canvasId)) {
-          setCacheVersion(version => version + 1);
-          return;
-        }
-      }
-    };
-    cacheListeners.add(listener);
-    return () => {
-      cacheListeners.delete(listener);
-    };
-  }, [ids]);
+  useEffect(() => (ids.length > 0 ? trackCanvasIds(ids) : undefined), [ids]);
 
-  const runLoad = useCallback((idsToLoad: string[], force: boolean): (() => void) => {
-    let cancelled = false;
-    setPendingCount(count => count + 1);
-    void loadCanvasLabels(idsToLoad, { force }).finally(() => {
-      if (!cancelled) setPendingCount(count => Math.max(0, count - 1));
-    });
-    return () => {
-      if (cancelled) return;
-      cancelled = true;
-      setPendingCount(count => Math.max(0, count - 1));
-    };
-  }, []);
-
-  // Fetch only ids we have never loaded. Labels already loaded stay on screen while the
-  // new page's labels load.
+  // Fetch only ids that are not in the store. Labels already loaded stay on screen while
+  // the new page's labels load. Runs again when an untracked entry is dropped.
   useEffect(() => {
     const missing = ids.filter(canvasId => !labelCache.has(canvasId));
-    if (missing.length === 0) return;
-    return runLoad(missing, false);
-  }, [ids, runLoad]);
-
-  useEffect(() => {
-    if (ids.length === 0 || typeof window === 'undefined') return;
-
-    const tracked = new Set(ids);
-    const handleCanvasLabelsChanged = (event: Event): void => {
-      const canvasId = (event as CustomEvent<{ canvasId?: string }>).detail?.canvasId;
-      if (!canvasId) {
-        void loadCanvasLabels(ids, { force: true });
-        return;
-      }
-      if (tracked.has(canvasId)) {
-        void loadCanvasLabels([canvasId], { force: true });
-      }
-    };
-
-    window.addEventListener(CANVAS_LABELS_CHANGED_EVENT, handleCanvasLabelsChanged);
-    return () => {
-      window.removeEventListener(CANVAS_LABELS_CHANGED_EVENT, handleCanvasLabelsChanged);
-    };
-  }, [ids]);
+    if (missing.length > 0) void loadCanvasLabels(missing);
+  }, [ids, version]);
 
   const refresh = useCallback((): void => {
     if (ids.length === 0) return;
@@ -252,9 +284,9 @@ export const useCanvasLabelMapResult = (canvasIds: string[]): CanvasLabelMapResu
       if (labels !== undefined) mapped[canvasId] = labels;
     }
     return mapped;
-    // cacheVersion is the signal that labelCache changed for one of `ids`.
+    // `version` is the signal that the store changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids, cacheVersion, pendingCount]);
+  }, [ids, version]);
 
   const isLoading = ids.some(canvasId => !labelCache.has(canvasId));
 
@@ -264,6 +296,23 @@ export const useCanvasLabelMapResult = (canvasIds: string[]): CanvasLabelMapResu
     refresh,
     refreshIfStale,
   };
+};
+
+/**
+ * Labels for one canvas from the shared store, loading them if needed. Pass `null` to
+ * skip (e.g. when the caller already has labels). Re-renders when the entry changes.
+ */
+export const useStoredCanvasLabels = (canvasId: string | null): CanvasLabelList | undefined => {
+  const id = isLabelableCanvasId(canvasId) ? canvasId : null;
+  const getSnapshot = useCallback(() => (id ? labelCache.get(id) : undefined), [id]);
+  const labels = useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
+
+  useEffect(() => (id ? trackCanvasIds([id]) : undefined), [id]);
+  useEffect(() => {
+    if (id && labels === undefined) void loadCanvasLabels([id]);
+  }, [id, labels]);
+
+  return labels;
 };
 
 export const useCanvasLabelMap = (canvasIds: string[]): CanvasLabelMap => {
@@ -291,5 +340,6 @@ export const useCanvasesWithRestLabels = (canvases: Canvas[]): Canvas[] => {
 
 export const notifyCanvasLabelsChanged = (canvasId: string): void => {
   if (typeof window === 'undefined') return;
+  ensureLabelsChangedListener();
   window.dispatchEvent(new CustomEvent(CANVAS_LABELS_CHANGED_EVENT, { detail: { canvasId } }));
 };
