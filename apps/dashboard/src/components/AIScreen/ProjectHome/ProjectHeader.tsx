@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { ChatPlus, PencilEdit, DeleteDustbin01, ThreeDotsMenuVertical } from '@xyne/icons';
+import { PencilEditBox, PencilEdit, DeleteDustbin01, ThreeDotsMenuVertical } from '@xyne/icons';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,7 +33,7 @@ export function ProjectHeader({
           {renderEmoji(project.icon ?? DEFAULT_PROJECT_ICON, 'w-6 h-6', 'text-xl')}
         </span>
         <div className='min-w-0'>
-          <h1 className='truncate text-lg font-medium text-foreground'>{project.name}</h1>
+          <h1 className='truncate text-xl font-semibold text-foreground'>{project.name}</h1>
           <p className='text-xs text-muted-foreground'>
             {chatCount === 1 ? '1 chat' : `${chatCount} chats`}
           </p>
@@ -44,7 +44,7 @@ export function ProjectHeader({
         <button
           type='button'
           onClick={onNewChat}
-          className='inline-flex h-9 items-center gap-2 rounded-lg bg-action-primary px-3 text-sm font-medium text-action-primary-foreground transition-opacity hover:opacity-90'
+          className='inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-secondary/60'
           data-track-category='XyneAI'
           data-track-name='NEW_CHAT_IN_PROJECT'
           data-track-metadata={JSON.stringify({
@@ -52,7 +52,7 @@ export function ProjectHeader({
             projectId: project.id,
           })}
         >
-          <ChatPlus size={15} aria-hidden />
+          <PencilEditBox size={15} aria-hidden />
           New chat
         </button>
 
@@ -67,8 +67,6 @@ export function ProjectHeader({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end' className='w-48'>
-            {/* Rename opens the same dialog the sidebar uses, which edits name
-                and icon together — there is no separate "change icon". */}
             <DropdownMenuItem className='gap-2' onClick={() => onOpenDialog('rename')}>
               <PencilEdit size={14} className='shrink-0' aria-hidden />
               <span className='flex-1'>Rename</span>

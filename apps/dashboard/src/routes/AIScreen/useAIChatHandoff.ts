@@ -10,11 +10,6 @@ export function useAIChatHandoff(): {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const chatPath = workspaceId ? `/${workspaceId}/ai/chat/new` : '/ai/chat/new';
 
-  // projectId rides in the URL because the chat screen is a different route:
-  // its pendingProjectId is component state the sidebar sets directly, and a
-  // screen handing off to it has no way to reach that. Without this, the
-  // sidebar's "new chat in project" silently filed the chat nowhere whenever
-  // the user happened to be on one of these screens rather than the chat.
   const onCreateChat = useCallback(
     (projectId?: string): void => {
       sessionStorage.removeItem(AI_ACTIVE_SESSION_KEY);

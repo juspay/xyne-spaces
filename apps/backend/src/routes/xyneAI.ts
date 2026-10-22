@@ -113,8 +113,6 @@ router.put('/v2/chat-projects/reorder', chatProjectsLimiter, authMiddleware.auth
 router.get('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getChatProject);
 router.patch('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
 router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
-// Knowledge attached to a project. Declared after `/:projectId` for readability
-// only — these carry an extra segment, so neither can shadow the other.
 router.get('/v2/chat-projects/:projectId/knowledge', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listChatProjectKnowledge);
 router.post('/v2/chat-projects/:projectId/knowledge', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.addChatProjectKnowledge);
 router.delete('/v2/chat-projects/:projectId/knowledge/:knowledgeId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProjectKnowledge);

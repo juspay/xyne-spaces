@@ -1568,11 +1568,6 @@ export class XyneAIControllerV2 {
     }
   };
 
-  // Knowledge attached to a project. Same thin-passthrough rule as the project
-  // routes above: claw-auth owns which types are legal, the per-project cap and
-  // the ownership check, and re-stating any of it here would only let the two
-  // drift. A file's storage path is resolved there from the attachment the
-  // caller names, never taken from this body.
   listChatProjectKnowledge = async (req: Request, res: Response): Promise<void> => {
     const userId = (req as any).user?.id;
     if (!userId) {

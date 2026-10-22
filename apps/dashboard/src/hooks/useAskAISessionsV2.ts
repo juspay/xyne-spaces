@@ -358,13 +358,6 @@ export const v2ChatProjectKnowledgeKey = (projectId: string): readonly string[] 
   projectId,
 ];
 
-/**
- * Knowledge attached to one project, with a detach that shows immediately.
- *
- * `isError` is surfaced rather than swallowed: an empty list and a failed load
- * look identical otherwise, and a project home that silently reports "nothing
- * attached" when the request failed is the worse of the two.
- */
 export function useV2ChatProjectKnowledge(projectId: string | undefined) {
   const queryClient = useQueryClient();
   const key = v2ChatProjectKnowledgeKey(projectId ?? '');

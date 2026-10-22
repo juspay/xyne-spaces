@@ -289,11 +289,6 @@ const AIScreen = (): ReactElement => {
     // project row. Without this, the project they picked earlier would still be
     // pending and the next conversation id to arrive — this existing chat —
     // would be filed into it.
-    //
-    // The exception is `?projectId=`, which the project home page sets on its
-    // "New chat" action. That arrives as a navigation rather than through
-    // handleCreateChat, so clearing unconditionally would drop the one thing
-    // the user asked for and file the chat nowhere.
     setPendingProjectId(new URLSearchParams(location.search).get('projectId'));
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
@@ -303,9 +298,6 @@ const AIScreen = (): ReactElement => {
     resetAssistant();
   }, [sessionFromUrl, activeSessionId, location.search, resetAssistant]);
 
-  // Consume `?projectId=` once. The state→URL effect carries location.search
-  // onto every later navigation, so leaving it there would re-arm the filing
-  // on Back and on the next chat started from this screen.
   useEffect(() => {
     if (!workspaceId) return;
     const params = new URLSearchParams(location.search);
@@ -443,7 +435,9 @@ const AIScreen = (): ReactElement => {
     };
   }, []);
 
-  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('projectId'),
+  );
   const attemptedFileIdsRef = useRef<Set<string>>(new Set());
 
   const handleCreateChat = useCallback(
@@ -563,7 +557,11 @@ const AIScreen = (): ReactElement => {
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
       setActiveSessionId(sessionId);
-      if (pendingProjectId && !attemptedFileIdsRef.current.has(sessionId)) {
+      if (
+        pendingProjectId &&
+        sessionId.startsWith('chat-') &&
+        !attemptedFileIdsRef.current.has(sessionId)
+      ) {
         attemptedFileIdsRef.current.add(sessionId);
         const projectId = pendingProjectId;
         void moveV2ConversationToProject(sessionId, projectId)

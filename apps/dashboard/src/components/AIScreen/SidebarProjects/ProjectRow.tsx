@@ -32,10 +32,6 @@ export function ProjectRow({
       )}
       data-testid={`project-row-${project.id}`}
     >
-      {/* Two controls, not one. The icon already turns into a chevron on hover,
-          so it reads as the expander; the name opens the project's own page.
-          One button could only do one of those, and a row that cannot be
-          opened leaves the page reachable by URL alone. */}
       <button
         type='button'
         onClick={onToggle}

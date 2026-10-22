@@ -23,9 +23,6 @@ describe('instructionsCounter', () => {
     expect(counter.overLimit).toBe(false);
   });
 
-  // The counter has to say how much must go, so remaining goes negative rather
-  // than clamping at zero — otherwise the editor refuses to save with nothing
-  // on screen explaining why.
   it('reports how far past the limit a long paste is', () => {
     const counter = instructionsCounter('x'.repeat(PROJECT_INSTRUCTIONS_MAX_CHARS + 25));
     expect(counter.remaining).toBe(-25);
@@ -50,8 +47,6 @@ describe('formatKnowledgeSize', () => {
     expect(formatKnowledgeSize(15 * 1024 * 1024)).toBe('15 MB');
   });
 
-  // A row whose size was never recorded is not a zero-byte file, and only
-  // `file` rows carry one at all.
   it.each([null, undefined, -1, Number.NaN])('returns null for %s', value => {
     expect(formatKnowledgeSize(value as number | null)).toBeNull();
   });
@@ -67,7 +62,6 @@ describe('formatKnowledgeMime', () => {
     expect(formatKnowledgeMime(mime)).toBe(expected);
   });
 
-  // Office types are long enough to push every other badge off the row.
   it('keeps a vendor type short', () => {
     expect(
       formatKnowledgeMime(
@@ -95,8 +89,6 @@ describe('knowledgeTypeLabel', () => {
     expect(knowledgeTypeLabel(type)).toBe(expected);
   });
 
-  // A type added server-side before this page knows about it should still
-  // render something rather than a blank badge.
   it('falls back to the raw type it does not know', () => {
     expect(knowledgeTypeLabel('workflow')).toBe('workflow');
   });

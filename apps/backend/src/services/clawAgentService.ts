@@ -1747,14 +1747,11 @@ export interface ClawChatProjectKnowledge {
   type: 'file' | 'kb_collection' | 'channel' | 'ticket' | 'canvas';
   refId: string;
   title: string;
-  /** `file` only. */
   mimeType: string | null;
   size: number | null;
   createdAt: string;
 }
 
-/** Shaped by claw-auth's parseKnowledgeBody; forwarded as-is so the two do not
- *  drift. `file` resolves its own storagePath there, never from this body. */
 export interface ClawChatProjectKnowledgeInput {
   type: string;
   refId: string;
@@ -1784,6 +1781,10 @@ async function clawProjectRequest<T>(
     const errorText = await response.text();
     logger.error(`[ClawAgentService] ${failure} failed: ${response.status} ${errorText}`);
     throw new ClawRequestError(clawErrorMessage(errorText) ?? failure, response.status);
+  }
+
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    return { success: true } as T;
   }
 
   return (await response.json()) as T;

@@ -520,10 +520,8 @@ export interface ChatProjectKnowledge {
   id: string;
   projectId: string;
   type: ChatProjectKnowledgeType;
-  /** Attachment id, collection id, or Spaces entity id. */
   refId: string;
   title: string;
-  /** `file` only; null for every other type. */
   mimeType: string | null;
   size: number | null;
   createdAt: string;

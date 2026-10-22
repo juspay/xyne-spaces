@@ -15,7 +15,6 @@ export interface ProjectRowProps {
   project: ChatProject;
   isExpanded: boolean;
   onToggle: () => void;
-  /** Opens the project's own page. */
   onOpen: () => void;
   onRename: () => void;
   onDelete: () => void;

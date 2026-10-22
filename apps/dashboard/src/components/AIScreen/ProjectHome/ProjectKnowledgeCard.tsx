@@ -3,7 +3,12 @@ import { toast } from 'sonner';
 import { FolderRemove } from '@xyne/icons';
 import { useV2ChatProjectKnowledge } from '../../../hooks/useAskAISessionsV2';
 import type { ChatProjectKnowledge } from '../../../services/XyneAI/XyneAISessionsV2Service';
-import { formatKnowledgeMime, formatKnowledgeSize, knowledgeTypeLabel } from './projectHome.utils';
+import {
+  SECTION_HEADING_CLASS,
+  formatKnowledgeMime,
+  formatKnowledgeSize,
+  knowledgeTypeLabel,
+} from './projectHome.utils';
 
 function Badge({ children }: { children: string }): ReactElement {
   return (
@@ -47,13 +52,6 @@ function KnowledgeRow({
   );
 }
 
-/**
- * What the project's chats can draw on, and the way to take it back out.
- *
- * A failed load is told apart from an empty project on purpose: both would
- * otherwise render "Nothing attached yet", which would have the user believe
- * they had removed something they had not.
- */
 export function ProjectKnowledgeCard({ projectId }: { projectId: string }): ReactElement {
   const { knowledge, isLoading, isError, detach } = useV2ChatProjectKnowledge(projectId);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -73,13 +71,8 @@ export function ProjectKnowledgeCard({ projectId }: { projectId: string }): Reac
   };
 
   return (
-    <section className='rounded-xl border border-border bg-card p-4 sm:p-5'>
-      <div className='flex items-baseline justify-between gap-3'>
-        <h2 className='text-sm font-medium text-foreground'>Knowledge</h2>
-        {knowledge.length > 0 && (
-          <span className='text-xs text-muted-foreground'>{knowledge.length}</span>
-        )}
-      </div>
+    <section>
+      <h2 className={SECTION_HEADING_CLASS}>Knowledge</h2>
 
       {isLoading ? (
         <p className='mt-3 text-xs text-muted-foreground'>Loading…</p>
