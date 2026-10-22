@@ -1545,7 +1545,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       rowsAfterBoundary: (snapshot['rowsAfterBoundary'] as number) ?? 0,
       rowsAfterBoundaryEligible: (snapshot['rowsAfterBoundaryEligible'] as number) ?? 0,
       rowReadStaleByMs: unreadDiagOpenRecord?.rowReadStaleByMs,
+      isLiveWindowLoaded:
+        snapshot['isInitialLoadComplete'] === true && snapshot['hasMoreAfter'] !== true,
     });
+    const newestRowAt = snapshot['newestRowAt'];
     const summary = {
       ...snapshot,
       trigger,
@@ -1577,6 +1580,11 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       shimmerMs: diag.revealedAtMs,
       seedRows: openCycleState.initialSeedRows,
       unreadLastActivityAt,
+      // > 0: the channel's activity time is newer than every loaded message.
+      activityAheadOfNewestRowMs:
+        unreadLastActivityAt !== undefined && typeof newestRowAt === 'number'
+          ? unreadLastActivityAt - newestRowAt
+          : undefined,
       isUnreadCacheCurrent,
     };
     logUnreadDiag('unread_diag_list_summary', summary);

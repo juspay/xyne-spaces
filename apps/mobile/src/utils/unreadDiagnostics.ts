@@ -145,11 +145,29 @@ export type UnreadDiagVerdict =
   | 'UNREAD_OPEN_WITHOUT_BOUNDARY'
   | 'ONLY_OWN_OR_SYSTEM_MESSAGES'
   | 'NO_NEW_MESSAGES_LOADED'
+  | 'UNREAD_FROM_ACTIVITY_WITHOUT_MESSAGES'
   | 'BUG_NEW_MESSAGES_NO_DIVIDER'
   | 'BUG_DIVIDER_NEVER_ON_SCREEN'
   | 'BUG_DIVIDER_NOT_DRAWN'
   | 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW'
   | 'BUG_STALE_READ_STATE';
+
+type UnreadDiagOutcome = {
+  verdict: UnreadDiagVerdict;
+  expectedDivider: boolean;
+  isFailure: boolean;
+  explanation: string | undefined;
+};
+
+/** Opens that looked unread but correctly had no divider, in words a user can be given. */
+const UNREAD_DIAG_EXPLANATIONS: Partial<Record<UnreadDiagVerdict, string>> = {
+  BADGE_WITHOUT_NEW_MESSAGES:
+    'The badge came from a notification (mention, reaction or thread activity), not a new main-chat message.',
+  ONLY_OWN_OR_SYSTEM_MESSAGES:
+    'The only new messages were your own or system messages, which the divider skips.',
+  UNREAD_FROM_ACTIVITY_WITHOUT_MESSAGES:
+    "The channel's activity time moved without a new main-chat message, e.g. a call started inside a thread.",
+};
 
 /**
  * One answer per open. `isFailure` means the user had reason to expect a
@@ -168,6 +186,7 @@ export const resolveUnreadDiagVerdict = ({
   rowsAfterBoundary,
   rowsAfterBoundaryEligible,
   rowReadStaleByMs,
+  isLiveWindowLoaded,
 }: {
   rowLooksUnread: boolean | null;
   isUnreadOpen: boolean;
@@ -180,17 +199,17 @@ export const resolveUnreadDiagVerdict = ({
   rowsAfterBoundary: number;
   rowsAfterBoundaryEligible: number;
   rowReadStaleByMs: number | undefined;
-}): { verdict: UnreadDiagVerdict; expectedDivider: boolean; isFailure: boolean } => {
+  isLiveWindowLoaded: boolean;
+}): UnreadDiagOutcome => {
   const expectedDivider = rowLooksUnread === true || isUnreadOpen;
-  const result = (
-    verdict: UnreadDiagVerdict,
-  ): { verdict: UnreadDiagVerdict; expectedDivider: boolean; isFailure: boolean } => ({
+  const result = (verdict: UnreadDiagVerdict): UnreadDiagOutcome => ({
     verdict,
     expectedDivider,
     isFailure:
       verdict === 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW' ||
       verdict === 'BUG_STALE_READ_STATE' ||
-      (expectedDivider && verdict !== 'DIVIDER_SHOWN'),
+      (expectedDivider && verdict !== 'DIVIDER_SHOWN' && !(verdict in UNREAD_DIAG_EXPLANATIONS)),
+    explanation: UNREAD_DIAG_EXPLANATIONS[verdict],
   });
   if (isUnreadOpen && (rowReadStaleByMs ?? 0) > 0) return result('BUG_STALE_READ_STATE');
   if (dividerShownWithoutMessageBelow) return result('BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW');
@@ -206,7 +225,12 @@ export const resolveUnreadDiagVerdict = ({
   if (!hasUnreadOpenAnchor) return result('UNREAD_OPEN_WITHOUT_BOUNDARY');
   if (dividerEverPresent) return result('BUG_DIVIDER_NEVER_ON_SCREEN');
   if (rowsAfterBoundaryEligible > 0) return result('BUG_NEW_MESSAGES_NO_DIVIDER');
-  return result(rowsAfterBoundary > 0 ? 'ONLY_OWN_OR_SYSTEM_MESSAGES' : 'NO_NEW_MESSAGES_LOADED');
+  if (rowsAfterBoundary > 0) return result('ONLY_OWN_OR_SYSTEM_MESSAGES');
+  // Everything up to the latest message loaded and none is newer than the last
+  // visit: the channel's activity time moved without a main-chat message.
+  return result(
+    isLiveWindowLoaded ? 'UNREAD_FROM_ACTIVITY_WITHOUT_MESSAGES' : 'NO_NEW_MESSAGES_LOADED',
+  );
 };
 
 type RowSample = {
