@@ -60,8 +60,6 @@ import { installStreamModelFallback } from "./stream-model-fallback.js";
 import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
-import { installToolCallRepair } from "./tool-call-repair.js";
-import { installHonestErrorFlag, installToolOutcomeMetric } from "./tool-outcome.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
 import crypto from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
@@ -1217,14 +1215,6 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
         });
-        // Same tool-call repair, error flag and outcome metric as the parent (agent.ts).
-        const childMcpToolNames = new Set((tools ?? []).filter((t) => "mcpToolName" in t).map((t) => t.name));
-        installToolCallRepair(session.agent, { agentSlug: `subagent:${def.name}` });
-        installHonestErrorFlag(session.agent, (name) => childMcpToolNames.has(name));
-        const recordChildToolOutcome = installToolOutcomeMetric(session.agent, () => ({
-          model: session.model?.id ?? model.id,
-          agent: `subagent:${def.name}`,
-        }));
 
         // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
         // Without this the child never checks the tool_result that just landed
@@ -1311,7 +1301,6 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
           if (event.type === "tool_execution_end") {
             toolsUsed.push(event.toolName);
-            recordChildToolOutcome(event);
             // Surface inner tool names to the parent's toolsUsed so chain
             // conditions can match on specific MCP tools (e.g.
             // Bitbucket__create_pull_request) rather than only the subagent

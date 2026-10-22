@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { basename, dirname, isAbsolute, join as joinPath, resolve as resolvePath, relative as relativePath, sep } from "node:path";
+import { basename, isAbsolute, join as joinPath, resolve as resolvePath, relative as relativePath } from "node:path";
 import {
   createReadTool,
   createWriteTool,
@@ -64,32 +63,12 @@ function denyOutside(
 }
 
 /**
- * Spilled tool results live in the SESSION dir's `.context/tool-results`
- * (tool-output.ts), not in the working dir, but models build their path from
- * the working dir: `<cwd>/.context/tool-results/…`, or `tool-results/…` (the
- * relative form a sandbox-copy-in hint uses). When such a path does not exist
- * and exactly one `.context` read root has it, use that one. Exported for tests.
+ * Added to a "Path not found" error. Spilled tool results live in the session
+ * dir's `.context/tool-results` (tool-output.ts), not under the working dir,
+ * and models were building those paths from the working dir.
  */
-export function redirectSpillPath(root: string, contextRoots: string[], raw: unknown): string | undefined {
-  if (typeof raw !== "string" || !raw || contextRoots.length === 0) return undefined;
-  const absolute = isAbsolute(raw) ? resolvePath(raw) : resolvePath(root, raw);
-  if (!isWithin(absolute, root) || existsSync(absolute)) return undefined;
-  const rel = relativePath(root, absolute).split(sep).join("/");
-  const found = new Set<string>();
-  for (const contextRoot of contextRoots) {
-    const candidate =
-      rel === ".context" || rel.startsWith(".context/")
-        ? joinPath(dirname(contextRoot), rel)
-        : rel === "tool-results" || rel.startsWith("tool-results/")
-          ? joinPath(contextRoot, rel)
-          : undefined;
-    if (candidate && existsSync(candidate)) found.add(candidate);
-  }
-  return found.size === 1 ? [...found][0] : undefined;
-}
-
-function notFoundHint(root: string, contextRoots: string[]): string {
-  const saved = contextRoots.map((c) => joinPath(c, "tool-results"));
+function notFoundHint(root: string, readRoots: string[]): string {
+  const saved = readRoots.filter((r) => basename(r) === ".context").map((c) => joinPath(c, "tool-results"));
   return (
     `Relative paths resolve against your working directory ${root}.` +
     (saved.length > 0 ? ` Saved tool results are under ${saved.join(" or ")}.` : "")
@@ -102,26 +81,22 @@ function gatePathParam<T extends AgentTool<any, any>>(
   opts: GateOptions = {},
 ): T {
   const originalExecute = inner.execute.bind(inner);
-  const contextRoots = roots.slice(1).filter((r) => basename(r) === ".context");
   const wrapped: AgentTool<any, any> = {
     ...inner,
     execute: async (toolCallId, params, signal, onUpdate) => {
-      const raw = (params as Record<string, unknown>)?.["path"];
-      const err = denyOutside(roots, raw, opts);
+      const err = denyOutside(roots, (params as Record<string, unknown>)?.["path"], opts);
       if (err) {
         return {
           content: [{ type: "text", text: `Error: ${err}` }],
           details: undefined as never,
         };
       }
-      const redirected = redirectSpillPath(roots[0]!, contextRoots, raw);
-      const callParams = redirected ? { ...(params as Record<string, unknown>), path: redirected } : params;
       try {
-        return await originalExecute(toolCallId, callParams, signal, onUpdate);
+        return await originalExecute(toolCallId, params, signal, onUpdate);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         if (!/Path not found|ENOENT|no such file/i.test(message)) throw e;
-        throw new Error(`${message}\n${notFoundHint(roots[0]!, contextRoots)}`);
+        throw new Error(`${message}\n${notFoundHint(roots[0]!, roots.slice(1))}`);
       }
     },
   };

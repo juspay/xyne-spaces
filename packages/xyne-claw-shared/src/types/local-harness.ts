@@ -13,18 +13,6 @@ export function isSafeLocalHarnessName(v: unknown): v is string {
   return typeof v === "string" && LOCAL_HARNESS_SAFE_NAME.test(v);
 }
 
-/**
- * A gateway MCP server's type as claw-auth lists it to the desktop:
- * `gateway:<encoded service>:<encoded backend>` (claw-auth mcpgateway/key-format.ts).
- * Each part is encodeURIComponent output, so `:` cannot appear inside one.
- */
-export const LOCAL_HARNESS_GATEWAY_SERVER_TYPE = /^gateway:[A-Za-z0-9%._~!*'()-]{1,128}:[A-Za-z0-9%._~!*'()-]{1,128}$/;
-
-/** A server type the desktop may call through: a plain safe name or a gateway key. */
-export function isLocalHarnessServerType(v: unknown): v is string {
-  return isSafeLocalHarnessName(v) || (typeof v === "string" && LOCAL_HARNESS_GATEWAY_SERVER_TYPE.test(v));
-}
-
 export const LOCAL_HARNESS_PROTOCOL_VERSION = 1;
 
 export interface LocalHarnessInstallation {
@@ -194,7 +182,7 @@ export function clampLocalHarnessWorkspaceDiff(diff: LocalHarnessWorkspaceDiff):
 export function isLocalHarnessToolCallRequest(v: unknown): v is LocalHarnessToolCallRequest {
   if (!v || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
-  if (!isLocalHarnessServerType(r["serverType"])) return false;
+  if (!isSafeLocalHarnessName(r["serverType"])) return false;
   if (!isSafeLocalHarnessName(r["toolName"])) return false;
   const params = r["params"];
   return params === undefined || (typeof params === "object" && params !== null && !Array.isArray(params));

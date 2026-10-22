@@ -276,24 +276,6 @@ function storeKeyFromContext(context: { meta?: Record<string, string> } | undefi
   );
 }
 
-const OPTIONAL_SESSION_ID_DESCRIPTION =
-  "Optional. Defaults to this conversation's sandbox; pass the id returned by sandbox-create / sandbox-repo-setup to use a different one.";
-const NO_SANDBOX_SESSION_MESSAGE =
-  "Error: No sandbox session for this conversation. Create one with sandbox-create or sandbox-repo-setup, or pass sessionId.";
-
-/**
- * The sessionId a call names, else this conversation's sandbox — the same
- * store-key lookup sandbox-run already does. Models routinely omit sessionId
- * on follow-up calls (sampled run errors), and requiring it rejected the call
- * before the tool ran. Ownership is still checked by the caller.
- */
-function resolveSessionId(params: Record<string, unknown>, context: { meta?: Record<string, string> } | undefined): string | undefined {
-  const explicit = typeof params["sessionId"] === "string" ? params["sessionId"].trim() : "";
-  if (explicit) return explicit;
-  const storeKey = storeKeyFromContext(context);
-  return storeKey ? SESSION_STORE.get(storeKey)?.id : undefined;
-}
-
 const EXPERIMENT_IDLE_SLACK_MS = 20 * 60_000;
 const EXPERIMENT_IDLE_FLOOR_MS = 30 * 60_000;
 const EXPERIMENT_IDLE_CAP_MS = 3 * 60 * 60_000;
@@ -1201,7 +1183,7 @@ export const sandboxRunDetached: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       cmd: {
         type: "string",
@@ -1212,13 +1194,12 @@ export const sandboxRunDetached: ToolDefinition = {
         description: "Wait for background setup (services/dev servers) to finish before launching the command; surfaces the real setup error instead of hanging. Default false.",
       },
     },
-    required: ["cmd"],
+    required: ["sessionId", "cmd"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const cmd = (params["cmd"] ?? params["command"]) as string;
     const destructive = destructiveCommandGuard(cmd);
     if (destructive) return destructive;
@@ -1266,20 +1247,19 @@ export const sandboxPollJob: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       jobId: {
         type: "string",
         description: "Job ID returned by sandbox-run-detached",
       },
     },
-    required: ["jobId"],
+    required: ["sessionId", "jobId"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const jobId = params["jobId"] as string;
 
     const session = SESSION_STORE.get(sessionId);
@@ -1317,7 +1297,7 @@ export const sandboxWriteFile: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       path: {
         type: "string",
@@ -1333,13 +1313,12 @@ export const sandboxWriteFile: ToolDefinition = {
         description: "Encoding of content. Use 'base64' for binary files, 'utf8' (default) for text.",
       },
     },
-    required: ["path", "content"],
+    required: ["sessionId", "path", "content"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const path = params["path"] as string;
     const content = params["content"] as string;
     const encoding = (params["encoding"] as string | undefined) ?? "utf8";
@@ -1386,7 +1365,7 @@ export const sandboxEditFile: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       path: {
         type: "string",
@@ -1405,13 +1384,12 @@ export const sandboxEditFile: ToolDefinition = {
         description: "Replace every occurrence instead of requiring a unique match. Default false.",
       },
     },
-    required: ["path", "oldString", "newString"],
+    required: ["sessionId", "path", "oldString", "newString"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const path = params["path"] as string;
     const oldString = params["oldString"] as string;
     const newString = params["newString"] as string;
@@ -1480,7 +1458,7 @@ export const sandboxCopyIn: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Sandbox session ID returned by sandbox-create / sandbox-repo-setup",
       },
       skillPath: {
         type: "string",
@@ -1497,13 +1475,12 @@ export const sandboxCopyIn: ToolDefinition = {
         description: "Absolute destination path inside the sandbox (default: /workspace/<basename of source path>).",
       },
     },
-    required: [],
+    required: ["sessionId"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const skillPathRaw = params["skillPath"] as string | undefined;
     const contextPathRaw = params["contextPath"] as string | undefined;
     const destPathRaw = params["destPath"] as string | undefined;
@@ -1686,7 +1663,7 @@ export const sandboxReadFile: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       path: {
         type: "string",
@@ -1701,13 +1678,12 @@ export const sandboxReadFile: ToolDefinition = {
         description: "Optional maximum number of lines to return (text files only).",
       },
     },
-    required: ["path"],
+    required: ["sessionId", "path"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const path = params["path"] as string;
     if (isCredentialPath(path)) {
       return JSON.stringify({ error: "Refused: path looks like a credential file" });
@@ -1775,7 +1751,7 @@ export const sandboxDeliverFiles: ToolDefinition = {
     properties: {
       sessionId: {
         type: "string",
-        description: OPTIONAL_SESSION_ID_DESCRIPTION,
+        description: "Session ID returned by sandbox-create",
       },
       paths: {
         type: "array",
@@ -1784,13 +1760,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
         minItems: 1,
       },
     },
-    required: ["paths"],
+    required: ["sessionId", "paths"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
-    const sessionId = resolveSessionId(params, context);
-    if (!sessionId) return NO_SANDBOX_SESSION_MESSAGE;
+    const sessionId = params["sessionId"] as string;
     const paths = params["paths"] as string[];
     if (!Array.isArray(paths) || paths.length === 0) {
       return "Error: paths must be a non-empty array of absolute file paths.";

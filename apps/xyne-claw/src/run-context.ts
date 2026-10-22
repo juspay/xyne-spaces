@@ -9,8 +9,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 interface RunContext {
   task: string;
   messages?: () => readonly unknown[];
-  /** Per-run inline cap for tool results (bytes), when the run sets one. */
-  inlineCapBytes?: number;
 }
 
 const store = new AsyncLocalStorage<RunContext>();
@@ -38,14 +36,4 @@ export function attachRunMessages(getter: () => readonly unknown[] | undefined):
 
 export function currentRunMessages(): readonly unknown[] {
   return store.getStore()?.messages?.() ?? [];
-}
-
-/** Set this run's tool-result inline cap. No-op outside a run. */
-export function pinRunInlineCap(bytes: number): void {
-  const ctx = store.getStore();
-  if (ctx) ctx.inlineCapBytes = bytes;
-}
-
-export function currentRunInlineCap(): number | undefined {
-  return store.getStore()?.inlineCapBytes;
 }

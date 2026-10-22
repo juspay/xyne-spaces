@@ -243,30 +243,6 @@ export const OPTIMIZATIONS = {
     defaultOn: false,
     scope: "agent",
   },
-  tool_auto_load: {
-    label: "Load tools on first call",
-    summary: "When the agent calls a catalog tool it has not loaded, the tool is loaded and the call runs in the same turn.",
-    detail: "Saves the extra turn a load-tools call costs. Only tools already in this agent's catalog are loaded; a call to any other name still fails.",
-    group: "tools",
-    defaultOn: false,
-    scope: "agent",
-  },
-  tool_call_examples: {
-    label: "Example arguments in tool descriptions",
-    summary: "Tools whose required fields hold objects or lists of objects get one example of their arguments, built from the schema.",
-    detail: "Aimed at the nested shapes models most often get wrong. Adds a few hundred characters per such tool to every request.",
-    group: "tools",
-    defaultOn: false,
-    scope: "agent",
-  },
-  tool_result_cap_by_model: {
-    label: "Size tool results to the model",
-    summary: "A tool result larger than a tenth of the model's context window is saved to a file, with a preview inline.",
-    detail: "Without it every model gets the same 128KB limit, which is a large share of a small model's window. Never raises the limit.",
-    group: "context",
-    defaultOn: false,
-    scope: "agent",
-  },
 } as const satisfies Record<string, OptimizationSpec>;
 
 export type OptimizationKey = keyof typeof OPTIMIZATIONS;

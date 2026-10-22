@@ -36,25 +36,12 @@ import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
 import { siftToolResult } from "./result-sift.js";
-import { currentRunInlineCap, currentRunMessages, currentRunTask } from "./run-context.js";
+import { currentRunMessages, currentRunTask } from "./run-context.js";
 import { currentToolCall } from "./tool-call-context.js";
 const log = createLogger("tool-output");
 
 export const TOOL_RESULT_INLINE_CAP_BYTES = Number(process.env["XYNE_CLAW_TOOL_RESULT_INLINE_CAP_BYTES"] ?? 128 * 1024);
 const TOOL_RESULT_PREVIEW_BYTES = 16 * 1024;
-const MODEL_RELATIVE_CAP_SHARE = 0.1;
-const BYTES_PER_TOKEN = 4;
-
-/**
- * Inline cap that fits the model: a tenth of its context window (in bytes, at
- * ~4 bytes a token), never above the fleet cap and never below the preview.
- * 128k-token model → ~51KB, 200k → ~80KB, 1M → the fleet cap.
- */
-export function modelRelativeInlineCap(contextWindowTokens: number | undefined): number {
-  if (!contextWindowTokens || contextWindowTokens <= 0) return TOOL_RESULT_INLINE_CAP_BYTES;
-  const share = Math.floor(contextWindowTokens * MODEL_RELATIVE_CAP_SHARE * BYTES_PER_TOKEN);
-  return Math.min(TOOL_RESULT_INLINE_CAP_BYTES, Math.max(TOOL_RESULT_PREVIEW_BYTES, share));
-}
 
 // Maximum characters allowed on a single physical line in a spilled file.
 // pi-coding-agent's built-in `read` paginates by line and caps a single line at
@@ -211,7 +198,7 @@ export async function promoteIfOversized(
   // byte-for-byte (sandbox-copy-in contextPath) instead of retyping it.
   forceFile = false,
 ): Promise<string> {
-  const cap = inlineCapBytes ?? currentRunInlineCap() ?? TOOL_RESULT_INLINE_CAP_BYTES;
+  const cap = inlineCapBytes ?? TOOL_RESULT_INLINE_CAP_BYTES;
   const clean = stripControlChars(rawContent);
   // Sifting happens only when the call asks for it (the `sift` tool param).
   // Only one pass sifts: an MCP result goes through
