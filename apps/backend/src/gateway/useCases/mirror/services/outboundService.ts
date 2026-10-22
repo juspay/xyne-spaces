@@ -17,7 +17,6 @@ import type {
   JobContext,
   OutboundFile,
   OutboundMessage,
-  ProviderConfig,
   SpacesMessageChange,
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
@@ -25,7 +24,12 @@ import type { UserApi, UserAuthService } from '../../../core/services/userAuthSe
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
 import { MessageMapRepository } from '../repositories/messageMapRepository';
 import { MessageSourceRepository } from '../repositories/messageSourceRepository';
-import { MIRROR_ORIGIN_TYPE, type MirrorApi, type MirrorLink } from '../types';
+import {
+  MIRROR_ORIGIN_TYPE,
+  type MirrorApi,
+  type MirrorConnection,
+  type MirrorLink,
+} from '../types';
 
 interface OutboundContext {
   link: MirrorLink;
@@ -87,16 +91,16 @@ export class OutboundService {
 
   async sendMessageChange(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     change: SpacesMessageChange,
     job: JobContext
   ): Promise<void> {
-    const source = buildMessageSource(this.provider, link, config);
+    const source = buildMessageSource(this.provider.id, link);
     const legacyNames = legacyMessageSourceNames(this.provider.id, link);
     const { sourceId, sourceIds } = await this.sources.findMessageScopes(source, legacyNames, link);
     const ctx: OutboundContext = {
       link,
-      api: this.provider.createApi(config.credentials),
+      api: connection.api,
       sourceId,
       sourceIds,
       job,

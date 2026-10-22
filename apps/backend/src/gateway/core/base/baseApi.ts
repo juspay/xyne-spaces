@@ -65,6 +65,7 @@ export interface MessagingApi {
 }
 
 export interface FileApi {
+  downloadFile(url: string): Promise<Buffer>;
   uploadFile(file: OutboundFile): Promise<string>;
   shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void>;
   findFileMessage(channelId: string, fileId: string): Promise<string | null>;

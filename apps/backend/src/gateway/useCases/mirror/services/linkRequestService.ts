@@ -47,7 +47,7 @@ export class LinkRequestService {
 
   constructor(
     private readonly provider: BaseProvider<unknown, MirrorApi>,
-    private readonly config: ConfigService,
+    private readonly config: ConfigService<MirrorApi>,
     private readonly links: LinkService
   ) {}
 
@@ -57,8 +57,8 @@ export class LinkRequestService {
     spacesChannelId: string,
     isOrgAdmin: boolean
   ): Promise<ChannelSyncStatus> {
-    const [config, view, request, participant] = await Promise.all([
-      this.config.findConfigByWorkspace(workspaceId),
+    const [connection, view, request, participant] = await Promise.all([
+      this.config.findConnectionByWorkspace(workspaceId),
       this.links.findChannelLink(spacesChannelId),
       this.requests.findLatestBySpacesId(workspaceId, spacesChannelId),
       db.channelParticipant.findUnique({
@@ -68,8 +68,8 @@ export class LinkRequestService {
     ]);
     const isChannelAdmin = participant?.role === 'ADMIN';
     return {
-      connected: !!config,
-      appName: config?.appName ?? null,
+      connected: !!connection,
+      appName: connection?.appName ?? null,
       link: view?.link ?? null,
       externalChannel: view?.externalChannel ?? null,
       request,
@@ -79,11 +79,11 @@ export class LinkRequestService {
   }
 
   async submit(workspaceId: string, userId: string, input: LinkInput): Promise<SyncRequest> {
-    const config = await this.config.getConfigByWorkspace(workspaceId);
-    const channel = await this.links.assertCanLink(workspaceId, userId, config, input);
+    const connection = await this.config.getConnectionByWorkspace(workspaceId);
+    const channel = await this.links.assertCanLink(workspaceId, userId, connection, input);
     const request = await this.requests.create({
       workspaceId,
-      connectionId: config.sourceId,
+      connectionId: connection.sourceId,
       externalId: input.externalChannelId,
       externalName: channel.name,
       spacesId: input.spacesChannelId,

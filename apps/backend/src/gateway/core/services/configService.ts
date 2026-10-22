@@ -1,12 +1,13 @@
 import type { ExternalSource } from '@prisma/client';
 import { z } from 'zod';
 import { decrypt, encrypt } from '../../re-exports';
+import type { BaseApi } from '../base/baseApi';
 import type { BaseProvider } from '../base/baseProvider';
 import { GatewayError } from '../errors';
 import { PairRepository } from '../repositories/pairRepository';
 import { SourceRepository } from '../repositories/sourceRepository';
 import { UserTokenRepository } from '../repositories/userTokenRepository';
-import type { ProviderConfig, ProviderWorkspace } from '../types';
+import type { ProviderConfig, ProviderConnection, ProviderWorkspace } from '../types';
 
 interface StoredConfig {
   credentials: unknown;
@@ -21,12 +22,12 @@ const ConfigInputSchema = z.object({
 });
 
 /** One provider workspace per Spaces workspace, saved encrypted on a CONNECTION row in ExternalSource. */
-export class ConfigService {
+export class ConfigService<TApi extends BaseApi = BaseApi> {
   private readonly sources = new SourceRepository();
   private readonly pairs = new PairRepository();
   private readonly userTokens = new UserTokenRepository();
 
-  constructor(private readonly provider: BaseProvider) {}
+  constructor(private readonly provider: BaseProvider<unknown, TApi>) {}
 
   async findConfigByWorkspace(workspaceId: string): Promise<ProviderConfig | null> {
     const source = await this.sources.findActiveConfig(workspaceId, this.provider.configSourceType);
@@ -104,6 +105,28 @@ export class ConfigService {
     const source = await this.sources.findById(sourceId);
     if (!source?.isActive) throw this.notConfiguredError();
     return this.decryptConfig(source);
+  }
+
+  async findConnectionByWorkspace(workspaceId: string): Promise<ProviderConnection<TApi> | null> {
+    const config = await this.findConfigByWorkspace(workspaceId);
+    return config && this.toConnection(config);
+  }
+
+  async getConnectionByWorkspace(workspaceId: string): Promise<ProviderConnection<TApi>> {
+    return this.toConnection(await this.getConfigByWorkspace(workspaceId));
+  }
+
+  async getConnectionBySource(sourceId: string): Promise<ProviderConnection<TApi>> {
+    return this.toConnection(await this.getConfigBySource(sourceId));
+  }
+
+  toConnection(config: ProviderConfig): ProviderConnection<TApi> {
+    const { credentials, ...connection } = config;
+    return {
+      ...connection,
+      api: this.provider.createApi(credentials),
+      toSpaces: (message) => this.provider.transformer.toSpaces(message, config),
+    };
   }
 
   async findConfigByExternalWorkspace(externalWorkspaceId: string): Promise<ProviderConfig | null> {

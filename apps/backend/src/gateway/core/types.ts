@@ -31,6 +31,16 @@ export interface ProviderWorkspace {
   appId: string;
 }
 
+export interface ProviderConnection<TApi extends BaseApi = BaseApi> {
+  sourceId: string;
+  workspaceId: string;
+  workspace: ProviderWorkspace;
+  appName: string | null;
+  description: string | null;
+  api: TApi;
+  toSpaces(message: ProviderMessage): Promise<string>;
+}
+
 /** A person's own provider token, from signing in with the provider. */
 export interface ProviderUserToken {
   externalUserId: string;
@@ -145,7 +155,7 @@ export interface SpacesMemberChange {
 /** What every use of the gateway shares for one provider; built once in index.ts. */
 export interface ProviderServices<TApi extends BaseApi = BaseApi> {
   provider: BaseProvider<unknown, TApi>;
-  config: ConfigService;
+  config: ConfigService<TApi>;
   identity: IdentityService;
   userAuth: UserAuthService<TApi>;
   jobs: GatewayQueue;
@@ -170,7 +180,7 @@ export interface JobContext {
 /** What core hands verified provider events and Spaces changes to, e.g. Mirror. Core never imports it. */
 export interface GatewayHandler {
   readonly name: string;
-  onProviderEvent(config: ProviderConfig, event: ProviderEvent): Promise<void>;
+  onProviderEvent(connection: ProviderConnection, event: ProviderEvent): Promise<void>;
   onSpacesMessageChanged?(change: SpacesMessageChange): Promise<void>;
   onSpacesMemberChanged?(change: SpacesMemberChange): Promise<void>;
   runJob?(job: GatewayJob, context: JobContext): Promise<void>;

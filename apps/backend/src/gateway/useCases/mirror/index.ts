@@ -15,7 +15,7 @@ export function createMirror(core: ProviderServices<MirrorApi>): {
   router: Router;
 } {
   const { provider, config, identity, userAuth } = core;
-  const members = new MemberSyncService(provider, identity);
+  const members = new MemberSyncService(identity);
   const links = new LinkService(provider, config, identity, members);
   const services: MirrorServices = {
     links,

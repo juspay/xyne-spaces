@@ -48,10 +48,6 @@ export class SlackProvider extends BaseProvider<SlackCredentials, SlackApi> {
     return message.appId === workspace.appId || message.authorId === workspace.botUserId;
   }
 
-  fileDownloadCredentials(credentials: SlackCredentials): Record<string, string> {
-    return { botToken: credentials.botToken };
-  }
-
   buildUserAuthUrl(credentials: SlackCredentials, state: string, redirectUri: string): string {
     return buildSlackUserAuthUrl(credentials.clientId, state, redirectUri);
   }

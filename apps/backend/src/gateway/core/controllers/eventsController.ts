@@ -29,7 +29,8 @@ export class EventsController {
     );
 
     if (request.event) {
-      for (const handler of this.handlers) await handler.onProviderEvent(config, request.event);
+      const connection = configService.toConnection(config);
+      for (const handler of this.handlers) await handler.onProviderEvent(connection, request.event);
     }
     res.status(200).json({ ok: true });
   });

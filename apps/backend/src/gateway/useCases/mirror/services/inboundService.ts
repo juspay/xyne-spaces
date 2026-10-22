@@ -14,18 +14,12 @@ import {
 import { gatewayConfig } from '../../../config';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
-import type {
-  JobContext,
-  ProviderConfig,
-  ProviderEvent,
-  ProviderFile,
-  ProviderMessage,
-} from '../../../core/types';
+import type { JobContext, ProviderEvent, ProviderFile, ProviderMessage } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
 import { MessageMapRepository } from '../repositories/messageMapRepository';
 import { MessageSourceRepository } from '../repositories/messageSourceRepository';
-import type { MirrorApi, MirrorLink } from '../types';
+import type { MirrorApi, MirrorConnection, MirrorLink } from '../types';
 
 export type MessageEvent = Extract<
   ProviderEvent,
@@ -40,7 +34,7 @@ const PARENT_LOCK_WAIT_MS = 10_000;
 
 interface InboundContext {
   link: MirrorLink;
-  config: ProviderConfig;
+  connection: MirrorConnection;
   api: MirrorApi;
   sourceName: string;
   sourceId: string;
@@ -61,17 +55,17 @@ export class InboundService {
 
   async applyMessageEvent(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     event: MessageEvent,
     job: JobContext
   ): Promise<void> {
-    const source = buildMessageSource(this.provider, link, config);
+    const source = buildMessageSource(this.provider.id, link);
     const legacyNames = legacyMessageSourceNames(this.provider.id, link);
     const { sourceId, sourceIds } = await this.sources.findMessageScopes(source, legacyNames, link);
     const ctx: InboundContext = {
       link,
-      config,
-      api: this.provider.createApi(config.credentials),
+      connection,
+      api: connection.api,
       sourceName: source.name,
       sourceId,
       sourceIds,
@@ -101,7 +95,7 @@ export class InboundService {
     }
 
     const [html, { uploadedFiles, missing }] = await Promise.all([
-      this.provider.transformer.toSpaces(message, ctx.config),
+      ctx.connection.toSpaces(message),
       this.downloadFiles(ctx, message),
     ]);
     // Same placeholder as self-serve migration for a file that didn't make it.
@@ -149,7 +143,7 @@ export class InboundService {
   private async editSpacesMessage(ctx: InboundContext, message: ProviderMessage): Promise<void> {
     const messageId = await this.findIncomingMessageId(ctx, message.id);
     if (!messageId) return;
-    const content = await this.provider.transformer.toSpaces(message, ctx.config);
+    const content = await ctx.connection.toSpaces(message);
     await conversationService.updateMessageContent({ messageId, content });
   }
 
@@ -233,16 +227,7 @@ export class InboundService {
         missing.push(file);
         continue;
       }
-      const [downloaded] = await this.attachments.downloadAttachmentsForSource(
-        ctx.sourceName,
-        [{ fileName: file.name, fileUrl: file.url, mimeType: file.mimeType, size: file.size }],
-        {
-          maxFileSize: gatewayConfig.maxFileBytes,
-          timeout: gatewayConfig.fileTimeoutMs,
-          scopeType: 'EXTERNAL_MESSAGE',
-          scopeId: ctx.sourceName,
-        }
-      );
+      const downloaded = await this.downloadFile(ctx, file);
       if (downloaded) {
         saved[file.url] = downloaded;
         await ctx.job.setProgress(key, saved);
@@ -253,6 +238,29 @@ export class InboundService {
       }
     }
     return { uploadedFiles: message.files.flatMap((file) => saved[file.url] ?? []), missing };
+  }
+
+  private async downloadFile(
+    ctx: InboundContext,
+    file: ProviderFile
+  ): Promise<DownloadedAttachment | undefined> {
+    let buffer: Buffer;
+    try {
+      buffer = await ctx.api.downloadFile(file.url);
+    } catch (error) {
+      if (error instanceof GatewayError && error.code === 'PROVIDER_ERROR') return undefined;
+      throw error;
+    }
+    const [downloaded] = await this.attachments.downloadAttachmentsForSource(
+      ctx.sourceName,
+      [{ fileName: file.name, buffer, mimeType: file.mimeType, size: file.size }],
+      {
+        maxFileSize: gatewayConfig.maxFileBytes,
+        scopeType: 'EXTERNAL_MESSAGE',
+        scopeId: ctx.sourceName,
+      }
+    );
+    return downloaded;
   }
 
   /** Notifications, mentions and automations, as for any service-written message. */

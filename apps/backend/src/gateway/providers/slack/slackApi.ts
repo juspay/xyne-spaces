@@ -138,6 +138,20 @@ export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelA
     );
   }
 
+  async downloadFile(url: string): Promise<Buffer> {
+    return await this.call(async () => {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${this.client.token}` },
+        signal: AbortSignal.timeout(gatewayConfig.fileTimeoutMs),
+      });
+      // Without access Slack answers 200 with its sign-in page instead of the file.
+      if (!response.ok || response.headers.get('content-type')?.startsWith('text/html')) {
+        throw new GatewayError('PROVIDER_ERROR', `Slack file download returned ${response.status}`);
+      }
+      return Buffer.from(await response.arrayBuffer());
+    });
+  }
+
   async uploadFile(file: OutboundFile): Promise<string> {
     const { upload_url: uploadUrl, file_id: fileId } = await this.call(() =>
       this.client.files.getUploadURLExternal({ filename: file.name, length: file.content.length })

@@ -7,7 +7,6 @@ import type {
   GatewayHandler,
   GatewayJob,
   JobContext,
-  ProviderConfig,
   ProviderEvent,
   ProviderServices,
   SpacesMemberChange,
@@ -21,6 +20,7 @@ import {
   outboundJobId,
   type InboundJobPayload,
   type MirrorApi,
+  type MirrorConnection,
   type MirrorJobType,
   type MirrorLink,
   type MirrorServices,
@@ -29,7 +29,7 @@ import {
 
 const SEND_AS_PROBE_TTL_SECONDS = 5;
 
-type LinkWork = (link: MirrorLink, config: ProviderConfig) => Promise<void>;
+type LinkWork = (link: MirrorLink, connection: MirrorConnection) => Promise<void>;
 
 /** Mirror for one provider: its events go into linked Spaces channels, and Spaces changes go back out. */
 export class MirrorHandler implements GatewayHandler {
@@ -44,15 +44,15 @@ export class MirrorHandler implements GatewayHandler {
     this.links = new PairRepository(this.name);
   }
 
-  async onProviderEvent(config: ProviderConfig, event: ProviderEvent): Promise<void> {
-    if (this.isOwnMessage(event, config)) return;
-    const link = await this.mirror.links.findActiveLink(config.sourceId, this.channelOf(event));
+  async onProviderEvent(connection: MirrorConnection, event: ProviderEvent): Promise<void> {
+    if (this.isOwnMessage(event, connection)) return;
+    const link = await this.mirror.links.findActiveLink(connection.sourceId, this.channelOf(event));
     if (!link) return;
     if (isMessageEvent(event) && (await this.shouldQueue(link, event))) {
       await this.queueInbound(link, event);
       return;
     }
-    await this.applyAsLinker(link, config, event, inlineJobContext());
+    await this.applyAsLinker(link, connection, event, inlineJobContext());
   }
 
   async onSpacesMessageChanged(change: SpacesMessageChange): Promise<void> {
@@ -75,8 +75,8 @@ export class MirrorHandler implements GatewayHandler {
   }
 
   async onSpacesMemberChanged(change: SpacesMemberChange): Promise<void> {
-    await this.forActiveLink(change.channelId, (link, config) =>
-      this.mirror.members.applySpacesMemberChange(link, config, change)
+    await this.forActiveLink(change.channelId, (link, connection) =>
+      this.mirror.members.applySpacesMemberChange(link, connection, change)
     );
   }
 
@@ -84,7 +84,7 @@ export class MirrorHandler implements GatewayHandler {
     const { linkId } = job.payload as { linkId: string };
     const link = await this.links.findById(linkId);
     if (link?.status !== 'ACTIVE') return;
-    const config = await this.core.config.getConfigBySource(link.connectionId);
+    const connection = await this.core.config.getConnectionBySource(link.connectionId);
 
     if ((job.type as MirrorJobType) === 'outbound') {
       const { change } = job.payload as OutboundJobPayload;
@@ -97,7 +97,7 @@ export class MirrorHandler implements GatewayHandler {
       const principal = { userId: link.createdBy, workspaceId: link.workspaceId };
       await runWithContext(principal, () =>
         this.pausingOnError(link, () =>
-          this.mirror.outbound.sendMessageChange(link, config, change, context)
+          this.mirror.outbound.sendMessageChange(link, connection, change, context)
         )
       );
       return;
@@ -107,14 +107,14 @@ export class MirrorHandler implements GatewayHandler {
     if (await this.isWaitingOnEarlierJob(link, event)) {
       throw new GatewayError('LOCK_HELD', 'An earlier message is still being copied');
     }
-    await this.applyAsLinker(link, config, event, context);
+    await this.applyAsLinker(link, connection, event, context);
   }
 
   private async forActiveLink(channelId: string, work: LinkWork): Promise<void> {
     const link = await this.links.findBySpacesId(channelId);
     if (link?.status !== 'ACTIVE') return;
     await this.pausingOnError(link, async () =>
-      work(link, await this.core.config.getConfigBySource(link.connectionId))
+      work(link, await this.core.config.getConnectionBySource(link.connectionId))
     );
   }
 
@@ -162,7 +162,7 @@ export class MirrorHandler implements GatewayHandler {
 
   private async applyAsLinker(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     event: ProviderEvent,
     context: JobContext
   ): Promise<void> {
@@ -171,8 +171,8 @@ export class MirrorHandler implements GatewayHandler {
     await runWithContext(principal, () =>
       this.pausingOnError(link, () =>
         event.type === 'member_joined' || event.type === 'member_left'
-          ? this.mirror.members.applyProviderMemberChange(link, config, event)
-          : this.applyMessage(link, config, event, context)
+          ? this.mirror.members.applyProviderMemberChange(link, connection, event)
+          : this.applyMessage(link, connection, event, context)
       )
     );
   }
@@ -190,7 +190,7 @@ export class MirrorHandler implements GatewayHandler {
   /** A retry that arrives while the first attempt is still working gets 503, and the provider tries later. */
   private async applyMessage(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     event: MessageEvent,
     context: JobContext
   ): Promise<void> {
@@ -203,7 +203,7 @@ export class MirrorHandler implements GatewayHandler {
     });
     if (!lock) throw new GatewayError('LOCK_HELD', 'This message is still being processed');
     try {
-      await this.mirror.inbound.applyMessageEvent(link, config, event, context);
+      await this.mirror.inbound.applyMessageEvent(link, connection, event, context);
     } finally {
       await releaseLock(lock);
     }
@@ -222,10 +222,10 @@ export class MirrorHandler implements GatewayHandler {
     await releaseLock(lock);
   }
 
-  private isOwnMessage(event: ProviderEvent, config: ProviderConfig): boolean {
+  private isOwnMessage(event: ProviderEvent, connection: MirrorConnection): boolean {
     return (
       (event.type === 'message_created' || event.type === 'message_edited') &&
-      this.core.provider.isOwnMessage(event.message, config.workspace)
+      this.core.provider.isOwnMessage(event.message, connection.workspace)
     );
   }
 

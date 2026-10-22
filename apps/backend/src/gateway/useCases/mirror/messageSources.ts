@@ -3,12 +3,11 @@ import {
   buildSlackDeskSourceName,
   buildSlackMigrationSourceName,
 } from '../../re-exports';
-import type { BaseProvider } from '../../core/base/baseProvider';
-import type { ProviderConfig, ProviderId } from '../../core/types';
+import type { ProviderId } from '../../core/types';
 import type { MessageSource, MirrorLink } from './types';
 
 interface ProviderSourceNames {
-  messageSource(spacesChannelId: string): Omit<MessageSource, 'credentials'>;
+  messageSource(spacesChannelId: string): MessageSource;
   legacyMessageSourceNames(externalChannelId: string, spacesChannelId: string): string[];
   deskSourceName(externalChannelId: string): string | null;
 }
@@ -29,16 +28,8 @@ const SOURCE_NAMES: Record<ProviderId, ProviderSourceNames> = {
   },
 };
 
-export function buildMessageSource(
-  provider: BaseProvider,
-  link: MirrorLink,
-  config: ProviderConfig
-): MessageSource {
-  return {
-    ...SOURCE_NAMES[provider.id].messageSource(link.spacesId),
-    credentials: provider.fileDownloadCredentials(config.credentials),
-  };
-}
+export const buildMessageSource = (provider: ProviderId, link: MirrorLink): MessageSource =>
+  SOURCE_NAMES[provider].messageSource(link.spacesId);
 
 export const legacyMessageSourceNames = (provider: ProviderId, link: MirrorLink): string[] =>
   SOURCE_NAMES[provider].legacyMessageSourceNames(link.externalId, link.spacesId);

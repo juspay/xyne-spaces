@@ -9,7 +9,8 @@ The gateway carries everything between Spaces and an external app (a provider). 
 - Only `re-exports.ts` imports from outside `gateway/`. Need repo code? Re-export it there. npm packages are imported directly.
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
-- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged` and `runJob` only if it needs them and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged` and `runJob` only if it needs them, and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- Use cases never see provider secrets. They get a `ProviderConnection` (`ConfigService.getConnectionBy…()`, or the one passed to `onProviderEvent`): ids, workspace, app name, a ready `api` and `toSpaces()`. Only core and the provider read `credentials`.
 - `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories every use case shares (connections, pairs, people's tokens) stay in `core/repositories/`, and a use case's own stores in `useCases/<name>/repositories/` (Mirror's message map and Redis sync requests).
 
 ## Steps
@@ -50,7 +51,6 @@ The gateway carries everything between Spaces and an external app (a provider). 
 | `parseEvent()`                     | `challenge` for setup handshakes, else `event` with the provider workspace id and a `ProviderEvent` (`null` to ignore) |
 | `createApi()`                      | An `<Id>Api` for these credentials                                                                                     |
 | `isOwnMessage()`                   | True for the app's own posts (loop guard)                                                                              |
-| `fileDownloadCredentials()`        | What `ExternalAttachmentService` needs to download the provider's files, e.g. `{ botToken }`                           |
 | `buildUserAuthUrl()`               | The provider's sign-in page for a person's own token                                                                   |
 | `exchangeUserAuthCode()`           | Trades the sign-in code for the token, the person's provider id and their provider workspace                           |
 | `createUserApi()`                  | An `<Id>Api` acting as that person; their name and photo are never overridden                                          |
@@ -83,7 +83,7 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 - PAIR rows go through `PairRepository`, scoped by the use case's sourceType suffix (`-mirror`); the use case builds each pair's unique name.
 - Query the gateway's rows by `recordType` and sourceType. A use case may set `channelId` on its PAIR when the Spaces side is a channel (Mirror does); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
 - One link per provider channel: the unique `name`. One link per Spaces channel: links are made only on approval, one request per channel can be pending, and approval checks again. `(workspaceId, spacesIdentifier)` is indexed, since every Spaces message checks it.
-- The message map stays in `ExternalMessage`, under the channel's self-serve migration source, so a migration and Mirror each skip what the other copied; older migrations' rows are read too. Mirror owns those names per provider in `useCases/mirror/messageSources.ts`, so a provider never knows about them.
+- The message map stays in `ExternalMessage`, under the channel's self-serve migration source, so a migration and Mirror each skip what the other copied; older migrations' rows are read too. Mirror owns those names per provider in `useCases/mirror/messageSources.ts`, so a provider never knows about them. Those rows hold no token: incoming files are downloaded by the provider's `api`.
 
 ## Jobs
 
@@ -107,7 +107,7 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 | Group          | Methods                                                                                                                  |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `MessagingApi` | `postMessage`, `updateMessage`, `deleteMessage`, `findPostedMessage`, `findThreadParent`                                 |
-| `FileApi`      | `uploadFile`, `shareFiles`, `findFileMessage`                                                                            |
+| `FileApi`      | `downloadFile` (with the provider's own token), `uploadFile`, `shareFiles`, `findFileMessage`                            |
 | `ChannelApi`   | `getChannel`, `listSharedChannels` (channels the user and the bot share), `listMembers`, `inviteMembers`, `removeMember` |
 | `DirectoryApi` | `findUser`, `findUserIdByEmail`                                                                                          |
 

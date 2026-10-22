@@ -5,7 +5,12 @@ import type {
   FileApi,
   MessagingApi,
 } from '../../core/base/baseApi';
-import type { Pair, ProviderChannel, SpacesMessageChange } from '../../core/types';
+import type {
+  Pair,
+  ProviderChannel,
+  ProviderConnection,
+  SpacesMessageChange,
+} from '../../core/types';
 import type { InboundService, MessageEvent } from './services/inboundService';
 import type { LinkRequestService } from './services/linkRequestService';
 import type { LinkService } from './services/linkService';
@@ -28,6 +33,8 @@ export const MIRROR_ORIGIN_TYPE = 'xyne_mirror';
 
 export type MirrorApi = BaseApi & MessagingApi & FileApi & ChannelApi & DirectoryApi;
 
+export type MirrorConnection = ProviderConnection<MirrorApi>;
+
 /** A Mirror link: one provider channel (`externalId`) ⇄ one Spaces channel (`spacesId`). */
 export type MirrorLink = Pair;
 
@@ -36,7 +43,6 @@ export interface MessageSource {
   name: string;
   sourceType: string;
   displayName: string;
-  credentials: Record<string, string>;
 }
 
 export type MirrorJobType = 'outbound' | 'inbound';

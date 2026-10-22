@@ -12,11 +12,16 @@ import { PairRepository } from '../../../core/repositories/pairRepository';
 import { MessageSourceRepository } from '../repositories/messageSourceRepository';
 import { SyncRequestRepository } from '../repositories/syncRequestRepository';
 import { SourceRepository } from '../../../core/repositories/sourceRepository';
-import type { ProviderConfig, ProviderChannel } from '../../../core/types';
+import type { ProviderChannel } from '../../../core/types';
 import type { ConfigService } from '../../../core/services/configService';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, deskSourceName } from '../messageSources';
-import { MIRROR_SOURCE_SUFFIX, type MirrorApi, type MirrorLink } from '../types';
+import {
+  MIRROR_SOURCE_SUFFIX,
+  type MirrorApi,
+  type MirrorConnection,
+  type MirrorLink,
+} from '../types';
 import type { MemberSyncService } from './memberSyncService';
 
 // Unique, so there is one link per provider channel; (spacesId, sourceType) keeps one per Spaces channel.
@@ -42,7 +47,7 @@ export class LinkService {
 
   constructor(
     private readonly provider: BaseProvider<unknown, MirrorApi>,
-    private readonly config: ConfigService,
+    private readonly config: ConfigService<MirrorApi>,
     private readonly identity: IdentityService,
     private readonly members: MemberSyncService
   ) {}
@@ -74,14 +79,14 @@ export class LinkService {
 
   /** Provider channels the user and the bot share, minus linked, requested and desk channels. */
   async listLinkableChannels(workspaceId: string, userId: string): Promise<ProviderChannel[]> {
-    const config = await this.config.getConfigByWorkspace(workspaceId);
-    const api = this.provider.createApi(config.credentials);
+    const connection = await this.config.getConnectionByWorkspace(workspaceId);
+    const api = connection.api;
     const externalUserId = await this.identity.findExternalUserId(api, userId);
     if (!externalUserId) return [];
 
     const [channels, links] = await Promise.all([
       api.listSharedChannels(externalUserId),
-      this.pairs.listByConnection(config.sourceId),
+      this.pairs.listByConnection(connection.sourceId),
     ]);
     const requested = await this.requests.findPendingExternalIds(
       workspaceId,
@@ -105,38 +110,34 @@ export class LinkService {
   async assertCanLink(
     workspaceId: string,
     userId: string,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     input: LinkInput,
     subject = 'You'
   ): Promise<ProviderChannel> {
-    await this.assertLinkable(workspaceId, config, input);
-    return await this.findSharedChannel(userId, config, input.externalChannelId, subject);
+    await this.assertLinkable(workspaceId, connection, input);
+    return await this.findSharedChannel(userId, connection, input.externalChannelId, subject);
   }
 
   /** Links an approved request. The checks run again as the requester, whom incoming events act as. */
   async linkChannel(workspaceId: string, userId: string, input: LinkInput): Promise<MirrorLink> {
-    const config = await this.config.getConfigByWorkspace(workspaceId);
-    await this.assertCanLink(workspaceId, userId, config, input, 'The requester');
+    const connection = await this.config.getConnectionByWorkspace(workspaceId);
+    await this.assertCanLink(workspaceId, userId, connection, input, 'The requester');
 
     const link = await this.createLink({
-      name: linkName(config.sourceId, input.externalChannelId),
+      name: linkName(connection.sourceId, input.externalChannelId),
       sourceType: `${this.provider.id}${MIRROR_SOURCE_SUFFIX}`,
       displayName: 'Mirror link',
       workspaceId,
-      connectionId: config.sourceId,
+      connectionId: connection.sourceId,
       externalId: input.externalChannelId,
       spacesId: input.spacesChannelId,
       channelId: input.spacesChannelId,
       createdBy: userId,
     });
-    await this.messageSources.ensureMessageSource(
-      buildMessageSource(this.provider, link, config),
-      link,
-      true
-    );
+    await this.messageSources.ensureMessageSource(buildMessageSource(this.provider.id, link), link);
 
     // Seeding acts for the whole channel, not just the caller, and runs after the response.
-    void withWorkspaceScope(() => this.members.seedMembers(link, config)).catch((error) =>
+    void withWorkspaceScope(() => this.members.seedMembers(link, connection)).catch((error) =>
       logger.error('[Mirror] Member seed failed', { linkId: link.id, error })
     );
     return link;
@@ -147,16 +148,12 @@ export class LinkService {
     return await this.pairs.setStatus(link.id, 'PAUSED');
   }
 
-  /** Resumes only when the config is active and the bot can still see the channel. */
+  /** Resumes only when the connection is active and the bot can still see the channel. */
   async resumeLink(workspaceId: string, linkId: string): Promise<MirrorLink> {
     const link = await this.getLinkById(workspaceId, linkId);
-    const config = await this.config.getConfigBySource(link.connectionId);
-    await this.provider.createApi(config.credentials).getChannel(link.externalId);
-    await this.messageSources.ensureMessageSource(
-      buildMessageSource(this.provider, link, config),
-      link,
-      true
-    );
+    const connection = await this.config.getConnectionBySource(link.connectionId);
+    await connection.api.getChannel(link.externalId);
+    await this.messageSources.ensureMessageSource(buildMessageSource(this.provider.id, link), link);
     return await this.pairs.setStatus(link.id, 'ACTIVE');
   }
 
@@ -166,7 +163,7 @@ export class LinkService {
     await this.pairs.delete(link.id);
   }
 
-  /** PROVIDER_AUTH pauses every link on the config; CHANNEL_GONE pauses this one. */
+  /** PROVIDER_AUTH pauses every link on the connection; CHANNEL_GONE pauses this one. */
   async pauseOnError(link: MirrorLink, error: GatewayError): Promise<void> {
     logger.warn('[Mirror] Pausing on provider error', {
       linkId: link.id,
@@ -182,7 +179,7 @@ export class LinkService {
 
   private async assertLinkable(
     workspaceId: string,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     input: LinkInput
   ): Promise<void> {
     const channel = await db.channel.findUnique({
@@ -202,7 +199,7 @@ export class LinkService {
 
     const [spacesLink, externalLink] = await Promise.all([
       this.pairs.findBySpacesId(input.spacesChannelId),
-      this.pairs.findByName(linkName(config.sourceId, input.externalChannelId)),
+      this.pairs.findByName(linkName(connection.sourceId, input.externalChannelId)),
     ]);
     if (spacesLink) throw new GatewayError('CHANNEL_TAKEN', 'This channel is already linked');
     if (externalLink)
@@ -223,18 +220,18 @@ export class LinkService {
   /** Linking shares the channel both ways, so the person must be in it alongside the app. */
   private async findSharedChannel(
     userId: string,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     externalChannelId: string,
     subject: string
   ): Promise<ProviderChannel> {
-    const api = this.provider.createApi(config.credentials);
+    const api = connection.api;
     const externalUserId = await this.identity.findExternalUserId(api, userId);
     const channels = externalUserId ? await api.listSharedChannels(externalUserId) : [];
     const channel = channels.find((candidate) => candidate.id === externalChannelId);
     if (!channel) {
       throw new GatewayError(
         'NOT_CHANNEL_MEMBER',
-        `${subject} and ${config.appName ?? 'the Mirror app'} must both be in that ${this.provider.displayName} channel`
+        `${subject} and ${connection.appName ?? 'the Mirror app'} must both be in that ${this.provider.displayName} channel`
       );
     }
     return channel;
@@ -260,8 +257,8 @@ export class LinkService {
 
   private async findExternalChannel(link: MirrorLink): Promise<ProviderChannel | null> {
     try {
-      const config = await this.config.getConfigBySource(link.connectionId);
-      return await this.provider.createApi(config.credentials).getChannel(link.externalId);
+      const connection = await this.config.getConnectionBySource(link.connectionId);
+      return await connection.api.getChannel(link.externalId);
     } catch {
       return null;
     }

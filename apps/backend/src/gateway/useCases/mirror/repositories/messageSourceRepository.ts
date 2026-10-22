@@ -24,18 +24,11 @@ export class MessageSourceRepository {
     return { sourceId, sourceIds: [sourceId, ...legacyIds] };
   }
 
-  /** The link's message-map source; `refresh` re-saves Mirror's credentials on it (file downloads use them). */
-  async ensureMessageSource(
-    source: MessageSource,
-    link: MirrorLink,
-    refresh = false
-  ): Promise<string> {
+  /** The link's message-map source. It holds no secrets: the provider downloads files with its own token. */
+  async ensureMessageSource(source: MessageSource, link: MirrorLink): Promise<string> {
     const existing = await this.sources.findByName(source.name);
-    if (existing && existing.isActive && !refresh) return existing.id;
-
-    const credentials = encrypt(JSON.stringify(source.credentials));
     if (existing) {
-      await this.sources.update(existing.id, { credentials, isActive: true });
+      if (!existing.isActive) await this.sources.update(existing.id, { isActive: true });
       return existing.id;
     }
     const created = await this.sources.create({
@@ -43,7 +36,7 @@ export class MessageSourceRepository {
       sourceType: source.sourceType,
       displayName: source.displayName,
       channelId: link.spacesId,
-      credentials,
+      credentials: encrypt('{}'),
       workspaceId: link.workspaceId,
     });
     return created.id;

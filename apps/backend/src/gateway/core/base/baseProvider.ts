@@ -29,8 +29,6 @@ export abstract class BaseProvider<TCredentials = unknown, TApi extends BaseApi 
   /** Loop guard: true for messages the app itself posted. */
   abstract isOwnMessage(message: ProviderMessage, workspace: ProviderWorkspace): boolean;
 
-  abstract fileDownloadCredentials(credentials: TCredentials): Record<string, string>;
-
   abstract buildUserAuthUrl(credentials: TCredentials, state: string, redirectUri: string): string;
 
   abstract exchangeUserAuthCode(

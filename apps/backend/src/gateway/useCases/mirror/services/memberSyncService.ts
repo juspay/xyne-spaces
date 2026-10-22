@@ -1,23 +1,19 @@
 import { db, logger, repositories } from '../../../re-exports';
-import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
-import type { ProviderConfig, SpacesMemberChange } from '../../../core/types';
+import type { SpacesMemberChange } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
-import type { MirrorApi, MirrorLink } from '../types';
+import type { MirrorApi, MirrorConnection, MirrorLink } from '../types';
 
 /** Additions sync both ways in every channel, apps included; removals only when both channels are private. */
 export class MemberSyncService {
-  constructor(
-    private readonly provider: BaseProvider<unknown, MirrorApi>,
-    private readonly identity: IdentityService
-  ) {}
+  constructor(private readonly identity: IdentityService) {}
 
   /** On link: adds each side's members to the other. Never removes anyone. */
-  async seedMembers(link: MirrorLink, config: ProviderConfig): Promise<void> {
-    const api = this.provider.createApi(config.credentials);
+  async seedMembers(link: MirrorLink, connection: MirrorConnection): Promise<void> {
+    const api = connection.api;
     const externalMembers = await api.listMembers(link.externalId);
     for (const externalUserId of externalMembers) {
-      if (externalUserId !== config.workspace.botUserId)
+      if (externalUserId !== connection.workspace.botUserId)
         await this.addMemberToSpaces(api, link, externalUserId);
     }
 
@@ -35,12 +31,12 @@ export class MemberSyncService {
 
   async applySpacesMemberChange(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     change: SpacesMemberChange
   ): Promise<void> {
-    const api = this.provider.createApi(config.credentials);
+    const api = connection.api;
     const externalUserId = await this.identity.findExternalUserId(api, change.userId);
-    if (!externalUserId || externalUserId === config.workspace.botUserId) return;
+    if (!externalUserId || externalUserId === connection.workspace.botUserId) return;
 
     if (change.type === 'added') {
       await api.inviteMembers(link.externalId, [externalUserId]);
@@ -51,16 +47,16 @@ export class MemberSyncService {
 
   async applyProviderMemberChange(
     link: MirrorLink,
-    config: ProviderConfig,
+    connection: MirrorConnection,
     event: { type: 'member_joined' | 'member_left'; userId: string }
   ): Promise<void> {
-    if (event.userId === config.workspace.botUserId) {
+    if (event.userId === connection.workspace.botUserId) {
       if (event.type === 'member_left')
         throw new GatewayError('CHANNEL_GONE', 'The bot was removed from the channel');
       return;
     }
 
-    const api = this.provider.createApi(config.credentials);
+    const api = connection.api;
     if (event.type === 'member_joined') {
       await this.addMemberToSpaces(api, link, event.userId);
       return;
