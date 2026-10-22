@@ -49,6 +49,7 @@ import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
 import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
 import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
+import { useSdlcResourceRoom } from './SdlcScreen/sdlcResourceChanged';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -516,6 +517,10 @@ const AppRoot = (): ReactElement => {
   // the host must not also render one (that would double it).
   const isSdlcRoute =
     /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
+  // Not inside the SDLC frame or a panel webview: they have no socket, and the host relays to the frame.
+  useSdlcResourceRoom(
+    !isInPanelWebview && /\/(sdlc|ai\/library|ai\/environments)(\/|$)/.test(location.pathname),
+  );
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {

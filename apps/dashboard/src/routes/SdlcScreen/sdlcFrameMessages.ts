@@ -26,6 +26,7 @@ export const SDLC_FRAME_MESSAGE = {
   historyResult: 'xyne:sdlc-frame:history-result',
   downloads: 'xyne:sdlc-frame:downloads',
   downloadsRequest: 'xyne:sdlc-frame:downloads-request',
+  resourceChanged: 'xyne:sdlc-frame:resource-changed',
 } as const;
 
 export interface SdlcFrameNavigateMessage {
@@ -66,6 +67,15 @@ export interface SdlcFrameShowBrowserMessage {
   type: typeof SDLC_FRAME_MESSAGE.showBrowser;
 }
 
+export const SDLC_RESOURCE_KINDS = ['agents', 'knowledge', 'environments'] as const;
+export type SdlcResourceKind = (typeof SDLC_RESOURCE_KINDS)[number];
+
+/** Parent → frame: the backend's `sdlc_resource_changed`; only the parent holds the socket. */
+export interface SdlcFrameResourceChangedMessage {
+  type: typeof SDLC_FRAME_MESSAGE.resourceChanged;
+  kind: SdlcResourceKind;
+}
+
 export type SdlcFrameMessage =
   | SdlcFrameNavigateMessage
   | SdlcFrameRouteMessage
@@ -85,7 +95,8 @@ export type SdlcFrameMessage =
   | SdlcFrameHistoryQueryMessage
   | SdlcFrameHistoryResultMessage
   | SdlcFrameDownloadsMessage
-  | SdlcFrameDownloadsRequestMessage;
+  | SdlcFrameDownloadsRequestMessage
+  | SdlcFrameResourceChangedMessage;
 
 /**
  * Frame → parent: open this url the way the app opens links. The lane is an
@@ -646,6 +657,11 @@ export function parseSdlcFrameMessage(data: unknown): SdlcFrameMessage | null {
     return { type, downloads: downloadsFrom(data['downloads']) };
   }
 
+  if (type === SDLC_FRAME_MESSAGE.resourceChanged) {
+    const { kind } = data;
+    return isSdlcResourceKind(kind) ? { type, kind } : null;
+  }
+
   if (type === SDLC_FRAME_MESSAGE.downloadsRequest) {
     const { request, id } = data;
     if (typeof request !== 'string' || !DOWNLOAD_REQUESTS.includes(request)) return null;
@@ -717,4 +733,8 @@ export function parseSdlcFrameMessage(data: unknown): SdlcFrameMessage | null {
   }
 
   return null;
+}
+
+export function isSdlcResourceKind(kind: unknown): kind is SdlcResourceKind {
+  return SDLC_RESOURCE_KINDS.includes(kind as SdlcResourceKind);
 }
