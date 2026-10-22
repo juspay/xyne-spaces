@@ -372,7 +372,7 @@ function lastBatchCard(): string {
 }
 
 function toolsRun(): string[] {
-  return h.state.callTool.mock.calls.map((c) => String(c[3]));
+  return h.state.callTool.mock.calls.map((c) => String((c as unknown[])[3]));
 }
 
 describe("approvals card with several writes", () => {

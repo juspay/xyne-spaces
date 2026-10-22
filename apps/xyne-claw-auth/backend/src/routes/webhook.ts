@@ -129,6 +129,8 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
 import { systemNote } from "../lib/notice-format.js";
 import {
+  buildWriteBatchApprovalFlow,
+  type WriteBatchRow,
   buildWriteApprovalFlow,
   buildTwinApprovalFlow,
   buildUserQuestionFlow,
@@ -808,6 +810,105 @@ function rendersAgentDraftCard(action: Record<string, unknown>, ctx: SessionCont
   if (action["tool"] !== "create-agent" || !ctx.agentSlug || !ctx.agentOrgId) return false;
   const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
   return draftSpecFromCreateAgentParams(params) !== null;
+}
+
+type WriteTargetValidation = { error: string | null; channelName?: string };
+
+function isBatchableWriteAction(action: Record<string, unknown>, ctx: SessionContext): boolean {
+  return !rendersAgentDraftCard(action, ctx) && action["tool"] !== "spaces-memory-create";
+}
+
+async function postWriteBatchCard(
+  entries: Array<{ action: Record<string, unknown>; targetValidation: WriteTargetValidation }>,
+  ctx: SessionContext,
+  token: string,
+): Promise<void> {
+  const agentSlug = ctx.agentSlug ?? "";
+  const spacesAppId = ctx.spacesAppId ?? "";
+  const rows: WriteBatchRow[] = [];
+  for (const { action, targetValidation } of entries) {
+    const pending = readPendingWriteAction(action);
+    if (!pending) throw new Error("Invalid pending write-action shape");
+    const card = await mintWriteCardAction(pending, {
+      agentSlug,
+      spacesAppId,
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+    });
+    rows.push({
+      description: formatActionDescription(card.tool, card.params, targetValidation),
+      status: "pending",
+      action: {
+        serverType: card.serverType,
+        tool: card.tool,
+        params: card.params,
+        userId: card.userId,
+        signature: card.signature,
+        agentSlug: card.agentSlug,
+        ...(card.subagentId ? { subagentId: card.subagentId } : {}),
+        ...(card.channelId !== undefined ? { channelId: card.channelId } : {}),
+        ...(card.conversationId !== undefined ? { conversationId: card.conversationId } : {}),
+      },
+    });
+  }
+  const flow = withSpacesAppId(
+    buildWriteBatchApprovalFlow({ batchId: crypto.randomUUID(), rows, ...(spacesAppId ? { spacesAppId } : {}) }),
+    spacesAppId,
+  );
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: ctx.channelId,
+    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+    flow,
+    userId: ctx.spacesAppUserId,
+  }, token);
+}
+
+async function postWriteApprovals(args: {
+  actions: Array<Record<string, unknown>>;
+  ctx: SessionContext;
+  token: string;
+  runOwnerId?: string | undefined;
+  validations?: Map<Record<string, unknown>, WriteTargetValidation> | undefined;
+  label: string;
+}): Promise<number> {
+  const { actions, ctx, token, runOwnerId, validations, label } = args;
+  const ready: Array<{ action: Record<string, unknown>; targetValidation: WriteTargetValidation }> = [];
+  for (const action of actions) {
+    try {
+      const targetValidation = validations?.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
+      if (targetValidation.error) {
+        clog.info(`[webhook/result] ${label} skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+        continue;
+      }
+      ready.push({ action, targetValidation });
+    } catch (err) {
+      clog.warn(`[webhook/result] ${label} approval target check failed tool=${String(action["tool"] ?? "")}: ${errMsg(err)}`);
+    }
+  }
+
+  const batchable = ready.filter((r) => isBatchableWriteAction(r.action, ctx));
+  const single = ready.filter((r) => !isBatchableWriteAction(r.action, ctx));
+  let sent = 0;
+  if (batchable.length >= 2) {
+    try {
+      await postWriteBatchCard(batchable, ctx, token);
+      sent += batchable.length;
+    } catch (err) {
+      clog.warn(`[webhook/result] ${label} approvals card failed, posting one card per action: ${errMsg(err)}`);
+      single.push(...batchable);
+    }
+  } else {
+    single.push(...batchable);
+  }
+  for (const { action, targetValidation } of single) {
+    try {
+      await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
+      sent += 1;
+    } catch (err) {
+      clog.warn(`[webhook/result] ${label} approval card failed tool=${String(action["tool"] ?? "")}: ${errMsg(err)}`);
+    }
+  }
+  return sent;
 }
 
 async function postWriteApprovalAction(args: {
@@ -3399,8 +3500,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (queued.length > 0) {
       const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
       const noun = queued.length === 1 ? "action is" : "actions are";
+      const batched = queued.filter((a) => isBatchableWriteAction(a, ctx)).length >= 2;
       lines.push(
-        `${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+        `${queued.length} write ${noun} waiting for your approval — nothing has run yet: ${names.join(", ")}. ` +
+          (batched ? "Review them in the approvals card below." : `Approve the card${queued.length === 1 ? "" : "s"} to run.`),
       );
     }
     for (const action of rejected) {
@@ -3639,20 +3742,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     const cbCtx = ctx;
     if (cbCtx?.channelId && cbCtx.appToken && externalPendingActions?.length) {
       const cbAppToken = cbCtx.appToken;
-      let approvalCardsSent = 0;
-      for (const action of externalPendingActions) {
-        try {
-          const targetValidation = await pendingActionTargetValidation(action, cbCtx, cbAppToken);
-          if (targetValidation.error) {
-            clog.info(`[webhook/result] external-callback skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
-            continue;
-          }
-          await postWriteApprovalAction({ action, ctx: cbCtx, token: cbAppToken, targetValidation });
-          approvalCardsSent += 1;
-        } catch (err) {
-          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${errMsg(err)}`);
-        }
-      }
+      const approvalCardsSent = await postWriteApprovals({
+        actions: externalPendingActions,
+        ctx: cbCtx,
+        token: cbAppToken,
+        label: `external-callback sessionId=${sessionId}`,
+      });
       clog.info(`[webhook/result] external-callback sent ${approvalCardsSent}/${externalPendingActions.length} write approval card(s) channelId=${cbCtx.channelId} sessionId=${sessionId}`);
     }
     await deleteSession(sessionId);
@@ -5164,17 +5259,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Post pending write action approvals (e.g. spaces-memory-create) before returning
       const copilotPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
       if (copilotPendingActions?.length) {
-        let copilotApprovalCardsSent = 0;
-        for (const action of copilotPendingActions) {
-          const targetValidation = await pendingActionTargetValidation(action, ctx, token);
-          if (targetValidation.error) {
-            log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
-            continue;
-          }
-
-          await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
-          copilotApprovalCardsSent += 1;
-        }
+        const copilotApprovalCardsSent = await postWriteApprovals({
+          actions: copilotPendingActions,
+          ctx,
+          token,
+          runOwnerId,
+          label: "copilot",
+        });
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
       }
 
@@ -5519,21 +5610,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // ── Send approval DMs for pending write actions (HITL) ──
     const pendingActionsPayload = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
     if (pendingActionsPayload?.length) {
-      let approvalCardsSent = 0;
-      for (const action of pendingActionsPayload) {
-        // Reuse the validation computed for the footer above so the message and
-        // the card can never disagree; fall back only if it wasn't classified
-        // (e.g. a non-completed status path that skipped the footer).
-        const targetValidation =
-          pendingActionValidation.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
-        if (targetValidation.error) {
-          log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
-          continue;
-        }
-
-        await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
-        approvalCardsSent += 1;
-      }
+      // Reuse the validation computed for the footer above so the message and
+      // the cards can never disagree.
+      const approvalCardsSent = await postWriteApprovals({
+        actions: pendingActionsPayload,
+        ctx,
+        token,
+        runOwnerId,
+        validations: pendingActionValidation,
+        label: "thread",
+      });
 
       log.info(`Sent ${approvalCardsSent}/${pendingActionsPayload.length} write action approval(s) to ${ctx.senderId}`);
     }
