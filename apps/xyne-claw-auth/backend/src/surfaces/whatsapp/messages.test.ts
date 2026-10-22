@@ -172,3 +172,60 @@ describe("LID addressing", () => {
     expect(msg?.selfChat).toBe(true);
   });
 });
+
+describe("toInbound: quoted and forwarded messages", () => {
+  const CONTACT = "15550001111@s.whatsapp.net";
+  const reply = (contextInfo: Record<string, unknown>, text = "summarise this") =>
+    wa({ remoteJid: CONTACT }, { extendedTextMessage: { text, contextInfo } });
+
+  it("carries the quoted text and who wrote it, alongside the existing reply flag", () => {
+    const msg = toInbound(
+      reply({ stanzaId: "OLD1", participant: CONTACT, quotedMessage: { conversation: "Lunch at noon?" } }),
+      self,
+    );
+    expect(msg).toMatchObject({ text: "summarise this", replyToSelf: false, quotedAuthorJid: CONTACT });
+    expect(msg?.quotedMessage).toEqual({ text: "Lunch at noon?" });
+  });
+
+  it("marks a quote of one of our own messages as ours and still flags the reply to us", () => {
+    const msg = toInbound(
+      reply({ stanzaId: "OURS", participant: self.jid, quotedMessage: { extendedTextMessage: { text: "Here is the report" } } }),
+      self,
+    );
+    expect(msg).toMatchObject({ replyToSelf: true, quotedMessage: { text: "Here is the report", fromSelf: true } });
+    expect(msg?.quotedAuthorJid).toBeUndefined();
+  });
+
+  it("reads a quoted photo's caption, and names the file kind", () => {
+    const msg = toInbound(
+      reply({ stanzaId: "PIC", participant: CONTACT, quotedMessage: { imageMessage: { caption: "the whiteboard", mimetype: "image/jpeg" } } }),
+      self,
+    );
+    expect(msg?.quotedMessage).toEqual({ text: "the whiteboard", mediaKind: "image" });
+  });
+
+  it("unwraps a quoted message WhatsApp nested in an ephemeral envelope", () => {
+    const msg = toInbound(
+      reply({
+        stanzaId: "EPH",
+        participant: CONTACT,
+        quotedMessage: { ephemeralMessage: { message: { conversation: "disappearing note" } } },
+      }),
+      self,
+    );
+    expect(msg?.quotedMessage?.text).toBe("disappearing note");
+  });
+
+  it("carries nothing when the message quotes nothing", () => {
+    const msg = toInbound(wa({ remoteJid: CONTACT }), self);
+    expect(msg?.quotedMessage).toBeUndefined();
+    expect(msg?.forwarded).toBeUndefined();
+  });
+
+  it("flags a forwarded message", () => {
+    const flagged = toInbound(reply({ isForwarded: true, forwardingScore: 1 }, "Meeting moved to 4pm"), self);
+    expect(flagged).toMatchObject({ forwarded: true, text: "Meeting moved to 4pm" });
+    const scored = toInbound(reply({ forwardingScore: 5 }, "chain message"), self);
+    expect(scored?.forwarded).toBe(true);
+  });
+});
