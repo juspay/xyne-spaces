@@ -13,10 +13,17 @@ const state = vi.hoisted(() => ({
   objects: new Map<string, string>(),
   admins: new Set<string>(),
   updates: [] as Array<{ id: string; metadata: Record<string, unknown> }>,
+  designSystems: [] as Array<Record<string, any>>,
+  users: [] as Array<Record<string, any>>,
 }));
 
 vi.mock("../db.js", () => ({
   prisma: {
+    user: {
+      findFirst: vi.fn(async (args: any) =>
+        state.users.find((u) => u["id"] === args?.where?.id) ?? null,
+      ),
+    },
     chatAttachment: {
       update: vi.fn(async (args: any) => {
         state.updates.push({ id: args.where.id, metadata: args.data.metadata });
@@ -32,6 +39,11 @@ vi.mock("../repositories/index.js", () => ({
   chatAttachmentRepository: {
     findById: vi.fn(async (id: string) => state.attachments.find((a) => a["id"] === id) ?? null),
   },
+  designSystemRepository: {
+    findById: vi.fn(async (id: string, orgId: string) =>
+      state.designSystems.find((d) => d["id"] === id && d["orgId"] === orgId) ?? null,
+    ),
+  },
 }));
 
 vi.mock("../services/storageService.js", () => ({
@@ -46,6 +58,7 @@ vi.mock("../services/storageService.js", () => ({
 
 vi.mock("../middleware/agent-acl.js", () => ({
   getRequesterId: (req: Request) => req.headers["x-user-id"],
+  getOrgId: (req: Request) => req.headers["x-org-id"],
   isClawAdmin: vi.fn(async (id: string) => state.admins.has(id)),
 }));
 
@@ -58,6 +71,7 @@ vi.mock("../logger.js", () => ({
 }));
 
 const OWNER = "user-owner";
+const ORG = "org-1";
 const ADMIN = "user-admin";
 const STRANGER = "user-stranger";
 
@@ -75,13 +89,14 @@ const VALID_SUMMARY = JSON.stringify({
 async function call(
   method: "GET" | "POST",
   url: string,
-  opts: { userId?: string | null; body?: Record<string, unknown> } = {},
+  opts: { userId?: string | null; orgId?: string | null; body?: Record<string, unknown> } = {},
 ): Promise<{ status: number; body: Record<string, any> }> {
   const { brandAttachmentsRouter } = await import("./brand-attachments.js");
   return await new Promise((resolve, reject) => {
     let statusCode = 200;
     const headers: Record<string, string> = {};
     if (opts.userId !== null) headers["x-user-id"] = opts.userId ?? OWNER;
+    if (opts.orgId !== null) headers["x-org-id"] = opts.orgId ?? ORG;
 
     const req = { method, url, originalUrl: url, headers, body: opts.body ?? {}, query: {} } as unknown as Request;
     const res = {
@@ -100,6 +115,8 @@ async function call(
 }
 
 beforeEach(() => {
+  state.designSystems = [{ id: "ds-1", orgId: ORG, name: "Saved" }];
+  state.users = [{ id: OWNER, orgId: ORG }];
   state.objects = new Map([
     ["gcs/valid.json", VALID_SUMMARY],
     ["gcs/invalid.json", JSON.stringify({ version: 1, name: "X", source: "url", colors: "nope" })],
@@ -213,5 +230,40 @@ describe("POST /attachments/:id/brand-saved", () => {
       reactArtifact: { entry: "index.html" },
       savedDesignSystemId: "ds-1",
     });
+  });
+});
+
+describe("hardening from the #3258 review", () => {
+  it("refuses a design system id that is not in the caller's org", async () => {
+    const got = await call("POST", "/attachments/att-valid/brand-saved", {
+      body: { designSystemId: "ds-elsewhere" },
+    });
+
+    expect(got.status).toBe(404);
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it("refuses a design system from another org", async () => {
+    state.designSystems = [{ id: "ds-other", orgId: "org-2", name: "Theirs" }];
+
+    const got = await call("POST", "/attachments/att-valid/brand-saved", {
+      body: { designSystemId: "ds-other" },
+    });
+
+    expect(got.status).toBe(404);
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it("refuses a summary whose size cannot be determined, rather than reading it whole", async () => {
+    // A null size used to fall back to 0, which passed the cap and then read
+    // the entire object into memory.
+    const att = state.attachments.find((a) => a["id"] === "att-valid")!;
+    att["size"] = null;
+    const { gcsService } = await import("../services/storageService.js");
+    vi.mocked(gcsService.getMetadata).mockRejectedValueOnce(new Error("no metadata"));
+
+    const got = await call("GET", "/attachments/att-valid/brand-summary");
+
+    expect(got.status).toBe(413);
   });
 });

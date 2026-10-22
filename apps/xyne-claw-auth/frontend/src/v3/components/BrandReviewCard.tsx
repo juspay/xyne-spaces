@@ -27,6 +27,9 @@ import {
  */
 
 const MAX_NAME_CHARS = 120;
+/** DESIGN.md becomes a standing instruction for every /design run that uses
+ *  this system, so it is capped before it is stored. */
+const MAX_DESIGN_MD_CHARS = 20_000;
 
 interface BrandFiles {
   summary: ChatAttachmentMeta | undefined;
@@ -91,6 +94,10 @@ export function BrandReviewCard({
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedName, setSavedName] = useState<string | null>(null);
+  // Fetched on load, not at save: the user has to be able to read this before
+  // they turn it into an org-visible instruction.
+  const [designMd, setDesignMd] = useState<string>("");
+  const [designMdOpen, setDesignMdOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -113,6 +120,10 @@ export function BrandReviewCard({
         // Already saved in an earlier session: show that instead of a Save
         // button, which would mint a duplicate for the whole org.
         if (result.savedDesignSystemId) setSavedName(result.summary.name);
+        if (files.designMd) {
+          const text = await fetchChatAttachmentText(files.designMd.id, userId).catch(() => "");
+          if (!cancelled) setDesignMd(text.slice(0, MAX_DESIGN_MD_CHARS));
+        }
       } catch {
         if (!cancelled) setLoadFailed(true);
       }
@@ -127,12 +138,12 @@ export function BrandReviewCard({
     setSaving(true);
     setError(null);
     try {
-      const [designMd, tokensCss] = await Promise.all([
-        files.designMd ? fetchChatAttachmentText(files.designMd.id, userId) : Promise.resolve(""),
-        files.tokensCss ? fetchChatAttachmentText(files.tokensCss.id, userId) : Promise.resolve(""),
-      ]);
+      const tokensCss = files.tokensCss
+        ? await fetchChatAttachmentText(files.tokensCss.id, userId)
+        : "";
       const created = await createDesignSystem({
         name: name.trim() || summary.name,
+        // Already fetched, shown to the user, and capped on the way in.
         designMd,
         tokensCss,
         source: summary.source,
@@ -269,6 +280,29 @@ export function BrandReviewCard({
               <li key={gap}>{gap}</li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {designMd && (
+        <section className="border-t border-xyne-border-subtle px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setDesignMdOpen((open) => !open)}
+            aria-expanded={designMdOpen}
+            className="flex w-full items-center justify-between gap-2 text-left text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
+          >
+            <span>Design instructions ({designMd.length.toLocaleString()} characters)</span>
+            <span aria-hidden>{designMdOpen ? "Hide" : "Review"}</span>
+          </button>
+          <p className="mt-1 text-[11px] text-xyne-fg-muted">
+            Written from the source you gave. Saving makes this a standing instruction for every
+            design run that uses it, so read it first.
+          </p>
+          {designMdOpen && (
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-xyne-border-subtle bg-xyne-bg-subtle p-2 text-[11px] leading-relaxed text-xyne-fg-secondary">
+              {designMd}
+            </pre>
+          )}
         </section>
       )}
 

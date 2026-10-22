@@ -3162,6 +3162,11 @@ export interface BrandTypeStep {
   letterSpacingPx?: number;
 }
 
+export interface BrandScaleValue {
+  token: string;
+  value: string;
+}
+
 export interface BrandAssetRef {
   kind: "logo" | "favicon" | "screenshot-desktop" | "screenshot-mobile";
   file: string;
@@ -3181,6 +3186,9 @@ export interface BrandSummary {
   colors: BrandColor[];
   fonts: BrandFont[];
   typeScale: BrandTypeStep[];
+  radii?: BrandScaleValue[];
+  spacing?: BrandScaleValue[];
+  shadows?: BrandScaleValue[];
   assets?: BrandAssetRef[];
   gaps?: string[];
 }

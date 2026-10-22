@@ -11,9 +11,9 @@ import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { parseBrandSummary } from "xyne-claw-shared";
 import { prisma } from "../db.js";
-import { chatAttachmentRepository } from "../repositories/index.js";
+import { chatAttachmentRepository, designSystemRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getOrgId, getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";
@@ -45,6 +45,17 @@ function savedDesignSystemIdOf(metadata: unknown): string | null {
  *
  * Same ACL as the download route below — this exposes the same bytes.
  */
+/** The caller's org: the header requireAuth stamped, falling back to their own
+ *  row. Same order the chat-project routes use. */
+async function resolveCallerOrgId(req: Request, requesterId: string): Promise<string | null> {
+  const headerOrgId = getOrgId(req);
+  if (headerOrgId) return headerOrgId;
+  const row = await prisma.user
+    .findFirst({ where: { id: requesterId }, select: { orgId: true } })
+    .catch(() => null);
+  return row?.orgId ?? null;
+}
+
 brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);
@@ -60,8 +71,15 @@ brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request
     // or hostile upload from being read wholly into memory to be parsed.
     // `att.size` is nullable, and a null slipped past a truthiness check — so
     // fall back to the object's own metadata rather than skipping the cap.
+    // An unknown size REFUSES rather than defaulting to 0: a 0 slipped past the
+    // comparison below and the object was then read whole into memory, which is
+    // exactly what the cap exists to prevent.
     const declaredSize =
-      att.size || (await gcsService.getMetadata(att.url).then((m) => m.size).catch(() => 0));
+      att.size ?? (await gcsService.getMetadata(att.url).then((m) => m.size).catch(() => null));
+    if (declaredSize === null || declaredSize === undefined) {
+      res.status(413).json({ success: false, error: "Brand summary size could not be determined" });
+      return;
+    }
     if (declaredSize > BRAND_SUMMARY_MAX_BYTES) {
       res.status(413).json({ success: false, error: "Brand summary is too large to parse" });
       return;
@@ -118,6 +136,18 @@ brandAttachmentsRouter.post("/attachments/:id/brand-saved", async (req: Request<
     const existing = savedDesignSystemIdOf(att.metadata);
     if (existing) {
       res.json({ success: true, data: { savedDesignSystemId: existing, alreadySaved: true } });
+      return;
+    }
+
+    // The id is recorded on an org-visible attachment and later used to show the
+    // card as saved, so it must name a design system that actually exists in the
+    // caller's org — not any string they send.
+    const callerOrgId = await resolveCallerOrgId(req, requesterId);
+    const target = callerOrgId
+      ? await designSystemRepository.findById(designSystemId.trim(), callerOrgId)
+      : null;
+    if (!target) {
+      res.status(404).json({ success: false, error: "Design system not found" });
       return;
     }
 
