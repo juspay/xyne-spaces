@@ -21,7 +21,7 @@ import { errMsg } from "../../lib/errors.js";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
-import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
+import { assertSafeOutboundUrl, publicOnlyAgent } from "../../lib/safe-fetch.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("webfetch");
@@ -181,8 +181,12 @@ export async function handleWebfetch(
     let redirectCount = 0;
     let response: Response;
     for (;;) {
-      await assertSafeOutboundUrl(currentUrl);
+      // Pre-flight check gives a clear error for literal/obvious internal
+      // targets; publicOnlyAgent re-checks the address actually dialled, so a
+      // DNS-rebinding name cannot pass the check and then connect internally.
+      await assertSafeOutboundUrl(currentUrl, { allowLoopbackInDev: true });
       response = await fetch(currentUrl, {
+        dispatcher: publicOnlyAgent,
         signal: AbortSignal.timeout(fetchTimeoutMs),
         headers: {
           "User-Agent":
@@ -190,7 +194,7 @@ export async function handleWebfetch(
           Accept: "text/html, text/plain;q=0.9, */*;q=0.1",
         },
         redirect: "manual",
-      });
+      } as unknown as RequestInit);
 
       const status = response.status;
       if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {

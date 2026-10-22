@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
+import { guardUserBaseUrl } from "./outbound-guard.js";
 import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
 import { checkTwinDelivery } from "./twin-delivery-check.js";
@@ -2132,6 +2133,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const workingDir = cwd ?? PATHS.dataDir;
 
   // Get (or start) the persistent local proxy for GitHub Copilot
+  // A user-supplied provider base URL was validated at save time; re-check it
+  // at use time and register it with the connect-time guard so DNS rebinding
+  // cannot point the model client (and the user's key) at an internal host.
+  guardUserBaseUrl(providerConfig?.baseUrl);
   let effectiveProviderConfig = providerConfig;
   // NOTE: modelSettings.model is the Spaces/platform-default model override.
   // It deliberately does NOT touch provider credentials — premium providers

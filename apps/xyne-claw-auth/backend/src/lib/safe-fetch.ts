@@ -1,6 +1,12 @@
-import { lookup as dnsLookup } from "node:dns/promises";
-import { BlockList, isIP, isIPv6 } from "node:net";
+import { isIP } from "node:net";
 import { Agent } from "undici";
+import {
+  createPublicOnlyLookup,
+  defaultResolve,
+  isBlockedIpAddress,
+  isLoopbackAddress,
+  type ResolvedAddress,
+} from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
 
 export type SafeFetchErrorCode =
@@ -12,11 +18,6 @@ export class SafeFetchError extends Error {
     super(message);
     this.name = "SafeFetchError";
   }
-}
-
-interface ResolvedAddress {
-  address: string;
-  family: number;
 }
 
 export interface SafeFetchOptions {
@@ -38,51 +39,13 @@ const SENSITIVE_HEADERS = new Set([
   "authorization", "proxy-authorization", "cookie", "x-s2s-key", "x-session-token", "x-api-key",
 ]);
 
-function blockList(v4: Array<[string, number]>, v6: Array<[string, number]>): BlockList {
-  const list = new BlockList();
-  for (const [net, bits] of v4) list.addSubnet(net, bits, "ipv4");
-  for (const [net, bits] of v6) list.addSubnet(net, bits, "ipv6");
-  return list;
-}
-
-const denied = blockList(
-  [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
-   ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15],
-   ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4]],
-  [["::", 128], ["::1", 128], ["fe80::", 10], ["fc00::", 7], ["ff00::", 8], ["2001:db8::", 32]],
-);
-const loopback = blockList([["127.0.0.0", 8]], [["::1", 128]]);
-
-/** `::ffff:127.0.0.1` and `::ffff:7f00:1` are both 127.0.0.1 wearing a hat. */
-function ipv4Mapped(ip: string): string | null {
-  const bare = (ip.toLowerCase().split("%")[0] ?? "").replace(/^\[|\]$/g, "");
-  const dotted = bare.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted) return dotted[1] as string;
-  const hex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (!hex) return null;
-  const hi = Number.parseInt(hex[1] as string, 16);
-  const lo = Number.parseInt(hex[2] as string, 16);
-  return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
-}
-
-function checkList(list: BlockList, ip: string): boolean {
-  const mapped = isIPv6(ip) ? ipv4Mapped(ip) : null;
-  const target = mapped ?? ip;
-  const family = isIP(target);
-  if (family === 0) return true;
-  return list.check(target, family === 4 ? "ipv4" : "ipv6");
-}
-
-function isBlockedIpAddress(ip: string): boolean {
-  return checkList(denied, ip);
-}
-
-function isLoopbackAddress(ip: string): boolean {
-  return isIP(ip) !== 0 && checkList(loopback, ip);
-}
-
 function stripBrackets(host: string): string {
   return host.replace(/^\[/, "").replace(/\]$/, "");
+}
+
+/** Hostname is `localhost`, `*.localhost` or a loopback literal. */
+export function isLoopbackHost(host: string): boolean {
+  return isLoopbackHostname(host);
 }
 
 function isLoopbackHostname(host: string): boolean {
@@ -139,10 +102,7 @@ export function outboundUrlSyntaxError(rawUrl: string): string | null {
   }
 }
 
-async function defaultLookup(hostname: string): Promise<ResolvedAddress[]> {
-  const entries = await dnsLookup(hostname, { all: true, verbatim: true });
-  return entries.map((entry) => ({ address: entry.address, family: entry.family }));
-}
+const defaultLookup = defaultResolve;
 
 /**
  * Validate an outbound URL and resolve it to the exact addresses a connect may
@@ -195,6 +155,30 @@ type ConnectCallback = (
   address: string | Array<{ address: string; family: number }>,
   family?: number,
 ) => void;
+
+/**
+ * Shared dispatcher for callers that cannot use `safeFetch` (streaming bodies,
+ * soft size caps, manual redirect loops). Every connect — first request, each
+ * redirect hop and each keep-alive reconnect — re-resolves the host through a
+ * guarded lookup and refuses blocked addresses, so a pre-flight
+ * `assertSafeOutboundUrl` cannot be bypassed by DNS rebinding between check
+ * and connect. Loopback is permitted outside production only, matching
+ * `allowLoopbackInDev`.
+ */
+export const publicOnlyAgent: Agent = new Agent({
+  connect: { lookup: createPublicOnlyLookup({ allowLoopback: process.env["NODE_ENV"] !== "production" }) },
+});
+
+/**
+ * Dispatcher to pass to `fetch` for an untrusted outbound URL. Operator-
+ * allowlisted private origins and config origins are trusted by configuration
+ * (they may legitimately live on a private address), so they keep the default
+ * dispatcher; everything else gets the connect-time guard.
+ */
+export function outboundDispatcher(rawUrl: string): Agent | undefined {
+  if (isAllowlistedPrivateOrigin(rawUrl) || isConfigOrigin(rawUrl)) return undefined;
+  return publicOnlyAgent;
+}
 
 /** Dial this exact address while the request keeps the original Host/SNI. */
 function pinnedAgent(address: string, family: number): Agent {

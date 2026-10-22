@@ -64,6 +64,7 @@ import { track, type ChildTaskRegistry } from "./child-tasks.js";
 import crypto from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 
+import { guardUserBaseUrl } from "./outbound-guard.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("subagent-tools");
 
@@ -1058,6 +1059,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const authStorage = AuthStorage.create();
         const modelRegistry = ModelRegistry.create(authStorage);
 
+        guardUserBaseUrl(resolvedProvider?.config.baseUrl);
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
         const useFastModel = litellmPick?.arm === "fast";
