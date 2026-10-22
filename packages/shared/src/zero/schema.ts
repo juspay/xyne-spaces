@@ -16,6 +16,7 @@ export * from './types';
 
 import {
   AccessType,
+  AgentProactivityMode,
   ActivityClassification,
   ActivityClassificationJobType,
   ActivityType,
@@ -794,6 +795,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    agentProactivityMode: enumeration<AgentProactivityMode>().optional(), // Agents answering without a mention
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');

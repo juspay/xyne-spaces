@@ -194,6 +194,7 @@ import {
   MembersTab,
   RepositoryCredentialsTab,
   ToolbarTab,
+  AgentActivityTab,
 } from './WorkspaceManagementScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
@@ -1898,6 +1899,16 @@ export const router = createBrowserRouter(
                         <OrganisationsSectionGuard section='toolbar'>
                           <OrganisationsPage>
                             <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'agent-activity',
+                      element: (
+                        <OrganisationsSectionGuard section='agent-activity'>
+                          <OrganisationsPage wide>
+                            <AgentActivityTab isActive />
                           </OrganisationsPage>
                         </OrganisationsSectionGuard>
                       ),
