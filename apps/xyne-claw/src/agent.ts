@@ -1889,6 +1889,9 @@ export interface RunTaskOptions {
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
   twinDeliverRef?: TwinDeliverRef | undefined;
+  /** True once ask-user-question posted a card: the run must end and wait for
+   *  the answer run, so no further turns and no auto-continue nudge. */
+  questionPosted?: (() => boolean) | undefined;
   /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
@@ -2073,6 +2076,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     modelSettings,
     structuredOutputRef,
     twinDeliverRef,
+    questionPosted,
     mode,
     planContinuation,
     agentHandoff,
@@ -2622,8 +2626,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   installMidTurnCompaction(session);
   // Digital Twin: end the loop right after the first accepted twin_deliver.
   // Installed after mid-turn compaction so it chains that stop hook.
-  if (twinDeliverRef) {
-    installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
+  if (twinDeliverRef || questionPosted) {
+    installStopAfterDelivery(session.agent, () => twinDeliverRef?.value !== undefined || questionPosted?.() === true);
   }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
   // directly-assignable property of the same name on the Agent. Semantics
@@ -4204,7 +4208,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : 0;
   // A twin run's only output is twin_deliver (enforced by the reflection stage
   // above); an auto-continue nudge would reopen a finished delivery.
-  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef;
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef && !questionPosted?.();
 
   let text = computeFinalText();
   let answerAssessment: AnswerAssessment | null = null;

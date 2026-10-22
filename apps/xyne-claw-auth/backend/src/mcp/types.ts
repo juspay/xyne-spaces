@@ -106,6 +106,7 @@ export interface StdioMcpAdapter {
    * be selectable in the UI without a per-user "Connect" round-trip.
    */
   readonly staticTools?: readonly string[];
+  readonly forwardFiles?: boolean;
   buildCommand(credentials: Record<string, unknown>): { cmd: string; args: string[]; env: Record<string, string> };
 }
 
@@ -122,6 +123,7 @@ export interface HttpMcpAdapter {
   readonly writeTools?: readonly string[];
   /** Picker-only fallback list; see StdioMcpAdapter.staticTools. */
   readonly staticTools?: readonly string[];
+  readonly forwardFiles?: boolean;
   buildHttpUrl(credentials: Record<string, unknown>): { url: string; headers: Record<string, string> };
 }
 

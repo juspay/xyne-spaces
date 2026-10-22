@@ -41,6 +41,7 @@ export const useChannelDisplayName = (
     isArchived: false,
     showTicketsTabTicketsInChat: true,
     callSummaryPrompt: null,
+    agentProactivityMode: null,
     workspaceId: workspaceId,
     connectId: null,
   };

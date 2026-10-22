@@ -188,6 +188,7 @@ export type SpacesAuthCaller =
   | "clone-owner-dm"
   | "skill-update-owner-dm"
   | "awakening"
+  | "proactivity"
   | "artifact-apps"
   | "artifact-app-agents"
   | "artifact-app-storage"

@@ -5,6 +5,8 @@ const state = vi.hoisted(() => ({
   listCalls: 0,
   tools: [{ name: "t1", description: "d", inputSchema: { type: "object" } }] as Array<Record<string, unknown>>,
   callError: "",
+  listGate: null as Promise<void> | null,
+  listError: "",
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
@@ -15,6 +17,8 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
     async connect() {}
     async listTools() {
       state.listCalls += 1;
+      if (state.listGate) await state.listGate;
+      if (state.listError) throw new Error(state.listError);
       return { tools: state.tools };
     }
     async callTool() {
@@ -79,6 +83,8 @@ describe("listToolsForUser shared tool-list cache", () => {
     state.spawns = 0;
     state.listCalls = 0;
     state.callError = "";
+    state.listGate = null;
+    state.listError = "";
     state.tools = [{ name: "t1", description: "d", inputSchema: { type: "object" } }];
   });
 
@@ -215,5 +221,80 @@ describe("listToolsForUser shared tool-list cache", () => {
     await expect(callTool(user("u1"), "bitbucket", {}, "t1", {})).rejects.toThrow(/502/);
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     expect(state.listCalls).toBe(1);
+  });
+});
+
+describe("listToolsForUser cutoff for slow or failing servers", () => {
+  const CUT = { cutoff: true };
+  beforeEach(() => {
+    run += 1;
+    clearToolListCache();
+    state.listCalls = 0;
+    state.listGate = null;
+    state.listError = "";
+    state.tools = [{ name: "t1", description: "d", inputSchema: { type: "object" } }];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on a hanging server at the cutoff, skips it, then serves the late result", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    state.listGate = new Promise<void>((resolve) => { release = resolve; });
+    const first = listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    const firstResult = expect(first).rejects.toThrow(/exceeded 8000ms/);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await firstResult;
+    await expect(listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT)).rejects.toThrow(/skipped/);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    const late = await listToolsForUser(user("u3"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    expect(late.tools.map((t) => t.name)).toEqual(["t1"]);
+    expect(state.listCalls).toBe(1);
+  });
+
+  it("skips a failing server for the backoff window, then retries", async () => {
+    vi.useFakeTimers();
+    state.listError = "connect ECONNREFUSED";
+    await expect(listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT)).rejects.toThrow(/ECONNREFUSED/);
+    await expect(listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT)).rejects.toThrow(/skipped/);
+    expect(state.listCalls).toBe(1);
+    state.listError = "";
+    await vi.advanceTimersByTimeAsync(300_001);
+    const tools = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT);
+    expect(tools.tools).toHaveLength(1);
+    expect(state.listCalls).toBe(2);
+  });
+
+  it("retries right away after the user reconnects or an admin restarts the server", async () => {
+    state.listError = "401 bad credentials";
+    await expect(listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT)).rejects.toThrow(/401/);
+    await expect(listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT)).rejects.toThrow(/401/);
+    state.listError = "";
+    await evictAllSessionsForUser(user("u1"));
+    await restartMcpServers("heisenberg");
+    await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT);
+    await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    expect(state.listCalls).toBe(4);
+  });
+
+  it("does not apply the cutoff or skip to fresh health-check listings", async () => {
+    state.listError = "boom";
+    await expect(listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT)).rejects.toThrow(/boom/);
+    state.listError = "";
+    const fresh = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, { fresh: true });
+    expect(fresh.tools).toHaveLength(1);
+  });
+
+  it("leaves callers without the cutoff option waiting for the listing", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    state.listGate = new Promise<void>((resolve) => { release = resolve; });
+    const pending = listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await vi.advanceTimersByTimeAsync(20_000);
+    release();
+    expect((await pending).tools).toHaveLength(1);
   });
 });

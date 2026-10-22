@@ -69,7 +69,7 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "help") {
-    await handleHelp(ctx);
+    await handleHelp(ctx, slash.command);
     return { kind: "handled" };
   }
 

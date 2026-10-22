@@ -120,6 +120,7 @@ interface AIComposerProps {
   /** The chat voice mode is in, shown as its transcript; without it, only what is said there. */
   voiceMessages?: readonly Message[] | undefined;
   voiceChatTitle?: string | undefined;
+  lastUserMessage?: string | undefined;
 }
 
 interface XyneAIConfigResponse {
@@ -168,6 +169,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     voiceStageHost,
     voiceMessages,
     voiceChatTitle,
+    lastUserMessage,
   },
   ref,
 ): ReactElement {
@@ -772,6 +774,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         onValueChange={setValue}
         {...(placeholder ? { placeholder } : {})}
         {...(autoFocus ? { autoFocus } : {})}
+        {...(lastUserMessage ? { lastUserMessage } : {})}
         isStreaming={pending || buddyWorking}
         anchor={anchor}
         onSubmit={submit}

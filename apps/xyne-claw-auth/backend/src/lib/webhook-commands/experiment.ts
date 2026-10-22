@@ -1,4 +1,5 @@
 import { errMsg } from "../errors.js";
+import { loopCommandFor } from "xyne-claw-shared";
 import { experimentRepository } from "../../repositories/index.js";
 import { isClawAdmin } from "../../middleware/agent-acl.js";
 import {
@@ -262,19 +263,17 @@ const handlers: ExperimentHandlers = {
       kind: experimentCommand.kind ?? null,
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
-    const isUnderstanding = experimentCommand.kind === "understanding";
+    const loop = loopCommandFor(experimentCommand.kind);
     // Seed the frontier from a list the user already gave us (e.g. 57 table
     // names). Ground truth beats model enumeration: with the paths pre-recorded
     // the run cannot exit by imagining fewer of them.
-    const seededPaths = isUnderstanding
+    const seededPaths = loop.start.seedFrontier
       ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
       : 0;
     await ctx.reply([
-      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
-      isUnderstanding
-        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
-        : `Mode: time-boxed autonomous exploration`,
-      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
+      loop.start.title,
+      loop.start.mode,
+      `${loop.start.durationLabel}: ${formatDuration(experimentCommand.durationMs)}`,
       ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
       seededPaths > 0
         ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`

@@ -1514,7 +1514,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               hasAgentActivity={agentActive}
               agentSlot={
                 <AgentProgressIndicator
-                  sessionId={agentProgressConversationId ?? currentSessionId}
+                  sessionId={agentProgressConversationId}
                   conversationId={agentProgressConversationId}
                   onActiveChange={setAgentActive}
                 />

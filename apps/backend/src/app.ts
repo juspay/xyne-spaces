@@ -11,7 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
+import { runWithContext, tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
@@ -226,6 +226,10 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import channelsDeskRoutes from '@/routes/channelsDesks';
+import proactivityRoutes from '@/routes/proactivity';
+import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
+import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
+import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
 
 
 export class App {
@@ -376,6 +380,7 @@ export class App {
       logger.info('Public SDK API mounted at /api/sdk');
     }
     this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
+    this.app.use('/api/proactivity', proactivityRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -662,6 +667,81 @@ export class App {
       '/api/internal/email/autodraft-callback/:conversationId/:channelId',
       validateS2SKey,
       handleAutoDraftCallback,
+    );
+    // An agent's draft for an unprompted answer. Acked first: claw-auth must not wait
+    // on the check before posting.
+    // For claw-auth's proactive runs, answered as the agent's bot with its own channel
+    // access: where the run's reads land, and which channels a routing card may learn
+    // from. Any failure means no.
+    this.app.post('/api/internal/proactivity/room-allows', validateS2SKey, async (req: Request, res: Response) => {
+      const { userId, workspaceId, roomChannelId, refs } = (req.body ?? {}) as Record<string, unknown>;
+      const valid =
+        Array.isArray(refs) &&
+        refs.every(
+          (r) =>
+            r &&
+            ['channel', 'conversation', 'message', 'ticket'].includes((r as RoomRef).kind) &&
+            typeof (r as RoomRef).id === 'string',
+        );
+      if (typeof userId !== 'string' || typeof workspaceId !== 'string' || typeof roomChannelId !== 'string' || !valid) {
+        res.status(400).json({ allowed: false });
+        return;
+      }
+      try {
+        const allowed = await runWithContext({ userId, workspaceId }, () =>
+          roomAllows(roomChannelId, refs as RoomRef[]),
+        );
+        res.json({ allowed });
+      } catch (error) {
+        logger.error('[Proactivity] room check failed', { error });
+        res.status(500).json({ allowed: false });
+      }
+    });
+    this.app.post('/api/internal/proactivity/public-channels', validateS2SKey, async (req: Request, res: Response) => {
+      const { userId, workspaceId, channelIds } = (req.body ?? {}) as Record<string, unknown>;
+      if (
+        typeof userId !== 'string' ||
+        typeof workspaceId !== 'string' ||
+        !Array.isArray(channelIds) ||
+        !channelIds.every((id) => typeof id === 'string')
+      ) {
+        res.status(400).json({ channelIds: [] });
+        return;
+      }
+      try {
+        const ids = await runWithContext({ userId, workspaceId }, () =>
+          publicChannels((channelIds as string[]).slice(0, 500)),
+        );
+        res.json({ channelIds: ids });
+      } catch (error) {
+        logger.error('[Proactivity] public channels lookup failed', { error });
+        res.status(500).json({ channelIds: [] });
+      }
+    });
+    this.app.post(
+      '/api/internal/proactivity/draft/:episodeId/:agentSlug',
+      validateS2SKey,
+      (req: Request, res: Response) => {
+        // Into the worker's queue, so a restarting API pod can't lose the draft.
+        const context = decodeDraftContext(req.query.context);
+        if (!context) {
+          logger.warn('[Proactivity] draft without its context', { params: req.params });
+          res.json({ success: true });
+          return;
+        }
+        void proactiveEpisodeQueue
+          .schedule(
+            {
+              type: 'draft',
+              episodeId: String(req.params.episodeId),
+              agentSlug: String(req.params.agentSlug),
+              result: (req.body ?? {}) as DraftResult,
+              context,
+            },
+            Date.now(),
+          )
+          .finally(() => res.json({ success: true }));
+      },
     );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler

@@ -46,6 +46,7 @@ import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
+import { proactiveEpisodeWorker } from '@/workers/proactiveEpisodeWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
@@ -365,6 +366,15 @@ class WorkerService {
         }
       }
 
+      if (appConfig.enableProactivityWorker) {
+        logger.info('Starting proactive episode worker...');
+        try {
+          await proactiveEpisodeWorker.start();
+        } catch (error) {
+          logger.error('[PROACTIVE-EPISODE-WORKER] Failed to start; continuing without it', error);
+        }
+      }
+
       if (appConfig.enableAiProvisioningWorker) {
         logger.info('Starting AI provisioning worker...');
         await aiProvisioningWorker.start();
@@ -569,6 +579,7 @@ class WorkerService {
         await callTranscriptionQueue.close();
       }
 
+      await proactiveEpisodeWorker.shutdown();
       if (appConfig.radar.enabled) {
         await radarExecutionWorker.shutdown();
       }

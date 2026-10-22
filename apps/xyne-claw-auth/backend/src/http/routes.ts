@@ -6,6 +6,7 @@ import { connectionsRouter } from "../routes/connections.js";
 import { mcpRouter } from "../routes/mcp.js";
 import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
 import { awakeningRouter } from "../routes/awakening.js";
+import { agentProactivityRouter } from "../routes/agent-proactivity.js";
 import { runRouter } from "../routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "../routes/run-stream.js";
 import { usersRouter } from "../routes/users.js";
@@ -332,6 +333,7 @@ function mountRunAndWebhooks(app: Express): void {
   // Awakening: the result callback self-protects with requireStrictS2S and the
   // status route carries its own admin gate, so no mount-level auth here.
   app.use(BASE, awakeningRouter);
+  app.use(BASE, agentProactivityRouter);
   // No mount-level auth on /webhook by design: it mixes auth schemes per route.
   // POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
   // directly by Spaces and self-protects via verifySpacesSignature (per-agent

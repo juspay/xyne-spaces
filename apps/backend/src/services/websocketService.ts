@@ -2,7 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent } from './redisService';
+import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent, SdlcResourceChangedEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
@@ -15,6 +15,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
+import { readAgentProgress, type AgentProgressEntry } from './agentProgressService';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -36,6 +37,19 @@ interface SubscribeToChannelsData {
   channels: string[];
   conversations: string[];
 }
+
+interface AgentProgressSyncData {
+  conversationIds: string[];
+}
+
+// Bounds per agent_progress_sync request and per remembered socket set — a client
+// only asks for the conversations it is rendering, so these are generous.
+const AGENT_PROGRESS_SYNC_MAX_IDS = 100;
+const AGENT_PROGRESS_REMEMBERED_MAX_IDS = 200;
+// Delay before replaying snapshots after the Redis subscriber reconnects, so the
+// subscriber has re-subscribed its channels before we read state; an event published
+// between the read and the re-subscribe would otherwise be missed.
+const AGENT_PROGRESS_RESYNC_DELAY_MS = 1000;
 
 // interface ChannelSubscriptionData {
 //   sessionId: string;
@@ -75,6 +89,10 @@ class WebSocketService {
   private orgMemberEventSubscriptions = new Map<string, boolean>(); // orgMemberId -> hasSubscription
   private orgMemberSocketIds = new Map<string, Set<string>>(); // orgMemberId -> Set<socketId>
   private notificationHealthIntervals = new Map<string, ReturnType<typeof setInterval>>(); // socketId -> healthcheck interval
+  // socketId -> conversationIds the client asked agent-progress snapshots for. Replayed
+  // when the Redis subscriber reconnects: pub/sub events published during the outage are
+  // lost while the socket itself stays connected, so the client can't detect the gap.
+  private agentProgressSyncIds = new Map<string, Set<string>>();
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -110,6 +128,10 @@ class WebSocketService {
       pingInterval: 5000, // Send ping every 5 seconds
       pingTimeout: 25000, // Wait 25 seconds for pong response before disconnecting
     });
+
+    // Pub/sub messages published while the Redis subscriber was reconnecting are lost
+    // without the client noticing — replay agent-progress state to this pod's sockets.
+    redisService.onSubscriberReconnect(() => this.resyncAgentProgress());
 
     // Authentication middleware - reuse Express auth logic
     this.io.use(async (socket, next) => {
@@ -212,6 +234,12 @@ class WebSocketService {
 
     void this.setupLabelUnreadCountsSubscription();
 
+    void redisService
+      .subscribeToSdlcResourceChanged(({ workspaceId, kind }: SdlcResourceChangedEvent) => {
+        this.io?.to(`sdlc-resources:${workspaceId}`).emit('sdlc_resource_changed', { kind });
+      })
+      .catch((error) => logger.error('[SDLC-RESOURCES] Subscription setup failed:', error));
+
     logger.info('WebSocket server initialized');
   }
 
@@ -245,6 +273,40 @@ class WebSocketService {
     const { userId, userEmail, userName } = socket;
 
     logger.info(`🔌 [CONNECT] User ${userEmail} connected via WebSocket (Socket ID: ${socket.id})`);
+
+    // The client sees `connect` before the awaited setup below finishes, and an event with
+    // no handler yet is dropped silently. Clients (re)subscribe on `connect`, so these two
+    // handlers are registered now and wait for setup — they need socket.workspaceId, which
+    // setup resolves. Handlers queued on the same promise resume in arrival order.
+    let markSetupDone!: () => void;
+    const setupDone = new Promise<void>((resolve) => {
+      markSetupDone = resolve;
+    });
+    const afterSetup = <T>(handler: (data: T) => Promise<void>) => async (data: T): Promise<void> => {
+      await setupDone;
+      // Disconnected meanwhile: handleDisconnection already cleaned up — don't subscribe a dead socket.
+      if (socket.disconnected) return;
+      await handler(data);
+    };
+
+    // Channel subscriptions (XYNE-17679): re-enabled WITH authorization.
+    // handleBulkSubscription verifies channel-participant + workspace access for every
+    // requested channel/conversation before subscribing, and caps sessions per request.
+    // This powers real-time typing indicators and agent-progress (via session_activity).
+    socket.on('subscribe_to_channels', afterSetup((data: SubscribeToChannelsData) => this.handleBulkSubscription(socket, data)));
+
+    // Agent-progress snapshot (XYNE-65672): the client asks for the current state of the
+    // conversations it renders whenever it may have missed live events (after a subscribe
+    // ack, a reconnect, or the tab becoming visible). Replaces HTTP rehydrate + polling.
+    socket.on('agent_progress_sync', afterSetup((data: AgentProgressSyncData) => this.handleAgentProgressSync(socket, data)));
+
+    // Only sockets with an SDLC or Library page open get resource pushes; the room is the socket's own workspace.
+    socket.on('subscribe_to_sdlc_resources', afterSetup(async () => {
+      if (socket.workspaceId) socket.join(`sdlc-resources:${socket.workspaceId}`);
+    }));
+    socket.on('unsubscribe_from_sdlc_resources', afterSetup(async () => {
+      if (socket.workspaceId) socket.leave(`sdlc-resources:${socket.workspaceId}`);
+    }));
 
     // Cancel any pending offline job (user reconnected within grace period)
     const wasPendingOffline = await presenceCleanupQueue.cancelOfflineJob(userId);
@@ -384,13 +446,8 @@ class WebSocketService {
       await this.handleTypingStop(socket, data.sessionId);
     });
 
-    // Channel subscriptions (XYNE-17679): re-enabled WITH authorization.
-    // handleBulkSubscription verifies channel-participant + workspace access for every
-    // requested channel/conversation before subscribing, and caps sessions per request.
-    // This powers real-time typing indicators and agent-progress (via session_activity).
-    socket.on('subscribe_to_channels', async (data: SubscribeToChannelsData) => {
-      await this.handleBulkSubscription(socket, data);
-    });
+    // subscribe_to_channels / agent_progress_sync / sdlc resource rooms are registered at the top of this method.
+    markSetupDone();
 
     // Single-channel add/remove subscription events remain disabled — no client emits
     // them; re-enabling would require the same authorization as handleBulkSubscription.
@@ -795,6 +852,7 @@ class WebSocketService {
 
       // Clean up channel subscriptions for this socket
       await this.clearSocketSubscriptions(socket.id);
+      this.agentProgressSyncIds.delete(socket.id);
       logger.info(`🧹 [DISCONNECT] Cleaned up subscriptions for socket ${socket.id}`);
 
       // Remove user connection from Redis
@@ -1078,6 +1136,63 @@ class WebSocketService {
       logger.error(`❌ [BULK-SUB] canAccessConversation failed for ${conversationId}:`, error);
       return false;
     }
+  }
+
+  private async handleAgentProgressSync(socket: AuthenticatedSocket, data: AgentProgressSyncData): Promise<void> {
+    try {
+      const requested = Array.isArray(data?.conversationIds) ? data.conversationIds : [];
+      const unique = [...new Set(requested.filter((id): id is string => typeof id === 'string' && id.length > 0))]
+        .slice(0, AGENT_PROGRESS_SYNC_MAX_IDS);
+
+      // 🔒 Same ACL as the HTTP GET and subscribe_to_channels.
+      const authorized = (
+        await Promise.all(unique.map(async (id) => ((await this.canAccessConversation(socket, id)) ? id : null)))
+      ).filter((id): id is string => id !== null);
+
+      const remembered = this.agentProgressSyncIds.get(socket.id) ?? new Set<string>();
+      for (const id of authorized) {
+        remembered.delete(id); // re-insert so the most recent asks survive trimming
+        remembered.add(id);
+      }
+      while (remembered.size > AGENT_PROGRESS_REMEMBERED_MAX_IDS) {
+        const oldest = remembered.values().next().value;
+        if (oldest === undefined) break;
+        remembered.delete(oldest);
+      }
+      this.agentProgressSyncIds.set(socket.id, remembered);
+
+      await this.emitAgentProgressSnapshot(socket, authorized);
+    } catch (error) {
+      logger.error(`❌ [AGENT-PROGRESS] sync failed for socket ${socket.id}:`, error);
+    }
+  }
+
+  /** Emit the current agent-progress state for each conversation — empty arrays included, so a missed `done` clears. */
+  private async emitAgentProgressSnapshot(socket: Socket, conversationIds: string[]): Promise<void> {
+    if (conversationIds.length === 0) return;
+    const entries: Record<string, AgentProgressEntry[]> = {};
+    await Promise.all(
+      conversationIds.map(async (id) => {
+        entries[id] = await readAgentProgress(id);
+      }),
+    );
+    socket.emit('agent_progress_snapshot', { entries });
+  }
+
+  /** Replay snapshots to every socket on this pod — used after the Redis subscriber reconnects. */
+  private resyncAgentProgress(): void {
+    setTimeout(() => {
+      for (const [socketId, ids] of this.agentProgressSyncIds) {
+        const socket = this.io?.sockets.sockets.get(socketId);
+        if (!socket) {
+          this.agentProgressSyncIds.delete(socketId);
+          continue;
+        }
+        void this.emitAgentProgressSnapshot(socket, [...ids]).catch((error) =>
+          logger.error(`❌ [AGENT-PROGRESS] resync failed for socket ${socketId}:`, error),
+        );
+      }
+    }, AGENT_PROGRESS_RESYNC_DELAY_MS);
   }
 
   // private async handleAddSubscription(socket: AuthenticatedSocket, data: ChannelSubscriptionData): Promise<void> {
