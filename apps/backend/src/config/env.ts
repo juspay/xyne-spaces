@@ -162,6 +162,12 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  // Compatible (H.264 SDR) video renditions. Consumer only runs where this is true (needs ffmpeg).
+  ENABLE_VIDEO_RENDITION_WORKER: Joi.boolean().default(false),
+  // Serve /stream?variant=compat (else the API answers 404 for the variant and clients keep the original).
+  VIDEO_RENDITION_ENABLED: Joi.boolean().default(false),
+  // Also enqueue a rendition job for every uploaded video (otherwise only on first compat request).
+  VIDEO_RENDITION_ON_UPLOAD: Joi.boolean().default(false),
   ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_PROACTIVITY_WORKER: Joi.boolean().default(false),
@@ -905,6 +911,9 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableVideoRenditionWorker: envVars.ENABLE_VIDEO_RENDITION_WORKER as boolean,
+  videoRenditionEnabled: envVars.VIDEO_RENDITION_ENABLED as boolean,
+  videoRenditionOnUpload: envVars.VIDEO_RENDITION_ON_UPLOAD as boolean,
   enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   enableProactivityWorker: envVars.ENABLE_PROACTIVITY_WORKER,
