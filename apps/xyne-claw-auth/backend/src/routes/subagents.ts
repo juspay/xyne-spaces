@@ -35,7 +35,7 @@ import {
   validateSubagentInput,
   nextChecksVersion,
 } from "../lib/subagent-resolver.js";
-import { SUBAGENT_DEFINITIONS, validateDecideQuestions } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, SUBAGENT_TEMPLATES, getSubagentTemplate, loadTemplateSamples, validateDecideQuestions } from "xyne-claw-shared";
 import { evalChecksViaClaw, tryChecksViaClaw } from "../services/xorTryClient.js";
 import { runRegressionGate } from "../lib/subagent-eval-gate.js";
 import type { DecideQuestion } from "xyne-claw-shared";
@@ -173,12 +173,76 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const creatorById = new Map(creators.map((u) => [u.id, u]));
   const items = [
     ...SUBAGENT_DEFINITIONS.map(builtinAsListItem),
-    ...customs.map((c) =>
-      dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null),
-    ),
+    ...customs.map((c) => {
+      const item = dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null);
+      return { ...item, samples: [], sampleCount: Array.isArray(c.samples) ? c.samples.length : 0, evalReport: null };
+    }),
   ];
   ok(res, items);
 }));
+
+// ── GET /templates — cloneable fast subagent templates ───────────────────
+router.get("/templates", asyncHandler(async (_req: Request, res: Response) => {
+  const items = await Promise.all(
+    SUBAGENT_TEMPLATES.map(async (t) => ({
+      id: t.id,
+      title: t.title,
+      summary: t.summary,
+      requires: t.requires,
+      defaultName: t.defaults.name,
+      fast: t.defaults.fast,
+      tools: t.defaults.tools.custom,
+      checks: t.defaults.checks.length,
+      samples: (await loadTemplateSamples(t)).length,
+      screenshotSamples: Boolean(t.imageSamples),
+    })),
+  );
+  ok(res, items);
+}));
+
+// ── POST /templates/:id/clone — create a subagent from a template ────────
+router.post("/templates/:id/clone", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const template = getSubagentTemplate(typeof req.params.id === "string" ? req.params.id : "");
+  if (!template) throw notFound("template not found");
+  const requested = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim() : null;
+  const name = requested ?? (await freeName(template.defaults.name, orgId));
+  const samples = await loadTemplateSamples(template);
+  const validated = await validateSubagentInput(
+    prisma,
+    { ...template.defaults, name, samples, tools: template.defaults.tools },
+    { isCreate: true, orgId },
+  ).catch((err) => {
+    if (err instanceof ValidationError) throw new HttpError(400, err.message, undefined, { field: err.field });
+    throw err;
+  });
+  const created = await subagentDefinitionRepository.create({
+    name: validated.name,
+    description: validated.description,
+    progressLabels: validated.progressLabels,
+    systemPrompt: validated.systemPrompt,
+    paramName: validated.paramName,
+    paramDescription: validated.paramDescription,
+    tools: validated.tools as object,
+    ...fastColumns(validated, null),
+    createdByUserId: requesterId,
+    org: { connect: { id: orgId } },
+  });
+  log.info(`[subagents/clone] template=${template.id} name=${created.name} samples=${samples.length} userId=${requesterId}`);
+  res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
+}));
+
+async function freeName(base: string, orgId: string): Promise<string> {
+  for (let i = 1; i <= 20; i++) {
+    const candidate = i === 1 ? base : `${base}-${i}`;
+    const taken = await prisma.subagentDefinition.findUnique({ where: { orgId_name: { orgId, name: candidate } }, select: { id: true } });
+    if (!taken) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
 
 // ── GET /:name — single subagent ─────────────────────────────────────────
 router.get("/:name", asyncHandler(async (req: Request, res: Response) => {

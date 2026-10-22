@@ -438,7 +438,10 @@ async function spawnSession(
 
   const client = new Client(
     { name: "xyne-claw-auth", version: "0.1.0" },
-    { jsonSchemaValidator: passThroughSchemaValidator },
+    {
+      jsonSchemaValidator: passThroughSchemaValidator,
+      capabilities: { tasks: {} },
+    },
   );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0], {
@@ -765,6 +768,38 @@ function extractAttachments(
   return out;
 }
 
+type McpToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
+
+async function invokeToolCall(
+  client: Client,
+  serverType: string,
+  args: Parameters<Client["callTool"]>[0],
+): Promise<McpToolCallResult> {
+  const options = { timeout: MCP_REQUEST_TIMEOUT_MS, signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) };
+  const serverTasks = Boolean(client.getServerCapabilities()?.tasks?.requests?.tools?.call);
+  if (!serverTasks) return client.callTool(args, undefined, options);
+
+  let taskId: string | undefined;
+  try {
+    for await (const message of client.experimental.tasks.callToolStream(args, undefined, options)) {
+      if (message.type === "taskCreated") {
+        taskId = message.task.taskId;
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} created task=${taskId} status=${message.task.status}`);
+      } else if (message.type === "taskStatus") {
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} task=${message.task.taskId} status=${message.task.status}`);
+      } else if (message.type === "result") {
+        return message.result;
+      } else if (message.type === "error") {
+        throw message.error;
+      }
+    }
+    throw new Error(`MCP task for ${serverType}/${args.name} ended without a result`);
+  } catch (err) {
+    if (taskId) await client.experimental.tasks.cancelTask(taskId).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function callTool(
   userId: string,
   serverType: string,
@@ -780,11 +815,11 @@ export async function callTool(
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
-  const result = await client
-    .callTool({ name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) }, undefined, {
-      timeout: MCP_REQUEST_TIMEOUT_MS,
-      signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-    })
+  const result = await invokeToolCall(
+    client,
+    serverType,
+    { name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) },
+  )
     .catch((err: unknown) => {
       if (MISSING_TOOL_ERROR.test(err instanceof Error ? err.message : String(err))) {
         forgetToolList(userId, serverType, agentSlug, credentials, lane);

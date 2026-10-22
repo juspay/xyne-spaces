@@ -2002,7 +2002,10 @@ export function buildSubagentTools(
         name: spec.name,
         description: spec.description,
         progressLabels: spec.progressLabels,
-        systemPrompt: palette.some((t) => t.name === "xor-decide") ? withChecks(spec.systemPrompt, spec.checks, spec.checksVersion) : spec.systemPrompt,
+        systemPrompt:
+          palette.some((t) => t.name === "xor-decide") && !(bonusToolsBySubagent?.[spec.name] ?? []).some((t) => t.name === "ui-test-variations")
+            ? withChecks(spec.systemPrompt, spec.checks, spec.checksVersion)
+            : spec.systemPrompt,
         paramName: spec.paramName,
         paramDescription: spec.paramDescription,
         // Synthetic serverType — never matched against an MCP group. Kept

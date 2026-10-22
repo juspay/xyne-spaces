@@ -7,6 +7,7 @@ export { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "./tools/
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, resolveAgentToolsConfig, isEmptyToolsSelection, grantMatchesToolName, findUnusedGrants, type SubagentDefinition, type AgentToolsConfig, type AgentDelegationTier } from "./tools/subagents/index.js";
+export { SUBAGENT_TEMPLATES, getSubagentTemplate, loadTemplateSamples, UI_TESTER_EVAL_DIR, UI_TESTER_STANDARD_CHECKS, UI_TESTER_HARNESS_TOOLS, UI_TESTER_SANDBOX_TOOLS, type SubagentTemplate, type TemplateSample, type UiTesterStandardKey } from "./tools/subagents/templates.js";
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
 export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_AGENT_PRIVACY, type AgentPrivacy, type AgentPrivacyMode } from "./agent-privacy.js";
 export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, type OptimizationSpec, type OptimizationKey, type OptimizationGroup } from "./optimizations.js";

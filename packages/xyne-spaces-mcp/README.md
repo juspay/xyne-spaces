@@ -106,19 +106,28 @@ such as `BCDF-GHJK`). Sign in to Spaces if asked, check the page shows the same 
 click **Approve**. Never approve a link someone else sent you. The session is saved to `~/.xyne/agent/spaces.json`
 (owner-only, `0600`), and a running server picks it up without a restart.
 
-A session lasts as long as a Spaces login on that deployment (24 hours by default;
-`spaces_whoami` shows exactly when it expires) and cannot be refreshed. When it expires,
-tools say so and the agent can call `spaces_login` again.
+You stay signed in for as long as a Spaces browser login lasts on that deployment;
+`spaces_whoami` shows until when. The session's cookie lasts 24 hours by default, and the
+server renews it by itself with the refresh token saved alongside it, writing each renewal
+back to `spaces.json`. When the sign-in finally ends, or is revoked, tools say so and the
+agent can call `spaces_login` again.
+
+Every client you connect (Claude Code, Cursor, VS Code…) runs its own server, and they
+all share the one saved sign-in. Each renewal replaces the refresh token, and Spaces ends a
+sign-in whose replaced token is used again, so renewals are coordinated: a server takes
+`spaces.json.lock`, re-reads the file, and uses a session another server already renewed
+rather than renewing it twice. Signing in from one client also signs in the others, on
+their next tool call.
 
 To use a session you already have instead, set it as the cookie string, exactly as the
-browser holds it. It takes precedence over the saved session:
+browser holds it. It takes precedence over the saved session and is never renewed:
 
 ```bash
 export XYNE_SPACES_COOKIE="xyne_ws_<workspaceId>_token=<token>"
 ```
 
 **4. Check it works.** Ask the agent to run `spaces_whoami`. It should name you, your
-workspace, and when the session expires.
+workspace, and until when you stay signed in.
 
 ### Compatibility
 
