@@ -2119,6 +2119,21 @@ export class ClawAgentNotAvailableError extends Error {
   }
 }
 
+/**
+ * The agent exists and is visible, but cannot be dispatched yet: dispatch goes
+ * through the agent's Spaces app, and a newly created agent has none until its
+ * app is created and installed.
+ */
+export class ClawAgentNotInstalledError extends Error {
+  constructor(readonly agentSlug: string) {
+    super(
+      `Agent "${agentSlug}" has no Spaces app yet, so it cannot be dispatched. Create and install its app ` +
+        'from the agent\'s page in Claw first.'
+    );
+    this.name = 'ClawAgentNotInstalledError';
+  }
+}
+
 /** Identity a scoped Claw call acts as. Every field comes from the verified session. */
 export interface ScopedClawIdentity {
   /** Spaces user id — claw-auth resolves visibility against this. */
@@ -2199,9 +2214,7 @@ export async function runScopedClawAgent(
     throw new ClawAgentNotAvailableError(req.agentSlug);
   }
   if (!agent.spacesAppId) {
-    throw new Error(
-      `[ClawAgentService] runScopedClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
-    );
+    throw new ClawAgentNotInstalledError(req.agentSlug);
   }
   // Dispatched with the agent object already resolved, not by slug again: going
   // back through the unscoped lookup could match a different agent of the same

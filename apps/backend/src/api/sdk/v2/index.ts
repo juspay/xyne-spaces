@@ -5,6 +5,8 @@
  * unless `V2_OVERRIDES` says otherwise, and every direct route is the same
  * route; what v2 adds is:
  *
+ *   POST /claw/runs                 the same route as v1, but run as the caller
+ *                                   (claw-auth `/run`), so it needs no Spaces app
  *   POST /claw/runs/stream          an agent run as a live event stream
  *   POST /claw/runs/stream/cancel   stop one
  *   *    /claw/api/*                claw-auth's product API, as the caller
@@ -16,6 +18,7 @@
 import type { Router } from 'express';
 import { createClawProxyRouter } from '../claw/proxy';
 import { createClawRunStreamRouter } from '../claw/run-stream';
+import { createClawRunsRouter } from '../claw/runs';
 import { createSdkVersionRouter, resolveV1Operation } from '../v1';
 import type { V1Target } from '../v1/types';
 
@@ -35,6 +38,7 @@ export function createSdkV2Router(): Router {
     resolve: resolveV2Operation,
     // The typed run stream before the proxy: `/claw/runs/*` and `/claw/api/*`
     // do not overlap today, and this keeps it that way if a mount ever does.
-    routers: [createClawRunStreamRouter(), createClawProxyRouter()],
+    // `createClawRunsRouter` shadows the shared direct route of the same path.
+    routers: [createClawRunsRouter(), createClawRunStreamRouter(), createClawProxyRouter()],
   });
 }

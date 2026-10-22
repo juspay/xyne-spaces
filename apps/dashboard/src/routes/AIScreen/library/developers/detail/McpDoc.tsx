@@ -88,14 +88,79 @@ const TOOL_GROUPS: { label: string; tools: McpTool[] }[] = [
       { name: 'spaces_calls_list', description: 'Calls and meetings.' },
       { name: 'spaces_canvases_list', description: 'Canvases: design notes, RFCs, meeting notes.' },
       { name: 'spaces_canvas_get', description: 'One canvas, as markdown.' },
-      { name: 'spaces_claw_list_agents', description: 'Xyne Claw agents you can run.' },
-      { name: 'spaces_claw_get_run', description: 'Status and result of a Claw run.' },
       {
         name: 'spaces_notifications_mark_read',
         description: 'Mark a notification as read.',
         write: true,
       },
-      { name: 'spaces_claw_run', description: 'Hand a task to a Claw agent.', write: true },
+    ],
+  },
+  {
+    label: 'Xyne Claw agents',
+    tools: [
+      {
+        name: 'spaces_claw_list_agents',
+        description: 'Claw agents you can see, and which ones can be run.',
+      },
+      {
+        name: 'spaces_claw_agent_get',
+        description: 'One agent in full: prompt, model, tools, skills, connections, sharing.',
+      },
+      { name: 'spaces_claw_subagents', description: 'Subagents, or one in full.' },
+      { name: 'spaces_claw_skills', description: 'Skills, or one with its SKILL.md and files.' },
+      { name: 'spaces_claw_tools_search', description: 'Tools an agent can be given.' },
+      { name: 'spaces_claw_runs', description: 'Your run history, or a search over it.' },
+      {
+        name: 'spaces_claw_get_run',
+        description: 'One run: status, result, tools used, tokens, time.',
+      },
+      { name: 'spaces_claw_conversations', description: 'Your Claw chats, or one’s messages.' },
+      {
+        name: 'spaces_claw_memory',
+        description: 'What an agent remembers, or would recall for a question.',
+      },
+      { name: 'spaces_claw_schedules', description: 'Scheduled agent jobs.' },
+      {
+        name: 'spaces_claw_run',
+        description: 'Hand a task to a Claw agent and wait for the answer.',
+        write: true,
+      },
+      { name: 'spaces_claw_run_cancel', description: 'Stop a run.', write: true },
+      {
+        name: 'spaces_claw_agent_create',
+        description: 'Create an agent, with skills and tools attached.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_agent_update',
+        description: 'Change an agent and attach or detach skills and tools, in one call.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_agent_share',
+        description: 'Share, unshare or hand over an agent, by email.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_subagent_upsert',
+        description: 'Create or update a subagent.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_skill_upsert',
+        description: 'Create or update a skill and its files.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_schedule',
+        description: 'Schedule a task, or pause, resume, change or cancel one.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_delete',
+        description: 'Delete an agent, subagent, skill or scheduled job.',
+        write: true,
+      },
     ],
   },
 ];
@@ -259,7 +324,7 @@ export function McpDoc(): ReactElement {
           features={[
             {
               title: 'Catch up without opening Spaces',
-              body: 'Summarise a channel, a thread or your notifications while you stay in the editor.',
+              body: 'Summarise a channel, a thread or your notifications, or search everything you can see, while you stay in the editor.',
               example: '“What did I miss in #deployments since yesterday?”',
             },
             {
@@ -268,9 +333,10 @@ export function McpDoc(): ReactElement {
               example: '“Read XYNE-1234 and find the code it is about.”',
             },
             {
-              title: 'Search everything you can see',
-              body: 'Messages, tickets, canvases, emails, calls and people, ranked in one search.',
-              example: '“Find the RFC canvas about rate limiting.”',
+              title: 'Build and run Claw agents',
+              body: 'Hand work to a Claw agent, or create and tune agents, skills, subagents and schedules from the editor.',
+              example:
+                '“Make a release-notes agent with the changelog skill and run it every Friday.”',
             },
             {
               title: 'Close the loop (with writes on)',

@@ -4,7 +4,7 @@ An MCP server that lets a coding agent read and write Xyne Spaces — channels, 
 messages, tickets, calls, canvases and search — through
 [`@xyne/spaces-sdk`](https://www.npmjs.com/package/@xyne/spaces-sdk).
 
-36 tools over the Spaces public API. Not 483: the SDK exposes every operation the
+52 tools over the Spaces public API. Not 483: the SDK exposes every operation the
 product itself performs, and this exposes the ones an agent actually reaches for, each
 with an exact schema.
 
@@ -177,7 +177,7 @@ Inside this repository, `node packages/xyne-spaces-mcp/dist/index.js writes on` 
 The setting is `"writes": true` in `~/.xyne/agent/spaces.json`, so one command covers
 every client on the computer — Claude Code, Cursor, VS Code — and **running servers pick
 it up without a restart**: they watch the file and tell their client the tool list
-changed, so the write tools appear or disappear on their own. Read-only means 24 tools
+changed, so the write tools appear or disappear on their own. Read-only means 32 tools
 instead of 36 (`spaces_login` is always there). A tool the model cannot see is a tool it
 cannot decide to use, which is more reliable than declining after the fact; a write call
 from a list made before writes were turned off is refused all the same.
@@ -278,9 +278,25 @@ guessing at "Done" or "In Progress".
 | `spaces_drafts_list` | — | Your unsent drafts |
 | `spaces_canvases_list` | — | Canvases: title, owner, last editor |
 | `spaces_canvas_get` | `canvas_id` | A canvas body converted to markdown |
-| `spaces_claw_list_agents` | — | Claw agents available to this deployment |
-| `spaces_claw_run` | `agent`, `task` | Dispatches a Claw run and waits for the answer |
-| `spaces_claw_get_run` | `session_id` | Status and result of a run |
+| `spaces_claw_list_agents` | — | Claw agents you can see, and which `spaces_claw_run` can dispatch |
+| `spaces_claw_agent_get` | `slug` | One agent in full: prompt, model, tool permissions, tools, skills, MCP connections, shares |
+| `spaces_claw_subagents` | — | Subagents, or one in full with `name` |
+| `spaces_claw_skills` | — | Skills, or one with its SKILL.md and files with `slug` |
+| `spaces_claw_tools_search` | — | Tools agents can be given, by `query` and `source` |
+| `spaces_claw_runs` | — | Your run history, or a `query` search over it |
+| `spaces_claw_get_run` | `session_id` | One run: status, result, tools used, model, tokens, time |
+| `spaces_claw_conversations` | — | Your Claw chats, or one's messages with `conversation_id` + `agent` |
+| `spaces_claw_memory` | `agent` | What an agent remembers, or would recall for a `query` |
+| `spaces_claw_schedules` | — | Scheduled agent jobs, or one with `id` |
+| `spaces_claw_run` ✎ | `agent`, `task` | Dispatches a Claw run and waits for the answer |
+| `spaces_claw_run_cancel` ✎ | `session_id` | Stops a run |
+| `spaces_claw_agent_create` ✎ | `slug`, `name`, `system_prompt` | Creates an agent, with skills and tools attached |
+| `spaces_claw_agent_update` ✎ | `slug` | Changes fields, and attaches or detaches skills and tools, in one call |
+| `spaces_claw_agent_share` ✎ | `slug`, `action`, `user` | Shares, unshares or transfers an agent; `user` is an email or id |
+| `spaces_claw_subagent_upsert` ✎ | `name` | Creates or updates a custom subagent |
+| `spaces_claw_skill_upsert` ✎ | `slug` | Creates or updates a skill and its files |
+| `spaces_claw_schedule` ✎ | `action` | Creates, updates, pauses, resumes or cancels a scheduled job |
+| `spaces_claw_delete` ✎ | `kind`, `id`, `confirm` | Deletes an agent, subagent, skill or job; `confirm` repeats the id |
 
 Email channels are excluded from `spaces_channels_list` by default — pass
 `include_email_channels` to find one.
@@ -364,8 +380,9 @@ through. Quote the message and the code when reporting a server-side failure.
 
 `packages/xyne-claw-mcp` ships its own Claw tools behind a separate device login. If both
 servers are installed the model sees two Claw tool sets and may pick the one that is not
-authenticated. **Install one or the other.** The three `spaces_claw_*` tools here need no
-second login — the Spaces backend relays to Claw with the deployment's own credential.
+authenticated. **Install one or the other.** The `spaces_claw_*` tools here need no
+second login: Spaces forwards them to Claw as you, so Claw's own permissions apply, as in
+the Claw dashboard. Provider keys, connector sign-in and admin screens are not exposed.
 
 ---
 

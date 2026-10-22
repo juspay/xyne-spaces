@@ -68,7 +68,7 @@ function errorCode(status: number): ErrorCode {
   return 'validation_failed';
 }
 
-async function upstreamError(upstream: globalThis.Response, path: string): Promise<SdkApiError> {
+export async function upstreamError(upstream: globalThis.Response, path: string): Promise<SdkApiError> {
   const text = await upstream.text().catch(() => '');
   let message: string | undefined;
   let reason: string | undefined;

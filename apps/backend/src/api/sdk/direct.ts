@@ -55,6 +55,7 @@ import {
   listScopedClawAgents,
   runScopedClawAgent,
   ClawAgentNotAvailableError,
+  ClawAgentNotInstalledError,
   type ScopedClawIdentity,
 } from '@/services/clawAgentService';
 import {
@@ -1017,6 +1018,9 @@ export function createDirectRouter(): Router {
             // error envelope replaces with a generic string.
             if (err instanceof ClawAgentNotAvailableError) {
               throw new SdkApiError('not_found', err.message, { cause: err });
+            }
+            if (err instanceof ClawAgentNotInstalledError) {
+              throw new SdkApiError('validation_failed', err.message, { reason: 'agent_not_installed', cause: err });
             }
             throw connectorError(err) ?? new SdkApiError('internal', serviceMessage(err), { cause: err });
           }
