@@ -1,0 +1,42 @@
+diff --git a/ios/VideoPlayerObserver.swift b/ios/VideoPlayerObserver.swift
+index 3962b2595a5f82bbde4957e49ff23c361bca57e0..203f28acca3bd8c7b899af6a42a2e4ddcada8c93 100644
+--- a/ios/VideoPlayerObserver.swift
++++ b/ios/VideoPlayerObserver.swift
+@@ -462,7 +462,7 @@ class VideoPlayerObserver: VideoSourceLoaderListener {
+     // The AVPlayerItem.error can't be modified, so we have a custom field for caching errors
+     if newStatus == .error {
+       let playerItemError = (playerItem as? VideoPlayerItem)?.urlAsset.transportError ?? playerItem.error ?? error
+-      error = PlayerItemLoadException(playerItemError?.localizedDescription)
++      error = PlayerItemLoadException(describePlaybackError(playerItemError))
+       status = .error
+     }
+ 
+@@ -483,7 +483,7 @@ class VideoPlayerObserver: VideoSourceLoaderListener {
+     }
+ 
+     if player.status == .failed {
+-      error = PlayerException(player.error?.localizedDescription)
++      error = PlayerException(describePlaybackError(player.error))
+       status = .error
+     }
+   }
+@@ -615,3 +615,19 @@ fileprivate extension AVPlayerItem.Status {
+     }
+   }
+ }
++
++// Xyne patch: AVFoundation's localizedDescription is often just "unknown error",
++// which hides the cause. Append the NSError domain and code (and the underlying
++// error's, when present) so app telemetry can tell a server/HTTP failure from a
++// network or decoder one. Format: "<description> [Domain:code] [underlying Domain:code]".
++private func describePlaybackError(_ error: Error?) -> String? {
++  guard let error else {
++    return nil
++  }
++  let nsError = error as NSError
++  var description = "\(nsError.localizedDescription) [\(nsError.domain):\(nsError.code)]"
++  if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
++    description += " [underlying \(underlying.domain):\(underlying.code)]"
++  }
++  return description
++}

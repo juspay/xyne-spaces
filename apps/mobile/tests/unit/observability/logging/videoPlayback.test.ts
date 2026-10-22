@@ -7,6 +7,7 @@ import {
   classifyVideoPlaybackError,
   extractVideoDecoderName,
   extractVideoErrorCode,
+  extractVideoUnderlyingErrorCode,
   getVideoFileExtension,
   toVideoErrorMessage,
   toVideoTrackFields,
@@ -63,6 +64,50 @@ describe('video playback telemetry', () => {
     assert.equal(fields.videoTrackHeight, 1080);
     assert.equal(fields.videoTrackIsSupported, false);
     assert.ok(!('originalFilename' in fields), 'never logs the full filename');
+  });
+
+  it('reads the iOS error codes appended by the expo-video patch', () => {
+    const msg =
+      'Failed to load the player item: unknown error [AVFoundationErrorDomain:-11800] [underlying NSURLErrorDomain:-1011]';
+    assert.equal(extractVideoErrorCode(msg), 'AVFoundationErrorDomain:-11800');
+    assert.equal(extractVideoUnderlyingErrorCode(msg), 'NSURLErrorDomain:-1011');
+    assert.equal(classifyVideoPlaybackError('player_status', msg), 'http');
+  });
+
+  it('keeps underlyingErrorCode null for untagged and Android messages', () => {
+    assert.equal(
+      extractVideoUnderlyingErrorCode('Failed to load the player item: unknown error'),
+      null,
+    );
+    assert.equal(
+      extractVideoUnderlyingErrorCode(
+        'A playback exception has occurred: Decoder failed: c2.mtk.hevc.decoder',
+      ),
+      null,
+    );
+  });
+
+  it('still treats other NSURLErrorDomain codes as network', () => {
+    const msg =
+      'Failed to load the player item: The network connection was lost. [NSURLErrorDomain:-1005]';
+    assert.equal(classifyVideoPlaybackError('player_status', msg), 'network');
+    assert.equal(extractVideoErrorCode(msg), 'NSURLErrorDomain:-1005');
+  });
+
+  it('adds underlyingErrorCode to the failed event', () => {
+    const fields = buildVideoPlaybackFailed({
+      surface: 'attachments_viewer',
+      stage: 'player_status',
+      subject: { attachmentId: 'a', mimetype: 'video/mp4' },
+      error: new Error(
+        'Failed to load the player item: unknown error [AVFoundationErrorDomain:-11800] [underlying CoreMediaErrorDomain:-12939]',
+      ),
+      openedAtMs: 0,
+      nowMs: 1500,
+      reachedReady: false,
+    });
+    assert.equal(fields.errorCode, 'AVFoundationErrorDomain:-11800');
+    assert.equal(fields.underlyingErrorCode, 'CoreMediaErrorDomain:-12939');
   });
 
   it('labels the iOS AVPlayer loopback connect failure as network', () => {
