@@ -7,6 +7,10 @@ import { logger } from '@/utils/logger';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
 import type { TicketLike } from './ticket-context';
+import {
+  toTriggerAttachment,
+  type TriggerAttachment,
+} from '../services/trigger-attachment.service';
 
 export function extractEmailAddress(raw: string): string {
   if (!raw) return '';
@@ -79,6 +83,16 @@ interface EmailRow {
   rating: number | null;
   createdAt: Date;
   hasAttachments?: boolean;
+}
+
+function loadEmailAttachments(emailId: string): Promise<TriggerAttachment[]> {
+  return repositories.messageAttachments
+    .findByEmailIds([emailId])
+    .then(rows => rows.map(toTriggerAttachment))
+    .catch(error => {
+      logger.warn(`[automations] failed to hydrate attachments for email=${emailId}`, error);
+      return [];
+    });
 }
 
 /** Flat, source-agnostic origin fields; null where the source has no such notion. */
@@ -217,6 +231,7 @@ export async function hydrateEmailReceivedPayload(
       );
       return false;
     });
+  const attachments = await loadEmailAttachments(email.id);
   const emailUrl = buildEmailUrl({
     ticketUrl: ticketContext?.ticket.url,
     conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
@@ -226,7 +241,11 @@ export async function hydrateEmailReceivedPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput({ ...email, hasAttachments } as EmailRow), url: emailUrl },
+    email: {
+      ...emailRowToOutput({ ...email, hasAttachments } as EmailRow),
+      attachments,
+      url: emailUrl,
+    },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),
@@ -246,6 +265,7 @@ export async function hydrateEmailSentPayload(
   if (!email) return { ...payload };
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const attachments = await loadEmailAttachments(email.id);
   const emailUrl = buildEmailUrl({
     ticketUrl: ticketContext?.ticket.url,
     conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
@@ -268,7 +288,7 @@ export async function hydrateEmailSentPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput(email as EmailRow), url: emailUrl },
+    email: { ...emailRowToOutput(email as EmailRow), attachments, url: emailUrl },
     ...(ticketContext ?? {}),
     sender: {
       email: extractEmailAddress(email.from),

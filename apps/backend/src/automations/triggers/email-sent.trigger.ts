@@ -6,6 +6,7 @@ import { TriggerCategory } from '../types/categories';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { TicketContextSchema } from './ticket-context';
+import { TriggerAttachmentSchema } from '../services/trigger-attachment.service';
 import {
   EmailOriginSchema,
   extractEmailAddress,
@@ -75,6 +76,7 @@ export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
     externalMessageId: z.string(),
     rating: z.number().nullable(),
     createdAt: z.coerce.date(),
+    attachments: z.array(TriggerAttachmentSchema),
   }),
   sender: z.object({
     email: z.string(),

@@ -13,6 +13,11 @@ import { ExternalSourcePlatform } from '@/integrations/core/types';
 import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender';
 import { appendReplyQuote } from '@/utils/replyQuote';
 import { reattachTrailImages } from '@/utils/reattachTrailImages';
+import {
+  fileAttachmentsField,
+  loadAttachmentFiles,
+  saveEmailAttachmentRows,
+} from '../services/trigger-attachment.service';
 
 /** A CC/BCC entry resolves to one string (maybe comma-separated) or a list of such strings. */
 const addressEntry = z.union([z.string().min(1), z.array(z.string())]);
@@ -49,6 +54,7 @@ const SendEmailReplyConfigSchema = z.object({
       'Optional email addresses to blind-copy on the reply. Each entry may be an address, a comma/semicolon-separated list, or a list of those. Added to, never replacing, the default blind-copy list.',
     ),
   replyAll: z.boolean().optional(),
+  fileAttachments: fileAttachmentsField,
 });
 
 const SendEmailReplyOutputSchema = z.object({
@@ -103,6 +109,11 @@ export class SendEmailReplyStep extends BaseActionStep<
         });
       }
     }
+    const forwardedFiles = await loadAttachmentFiles(
+      config.fileAttachments,
+      context.automation.workspaceId,
+    );
+    fileAttachments.push(...forwardedFiles);
 
     // Configured addresses extend the default lists (REPLY_ALL keeps the original CCs); they never replace them.
     const configCc = config.cc as Array<string | string[]> | undefined;
@@ -119,6 +130,22 @@ export class SendEmailReplyStep extends BaseActionStep<
       bcc,
       ...(fileAttachments.length > 0 && { fileAttachments }),
     });
+
+    if (conversation && forwardedFiles.length > 0) {
+      await saveEmailAttachmentRows({
+        files: forwardedFiles,
+        emailId: result.emailId,
+        conversationId,
+        channelId: conversation.channelId,
+        workspaceId: context.automation.workspaceId,
+        userId: context.automation.createdById,
+      }).catch(err =>
+        logger.warn(
+          `[automations] SEND_EMAIL_REPLY attachment rows failed email=${result.emailId}:`,
+          err,
+        ),
+      );
+    }
 
     logger.info(
       `[automations] SEND_EMAIL_REPLY ${type} via ${result.externalSourceType} conv=${conversationId} email=${result.emailId}`,
