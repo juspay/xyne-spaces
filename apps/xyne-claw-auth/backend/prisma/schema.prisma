@@ -2239,6 +2239,12 @@ model SubagentDefinition {
   /// NULL or missing keys = inherit all instances of that server type
   /// from the parent agent (Stance A — today's behavior).
   mcpInstanceMap   Json?
+  fast             Boolean                 @default(false)
+  checks           Json?
+  checksVersion    Int                     @default(0)
+  samples          Json?
+  model            String?
+  budget           Json?
   /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).
@@ -3368,7 +3374,8 @@ model ChatProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items ChatProjectItem[]
+  items     ChatProjectItem[]
+  knowledge ChatProjectKnowledge[]
 
   @@index([ownerUserId, sortOrder])
   @@index([orgId])
@@ -3400,6 +3407,42 @@ model ChatProjectItem {
   @@index([userId])
   @@index([orgId])
   @@map("chat_project_items")
+}
+
+/// A file, KB collection or Spaces entity attached to a project, injected as
+/// context into every run in that project (XYNE-66810).
+model ChatProjectKnowledge {
+  id        String @id @default(cuid())
+  projectId String
+  /// Copied from the parent ChatProject row, never read from the request body.
+  orgId         String
+  addedByUserId String
+
+  /// file | kb_collection | channel | ticket | canvas
+  type String
+  /// Attachment id, collection id, or Spaces entity id.
+  refId String
+  title String
+
+  /// Bucket-relative GCS path, for `file` only.
+  ///
+  /// Deliberately stored instead of a foreign key to ChatAttachment: that row
+  /// cascades away with its ChatMessage, which would take the project's
+  /// knowledge with it. Nothing deletes the GCS object itself, so the path
+  /// stays readable after the attachment row is gone.
+  storagePath String?
+  mimeType    String?
+  size        Int?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+
+  project ChatProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, type, refId])
+  @@index([projectId, createdAt])
+  @@index([orgId])
+  @@map("chat_project_knowledge")
 }
 
 /// An org's brand as its own record. Supersedes the free-text

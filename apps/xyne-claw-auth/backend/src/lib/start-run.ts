@@ -36,6 +36,7 @@ import {
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
+  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
 import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
 import { getSessionByConv } from "./session-context.js";
@@ -1038,6 +1039,7 @@ export async function prepareRun(
       mergedAgentConfig = safeAgentConfig;
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
+    let sdlcContextError: string | undefined;
     if (!sdlcAgentRunContext) {
       // Claw chat sends no channel; a hub thread reopened there takes its hub from the thread's last run.
       const hubChannelId =
@@ -1051,9 +1053,21 @@ export async function prepareRun(
       const hubWorkspaceHint =
         typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
+        await resolveSdlcHubContextForUser(
+          resolved.userId,
+          hubChannelId,
+          conversationId,
+          hubWorkspaceHint,
+          attachedThreadConversationId,
+          (reason) => {
+            sdlcContextError = reason;
+          },
+        ),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+      // Only warn when the run is known to be in a hub, else a slow Spaces would warn every channel run.
+      else if (sdlcContextError && (agentSlug === SDLC_AGENT_SLUG || (!effectiveChannelId && hubChannelId)))
+        mergedAgentConfig = { ...mergedAgentConfig, sdlcContextError };
     }
     // Any agent running in an SDLC hub gets the SDLC tools on top of its own.
     if (sdlcAgentRunContext) {

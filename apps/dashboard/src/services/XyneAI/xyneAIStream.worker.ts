@@ -1,5 +1,6 @@
 import type { DesignSelectionPayload } from '../../components/AIScreen/Workspace/design/designStudioContext';
 import type { PageSelectionPayload } from '../../components/AIScreen/Workspace/pageSelectionContext';
+import type { ApprovedActionPayload } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 /**
  * Web Worker for XyneAI Streaming
  * Runs API calls on a separate thread to avoid blocking the main UI thread
@@ -89,6 +90,7 @@ export interface WorkerStartStreamMessage {
       draftMode?: boolean;
       version?: 'v1' | 'v2';
       disableTools?: boolean;
+      approvedAction?: ApprovedActionPayload;
       agentSlug?: string;
       /** Per-run model pin from the composer's model picker. */
       model?: string;
@@ -215,6 +217,7 @@ async function executeStream(
         instant: requestBody.instant ?? false,
         ...(requestBody.tab && { tab: requestBody.tab }),
         ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
+        ...(requestBody.approvedAction ? { approvedAction: requestBody.approvedAction } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,

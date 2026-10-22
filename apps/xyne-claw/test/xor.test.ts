@@ -289,6 +289,16 @@ describe("xor images", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).model).toBe("xor-omni-next");
   });
 
+  it("sends text calls with value questions to xor-omni, since xor-latest has no value type", async () => {
+    enable();
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    await xor({ state: "Invoice INV-1 for 500", questions: { ...QUESTIONS, amount: { type: "value", instructions: "Amount?", dtype: "int" } }, purpose: "xor-decide" });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://ourjev.internal/v1/decisions");
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
+    expect(body.model).toBe("xor-omni");
+    expect(body).not.toHaveProperty("images");
+  });
+
   it("omits the images field when there are none", async () => {
     enable();
     fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));

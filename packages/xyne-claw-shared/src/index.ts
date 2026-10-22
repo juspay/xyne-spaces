@@ -165,6 +165,7 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export { xorDecideTool, MAX_DECIDE_QUESTIONS, validateDecideQuestions, type DecideQuestion, type DecideType } from "./tools/xor/index.js";
 export { AGENT_TOOL_DEFS } from "./tools/agent-tools/index.js";
 export {
   TASK_COMMAND_NAMES,

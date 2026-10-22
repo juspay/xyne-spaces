@@ -14,7 +14,7 @@ import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, 
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { type Citation } from "xyne-claw-shared";
+import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import {
   channelAgentTools,
@@ -1310,7 +1310,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
       ? (async () => {
           const appCreds = await getAppTokenCredentials(userId);
           if (!appCreds) return null;
-          return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
+          return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds, undefined, { cutoff: true });
         })().catch((err) => {
           log.error("[mcp/tools] App token fallback failed:", err);
           return null;
@@ -1337,6 +1337,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
         entry.serverName,
         entry.credentials,
         agentSlug,
+        { cutoff: true },
       );
       return {
         ...serverTools,
@@ -1372,6 +1373,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
       entry.serverName,
       effective.credentials,
       agentSlug,
+      { cutoff: true },
     );
     return { entry, serverTools };
   }
@@ -2168,6 +2170,12 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         },
       });
       return;
+    }
+
+    // Filing a personal canvas into a hub widens its audience: only an approved (signed "ask") call may.
+    // Keyed on tool only: automation runs reach the same handler as xyne-spaces-app-tools.
+    if (tool === SDLC_TOOL_NAMES.writeArtifact) {
+      effectiveParams = { ...effectiveParams, adoptApproved: effectivePermission === "ask" };
     }
 
     if (effectivePermission === "ask") {

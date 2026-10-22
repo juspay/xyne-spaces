@@ -9,7 +9,7 @@ export {
 } from '@xyne/shared/hooks';
 
 import { usePermissions } from '@xyne/shared/hooks';
-import { AccessType } from '@xyne/shared';
+import { AccessType, meetsDeskInsightsAccess } from '@xyne/shared';
 import { useAuth } from './useAuth';
 
 export const useCanCreateWorkspace = (): boolean => {
@@ -18,6 +18,27 @@ export const useCanCreateWorkspace = (): boolean => {
     permission =>
       permission.resourceName === 'WORKSPACE' &&
       (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
+  );
+};
+
+// Desk email sending. SUPPORT READ is view-only: the holder can open the desk and
+// read mail chains but cannot compose or reply. Scoped to the email chain only —
+// Slack/social desk composers and ordinary sidebar chat are deliberately untouched.
+export const useCanSendDeskEmail = (): boolean => {
+  const permissions = usePermissions();
+  return permissions.some(
+    p =>
+      p.resourceName === 'SUPPORT' &&
+      (p.accessType === AccessType.WRITE || p.accessType === AccessType.ADMIN),
+  );
+};
+
+// Mirrors the backend's canViewDeskInsights SUPPORT-tier check.
+export const useHasDeskInsightsAccess = (minAccess?: string | null): boolean => {
+  const permissions = usePermissions();
+  return meetsDeskInsightsAccess(
+    permissions.filter(p => p.resourceName === 'SUPPORT').map(p => p.accessType),
+    minAccess,
   );
 };
 

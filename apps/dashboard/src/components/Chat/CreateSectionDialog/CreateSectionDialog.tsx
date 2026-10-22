@@ -1,19 +1,24 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type ReactElement } from 'react';
 import { Hash, Lock, MessageCircle, Search, X } from 'lucide-react';
+import { FolderAi } from '@xyne/icons';
 import { toast } from 'sonner';
 import { ChannelVisibility } from '@xyne/shared';
 import { Button } from '../../ui/Button';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { keyBetween, isDMChannel, getDMSearchableName } from '../ChatDirectory/ChatDirectory.utils';
+import { settleMutation, surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { SectionEmojiPicker } from '../SectionEmojiPicker';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+
+const MOVE_CHUNK_SIZE = 200;
 
 interface CreateSectionDialogProps {
   channels: VisibleChannel[];
@@ -24,6 +29,7 @@ interface CreateSectionDialogProps {
   initialName?: string;
   initialEmoji?: string;
   initialSelectedChannelIds?: readonly string[];
+  onUseSuggestions?: (draft: { name: string; emoji: string; selectedChannelIds: string[] }) => void;
 }
 
 const ChannelRow = ({
@@ -40,13 +46,13 @@ const ChannelRow = ({
   const isDM = isDMChannel(channel.scopeType);
   return (
     <label className='flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-sidebar-item-hover'>
-      <input
-        type='checkbox'
+      <Checkbox
         checked={selected}
         onChange={onToggle}
+        ariaLabel={`Include ${displayName}`}
+        label=''
         data-track-category='CHAT_SIDEBAR'
         data-track-name='CREATE_SECTION_TOGGLE_CHANNEL'
-        className='size-4 accent-primary'
       />
       <span className='shrink-0 text-muted-foreground'>
         {isDM ? (
@@ -71,6 +77,7 @@ export const CreateSectionDialog = ({
   initialName,
   initialEmoji,
   initialSelectedChannelIds,
+  onUseSuggestions,
 }: CreateSectionDialogProps): ReactElement => {
   const zero = useZero();
   const [name, setName] = useState(initialName ?? '');
@@ -158,24 +165,46 @@ export const CreateSectionDialog = ({
     const sectionId = crypto.randomUUID();
     const timestamp = Date.now();
 
-    void zero.mutate(
-      mutators.channelSection.create({
-        id: sectionId,
-        name: trimmedName,
-        emoji: emoji.trim() || null,
-        position: keyBetween(lastSectionPosition, null),
-        timestamp,
-      }),
+    // Fired in call order and awaited together: Zero applies a client's mutations in the
+    // order they were called, so the moves land after the create without waiting for its
+    // server round trip. Awaiting here only reports failures.
+    const sectionCreated = surfaceMutationError(
+      zero.mutate(
+        mutators.channelSection.create({
+          id: sectionId,
+          name: trimmedName,
+          emoji: emoji.trim() || null,
+          position: keyBetween(lastSectionPosition, null),
+          timestamp,
+        }),
+      ),
     );
 
+    const channelIds = [...selected];
     let prevKey: string | null = null;
-    for (const channelId of selected) {
-      const position = keyBetween(prevKey, null);
-      void zero.mutate(
-        mutators.channel.moveToSection({ channelId, sectionId, position, timestamp }),
+    const moves = [];
+    for (let i = 0; i < channelIds.length; i += MOVE_CHUNK_SIZE) {
+      const items = channelIds.slice(i, i + MOVE_CHUNK_SIZE).map(channelId => {
+        const position = keyBetween(prevKey, null);
+        prevKey = position;
+        return { channelId, position };
+      });
+      moves.push(
+        settleMutation(
+          zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
+        ),
       );
-      prevKey = position;
     }
+
+    void (async (): Promise<void> => {
+      const [created, ...moved] = await Promise.all([sectionCreated, ...moves]);
+      if (!created) return;
+
+      const failedChunks = moved.filter(ok => !ok).length;
+      if (failedChunks > 0) {
+        toast.error("Couldn't add some channels to the section. Try adding them again.");
+      }
+    })();
 
     if (selected.size === 0) {
       toast(
@@ -202,6 +231,20 @@ export const CreateSectionDialog = ({
           <X className='size-5' />
         </button>
       </div>
+
+      {onUseSuggestions && (
+        <button
+          type='button'
+          onClick={() => onUseSuggestions({ name, emoji, selectedChannelIds: [...selected] })}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='CREATE_SECTION_USE_SUGGESTIONS'
+          className='flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-left text-sm transition-colors hover:bg-muted'
+        >
+          <FolderAi size={16} className='shrink-0 text-primary' />
+          <span className='flex-1 text-foreground'>Prefer we group them for you?</span>
+          <span className='shrink-0 text-xs text-muted-foreground'>Suggest sections →</span>
+        </button>
+      )}
 
       <div className='space-y-1.5'>
         <label htmlFor='section-name' className='text-sm font-medium text-foreground'>
@@ -266,13 +309,14 @@ export const CreateSectionDialog = ({
         <div className='rounded-md border border-border'>
           <label className='flex cursor-pointer items-center justify-between gap-2 border-b border-border px-3 py-2'>
             <span className='flex items-center gap-2 text-sm font-medium text-foreground'>
-              <input
-                type='checkbox'
+              <Checkbox
                 checked={allFilteredSelected}
+                indeterminate={selected.size > 0 && !allFilteredSelected}
                 onChange={toggleSelectAll}
+                ariaLabel='Select all channels'
+                label=''
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CREATE_SECTION_SELECT_ALL'
-                className='size-4 accent-primary'
               />
               Select all
             </span>

@@ -4724,6 +4724,54 @@ export interface SubagentDef {
   updatedAt?: string;
   skills: Array<{ id: string; slug: string; name: string }>;
   shares?: SubagentShareEntry[];
+  fast?: boolean;
+  checks?: SubagentCheck[];
+  checksVersion?: number;
+  samples?: SubagentSample[];
+  model?: string | null;
+  budget?: { maxToolCalls?: number };
+}
+
+export type SubagentCheckType = "yesno" | "choice" | "score" | "value";
+
+export interface SubagentCheck {
+  id: string;
+  question: string;
+  type: SubagentCheckType;
+  options?: Record<string, string> | string[];
+  dtype?: "string" | "int" | "float";
+  pattern?: string;
+  expect?: string | number | boolean;
+  threshold?: number;
+}
+
+export type CheckValue = string | number | boolean | null;
+
+export interface SubagentSample {
+  input: string;
+  expected: Record<string, CheckValue>;
+  label?: string;
+}
+
+export interface CheckAnswer {
+  value: CheckValue;
+  confidence: number | null;
+  unsure: boolean;
+  ok?: boolean;
+}
+
+export interface CheckTryResult {
+  answers: Record<string, CheckAnswer>;
+  unavailable: boolean;
+  ms: number;
+}
+
+export async function tryChecks(payload: { checks: SubagentCheck[]; text?: string; image?: string; context?: string }): Promise<CheckTryResult> {
+  const data = await request<{ success: boolean; data: CheckTryResult }>(
+    `${AUTH_API_URL}/api/v1/subagents/checks/try`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
 }
 
 export interface SubagentInputBody {
@@ -4737,6 +4785,9 @@ export interface SubagentInputBody {
   skillIds?: string[];
   /** Optional. Omit or pass `{}` to clear/inherit-all. */
   mcpInstanceMap?: Record<string, string>;
+  fast?: boolean;
+  checks?: SubagentCheck[] | null;
+  samples?: SubagentSample[] | null;
 }
 
 export async function listSubagents(): Promise<SubagentDef[]> {

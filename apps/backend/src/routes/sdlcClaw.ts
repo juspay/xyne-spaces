@@ -140,8 +140,8 @@ router.post(
   route(async (req, res) => {
     const channelId = channelIdFromBody(req);
     if (!channelId) throw new AppError('channelId is required', 400);
-    const artifactTypes = await sdlcHub.listArtifactTypes(await actorFromRequest(req), channelId);
-    res.status(200).json({ success: true, artifactTypes });
+    const result = await sdlcHub.listArtifactTypes(await actorFromRequest(req), channelId);
+    res.status(200).json({ success: true, ...result });
   }),
 );
 
