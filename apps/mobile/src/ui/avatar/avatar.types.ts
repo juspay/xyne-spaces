@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { ViewStyle } from 'react-native';
 
 import type { AvatarFallbackUser } from '@/src/components/ui/avatar/avatar.types';
@@ -23,12 +24,9 @@ export type AvatarProps = {
   /** Outer slot size in px. Default 40, the DM row. */
   size?: number;
   /**
-   * The surface the avatar sits on, as a Uniwind border class.
-   *
-   * The stack separates its two faces with a ring in this color, so it has to
-   * match what is actually behind the avatar. Defaults to the screen
-   * background, which is where the DM list puts it.
+   * Drawn centred in a circle cut into the bottom-right corner of the front
+   * face, sized by `avatarCornerBadgeSize`. The DM list's star.
    */
-  ringClassName?: string;
+  cornerBadge?: ReactNode;
   style?: ViewStyle;
 };

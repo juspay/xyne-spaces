@@ -84,7 +84,8 @@ export const AvatarFace = memo(function AvatarFace({
     >
       {showImage ? (
         <Image
-          key={imageKey}
+          // No `key`: a recycled row keeps this view, and `recyclingKey` is
+          // what clears the previous person's picture off it.
           allowDownscaling={Platform.OS === 'ios' ? false : true}
           cachePolicy='memory-disk'
           contentFit='cover'
