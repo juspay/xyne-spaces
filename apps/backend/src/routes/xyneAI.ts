@@ -117,6 +117,16 @@ router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddlewar
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);
 
+// Design share links (claw-auth routes/design-shares.ts): publish or update the
+// conversation's public link, read it with its view count, and revoke it.
+router.post('/v2/design-shares', authMiddleware.authenticate, xyneAIControllerV2.publishDesignShare);
+router.get(
+  '/v2/design-shares/conversation/:convId',
+  authMiddleware.authenticate,
+  xyneAIControllerV2.getDesignShare
+);
+router.delete('/v2/design-shares/:shareId', authMiddleware.authenticate, xyneAIControllerV2.revokeDesignShare);
+
 // GET /api/xyne-ai/v2/attachments/:attachmentId/download - Download attachment from claw
 router.get(
   '/v2/attachments/:attachmentId/download',
