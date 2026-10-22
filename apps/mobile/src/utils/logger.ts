@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { APP_VARIANT, LOGGER_CONFIG } from '@/src/config';
+import { getDeviceId } from '@/src/utils/deviceId';
 import DeviceInfo from 'react-native-device-info';
 import {
   documentDirectory,
@@ -71,7 +72,6 @@ export interface Breadcrumb {
 }
 
 // Storage keys
-const STORAGE_KEY_SESSION_ID = '@lotus/logger_session_id';
 const LEGACY_STORAGE_KEY_EMAIL = '@lotus/logger_email';
 export interface LogEntry {
   logId: string;
@@ -168,7 +168,7 @@ class LoggerService {
       return;
     }
     this.isInitialized = true;
-    this.clientSessionId = await this.getOrCreateClientSessionId();
+    this.clientSessionId = await getDeviceId();
     // Remove the pre-hardening persisted identity. Remote log records never
     // contain it, and keeping it locally is unnecessary.
     await AsyncStorage.removeItem(LEGACY_STORAGE_KEY_EMAIL).catch(() => undefined);
@@ -399,19 +399,6 @@ class LoggerService {
     } finally {
       this.deviceStateRefreshing = false;
     }
-  }
-
-  /**
-   * Get or create a persistent client session ID
-   */
-  private async getOrCreateClientSessionId(): Promise<string> {
-    const sessionId = await AsyncStorage.getItem(STORAGE_KEY_SESSION_ID);
-    if (!sessionId) {
-      const newId = uuidv4();
-      await AsyncStorage.setItem(STORAGE_KEY_SESSION_ID, newId);
-      return newId;
-    }
-    return sessionId;
   }
 
   /**

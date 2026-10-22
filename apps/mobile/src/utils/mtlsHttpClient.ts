@@ -22,6 +22,7 @@ import { API_ORIGIN, isMtlsFeatureEnabled } from '../config';
 import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger';
+import { getDeviceId } from './deviceId';
 import { getActiveWorkspaceId } from './activeWorkspace';
 import { decodeBase64Bytes, decodeBase64Utf8 } from './base64Utf8';
 
@@ -279,15 +280,30 @@ export async function prepareHeadersForTransport(
     nextHeaders['x-zero-client-group-id'] = zeroClientGroupId;
   }
 
-  const clientSessionId = logger.getClientSessionId();
-  if (clientSessionId) {
-    nextHeaders['x-device-id'] = clientSessionId;
+  // The logger loads this id late (after the first frame), so read it directly
+  // when the logger has not yet: startup requests must carry it too.
+  let deviceId = logger.getClientSessionId();
+  if (!deviceId) {
+    try {
+      deviceId = await getDeviceId();
+    } catch {
+      // Storage unavailable: send the request without the header.
+    }
+  }
+  if (deviceId) {
+    nextHeaders['x-device-id'] = deviceId;
   }
 
   const workspaceId = getActiveWorkspaceId();
   if (workspaceId) {
     nextHeaders['x-workspace-id'] = workspaceId;
   }
+
+  // TEMP(XYNE-65880): verify x-device-id on every request. Remove before release.
+  // eslint-disable-next-line no-console
+  console.log(
+    `[hdr-check] x-device-id=${nextHeaders['x-device-id'] ?? 'MISSING'} req=${nextHeaders['x-request-id']}`,
+  );
 
   // iOS sends cookies from the native HTTPCookieStorage attached to the shared
   // URLSession, so reading the JS cookie jar here was a bridge round trip on the
