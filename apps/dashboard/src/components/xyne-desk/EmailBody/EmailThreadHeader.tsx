@@ -3,7 +3,7 @@ import { JSX, ReactNode, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
 import { Popover } from '../../ui/Popover/Popover';
-import { EmailSignalTags, EmailTagsBadge } from './TagsBadgePopover';
+import { EmailAvatarSentiment, EmailSignalTags, EmailTagsBadge } from './TagsBadgePopover';
 import {
   avatarColorFor,
   avatarInitial,
@@ -125,7 +125,10 @@ export const EmailThreadHeader = ({
 
   return (
     <div className='w-full flex items-start gap-3'>
-      <EmailAvatar name={fromName} email={fromEmail} />
+      <div className='relative shrink-0'>
+        <EmailAvatar name={fromName} email={fromEmail} />
+        {emailId && <EmailAvatarSentiment key={tagsVersion} emailId={emailId} />}
+      </div>
       <div className='flex-1 min-w-0'>
         <div className='flex items-start justify-between gap-3'>
           <div className='flex-1 min-w-0'>

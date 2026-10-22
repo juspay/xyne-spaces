@@ -86,6 +86,26 @@ const SignalIcon = ({
   return Face ? <Face size={size} aria-hidden='true' /> : null;
 };
 
+/** Sentiment face on the sender avatar's corner, in the sentiment colour. */
+export const EmailAvatarSentiment = ({ emailId }: { emailId: string }): JSX.Element | null => {
+  const { groups } = useEntityTags(DESK_EMAIL, emailId, true);
+  const tag = groups.find(g => g.category === 'sentiment')?.tags[0]?.tag ?? '';
+  const sentiment = SENTIMENT[tag];
+  if (!sentiment) return null;
+  return (
+    <span
+      title={`Sentiment: ${tag}`}
+      className={cn(
+        'absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border ring-2 ring-background',
+        sentiment.tint,
+        sentiment.text,
+      )}
+    >
+      <sentiment.icon size={10} aria-hidden='true' />
+    </span>
+  );
+};
+
 /**
  * Insight capsule (priority + sentiment) for one email, fetched on mount so every email in an
  * opened thread loads in parallel; hover shows each scale and the tag's reason.
