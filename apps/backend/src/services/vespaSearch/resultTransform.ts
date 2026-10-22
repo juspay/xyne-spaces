@@ -763,7 +763,10 @@ function transformCollection(
     chunkIndex = 0;
   }
 
-  const chunkContent = doc.chunks?.[chunkIndex] || '';
+  // The `claw` summary carries only the matched chunks (claw_chunks) and no `chunks`, so the
+  // chunk_scores index above doesn't point into it; use all of them instead.
+  const matchedChunks = (doc.claw_chunks ?? []).filter((c) => typeof c === 'string' && c.trim() !== '');
+  const chunkContent = matchedChunks.length > 0 ? matchedChunks.join('\n\n') : doc.chunks?.[chunkIndex] || '';
 
   // Parse metadata for collection name if available
   let collectionName: string | undefined;

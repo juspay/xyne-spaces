@@ -686,6 +686,9 @@ export async function handleKbSearch(args: {
     apps: "file",
     subApp: "collections",
     limit: String(Math.min(Math.max(limit * 2, limit), 50)),
+    rankProfile: "default_native",
+    // claw = lean + the 3 best matched chunks (claw_chunks), which becomes each hit's snippet.
+    presentationSummary: "claw",
   };
   if (scope.kind === "collection" && scope.ids.length > 0) {
     params["collectionId"] = scope.ids.join(",");
@@ -842,7 +845,7 @@ export async function handleKbSearch(args: {
         `collection="${escapeXmlAttr(h.collectionName)}" cite="[clf-__TOOL_CALL_ID__#${i}]">`,
     );
     if (h.snippet) {
-      const snippet = h.snippet.replace(/<\/?[^>]+>/g, "").replace(/\s+/g, " ").slice(0, 280);
+      const snippet = h.snippet.replace(/<\/?[^>]+>/g, "").replace(/\s+/g, " ").slice(0, KB_SNIPPET_MAX_CHARS);
       lines.push(`    <snippet>${escapeXmlText(snippet)}</snippet>`);
     }
     lines.push(`  </hit>`);
@@ -903,6 +906,10 @@ function collectAllowedVespaDocIds(ctx: KbResolution, folderId: string): string[
  * and sends the agent down the same blind-search path this tool exists to avoid.
  */
 const LIST_FILES_MAX_ROWS = 400;
+
+/** Max characters of a kb-search hit's snippet (its matched chunks) shown to the model:
+ *  one Docling chunk, ~500 tokens at ~4 chars/token. */
+const KB_SNIPPET_MAX_CHARS = 2000;
 
 export async function handleKbListFiles(args: {
   userId: string;
