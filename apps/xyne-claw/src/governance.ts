@@ -43,6 +43,8 @@ export interface ToolMetaEntry {
   serverType?: string | undefined;
   mcpToolName?: string | undefined;
   isWriteTool?: boolean | undefined;
+  /** Under the server's declared write policy: true a write, false a read; absent when nothing was declared. */
+  declaredWrite?: boolean | undefined;
   permission?: string | undefined;
 }
 
@@ -55,6 +57,7 @@ export function toolMetaOf(tool: { name: string } & Record<string, unknown>): To
     ...(serverType ? { serverType } : {}),
     ...(typeof tool["mcpToolName"] === "string" ? { mcpToolName: tool["mcpToolName"] } : {}),
     ...(typeof tool["isWriteTool"] === "boolean" ? { isWriteTool: tool["isWriteTool"] } : {}),
+    ...(typeof tool["declaredWrite"] === "boolean" ? { declaredWrite: tool["declaredWrite"] } : {}),
   };
 }
 
@@ -280,7 +283,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   // C1: one decision per call, recorded before a side effect runs.
   const criticCall = (id: string, toolName: string, args: unknown): CriticCallInput | null => {
     const meta = toolMeta.get(toolName);
-    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args });
+    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args });
     if (!criticNeeded(d.effect, state.readUntypedContent)) return null;
     const argsText = safeJson(args, 65_536);
     const scan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
@@ -306,7 +309,9 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const t0 = performance.now();
     const name = ctx.toolCall.name;
     const meta = toolMeta.get(name);
-    const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? name, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args: ctx.args });
+    // Records and kill scopes use the tool's own name, the one claw-auth records, not pi's prefixed one.
+    const toolLabel = meta?.mcpToolName ?? name;
+    const descriptor = resolveToolDescriptor({ toolName: toolLabel, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args: ctx.args });
     const argsText = safeJson(ctx.args, 65_536);
     const argScan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");
@@ -318,13 +323,16 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const nowMs = Date.now();
     const hint = grantOf(meta?.permission);
     const decideWith = (c: CriticVerdict) => decide({
-      call: { toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
-      kill: { snapshot: componentMode("kill") === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot(), scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(orgId ? { org: orgId } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
+      call: { toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
+      kill: { snapshot: componentMode("kill") === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot(), scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(orgId ? { org: orgId } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: toolLabel }, nowMs },
       conversation: state,
       critic: c,
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
     });
     const verdict = decideWith(critic.verdict);
+    // A switch an admin set acts whenever the kill component enforces, whatever C1's own mode.
+    const killActs = verdict.killSwitch !== undefined && componentMode("kill") === "enforce";
+    const acting = mode === "enforce" || killActs;
     const decision: C1Decision = {
       decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id,
       criticStatus: critic.verdict.status,
@@ -336,17 +344,17 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       void criticVerdict(ctx, current).then((r) => {
         if (!r.risk) return;
         const would = decideWith(r.verdict);
-        queueGovernance({ ...base(), eventType: "critic_verdict", toolCallId: ctx.toolCall.id, toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: "c1", subjectId: decision.decisionId, decision: would.decision, reasonCode: would.reasonCode, reasonText: `shadow: would decide ${would.decision} (${would.reasonCode}); critic ${r.risk.source} ${r.risk.level}${r.risk.reasons.length > 0 ? `: ${r.risk.reasons.join("; ")}` : ""}`.slice(0, 1_900), checkTierReached: r.risk.source === "xor" ? "xor_judge" : "parser", ...(r.ms !== undefined ? { judgeMs: r.ms } : {}), matchedRuleIds: criticTags(r.risk) });
+        queueGovernance({ ...base(), eventType: "critic_verdict", toolCallId: ctx.toolCall.id, toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: "c1", subjectId: decision.decisionId, decision: would.decision, reasonCode: would.reasonCode, reasonText: `shadow: would decide ${would.decision} (${would.reasonCode}); critic ${r.risk.source} ${r.risk.level}${r.risk.reasons.length > 0 ? `: ${r.risk.reasons.join("; ")}` : ""}`.slice(0, 1_900), checkTierReached: r.risk.source === "xor" ? "xor_judge" : "parser", ...(r.ms !== undefined ? { judgeMs: r.ms } : {}), matchedRuleIds: criticTags(r.risk) });
       }).catch((err) => log.warn(`[governance] critic failed session=${sessionId}: ${err instanceof Error ? err.message : String(err)}`));
     }
     decisions.set(ctx.toolCall.id, decision);
     stats.decisions++;
-    if (verdict.killSwitch) queueGovernance({ ...base(), eventType: "kill_switch_enforced", toolCallId: ctx.toolCall.id, toolName: name, subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: mode === "enforce" ? "enforced at C1" : "shadow: would enforce at C1" });
+    if (verdict.killSwitch) queueGovernance({ ...base(), eventType: "kill_switch_enforced", toolCallId: ctx.toolCall.id, toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: acting ? "enforced at C1" : "shadow: would enforce at C1" });
     const event: GovernanceEvent = {
       ...base(),
       eventType: "tool_call",
       toolCallId: ctx.toolCall.id,
-      toolName: name,
+      toolName: toolLabel,
       ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}),
       decision: verdict.decision,
       reasonCode: verdict.reasonCode,
@@ -370,7 +378,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     // An MCP call is recorded once, by C2 in claw-auth, which receives this decision with the call; a call C1
     // stops here never reaches claw-auth, so C1 records that one itself.
     if (meta?.serverType) {
-      if (verdict.decision === "block" && mode === "enforce" && !(await recordGovernanceNow(event))) stats.auditFailures++;
+      if (verdict.decision === "block" && acting && !(await recordGovernanceNow(event))) stats.auditFailures++;
     } else if (descriptor.effect !== "read") {
       const recorded = await recordGovernanceNow(event);
       if (!recorded) {
@@ -382,8 +390,13 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     }
     if (verdict.decision === "block") {
       stats.blocks++;
-      log.info(`[governance] C1 ${mode} block session=${sessionId} tool=${name} ${verdict.reasonCode}`);
-      if (mode === "enforce") return { block: true, reason: `Blocked by policy (${verdict.reasonCode}): ${verdict.reasonText} Do not retry; tell the user.` };
+      log.info(`[governance] C1 ${acting ? "enforce" : "shadow"} block session=${sessionId} tool=${name} ${verdict.reasonCode}`);
+      if (acting) return { block: true, reason: `Blocked by policy (${verdict.reasonCode}): ${verdict.reasonText} Do not retry; tell the user.` };
+    }
+    // An MCP call under ask-all goes on to claw-auth's approval card; a claw-local tool has no card yet (PR-15), so it does not run.
+    if (verdict.decision === "ask" && killActs && !meta?.serverType) {
+      log.info(`[governance] C1 kill ask session=${sessionId} tool=${name} ${verdict.reasonCode}: no approval card for a local tool`);
+      return { block: true, reason: `Needs approval (${verdict.reasonCode}): ${verdict.reasonText} Approval is not available for this tool in this run, so it does not run. Do not retry; tell the user.` };
     }
     // The outcome's duration counts from here, after the decision and its record.
     started.set(ctx.toolCall.id, Date.now());

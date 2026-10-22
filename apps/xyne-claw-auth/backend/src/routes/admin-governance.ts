@@ -5,10 +5,11 @@
  */
 import { Router, type Request, type Response } from "express";
 import type { Prisma } from "@prisma/client";
-import { KILL_SCOPE_KINDS } from "xyne-claw-shared/governance";
+import { KILL_SCOPE_KINDS, parseComponentModes } from "xyne-claw-shared/governance";
+import { CONFIG } from "../config.js";
 import { governancePrisma, prisma } from "../db.js";
 import { getAdminOrgScope } from "../lib/admin-org-scope.js";
-import { clearKillSwitch, KILL_MODES, listKillSwitches, setKillSwitch } from "../lib/governance-kill.js";
+import { clearKillSwitch, currentKillSnapshot, KILL_MODES, listKillSwitches, setKillSwitch } from "../lib/governance-kill.js";
 import { asyncHandler, badRequest, forbidden, notFound, ok } from "../lib/http.js";
 import { getOrgId, requireRequester } from "../middleware/agent-acl.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
@@ -50,6 +51,17 @@ const SELECT = {
   riskLevelAtCall: true, carriedPrivateData: true, outcome: true, matchedRuleIds: true, gateMs: true, judgeMs: true, subjectKind: true, subjectId: true, argumentsRedacted: true,
 } as const;
 
+/** Display names for the ids the rows carry: agents by slug, people by id. */
+async function namesFor(agentSlugs: Iterable<string | null>, userIds: Iterable<string | null>, orgId: string | undefined): Promise<{ agents: Record<string, string>; users: Record<string, { name: string; email: string }> }> {
+  const slugs = [...new Set([...agentSlugs].filter((s): s is string => !!s))];
+  const ids = [...new Set([...userIds].filter((s): s is string => !!s))];
+  const [agents, users] = await Promise.all([
+    slugs.length > 0 ? prisma.agent.findMany({ where: { slug: { in: slugs }, ...(orgId ? { orgId } : {}) }, select: { slug: true, name: true } }) : [],
+    ids.length > 0 ? prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } }) : [],
+  ]);
+  return { agents: Object.fromEntries(agents.map((a) => [a.slug, a.name])), users: Object.fromEntries(users.map((u) => [u.id, { name: u.name, email: u.email }])) };
+}
+
 router.get("/events", asyncHandler(async (req: Request, res: Response) => {
   const scope = getAdminOrgScope(req, "/admin/governance/events");
   const where = eventsWhere(req.query as Record<string, unknown>, scope.orgId);
@@ -60,8 +72,44 @@ router.get("/events", asyncHandler(async (req: Request, res: Response) => {
     governancePrisma.governanceAuditEvent.count({ where }),
   ]);
   const runIds = [...new Set(rows.map((r) => r.runId).filter((id): id is string => !!id))];
-  const sessions = new Map(runIds.length > 0 ? (await prisma.agentRun.findMany({ where: { id: { in: runIds } }, select: { id: true, sessionId: true } })).map((r) => [r.id, r.sessionId]) : []);
-  ok(res, { rows: rows.map((r) => ({ ...r, sessionId: r.runId ? sessions.get(r.runId) ?? null : null })), total });
+  const [sessions, names] = await Promise.all([
+    runIds.length > 0 ? prisma.agentRun.findMany({ where: { id: { in: runIds } }, select: { id: true, sessionId: true } }).then((runs) => new Map(runs.map((r) => [r.id, r.sessionId]))) : new Map<string, string>(),
+    namesFor(rows.map((r) => (r.actorKind === "agent" ? r.actorId : null)), rows.flatMap((r) => [r.onBehalfOfUserId, r.actorKind === "agent" ? null : r.actorId]), scope.orgId),
+  ]);
+  ok(res, { rows: rows.map((r) => ({ ...r, sessionId: r.runId ? sessions.get(r.runId) ?? null : null })), total, names });
+}));
+
+/** The values the feed's filters can take in a window, with counts and names, so a filter offers what exists. */
+router.get("/facets", asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/admin/governance/facets");
+  const where = { ...(scope.orgId ? { orgId: scope.orgId } : {}), eventType: "tool_call", occurredAt: { gte: date(req.query["since"]) ?? new Date(Date.now() - 7 * DAY_MS) } };
+  const [agents, users, tools, servers] = await Promise.all([
+    governancePrisma.governanceAuditEvent.groupBy({ by: ["actorId"], where, _count: { _all: true }, orderBy: { _count: { actorId: "desc" } }, take: 200 }),
+    governancePrisma.governanceAuditEvent.groupBy({ by: ["onBehalfOfUserId"], where, _count: { _all: true }, orderBy: { _count: { onBehalfOfUserId: "desc" } }, take: 200 }),
+    governancePrisma.governanceAuditEvent.groupBy({ by: ["toolName"], where, _count: { _all: true }, orderBy: { _count: { toolName: "desc" } }, take: 200 }),
+    governancePrisma.governanceAuditEvent.groupBy({ by: ["mcpServerId"], where, _count: { _all: true }, orderBy: { _count: { mcpServerId: "desc" } }, take: 100 }),
+  ]);
+  const names = await namesFor(agents.map((a) => a.actorId), users.map((u) => u.onBehalfOfUserId), scope.orgId);
+  ok(res, {
+    agents: agents.flatMap((a) => (a.actorId ? [{ slug: a.actorId, name: names.agents[a.actorId] ?? null, count: a._count._all }] : [])),
+    users: users.flatMap((u) => (u.onBehalfOfUserId ? [{ id: u.onBehalfOfUserId, name: names.users[u.onBehalfOfUserId]?.name ?? null, email: names.users[u.onBehalfOfUserId]?.email ?? null, count: u._count._all }] : [])),
+    tools: tools.flatMap((t) => (t.toolName ? [{ name: t.toolName, count: t._count._all }] : [])),
+    servers: servers.flatMap((s) => (s.mcpServerId ? [{ id: s.mcpServerId, count: s._count._all }] : [])),
+  });
+}));
+
+/** Each service's component modes and kill snapshot, so the page can say whether a switch will act. */
+router.get("/config", asyncHandler(async (_req: Request, res: Response) => {
+  const snap = currentKillSnapshot();
+  const clawAuth = { modes: parseComponentModes(process.env), kill: { epoch: snap.epoch, ageMs: Date.now() - snap.takenAtMs, switches: snap.switches.length } };
+  let claw: unknown = null;
+  try {
+    const r = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/governance/modes`, { headers: { "x-s2s-key": CONFIG.xyneClawS2sKey }, signal: AbortSignal.timeout(1_500) });
+    if (r.ok) claw = await r.json();
+  } catch {
+    // claw unreachable: the page says so.
+  }
+  ok(res, { clawAuth, claw });
 }));
 
 const CSV_COLUMNS = ["occurredAt", "orgSequence", "eventType", "actorId", "onBehalfOfUserId", "runId", "toolCallId", "mcpServerId", "toolName", "toolEffect", "destinationKind", "decision", "reasonCode", "riskLevelAtCall", "carriedPrivateData", "outcome", "gateMs", "judgeMs", "reasonText"] as const;

@@ -78,7 +78,7 @@ export interface GateResult {
   reasonText: string;
   policyVersion: string;
   mode: ComponentMode;
-  /** True only when the component mode is enforce, so a caller acts on block or ask. */
+  /** True when C2 enforces, or a kill switch decided the call and the kill component enforces; the caller then acts on block or ask. */
   enforce: boolean;
   effect: string;
   destinationKind: string;
@@ -161,16 +161,18 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
       policy: { ...(grant ? { grant } : {}), ...(hint ? { permissionHint: hint } : {}), judgeAvailable: Boolean(input.c1), auditAvailable: true },
     });
 
+    // A switch an admin set acts whenever the kill component enforces, whatever C2's own mode.
+    const enforce = mode === "enforce" || (verdict.killSwitch !== undefined && killMode === "enforce");
     const result: GateResult = {
       decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: verdict.reasonText, policyVersion: verdict.policyVersion,
-      mode, enforce: mode === "enforce", effect: descriptor.effect, destinationKind: descriptor.destination.kind, recorded: false,
+      mode, enforce, effect: descriptor.effect, destinationKind: descriptor.destination.kind, recorded: false,
     };
     if (!orgId) {
       log.warn(`[governance-gate] no org for user=${input.userId} site=${input.site}; decision not recorded`);
       return result;
     }
     if (verdict.killSwitch) {
-      queueGovernanceEvent({ orgId, eventType: "kill_switch_enforced", actorKind: "system", subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, runId: run.runId ?? null, toolName: input.tool, mcpServerId: input.serverType, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: mode === "enforce" ? "enforced at C2" : "shadow: would enforce at C2" });
+      queueGovernanceEvent({ orgId, eventType: "kill_switch_enforced", actorKind: "system", subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, runId: run.runId ?? null, toolName: input.tool, mcpServerId: input.serverType, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: enforce ? "enforced at C2" : "shadow: would enforce at C2" });
     }
     const event: GovernanceEventInput = {
       orgId,

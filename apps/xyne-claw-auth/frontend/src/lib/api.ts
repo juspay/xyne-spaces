@@ -8609,6 +8609,15 @@ export interface KillSwitchRow {
   id: string; orgId: string; scopeKind: string; scopeId: string; mode: string; reason: string; setBy: string; setByUserId: string | null; epoch: number;
   expiresAt: string | null; clearedByUserId: string | null; clearedAt: string | null; clearReason: string | null; createdAt: string;
 }
+export interface GovernanceNames { agents: Record<string, string>; users: Record<string, { name: string; email: string }> }
+export interface GovernanceFacets {
+  agents: Array<{ slug: string; name: string | null; count: number }>;
+  users: Array<{ id: string; name: string | null; email: string | null; count: number }>;
+  tools: Array<{ name: string; count: number }>;
+  servers: Array<{ id: string; count: number }>;
+}
+export interface GovernanceServiceConfig { modes: Record<string, "off" | "shadow" | "enforce">; kill: { epoch: number; ageMs: number; switches: number }; critic?: boolean; criticBatch?: boolean }
+export interface GovernanceConfig { clawAuth: GovernanceServiceConfig; claw: GovernanceServiceConfig | null }
 export type GovernanceEventQuery = Partial<Record<"since" | "until" | "decision" | "risk" | "effect" | "tool" | "agent" | "user" | "server" | "runId" | "eventType", string>> & { orgScope?: AdminOrgScope; limit?: number; offset?: number };
 const governanceQuery = (q: GovernanceEventQuery): string => {
   const p = new URLSearchParams();
@@ -8616,8 +8625,16 @@ const governanceQuery = (q: GovernanceEventQuery): string => {
   if (q.orgScope === "all") p.set("orgScope", "all");
   return p.toString();
 };
-export async function getGovernanceEvents(userId: string, q: GovernanceEventQuery): Promise<{ rows: GovernanceEvent[]; total: number }> {
-  const res = await request<{ data: { rows: GovernanceEvent[]; total: number } }>(`${AUTH_API_URL}/api/v1/admin/governance/events?${governanceQuery(q)}`, { headers: { "x-user-id": userId } });
+export async function getGovernanceEvents(userId: string, q: GovernanceEventQuery): Promise<{ rows: GovernanceEvent[]; total: number; names: GovernanceNames }> {
+  const res = await request<{ data: { rows: GovernanceEvent[]; total: number; names: GovernanceNames } }>(`${AUTH_API_URL}/api/v1/admin/governance/events?${governanceQuery(q)}`, { headers: { "x-user-id": userId } });
+  return res.data;
+}
+export async function getGovernanceFacets(userId: string, since: string, orgScope: AdminOrgScope): Promise<GovernanceFacets> {
+  const res = await request<{ data: GovernanceFacets }>(`${AUTH_API_URL}/api/v1/admin/governance/facets?${governanceQuery({ since, orgScope })}`, { headers: { "x-user-id": userId } });
+  return res.data;
+}
+export async function getGovernanceConfig(userId: string): Promise<GovernanceConfig> {
+  const res = await request<{ data: GovernanceConfig }>(`${AUTH_API_URL}/api/v1/admin/governance/config`, { headers: { "x-user-id": userId } });
   return res.data;
 }
 export async function downloadGovernanceCsv(userId: string, q: GovernanceEventQuery): Promise<void> {

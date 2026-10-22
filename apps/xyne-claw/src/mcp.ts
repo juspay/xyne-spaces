@@ -71,6 +71,7 @@ interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  readonly writePolicyDeclared?: boolean;
   readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
@@ -399,7 +400,7 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean; declaredWrite?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
         serverToolKey: toolKey,
@@ -411,6 +412,8 @@ export async function loadMcpToolsForUser(
         // every read-palette run. Only `true` means write anywhere downstream,
         // so `false` narrows nothing that was previously wide.
         ...(mcpTool.readOnly === true ? { isWriteTool: false } : {}),
+        // Governance only: under a declared write policy a tool outside it is a read, as claw-auth's gate reads it.
+        ...(server.writePolicyDeclared ? { declaredWrite: (server.writeTools ?? []).includes(mcpTool.name) } : {}),
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }

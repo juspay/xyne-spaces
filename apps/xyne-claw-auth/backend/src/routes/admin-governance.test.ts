@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../db.js", () => ({ governancePrisma: {}, prisma: {} }));
-vi.mock("../lib/governance-kill.js", () => ({ KILL_MODES: ["stop", "read_only", "ask_all"], clearKillSwitch: vi.fn(), listKillSwitches: vi.fn(), setKillSwitch: vi.fn() }));
+vi.mock("../lib/governance-kill.js", () => ({ KILL_MODES: ["stop", "read_only", "ask_all"], clearKillSwitch: vi.fn(), currentKillSnapshot: vi.fn(() => ({ epoch: 0, takenAtMs: 0, switches: [] })), listKillSwitches: vi.fn(), setKillSwitch: vi.fn() }));
+vi.mock("../config.js", () => ({ CONFIG: { xyneClawUrl: "http://claw.test", xyneClawS2sKey: "k" } }));
 vi.mock("../middleware/require-auth.js", () => ({ s2sKeyMatches: vi.fn(() => false) }));
 vi.mock("../middleware/agent-acl.js", () => ({ getOrgId: vi.fn(), requireRequester: vi.fn() }));
 vi.mock("../lib/admin-org-scope.js", () => ({ getAdminOrgScope: vi.fn() }));

@@ -68,12 +68,18 @@ describe("gateCall", () => {
     expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ toolCallId: "c9", matchedRuleIds: ["critic.xor.high", "critic.exfiltration"], judgeMs: 640, checkTierReached: "xor_judge", reasonText: expect.stringContaining("Critic: exfiltration 90%") }));
   });
 
-  it("blocks on a matching stop switch, refuses side effects on a stale snapshot, and records the enforcement", async () => {
+  it("acts on a matching stop switch while the kill component enforces, even with C2 in shadow; kill=shadow and a stale snapshot only record", async () => {
     kill.snapshot = { epoch: 5, takenAtMs: 0, switches: [{ scopeKind: "org", scopeId: "org-1", mode: "stop", epoch: 5, reason: "incident" }] };
-    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STOP" });
-    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ eventType: "kill_switch_enforced", subjectKind: "kill:org", subjectId: "org-1", reasonText: "shadow: would enforce at C2" }));
+    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STOP", mode: "shadow", enforce: true });
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ eventType: "kill_switch_enforced", subjectKind: "kill:org", subjectId: "org-1", reasonText: "enforced at C2" }));
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "kill=shadow";
+    resetComponentModes();
+    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STOP", enforce: false });
+    expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "kill_switch_enforced", reasonText: "shadow: would enforce at C2" }));
+    delete process.env["GOVERNANCE_COMPONENT_MODES"];
+    resetComponentModes();
     kill.snapshot = { epoch: 6, takenAtMs: Date.now() - 60_000, switches: [] };
-    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STALE" });
+    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STALE", enforce: false });
     kill.snapshot = { epoch: 0, takenAtMs: 0, switches: [] };
   });
 

@@ -30,6 +30,7 @@ import { AgentsDashboardPageV3 } from "./components/AgentsDashboardPageV3";
 import { WorkflowsPageV3 } from "./components/WorkflowsPageV3";
 import { DigitalTwinPageV3 } from "./components/digital-twin/DigitalTwinPageV3";
 import { AdminPageV3 } from "./components/AdminPageV3";
+import { GovernancePageV3 } from "./components/GovernancePageV3";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
 import { RunsPageV3 } from "./components/RunsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
@@ -231,6 +232,15 @@ export function AppV3() {
               isAdmin ? (
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                   <EvalsPageV3 userId={userId} />
+                </div>
+              ) : isAdminLoading ? null : (
+                <Navigate to="/v3/home" replace />
+              )
+            } />
+            <Route path="/v3/governance" element={
+              isAdmin ? (
+                <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                  <GovernancePageV3 userId={userId} />
                 </div>
               ) : isAdminLoading ? null : (
                 <Navigate to="/v3/home" replace />
