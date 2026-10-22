@@ -53,6 +53,30 @@ class MtlsProxyModule: NSObject {
         }
     }
 
+    /// Resolve `true` only if the running listener answers on loopback.
+    @objc(checkHealth:reject:)
+    func checkHealth(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        MtlsProxyServer.shared.checkHealth { healthy in
+            resolve(NSNumber(value: healthy))
+        }
+    }
+
+    /// Replace a dead listener, keeping the auth token. Resolves the new port.
+    @objc(restart:resolve:reject:)
+    func restart(
+        apiBaseUrl: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        MtlsProxyServer.shared.restart(allowedBaseURL: apiBaseUrl) { success, actualPort, error in
+            if success {
+                resolve(NSNumber(value: actualPort))
+            } else {
+                reject("RESTART_ERROR", error?.localizedDescription ?? "Unknown error", error)
+            }
+        }
+    }
+
     /// Stop the proxy server
     @objc(stop:reject:)
     func stop(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {

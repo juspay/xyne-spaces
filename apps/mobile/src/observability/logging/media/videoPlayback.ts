@@ -68,11 +68,19 @@ export type VideoPlaybackFailedFields = Readonly<{
   sizeBytes: number | null;
   errorCategory: VideoPlaybackErrorCategory;
   /**
-   * `NSError` `Domain:code` (iOS) when present in the message. Always `null`
-   * on Android: expo-video's `PlaybackError` only forwards
-   * `localizedMessage`, not ExoPlayer's `ERROR_CODE_*`.
+   * `NSError` `Domain:code` (iOS) when present in the message. Our expo-video
+   * patch appends it as `[Domain:code]`, because AVFoundation's description is
+   * often just "unknown error". Always `null` on Android: expo-video's
+   * `PlaybackError` only forwards `localizedMessage`, not ExoPlayer's
+   * `ERROR_CODE_*`.
    */
   errorCode: string | null;
+  /**
+   * The underlying `NSError` `Domain:code` (iOS, from `NSUnderlyingErrorKey`),
+   * usually the real cause behind a generic AVFoundation error. `null` when
+   * absent and always `null` on Android.
+   */
+  underlyingErrorCode: string | null;
   /** Native decoder named in the error (e.g. `c2.mtk.hevc.decoder`), when present. */
   decoderName: string | null;
   /** Player error message with URLs stripped, truncated to 500 chars. */
@@ -90,11 +98,20 @@ const DECODER_PATTERN =
 const PARSE_PATTERN =
   /ParserException|UnrecognizedInputFormat|malformed|AVFoundationErrorDomain[^\d-]*-11850/i;
 const NETWORK_PATTERN =
-  /Unable to connect|timed? ?out|network|connection (?:refused|reset|closed|abort)|UnknownHost|SocketException|SSLHandshake|NSURLErrorDomain|not connected/i;
+  /Unable to connect|Could not connect|timed? ?out|network|connection (?:refused|reset|closed|abort)|UnknownHost|SocketException|SSLHandshake|NSURLErrorDomain|not connected/i;
 /** Only an explicit HTTP status counts as an HTTP failure. */
 const HTTP_PATTERN = /Response code:\s*[45]\d\d\b/i;
+/**
+ * `NSURLErrorBadServerResponse` (-1011): the server answered, but with an
+ * error status. Checked before the network pattern, which matches any
+ * `NSURLErrorDomain` error.
+ */
+const BAD_SERVER_RESPONSE_PATTERN = /NSURLErrorDomain[^\d-]*-1011\b/;
 
 const NS_ERROR_CODE_PATTERN = /([A-Za-z]+ErrorDomain)[^\d-]*(-?\d+)/;
+/** Tags appended by patches/expo-video+57.0.2.patch. */
+const TAGGED_ERROR_CODE_PATTERN = /\[([A-Za-z]+ErrorDomain):(-?\d+)\]/;
+const TAGGED_UNDERLYING_CODE_PATTERN = /\[underlying ([A-Za-z]+ErrorDomain):(-?\d+)\]/;
 const DECODER_NAME_PATTERN = /\b((?:c2|OMX)\.[A-Za-z0-9_.-]+)/;
 const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>),\]]+/gi;
 
@@ -140,6 +157,7 @@ export function classifyVideoPlaybackError(
   if (stage === 'stream_url') return 'stream_setup';
   if (DECODER_PATTERN.test(message)) return 'decoder_unsupported';
   if (PARSE_PATTERN.test(message)) return 'container_parse';
+  if (BAD_SERVER_RESPONSE_PATTERN.test(message)) return 'http';
   // Network before HTTP: "Unable to connect to http://127.0.0.1:…" contains
   // "http" but is a connectivity failure. HTTP only on an explicit status.
   if (NETWORK_PATTERN.test(message)) return 'network';
@@ -148,9 +166,22 @@ export function classifyVideoPlaybackError(
 }
 
 export function extractVideoErrorCode(message: string): string | null {
-  const ns = NS_ERROR_CODE_PATTERN.exec(message);
+  const ns = TAGGED_ERROR_CODE_PATTERN.exec(message) ?? NS_ERROR_CODE_PATTERN.exec(message);
   if (ns) return `${ns[1]}:${ns[2]}`;
   return null;
+}
+
+export function extractVideoUnderlyingErrorCode(message: string): string | null {
+  const ns = TAGGED_UNDERLYING_CODE_PATTERN.exec(message);
+  return ns ? `${ns[1]}:${ns[2]}` : null;
+}
+
+/**
+ * The player message without the `[Domain:code]` tags our expo-video patch
+ * appends. Those are for telemetry; the viewer shows the readable part.
+ */
+export function stripVideoErrorCodeTags(message: string): string {
+  return message.replace(/\s*\[(?:underlying )?[A-Za-z]+ErrorDomain:-?\d+\]/g, '');
 }
 
 export function extractVideoDecoderName(message: string): string | null {
@@ -238,6 +269,7 @@ export function buildVideoPlaybackFailed(input: {
     sizeBytes: normalizeSize(input.subject.sizeBytes),
     errorCategory: classifyVideoPlaybackError(input.stage, errorMessage),
     errorCode: extractVideoErrorCode(errorMessage),
+    underlyingErrorCode: extractVideoUnderlyingErrorCode(errorMessage),
     decoderName: extractVideoDecoderName(errorMessage),
     errorMessage,
     msSinceOpen: elapsed(input.openedAtMs, input.nowMs),

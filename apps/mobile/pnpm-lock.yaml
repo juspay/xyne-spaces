@@ -85,6 +85,9 @@ patchedDependencies:
   expo-modules-jsi@57.0.4:
     hash: fa97750fc488cd74a33bc0a9e35f8ac3d1b3f80258123ffd3f9f1c135d084ee1
     path: patches/expo-modules-jsi+57.0.4.patch
+  expo-video@57.0.2:
+    hash: 621ce68e00897450549ee10c5715a9106648b886e8b4ed1975cb390d22d4e819
+    path: patches/expo-video+57.0.2.patch
   react-native-callkeep@4.3.16:
     hash: 76fe8d8b855a4584dda13e194720845db75d9afa849137dc3b5890aaf6d18832
     path: patches/react-native-callkeep+4.3.16.patch
