@@ -35,7 +35,8 @@ import {
   validateSubagentInput,
   nextChecksVersion,
 } from "../lib/subagent-resolver.js";
-import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, validateDecideQuestions } from "xyne-claw-shared";
+import { tryChecksViaClaw } from "../services/xorTryClient.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
@@ -243,6 +244,24 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   });
 
   res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
+}));
+
+// ── POST /checks/try — run one xor decision on a pasted sample ──────────
+router.post("/checks/try", asyncHandler(async (req: Request, res: Response) => {
+  if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
+  const body = (req.body ?? {}) as { checks?: unknown; text?: unknown; image?: unknown; context?: unknown };
+  const v = validateDecideQuestions(body.checks);
+  if ("error" in v) throw new HttpError(400, `checks: ${v.error}`, undefined, { field: "checks" });
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const image = typeof body.image === "string" ? body.image : "";
+  if (!text && !image) throw badRequest("paste some text or add a screenshot to try");
+  const result = await tryChecksViaClaw({
+    questions: v.questions,
+    item: { ...(text ? { text } : {}), ...(image ? { image } : {}) },
+    ...(typeof body.context === "string" && body.context.trim() ? { context: body.context } : {}),
+  });
+  if (!result.ok) throw new HttpError(result.status, result.error);
+  ok(res, { answers: result.answers, unavailable: result.unavailable, ms: result.ms });
 }));
 
 // ── PUT /:name — update (owner OR admin OR EDITOR share) ─────────────────
