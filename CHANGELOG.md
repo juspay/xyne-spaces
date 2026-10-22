@@ -1,3 +1,10 @@
+## [1.517.0-release-20261022.1](https://github.com/juspay/xyne-spaces/compare/v1.516.0...v1.517.0-release-20261022.1) (2026-10-22)
+
+
+### Features
+
+* seperate worker for conversation flows- [#3341](https://github.com/juspay/xyne-spaces/issues/3341) ([#3342](https://github.com/juspay/xyne-spaces/issues/3342)) ([18a59f6](https://github.com/juspay/xyne-spaces/commit/18a59f66fc4501bb3c6c7bc9ad8653cd4a56cf76))
+
 ## [1.516.0](https://github.com/juspay/xyne-spaces/compare/v1.515.0...v1.516.0) (2026-10-22)
 
 
