@@ -4,6 +4,12 @@ export const CANVAS_BACKGROUNDS = ['light', 'dark', 'checkerboard'] as const;
 
 export type CanvasBackground = (typeof CANVAS_BACKGROUNDS)[number];
 
+export const CANVAS_BACKGROUND_LABELS: Record<CanvasBackground, string> = {
+  light: 'Default',
+  dark: 'Dark',
+  checkerboard: 'Checkerboard',
+};
+
 export function nextCanvasBackground(current: CanvasBackground): CanvasBackground {
   const index = CANVAS_BACKGROUNDS.indexOf(current);
   return CANVAS_BACKGROUNDS[(index + 1) % CANVAS_BACKGROUNDS.length] ?? 'light';
