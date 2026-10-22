@@ -122,6 +122,7 @@ describe("commitSkillVersion", () => {
 
   it("uploads once per hash, records a version without its bytes when storage fails, and repairs the row on the next identical write", async () => {
     const { gcsService } = await import("../services/storageService.js");
+    vi.mocked(gcsService.uploadFile).mockClear();
     vi.mocked(gcsService.uploadFile).mockRejectedValueOnce(new Error("gcs down"));
     const first = await commitSkillVersion(skill, { writtenBy: "person", userId: "u1", approvedVia: "owner" });
     expect(first).toMatchObject({ status: "approved" });
