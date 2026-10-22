@@ -1310,7 +1310,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
       ? (async () => {
           const appCreds = await getAppTokenCredentials(userId);
           if (!appCreds) return null;
-          return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
+          return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds, undefined, { cutoff: true });
         })().catch((err) => {
           log.error("[mcp/tools] App token fallback failed:", err);
           return null;
@@ -1337,6 +1337,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
         entry.serverName,
         entry.credentials,
         agentSlug,
+        { cutoff: true },
       );
       return {
         ...serverTools,
@@ -1372,6 +1373,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
       entry.serverName,
       effective.credentials,
       agentSlug,
+      { cutoff: true },
     );
     return { entry, serverTools };
   }
