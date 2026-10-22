@@ -6,6 +6,7 @@ import {
   flowCardLabel,
   flowCardType,
   flowFallbackLabel,
+  flowVisibleText,
 } from '../dist/utils/flowCardLabel.js';
 
 const card = (type, props, extra = {}) => ({
@@ -148,4 +149,45 @@ test('decodes the stored message attribute', () => {
   assert.equal(flowCardLabel(decoded), '🤖 Shared an agent · Q & A');
   assert.equal(decodeFlowJsonAttribute('<p>plain</p>'), null);
   assert.equal(decodeFlowJsonAttribute('<div data-flow-json="{not json">x</div>'), null);
+});
+
+test('cards with no label fall back to their visible text', () => {
+  const flow = components => ({ components });
+  assert.equal(
+    flowFallbackLabel(flow([{ id: 'h', type: 'heading', props: { content: 'Weekly report' } }])),
+    'Weekly report',
+  );
+  assert.equal(
+    flowFallbackLabel(flow([{ id: 't', type: 'table', props: { rows: [['Name', 'Owner'], ['a', 'b']] } }])),
+    'Name · Owner',
+  );
+  assert.equal(
+    flowFallbackLabel(flow([{ id: 'l', type: 'link', props: { href: 'https://x.dev', label: 'Open dashboard' } }])),
+    'Open dashboard',
+  );
+  assert.equal(
+    flowFallbackLabel(flow([{ id: 'i', type: 'image', props: { src: 'x.png', alt: 'Latency graph' } }])),
+    'Latency graph',
+  );
+  assert.equal(
+    flowFallbackLabel(
+      flow([
+        {
+          id: 's',
+          type: 'slash_command_artifact',
+          props: {},
+          children: [{ id: 'b', type: 'text', props: { content: 'Incident declared: login down' } }],
+        },
+      ]),
+    ),
+    'Incident declared: login down',
+  );
+  assert.equal(flowFallbackLabel(flow([{ id: 'd', type: 'divider' }])), GENERIC_FLOW_CARD_LABEL);
+});
+
+test('visible text is capped', () => {
+  const long = 'x'.repeat(500);
+  const out = flowVisibleText({ components: [{ id: 't', type: 'text', props: { content: long } }] });
+  assert.equal(out.length, 200);
+  assert.ok(out.endsWith('…'));
 });

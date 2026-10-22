@@ -197,11 +197,39 @@ export function flowCardLabel(flow: FlowCardLike): string | null {
   return null;
 }
 
+const VISIBLE_TEXT_LIMIT = 200;
+
+function visibleTextOf(component: Record<string, unknown>): string[] {
+  const props = record(component['props']);
+  if (component['type'] === 'link') return [text(props['label'])];
+  if (component['type'] === 'image') return [text(props['alt'])];
+  if (component['type'] === 'table') {
+    const rows = Array.isArray(props['rows']) ? (props['rows'] as unknown[]) : [];
+    const first = Array.isArray(rows[0]) ? (rows[0] as unknown[]) : [];
+    return [first.map(text).filter(Boolean).join(' · ')];
+  }
+  return [text(props['content'])];
+}
+
+export function flowVisibleText(flow: FlowCardLike): string {
+  const parts: string[] = [];
+  const queue = Array.isArray(flow.components) ? [...(flow.components as unknown[])] : [];
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || typeof next !== 'object') continue;
+    const component = next as Record<string, unknown>;
+    parts.push(...visibleTextOf(component));
+    if (Array.isArray(component['children'])) queue.push(...(component['children'] as unknown[]));
+  }
+  const joined = parts.filter(Boolean).join(' — ');
+  return joined.length > VISIBLE_TEXT_LIMIT ? `${joined.slice(0, VISIBLE_TEXT_LIMIT - 1)}…` : joined;
+}
+
 export function flowFallbackLabel(flow: FlowCardLike | null): string {
   if (!flow) return GENERIC_FLOW_CARD_LABEL;
   const fallbackText = text(record(flow.data)['fallbackText']);
   if (fallbackText) return fallbackText;
   const title = text(flow.title);
   if (title) return title;
-  return flowCardLabel(flow) ?? GENERIC_FLOW_CARD_LABEL;
+  return flowCardLabel(flow) ?? (flowVisibleText(flow) || GENERIC_FLOW_CARD_LABEL);
 }

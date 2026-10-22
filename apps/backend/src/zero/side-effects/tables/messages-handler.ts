@@ -38,7 +38,7 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType, parseSlashCommandArtifactMessage, decodeFlowJsonAttribute, flowCardLabel, flowFallbackLabel } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage, decodeFlowJsonAttribute, flowCardLabel } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -53,11 +53,10 @@ import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import {
   cleanNotificationText,
-  getFlowJsonContentForNotification,
+  flowMessagePreviewText,
+  flowMessageSearchText,
   getFlowJsonRawTextForMentions,
 } from '@/utils/flowJson';
-// Re-exported so existing importers (e.g. vespa-injection mapper) keep working.
-export { getFlowJsonContentForNotification };
 import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -131,12 +130,7 @@ function getNotificationPreviewContent(content: string, msgType: string, hasAtta
     } else {
       // For flow JSON messages, extract text from the component tree instead of
       // parsing HTML (which only sees the literal "Flow JSON" text node).
-      const flowText = getFlowJsonContentForNotification(content);
-      cleanContent =
-        flowText ||
-        (content.includes('data-flow-json')
-          ? flowFallbackLabel(decodeFlowJsonAttribute(content))
-          : getPlainTextNotificationContent(content));
+      cleanContent = flowMessagePreviewText(content) ?? getPlainTextNotificationContent(content);
     }
   }
 
@@ -155,8 +149,7 @@ function getPlainTextNotificationContent(content: string): string {
  * Plain text to scan for keyword notifications.
  */
 function getKeywordScanText(content: string): string {
-  const flowText = getFlowJsonContentForNotification(content);
-  return flowText ?? getPlainTextNotificationContent(content);
+  return flowMessageSearchText(content) ?? getPlainTextNotificationContent(content);
 }
 
 export function formatDmChannelName(names: string[], maxVisible: number = 2): string {
