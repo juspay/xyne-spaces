@@ -3,6 +3,7 @@ import { Hashtag as HashV2, CalendarEvent } from '@xyne/icons';
 import * as Popover from '@radix-ui/react-popover';
 import { useRef, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useHasResourceAccess } from '../../hooks/usePermissions';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
@@ -104,6 +105,7 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
     currentUserId,
   } = props;
   const navigate = useNavigate();
+  const isScribeAdmin = useHasResourceAccess('SCRIBE');
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
@@ -135,20 +137,22 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                 <XyneAIStar size={15} />
                 Ask AI
               </Button>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => void navigate('/calls/admin')}
-                className={cn(
-                  'h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold',
-                  !isMobile && 'hover:bg-muted/70',
-                )}
-                data-track-category='CALLS'
-                data-track-name='open-calls-admin'
-              >
-                <Settings2 size={15} />
-                Manage calls
-              </Button>
+              {isScribeAdmin && (
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => void navigate('/calls/admin')}
+                  className={cn(
+                    'h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold',
+                    !isMobile && 'hover:bg-muted/70',
+                  )}
+                  data-track-category='CALLS'
+                  data-track-name='open-calls-admin'
+                >
+                  <Settings2 size={15} />
+                  Manage calls
+                </Button>
+              )}
               <Button
                 type='button'
                 variant='outline'
@@ -210,22 +214,24 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                   </span>
                 </button>
               )}
-              <button
-                type='button'
-                onClick={() => void navigate('/calls/admin')}
-                data-track-category='CALLS'
-                data-track-name='open-calls-admin'
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border border-border text-foreground transition-colors',
-                  !isMobile && 'hover:bg-muted',
-                )}
-              >
-                <Settings2 className='size-3.5' />
-                <span>
-                  <span className='md:hidden'>Manage</span>
-                  <span className='hidden md:inline'>Manage calls</span>
-                </span>
-              </button>
+              {isScribeAdmin && (
+                <button
+                  type='button'
+                  onClick={() => void navigate('/calls/admin')}
+                  data-track-category='CALLS'
+                  data-track-name='open-calls-admin'
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border border-border text-foreground transition-colors',
+                    !isMobile && 'hover:bg-muted',
+                  )}
+                >
+                  <Settings2 className='size-3.5' />
+                  <span>
+                    <span className='md:hidden'>Manage</span>
+                    <span className='hidden md:inline'>Manage calls</span>
+                  </span>
+                </button>
+              )}
             </div>
           </>
         )}

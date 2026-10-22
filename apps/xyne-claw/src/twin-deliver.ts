@@ -320,7 +320,7 @@ export function installStopAfterDelivery(agent: object, delivered: () => boolean
     const prev = cfg.shouldStopAfterTurn;
     cfg.shouldStopAfterTurn = async (ctx: unknown): Promise<boolean> => {
       if (delivered()) {
-        log.info("[twin-deliver] delivery accepted — ending the run at this turn boundary");
+        log.info("[agent] stop condition met (twin delivery or question posted) — ending the run at this turn boundary");
         return true;
       }
       return prev ? Boolean(await prev(ctx)) : false;

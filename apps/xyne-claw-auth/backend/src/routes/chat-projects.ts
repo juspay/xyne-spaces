@@ -29,6 +29,119 @@ const log = createLogger("chat-projects");
 
 export const chatProjectsRouter: Router = Router();
 
+/**
+ * Filing a chat into a project, and the `?projectId=` list scope, are project
+ * operations that the conversation routes in agent-chat.ts drive. They live
+ * here with the rest of the project domain — and, practically, because
+ * agent-chat.ts cannot be imported in a test without its whole dependency
+ * graph, while this module can.
+ */
+
+export type PreparedProjectMove =
+  | { status: "ok"; projectId: string | null; apply: () => Promise<void> }
+  | { status: "project-not-found" };
+
+/**
+ * Validate a move and hand back the write, without performing it.
+ *
+ * Split in two on purpose. The conversation PATCH can carry a title and a pin
+ * alongside `projectId`, and it used to write those first — so a bad project
+ * id saved the title and THEN answered 404. The dashboard's optimistic update
+ * rolls back on that 404, reverting a title the server had actually kept.
+ * Resolving everything before the first write removes the half-applied state.
+ *
+ * `ownerUserId` must be the id the conversation's own chat rows use, so the
+ * membership is found again on read; `aliases` lets the repository sweep a row
+ * filed earlier under the caller's other verified id.
+ */
+export async function prepareProjectMove(args: {
+  conversationId: string;
+  ownerUserId: string;
+  ownerOrgId: string;
+  aliases: string[];
+  projectId: string | null;
+}): Promise<PreparedProjectMove> {
+  if (args.projectId === null) {
+    return {
+      status: "ok",
+      projectId: null,
+      apply: async () => {
+        await chatProjectRepository.removeConversation(args.conversationId, args.aliases);
+      },
+    };
+  }
+
+  const project = await chatProjectRepository.findOwned(
+    args.projectId.trim(),
+    args.aliases,
+    args.ownerOrgId,
+  );
+  // Owner-only, and same org as the chat. Null covers "not yours" and "no such
+  // project" alike, so the caller answers 404 either way.
+  if (!project) return { status: "project-not-found" };
+
+  return {
+    status: "ok",
+    projectId: project.id,
+    apply: async () => {
+      await chatProjectRepository.moveConversation(
+        {
+          conversationId: args.conversationId,
+          userId: args.ownerUserId,
+          projectId: project.id,
+          // Taken from the project row, never the request: nothing in the
+          // schema enforces item.orgId == project.orgId.
+          orgId: project.orgId,
+        },
+        args.aliases,
+      );
+    },
+  };
+}
+
+/** conversationId sets for `?projectId=`. `only` narrows to a project (and
+ *  stays empty for an empty one); `exclude` powers `?projectId=none`. */
+export interface ProjectListScope {
+  only?: string[];
+  exclude?: string[];
+}
+
+export type ProjectScopeResult =
+  | { status: "ok"; scope: ProjectListScope | undefined }
+  | { status: "project-not-found" };
+
+/**
+ * Turn `?projectId=` into a conversationId set for the list aggregate.
+ *
+ * Returns `scope: undefined` when the param is absent — no filtering. An empty
+ * `only` is NOT the same thing and must survive: it means a project with no
+ * chats, which lists nothing.
+ */
+export async function resolveProjectScope(args: {
+  projectParam: string | undefined;
+  userIds: string[];
+  orgId: string | undefined;
+}): Promise<ProjectScopeResult> {
+  if (!args.projectParam) return { status: "ok", scope: undefined };
+
+  if (args.projectParam === "none") {
+    return {
+      status: "ok",
+      scope: { exclude: await chatProjectRepository.filedConversationIds(args.userIds) },
+    };
+  }
+
+  const project = args.orgId
+    ? await chatProjectRepository.findOwned(args.projectParam, args.userIds, args.orgId)
+    : null;
+  if (!project) return { status: "project-not-found" };
+
+  return {
+    status: "ok",
+    scope: { only: await chatProjectRepository.conversationIdsInProject(project.id, args.userIds) },
+  };
+}
+
 const MAX_PROJECT_NAME_CHARS = 120;
 const MAX_PROJECT_ICON_CHARS = 64;
 const MAX_PROJECT_INSTRUCTIONS_CHARS = 10_000;

@@ -49,6 +49,8 @@ interface RankedPeopleOptions {
   seedDmContactsAtRest?: boolean;
   /** Substring fallback when Fuse returns nothing (1-char / gapped 2-char queries). */
   substringFallback?: boolean;
+  /** Matches already searched elsewhere (e.g. `useWorkerUserSearch`); skips the main-thread search. */
+  searchCandidates?: User[];
 }
 
 /**
@@ -64,7 +66,9 @@ export function useRankedActivePeople(
   opts: RankedPeopleOptions = {},
 ): User[] {
   const activeUsers = useActiveUsers();
-  const searchCandidates = useActiveUserSearch(query, limit);
+  // With precomputed candidates the search is skipped: an empty query only slices the list.
+  const mainThreadCandidates = useActiveUserSearch(opts.searchCandidates ? '' : query, limit);
+  const searchCandidates = opts.searchCandidates ?? mainThreadCandidates;
   const defaultRecency = useDmContactRecency();
   const affinityVersion = useAffinityCallback();
 

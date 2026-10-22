@@ -742,7 +742,9 @@ export const mutators = defineMutators({
           throw new Error('You are not a participant of this channel');
         }
 
-        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        const existingChannel = await tx.run(
+          zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+        );
         if (existingChannel && existingChannel.id !== channelId) {
           throw new Error('A channel with this name already exists');
         }
@@ -1498,6 +1500,56 @@ export const mutators = defineMutators({
         });
       },
     ),
+    moveManyToSection: defineMutator(
+      z.object({
+        sectionId: z.string().nullable(),
+        items: z
+          .array(z.object({ channelId: z.string(), position: z.string() }))
+          .min(1)
+          .max(200),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { sectionId, items, timestamp } }) => {
+        if (sectionId) {
+          const section = await tx.run(
+            zql.channel_sections
+              .where('id', sectionId)
+              .where('userId', ctx.userID)
+              .where('isDeleted', false)
+              .one(),
+          );
+          if (!section) {
+            throw new Error('Section not found');
+          }
+        }
+
+        const statuses = await tx.run(
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .where(h =>
+              h.cmp(
+                'channelId',
+                'IN',
+                items.map(item => item.channelId),
+              ),
+            ),
+        );
+        const statusByChannelId = new Map(statuses.map(status => [status.channelId, status]));
+
+        for (const item of items) {
+          const userStatus = statusByChannelId.get(item.channelId);
+          if (!userStatus) continue;
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            sectionId,
+            sectionPosition: sectionId ? item.position : null,
+            ...(sectionId ? { isStarred: false } : {}),
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
     // Link boards to a channel (channel_board_mappings). Additive only: this never
     // removes a mapping, so a board that is already linked is silently skipped
     // rather than erroring — the unique (channelId, boardId) index would reject it,
@@ -1839,7 +1891,9 @@ export const mutators = defineMutators({
         }
 
         // Check for duplicate name
-        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        const existingChannel = await tx.run(
+          zql.channels.where('workspaceId', channel.workspaceId).where('name', name).one(),
+        );
         if (existingChannel && existingChannel.id !== channelId) {
           throw new Error('A channel with this name already exists');
         }

@@ -123,82 +123,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       hostWorkspaceId: actor.workspaceId,
       connectId,
     });
-    if (input.trackId) {
-      await tx.sdlcEntityLink.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          channelId,
-          sourceType: trackFolderId ? 'FOLDER' : 'TRACK',
-          sourceId: trackFolderId ?? input.trackId,
-          targetType: 'CANVAS',
-          targetId: canvas.id,
-          relationType: SDLC_CONTAINMENT_RELATION,
-          createdBy: actor.userId,
-        },
-      });
-      await tx.sdlcEntityLink.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          channelId,
-          sourceType: 'TRACK',
-          sourceId: input.trackId,
-          targetType: 'CANVAS',
-          targetId: canvas.id,
-          relationType: SDLC_TRACK_FLAT_RELATION,
-          createdBy: actor.userId,
-        },
-      });
-      await refileFolderEdges(
-        tx,
-        {
-          channelId,
-          item: { type: 'CANVAS', id: canvas.id },
-          parent: trackFolderId
-            ? { type: 'FOLDER', id: trackFolderId }
-            : { type: 'TRACK', id: input.trackId },
-        },
-        { workspaceId: actor.workspaceId, userId: actor.userId }
-      );
-    }
-    await tx.sdlcArtifact.create({
-      data: {
-        workspaceId: actor.workspaceId,
-        ...(repo ? { repoId: repo.id } : {}),
-        artifactId: canvas.id,
-        artifactType: hubKnowledge ? SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE : 'DEFAULT',
-        artifactStatus: 'ACTIVE',
-        createdBy: actor.userId,
-      },
-    });
-
-    if (hubKnowledge) {
-      const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
-      const knowledgeFolderId = await ensureHubKnowledgeFolder(tx, actorRef, channelId);
-      await placeHubItem(tx, actorRef, {
-        channelId,
-        scopeFolderId: knowledgeFolderId,
-        parentId: knowledgeFolderId,
-        targetType: 'CANVAS',
-        targetId: canvas.id,
-      });
-    }
-
-    for (const artifactRepoId of repoIds) {
-      await ensureLink(
-        tx,
-        {
-          channelId,
-          sourceType: 'CANVAS',
-          sourceId: canvas.id,
-          targetType: 'REPOSITORY',
-          targetId: artifactRepoId,
-          relationType: SDLC_ARTIFACT_REPOSITORY_RELATION,
-        },
-        { workspaceId: actor.workspaceId, userId: actor.userId }
-      );
-    }
-
-    await linkRelatedCanvases(tx, actor, channelId, canvas.id, input.relatedCanvasIds);
+    await fileArtifactTx(tx, actor, channelId, canvas.id, { ...input, trackFolderId, hubKnowledge, repoId: repo?.id, repoIds });
     return {
       artifact: {
         canvasId: canvas.id,
@@ -209,6 +134,114 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       content,
     };
   });
+}
+
+export function adoptCanvasAsArtifactTx(self: SdlcHubService, actor: SdlcActor, canvas: { id: string; connectId: string | null }, channelId: string, folderId: string, projectId: string, trackId: string | undefined, trackFolderId: string | undefined) {
+  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'adoptCanvasAsArtifact: hub placement, hub access and artifact links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+    const connectId = canvas.connectId ?? newConnectId();
+    if (!canvas.connectId) {
+      await createConnectGroupForEntity(tx, {
+        entityType: ConnectEntityType.CANVAS,
+        entityId: canvas.id,
+        hostWorkspaceId: actor.workspaceId,
+        connectId,
+      });
+    }
+    await tx.canvas.update({
+      where: { id: canvas.id },
+      data: { channelId, folderId, projectId, connectId },
+    });
+    // Existing shares stay; the hub gets the same read access a created artifact gives it.
+    const [hubParticipant] = sdlcCanvasParticipants(actor.workspaceId, channelId, actor.userId, connectId);
+    await tx.canvasParticipant.upsert({
+      where: { canvasId_channelId: { canvasId: canvas.id, channelId } },
+      create: { ...hubParticipant, canvasId: canvas.id },
+      update: {},
+    });
+    await fileArtifactTx(tx, actor, channelId, canvas.id, { trackId, trackFolderId, hubKnowledge: !trackId, repoIds: [] });
+  });
+}
+
+async function placeHubKnowledge(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string) {
+  const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
+  const knowledgeFolderId = await ensureHubKnowledgeFolder(tx, actorRef, channelId);
+  await placeHubItem(tx, actorRef, {
+    channelId,
+    scopeFolderId: knowledgeFolderId,
+    parentId: knowledgeFolderId,
+    targetType: 'CANVAS',
+    targetId: canvasId,
+  });
+}
+
+/** Track edges, artifact row, Hub Knowledge placement and repo/related links that make a canvas an SDLC artifact. */
+async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string, opts: { trackId?: string | undefined; trackFolderId?: string | undefined; hubKnowledge: boolean; repoId?: string | undefined; repoIds: string[]; relatedCanvasIds?: string[] | undefined }) {
+  if (opts.trackId) {
+    await tx.sdlcEntityLink.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        channelId,
+        sourceType: opts.trackFolderId ? 'FOLDER' : 'TRACK',
+        sourceId: opts.trackFolderId ?? opts.trackId,
+        targetType: 'CANVAS',
+        targetId: canvasId,
+        relationType: SDLC_CONTAINMENT_RELATION,
+        createdBy: actor.userId,
+      },
+    });
+    await tx.sdlcEntityLink.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        channelId,
+        sourceType: 'TRACK',
+        sourceId: opts.trackId,
+        targetType: 'CANVAS',
+        targetId: canvasId,
+        relationType: SDLC_TRACK_FLAT_RELATION,
+        createdBy: actor.userId,
+      },
+    });
+    await refileFolderEdges(
+      tx,
+      {
+        channelId,
+        item: { type: 'CANVAS', id: canvasId },
+        parent: opts.trackFolderId
+          ? { type: 'FOLDER', id: opts.trackFolderId }
+          : { type: 'TRACK', id: opts.trackId },
+      },
+      { workspaceId: actor.workspaceId, userId: actor.userId }
+    );
+  }
+  await tx.sdlcArtifact.create({
+    data: {
+      workspaceId: actor.workspaceId,
+      ...(opts.repoId ? { repoId: opts.repoId } : {}),
+      artifactId: canvasId,
+      artifactType: opts.hubKnowledge ? SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE : 'DEFAULT',
+      artifactStatus: 'ACTIVE',
+      createdBy: actor.userId,
+    },
+  });
+
+  if (opts.hubKnowledge) await placeHubKnowledge(tx, actor, channelId, canvasId);
+
+  for (const artifactRepoId of opts.repoIds) {
+    await ensureLink(
+      tx,
+      {
+        channelId,
+        sourceType: 'CANVAS',
+        sourceId: canvasId,
+        targetType: 'REPOSITORY',
+        targetId: artifactRepoId,
+        relationType: SDLC_ARTIFACT_REPOSITORY_RELATION,
+      },
+      { workspaceId: actor.workspaceId, userId: actor.userId }
+    );
+  }
+
+  await linkRelatedCanvases(tx, actor, channelId, canvasId, opts.relatedCanvasIds);
 }
 
 export function updateArtifactTitleOrLinksTx(self: SdlcHubService, actor: SdlcActor, channelId: string, existing: { id: string; viewAccessId: string | null; title: string }, input: { title?: string | undefined; relatedCanvasIds?: string[] | undefined }) {
@@ -290,8 +323,11 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
 }
 
   /** The private channel a hub lives in, plus its starting artifact-type folders. */
-export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, channelId: string, input: { canvasId: string; parentId: string }, toRoot: boolean) {
-  return transaction(['SdlcEntityLink'], 'moveArtifactFromClaw: the old containment edge, the new one and the folder edges that follow must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, channelId: string, input: { canvasId: string; parentId: string; folderId?: string | undefined }, toRoot: boolean) {
+  return transaction(['Canvas', 'SdlcEntityLink'], 'moveArtifactFromClaw: the type, the old containment edge, the new one and the folder edges that follow must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+    if (input.folderId) {
+      await tx.canvas.update({ where: { id: input.canvasId }, data: { folderId: input.folderId } });
+    }
     await tx.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -321,6 +357,28 @@ export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, c
       },
       { workspaceId: actor.workspaceId, userId: actor.userId }
     );
+  });
+}
+
+/** Takes a track artifact out of its track and files it as Hub Knowledge, like creating one there. */
+export function moveArtifactToHubKnowledgeTx(self: SdlcHubService, actor: SdlcActor, channelId: string, canvasId: string, folderId: string) {
+  return transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder'], 'moveArtifactToHubKnowledge: leaving the track, the type and the Hub Knowledge placement must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+    await tx.sdlcEntityLink.deleteMany({
+      where: {
+        channelId,
+        relationType: { in: [SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION] },
+        targetType: 'CANVAS',
+        targetId: canvasId,
+      },
+    });
+    await refileFolderEdges(
+      tx,
+      { channelId, item: { type: 'CANVAS', id: canvasId }, parent: null },
+      { workspaceId: actor.workspaceId, userId: actor.userId }
+    );
+    await tx.canvas.update({ where: { id: canvasId }, data: { folderId } });
+    await tx.sdlcArtifact.update({ where: { artifactId: canvasId }, data: { artifactType: SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE } });
+    await placeHubKnowledge(tx, actor, channelId, canvasId);
   });
 }
 

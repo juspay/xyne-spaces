@@ -3,6 +3,7 @@
 * navigating via sidebar to "chat"
 * clicking on stored channel <channelAlias> name for user <userAlias>
 * waiting for network to be idle
+* waiting for "[data-testid='chat-list-loading']" to disappear
 
 # Creating channel <channelAlias> for user <userAlias> in project <projectAlias>
 * ensuring project <projectAlias> exists in fixture for user <userAlias>

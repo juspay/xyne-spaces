@@ -306,6 +306,10 @@ export interface ConversationHistory {
   /** The agent to open and continue this conversation with — the one active
    *  most recently. Set by the all-agents history. */
   agentSlug?: string;
+  /** The chat project this conversation is filed in, null when unfiled.
+   *  Undefined on rows from a backend older than XYNE-66809, which renders
+   *  the same as unfiled. */
+  projectId?: string | null;
 }
 
 // ============================================================================

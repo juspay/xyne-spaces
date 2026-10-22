@@ -75,6 +75,7 @@ router.get('/chat/:externalId/participants', requireInternalCallParticipant, cal
 
 // Get another user's scheduled calls (must come before /:callId wildcard)
 router.get('/user/:userId/scheduled', scheduleCallController.getOtherUserScheduledCalls);
+router.get('/user/:userId/scheduled/:callId/participants', scheduleCallController.getOtherUserCallParticipants);
 
 // Edit a single scheduled call instance (must come after all static /... routes)
 router.patch('/:callId', scheduleCallController.updateScheduledCall);
