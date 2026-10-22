@@ -68,6 +68,8 @@ export interface GateInput {
   /** The permission the caller sent; it can only tighten. */
   permissionHint?: string | undefined;
   writeTool?: boolean | undefined;
+  /** The listing's description of the tool; its opening verb classifies a name that has none. */
+  description?: string | undefined;
   annotations?: ToolAnnotations | undefined;
   c1?: C1Handoff | undefined;
 }
@@ -139,7 +141,7 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
   });
   if (mode === "off") return allow("GOV-ALLOW", "Governance is off for C2.");
   try {
-    const descriptor = resolveToolDescriptor({ toolName: input.tool, serverType: input.serverType, writeTool: input.writeTool, annotations: input.annotations, args: input.params });
+    const descriptor = resolveToolDescriptor({ toolName: input.tool, serverType: input.serverType, writeTool: input.writeTool, description: input.description, annotations: input.annotations, args: input.params });
     const argsText = JSON.stringify(input.params ?? {}).slice(0, 65_536);
     const argScan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + 50 });
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");

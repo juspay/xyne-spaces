@@ -45,6 +45,8 @@ export interface ToolMetaEntry {
   isWriteTool?: boolean | undefined;
   /** Under the server's declared write policy: true a write, false a read; absent when nothing was declared. */
   declaredWrite?: boolean | undefined;
+  /** The server's description of the tool; its opening verb classifies a name that has none. */
+  description?: string | undefined;
   permission?: string | undefined;
 }
 
@@ -58,6 +60,7 @@ export function toolMetaOf(tool: { name: string } & Record<string, unknown>): To
     ...(typeof tool["mcpToolName"] === "string" ? { mcpToolName: tool["mcpToolName"] } : {}),
     ...(typeof tool["isWriteTool"] === "boolean" ? { isWriteTool: tool["isWriteTool"] } : {}),
     ...(typeof tool["declaredWrite"] === "boolean" ? { declaredWrite: tool["declaredWrite"] } : {}),
+    ...(serverType && typeof tool["description"] === "string" && tool["description"] ? { description: tool["description"] } : {}),
   };
 }
 
@@ -271,7 +274,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const outcome = override?.isError ?? ctx.isError ? "error" : "executed";
     queueGovernance({ ...base(), eventType: "tool_outcome", toolCallId: ctx.toolCall.id, toolName: meta?.mcpToolName ?? ctx.toolCall.name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), outcome, reasonText: t0 ? `${outcome} in ${Date.now() - t0} ms` : outcome });
     if (!text || seen(text)) return;
-    const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? ctx.toolCall.name, serverType: meta?.serverType });
+    const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? ctx.toolCall.name, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, description: meta?.description });
     state.readUntypedContent = true;
     if (descriptor.returnsPrivateData) {
       state.privateData = true;
@@ -283,7 +286,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
   // C1: one decision per call, recorded before a side effect runs.
   const criticCall = (id: string, toolName: string, args: unknown): CriticCallInput | null => {
     const meta = toolMeta.get(toolName);
-    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args });
+    const d = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? toolName, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, description: meta?.description, args });
     if (!criticNeeded(d.effect, state.readUntypedContent)) return null;
     const argsText = safeJson(args, 65_536);
     const scan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
@@ -311,7 +314,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const meta = toolMeta.get(name);
     // Records and kill scopes use the tool's own name, the one claw-auth records, not pi's prefixed one.
     const toolLabel = meta?.mcpToolName ?? name;
-    const descriptor = resolveToolDescriptor({ toolName: toolLabel, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, args: ctx.args });
+    const descriptor = resolveToolDescriptor({ toolName: toolLabel, serverType: meta?.serverType, writeTool: meta?.declaredWrite ?? meta?.isWriteTool, description: meta?.description, args: ctx.args });
     const argsText = safeJson(ctx.args, 65_536);
     const argScan = scanText({ text: argsText, kind: "agent_written_text", outbound: true }, { deadlineMs: Date.now() + ARGS_BUDGET_MS });
     const secretInArguments = argScan.findings.some((f) => f.family === "secrets" && f.verdict === "injection");

@@ -13,6 +13,8 @@ export interface ToolDescriptorInput {
   serverType?: string | undefined;
   /** Declared by claw-auth's write policy or the gateway catalog: true raises to write, false settles an unknown verb as read. */
   writeTool?: boolean | undefined;
+  /** The tool's description: the leading verb of its first sentence settles an unknown name and can raise, never lower, except over a declared read. */
+  description?: string | undefined;
   annotations?: ToolAnnotations | undefined;
   /** Defaults to reviewed: every server that existed before trust tiers shipped. */
   trustTier?: TrustTier | undefined;
@@ -24,7 +26,7 @@ export interface ToolDescriptor {
   effect: EffectClass | "unknown";
   destination: { kind: DestinationKind; host?: string };
   /** What settled the effect; "unknown" counts as an external send and a write at the gate. */
-  source: "first_party" | "policy" | "annotations" | "verb" | "unknown";
+  source: "first_party" | "policy" | "annotations" | "verb" | "description" | "unknown";
   /** The tool answers with mail, messages or files a person did not type. */
   returnsPrivateData: boolean;
 }
@@ -35,13 +37,14 @@ const FIRST_PARTY_SERVERS: ReadonlySet<string> = new Set([
 ]);
 const PRIVATE_DATA_SERVERS: ReadonlySet<string> = new Set(["google", "microsoft", "slack", "whatsapp", "telegram", "xyne-spaces"]);
 
-/** claw-local tools, classified in code. */
+/** claw-local tools, classified in code; a tool whose effect stays inside the run (a question, the plan, the catalog) is a read. */
 const LOCAL_TOOLS: Readonly<Record<string, EffectClass>> = {
-  read: "read", grep: "read", find: "read", ls: "read", glob: "read", "read-memory-file": "read", "task-status": "read", "load-tools": "read",
+  read: "read", grep: "read", find: "read", ls: "read", glob: "read", "read-memory-file": "read", "task-status": "read", "load-tools": "read", "search-tools": "read",
+  "ask-user-question": "read", "propose-plan": "read", "todo-write": "read", "todo-read": "read", "memory-search": "read",
   write: "write", edit: "write", "suggest-goal": "write", "task-stop": "write",
   bash: "execute", "sandbox-run": "execute",
-  "write-memory-file": "persist", "create-skill": "persist",
-  "xyne-claw": "publish", "call-agent": "publish", "twin-deliver": "publish",
+  "write-memory-file": "persist", "create-skill": "persist", "memory-write": "persist",
+  "xyne-claw": "publish", "call-agent": "publish", "twin-deliver": "publish", visualize: "publish",
 };
 
 const VERBS: ReadonlyArray<[RegExp, EffectClass]> = [
@@ -51,7 +54,7 @@ const VERBS: ReadonlyArray<[RegExp, EffectClass]> = [
   [/^(save|store|remember|persist|memorize|pin)$/, "persist"],
   [/^(grant|promote|demote|permission|permissions|role|roles|admin|configure|settings)$/, "admin"],
   [/^(create|update|edit|set|add|put|patch|upload|move|rename|write|modify|change|insert|append|merge|approve|reject|assign|close|open|resolve|transition|label|tag|submit|schedule|cancel|import|sync|star|unstar|fork|push|commit)$/, "write"],
-  [/^(get|list|search|find|fetch|read|describe|query|show|view|lookup|check|count|retrieve|browse|head|download|export|summarize|analyze|analyse|compare|preview|status|history|info|detail|details|whoami|me|ping|health|version|echo|validate|verify|exists|current|who)$/, "read"],
+  [/^(get|list|search|find|fetch|read|describe|query|show|view|lookup|check|count|retrieve|return|browse|head|download|export|summarize|analyze|analyse|compare|preview|status|history|info|detail|details|whoami|me|ping|health|version|echo|validate|verify|exists|current|who)$/, "read"],
 ];
 
 const INTERNAL_HOSTS = /(^|\.)(localhost|internal|local|svc|cluster\.local)$/i;
@@ -79,6 +82,20 @@ function effectFromVerb(toolName: string): EffectClass | undefined {
   return first === "publish" && firstIsNoun && sawRead ? "read" : first;
 }
 
+/** Third-person forms in a description: sends → send, replies → reply, searches → search. */
+const stems = (token: string): string[] => [token, token.replace(/ies$/, "y"), token.replace(/(sh|ch|ss|x|z)es$/, "$1"), token.replace(/s$/, "")];
+
+/** The first verb in the opening words of a description's first sentence; a noun-like publish word (message, post) only settles, never raises. */
+function effectFromDescription(description: string): { effect: EffectClass; nounLike: boolean } | undefined {
+  const sentence = description.slice(0, 240).split(/[.\n:;(]/)[0] ?? "";
+  for (const token of sentence.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).slice(0, 8)) {
+    for (const stem of stems(token)) {
+      for (const [re, effect] of VERBS) if (re.test(stem)) return { effect, nounLike: effect === "publish" && NOUN_LIKE_PUBLISH.test(stem) };
+    }
+  }
+  return undefined;
+}
+
 const RANK: Readonly<Record<EffectClass | "unknown", number>> = { read: 0, write: 1, persist: 2, publish: 3, send: 4, execute: 5, delete: 6, admin: 7, unknown: 1 };
 const raise = (current: EffectClass | "unknown", to: EffectClass): EffectClass | "unknown" => (current === "unknown" || RANK[to] > RANK[current] ? to : current);
 
@@ -102,8 +119,8 @@ export function externalHostInArgs(args: unknown): string | undefined {
 
 /**
  * One classification for every tool the gate sees: first-party tools from a code table, MCP tools from
- * their declared write policy and verb, raised by annotations but never lowered. Unknown stays unknown,
- * which decide() treats as an external send and a write.
+ * the verb in their name, their declared write policy and the verb that opens their description, raised
+ * by annotations but never lowered. Unknown stays unknown, which decide() treats as an external send and a write.
  */
 export function resolveToolDescriptor(input: ToolDescriptorInput): ToolDescriptor {
   const { toolName, serverType } = input;
@@ -124,6 +141,11 @@ export function resolveToolDescriptor(input: ToolDescriptorInput): ToolDescripto
     } else if (input.writeTool === false && effect === "unknown") {
       effect = "read";
       source = "policy";
+    }
+    const described = input.description ? effectFromDescription(input.description) : undefined;
+    if (described && (effect === "unknown" || (!described.nounLike && input.writeTool !== false && RANK[described.effect] > RANK[effect]))) {
+      effect = described.effect;
+      source = "description";
     }
   }
   if (input.annotations?.destructiveHint === true) {
