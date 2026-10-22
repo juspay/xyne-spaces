@@ -64,6 +64,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
+import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
+import { AgentsConfig } from '@/agents/config';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
   FormContextType,
@@ -83,7 +85,7 @@ import { BaseTicketType,
 } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
-import { backlogFlowGroup } from '@/services/flowCascadeService';
+import { backlogFlowGroup, skipFlowGroup } from '@/services/flowCascadeService';
 import { AppError } from '@/middleware/errorHandler';
 
 import { z } from 'zod';
@@ -598,6 +600,7 @@ export class TicketController {
       // is sent) — an incomplete repo would otherwise be silently dropped when
       // persisting releaseRepos, quietly covering fewer repos than configured.
       const rawReleaseRepos = dynamicFields?.['releaseRepos'];
+      let releaseRepoBoardIds: string[] = [];
       if (rawReleaseRepos !== undefined) {
         if (!req.user) {
           res.status(401).json({ error: 'Authentication required' });
@@ -671,6 +674,7 @@ export class TicketController {
             });
             return;
           }
+          releaseRepoBoardIds = boardIds;
         }
       }
 
@@ -705,6 +709,27 @@ export class TicketController {
         } else {
           // Non-support channels must provide boardId
           res.status(400).json({ error: 'boardId is required' });
+          return;
+        }
+      }
+
+      // A release config's main board takes tickets only from its release channel. Keyed
+      // on the board, not the requested ticket type, which the client could leave out.
+      {
+        const releaseBoardIds = [
+          ...new Set([boardId, ...releaseRepoBoardIds].filter((id): id is string => !!id)),
+        ];
+        const otherChannelConfig = await db.application.findFirst({
+          where: {
+            mainReleaseBoardId: { in: releaseBoardIds },
+            NOT: { channelId: actualChannelId ?? '' },
+          },
+          select: { id: true },
+        });
+        if (otherChannelConfig) {
+          res.status(403).json({
+            error: "This release board belongs to another release config; create the release from that config's release channel.",
+          });
           return;
         }
       }
@@ -1241,7 +1266,7 @@ export class TicketController {
 
         if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
-          // from Application.repoUrl on the resolved project. We pass empty
+          // from the release config's repository (Application.repoId). We pass empty
           // placeholders to satisfy the existing param shape; the controller
           // ignores them when DB-derived values are available.
           const xyneReleaseBot = await unifiedBotUserService.getBotByBotId('xyne-release-bot', ticket.workspaceId);
@@ -1334,6 +1359,42 @@ export class TicketController {
 
     try {
       const result = await backlogFlowGroup({
+        rootTicketId,
+        groupId,
+        actorUserId: userId,
+        workspaceId,
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Skip every non-terminal descendant of a Flow run group.
+   * POST /api/tickets/:ticketId/flow-groups/:groupId/skip
+   */
+  skipFlowGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      next(new AppError('User not authenticated', 401));
+      return;
+    }
+
+    const rootTicketId = req.params.ticketId;
+    const groupId = req.params.groupId;
+    if (!rootTicketId || !groupId) {
+      next(new AppError('ticketId and groupId are required', 400));
+      return;
+    }
+
+    try {
+      const result = await skipFlowGroup({
         rootTicketId,
         groupId,
         actorUserId: userId,
@@ -1928,13 +1989,33 @@ export class TicketController {
     }
   };
 
+  suggestFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!(await AgentsConfig.fetch()).ticketFieldSuggestionsXorEnabled) {
+        res.json({ success: true, data: {} });
+        return;
+      }
+      const { title, description = '', boards } = req.body as TicketFieldSuggestionInput;
+      // Stop the XOR call when the dashboard drops the request.
+      const controller = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      const data = await suggestTicketFields({ title, description, boards }, controller.signal);
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error suggesting ticket fields:', error);
+      res.status(500).json({ error: 'Failed to suggest ticket fields' });
+    }
+  };
+
   private async getBoardCandidates(projectId: string): Promise<TicketBoardCandidate[]> {
     const boards = await this.boardRepository.findBoardsByProject(projectId);
 
     return boards.map(board => ({
       id: board.id,
       name: board.name,
-      description: undefined, // Board model doesn't have description field
+      description: board.description || undefined,
       boardType: board.boardType || undefined,
       stageCount: undefined, // Can be populated if needed by fetching stages count
     }));

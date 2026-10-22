@@ -57,6 +57,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
+import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -105,7 +106,7 @@ const ChannelTabTrigger = ({
   onSelect,
 }: ChannelTabTriggerProps): JSX.Element => {
   const trigger = (
-    <Tabs.Trigger value={tab.value} asChild>
+    <Tabs.Trigger value={tab.value} aria-description={tab.description} asChild>
       <button
         data-testid={`channel-tab-${tab.value}`}
         data-track-category='CHANNELS'
@@ -247,17 +248,19 @@ const ConversationHeader = ({
     setEditSnapshot(null);
     discardPublishing();
   }, [channelId, discardPublishing]);
+  // Not while full-page search covers the channel: its Esc is full page's.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!isEditingTabs) return undefined;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || coverage.isCovered()) return;
       // Esc that closes the "+" menu or the app picker is theirs, not a cancel.
       if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]')) return;
       cancelTabs();
     };
     window.addEventListener('keydown', onKey);
     return (): void => window.removeEventListener('keydown', onKey);
-  }, [isEditingTabs, cancelTabs]);
+  }, [isEditingTabs, cancelTabs, coverage]);
   const handleTabSelect = useCallback(
     (value: string, e?: React.MouseEvent) => setActiveTab?.(value, e),
     [setActiveTab],
@@ -436,6 +439,7 @@ const ConversationHeader = ({
         >
           <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
             <Button
+              aria-label={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}
               variant='ghost'
               size='sm'
               onClick={e => {
@@ -518,6 +522,7 @@ const ConversationHeader = ({
                         setIsInfoOpen(true);
                       }}
                       className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
+                      aria-label={`Channel members (${channel.channelStats?.participantCount ?? 0})`}
                       data-track-category='CHANNELS'
                       data-track-name='VIEW_MEMBERS'
                       data-track-metadata={JSON.stringify({ channelId })}
@@ -534,6 +539,7 @@ const ConversationHeader = ({
               {!isCompact && channelUserStatus && (
                 <Tooltip content='Notifications'>
                   <Button
+                    aria-label='Notifications'
                     variant='ghost'
                     size='sm'
                     onClick={() => {
@@ -575,6 +581,7 @@ const ConversationHeader = ({
                   side='bottom'
                 >
                   <Button
+                    aria-label='Ask AI'
                     variant='ghost'
                     size='sm'
                     onClick={() => {
@@ -599,6 +606,7 @@ const ConversationHeader = ({
                     size='sm'
                     onClick={() => invokeShortcut('mod+f')}
                     className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                    aria-label='Search in this channel'
                     data-track-category='CHANNELS'
                     data-track-name='SEARCH_IN_CHANNEL'
                     data-track-metadata={JSON.stringify({ channelId })}
@@ -631,6 +639,7 @@ const ConversationHeader = ({
                       variant='ghost'
                       size='sm'
                       className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                      aria-label='Channel options'
                       data-track-category='CHANNELS'
                       data-track-name='OPEN_CHANNEL_MENU'
                     >

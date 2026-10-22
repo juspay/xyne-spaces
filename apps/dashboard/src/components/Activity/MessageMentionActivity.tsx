@@ -9,6 +9,7 @@ import {
   SlashCommandArtifactBadge,
 } from './SlashCommandArtifactActivity';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { getReactionMessagePreview } from './reactionMessagePreview';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -74,7 +75,7 @@ export const MessageMentionActivity = ({
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
           {getFlowJsonPreviewText(message.content) ?? (
             <RenderMessageWithHTML
-              message={message.content}
+              message={getReactionMessagePreview(message.content)}
               showEdited={message.edited}
               disableLinks
             />

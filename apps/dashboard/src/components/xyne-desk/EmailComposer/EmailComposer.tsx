@@ -2611,6 +2611,7 @@ export const EmailComposer = ({
                     onClick={() => setIsExpanded(false)}
                     className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                     title='Collapse'
+                    aria-label='Collapse'
                     data-track-category='Support'
                     data-track-name='CollapseReplyComposer'
                     data-track-metadata={JSON.stringify({
@@ -3187,6 +3188,12 @@ export const EmailComposer = ({
                       type='button'
                       className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
                       title={
+                        selectedSignatureId
+                          ? (signatures.find(s => s.id === selectedSignatureId)?.name ??
+                            'Signature')
+                          : 'No signature'
+                      }
+                      aria-label={
                         selectedSignatureId
                           ? (signatures.find(s => s.id === selectedSignatureId)?.name ??
                             'Signature')

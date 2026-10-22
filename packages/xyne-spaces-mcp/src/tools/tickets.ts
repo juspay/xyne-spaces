@@ -21,6 +21,8 @@ import {
 } from "../render.js";
 import {
 	MAX_LIMIT,
+	TicketCreatedButNotLinkedError,
+	type SpacesClient,
 	type Ticket,
 	type TicketPriority,
 	type TicketStatusV2,
@@ -28,11 +30,52 @@ import {
 } from "@xyne/spaces-sdk";
 import type { Related } from "../render.js";
 import { first } from "../render.js";
-import type { ToolDef } from "./shared.js";
+import type { ToolContext, ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
 const STATUSES = ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"] as const;
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+/** The app's ticket types (`BaseTicketType`), as its create form offers them. */
+const TICKET_TYPES = ["Feature", "Fix", "Story", "Hotfix", "Release", "Support", "Epic"] as const;
+
+/** A human ticket key such as INFRA-6564, as opposed to an internal id. */
+const TICKET_KEY = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
+
+/**
+ * Turn a ticket id or key into the ticket's id and key.
+ *
+ * Agents usually hold the key a person mentioned (INFRA-6564), while every write
+ * takes the internal id, so tools that name a ticket accept either. A key is
+ * looked up in the session's workspace; an id is checked to exist, so a typo
+ * fails here rather than as an opaque refusal from the write.
+ */
+async function resolveTicket(
+	sdk: SpacesClient,
+	config: ToolContext["config"],
+	idOrKey: string,
+): Promise<{ id: string; xyneId: string }> {
+	if (TICKET_KEY.test(idOrKey)) {
+		const workspaceId = config.session?.workspaceId ?? (await sdk.users.me()).workspaceId;
+		const ticket = await sdk.tickets.getByKey(idOrKey.toUpperCase(), workspaceId);
+		if (!ticket) throw new Error(`No ticket with key ${idOrKey} in this workspace.`);
+		return { id: ticket.id, xyneId: ticket.xyneId ?? idOrKey };
+	}
+	const ticket = await sdk.tickets.get(idOrKey);
+	if (!ticket) throw new Error(`No ticket with id ${idOrKey}. Pass the key (e.g. PLAT-1234) or the 'Ticket ID' from another tool.`);
+	return { id: ticket.id, xyneId: ticket.xyneId ?? ticket.id };
+}
+
+/** `subTicketsForTicket` rows: a mapping, its sub-ticket, and the ticket it is linked to. */
+interface SubTicketMappingRow {
+	id: string;
+	subTicket?: Related<{ id?: string; title?: string; mappedTicketId?: string | null; mappedTicket?: Related<{ xyneId?: string; title?: string; statusV2?: string; stageName?: string }> }>;
+}
+
+/** `subTicketsByMappedTicketId` rows: a sub-ticket that links to this ticket, and the parents it hangs under. */
+interface LinkedSubTicketRow {
+	id: string;
+	ticketMappings?: Array<{ id?: string; ticketId?: string }> | null;
+}
 
 /**
  * `ticketDetailsByIdV2` pulls in seven `.related()` collections that the SDK's
@@ -211,7 +254,7 @@ const ticketsList: ToolDef = {
 		if (viewMode in expected && !needs[viewMode]) {
 			throw new Error(
 				`view_mode '${viewMode}' needs ${expected[viewMode]}. Without it the filter is dropped and you would get ` +
-					`every ticket in scope rather than the ones you asked for.`,
+				`every ticket in scope rather than the ones you asked for.`,
 			);
 		}
 
@@ -280,8 +323,8 @@ const ticketGet: ToolDef = {
 	name: "spaces_ticket_get",
 	description:
 		"Read one Xyne Spaces ticket in full by its ticket id, including everything the list view shows plus its " +
-		"project, tags, role assignments (PR reviewer, QA), related and duplicate tickets, per-stage due dates, open " +
-		"stage-approval requests, and the latest RCA. Takes the internal ticket id — the 'Ticket ID' line in other " +
+		"project, tags, role assignments (PR reviewer, QA), related and duplicate tickets, its parent and " +
+		"sub-tickets, per-stage due dates, open stage-approval requests, and the latest RCA. Takes the internal ticket id — the 'Ticket ID' line in other " +
 		"tools' output — not the human key like PLAT-1234; use spaces_tickets_search to turn a key into an id.",
 	inputSchema: {
 		type: "object",
@@ -298,12 +341,48 @@ const ticketGet: ToolDef = {
 		if (!row) {
 			return ok(
 				`No ticket found with id ${ticketId}. If you have a key like PLAT-1234, look it up with ` +
-					`spaces_tickets_search first — this tool takes the internal id.`,
+				`spaces_tickets_search first — this tool takes the internal id.`,
 			);
 		}
-		return ok(renderTicket(row, 1));
+		return ok([renderTicket(row, 1), ...(await renderSubTicketLinks(sdk, ticketId))].join("\n"));
 	},
 };
+
+/**
+ * The ticket's place in the sub-ticket tree: the parent it is linked under, and
+ * the sub-tickets linked under it. Sub-tickets with no ticket behind them yet
+ * (added by title in the app's create form) are listed by title.
+ */
+async function renderSubTicketLinks(sdk: SpacesClient, ticketId: string): Promise<string[]> {
+	const [children, linkedAs] = await Promise.all([
+		sdk.tickets.listSubTickets(ticketId) as unknown as Promise<SubTicketMappingRow[]>,
+		sdk.tickets.listSubTicketsByMapped(ticketId) as unknown as Promise<LinkedSubTicketRow[]>,
+	]);
+	const lines: string[] = [];
+
+	const parentIds = [...new Set(linkedAs.flatMap((row) => (row.ticketMappings ?? []).map((m) => m.ticketId)))].filter(
+		(id): id is string => !!id,
+	);
+	if (parentIds.length > 0) {
+		const parents = await sdk.tickets.getMany(parentIds);
+		const label = (id: string): string => parents.find((t) => t.id === id)?.xyneId ?? id;
+		lines.push(`  Sub-ticket of: ${parentIds.map(label).join(", ")}`);
+	}
+
+	if (children.length > 0) {
+		lines.push(`  Sub-tickets (${children.length}):`);
+		for (const mapping of children) {
+			const sub = first(mapping.subTicket);
+			const ticket = first(sub?.mappedTicket);
+			lines.push(
+				ticket
+					? `    - ${ticket.xyneId ?? "?"} ${ticket.title ?? ""}${ticket.stageName ? ` · ${ticket.stageName}` : ""}${ticket.statusV2 ? ` · ${ticket.statusV2}` : ""}`
+					: `    - ${sub?.title ?? "(untitled)"} (no ticket yet)`,
+			);
+		}
+	}
+	return lines;
+}
 
 // ── spaces_ticket_activities ────────────────────────────────────────────────
 
@@ -362,11 +441,15 @@ const ticketActivities: ToolDef = {
 const ticketCreate: ToolDef = {
 	name: "spaces_ticket_create",
 	description:
-		"Create a Xyne Spaces ticket. Four ids are required and none can be guessed: title and description you " +
-		"supply, project_id comes from spaces_projects_list, board_id from spaces_board_stages, and channel_id from " +
-		"spaces_channels_list — the ticket gets a thread in that channel. The server allocates the human key " +
-		"(PLAT-1234) from the project's sequence, so do not invent one. Returns the new ticket id and key. " +
-		"If stage_name is given it must match a stage on that board exactly.",
+		"Create a Xyne Spaces ticket. title and description you supply; project_id comes from spaces_projects_list, " +
+		"board_id from spaces_board_stages, and channel_id from spaces_channels_list — the ticket gets a thread in " +
+		"that channel. The server allocates the human key (PLAT-1234) from the project's sequence, so do not invent " +
+		"one. Returns the new ticket id and key. " +
+		"stage_name must exactly match a stage on board_id, or the call is refused with the board's stages; omit it " +
+		"to start on the board's first stage. Without status, the ticket takes the status its stage sets. " +
+		"With parent_ticket_id the new ticket is linked under that parent as a sub-ticket (as 'Add existing " +
+		"sub-ticket' does in the app); if the link is refused, the ticket still exists and the error names it — " +
+		"link it with spaces_ticket_link_sub_ticket rather than creating it again.",
 	inputSchema: {
 		type: "object",
 		properties: {
@@ -376,17 +459,33 @@ const ticketCreate: ToolDef = {
 				description: "Ticket body. Plain text or simple HTML — <p>, <strong> and <ul><li> render as written.",
 			},
 			project_id: { type: "string", description: "Project id, from spaces_projects_list." },
-			board_id: { type: "string", description: "Board id, from spaces_board_stages. Required except on support channels." },
+			board_id: {
+				type: "string",
+				description: "Board id, from spaces_board_stages. Required, except in a support channel, and whenever stage_name is given.",
+			},
 			channel_id: { type: "string", description: "Channel the ticket's thread is created in, from spaces_channels_list." },
 			assigned_to: { type: "string", description: "Assignee — user id or email address." },
 			priority: { type: "string", enum: [...PRIORITIES], default: "MEDIUM", description: "Ticket priority." },
-			status: { type: "string", enum: [...STATUSES], default: "TODO", description: "Starting status." },
-			stage_name: { type: "string", description: "Starting stage. Must exactly match a stage on the board." },
-			ticket_type: { type: "string", description: "Ticket type label, e.g. 'Bug' or 'Feature'." },
+			status: {
+				type: "string",
+				enum: [...STATUSES],
+				description: "Starting status. Omit to use the status the starting stage sets (TODO without a stage).",
+			},
+			stage_name: {
+				type: "string",
+				description: "Starting stage, exactly as spaces_board_stages lists it. Needs board_id. Not allowed on Flow boards.",
+			},
+			ticket_type: { type: "string", enum: [...TICKET_TYPES], description: "Ticket type." },
 			tags: { type: "array", items: { type: "string" }, description: "Tag names to apply." },
 			eta: { type: "string", description: "Due date as an ISO 8601 timestamp, e.g. '2026-09-01T00:00:00Z'." },
-			user_group_id: { type: "string", description: "Owning user group id." },
-			parent_ticket_id: { type: "string", description: "Create this as a sub-ticket of that ticket." },
+			user_group_id: {
+				type: "string",
+				description: "Owning user group id. With no assigned_to, the group's assignment rule picks the assignee.",
+			},
+			parent_ticket_id: {
+				type: "string",
+				description: "Link the new ticket under this parent as a sub-ticket — the parent's key (INFRA-6564) or id.",
+			},
 			draft_attachment_ids: {
 				type: "array",
 				items: { type: "string" },
@@ -397,51 +496,133 @@ const ticketCreate: ToolDef = {
 		additionalProperties: false,
 	},
 	write: true,
-	async handler(args, { sdk }) {
+	async handler(args, { sdk, config }) {
 		const title = requiredString(args, "title");
 		const description = requiredString(args, "description");
 		const projectId = requiredString(args, "project_id");
 		const channelId = requiredString(args, "channel_id");
+		const boardId = optionalString(args, "board_id");
+		const stageName = optionalString(args, "stage_name");
 
 		const requestedAssignee = optionalString(args, "assigned_to");
 		const assignedTo = await users.toUserId(sdk, requestedAssignee);
 		if (requestedAssignee && !assignedTo) throw new Error(`No Spaces user matches "${requestedAssignee}".`);
 
+		// Resolved before the create, so a mistyped parent costs nothing.
+		const requestedParent = optionalString(args, "parent_ticket_id");
+		const parent = requestedParent ? await resolveTicket(sdk, config, requestedParent) : undefined;
+
+		// The server stores status as sent, independent of the stage. Without an
+		// explicit one, take the stage's own status so the two agree, the way
+		// spaces_board_stages describes each stage. The server checks the name.
+		let status = optionalString(args, "status") as TicketStatusV2 | undefined;
+		if (!status && stageName && boardId) {
+			const stage = (await sdk.boards.listStages(boardId)).find((s) => s.name === stageName);
+			if (stage?.defaultTicketStatusV2) status = stage.defaultTicketStatusV2;
+		}
+
 		const eta = optionalString(args, "eta");
-		// No cast: `CreateTicketResponse` now declares the server-decided fields
-		// (stageName, status) that the controller actually returns, so the
-		// compiler checks these reads instead of being told to trust them.
-		const created = await sdk.tickets.create({
-			title,
-			description,
-			projectId,
-			channelId,
-			...(optionalString(args, "board_id") ? { boardId: optionalString(args, "board_id")! } : {}),
-			...(assignedTo ? { assignedTo } : {}),
-			priority: (optionalString(args, "priority") ?? "MEDIUM") as TicketPriority,
-			statusV2: (optionalString(args, "status") ?? "TODO") as TicketStatusV2,
-			...(optionalString(args, "stage_name") ? { stageName: optionalString(args, "stage_name")! } : {}),
-			...(optionalString(args, "ticket_type") ? { ticketType: optionalString(args, "ticket_type")! } : {}),
-			...(optionalStringArray(args, "tags") ? { tags: optionalStringArray(args, "tags")! } : {}),
-			// `CreateTicketInput.eta` is `Date | string`, where the raw route took
-			// epoch ms. The column is a DateTime, so passing the ISO string
-			// through is the more correct of the two.
-			...(eta ? { eta } : {}),
-			...(optionalString(args, "user_group_id") ? { userGroupId: optionalString(args, "user_group_id")! } : {}),
-			...(optionalString(args, "parent_ticket_id") ? { parentTicketId: optionalString(args, "parent_ticket_id")! } : {}),
-			...(optionalStringArray(args, "draft_attachment_ids")
-				? { draftAttachmentIds: optionalStringArray(args, "draft_attachment_ids")! }
-				: {}),
-		});
+		const draftAttachmentIds = optionalStringArray(args, "draft_attachment_ids");
+		const tags = optionalStringArray(args, "tags");
+		const ticketType = optionalString(args, "ticket_type");
+		const userGroupId = optionalString(args, "user_group_id");
+
+		let created;
+		try {
+			created = await sdk.tickets.create({
+				title,
+				description,
+				projectId,
+				channelId,
+				...(boardId ? { boardId } : {}),
+				...(assignedTo ? { assignedTo } : {}),
+				priority: (optionalString(args, "priority") ?? "MEDIUM") as TicketPriority,
+				...(status ? { statusV2: status } : {}),
+				...(stageName ? { stageName } : {}),
+				...(ticketType ? { ticketType } : {}),
+				...(tags ? { tags } : {}),
+				// The column is a DateTime; the ISO string goes through as is.
+				...(eta ? { eta } : {}),
+				...(userGroupId ? { userGroupId } : {}),
+				...(parent ? { parentTicketId: parent.id } : {}),
+				...(draftAttachmentIds ? { draftAttachmentIds } : {}),
+			});
+		} catch (error) {
+			if (error instanceof TicketCreatedButNotLinkedError) {
+				throw new Error(
+					`Created ${error.ticket.xyneId} (Ticket ID: ${error.ticket.id}), but it is NOT a sub-ticket of ` +
+					`${parent?.xyneId ?? error.parentTicketId}: ${error.linkError.message} ` +
+					`Do not create it again — fix the cause, then use spaces_ticket_link_sub_ticket.`,
+				);
+			}
+			throw error;
+		}
 
 		return ok(
 			[
 				`Created ${created.xyneId}: ${title}`,
 				`  Ticket ID: ${created.id}`,
 				`  Stage: ${created.stageName ?? "(none)"} · Status: ${created.status ?? "?"}`,
+				...(created.parentLink && parent ? [`  Sub-ticket of: ${parent.xyneId} (mapping ID: ${created.parentLink.mappingId})`] : []),
 				`  Conversation ID: ${created.conversationId}`,
 			].join("\n"),
 		);
+	},
+};
+
+// ── spaces_ticket_link_sub_ticket ───────────────────────────────────────────
+
+const ticketLinkSubTicket: ToolDef = {
+	name: "spaces_ticket_link_sub_ticket",
+	description:
+		"Make an existing Xyne Spaces ticket a sub-ticket of another — the app's 'Add existing sub-ticket'. Takes " +
+		"each ticket by key (INFRA-6564) or id. The server enforces the app's rules and says which one failed: you " +
+		"need access to the parent and must be able to see the child, both must be on manual (non-Flow) boards, a " +
+		"ticket can have only one parent, and a link may not make a cycle. To create a new ticket as a sub-ticket, " +
+		"pass parent_ticket_id to spaces_ticket_create instead.",
+	inputSchema: {
+		type: "object",
+		properties: {
+			parent_ticket_id: { type: "string", description: "Ticket to link under — key or id." },
+			child_ticket_id: { type: "string", description: "Existing ticket to attach — key or id." },
+		},
+		required: ["parent_ticket_id", "child_ticket_id"],
+		additionalProperties: false,
+	},
+	write: true,
+	async handler(args, { sdk, config }) {
+		const parent = await resolveTicket(sdk, config, requiredString(args, "parent_ticket_id"));
+		const child = await resolveTicket(sdk, config, requiredString(args, "child_ticket_id"));
+		const link = await sdk.tickets.linkSubTicket(parent.id, child.id, child.xyneId);
+		return ok(`Linked ${child.xyneId} as a sub-ticket of ${parent.xyneId}.\n  Mapping ID: ${link.mappingId}`);
+	},
+};
+
+// ── spaces_ticket_unlink_sub_ticket ─────────────────────────────────────────
+
+const ticketUnlinkSubTicket: ToolDef = {
+	name: "spaces_ticket_unlink_sub_ticket",
+	description:
+		"Detach a sub-ticket from its parent in Xyne Spaces. Only the link goes; the child ticket itself is kept " +
+		"and can be linked elsewhere. Takes each ticket by key or id.",
+	inputSchema: {
+		type: "object",
+		properties: {
+			parent_ticket_id: { type: "string", description: "The parent — key or id." },
+			child_ticket_id: { type: "string", description: "The sub-ticket to detach — key or id." },
+		},
+		required: ["parent_ticket_id", "child_ticket_id"],
+		additionalProperties: false,
+	},
+	write: true,
+	async handler(args, { sdk, config }) {
+		const parent = await resolveTicket(sdk, config, requiredString(args, "parent_ticket_id"));
+		const child = await resolveTicket(sdk, config, requiredString(args, "child_ticket_id"));
+		const mappings = (await sdk.tickets.listSubTickets(parent.id)) as unknown as SubTicketMappingRow[];
+		const mapping = mappings.find((m) => first(m.subTicket)?.mappedTicketId === child.id);
+		if (!mapping) throw new Error(`${child.xyneId} is not a sub-ticket of ${parent.xyneId}.`);
+		await sdk.tickets.unlinkSubTicket(mapping.id);
+		return ok(`Detached ${child.xyneId} from ${parent.xyneId}. The ticket itself is unchanged.`);
 	},
 };
 
@@ -604,4 +785,6 @@ export const ticketTools: ToolDef[] = [
 	ticketCreate,
 	ticketUpdate,
 	ticketTransition,
+	ticketLinkSubTicket,
+	ticketUnlinkSubTicket,
 ];

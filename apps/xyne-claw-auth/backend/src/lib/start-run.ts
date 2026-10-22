@@ -36,6 +36,7 @@ import {
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
+  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
 import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
 import { getSessionByConv } from "./session-context.js";
@@ -66,8 +67,6 @@ import { dispatchRun } from "./dispatch-run.js";
 import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
-
-const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "xor", "ourtrainedjev", "llm"]);
 
 const log = createLogger("run");
 
@@ -559,7 +558,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -614,7 +613,6 @@ export async function prepareRun(
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
-      judgeBackend?: string;
       optimizations?: unknown;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
@@ -1041,6 +1039,7 @@ export async function prepareRun(
       mergedAgentConfig = safeAgentConfig;
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
+    let sdlcContextError: string | undefined;
     if (!sdlcAgentRunContext) {
       // Claw chat sends no channel; a hub thread reopened there takes its hub from the thread's last run.
       const hubChannelId =
@@ -1054,9 +1053,21 @@ export async function prepareRun(
       const hubWorkspaceHint =
         typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
+        await resolveSdlcHubContextForUser(
+          resolved.userId,
+          hubChannelId,
+          conversationId,
+          hubWorkspaceHint,
+          attachedThreadConversationId,
+          (reason) => {
+            sdlcContextError = reason;
+          },
+        ),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+      // Only warn when the run is known to be in a hub, else a slow Spaces would warn every channel run.
+      else if (sdlcContextError && (agentSlug === SDLC_AGENT_SLUG || (!effectiveChannelId && hubChannelId)))
+        mergedAgentConfig = { ...mergedAgentConfig, sdlcContextError };
     }
     // Any agent running in an SDLC hub gets the SDLC tools on top of its own.
     if (sdlcAgentRunContext) {
@@ -1592,7 +1603,6 @@ export async function prepareRun(
       // session was never actually compacted, only summarised.
       ...((body as { compactBeforeRun?: unknown }).compactBeforeRun === true ? { compactBeforeRun: true } : {}),
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
-      ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
       ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.

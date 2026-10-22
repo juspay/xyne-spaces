@@ -1,3 +1,5 @@
+import type { MessageBarActionId } from './messageBar';
+
 export const MEETING_DETECTION_ENABLED_KEY = 'xyne-meeting-detection-enabled';
 
 /**
@@ -20,3 +22,16 @@ export const INLINE_QUICK_REACTION_LIMIT = 3;
  * including for a user who has never reacted.
  */
 export const DEFAULT_QUICK_REACTIONS = ['\u{1F44D}', '\u2705', '\u{1F440}'];
+
+export const MESSAGE_BAR_STORAGE_KEY = 'xyne:message-actions';
+
+export const DEFAULT_MESSAGE_BAR_ACTIONS: readonly MessageBarActionId[] = [
+  'reply',
+  'createTicket',
+  'createSubTicket',
+  'call',
+  'notes',
+  'askAI',
+];
+
+export const MAX_MESSAGE_BAR_ACTIONS = 8;

@@ -60,6 +60,7 @@ export interface CallAdminCallFilters {
   scope: CallAdminListScope;
   /** Comma-separated CallStatus values. */
   status?: string;
+  /** Comma-separated CallType values. */
   type?: string;
   search?: string;
   /** Comma-separated pending | ready | failed. */

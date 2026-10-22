@@ -5,6 +5,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { canvasService } from './canvasService';
 import type { YSweetAuthToken } from './canvasService';
 import { logger, Event } from '../../utils/logger';
+import { stopYjsProviderPermanently } from './yjsProviderTeardown';
 
 interface PrefetchedCanvas {
   doc: Y.Doc;
@@ -12,12 +13,22 @@ interface PrefetchedCanvas {
   fragment: Y.XmlFragment;
   timestamp: number;
   isConnected: boolean;
+  errorCount: number;
 }
 
 class CanvasPrefetchService {
   private prefetchedCanvases = new Map<string, PrefetchedCanvas>();
   private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   private readonly MAX_PREFETCH_COUNT = 10; // Limit memory usage
+
+  // Canvases that just hit the 5-error cutoff, keyed by when that happened.
+  // Without this, CanvasList's prefetch effect re-fires on every rawItems
+  // change (frequent, from live Zero queries) and — since cleanup() removes
+  // the entry isPrefetched() relies on — immediately restarts a brand new
+  // 5-retry cycle for the same canvas, making a capped retry loop look like
+  // an unbounded one from the outside.
+  private recentlyFailedCanvases = new Map<string, number>();
+  private readonly FAILURE_COOLDOWN_MS = 30 * 1000; // 30 seconds
 
   async prefetchCanvas(
     queryClient: QueryClient,
@@ -27,6 +38,14 @@ class CanvasPrefetchService {
       title?: string;
     },
   ): Promise<void> {
+    const lastFailure = this.recentlyFailedCanvases.get(canvasId);
+    if (lastFailure !== undefined) {
+      if (Date.now() - lastFailure < this.FAILURE_COOLDOWN_MS) {
+        return;
+      }
+      this.recentlyFailedCanvases.delete(canvasId);
+    }
+
     const existing = this.prefetchedCanvases.get(canvasId);
     if (existing && Date.now() - existing.timestamp < this.CACHE_TTL_MS) {
       return;
@@ -92,6 +111,7 @@ class CanvasPrefetchService {
         fragment,
         timestamp: Date.now(),
         isConnected: false,
+        errorCount: 0,
       };
 
       const handleConnectionStatus = (
@@ -102,6 +122,22 @@ class CanvasPrefetchService {
           if (connectionResolve) {
             connectionResolve();
             connectionResolve = null;
+          }
+        }
+      };
+
+      const handlePersistentStatus = (
+        status: 'offline' | 'connecting' | 'error' | 'handshaking' | 'connected',
+      ): void => {
+        if (status === 'connected') {
+          prefetchedCanvas.errorCount = 0;
+          this.recentlyFailedCanvases.delete(canvasId);
+        } else if (status === 'error') {
+          prefetchedCanvas.errorCount += 1;
+          if (prefetchedCanvas.errorCount >= 5) {
+            provider.off(EVENT_CONNECTION_STATUS, handlePersistentStatus);
+            this.recentlyFailedCanvases.set(canvasId, Date.now());
+            this.cleanup(canvasId);
           }
         }
       };
@@ -121,6 +157,7 @@ class CanvasPrefetchService {
 
       doc.on('update', handleSync);
       provider.on(EVENT_CONNECTION_STATUS, handleConnectionStatus);
+      provider.on(EVENT_CONNECTION_STATUS, handlePersistentStatus);
 
       const cleanupListeners = (): void => {
         doc.off('update', handleSync);
@@ -176,6 +213,7 @@ class CanvasPrefetchService {
         canvasId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+      this.recentlyFailedCanvases.set(canvasId, Date.now());
       this.cleanup(canvasId);
     }
   }
@@ -208,7 +246,7 @@ class CanvasPrefetchService {
     const canvas = this.prefetchedCanvases.get(canvasId);
     if (canvas) {
       try {
-        canvas.provider.destroy();
+        stopYjsProviderPermanently(canvas.provider);
       } catch (error) {
         logger.error(Event.FRONTEND_ERROR, {
           type: 'migrated_console_error',

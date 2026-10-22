@@ -21,6 +21,7 @@ import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import {
   localFolderUnavailableMessage,
   splitLocalFolderContext,
@@ -706,10 +707,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...lines,
         'When they say "this page", "this doc" or "what is open", they mean that one.',
         channelId && folderId
-          ? `Anything you create for them belongs here too: pass channelId="${channelId}" and ` +
-            `sdlcFolderId="${folderId}" to spaces-create-canvas so it is filed in this folder ` +
-            "rather than left unfiled. For an SDLC artifact (PRD, Tech Doc, ...) pass the same id as trackFolderId " +
-            "to spaces-sdlc-write-artifact create, with that folder's trackId."
+          ? `Anything you create for them belongs here too: create it with spaces-sdlc-write-artifact create, ` +
+            `channelId="${channelId}", trackFolderId="${folderId}" and that folder's trackId, never spaces-create-canvas.`
           : "",
       ]
         .filter(Boolean)
@@ -2627,7 +2626,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           // them by id instead of by chronology (which breaks once a user
           // message has multiple assistant siblings).
           ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
-          ...(toolInvocations ? { toolInvocations } : {}),
+          ...clawMetricsFields(body),
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {

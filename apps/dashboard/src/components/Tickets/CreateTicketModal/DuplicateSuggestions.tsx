@@ -7,6 +7,7 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { cn } from '../../../utils/classNames';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { plain } from '../../Chat/ChatInput/relatedContextDisplay';
+import { useTicketNoun } from '../../../contexts/TicketNounContext';
 
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -129,6 +130,7 @@ export function DuplicateSuggestions({
   onUndoSame,
   onNotSame,
 }: DuplicateSuggestionsProps): ReactElement {
+  const noun = useTicketNoun();
   const reduceMotion = useReducedMotion();
   const [similarOpen, setSimilarOpen] = useState(false);
   const open = (suggestion: DuplicateSuggestion): boolean =>
@@ -157,7 +159,7 @@ export function DuplicateSuggestions({
           transition={transition}
         >
           <section
-            aria-label='Possible duplicate tickets'
+            aria-label={`Possible duplicate ${noun.plural}`}
             aria-busy={checking}
             className={cn(
               'space-y-1 pb-2 pt-1.5 transition-opacity duration-150',
@@ -181,7 +183,7 @@ export function DuplicateSuggestions({
                   aria-live='polite'
                 >
                   {sameAs
-                    ? 'Will be linked as a duplicate when you create this ticket'
+                    ? `Will be linked as a duplicate when you create this ${noun.singular}`
                     : regression
                       ? 'This was fixed before — it may be back'
                       : 'Looks like this was already reported'}

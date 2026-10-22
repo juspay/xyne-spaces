@@ -1,4 +1,4 @@
-import type { MarkedMoment } from '../../../stores/recordingStore';
+import type { MarkedMoment, TranscriptEntry } from '../../../stores/recordingStore';
 import type { LiveTranscriptVariant, MarkedMomentAnchors } from './LiveTranscriptList.types';
 
 /**
@@ -7,13 +7,24 @@ import type { LiveTranscriptVariant, MarkedMomentAnchors } from './LiveTranscrip
  * the overlay than on the detail screen would be describing the same recording two
  * different ways.
  */
-export function markedMomentAnchors(markedMoments: MarkedMoment[]): MarkedMomentAnchors {
+export function markedMomentAnchors(
+  markedMoments: MarkedMoment[],
+  transcripts: TranscriptEntry[],
+): MarkedMomentAnchors {
+  const lastId = transcripts[transcripts.length - 1]?.id;
+  // Anchored ahead of every line so far — marked at the live tail before its line arrived.
+  const isTrailing = (id: number): boolean => lastId === undefined || id > lastId;
   return {
     // Several moments can land on the same line; one divider is enough.
     markedTranscriptIds: new Set(
-      markedMoments.map(moment => moment.transcriptId).filter(id => id !== null),
+      markedMoments
+        .map(moment => moment.transcriptId)
+        .filter((id): id is number => id !== null && !isTrailing(id)),
     ),
     hasLeadingMoment: markedMoments.some(moment => moment.transcriptId === null),
+    hasTrailingMoment: markedMoments.some(
+      moment => moment.transcriptId !== null && isTrailing(moment.transcriptId),
+    ),
   };
 }
 

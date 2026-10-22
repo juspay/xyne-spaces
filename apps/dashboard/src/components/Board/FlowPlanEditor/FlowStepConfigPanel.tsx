@@ -93,6 +93,7 @@ export function FlowStepConfigPanel({
         </span>
         <button
           type='button'
+          aria-label='Close gate settings'
           onClick={onClose}
           data-track-category='flow_plan_editor'
           data-track-name='close_gate_config'
@@ -210,6 +211,7 @@ export function FlowStepConfigPanel({
                   <button
                     type='button'
                     title='Edit form'
+                    aria-label='Edit form'
                     onClick={() => void handleOpenAttachedForm()}
                     data-track-category='flow_plan_editor'
                     data-track-name='edit_gate_form'
@@ -220,6 +222,7 @@ export function FlowStepConfigPanel({
                   <button
                     type='button'
                     title='Detach form'
+                    aria-label='Detach form'
                     onClick={() => setDraftFormGate({ type: 'form', formId: '' })}
                     data-track-category='flow_plan_editor'
                     data-track-name='remove_gate_form'

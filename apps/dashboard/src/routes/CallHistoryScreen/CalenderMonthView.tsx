@@ -18,7 +18,9 @@ import {
   HATCH_BACKGROUND,
 } from './CalenderViewUtils';
 import { usePlatform } from '../../hooks/usePlatform';
-import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
+import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
+import { Popover } from '../../components/ui/Popover/Popover';
+import { OtherUserCallDetails } from './OtherUserCallDetails';
 
 /** Start – end for a month row, in the calendar's usual h:mm format; start alone without an end. */
 function formatMonthTimeRange(
@@ -30,26 +32,40 @@ function formatMonthTimeRange(
   return start && end ? `${start} - ${end}` : start;
 }
 
+/** Popover key for another user's slot; the `other-` prefix keeps it apart from own call ids. */
+const otherSlotPopoverId = (slot: OtherUserBusySlot): string =>
+  `other-${slot.userId}-${slot.id ?? slot.startsAt}`;
+
 function MonthOtherUserEventRow({
   color,
-  title,
-  startsAt,
-  endsAt,
+  slot,
   userName,
   variant = 'cell',
+  open,
+  onOpenChange,
 }: {
   color: string;
-  title: string | undefined;
-  startsAt: number | undefined;
-  endsAt: number | null;
+  slot: OtherUserBusySlot;
   userName: string;
   variant?: 'cell' | 'overflow';
+  // Controlled by the view, so its open-popover guard stops the closing click creating a call.
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }): ReactElement {
+  const { title, startsAt, endsAt } = slot;
+  // A public calendar's slot carries a title and opens its details; a busy slot doesn't.
+  const showsDetails = title !== undefined;
+
   // The colour is per person and only known at runtime, so it has to be an inline
   // style — Tailwind can't generate a class for it.
-  if (variant === 'overflow') {
-    return (
-      <div className='flex items-center gap-2 w-full px-4 py-2'>
+  const row =
+    variant === 'overflow' ? (
+      <div
+        className={cn(
+          'flex items-center gap-2 w-full px-4 py-2 text-left',
+          showsDetails && 'cursor-pointer hover:bg-muted/50 transition-colors',
+        )}
+      >
         <div className='w-0.5 h-8 rounded-full shrink-0' style={{ backgroundColor: color }} />
         <div className='flex min-w-0 flex-1 flex-col'>
           <span className='truncate text-sm font-medium text-foreground'>{title ?? 'Busy'}</span>
@@ -61,24 +77,52 @@ function MonthOtherUserEventRow({
           </span>
         )}
       </div>
-    );
-  }
-  return (
-    <div
-      title={`${userName} · ${title ?? 'Busy'}`}
-      className='flex shrink-0 items-center gap-1 text-left w-full px-1 py-0.5 rounded'
-      style={{ backgroundColor: `${color}1a` }}
-    >
-      <div className='w-0.5 h-3.5 rounded-full shrink-0' style={{ backgroundColor: color }} />
-      <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-xs font-medium'>
-        {title ?? 'Busy'}
-      </span>
-      {startsAt && (
-        <span className='shrink-0 tabular-nums text-muted-foreground text-xs opacity-70 max-sm:hidden'>
-          {formatMonthTimeRange(startsAt, endsAt)}
+    ) : (
+      <div
+        title={`${userName} · ${title ?? 'Busy'}`}
+        className={cn(
+          'flex shrink-0 items-center gap-1 text-left w-full px-1 py-0.5 rounded',
+          showsDetails && 'cursor-pointer',
+        )}
+        style={{ backgroundColor: `${color}1a` }}
+      >
+        <div className='w-0.5 h-3.5 rounded-full shrink-0' style={{ backgroundColor: color }} />
+        <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-xs font-medium'>
+          {title ?? 'Busy'}
         </span>
-      )}
-    </div>
+        {startsAt && (
+          <span className='shrink-0 tabular-nums text-muted-foreground text-xs opacity-70 max-sm:hidden'>
+            {formatMonthTimeRange(startsAt, endsAt)}
+          </span>
+        )}
+      </div>
+    );
+
+  if (!showsDetails) return row;
+
+  return (
+    <Popover
+      trigger={
+        <button
+          type='button'
+          // Keep the click off the day cell, which would start a new call on that day.
+          onClick={e => e.stopPropagation()}
+          data-track-category='CALENDAR'
+          data-track-name='calendar-month-other-user-call'
+          className='w-full focus:outline-none'
+        >
+          {row}
+        </button>
+      }
+      side='right'
+      align='start'
+      sideOffset={8}
+      collisionPadding={8}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      <OtherUserCallDetails details={slot} />
+    </Popover>
   );
 }
 
@@ -266,10 +310,12 @@ const CalendarMonthView = ({
                               <MonthOtherUserEventRow
                                 key={`other-${event.startsAt}-${ei}`}
                                 color={event.color}
-                                title={event.slot.title}
-                                startsAt={event.slot.startsAt}
-                                endsAt={event.slot.endsAt}
+                                slot={event.slot}
                                 userName={event.userName}
+                                open={openCallId === otherSlotPopoverId(event.slot)}
+                                onOpenChange={open =>
+                                  setOpenCallId(open ? otherSlotPopoverId(event.slot) : null)
+                                }
                               />
                             );
                           }
@@ -459,6 +505,7 @@ const CalendarMonthView = ({
                                     </span>
                                   </div>
                                   <button
+                                    aria-label='Close'
                                     onClick={() => {
                                       setOpenOverflowDay(null);
                                       setOpenOverflowCallId(null);
@@ -479,11 +526,17 @@ const CalendarMonthView = ({
                                         <MonthOtherUserEventRow
                                           key={`overflow-other-${event.startsAt}-${ei}`}
                                           color={event.color}
-                                          title={event.slot.title}
-                                          startsAt={event.slot.startsAt}
-                                          endsAt={event.slot.endsAt}
+                                          slot={event.slot}
                                           userName={event.userName}
                                           variant='overflow'
+                                          open={
+                                            openOverflowCallId === otherSlotPopoverId(event.slot)
+                                          }
+                                          onOpenChange={open =>
+                                            setOpenOverflowCallId(
+                                              open ? otherSlotPopoverId(event.slot) : null,
+                                            )
+                                          }
                                         />
                                       );
                                     }

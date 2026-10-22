@@ -73,6 +73,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
         </span>
         <button
           type='button'
+          aria-label='Close decision settings'
           onClick={onClose}
           data-track-category='flow_plan_editor'
           data-track-name='close_decision_config'

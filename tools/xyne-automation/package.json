@@ -25,6 +25,7 @@
     "check:fix": "biome check --assist-enabled=true --write .",
     "validate": "biome ci --assist-enabled=true . && biome format . --diagnostic-level=error && pnpm run validate:filename && pnpm run validate:literals",
     "test:runner": "ts-node --project tsconfig.json scripts/runner/index.ts",
+    "release:check": "ts-node --project tsconfig.json scripts/release-check.ts",
     "validate:filename": "ts-node --project tsconfig.json scripts/validation/validate-filename.ts",
     "validate:literals": "ts-node --project tsconfig.json scripts/validation/validate-literals.ts"
   },
@@ -35,7 +36,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.11",
     "@getgauge/cli": "^1.6.30",
-    "@playwright/test": "1.59.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "^24.6.1",
     "chalk": "^4.1.2",
     "dotenv": "^17.2.3",

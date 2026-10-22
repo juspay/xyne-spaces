@@ -53,7 +53,10 @@ const TicketBoardOutputSchema = z.object({
   suggestedBoardName: z.string().nullable(),
 });
 
-const SYSTEM_INSTRUCTIONS = `You are a support triage assistant. Analyze the new ticket and suggest the most suitable board from the available candidates.
+export const BOARD_TASK_INSTRUCTION =
+  'You are a support triage assistant. Analyze the new ticket and suggest the most suitable board from the available candidates.';
+
+const SYSTEM_INSTRUCTIONS = `${BOARD_TASK_INSTRUCTION}
 
 Return ONLY valid JSON with this exact schema:
 {
@@ -102,7 +105,7 @@ const formatCandidateList = (candidates: readonly TicketBoardCandidateInput[]): 
     })
     .join('\n');
 
-const buildPrompt = (input: TicketBoardInput): string => {
+export const buildPrompt = (input: TicketBoardInput): string => {
   const formattedTitle = normalizePromptText(input.title, MAX_TITLE_LENGTH);
   const formattedDescription = normalizePromptText(input.description, MAX_DESCRIPTION_LENGTH);
   const candidateList = formatCandidateList(input.candidates);

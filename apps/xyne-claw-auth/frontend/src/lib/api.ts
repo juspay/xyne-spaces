@@ -6118,118 +6118,7 @@ export async function getTwinReplyMetrics(
   return data.data;
 }
 
-// ── Workspace-wide metrics (v3 Metrics page) ───────────────────────────
-
-export interface SlowSessionToolRow {
-  tool: string;
-  ms: number;
-  calls: number;
-  isError: boolean;
-}
-export interface SlowSession {
-  sessionId: string;
-  agentSlug: string;
-  totalMs: number | null;
-  llmTotalMs: number | null;
-  toolMs: number | null;
-  completedAt: string;
-  task: string | null;
-  topTools: SlowSessionToolRow[];
-}
-
-export interface GlobalMetricsDayBucket {
-  day: string;
-  runs: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-  avgLlmMs: number | null;
-  avgToolMs: number | null;
-  errorRate: number;
-  user?: number;
-  automation?: number;
-  scheduled?: number;
-  api?: number;
-}
-export interface GlobalMetricsAgentRow {
-  agentSlug: string;
-  orgId?: string | null;
-  orgName?: string | null;
-  runs: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-  avgLlmMs: number | null;
-  avgToolMs: number | null;
-  errorRate: number;
-}
-export interface GlobalMetricsProviderRow {
-  provider: string;
-  model: string | null;
-  runs: number;
-  p50LlmMs: number | null;
-  p95LlmMs: number | null;
-  p50TtftMs: number | null;
-  p95TtftMs: number | null;
-  avgTokensPerSec: number | null;
-  errorRate: number;
-}
-export type GlobalMetricsTriggerGroup = "user" | "automation" | "scheduled" | "api";
-export interface GlobalMetricsTriggerRow {
-  trigger: GlobalMetricsTriggerGroup;
-  runs: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  errorRate: number;
-  p50TotalMs: number | null;
-  p95TotalMs: number | null;
-}
-export interface GlobalMetrics {
-  days: number;
-  windowStart: string;
-  windowEnd: string;
-  totals: {
-    runs: number;
-    completed: number;
-    failed: number;
-    cancelled: number;
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    avgLlmMs: number | null;
-    avgToolMs: number | null;
-    errorRate: number;
-    /** Window token totals. in = fresh input; cacheRead/cacheWrite = replayed/
-        stored context (real consumption on cache-heavy agents); out = generated. */
-    tokens?: { in: number; out: number; cacheRead: number; cacheWrite: number };
-    /** Distinct users in the window. */
-    uniqueUsers?: number;
-    /** Memory adoption — runs that recalled >=1 memory (per-agent endpoint only). */
-    memoryRecall?: { runsWithRecall: number; rate: number };
-  };
-  delta: {
-    runs: number;
-    p50TotalMs: number | null;
-    p95TotalMs: number | null;
-    errorRate: number;
-  };
-  perDay: GlobalMetricsDayBucket[];
-  byTrigger: GlobalMetricsTriggerRow[];
-  topAgents: GlobalMetricsAgentRow[];
-  byProvider: GlobalMetricsProviderRow[];
-  slowSessions: SlowSession[];
-}
-
-export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<GlobalMetrics> {
-  const qs = new URLSearchParams();
-  qs.set("days", String(days));
-  applyAdminOrgScope(qs, orgScope);
-  return request<GlobalMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
-    { headers: { "x-user-id": userId } },
-  );
-}
+// ── Metrics page: awakening, sentiment, improvements ─────────────────────
 
 /**
  * Activity for agents that wake on their own. Kept out of the main metrics
@@ -6337,36 +6226,6 @@ export interface AgentSentiment {
   recentComments: SentimentComment[];
 }
 
-// Per-agent metrics — same shape as global minus `topAgents`, with a couple
-// of extra single-agent rollups (avgTurns, avgTokensPerSec).
-export interface AgentMetrics {
-  agentSlug: string;
-  days: number;
-  windowStart: string;
-  windowEnd: string;
-  totals: GlobalMetrics["totals"] & {
-    avgTurns: number | null;
-    avgTokensPerSec: number | null;
-    // tokens + uniqueUsers inherited from GlobalMetrics["totals"] — both
-    // endpoints report them with identical shapes.
-  };
-  delta: GlobalMetrics["delta"];
-  perDay: GlobalMetricsDayBucket[];
-  slowSessions: SlowSession[];
-  toolLatency: ToolLatencyRow[];
-  sentiment: AgentSentiment;
-}
-
-export interface ToolLatencyRow {
-  tool: string;
-  calls: number;
-  errors: number;
-  avgMs: number | null;
-  p50Ms: number | null;
-  p95Ms: number | null;
-  totalMs: number;
-}
-
 // FailureCurator candidate types and endpoints
 export type ImprovementBucket = "agent_unable_to_do_work" | "failure" | "user_frustrated";
 export type ImprovementRootCause =
@@ -6415,15 +6274,748 @@ export async function dismissImprovement(userId: string, id: string, reason?: st
   );
 }
 
-export async function fetchAgentMetrics(userId: string, slug: string, days: 1 | 7 | 30 = 7, orgScope?: AdminOrgScope): Promise<AgentMetrics> {
-  const qs = new URLSearchParams();
-  qs.set("days", String(days));
-  applyAdminOrgScope(qs, orgScope);
-  return request<AgentMetrics>(
-    `${AUTH_API_URL}/api/v1/metrics/agent/${encodeURIComponent(slug)}?${qs.toString()}`,
-    { headers: { "x-user-id": userId } },
+/**
+ * Admin-only. Summarises historical runs so the tool panels stop under-reporting.
+ * `force` re-summarises rows written by an older summariser version.
+ */
+export async function backfillToolStats(
+  userId: string,
+  body?: { batchSize?: number; maxRows?: number; sinceDays?: number; force?: boolean },
+): Promise<ToolStatsBackfillReport> {
+  return request<ToolStatsBackfillReport>(
+    `${AUTH_API_URL}/api/v1/metrics/tools/backfill`,
+    {
+      method: "POST",
+      headers: { "x-user-id": userId },
+      body: JSON.stringify(body ?? {}),
+    },
   );
 }
+
+// ── Metrics v2 (one endpoint per card) ────────────────────────────────────
+// Every GET answers `{ window, ...body }` with `n` beside each average, percentile and rate.
+// Fetchers take an optional AbortSignal so the page cache can cancel unused requests.
+
+export type MetricsDays = 1 | 7 | 30;
+
+/** The filter context every metrics endpoint shares (a subset of the page's MetricsScopeParams). */
+export interface MetricsQueryScope {
+  userId: string;
+  days: MetricsDays;
+  orgScope: AdminOrgScope;
+  agentSlugs: readonly string[];
+}
+
+export type MetricsWindowColumn = "completedAt" | "startedAt";
+
+/** Echo of the window a response was computed over. Every v2 response starts with it. */
+export interface WindowInfo {
+  days: MetricsDays;
+  start: string;
+  end: string;
+  column: MetricsWindowColumn;
+  scope: { level: "org" | "own" | "all-orgs"; agentSlugs: string[] };
+  computedAt: string;
+  cached: boolean;
+}
+
+export type TriggerGroup = "user" | "automation" | "scheduled" | "api" | "awakened" | "delegation" | "messaging" | "other";
+
+export interface PctBlock {
+  n: number;
+  p50Ms: number | null;
+  p95Ms: number | null;
+}
+
+export interface SummaryFigures {
+  runs: number;
+  /** A2A callee rows inside `runs` — context, not a separate population. */
+  delegatedRuns: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  /** completed / runs. */
+  successRate: number | null;
+  users: number;
+  /** End-to-end wall clock (completedAt − startedAt) over completed runs. */
+  wall: PctBlock;
+  /** Agent-reported totalMs; its own n, never coalesced with `wall`. */
+  agent: PctBlock & { avgLlmMs: number | null; avgToolMs: number | null; avgOtherMs: number | null };
+  /** Run-level ttftMs — "Reply starts after". */
+  replyStart: PctBlock;
+  tokens: {
+    n: number;
+    promptPerRun: number | null;
+    outputPerRun: number | null;
+    freshPerRun: number | null;
+    cachedPerRun: number | null;
+    cacheHitRate: number | null;
+    promptTotal: number;
+    outputTotal: number;
+  };
+  /** Σout ÷ Σ decode seconds over rows with both > 0. */
+  throughput: { n: number; tokensPerSec: number | null };
+  /** From agent_run_stats; compare runsSummarised with `runs` for capture coverage. */
+  tools: {
+    runsWithTools: number;
+    runsSummarised: number;
+    calls: number;
+    errors: number;
+    errorRate: number | null;
+  };
+  llm: { runsWithSeries: number };
+}
+
+export interface SummaryResponse {
+  window: WindowInfo;
+  current: SummaryFigures;
+  previous: SummaryFigures | null;
+}
+
+export interface DailyPoint {
+  /** YYYY-MM-DD in the requested tz. */
+  day: string;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  byTrigger: Partial<Record<TriggerGroup, number>>;
+  wall: PctBlock;
+  agent: { n: number; avgLlmMs: number | null; avgToolMs: number | null; totalLlmMs: number; totalToolMs: number };
+  tokens: { n: number; prompt: number; output: number };
+}
+
+export interface TriggerRow {
+  group: TriggerGroup;
+  runs: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  successRate: number | null;
+  wall: PctBlock;
+}
+
+export interface RunDailyResponse {
+  window: WindowInfo;
+  tz: string;
+  /** Zero-filled, oldest first. */
+  days: DailyPoint[];
+  /** Groups with runs > 0 only. */
+  triggers: TriggerRow[];
+}
+
+export interface AgentLeaderRow {
+  agentSlug: string;
+  orgId: string;
+  orgName?: string | null;
+  runs: number;
+  failed: number;
+  successRate: number | null;
+  wall: PctBlock;
+  agent: { n: number; avgLlmMs: number | null; avgToolMs: number | null };
+  tokens: { n: number; promptPerRun: number | null; outputPerRun: number | null };
+  toolCalls: number;
+  toolErrorRate: number | null;
+}
+
+export interface AgentsTopResponse {
+  window: WindowInfo;
+  rows: AgentLeaderRow[];
+}
+
+export interface ActiveAgentRow {
+  agentSlug: string;
+  orgId: string;
+  runs: number;
+}
+
+/** Always a 30-day window, whatever `days` the page is on — it feeds the agent picker. */
+export interface ActiveAgentsResponse {
+  window: WindowInfo;
+  agents: ActiveAgentRow[];
+}
+
+/** One run-level route (agent_runs.provider) + model. "Route", not "Provider": see spec decisions. */
+export interface RouteRow {
+  route: string;
+  model: string | null;
+  runs: number;
+  /** Runs carrying LLM timing — the n behind `llm`. */
+  timed: number;
+  llm: PctBlock;
+  replyStart: PctBlock;
+  tokensPerSec: number | null;
+  failed: number;
+  errorRate: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface RoutesResponse {
+  window: WindowInfo;
+  rows: RouteRow[];
+}
+
+export interface JudgeSummaryRow {
+  backend: string;
+  runs: number;
+  calls: number;
+  failed: number;
+  compactions: number;
+}
+
+export interface JudgeResponse {
+  window: WindowInfo;
+  rows: JudgeSummaryRow[];
+}
+
+export interface MetricsSentiment extends AgentSentiment {
+  /** Runs with a non-null llmRetries — the denominator of retriedRate. */
+  retriesKnown: number;
+}
+
+export interface MemoryRecallFigures {
+  recalled: number;
+  runs: number;
+  rate: number | null;
+  /** False when recall is not instrumented for this scope — render "not captured", not 0%. */
+  captured: boolean;
+}
+
+export interface SentimentResponse {
+  window: WindowInfo;
+  sentiment: MetricsSentiment;
+  memoryRecall: MemoryRecallFigures;
+}
+
+/* Tools */
+
+/** Sortable columns of GET /metrics/tools. An unknown key makes the server sort by `errors` and echo that in `page.sort`. */
+export type ToolSortKey =
+  | "tool" | "calls" | "errors" | "errorRate" | "recoveryRate" | "dropped" | "duplicateRate" | "duplicates"
+  | "emptyRate" | "citeRate" | "uncited" | "avgMs" | "p95Ms" | "maxMs" | "totalMs" | "bytes" | "avgBytes";
+
+export const TOOL_SORT_KEYS: readonly ToolSortKey[] = [
+  "tool", "calls", "errors", "errorRate", "recoveryRate", "dropped", "duplicateRate", "duplicates",
+  "emptyRate", "citeRate", "uncited", "avgMs", "p95Ms", "maxMs", "totalMs", "bytes", "avgBytes",
+];
+
+/** One tool, window-wide. Every rate is null (not 0) when its denominator is 0. */
+export interface ToolRow {
+  tool: string;
+  calls: number;
+  runs: number;
+  topLevelCalls: number;
+  childCalls: number;
+  errors: number;
+  errorRate: number | null;
+  /** Errors of the form "tool X not found" — a palette problem, not a tool problem. */
+  notFound: number;
+  dropped: number;
+  droppedRate: number | null;
+  empty: number;
+  emptyRate: number | null;
+  duplicates: number;
+  duplicateRate: number | null;
+  recovered: number;
+  /** recovered / errors. */
+  recoveryRate: number | null;
+  unrecovered: number;
+  citeable: number;
+  cited: number;
+  citeRate: number | null;
+  timedCalls: number;
+  avgMs: number | null;
+  /** Estimated from the duration buckets (linear within the bucket the percentile falls in). */
+  p50Ms: number | null;
+  p95Ms: number | null;
+  /** True when p95 fell in the overflow bucket: render "> 5m", not a number. */
+  p95Overflow: boolean;
+  maxMs: number;
+  totalMs: number;
+  bytes: number;
+  avgBytes: number | null;
+  contextShare: number | null;
+  /** RUN counts per signal — the drill-down total, which can be smaller than the call counts. */
+  sessions: { errored: number; recovered: number; unrecovered: number; dropped: number; duplicated: number; empty: number; cited: number };
+}
+
+/** Window-wide sums, independent of the table page and the search box. */
+export interface ToolTotals {
+  distinctTools: number;
+  calls: number;
+  errors: number;
+  notFound: number;
+  dropped: number;
+  duplicates: number;
+  empty: number;
+  recovered: number;
+  citeable: number;
+  cited: number;
+  bytes: number;
+  totalMs: number;
+  timedCalls: number;
+  avgMsPerCall: number | null;
+  runsWithTools: number;
+}
+
+export interface RankPoint {
+  tool: string;
+  calls: number;
+  value: number;
+  share: number | null;
+  avg: number | null;
+  errorRate: number | null;
+  p95Ms: number | null;
+}
+
+export interface RankRemainder {
+  tools: number;
+  value: number;
+  share: number | null;
+}
+
+export interface RankSet {
+  byTotal: RankPoint[];
+  /** Tools with >= 5 calls. */
+  byAvg: RankPoint[];
+  other: RankRemainder;
+}
+
+export interface ToolRollup {
+  totals: ToolTotals;
+  rows: ToolRow[];
+  ranking: {
+    time: RankSet;
+    bytes: RankSet;
+    /** byRate: tools with >= 10 calls. */
+    errors: { byCount: RankPoint[]; byRate: RankPoint[]; other: RankRemainder };
+  };
+}
+
+/** Share of the window's runs with tool stats. `coverage` null when the window has no runs. */
+export interface ToolSummaryCoverage {
+  runsInWindow: number;
+  runsSummarised: number;
+  coverage: number | null;
+}
+
+export interface ToolsPageInfo {
+  limit: number;
+  offset: number;
+  /** Tools matching the search across the whole window. */
+  total: number;
+  sort: ToolSortKey;
+  dir: "asc" | "desc";
+}
+
+/** GET /metrics/tools: the cached rollup, with `rows` sliced to the requested page. */
+export interface ToolsResponse extends ToolRollup {
+  window: WindowInfo;
+  coverage: ToolSummaryCoverage;
+  page: ToolsPageInfo;
+}
+
+export interface ToolsRequest {
+  sort?: ToolSortKey;
+  dir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+export interface ErrorClassRow {
+  tool: string;
+  /** Normalised one-liner (ids, numbers, literals replaced). */
+  errorClass: string;
+  occurrences: number;
+  runs: number;
+  /** One raw example, <= 400 chars. */
+  sample: string;
+  lastSeen: string | null;
+  notFound: boolean;
+}
+
+export interface ErrorClassesResponse {
+  window: WindowInfo;
+  rows: ErrorClassRow[];
+  total: number;
+  occurrences: number;
+}
+
+export interface ErrorClassesRequest {
+  tool?: string;
+  limit?: number;
+  offset?: number;
+  /** Top N classes per tool when `tool` is absent. */
+  perTool?: number;
+}
+
+export interface CitationReflectionOutcome {
+  outcome: string;
+  runs: number;
+  share: number;
+}
+
+export interface CitationFlagRow {
+  orgId: string;
+  agentSlug: string;
+  autoToolCitations: boolean;
+  citationReflection: boolean;
+}
+
+export interface ExactCitationRow {
+  tool: string;
+  calls: number;
+  citeableCalls: number;
+  citedCalls: number;
+  citeRate: number | null;
+}
+
+export interface CitationsResponse {
+  window: WindowInfo;
+  scope: "same-turn" | "conversation";
+  funnel: { citeable: number; cited: number };
+  reflection: CitationReflectionOutcome[];
+  flags: CitationFlagRow[];
+  /** Only with `exact=1`; the server answers 400 unless one agent is selected or days <= 7. */
+  exact: ExactCitationRow[] | null;
+}
+
+/** open-palette = tools.openPalette read|all: every tool is allowed, so "granted nothing" is wrong. */
+export type PaletteState = "scoped" | "open-palette" | "unscoped";
+
+export interface AgentPaletteRow {
+  orgId: string;
+  agentSlug: string;
+  state: PaletteState;
+  openPalette?: "read" | "all";
+  /** toolsUsed ∪ toolStats[].t in the window. */
+  observedTools: number;
+  /** Null unless state = scoped. */
+  granted: number | null;
+  used: number | null;
+  unused: number | null;
+  usedShare: number | null;
+}
+
+export interface UnusedGrant {
+  orgId: string;
+  agentSlug: string;
+  kind: string;
+  grant: string;
+  server?: string | null;
+}
+
+export interface UnusedGrantsResponse {
+  window: WindowInfo;
+  agents: AgentPaletteRow[];
+  unusedGrants: UnusedGrant[];
+}
+
+/* LLM calls */
+
+export interface LlmSummary {
+  calls: number;
+  runs: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  nDecode: number;
+  p50DecodeMs: number | null;
+  /** Weighted: Σout ÷ Σ decode seconds. */
+  tokensPerSec: number | null;
+  avgContextTokens: number | null;
+  avgOutputTokens: number | null;
+  cacheHitRate: number | null;
+  compactions: number;
+  retries: number;
+  subagentCalls: number;
+  errorStops: number;
+}
+
+export interface LlmBucketRow {
+  /** Lower edge of the context-size bucket, in tokens. */
+  contextBucket: number;
+  calls: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  tokensPerSec: number | null;
+  avgOutputTokens: number | null;
+}
+
+export interface LlmIndexRow {
+  callIndex: number;
+  calls: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  avgContextTokens: number | null;
+  tokensPerSec: number | null;
+  compactionShare: number | null;
+  retriedShare: number | null;
+}
+
+export interface LlmModelRow {
+  model: string | null;
+  provider: string | null;
+  calls: number;
+  runs: number;
+  nTtft: number;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  tokensPerSec: number | null;
+  avgContextTokens: number | null;
+  avgOutputTokens: number | null;
+  errorStops: number;
+  retries: number;
+}
+
+export interface LlmCallsResponse {
+  window: WindowInfo;
+  coverage: {
+    runsInWindow: number;
+    runsWithSeries: number;
+    coverage: number | null;
+    /** ISO completedAt of the earliest in-window run carrying a per-call series. */
+    seriesSince?: string | null;
+  };
+  summary: LlmSummary;
+  byContext: LlmBucketRow[];
+  /** At most 40 positions. */
+  byCallIndex: LlmIndexRow[];
+  byModel: LlmModelRow[];
+}
+
+/* Sessions drill-down */
+
+export type SessionKind = "tool" | "failed" | "slow" | "model";
+export type ToolSignal = "calls" | "errors" | "recovered" | "unrecovered" | "dropped" | "duplicates" | "empty" | "cited" | "notFound";
+
+export interface MetricSessionToolFigures {
+  c: number;
+  e: number;
+  rec: number;
+  unrec: number;
+  d: number;
+  dup: number;
+  z: number;
+  ci: number;
+  nf: number;
+  ms: number;
+}
+
+export interface MetricSessionRow {
+  id: string;
+  sessionId: string;
+  conversationId: string | null;
+  channelId: string | null;
+  agentSlug: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
+  triggerSource: string;
+  status: string;
+  task: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  totalMs: number | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  rating: string | null;
+  /** Ran on the owner's personal credentials: task/error/sample/links are withheld. */
+  restricted: boolean;
+  /** kind=tool: this tool's figures in this run. */
+  tool?: MetricSessionToolFigures;
+  /** First error sample of that tool, for error-shaped signals. */
+  sample?: string | null;
+  /** kind=failed, <= 300 chars. */
+  error?: string | null;
+  /** kind=slow. */
+  split?: {
+    llmMs: number | null;
+    toolMs: number | null;
+    totalMs: number | null;
+    topTools: Array<{ tool: string; ms: number; calls: number; errored: boolean }>;
+  };
+  /** kind=model. calls = 0 means no per-call series was recorded for the run. */
+  model?: { calls: number; ttftMaxMs: number | null; ctxMax: number | null; retries: number; errorStops: number };
+}
+
+export interface MetricSessionsRequest {
+  kind: SessionKind;
+  tool?: string;
+  signal?: ToolSignal;
+  errorClass?: string;
+  status?: Array<"failed" | "cancelled">;
+  minMs?: number;
+  model?: string;
+  provider?: string;
+  limit: number;
+  cursor?: string;
+  /** Page 1 only: ask for the capped session total. */
+  count?: boolean;
+}
+
+export interface MetricSessionsResponse {
+  window: WindowInfo;
+  rows: MetricSessionRow[];
+  page: { limit: number; nextCursor: string | null; hasMore: boolean };
+  /** Distinct sessions, capped at 1000 (capped = true → "1,000+"). Null unless count was asked for. */
+  total: { value: number; capped: boolean } | null;
+  coverage: { runsInWindow: number; runsSummarised: number };
+}
+
+/* Backfill */
+
+export interface ToolStatsBackfillReport {
+  scanned: number;
+  summarised: number;
+  /** Runs scanned that had no tool calls to summarise. */
+  emptied: number;
+  /** agent_run_tool_stats rows written (one per tool per run). */
+  toolRows?: number;
+  /** Errored tool calls recorded in those rows. */
+  errorRows?: number;
+  /** Runs left without a row for the next call to retry: their write failed for a reason a retry can fix. */
+  failed?: number;
+  batches: number;
+  durationMs: number;
+  /** Finished runs still without tool stats after this call. */
+  remaining?: number;
+}
+
+/* Fetchers */
+
+const METRICS_BASE = `${AUTH_API_URL}/api/v1/metrics`;
+
+type QueryValue = string | number | boolean | readonly string[] | null | undefined;
+
+/** Builds `/metrics<path>?…`; the page cache keys on this URL. `agentSlug` repeats (slugs may contain commas); empty values are dropped. */
+export function metricsUrl(
+  path: string,
+  scope: Pick<MetricsQueryScope, "days" | "orgScope" | "agentSlugs">,
+  extra?: Record<string, QueryValue>,
+): string {
+  const qs = new URLSearchParams();
+  qs.set("days", String(scope.days));
+  applyAdminOrgScope(qs, scope.orgScope);
+  for (const slug of scope.agentSlugs) if (slug) qs.append("agentSlug", slug);
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value == null || value === false || value === "") continue;
+    if (Array.isArray(value)) {
+      if (value.length > 0) qs.set(key, value.join(","));
+    } else {
+      qs.set(key, value === true ? "1" : String(value));
+    }
+  }
+  return `${METRICS_BASE}${path}?${qs.toString()}`;
+}
+
+function metricsGet<T>(userId: string, url: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(url, { headers: { "x-user-id": userId }, signal });
+}
+
+export function fetchMetricsSummary(scope: MetricsQueryScope, signal?: AbortSignal): Promise<SummaryResponse> {
+  return metricsGet(scope.userId, metricsUrl("/summary", scope), signal);
+}
+
+export function fetchMetricsRunDaily(scope: MetricsQueryScope, tz: string, signal?: AbortSignal): Promise<RunDailyResponse> {
+  return metricsGet(scope.userId, metricsUrl("/runs/daily", scope, { tz }), signal);
+}
+
+export function fetchMetricsAgentsTop(scope: MetricsQueryScope, limit = 20, signal?: AbortSignal): Promise<AgentsTopResponse> {
+  return metricsGet(scope.userId, metricsUrl("/agents/top", scope, { limit }), signal);
+}
+
+/** The server always answers for 30 days; `days` is pinned so every range shares one cache entry. */
+export function fetchMetricsActiveAgents(scope: MetricsQueryScope, signal?: AbortSignal): Promise<ActiveAgentsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/agents/active", { ...scope, days: 30, agentSlugs: [] }), signal);
+}
+
+export function fetchMetricsRoutes(scope: MetricsQueryScope, signal?: AbortSignal): Promise<RoutesResponse> {
+  return metricsGet(scope.userId, metricsUrl("/routes", scope), signal);
+}
+
+export function fetchMetricsJudge(scope: MetricsQueryScope, signal?: AbortSignal): Promise<JudgeResponse> {
+  return metricsGet(scope.userId, metricsUrl("/judge", scope), signal);
+}
+
+/** Exactly one agent must be selected — the server answers 400 otherwise. */
+export function fetchMetricsSentiment(scope: MetricsQueryScope, signal?: AbortSignal): Promise<SentimentResponse> {
+  return metricsGet(scope.userId, metricsUrl("/sentiment", scope), signal);
+}
+
+/** `status` goes out comma-joined (`status=failed,cancelled`). */
+export function metricSessionsParams(req: MetricSessionsRequest): Record<string, QueryValue> {
+  return {
+    kind: req.kind,
+    tool: req.tool,
+    signal: req.signal,
+    errorClass: req.errorClass,
+    status: req.status,
+    minMs: req.minMs,
+    model: req.model,
+    provider: req.provider,
+    limit: req.limit,
+    cursor: req.cursor,
+    count: req.count,
+  };
+}
+
+export function fetchMetricSessions(
+  scope: MetricsQueryScope,
+  req: MetricSessionsRequest,
+  signal?: AbortSignal,
+): Promise<MetricSessionsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/sessions", scope, metricSessionsParams(req)), signal);
+}
+
+export function fetchMetricsTools(scope: MetricsQueryScope, req: ToolsRequest = {}, signal?: AbortSignal): Promise<ToolsResponse> {
+  return metricsGet(
+    scope.userId,
+    metricsUrl("/tools", scope, { sort: req.sort, dir: req.dir, limit: req.limit, offset: req.offset, search: req.search }),
+    signal,
+  );
+}
+
+export function fetchMetricsErrorClasses(
+  scope: MetricsQueryScope,
+  req: ErrorClassesRequest = {},
+  signal?: AbortSignal,
+): Promise<ErrorClassesResponse> {
+  return metricsGet(
+    scope.userId,
+    metricsUrl("/tools/error-classes", scope, { tool: req.tool, limit: req.limit, offset: req.offset, perTool: req.perTool }),
+    signal,
+  );
+}
+
+/** `exact` is the conversation-scoped join: allowed only with an agent filter or days <= 7. */
+export function fetchMetricsCitations(
+  scope: MetricsQueryScope,
+  req: { exact?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<CitationsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/tools/citations", scope, { exact: req.exact }), signal);
+}
+
+export function fetchMetricsUnusedGrants(scope: MetricsQueryScope, signal?: AbortSignal): Promise<UnusedGrantsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/tools/unused-grants", scope), signal);
+}
+
+export function fetchMetricsLlmCalls(
+  scope: MetricsQueryScope,
+  req: { includeSubagents?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<LlmCallsResponse> {
+  return metricsGet(scope.userId, metricsUrl("/llm-calls", scope, { includeSubagents: req.includeSubagents }), signal);
+}
+
 // ── Evals ─────────────────────────────────────────────────────────────────
 // A folder explorer of conversations to replay against an agent. The browser
 // orchestrates a run by calling sendChatMessage() per turn (the real chat SSE
@@ -6620,7 +7212,6 @@ export interface StartGenerationAgent {
   genProvider?: string;
   genModel?: string;
   optimizations?: string;
-  judgeBackend?: string;
 }
 
 /** Start a comparison of 1-3 agents over the same conversations. Each agent gets

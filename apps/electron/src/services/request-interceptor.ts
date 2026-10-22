@@ -1,11 +1,12 @@
 import log from 'electron-log/main';
-import { session, BrowserWindow, app } from 'electron';
+import { session, BrowserWindow, app, webContents } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import { Logger as appLogger } from './logger/Logger';
 import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
@@ -283,7 +284,9 @@ function installFrontendCsp(): void {
   const sandpackBundler = 'https://*.codesandbox.io';
   const cspDirectives = [
     `default-src 'self' ${xyneHosts}`,
-    `script-src 'self' ${xyneHosts} ${googleApis}`,
+    // 'wasm-unsafe-eval' lets WebAssembly compile (call background effects run MediaPipe
+    // as Wasm); it does not permit JS eval.
+    `script-src 'self' 'wasm-unsafe-eval' ${xyneHosts} ${googleApis}`,
     `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
     `img-src 'self' data: blob: https:`,
     `media-src 'self' blob: ${xyneHosts}`,
@@ -340,6 +343,15 @@ export function setupRequestInterceptor(): void {
     },
     (details, callback) => {
       details.requestHeaders['X-Platform'] = 'electron';
+      // The renderer's apiClient attaches x-device-id itself; this covers requests
+      // that bypass axios (fetch, EventSource, media elements) so every backend
+      // call carries the persistent device key.
+      const hasDeviceId = Object.keys(details.requestHeaders).some(
+        (name) => name.toLowerCase() === 'x-device-id',
+      );
+      if (!hasDeviceId) {
+        details.requestHeaders['x-device-id'] = appLogger.getClientSessionId();
+      }
       const preProdEnabled = store.get(config.preProdKey);
       if (preProdEnabled === true) {
         details.requestHeaders['x-route-env'] = 'playground';
@@ -375,12 +387,24 @@ export function setupRequestInterceptor(): void {
   );
 }
 
+// The window that asked for the capture. showScreenPicker uses it only if it
+// hosts a picker (the call window); anything else falls back to the main window.
+function requestingWindow(frame: Electron.WebFrameMain | null): BrowserWindow | null {
+  if (!frame) return null;
+  try {
+    const contents = webContents.fromFrame(frame);
+    return contents ? BrowserWindow.fromWebContents(contents) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Installs the custom display-media handler that shows the in-app screen picker.
  * Called on startup and re-called after a native OS picker fallback completes.
  */
 function setupDisplayMediaHandler(): void {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     const safeCallback = (streams: Electron.Streams): void => {
       try {
         callback(streams);
@@ -390,7 +414,7 @@ function setupDisplayMediaHandler(): void {
         Logger.info('[ScreenShare] Cancelled or no stream provided:', String(err));
       }
     };
-    showScreenPicker(safeCallback);
+    showScreenPicker(safeCallback, requestingWindow(request.frame));
   });
 }
 

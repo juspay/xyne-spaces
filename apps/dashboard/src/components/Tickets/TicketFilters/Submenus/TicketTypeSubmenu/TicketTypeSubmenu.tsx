@@ -116,6 +116,7 @@ export const TicketTypeSubmenu = ({
               const isSelected = selectedTypes.includes(type);
               return (
                 <button
+                  aria-pressed={isSelected}
                   key={type}
                   type='button'
                   onClick={() => handleTypeToggle(type)}

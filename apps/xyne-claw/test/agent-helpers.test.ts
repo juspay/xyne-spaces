@@ -20,6 +20,11 @@ test("contextWindowFor returns real per-model windows from pi's registry", () =>
   expect(contextWindowFor("claude-sonnet-4-5")).toBe(200_000);
 });
 
+test("contextWindowFor knows the 1M window of the Claude 5.5 models", () => {
+  expect(contextWindowFor("claude-opus-5-5")).toBe(1_000_000);
+  expect(contextWindowFor("claude-sonnet-5-5")).toBe(1_000_000);
+});
+
 test("contextWindowFor falls back to a conservative default for unknown models", () => {
   // Unknown/custom model → conservative default (never higher than real window).
   expect(contextWindowFor("some-unknown-model-xyz")).toBe(128_000);

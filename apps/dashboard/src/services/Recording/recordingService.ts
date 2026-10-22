@@ -11,7 +11,12 @@ import type {
   RecordingStatus,
   TranscriptTranslation,
 } from '@xyne/shared';
-import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
+import {
+  CallType,
+  CallVisibility,
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
+  RecordingType,
+} from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
@@ -313,6 +318,14 @@ interface RecordingDetailResponse {
 export const callScopedPath = (callId: string, isRecording: boolean): string =>
   isRecording ? `recordings/${callId}` : callId;
 
+/** The call has no transcript text to copy. */
+export class NoTranscriptError extends Error {
+  constructor() {
+    super('No transcript');
+    this.name = 'NoTranscriptError';
+  }
+}
+
 class RecordingService {
   /**
    * Start a headless recording session
@@ -431,6 +444,16 @@ class RecordingService {
     const response: AxiosResponse<{ success: true } & TranscriptTranslation> =
       await apiInstance.post(`/calls/${callId}/translate-transcript`, { language });
     return response.data;
+  }
+
+  /**
+   * What "Copy transcript" puts on the clipboard: the stored transcript, as the transcript
+   * panel shows it on "Original". Throws NoTranscriptError when there is no text.
+   */
+  async getCopyableTranscript(callId: string): Promise<string> {
+    const { text } = await this.translateTranscript(callId, ORIGINAL_TRANSCRIPT_LANGUAGE);
+    if (!text) throw new NoTranscriptError();
+    return text;
   }
 
   /** Generate topical labels for a recording that has none yet. Returns the new tag ids. */

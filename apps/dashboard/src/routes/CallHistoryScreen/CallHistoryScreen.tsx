@@ -872,6 +872,7 @@ const CallHistoryScreen = (): ReactElement => {
           {/* Action cards */}
           <div className='grid grid-cols-2 gap-3' data-testid='new-call-button'>
             <button
+              aria-haspopup='dialog'
               data-testid='start-instant-call-option'
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'
@@ -1327,6 +1328,7 @@ const CallHistoryScreen = (): ReactElement => {
         isOpen={deleteModalOpen}
         onClose={closeDeleteModal}
         onConfirm={handleDeleteConfirm}
+        participantCount={deleteModalCall?.participantCount ?? 0}
         callLabel={
           deleteModalCall
             ? `${deleteModalCall.title ?? 'Scheduled Call'}${

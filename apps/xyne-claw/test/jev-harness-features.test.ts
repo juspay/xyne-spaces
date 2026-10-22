@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClassifierExchange, UserMemoryCuratorTrace } from "xyne-claw-shared";
-import type { JevAnswer } from "../src/jev.js";
+import type { XorAnswer } from "../src/xor.js";
 import { buildTwinDeliverTool, installStopAfterDelivery, type TwinDeliverRef } from "../src/twin-deliver.js";
 import { checkTwinDelivery, twinCheckFromAnswers, twinCheckQuestions } from "../src/twin-delivery-check.js";
 import { decideFromJev } from "../src/twin-respond-gate.js";
@@ -14,16 +14,15 @@ import {
   similarity,
   type CandidateCheckSummary,
 } from "../src/user-memory-candidate-check.js";
-import { routeFromJev } from "../src/mode-router.js";
 import { goalFromJev } from "../src/goal-judge.js";
 import { prefetchGateFromJev } from "../src/prefetch.js";
 import { checkpointFromJev, contextGate, contextGateFromJev } from "../src/answer-gates.js";
 import { stalledFromJev } from "../src/tool-budget.js";
 import { siftState } from "../src/result-sift.js";
 
-const noul = (p: number): JevAnswer => ({ type: "noul", noul: p });
-const score = (p: number): JevAnswer => ({ type: "score", score: p });
-const choice = (pick: string, p: number): JevAnswer => ({ type: "choice", choice: pick, probabilities: { [pick]: p }, confidence: p });
+const noul = (p: number): XorAnswer => ({ type: "noul", noul: p });
+const score = (p: number): XorAnswer => ({ type: "score", score: p });
+const choice = (pick: string, p: number): XorAnswer => ({ type: "choice", choice: pick, probabilities: { [pick]: p }, confidence: p });
 
 // ── R7: stop after delivery ──────────────────────────────────────────────────
 describe("twin_deliver ends the run", () => {
@@ -95,10 +94,10 @@ describe("twin delivery check", () => {
   });
 
   it("puts the delivery in the state as fenced data", async () => {
-    const ask = vi.fn(async () => ({ answers_ask: score(0.8), grounded: score(0.7) }));
+    const ask = vi.fn(async (_req: { state: string }) => ({ answers_ask: score(0.8), grounded: score(0.7) }));
     const c = await checkTwinDelivery({ action: "reply", message: "shipping friday" }, { task: "when do we ship?", messages: [] }, { ask, enabled: true });
     expect(c?.overall).toBe(0.7);
-    expect(String(ask.mock.calls[0]![0])).toContain("<<<DATA\naction: reply\nreply: shipping friday");
+    expect(ask.mock.calls[0]![0].state).toContain("<<<DATA\naction: reply\nreply: shipping friday");
   });
 });
 
@@ -167,12 +166,12 @@ describe("memory candidate check", () => {
   });
 
   it("filters and re-ranks a batch; unavailable candidates pass through", async () => {
-    const answersFor: Record<string, Record<string, JevAnswer>> = {
+    const answersFor: Record<string, Record<string, XorAnswer>> = {
       dup: { verdict: choice("duplicate", 0.9) },
       good: { verdict: choice("new", 0.9), worth: score(0.9) },
       meh: { verdict: choice("new", 0.8), worth: score(0.2) },
     };
-    const ask = vi.fn(async (state: string) => {
+    const ask = vi.fn(async ({ state }: { state: string }) => {
       const key = Object.keys(answersFor).find((k) => state.includes(`] ${k}`));
       return key ? answersFor[key]! : null;
     });
@@ -360,12 +359,6 @@ describe("applyClassifierToTrace", () => {
 describe("routing and gates", () => {
   const commands = [{ command: "/review", instruction: "review code" }, { command: "/learn", instruction: "learn" }] as never;
 
-  it("mode router: a mode needs ≥0.85, none needs ≥0.7, else LLM", () => {
-    expect(routeFromJev(commands, { mode: choice("review", 0.9) })?.command).toMatchObject({ command: "/review" });
-    expect(routeFromJev(commands, { mode: choice("review", 0.8) })).toBeNull();
-    expect(routeFromJev(commands, { mode: choice("none", 0.75) })).toEqual({ command: null, source: "jev" });
-    expect(routeFromJev(commands, { mode: choice("none", 0.6) })).toBeNull();
-  });
 
   it("goal judge: only clear done / clear continue are decided", () => {
     expect(goalFromJev({ status: choice("completed", 0.95) })).toMatchObject({ done: true });

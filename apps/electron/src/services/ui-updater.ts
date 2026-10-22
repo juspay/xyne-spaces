@@ -1,4 +1,5 @@
 import { app, BrowserWindow, net } from 'electron';
+import { getMainWindow } from '../window/manager';
 import { createWriteStream, existsSync, mkdirSync, rmSync, renameSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { pipeline } from 'stream/promises';
 import { createHash } from 'crypto';
@@ -481,7 +482,9 @@ export async function downloadUIUpdate(): Promise<boolean> {
     // Note: isFocused() can return false even when the user is looking at the window
     // (e.g., if they clicked on the desktop or another app momentarily)
     // isVisible() is more reliable for determining if the user can see the window
-    const mainWindow = BrowserWindow.getAllWindows()[0];
+    // Not getAllWindows()[0]: with a call window or overlay open that can be a
+    // window other than the app, and loading the bundle there would drop a call.
+    const mainWindow = getMainWindow();
    
     
     if (mainWindow && !mainWindow.isDestroyed()) {

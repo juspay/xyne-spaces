@@ -9,14 +9,12 @@ import { AgentsConfig } from '../config.js';
 import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
-import { config as envConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
-import {
-  askJev,
-  isPrivateJevConfigured,
-  type JevQuestion,
-} from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import { isPrivateDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
+import type { RunRole } from '@/services/otel/decisionMetrics';
+import type { DecisionQuestion } from '@/services/decision/types';
 
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
@@ -186,11 +184,14 @@ const JEV_CONFIG_KEY = 'ticket_duplicate_jev_config';
 interface TicketDuplicateJevConfig {
   similarThreshold: number;
   shadow: boolean;
+  /** false => with Jev enabled, the LLM is not called even if Jev gives no answer. */
+  llmFallback: boolean;
 }
 
 const DEFAULT_JEV_CONFIG: TicketDuplicateJevConfig = {
   similarThreshold: 0.5,
   shadow: false,
+  llmFallback: true,
 };
 
 const LLM_MIN_CONFIDENCE = 0.7;
@@ -256,7 +257,7 @@ const tierOf = (
  * Only to a Jev that was pointed at explicitly: desk tickets carry customer email, so
  * they never go to the public default endpoint.
  */
-const isJevAvailable = (): boolean => isPrivateJevConfigured();
+const isJevAvailable = (): boolean => isPrivateDecisionEngineConfigured();
 
 export const isJevScoringEnabled = async (agentsConfig?: AgentsConfig): Promise<boolean> =>
   isJevAvailable() && (agentsConfig ?? (await AgentsConfig.fetch())).ticketDuplicateJevEnabled;
@@ -270,6 +271,7 @@ async function scoreWithJev(
   input: TicketDuplicateInput,
   thresholds: { likely: number; similar: number },
   allowPartial: boolean,
+  role: RunRole = 'live',
 ): Promise<TicketDuplicateOutput | null> {
   const candidates = input.candidates.slice(0, JEV_MAX_CANDIDATES);
   const state = {
@@ -278,7 +280,7 @@ async function scoreWithJev(
       description: normalizePromptText(input.description, JEV_NEW_TICKET_DESCRIPTION_LENGTH),
     },
   };
-  const questions: Record<string, JevQuestion> = {};
+  const questions: Record<string, DecisionQuestion> = {};
   candidates.forEach((candidate, i) => {
     const quoted = quoteCandidate(candidate);
     questions[`same${i}`] = {
@@ -293,7 +295,7 @@ async function scoreWithJev(
     };
   });
 
-  const answers = await askJev(state, questions, JEV_TIMEOUT_MS, undefined, { partial: allowPartial });
+  const answers = await askDecision('ticket_duplicate', state, questions, JEV_TIMEOUT_MS, undefined, { partial: allowPartial, role });
   if (!answers) return null;
 
   const scored = candidates.flatMap((candidate, i) => {
@@ -369,7 +371,7 @@ export async function analyzeTicketDuplicates(
     if (jevResult) {
       logger.info(`[${AGENT_NAME}] Verdict`, {
         source: 'jev',
-        model: envConfig.jev.model,
+        model: decisionEngineModel(),
         ticketId: context.ticketId,
         thresholds,
         isDuplicate: jevResult.isDuplicate,
@@ -380,17 +382,14 @@ export async function analyzeTicketDuplicates(
       });
       return jevResult;
     }
-    logger.warn(`[${AGENT_NAME}] Jev gave no answer, falling back to the LLM`, { source: 'jev' });
+    logger.warn(`[${AGENT_NAME}] Jev gave no answer${jevConfig.llmFallback ? ', falling back to the LLM' : ''}`, { source: 'jev' });
   }
 
-  if (options.jevOnly) {
-    return {
-      isDuplicate: false,
-      duplicateTicketId: null,
-      confidence: 0,
-      reason: 'Duplicate scoring is not available.',
-      matches: [],
-    };
+  // Only when Jev is actually reachable on this pod: unconfigured, the LLM is the fallback.
+  const llmDisabled = cacConfig.ticketDuplicateJevEnabled && isJevAvailable() && !jevConfig.llmFallback;
+  if (options.jevOnly || llmDisabled) {
+    // Thrown, not returned as "not a duplicate": callers turn it into an error instead of a verdict.
+    throw new Error('Jev gave no answer and the LLM fallback is off');
   }
 
   const modelName = cacConfig.ticketDuplicateModelName;
@@ -467,10 +466,10 @@ export async function analyzeTicketDuplicates(
       pick: parsed.duplicateTicketId,
     });
     if (jevConfig.shadow && !cacConfig.ticketDuplicateJevEnabled && isJevAvailable()) {
-      void scoreWithJev(input, thresholds, false).then(shadow => {
+      void scoreWithJev(input, thresholds, false, 'shadow').then(shadow => {
         logger.info(`[${AGENT_NAME}] Shadow`, {
           ticketId: context.ticketId,
-          model: envConfig.jev.model,
+          model: decisionEngineModel(),
           thresholds,
           llmPick: isDuplicate ? parsed.duplicateTicketId : null,
           jevPick: shadow?.isDuplicate ? shadow.duplicateTicketId : null,

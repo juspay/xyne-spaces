@@ -6,7 +6,7 @@
 * typing stored user <userAlias> project <projectAlias> field "name" in "input[placeholder*='Enter project name']"
 * typing stored user <userAlias> project <projectAlias> field "code" in "[data-testid='project-code-input']"
 * typing stored user <userAlias> project <projectAlias> field "description" in "textarea[placeholder*='Enter project description']"
-* clicking button with text "Create Project"
+* clicking button with text "Create project"
 * waiting for "[data-testid='create-project-dialog']" to disappear
 * verifying stored user <userAlias> project <projectAlias> field "name" is visible in "[data-testid='project-list']"
 

@@ -3,7 +3,7 @@ import { db } from '@/database/client';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { buildGooglePlaySourceRecords } from '@/integrations/adapters/social-media/google-play/sourceRecords';
 import { logger } from '@/utils/logger';
-import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
+import { BoardType, ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
 
 
 interface GooglePlayConnectInput {
@@ -84,7 +84,7 @@ export function postGooglePlayConnectTx(state: GooglePlayConnectInput & { userId
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping
     // so downstream consumers never need to read channel.projectId.
     const mappingBoards = await tx.board.findMany({
-      where: { projectId: state.projectId },
+      where: { projectId: state.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

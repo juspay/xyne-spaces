@@ -29,7 +29,8 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   // the file's metadata (name, mime, size, permissions, …) with empty chunks —
   // skipping the slow GCS-download + content-parse step. Makes the file
   // searchable by name in cmd+K within seconds; a second full feed enriches the
-  // same docId with content later.
+  // same docId with content later. On a field-scoped 'update' it maps metadata only, for
+  // fields that don't need the content (a transcript's title/ACL/labels).
   nameOnly?: boolean;
 }
 

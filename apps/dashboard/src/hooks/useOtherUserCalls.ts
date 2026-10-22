@@ -11,6 +11,10 @@ export interface OtherUserBusySlot {
   endsAt: number | null;
   id?: string;
   title?: string;
+  status?: string;
+  isRecurring?: boolean;
+  /** Whose calendar the slot is on; set here, not by the API. */
+  userId?: string;
 }
 
 export interface OtherUserCalls {
@@ -148,7 +152,7 @@ export function useOtherUserCalls(from: Date, to: Date) {
           next.set(user.id, {
             user,
             color,
-            calls: result.calls,
+            calls: result.calls.map(call => ({ ...call, userId: user.id })),
             calendarVisibility: result.calendarVisibility,
           });
           return next;

@@ -74,15 +74,25 @@ function setFloatingDockState(next: FloatingDockState): void {
   emitFloatingDockChange();
 }
 
-// The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on screen.
-let openTicket: { ticketId: string; numbers: string[] } | null = null;
+// The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on
+// screen: the one shown last of those still shown (a Desk ticket and one in full-page search's side
+// panel can both be), so one going hands back to the one shown before it.
+interface OpenTicket {
+  ticketId: string;
+  numbers: string[];
+}
+const shownTickets: OpenTicket[] = [];
 // busyAgent can fire more than once per call, and newCall too; act on each call once.
 const handledCallIds = new Set<string>();
 
-export function setCloudAgentOpenTicket(
-  ticket: { ticketId: string; numbers: string[] } | null,
-): void {
-  openTicket = ticket;
+/** `ticket` is on screen: calls are linked to it until another is shown. Returns its hiding. */
+export function showCloudAgentOpenTicket(ticket: OpenTicket): () => void {
+  const shown = { ...ticket };
+  shownTickets.push(shown);
+  return (): void => {
+    const at = shownTickets.indexOf(shown);
+    if (at !== -1) shownTickets.splice(at, 1);
+  };
 }
 
 function asText(value: unknown): string {
@@ -96,6 +106,7 @@ function lastDigits(value: unknown): string {
 function linkCallToOpenTicket(token: unknown): void {
   const call = (token ?? {}) as { monitorUcid?: unknown; ucid?: unknown; callerId?: unknown };
   const monitorUcid = asText(call.monitorUcid);
+  const openTicket = shownTickets[shownTickets.length - 1];
   if (!openTicket || !monitorUcid || handledCallIds.has(monitorUcid)) return;
   handledCallIds.add(monitorUcid);
 

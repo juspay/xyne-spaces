@@ -39,6 +39,69 @@ libraries, generates local secrets, and generates both Prisma clients. Backend a
 dashboard recipes also run preparation before launching. After changing the Nix
 environment, exit and re-enter `nix develop` so commands inherit the new variables.
 
+## Without Nix
+
+If you cannot install Nix, run the same stack from a container. The image is
+Linux (amd64 and arm64) and runs as uid 1000.
+
+The GHCR image is not published until CI 1 runs the workflow. Until then, build and
+run it from this checkout (a cold build compiles Y-Sweet and takes about 15 minutes):
+
+```bash
+just dev-image
+```
+
+`just dev-image` builds `.#packages.<system>.dev-image` (default `x86_64-linux` on an
+Intel/AMD host), loads it, and runs it against the checkout with the dashboard and
+backend ports published. It needs a Linux builder: use Linux, or on macOS
+[nix-darwin's `nix.linux-builder`](https://nixcademy.com/posts/macos-linux-builder/)
+(same arch as the host), or
+[nix-rosetta-builder / a `nixos/nix` container](https://github.com/JamesGuthrie/nix-docker-builder-macos)
+as an ssh-ng builder for both arches; Nix only uses it when a Linux system is requested,
+which is why the recipe names `.#packages.<system>.dev-image`. With an arm64 builder,
+pass the system:
+
+```bash
+just dev-image aarch64-linux
+```
+
+Otherwise run the published image; it is multi-arch (amd64 and arm64), so Apple
+Silicon runs the arm64 image natively:
+
+```bash
+docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
+  ghcr.io/juspay/xyne-spaces-dev
+```
+
+The first run executes `just prepare` and installs the workspace into the mount;
+the services, backend and dashboard follow. Open http://localhost:3000. The
+workspace, `node_modules` and the pnpm store live in the mount, so a second run
+reuses them. Do not share the checkout with a host Node install: the container's
+`node_modules` are Linux builds.
+
+On Linux the checkout must be writable by uid 1000, the image's user; the CI
+image job runs `chown -R 1000:1000` on it first. Docker Desktop on macOS handles
+the mount itself.
+
+Check the running container from inside it:
+
+```bash
+docker exec <container> nix-smoke-test --existing-services
+```
+
+### Over a LAN or Tailscale
+
+Pass extra docker flags through `just dev-image` to add the host to Vite and the
+dashboard's origin to the backend's CORS list:
+
+```bash
+just dev-image -e __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ts.net \
+  -e CORS_ORIGIN=http://localhost:3000,http://<your-host>:3000
+```
+
+A leading dot allows the whole domain (Vite's own variable, as in
+[Access over a LAN or Tailscale](#access-over-a-lan-or-tailscale)).
+
 ## Automatic shell loading with direnv
 
 The repository already tracks an [`.envrc`](../../.envrc). With direnv,
@@ -107,6 +170,10 @@ data**; use them only when you intend to start from an empty database.
 
 ## Nix-specific runtime configuration
 
+pnpm is pinned to the root `packageManager` version via a Nix override until the
+pnpm 12 migration lands.
+
+- PostgreSQL is pinned to 17 to keep existing developer data directories compatible.
 - Linux Prisma engines are pinned to Prisma 5.22.0 and patched for Nix. The shell
   and service environment set `PRISMA_QUERY_ENGINE_LIBRARY` and
   `PRISMA_SCHEMA_ENGINE_BINARY`. Do not suppress checksum errors: a `linux-nixos`
@@ -114,19 +181,30 @@ data**; use them only when you intend to start from an empty database.
   was not re-entered. Both the npm version and `nix/prisma-engines.nix` must be
   updated together when upgrading Prisma.
 - LiveKit uses loopback addresses for Redis and backend webhooks. `just prepare`
-  replaces published sample LiveKit keys with random local values. LiveKit and the
-  transcription agent read the backend env file at runtime, keeping secrets out
+  replaces published sample LiveKit keys with random local values. LiveKit, Zero (including `ZERO_AUTH_SECRET`), and the
+  transcription agent read `apps/backend/.env.local` at runtime, keeping secrets out
   of the Nix store. Existing custom keys are preserved.
-- On Linux, the transcription process gets the C++ runtime and zlib library paths
-  needed by native Python wheels. The first launch installs its Python dependencies
-  and may take several minutes; its readiness probe allows up to 15 minutes for
-  this initial setup. Zero creates its replica directory itself, including when
-  started directly by the smoke test.
+- The transcription agent runs a Python 3.11 environment built from `uv.lock` by
+  uv2nix, with native wheels patched by Nix. No dependency installation happens at
+  service startup. Docker's `requirements.txt` is exported from the same lock with
+  `uv export --format requirements-txt --no-dev --no-emit-project`.
+  Zero creates its replica directory itself, including in the smoke test.
+
+## Diarization
+
+Diarization is not part of the Nix environment.
+Its `requirements-diarization.txt` torch/torchaudio pins are mutually incompatible and need fixing by whoever owns that feature.
 
 ## Verification
 
+`nix/scripts/check-compose-refs.sh`, run by `nix flake check` as the `compose-refs`
+check, fails on any file containing `docker-compose` or `docker compose` that is
+not listed in `nix/compose-refs.allowlist`. A migration PR removes entries as it
+deletes references; a new entry needs a justification in the PR description.
+
 ```bash
-nix flake check --no-build
+nix flake check -L
+nix build .#dev-image
 nix build .#xyne-space-services
 nix develop --command just prepare
 # Stop any running local services/backend before this command:
@@ -141,7 +219,8 @@ kill unrelated processes. To check the backend against services you already have
 running, use `nix run .#nix-smoke-test -- --existing-services`.
 
 The [Nix CI workflow](../../.github/workflows/nix-ci.yml) runs these checks on Linux
-for pull requests, protected-branch pushes and `fix/nix-*` branches. It also supports
-manual dispatch and uploads logs on failure. This is a startup check, not a full UI,
-provider, or call-transcription integration test. macOS and ARM runtime behavior
-are not covered by the Linux CI job.
+when dispatched manually; its pull-request and push triggers stay off until CI 1. It
+uploads logs on failure. Its `publish` input pushes the dev image to GHCR: `:latest`
+from `main`, and `:sha-<short>` from any other ref. This is a startup check, not a
+full UI, provider, or call-transcription integration test. macOS and ARM runtime
+behavior are not covered by the Linux CI job.

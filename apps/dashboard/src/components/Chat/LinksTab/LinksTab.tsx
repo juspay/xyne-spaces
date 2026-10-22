@@ -186,6 +186,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               onClick={e => handleEditLink(link, e)}
               className='p-1.5 rounded-md hover:bg-blue-100 text-blue-600 transition-opacity'
               title='Edit link'
+              aria-label='Edit link'
               data-track-category='CHANNEL_LINKS'
               data-track-name='EditLink'
               data-track-metadata={JSON.stringify({
@@ -203,6 +204,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
               }}
               className='p-1.5 rounded-md hover:bg-red-100 text-red-600 transition-opacity'
               title='Delete link'
+              aria-label='Delete link'
               data-track-category='CHANNEL_LINKS'
               data-track-name='DeleteLink'
               data-track-metadata={JSON.stringify({

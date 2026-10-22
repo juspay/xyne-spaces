@@ -75,10 +75,10 @@ const STATUS_OPTIONS = [
   ...Object.values(CallStatus).map(status => ({ value: status, label: titleCase(status) })),
 ];
 
+// A recording is HEADLESS; every other type is a call.
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
-  { value: CallType.VIDEO, label: 'Video' },
-  { value: CallType.AUDIO, label: 'Audio' },
+  { value: `${CallType.AUDIO},${CallType.VIDEO}`, label: 'Call' },
   { value: CallType.HEADLESS, label: 'Recording' },
 ];
 
@@ -150,8 +150,7 @@ function runDirectAction(action: DirectAction, externalId: string): Promise<void
   }
 }
 
-const typeLabel = (type: CallType): string =>
-  type === CallType.HEADLESS ? 'Recording' : titleCase(type);
+const typeLabel = (type: CallType): string => (type === CallType.HEADLESS ? 'Recording' : 'Call');
 
 export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement {
   const queryClient = useQueryClient();

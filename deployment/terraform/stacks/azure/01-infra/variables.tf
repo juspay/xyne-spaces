@@ -130,6 +130,12 @@ variable "aks_inbound_ports" {
   default = ["80", "443"]
 }
 
+variable "aks_inbound_cidrs" {
+  description = "Restrict aks_inbound_ports on the AKS subnet to these source CIDRs. Empty: Internet in ingress_mode = gateway, the App Gateway subnet otherwise."
+  type        = list(string)
+  default     = []
+}
+
 variable "bastion_enabled" {
   type    = bool
   default = false

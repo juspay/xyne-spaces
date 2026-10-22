@@ -53,6 +53,7 @@ import {
 } from '../ui/dropdown-menu';
 import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
+import { discussionTitleOf } from './ChatInput/ChatInput.utils';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from './DragAndDropOverlay';
@@ -99,6 +100,7 @@ import {
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useReleaseForDevTicket } from '../../hooks/useReleaseForDevTicket';
 import { useZero } from '../../hooks/useZero';
+import { markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
@@ -159,6 +161,8 @@ interface ThreadMessagesProps {
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
   tabbedView?: boolean;
+  /** Opened from a Channels desk ticket: messages and details only, no thread actions, composer at the bottom. */
+  deskView?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -184,6 +188,7 @@ export const ThreadMessages = ({
   defaultTab,
   headerActionsContainer,
   tabbedView = false,
+  deskView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -382,6 +387,11 @@ export const ThreadMessages = ({
 
   // Tab state - default to 'details' when opening from a ticket card
   const [activeTab, setActiveTab] = useState<TabType>(selectedTab);
+  // On a desk ticket, the thread's ticket card opens its Details tab here.
+  const deskNavigation = useMemo(
+    () => ({ ...threadNavigation, openTicket: () => setActiveTab('details') }),
+    [threadNavigation],
+  );
 
   // Sync activeTab with URL query param when it changes
   useEffect(() => {
@@ -676,13 +686,20 @@ export const ThreadMessages = ({
     [setSkipMarkAsReadThread],
   );
 
+  // Full-page search covering the thread counts as leaving it (markWhenLeft), so replies that
+  // arrive while the user searches stay unread. The skip flags hold until unmount: a cover is not
+  // the end of the thread's skip. The Activity flag is app-wide and goes to the first thread that
+  // reads it, so this one takes it as it leaves — a thread opened meanwhile (full page's side
+  // panel) neither sees nor uses it up.
+  const coverage = usePageCoverage();
+  const activitySkipRef = useRef(false);
   useEffect(() => {
-    return () => {
-      if (skipMarkAsReadThreadRef?.current || activitySkipMarkAsReadThreadRef.current) {
-        skipMarkAsReadThreadRef.current = false;
+    const stopWatching = markWhenLeft(coverage, () => {
+      if (activitySkipMarkAsReadThreadRef.current) {
         activitySkipMarkAsReadThreadRef.current = false;
-        return;
+        activitySkipRef.current = true;
       }
+      if (skipMarkAsReadThreadRef?.current || activitySkipRef.current) return;
       if (derivedConversationId) {
         const draft = getDraft(derivedChannelId, derivedConversationId);
         void zero.mutate(
@@ -695,8 +712,13 @@ export const ThreadMessages = ({
           }),
         );
       }
+    });
+    return () => {
+      stopWatching();
+      skipMarkAsReadThreadRef.current = false;
+      activitySkipRef.current = false;
     };
-  }, [derivedConversationId]);
+  }, [derivedConversationId, coverage]);
 
   // Check if this is a ticket thread
   const isTicketThread = useMemo(() => {
@@ -741,6 +763,12 @@ export const ThreadMessages = ({
 
   // Create thread info for XyneAI context
   const initialMessage = conversation?.messages?.[0] ?? null;
+  const initialMessageContent =
+    typeof initialMessage?.content === 'string' ? initialMessage.content : '';
+  const discussionTitle = useMemo(
+    () => discussionTitleOf(initialMessageContent),
+    [initialMessageContent],
+  );
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
@@ -892,8 +920,12 @@ export const ThreadMessages = ({
     ];
 
     // Filter out Details tab when ticketId doesn't exist
-    return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
+    const visibleTabs = !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
+    return deskView
+      ? visibleTabs.filter(tab => tab.value === 'thread' || tab.value === 'details')
+      : visibleTabs;
   }, [
+    deskView,
     files.length,
     ticketId,
     derivedTicketId,
@@ -1292,6 +1324,7 @@ export const ThreadMessages = ({
           {!isStandaloneWindow() && askAIAvailable && (
             <Tooltip content='Ask AI Conversation'>
               <Button
+                aria-label='Ask AI Conversation'
                 size='sm'
                 variant='ghost'
                 onClick={() => {
@@ -1373,6 +1406,7 @@ export const ThreadMessages = ({
                   actionIconClass,
                 )}
                 title='More'
+                aria-label='More'
                 data-testid='thread-more-options-button'
               >
                 <ThreeDotsMenuVertical size={16} />
@@ -1502,6 +1536,11 @@ export const ThreadMessages = ({
     </div>
   );
 
+  const headerShowsTitle =
+    !!discussionTitle &&
+    !(isTicketThread && ticket) &&
+    (showHeader || (!simpleView && !derivedTicketId && !tabbedView && !hideHeader && !deskView));
+
   return (
     <ConversationTabContext.Provider value={conversationTabContextValue}>
       <div
@@ -1509,6 +1548,8 @@ export const ThreadMessages = ({
           isInPanelWebview ? '' : 'rounded-lg'
         }`}
         ref={dragAndDropAreaRef}
+        data-testid={previewCardMode ? 'thread-preview-card' : 'thread-panel'}
+        data-titled-thread={headerShowsTitle || undefined}
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
@@ -1516,10 +1557,16 @@ export const ThreadMessages = ({
             own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
-            <div className='flex gap-2 items-center min-w-0'>
+            <div className='flex gap-2 items-center min-w-0 px-0.5'>
               <ArrowTurnDownRight size={16} className='flex-shrink-0' />
-              <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0'>
-                {isTicketThread && ticket ? ticket.title : 'Thread message'}
+              <h3
+                className={cn(
+                  'text-[17px] font-semibold overflow-hidden min-w-0',
+                  headerShowsTitle ? 'line-clamp-3 break-words' : 'whitespace-nowrap text-ellipsis',
+                )}
+                {...(headerShowsTitle && { title: discussionTitle })}
+              >
+                {isTicketThread && ticket ? ticket.title : discussionTitle || 'Thread message'}
               </h3>
             </div>
 
@@ -1559,11 +1606,12 @@ export const ThreadMessages = ({
               </h3>
               {focusedChannelBreadcrumb}
             </div>
-            <div className='flex gap-x-2 shrink-0'>
+            <div className={cn('flex gap-x-2 shrink-0', deskView && 'hidden')}>
               {/* Ask AI */}
               {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
+                    aria-label='Ask AI Conversation'
                     size='sm'
                     variant='ghost'
                     onClick={() => {
@@ -1616,6 +1664,7 @@ export const ThreadMessages = ({
                       actionIconClass,
                     )}
                     title='More'
+                    aria-label='More'
                     data-testid='thread-more-options-button'
                   >
                     <ThreeDotsMenuVertical size={16} />
@@ -1750,7 +1799,8 @@ export const ThreadMessages = ({
             onValueChange={value => {
               setActiveTab(value as TabType);
               // Mirror it back, or re-opening the same tab from outside is a no-op.
-              if (!searchParams.has('selectedTab')) return;
+              // Not on a desk ticket: the URL's tab belongs to the desk's own panel.
+              if (deskView || !searchParams.has('selectedTab')) return;
               const next = new URLSearchParams(searchParams);
               next.set('selectedTab', value);
               setSearchParams(next, { replace: true });
@@ -1799,6 +1849,7 @@ export const ThreadMessages = ({
                   {!isThreadsRoute &&
                     !headerActionsContainer &&
                     isTicketThread &&
+                    !deskView &&
                     (resolvedOnClose ? (
                       <Button
                         variant='ghost'
@@ -1838,34 +1889,44 @@ export const ThreadMessages = ({
                 </div>
               ) : (
                 <>
-                  <ThreadList
-                    inspectedTag={inspectedTag}
-                    channelId={derivedChannelId || ''}
-                    conversationId={derivedConversationId || ''}
-                    threadMessages={messages}
-                    {...(onUserClick && { onUserClick })}
-                    messagesWithSeparators={messagesWithSeparators}
-                    initialScrollOffset={0}
-                    isTicketThread={true}
-                    spawnedTicketMessageIds={spawnedTicketMessageIds}
-                    channelScopeType={channel?.scopeType}
-                    conversation={conversation}
-                    enableCollapsing={previewCardMode}
-                    enableJumpFab={!previewCardMode}
-                    isMessagesLoaded={isMessagesLoaded}
-                    {...(disableAskAI !== undefined && { disableAskAI })}
-                    conversationParticipant={conversationParticipant}
-                  />
+                  <ThreadNavigationContext.Provider
+                    value={deskView ? deskNavigation : threadNavigation}
+                  >
+                    <ThreadList
+                      inspectedTag={inspectedTag}
+                      channelId={derivedChannelId || ''}
+                      conversationId={derivedConversationId || ''}
+                      threadMessages={messages}
+                      {...(onUserClick && { onUserClick })}
+                      messagesWithSeparators={messagesWithSeparators}
+                      initialScrollOffset={0}
+                      isTicketThread={true}
+                      spawnedTicketMessageIds={spawnedTicketMessageIds}
+                      channelScopeType={channel?.scopeType}
+                      conversation={conversation}
+                      enableCollapsing={previewCardMode}
+                      enableJumpFab={!previewCardMode}
+                      isMessagesLoaded={isMessagesLoaded}
+                      {...(disableAskAI !== undefined && { disableAskAI })}
+                      conversationParticipant={conversationParticipant}
+                    />
+                  </ThreadNavigationContext.Provider>
 
                   {/* ChatInput at the bottom - only show if user is a member.
                       Suppressed entirely in a deactivated 1:1 DM archive. */}
                   {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
-                    <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                    <div
+                      className={cn(
+                        'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                        deskView && 'mt-auto',
+                      )}
+                    >
                       <ChatInput
                         ref={inputRef}
                         channelId={derivedChannelId}
                         conversation={conversation ?? undefined}
                         placeholder='Reply to this thread...'
+                        allowSendToChannel={!deskView}
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
                         dockSlot={twinDock}
@@ -1890,11 +1951,7 @@ export const ThreadMessages = ({
                 value='details'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails
-                  ticketId={derivedTicketId}
-                  hideRelationships
-                  onFillRCA={() => setActiveTab('rca')}
-                />
+                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
               </Tabs.Content>
             )}
 
@@ -1957,13 +2014,13 @@ export const ThreadMessages = ({
           /* Regular Thread or Simple View */
           <>
             {/* Header with tabs for simpleView, or simple header for regular view */}
-            {!hideHeader && (
+            {!hideHeader && !deskView && (
               <div
                 className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'
                 style={isDraggableThreadPanel ? APP_DRAG_STYLE : undefined}
               >
                 {/* Title */}
-                <div className='flex items-center gap-2 min-w-0 flex-1'>
+                <div className='flex items-center gap-2 min-w-0 flex-1 px-0.5'>
                   {isStandaloneWindow() && (
                     <Tooltip content='Back to channel'>
                       <Button
@@ -1983,14 +2040,25 @@ export const ThreadMessages = ({
                   {/* Thread indicator — shown when summarizing, or in focused mode so the
                       header reads like Slack's "↳ Thread #channel". */}
                   {!simpleView && (isThreadSummaryActive || isFocusedThread) && (
-                    <ArrowTurnDownRight size={16} className='text-muted-foreground shrink-0' />
+                    <ArrowTurnDownRight
+                      size={16}
+                      className='text-muted-foreground shrink-0 first:ml-1.5'
+                    />
                   )}
-                  <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis min-w-0 text-foreground'>
+                  <h3
+                    className={cn(
+                      'text-[17px] font-semibold overflow-hidden min-w-0 text-foreground first:ml-1.5',
+                      headerShowsTitle
+                        ? 'line-clamp-3 break-words'
+                        : 'whitespace-nowrap text-ellipsis',
+                    )}
+                    {...(headerShowsTitle && { title: discussionTitle })}
+                  >
                     {simpleView
                       ? 'Thread'
                       : isTicketThread && ticket
                         ? ticket.title
-                        : 'Thread message'}
+                        : discussionTitle || 'Thread message'}
                   </h3>
                   {/* Classifies the whole thread, so it belongs beside the title rather
                       than against any one message. */}
@@ -2041,7 +2109,12 @@ export const ThreadMessages = ({
                 {/* ChatInput at the bottom - only show if user is a member.
                     Suppressed entirely in a deactivated 1:1 DM archive. */}
                 {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
-                  <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                  <div
+                    className={cn(
+                      'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                      deskView && 'mt-auto',
+                    )}
+                  >
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       autoFocus={previewCardMode || skipInputAutoFocus ? null : 'end'}
@@ -2049,6 +2122,7 @@ export const ThreadMessages = ({
                       channelId={derivedChannelId}
                       conversation={conversation ?? undefined}
                       placeholder='Reply to this thread...'
+                      allowSendToChannel={!deskView}
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
                       dockSlot={twinDock}

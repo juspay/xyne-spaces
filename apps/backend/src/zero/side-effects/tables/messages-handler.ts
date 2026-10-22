@@ -71,6 +71,7 @@ import {
   mentionRecipients,
   notifyMentioned,
 } from './mention-delivery';
+import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -222,7 +223,7 @@ function getKeywordScanText(content: string): string {
   return flowText ?? getPlainTextNotificationContent(content);
 }
 
-function formatDmChannelName(names: string[], maxVisible: number = 2): string {
+export function formatDmChannelName(names: string[], maxVisible: number = 2): string {
   const visible = names.slice(0, maxVisible);
   const remainder = names.length - visible.length;
   if (remainder === 0) {
@@ -302,6 +303,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
+        workspaceId: true,
         initialMessageId: true,
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
@@ -348,6 +350,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       userId: senderId,
       isReply: conversation.initialMessageId !== message.messageId,
     });
+    if (conversation.initialMessageId === message.messageId) {
+      // A new thread in a channel that feeds a Channels desk gets a desk ticket.
+      channelsDeskTicketForConversation(conversation.workspaceId, conversationId).catch(error => {
+        logger.error('[MessagesSideEffect] Channels desk ticket failed:', { conversationId, error });
+      });
+    }
 
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
@@ -436,7 +444,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
-    const contentForMentions = flowRawText ?? content;
+    const contentForMentions =
+      message.msgType === MessageType.FORWARDED
+        ? parseForwardedMessageXml(content)?.optionalText ?? ''
+        : flowRawText ?? content;
     // Channel-addressing artifacts reach the channel from inside a thread too:
     // an incident is the case the thread-broadcast restriction exists to allow.
     const allowBroadcastExpansion =
@@ -570,7 +581,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
     // In thread replies, disable @channel/@here expansion by not passing channelId.
-    // contentForMentions is already computed above (flow text for FlowJSON, raw HTML otherwise)
+    // contentForMentions is already computed above (the note for forwards, flow text for FlowJSON, raw HTML otherwise)
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,

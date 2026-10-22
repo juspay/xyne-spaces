@@ -561,6 +561,11 @@ async function persistCreds(connectionId: string, creds: Record<string, unknown>
 
 const OAUTH_TYPES = new Set(["docusign", "calendly", "jotform", "egnyte", "miro", "webflow", "wix", "attio", "honeycomb", "customerio"]);
 
+/** True when getFreshCredentials refreshes this type itself (hand-written refresh above). */
+export function hasDedicatedRefresh(serverType: string): boolean {
+  return OAUTH_TYPES.has(serverType);
+}
+
 /**
  * Returns fresh credentials for an MCP connection, refreshing the access token
  * if it is expired (or within REFRESH_BUFFER_MS of expiry).

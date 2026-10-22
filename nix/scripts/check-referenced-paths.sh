@@ -26,7 +26,7 @@ check() {
   local p="$1" src="$2"
   # Skip runtime/generated locations that legitimately do not exist at checkout.
   case "$p" in
-    data/* | .logs* | .nix-cache* | *node_modules* | dist/*) return 0 ;;
+    data/* | .logs* | *node_modules* | dist/*) return 0 ;;
   esac
   if [ ! -e "$ROOT/$p" ]; then
     echo "::error file=$src::Nix bootstrap references a missing source path: $p"

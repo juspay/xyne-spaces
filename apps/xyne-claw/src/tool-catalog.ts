@@ -1,5 +1,5 @@
-import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
-import { recordJudgeOutcome } from "./judge-backend.js";
+import { xorEnabled, xorScoreItems, xorThreshold } from "./xor.js";
+import { recordJudgeOutcome } from "./judge-trace.js";
 import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
 import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
@@ -479,10 +479,12 @@ async function matchScopedSifted(
   query: string,
 ): Promise<ToolCatalogEntry[]> {
   const keyword = matchScoped(entries, query);
-  if (!optEnabled("jev_tool_sift") || !jevEnabled()) return keyword;
+  if (!optEnabled("jev_tool_sift") || !xorEnabled()) return keyword;
 
   const already = new Set(keyword.map((e) => e.name));
-  const scores = await jevScoreItems(query, entries, {
+  const scores = await xorScoreItems({
+    state: query,
+    items: entries,
     purpose: "tool-search",
     key: (e) => e.name,
     instructions: (e) =>
@@ -491,7 +493,7 @@ async function matchScopedSifted(
   });
   if (!scores) return keyword;
 
-  const threshold = jevThreshold("JEV_TOOL_THRESHOLD", 0.4);
+  const threshold = xorThreshold("JEV_TOOL_THRESHOLD", 0.4);
   const added = entries
     .filter((e) => !already.has(e.name) && (scores.get(e.name) ?? 0) >= threshold)
     .sort((a, b) => (scores.get(b.name) ?? 0) - (scores.get(a.name) ?? 0));

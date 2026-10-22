@@ -1,15 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { jevAsk } from "../src/jev.js";
-import { collectJudgeExchanges, pinRunJudgeBackend, setJudgeDebugSink } from "../src/judge-backend.js";
+import { xor } from "../src/xor.js";
+import { collectJudgeExchanges, beginJudgeRun, setJudgeDebugSink } from "../src/judge-trace.js";
 import { isolateEnv } from "./helpers/env.js";
 
-const ENV = ["LITELLM_URL", "LITELLM_API_KEY", "JUDGE_BACKEND"];
+const ENV = ["LITELLM_URL", "LITELLM_API_KEY", "JUDGE_BACKEND", "XOR_BACKEND"];
 isolateEnv(ENV);
 
 function jevUp(answers: Record<string, unknown>) {
   process.env["LITELLM_URL"] = "https://grid.test";
   process.env["LITELLM_API_KEY"] = "k";
-  process.env["JUDGE_BACKEND"] = "xor";
   vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ answers }), { status: 200 }));
 }
 
@@ -22,9 +21,9 @@ describe("every Jev call leaves its full exchange", () => {
     jevUp({ a: { type: "noul", noul: 0.8 } });
     const events: Array<{ kind: string; data: Record<string, unknown> }> = [];
     await inRun(async () => {
-      pinRunJudgeBackend("xor");
+      beginJudgeRun();
       setJudgeDebugSink((kind, data) => events.push({ kind, data }));
-      await jevAsk("STATE: user asked who owns X", Q, { purpose: "unit" });
+      await xor({ state: "STATE: user asked who owns X", questions: Q, purpose: "unit" });
     });
     const call = events.find((e) => e.kind === "judge_call")!;
     expect(call.data).toMatchObject({ purpose: "unit", backend: "xor", ok: true, questions: 1 });
@@ -39,9 +38,9 @@ describe("every Jev call leaves its full exchange", () => {
     vi.stubGlobal("fetch", async () => new Response("nope", { status: 500 }));
     const events: Array<{ kind: string; data: Record<string, unknown> }> = [];
     await inRun(async () => {
-      pinRunJudgeBackend("xor");
+      beginJudgeRun();
       setJudgeDebugSink((kind, data) => events.push({ kind, data }));
-      expect(await jevAsk("s", Q, { purpose: "unit" })).toBeNull();
+      expect(await xor({ state: "s", questions: Q, purpose: "unit" })).toBeNull();
     });
     const call = events.find((e) => e.kind === "judge_call")!;
     expect(call.data).toMatchObject({ ok: false, answers: null });
@@ -52,8 +51,8 @@ describe("every Jev call leaves its full exchange", () => {
     jevUp({ a: { type: "noul", noul: 0.2 } });
     const events: string[] = [];
     await inRun(async () => {
-      pinRunJudgeBackend("xor");
-      await jevAsk("pre-run state", Q, { purpose: "mode-router" });
+      beginJudgeRun();
+      await xor({ state: "pre-run state", questions: Q, purpose: "mode-router" });
       setJudgeDebugSink((kind, data) => events.push(`${kind}:${String(data["purpose"])}:${String(data["state"])}`));
     });
     expect(events).toEqual(["judge_call:mode-router:pre-run state"]);
@@ -61,7 +60,7 @@ describe("every Jev call leaves its full exchange", () => {
 
   it("sites outside a run can collect their exchanges", async () => {
     jevUp({ a: { type: "noul", noul: 0.6 } });
-    const { exchanges } = await collectJudgeExchanges(() => jevAsk("gate state", Q, { purpose: "twin-respond-gate" }));
+    const { exchanges } = await collectJudgeExchanges(() => xor({ state: "gate state", questions: Q, purpose: "twin-respond-gate" }));
     expect(exchanges).toHaveLength(1);
     expect(exchanges[0]).toMatchObject({ purpose: "twin-respond-gate", state: "gate state", ok: true });
   });

@@ -15,6 +15,8 @@ import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import CompactActionsMenu from '../../ui/CompactActionsMenu';
 import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
+import { BackgroundPicker } from '../BackgroundPicker/BackgroundPicker';
+import { Popover } from '../../ui/Popover/Popover';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
@@ -67,12 +69,13 @@ export function ParticipantTile({
 
   const isClickable = !!onClick;
 
-  // Background blur state (web only) — surfaced as a toggle on the local tile.
-  const isBackgroundBlurEnabled = useSelector(
+  // Background effect (web only) — the local tile has a button that opens the picker.
+  const hasBackgroundEffect = useSelector(
     roomActor,
-    state => state.context.isBackgroundBlurEnabled,
+    state => state.context.backgroundEffect.mode !== 'none',
   );
-  const showBlurToggle = participant.isLocal && !isScreenShare && !!hasVideo;
+  const isNativeMode = useSelector(roomActor, state => state.context.isNativeMode);
+  const showBlurToggle = participant.isLocal && !isScreenShare && !!hasVideo && !isNativeMode;
   // Bottom-right corner holds a control button on the local tile: the blur toggle
   // when the camera is on, otherwise the hand-raise button. Used to lift the
   // network-quality badge clear of whichever control owns the corner.
@@ -210,8 +213,20 @@ export function ParticipantTile({
       )}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
-      onClick={onClick}
-      onKeyDown={onKeyDown}
+      // React events bubble through portals: ignore ones from the portaled
+      // background picker so using it doesn't also activate the tile.
+      onClick={
+        onClick &&
+        ((e): void => {
+          if (e.currentTarget.contains(e.target as Node)) onClick();
+        })
+      }
+      onKeyDown={
+        onKeyDown &&
+        ((e): void => {
+          if (e.currentTarget.contains(e.target as Node)) onKeyDown(e);
+        })
+      }
       data-track-category='CALLS'
       data-track-name='Participant_Tile'
       data-track-metadata={JSON.stringify({
@@ -451,31 +466,40 @@ export function ParticipantTile({
         </span>
       </div>
 
-      {/* Background Blur Toggle - local tile only, when camera is on */}
+      {/* Background effects - local tile only, when camera is on */}
       {showBlurToggle && (
-        <button
-          onClick={e => {
-            e.stopPropagation();
-            roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' });
-          }}
-          title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
-          aria-label={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
-          data-track-category='CALLS'
-          data-track-name='TOGGLE_BACKGROUND_BLUR_TILE'
-          data-track-metadata={JSON.stringify({ enabled: !isBackgroundBlurEnabled })}
-          className={cn(
-            'absolute z-10 flex items-center justify-center rounded-full shadow-md transition-colors',
-            'backdrop-blur-md ring-1 ring-inset ring-white/15',
-            compact
-              ? 'bottom-1 right-1 p-1'
-              : 'bottom-1 right-1 p-1.5 sm:bottom-2 sm:right-2 sm:p-2',
-            isBackgroundBlurEnabled
-              ? 'bg-blue-600/90 text-white hover:bg-blue-500'
-              : 'bg-black/45 text-white hover:bg-black/70',
-          )}
+        <Popover
+          side='top'
+          align='end'
+          sideOffset={8}
+          collisionPadding={8}
+          className='z-[90] rounded-xl border-0 bg-[#1e1f20] p-0 text-[#e3e3e3] shadow-2xl ring-1 ring-white/10'
+          trigger={
+            <button
+              type='button'
+              onClick={e => e.stopPropagation()}
+              title='Backgrounds'
+              aria-label='Backgrounds'
+              data-track-category='CALLS'
+              data-track-name='OPEN_BACKGROUND_PICKER_TILE'
+              data-track-metadata={JSON.stringify({ active: hasBackgroundEffect })}
+              className={cn(
+                'absolute z-10 flex items-center justify-center rounded-full shadow-md transition-colors',
+                'backdrop-blur-md ring-1 ring-inset ring-white/15',
+                compact
+                  ? 'bottom-1 right-1 p-1'
+                  : 'bottom-1 right-1 p-1.5 sm:bottom-2 sm:right-2 sm:p-2',
+                hasBackgroundEffect
+                  ? 'bg-blue-600/90 text-white hover:bg-blue-500'
+                  : 'bg-black/45 text-white hover:bg-black/70',
+              )}
+            >
+              <ImagePlus className={cn(compact ? 'w-3 h-3' : 'w-4 h-4 sm:w-5 sm:h-5')} />
+            </button>
+          }
         >
-          <ImagePlus className={cn(compact ? 'w-3 h-3' : 'w-4 h-4 sm:w-5 sm:h-5')} />
-        </button>
+          <BackgroundPicker />
+        </Popover>
       )}
 
       {/* Raised-hand indicator — prominent, shown on EVERY participant's tile so

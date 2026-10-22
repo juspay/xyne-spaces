@@ -18,7 +18,7 @@ import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
-import { grantPermissionsForRole } from './permissionMatrix';
+import { reconcileUserPermissions } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
 import { organizationDomainService } from './organizationDomainService';
@@ -811,13 +811,9 @@ export class InvitationService {
       }
     }
 
-    // Grant role-based resource permissions via the centralized permission matrix
-    await grantPermissionsForRole(
-      newWorkspaceUser.id,
-      newWorkspaceUser.email,
-      invitation.role as WorkspaceRole,
-      invitation.workspaceId,
-    );
+    // Reconcile role-based resource permissions via the centralized permission matrix.
+    // Not add-only: a re-accepted invitation can demote an existing user (workspace or org role).
+    await reconcileUserPermissions(newWorkspaceUser.id, newWorkspaceUser.id);
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
