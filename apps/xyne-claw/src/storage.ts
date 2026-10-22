@@ -330,11 +330,13 @@ export async function gcsUploadDebugRunWithRetries(
  * was sitting right there. The marker encodes the real storeKey in its own
  * object name, so discovery becomes a list instead of a guess.
  */
+const DEBUG_INDEX_BODY = Buffer.from("{}");
+
 export async function gcsPutDebugIndex(indexRelPath: string): Promise<boolean> {
   const client = getStorage();
   if (!client) return false;
   try {
-    await client.uploadFileV2(Buffer.alloc(0), {
+    await client.uploadFileV2(DEBUG_INDEX_BODY, {
       path: `${DEBUG_RUN_PREFIX}/${indexRelPath}`,
       contentType: "application/json",
       timeoutMs: STORAGE_TIMEOUT_MS,
