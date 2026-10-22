@@ -22,6 +22,9 @@ describe("toolRiskRules", () => {
 
   it("leaves a send to an untyped recipient and an unknown tool to the critic", () => {
     expect(call({ argsText: '{"to":"x@evil.example"}', request: "summarise my inbox" })).toBeNull();
+    // A lookalike of a typed address, or a typed address plus an untyped channel, is not settled by rule.
+    expect(call({ argsText: '{"to":"bob@corp.co"}', request: "email bob@corp.com the summary" })).toBeNull();
+    expect(call({ argsText: '{"to":["bob@corp.com"],"channel":"C0VERT"}', request: "email bob@corp.com the summary" })).toBeNull();
     expect(call({ effect: "publish", argsText: '{"channel":"C1"}' })).toBeNull();
     expect(call({ effect: "unknown", argsText: "{}" })).toBeNull();
   });

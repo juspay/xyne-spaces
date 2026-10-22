@@ -29,7 +29,8 @@ vi.mock("../redis.js", () => ({ redisService: { getConnection: () => ({ publish:
 vi.mock("ioredis", () => ({ Redis: class { on() { return this; } subscribe() { return Promise.resolve(); } quit() { return Promise.resolve(); } disconnect() { /* */ } } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 
-const { clearKillSwitch, currentKillSnapshot, killForAdmission, killForTool, parseBreakGlass, refreshKillSnapshot, setKillSnapshotForTests, setKillSwitch, signBreakGlass } = await import("./governance-kill.js");
+const { clearKillSwitch, currentKillEpoch, currentKillSnapshot, killForAdmission, killForTool, parseBreakGlass, refreshKillSnapshot, setKillSnapshotForTests, setKillSwitch, signBreakGlass } = await import("./governance-kill.js");
+const { governancePrisma } = await import("../db.js");
 const { resetComponentModes } = await import("xyne-claw-shared/governance");
 
 beforeEach(() => {
@@ -88,5 +89,20 @@ describe("kill switches", () => {
     expect(killForAdmission({ orgId: "any", userId: "u" })).toMatchObject({ scopeKind: "platform" });
     expect(parseBreakGlass(JSON.stringify({ switches, sig: "0".repeat(64) }), "k".repeat(32), Date.now())).toEqual([]);
     expect(parseBreakGlass(state.breakGlass, undefined, Date.now())).toEqual([]);
+  });
+
+  it("moves the epoch for a break-glass entry and keeps serving it while Postgres is away", async () => {
+    process.env["GOVERNANCE_BREAK_GLASS_KEY"] = "k".repeat(32);
+    await setKillSwitch({ orgId: "org-1", scopeKind: "agent", scopeId: "helper", mode: "read_only", reason: "x", actor: { kind: "admin", userId: "a" } });
+    const before = currentKillSnapshot().epoch;
+    const switches = [{ scopeKind: "org" as const, scopeId: "org-9", mode: "stop" as const, epoch: before + 1000, reason: "postgres down" }];
+    state.breakGlass = JSON.stringify({ switches, sig: signBreakGlass(switches, "k".repeat(32)) });
+    expect(await currentKillEpoch()).toBe(before + 1000);
+    vi.mocked(governancePrisma.killSwitch.findMany).mockRejectedValueOnce(new Error("connection refused"));
+    vi.mocked(governancePrisma.killSwitch.findFirst).mockRejectedValueOnce(new Error("connection refused"));
+    const snap = await refreshKillSnapshot();
+    expect(snap.epoch).toBe(before + 1000);
+    expect(Date.now() - snap.takenAtMs).toBeLessThan(1_000);
+    expect(snap.switches.map((s) => `${s.scopeKind}=${s.scopeId}`)).toEqual(["agent=helper", "org=org-9"]);
   });
 });

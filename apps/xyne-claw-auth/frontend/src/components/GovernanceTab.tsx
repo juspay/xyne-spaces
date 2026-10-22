@@ -16,7 +16,7 @@ const PAGE = 50;
 const SCOPES = ["run", "agent", "user", "mcp_server", "tool", "org", "platform"] as const;
 const MODES = ["stop", "read_only", "ask_all"] as const;
 const EMPTY_FILTERS = { eventType: "tool_call", decision: "", risk: "", effect: "", tool: "", agent: "", days: "7" };
-const EVENT_TYPES = ["tool_call", "tool_outcome", "run_started", "kill_switch_set", "kill_switch_enforced", "kill_switch_cleared", "content_scan", "version_status_changed", "admin_override", "config_changed"] as const;
+const EVENT_TYPES = ["tool_call", "critic_verdict", "tool_outcome", "run_started", "kill_switch_set", "kill_switch_enforced", "kill_switch_cleared", "content_scan", "version_status_changed", "admin_override", "config_changed"] as const;
 
 const badge = (decision: string | null): string =>
   decision === "block" ? "bg-red-950 text-red-400" : decision === "ask" ? "bg-amber-950 text-amber-400" : decision === "allow" ? "bg-green-950 text-green-400" : "bg-zinc-800 text-zinc-400";

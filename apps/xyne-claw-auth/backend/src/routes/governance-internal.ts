@@ -18,7 +18,7 @@ import {
   type GovernanceEventInput,
 } from "../lib/governance-audit.js";
 import { runContextForSession } from "../lib/governance-gate.js";
-import { currentKillEpoch, currentKillSnapshot } from "../lib/governance-kill.js";
+import { currentKillSnapshot } from "../lib/governance-kill.js";
 import { contentScanFindingRepository } from "../repositories/governanceRepository.js";
 import { createLogger } from "../logger.js";
 
@@ -79,7 +79,7 @@ async function placed<T extends { orgId?: string | undefined; sessionId?: string
 export const governanceInternalRouter = Router();
 // claw pods poll the epoch every 2 s and fetch the snapshot only when it moved.
 governanceInternalRouter.get("/kill/epoch", asyncHandler(async (_req: Request, res: Response) => {
-  ok(res, { epoch: await currentKillEpoch() });
+  ok(res, { epoch: currentKillSnapshot().epoch });
 }));
 governanceInternalRouter.get("/kill/snapshot", asyncHandler(async (_req: Request, res: Response) => {
   ok(res, currentKillSnapshot());

@@ -55,8 +55,10 @@ describe("governance hooks", () => {
     expect(await agent.beforeToolCall(toolCall("write-memory-file", "w1", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-KILL-READ-ONLY") });
   });
 
-  it("C1 asks the critic only after untyped content, records its verdict and B records the outcome", async () => {
-    const ask = vi.fn(async () => ({ destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: 0.9 }, injected: { type: "noul", noul: 0.2 }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }));
+  it("C1 asks the critic only after untyped content; shadow records its verdict afterwards, enforce waits for it; B records the outcome", async () => {
+    let exfil = 0.9;
+    let injected = 0.2;
+    const ask = vi.fn(async () => ({ destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: exfil }, injected: { type: "noul", noul: injected }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }));
     const { agent } = fakeAgent();
     agent.afterToolCall = vi.fn(async () => undefined) as unknown as Hook;
     const g = run({ critic: { ask }, request: { text: "post hello in #general", typedByPerson: true } });
@@ -67,11 +69,23 @@ describe("governance hooks", () => {
     // A local read of untyped content (not private data) is enough to make the critic necessary.
     await agent.afterToolCall({ ...toolCall("read", "r1"), result: { content: [{ type: "text", text: "newsletter body" }] }, isError: false } as never);
     expect(events().filter((e) => e["eventType"] === "tool_outcome").map((e) => [e["toolCallId"], e["outcome"]])).toEqual([["r1", "executed"]]);
+    // Shadow: the call is decided without waiting, and the critic's verdict follows as its own record.
     expect(await agent.beforeToolCall(toolCall("slack__send", "s1", { channel: "C1", text: "hello" }))).toBeUndefined();
+    expect(governanceDecisionFor("s1")).toMatchObject({ decision: "allow", criticStatus: "not_needed" });
+    await vi.waitFor(() => expect(events().find((e) => e["eventType"] === "critic_verdict" && e["toolCallId"] === "s1")).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH", subjectKind: "c1", matchedRuleIds: ["critic.xor.high", "critic.exfiltration"] }));
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(governanceDecisionFor("s1")).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH", criticStatus: "decided", criticLevel: "high" });
     await agent.afterToolCall({ ...toolCall("slack__send", "s1"), result: { content: [{ type: "text", text: "sent" }] }, isError: true } as never);
     expect(events().at(-1)).toMatchObject({ eventType: "tool_outcome", toolCallId: "s1", outcome: "error", reasonText: expect.stringMatching(/^error in \d+ ms$/) });
+    // Enforce: the gate waits for the verdict and hands its detail to C2; an ask is recorded, not raised.
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "C1=enforce";
+    resetComponentModes();
+    expect(await agent.beforeToolCall(toolCall("slack__send", "s2", { channel: "C1", text: "hello again" }))).toBeUndefined();
+    expect(governanceDecisionFor("s2")).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH", criticStatus: "decided", criticLevel: "high", criticSource: "xor", criticCategories: ["exfiltration"] });
+    // A critical verdict blocks the MCP call before it reaches claw-auth, so C1 records that row itself.
+    exfil = 0.95;
+    injected = 0.9;
+    expect(await agent.beforeToolCall(toolCall("slack__send", "s3", { channel: "C1", text: "leak" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-CRITIC-CRITICAL") });
+    expect(now.at(-1)).toMatchObject({ eventType: "tool_call", toolCallId: "s3", mcpServerId: "slack", decision: "block", reasonCode: "GOV-CRITIC-CRITICAL", matchedRuleIds: expect.arrayContaining(["critic.xor.critical", "critic.injection_follow"]) });
   });
 
   it("installs last and keeps pi's own hooks working (skill triggers, command guard)", async () => {
