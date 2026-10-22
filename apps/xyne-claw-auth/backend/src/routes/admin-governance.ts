@@ -127,8 +127,10 @@ router.get("/config", asyncHandler(async (_req: Request, res: Response) => {
   const snap = currentKillSnapshot();
   const clawAuth = { modes: parseComponentModes(process.env), kill: { epoch: snap.epoch, ageMs: Date.now() - snap.takenAtMs, switches: snap.switches.length } };
   let claw: unknown = null;
+  let clawUrl = CONFIG.xyneClawUrl;
+  while (clawUrl.endsWith("/")) clawUrl = clawUrl.slice(0, -1);
   try {
-    const r = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/governance/modes`, { headers: { "x-s2s-key": CONFIG.xyneClawS2sKey }, signal: AbortSignal.timeout(1_500) });
+    const r = await fetch(`${clawUrl}/governance/modes`, { headers: { "x-s2s-key": CONFIG.xyneClawS2sKey }, signal: AbortSignal.timeout(1_500) });
     if (r.ok) claw = await r.json();
   } catch {
     // claw unreachable: the page says so.
