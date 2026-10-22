@@ -3,6 +3,7 @@ import type { WebAPICallError } from '@slack/web-api';
 import { gatewayConfig } from '../../config';
 import {
   BaseApi,
+  sleep,
   type ChannelApi,
   type DirectoryApi,
   type FileApi,
@@ -10,6 +11,7 @@ import {
 } from '../../core/base/baseApi';
 import { GatewayError } from '../../core/errors';
 import type {
+  MessageUpdate,
   OutboundFile,
   OutboundMessage,
   PostedMessageMatch,
@@ -19,7 +21,7 @@ import type {
   ProviderUserToken,
   ProviderWorkspace,
 } from '../../core/types';
-import { toProviderMessage } from './slackUtils';
+import { prefixAuthor, toProviderMessage } from './slackUtils';
 import { SlackMessageSchema } from './types';
 
 const AUTH_ERRORS = new Set([
@@ -39,6 +41,9 @@ const MAX_PAGES = 10;
 const INVITE_BATCH = 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const HISTORY_LIMIT = 15;
+const CLOCK_SKEW_MS = 5_000;
+const SHARE_CHECKS = 10;
+const SHARE_CHECK_INTERVAL_MS = 1_000;
 
 /** Same synthetic email self-serve migration gives a Slack user without one, so both map to one Spaces user. */
 const fallbackEmail = (slackUserId: string): string => `${slackUserId}@cross-platform.in`;
@@ -127,7 +132,8 @@ export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelA
     };
   }
 
-  async updateMessage(channelId: string, messageId: string, text: string): Promise<void> {
+  async updateMessage(channelId: string, messageId: string, update: MessageUpdate): Promise<void> {
+    const text = this.withSender(update.text, update.senderName, !!update.hasFiles);
     await this.call(() => this.client.chat.update({ channel: channelId, ts: messageId, text }));
   }
 
@@ -172,28 +178,37 @@ export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelA
     return fileId;
   }
 
-  async shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void> {
+  async shareFiles(message: OutboundMessage, fileIds: string[]): Promise<string> {
     const [first, ...rest] = fileIds.map((id) => ({ id }));
-    if (!first) return;
+    if (!first) throw new GatewayError('VALIDATION_ERROR', 'No files to share');
     const destination = message.threadId
       ? { channel_id: message.channelId, thread_ts: message.threadId }
       : { channel_id: message.channelId };
+    const text = this.withSender(message.text, message.senderName, true);
     await this.call(() =>
       this.client.files.completeUploadExternal({
         ...destination,
         files: [first, ...rest],
-        ...(message.text && { initial_comment: message.text }),
+        ...(text && { initial_comment: text }),
       })
     );
+    const ts = await this.findFileMessage(message.channelId, first.id);
+    if (!ts) throw new GatewayError('PROVIDER_ERROR', 'The shared files have not shown up yet');
+    return ts;
   }
 
   async findFileMessage(channelId: string, fileId: string): Promise<string | null> {
-    const result = await this.callIgnoring(
-      () => this.client.files.info({ file: fileId }),
-      ['file_not_found', 'file_deleted']
-    );
-    const shares = result?.file?.shares;
-    return shares?.public?.[channelId]?.[0]?.ts ?? shares?.private?.[channelId]?.[0]?.ts ?? null;
+    for (let check = 0; check < SHARE_CHECKS; check++) {
+      if (check > 0) await sleep(SHARE_CHECK_INTERVAL_MS);
+      const result = await this.callIgnoring(
+        () => this.client.files.info({ file: fileId }),
+        ['file_not_found', 'file_deleted']
+      );
+      const shares = result?.file?.shares;
+      const ts = shares?.public?.[channelId]?.[0]?.ts ?? shares?.private?.[channelId]?.[0]?.ts;
+      if (ts) return ts;
+    }
+    return null;
   }
 
   async findPostedMessage(
@@ -204,7 +219,7 @@ export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelA
   ): Promise<string | null> {
     const window = {
       channel: channelId,
-      oldest: (since.getTime() / 1000).toFixed(6),
+      oldest: ((since.getTime() - CLOCK_SKEW_MS) / 1000).toFixed(6),
       limit: HISTORY_LIMIT,
       include_all_metadata: true,
     };
@@ -309,6 +324,11 @@ export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelA
       ['users_not_found']
     );
     return result?.user?.id ?? null;
+  }
+
+  // Files can't carry a custom name, so a bot post with files starts with the sender's name instead.
+  private withSender(text: string, senderName: string | undefined, hasFiles: boolean): string {
+    return !this.options.asUser && hasFiles && senderName ? prefixAuthor(senderName, text) : text;
   }
 
   protected toGatewayError(error: unknown): GatewayError {

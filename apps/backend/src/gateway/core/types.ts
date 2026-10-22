@@ -12,7 +12,6 @@ export type PairStatus = 'ACTIVE' | 'PAUSED';
 export interface Pair {
   id: string;
   workspaceId: string;
-  provider: ProviderId;
   connectionId: string;
   externalId: string;
   spacesId: string;
@@ -125,6 +124,12 @@ export interface MessageOrigin {
   id: string;
 }
 
+export interface MessageUpdate {
+  text: string;
+  senderName?: string;
+  hasFiles?: boolean;
+}
+
 export interface OutboundFile {
   id: string;
   name: string;
@@ -184,4 +189,5 @@ export interface GatewayHandler {
   onSpacesMessageChanged?(change: SpacesMessageChange): Promise<void>;
   onSpacesMemberChanged?(change: SpacesMemberChange): Promise<void>;
   runJob?(job: GatewayJob, context: JobContext): Promise<void>;
+  onConnectionRemoved?(connectionId: string): Promise<void>;
 }

@@ -8,6 +8,7 @@ import type {
 import type {
   Pair,
   ProviderChannel,
+  ProviderId,
   ProviderConnection,
   SpacesMessageChange,
 } from '../../core/types';
@@ -28,6 +29,9 @@ export interface MirrorServices {
 
 /** Mirror's links are PAIR rows with sourceType `<provider id><suffix>`, e.g. `slack-mirror`. */
 export const MIRROR_SOURCE_SUFFIX = '-mirror';
+
+export const mirrorSourceType = (provider: ProviderId): string =>
+  `${provider}${MIRROR_SOURCE_SUFFIX}`;
 
 export const MIRROR_ORIGIN_TYPE = 'xyne_mirror';
 

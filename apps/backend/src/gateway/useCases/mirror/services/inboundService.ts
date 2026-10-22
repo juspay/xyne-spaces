@@ -8,6 +8,7 @@ import {
   deleteConversationMessage,
   loadMessagesSideEffectHandler,
   logger,
+  redisService,
   releaseLock,
   repositories,
 } from '../../../re-exports';
@@ -31,6 +32,9 @@ export const messageLockKey = (linkId: string, externalMessageId: string): strin
   `mirror:${linkId}:${externalMessageId}`;
 
 const PARENT_LOCK_WAIT_MS = 10_000;
+const INBOUND_MARK_TTL_SECONDS = 300;
+
+export const inboundMarkKey = (messageId: string): string => `mirror:inbound:${messageId}`;
 
 interface InboundContext {
   link: MirrorLink;
@@ -128,7 +132,7 @@ export class InboundService {
           emitsMessageReceivedViaSideEffects: true,
         });
 
-    // Mapped before side effects run, so the outbound hook sees it as INCOMING and skips it.
+    // Mapped and marked before side effects run, so the outbound hook skips it without queuing a job.
     await this.messageMap.create({
       sourceId: ctx.sourceId,
       externalId: message.id,
@@ -136,6 +140,7 @@ export class InboundService {
       messageId: created.messageId,
       direction: MessageDirection.INCOMING,
     });
+    await redisService.set(inboundMarkKey(created.messageId), '1', INBOUND_MARK_TTL_SECONDS);
     void this.runSideEffects(userId, created.messageId);
     return created.messageId;
   }

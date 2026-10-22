@@ -7,6 +7,4 @@ export abstract class BaseTransformer<TCredentials = unknown> {
   ): Promise<string>;
 
   abstract toProvider(html: string, mentions: ReadonlyMap<string, string>): string;
-
-  abstract prefixAuthor(authorName: string, text: string): string;
 }

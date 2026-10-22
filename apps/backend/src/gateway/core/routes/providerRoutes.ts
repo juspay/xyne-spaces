@@ -12,7 +12,7 @@ const adminAuth = [authMiddleware.authenticate, authMiddleware.requireAdminOrOwn
 export function providerRoutes(services: ProviderServices, handlers: GatewayHandler[]): Router {
   const router = Router();
   const events = new EventsController(services, handlers);
-  const config = new ConfigController(services.config);
+  const config = new ConfigController(services.config, handlers);
   const userAuth = new UserAuthController(services.userAuth);
   const jobs = new JobsController(services.jobs, services.provider.id);
 

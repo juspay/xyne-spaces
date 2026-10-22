@@ -6,8 +6,9 @@ import {
   notificationService,
   releaseLock,
 } from '../../../re-exports';
+import { MirrorError } from '../errors';
 import type { BaseProvider } from '../../../core/base/baseProvider';
-import { GatewayError, type GatewayErrorCode } from '../../../core/errors';
+import { GatewayError } from '../../../core/errors';
 import {
   SyncRequestRepository,
   type SyncRequestFilters,
@@ -26,7 +27,7 @@ const decideLockKey = (requestId: string): string => `mirror:request-decide:${re
 
 // Failed checks that close a request on approval, so its channel admin can ask again. Anything else
 // (rate limits, provider outages) leaves it pending for another try.
-const RECHECK_FAILURES = new Set<GatewayErrorCode>([
+const RECHECK_FAILURES: ReadonlySet<string> = new Set([
   'VALIDATION_ERROR',
   'NOT_CONFIGURED',
   'NOT_CHANNEL_MEMBER',
@@ -90,10 +91,7 @@ export class LinkRequestService {
       requestedBy: userId,
     });
     if (!request) {
-      throw new GatewayError(
-        'CHANNEL_TAKEN',
-        'One of these channels already has a request waiting'
-      );
+      throw new MirrorError('CHANNEL_TAKEN', 'One of these channels already has a request waiting');
     }
     return request;
   }
@@ -134,7 +132,7 @@ export class LinkRequestService {
           this.reasonOf(error)
         );
         void this.notifyRequester(rejected);
-        throw new GatewayError(error.code, this.reasonOf(error));
+        throw new GatewayError(error.code, this.reasonOf(error), {}, error.statusCode);
       }
       const approved = await this.requests.close(request, 'APPROVED', adminId);
       void this.notifyRequester(approved);
@@ -195,10 +193,10 @@ export class LinkRequestService {
     try {
       const request = await this.requests.findById(requestId);
       if (!request || request.workspaceId !== workspaceId) {
-        throw new GatewayError('REQUEST_NOT_FOUND', 'Request not found');
+        throw new MirrorError('REQUEST_NOT_FOUND', 'Request not found');
       }
       if (request.status !== 'PENDING') {
-        throw new GatewayError(
+        throw new MirrorError(
           'REQUEST_CLOSED',
           `This request is already ${request.status.toLowerCase()}`
         );

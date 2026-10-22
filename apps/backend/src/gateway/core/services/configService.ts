@@ -4,7 +4,6 @@ import { decrypt, encrypt } from '../../re-exports';
 import type { BaseApi } from '../base/baseApi';
 import type { BaseProvider } from '../base/baseProvider';
 import { GatewayError } from '../errors';
-import { PairRepository } from '../repositories/pairRepository';
 import { SourceRepository } from '../repositories/sourceRepository';
 import { UserTokenRepository } from '../repositories/userTokenRepository';
 import type { ProviderConfig, ProviderConnection, ProviderWorkspace } from '../types';
@@ -24,7 +23,6 @@ const ConfigInputSchema = z.object({
 /** One provider workspace per Spaces workspace, saved encrypted on a CONNECTION row in ExternalSource. */
 export class ConfigService<TApi extends BaseApi = BaseApi> {
   private readonly sources = new SourceRepository();
-  private readonly pairs = new PairRepository();
   private readonly userTokens = new UserTokenRepository();
 
   constructor(private readonly provider: BaseProvider<unknown, TApi>) {}
@@ -85,14 +83,14 @@ export class ConfigService<TApi extends BaseApi = BaseApi> {
     return workspace;
   }
 
-  /** Deactivates the config, drops its secrets and people's tokens, and pauses every link on it. */
-  async removeConfig(workspaceId: string): Promise<void> {
+  /** Deactivates the config and drops its secrets and people's tokens; returns its id for the handlers. */
+  async removeConfig(workspaceId: string): Promise<string> {
     const source = await this.sources.findActiveConfig(workspaceId, this.provider.configSourceType);
     if (!source) throw this.notConfiguredError();
     await this.sources.update(source.id, { isActive: false, credentials: encrypt('{}') });
     // A later config may be another provider workspace, where these tokens mean nothing.
     await this.userTokens.deleteByWorkspace(workspaceId, this.provider.configSourceType);
-    await this.pairs.pauseByConnection(source.id, 'NOT_CONFIGURED');
+    return source.id;
   }
 
   async getConfigByWorkspace(workspaceId: string): Promise<ProviderConfig> {

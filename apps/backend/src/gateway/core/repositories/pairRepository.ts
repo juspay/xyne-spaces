@@ -1,7 +1,6 @@
 import type { ExternalSource } from '@prisma/client';
 import { db, encrypt } from '../../re-exports';
-import type { GatewayErrorCode } from '../errors';
-import type { Pair, PairStatus, ProviderId } from '../types';
+import type { Pair, PairStatus } from '../types';
 
 export interface CreatePairInput {
   name: string;
@@ -15,19 +14,15 @@ export interface CreatePairInput {
   createdBy: string;
 }
 
-// A pair's sourceType is `<provider id>-<use case>`.
-const providerOf = (sourceType: string): ProviderId => sourceType.split('-')[0] as ProviderId;
-
 function toPair(row: ExternalSource): Pair {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
-    provider: providerOf(row.sourceType),
     connectionId: row.recordParentId ?? '',
     externalId: row.externalIdentifier ?? '',
     spacesId: row.spacesIdentifier ?? '',
     status: row.isActive ? 'ACTIVE' : 'PAUSED',
-    statusReason: row.recordState,
+    statusReason: row.recordStateReason,
     createdBy: row.createdBy ?? '',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -35,11 +30,11 @@ function toPair(row: ExternalSource): Pair {
 }
 
 /**
- * PAIR rows in ExternalSource: one external resource ⇄ one Spaces resource. Given a use case's sourceType
- * suffix, it reads only that use case's pairs; without one, every use case's.
+ * PAIR rows in ExternalSource: one external resource ⇄ one Spaces resource. Given a use case's sourceType,
+ * it reads only that use case's pairs; without one, every use case's.
  */
 export class PairRepository {
-  constructor(private readonly sourceTypeSuffix?: string) {}
+  constructor(private readonly sourceType?: string) {}
 
   async findById(id: string): Promise<Pair | null> {
     const row = await db.externalSource.findFirst({ where: { id, ...this.scope } });
@@ -96,19 +91,19 @@ export class PairRepository {
   async setStatus(
     id: string,
     status: PairStatus,
-    statusReason: GatewayErrorCode | null = null
+    statusReason: string | null = null
   ): Promise<Pair> {
     const row = await db.externalSource.update({
       where: { id },
-      data: { isActive: status === 'ACTIVE', recordState: statusReason },
+      data: { isActive: status === 'ACTIVE', recordStateReason: statusReason },
     });
     return toPair(row);
   }
 
-  async pauseByConnection(connectionId: string, statusReason: GatewayErrorCode): Promise<void> {
+  async pauseByConnection(connectionId: string, statusReason: string): Promise<void> {
     await db.externalSource.updateMany({
       where: { recordParentId: connectionId, ...this.scope, isActive: true },
-      data: { isActive: false, recordState: statusReason },
+      data: { isActive: false, recordStateReason: statusReason },
     });
   }
 
@@ -119,7 +114,7 @@ export class PairRepository {
   private get scope() {
     return {
       recordType: 'PAIR',
-      ...(this.sourceTypeSuffix ? { sourceType: { endsWith: this.sourceTypeSuffix } } : {}),
+      ...(this.sourceType && { sourceType: this.sourceType }),
     };
   }
 }

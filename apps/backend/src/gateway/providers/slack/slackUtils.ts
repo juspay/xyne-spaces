@@ -135,3 +135,11 @@ export function toProviderMessage(message: SlackMessage, channelId: string): Pro
 function slackTsToDate(ts: string): Date {
   return new Date(Number(ts) * 1000);
 }
+
+const escapeMrkdwn = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export function prefixAuthor(authorName: string, text: string): string {
+  const author = `*${escapeMrkdwn(authorName)}*`;
+  return text ? `${author}: ${text}` : author;
+}

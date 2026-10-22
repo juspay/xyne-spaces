@@ -97,7 +97,7 @@ export class UserAuthService<TApi extends BaseApi = BaseApi> {
     };
   }
 
-  /** Runs a call with a person's token; null means the bot should do it instead. */
+  /** Runs a call with a person's token; null means the token was rejected and dropped. */
   async callAsUser<T>(
     user: UserApi<TApi>,
     fn: (api: TApi) => Promise<T>
@@ -110,7 +110,6 @@ export class UserAuthService<TApi extends BaseApi = BaseApi> {
         await this.tokens.deleteByUser(user.spacesUserId, this.tokenProvider);
         return null;
       }
-      if (['CHANNEL_GONE', 'NOT_MESSAGE_AUTHOR', 'NOT_PERMITTED'].includes(error.code)) return null;
       throw error;
     }
   }

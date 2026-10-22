@@ -1,14 +1,14 @@
 import type { Request, RequestHandler } from 'express';
 import { OrgRole, WorkspaceRole, db } from '../../../re-exports';
 import { GatewayError } from '../../../core/errors';
+import { MirrorError } from '../errors';
 import { asyncRoute } from '../../../core/middleware/errorHandler';
 import { PairRepository } from '../../../core/repositories/pairRepository';
 import { SyncRequestRepository } from '../repositories/syncRequestRepository';
-import { MIRROR_SOURCE_SUFFIX } from '../types';
 
 type ChannelOf = (req: Request) => Promise<string | undefined>;
 
-const links = new PairRepository(MIRROR_SOURCE_SUFFIX);
+const links = new PairRepository();
 const requests = new SyncRequestRepository();
 
 /** Workspace or organisation admins and owners, the same people `requireAdminOrOwner` lets in. */
@@ -28,13 +28,13 @@ const fromBodyOrQuery: ChannelOf = async (req) => {
 
 const fromLink: ChannelOf = async (req) => {
   const link = await links.findById(req.params.id);
-  if (!link) throw new GatewayError('LINK_NOT_FOUND', 'Link not found');
+  if (!link) throw new MirrorError('LINK_NOT_FOUND', 'Link not found');
   return link.spacesId;
 };
 
 const fromRequest: ChannelOf = async (req) => {
   const request = await requests.findById(req.params.id);
-  if (!request) throw new GatewayError('REQUEST_NOT_FOUND', 'Request not found');
+  if (!request) throw new MirrorError('REQUEST_NOT_FOUND', 'Request not found');
   return request.spacesId;
 };
 
@@ -54,9 +54,9 @@ function channelGuard(
       select: { role: true },
     });
     if (!participant)
-      throw new GatewayError('NOT_CHANNEL_MEMBER', 'Only channel members can see its sync');
+      throw new MirrorError('NOT_CHANNEL_MEMBER', 'Only channel members can see its sync');
     if (role === 'ADMIN' && participant.role !== 'ADMIN') {
-      throw new GatewayError('NOT_CHANNEL_ADMIN', 'Only channel admins can manage its sync');
+      throw new MirrorError('NOT_CHANNEL_ADMIN', 'Only channel admins can manage its sync');
     }
     next();
   });

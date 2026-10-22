@@ -2,7 +2,7 @@
 ALTER TABLE "workflow"."external_sources" ADD COLUMN     "createdBy" TEXT,
 ADD COLUMN     "description" TEXT,
 ADD COLUMN     "recordParentId" TEXT,
-ADD COLUMN     "recordState" TEXT,
+ADD COLUMN     "recordStateReason" TEXT,
 ADD COLUMN     "recordType" TEXT,
 ADD COLUMN     "spacesIdentifier" TEXT;
 

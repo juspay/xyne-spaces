@@ -68,11 +68,14 @@ export const sendAsLockKey = (linkId: string, externalUserId: string): string =>
 const SEND_AS_WAIT_MS = 10_000;
 const SEND_WAIT_MS = 10_000;
 const BOT_POSTER = 'bot';
-const CLOCK_SKEW_MS = 5_000;
-const SHARE_CHECKS = 10;
-const SHARE_CHECK_INTERVAL_MS = 1_000;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+// A person's token that can't reach the channel, lacks a scope, or didn't post that message falls back to the bot.
+const SENDER_FALLBACK: ReadonlySet<string> = new Set([
+  'CHANNEL_GONE',
+  'NOT_MESSAGE_AUTHOR',
+  'NOT_PERMITTED',
+]);
+
 const couldNotCopy = (fileName: string): string => `📎 ${fileName} (couldn't copy)`;
 const withNotes = (text: string, notes: string[]): string =>
   [text, ...notes].filter(Boolean).join('\n');
@@ -125,13 +128,14 @@ export class OutboundService {
       );
     } else if (message.content !== change.previousContent) {
       const text = await this.toProviderText(ctx, message.content);
+      const files = await repositories.messageAttachments.findByMessageId(change.messageId);
       await this.asPoster(ctx, message.senderId, async (api, asBot) => {
-        const hasFiles =
-          asBot &&
-          (await repositories.messageAttachments.findByMessageId(change.messageId)).length > 0;
-        const name = hasFiles ? (await this.findSenderIdentity(ctx, message.senderId)).name : '';
-        const update = hasFiles ? this.provider.transformer.prefixAuthor(name, text) : text;
-        await api.updateMessage(link.externalId, row.externalId, update);
+        const sender = asBot ? await this.findSenderIdentity(ctx, message.senderId) : null;
+        await api.updateMessage(link.externalId, row.externalId, {
+          text,
+          hasFiles: files.length > 0,
+          ...(sender && { senderName: sender.name }),
+        });
       });
     }
   }
@@ -143,7 +147,7 @@ export class OutboundService {
     fn: (api: MirrorApi, asBot: boolean) => Promise<void>
   ): Promise<void> {
     const sender = senderId ? await this.userAuth.findUserApi(senderId) : null;
-    if (sender && (await this.userAuth.callAsUser(sender, (api) => fn(api, false)))) return;
+    if (sender && (await this.callAsSender(sender, (api) => fn(api, false)))) return;
     await fn(ctx.api, true);
   }
 
@@ -221,11 +225,13 @@ export class OutboundService {
   ): Promise<string | null> {
     const delivery = ctx.job.getProgress<Delivery>(draft.messageId);
     if (!delivery?.startedAt) return null;
-    if (delivery.sharedFileId) return await this.waitForFileMessage(ctx, delivery.sharedFileId);
+    if (delivery.sharedFileId) {
+      return await ctx.api.findFileMessage(draft.message.channelId, delivery.sharedFileId);
+    }
     return await ctx.api.findPostedMessage(
       draft.message.channelId,
       draft.message.threadId,
-      new Date(delivery.startedAt - CLOCK_SKEW_MS),
+      new Date(delivery.startedAt),
       {
         origin: { type: MIRROR_ORIGIN_TYPE, id: draft.messageId },
         text: withNotes(draft.message.text, draft.notes),
@@ -243,7 +249,7 @@ export class OutboundService {
     sender: UserApi<MirrorApi>,
     draft: Draft
   ): Promise<string | null> {
-    const posted = await this.userAuth.callAsUser(sender, async (api) => {
+    const posted = await this.callAsSender(sender, async (api) => {
       const { fileIds, notes } = await this.uploadFiles(ctx, api, sender.externalUserId, draft);
       const lock = await acquireLock(sendAsLockKey(ctx.link.id, sender.externalUserId), {
         ttlSeconds: gatewayConfig.lockTtlSeconds,
@@ -263,17 +269,30 @@ export class OutboundService {
 
   /**
    * The bot posts under the sender's provider name and photo when they have an account there, else their
-   * Spaces ones. Files can't carry those, so a message with files starts with the sender's name.
+   * Spaces ones; the provider decides how to show them.
    */
   private async postAsBot(ctx: OutboundContext, draft: Draft, senderId: string): Promise<string> {
     const { name, avatarUrl } = await this.findSenderIdentity(ctx, senderId);
     const { fileIds, notes } = await this.uploadFiles(ctx, ctx.api, BOT_POSTER, draft);
-    const text = withNotes(draft.message.text, notes);
-    const message: OutboundMessage =
-      fileIds.length > 0
-        ? { ...draft.message, text: this.provider.transformer.prefixAuthor(name, text) }
-        : { ...draft.message, text, senderName: name, senderAvatarUrl: avatarUrl };
+    const message: OutboundMessage = {
+      ...draft.message,
+      text: withNotes(draft.message.text, notes),
+      senderName: name,
+      senderAvatarUrl: avatarUrl,
+    };
     return await this.publish(ctx, ctx.api, draft, message, fileIds);
+  }
+
+  private async callAsSender<T>(
+    sender: UserApi<MirrorApi>,
+    fn: (api: MirrorApi) => Promise<T>
+  ): Promise<{ value: T } | null> {
+    try {
+      return await this.userAuth.callAsUser(sender, fn);
+    } catch (error) {
+      if (error instanceof GatewayError && SENDER_FALLBACK.has(error.code)) return null;
+      throw error;
+    }
   }
 
   private async findSenderIdentity(
@@ -339,33 +358,10 @@ export class OutboundService {
       ...(sharedFileId && { sharedFileId }),
     });
     const externalId = sharedFileId
-      ? await this.shareFiles(ctx, api, message, fileIds, sharedFileId)
+      ? await api.shareFiles(message, fileIds)
       : await api.postMessage(message);
     await this.record(ctx, draft, externalId);
     return externalId;
-  }
-
-  private async shareFiles(
-    ctx: OutboundContext,
-    api: MirrorApi,
-    message: OutboundMessage,
-    fileIds: string[],
-    sharedFileId: string
-  ): Promise<string> {
-    await api.shareFiles(message, fileIds);
-    const externalId = await this.waitForFileMessage(ctx, sharedFileId);
-    if (!externalId)
-      throw new GatewayError('PROVIDER_ERROR', 'The shared files have not shown up yet');
-    return externalId;
-  }
-
-  private async waitForFileMessage(ctx: OutboundContext, fileId: string): Promise<string | null> {
-    for (let check = 0; check < SHARE_CHECKS; check++) {
-      if (check > 0) await sleep(SHARE_CHECK_INTERVAL_MS);
-      const externalId = await ctx.api.findFileMessage(ctx.link.externalId, fileId);
-      if (externalId) return externalId;
-    }
-    return null;
   }
 
   private async record(ctx: OutboundContext, draft: Draft, externalId: string): Promise<void> {

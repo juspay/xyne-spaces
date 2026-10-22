@@ -27,10 +27,7 @@ export class MessageSourceRepository {
   /** The link's message-map source. It holds no secrets: the provider downloads files with its own token. */
   async ensureMessageSource(source: MessageSource, link: MirrorLink): Promise<string> {
     const existing = await this.sources.findByName(source.name);
-    if (existing) {
-      if (!existing.isActive) await this.sources.update(existing.id, { isActive: true });
-      return existing.id;
-    }
+    if (existing) return existing.id;
     const created = await this.sources.create({
       name: source.name,
       sourceType: source.sourceType,

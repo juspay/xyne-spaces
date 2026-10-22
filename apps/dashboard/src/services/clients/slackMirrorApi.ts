@@ -13,7 +13,6 @@ export type SyncRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED
 export interface MirrorLink {
   id: string;
   workspaceId: string;
-  provider: string;
   connectionId: string;
   externalId: string;
   spacesId: string;

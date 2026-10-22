@@ -1,6 +1,7 @@
-import { acquireLock, logger, releaseLock, runWithContext } from '../../re-exports';
+import { acquireLock, logger, redisService, releaseLock, runWithContext } from '../../re-exports';
 import { gatewayConfig } from '../../config';
-import { GatewayError, isPausingError } from '../../core/errors';
+import { GatewayError } from '../../core/errors';
+import { isPausingError } from './errors';
 import { inlineJobContext } from '../../core/queue/gatewayQueue';
 import { PairRepository } from '../../core/repositories/pairRepository';
 import type {
@@ -12,11 +13,11 @@ import type {
   SpacesMemberChange,
   SpacesMessageChange,
 } from '../../core/types';
-import { messageLockKey, type MessageEvent } from './services/inboundService';
+import { inboundMarkKey, messageLockKey, type MessageEvent } from './services/inboundService';
 import { sendAsLockKey } from './services/outboundService';
 import {
-  MIRROR_SOURCE_SUFFIX,
   inboundJobId,
+  mirrorSourceType,
   outboundJobId,
   type InboundJobPayload,
   type MirrorApi,
@@ -40,7 +41,7 @@ export class MirrorHandler implements GatewayHandler {
     private readonly core: ProviderServices<MirrorApi>,
     private readonly mirror: MirrorServices
   ) {
-    this.name = `${core.provider.id}${MIRROR_SOURCE_SUFFIX}`;
+    this.name = mirrorSourceType(core.provider.id);
     this.links = new PairRepository(this.name);
   }
 
@@ -58,6 +59,8 @@ export class MirrorHandler implements GatewayHandler {
   async onSpacesMessageChanged(change: SpacesMessageChange): Promise<void> {
     const link = await this.links.findBySpacesId(change.channelId);
     if (link?.status !== 'ACTIVE') return;
+    if (change.operation === 'insert' && (await redisService.get(inboundMarkKey(change.messageId))))
+      return;
     const payload: OutboundJobPayload = { linkId: link.id, change };
     const job = this.buildJob(link, 'outbound', { messageId: change.messageId }, payload);
     try {
@@ -72,6 +75,10 @@ export class MirrorHandler implements GatewayHandler {
       });
       await this.runJob(job, inlineJobContext());
     }
+  }
+
+  async onConnectionRemoved(connectionId: string): Promise<void> {
+    await this.links.pauseByConnection(connectionId, 'NOT_CONFIGURED');
   }
 
   async onSpacesMemberChanged(change: SpacesMemberChange): Promise<void> {

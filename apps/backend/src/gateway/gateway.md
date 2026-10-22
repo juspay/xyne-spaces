@@ -9,7 +9,7 @@ The gateway carries everything between Spaces and an external app (a provider). 
 - Only `re-exports.ts` imports from outside `gateway/`. Need repo code? Re-export it there. npm packages are imported directly.
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
-- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged` and `runJob` only if it needs them, and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged`, `runJob` and `onConnectionRemoved` only if it needs them, and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
 - Each provider event goes to every handler at once; one handler's failure doesn't stop the others, but it answers 5xx, so the provider sends the event again to all of them. `onProviderEvent` must be safe to receive the same event twice (Mirror skips anything already in its message map).
 - Use cases never see provider secrets. They get a `ProviderConnection` (`ConfigService.getConnectionBy…()`, or the one passed to `onProviderEvent`): ids, workspace, app name, a ready `api` and `toSpaces()`. Only core and the provider read `credentials`.
 - `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories every use case shares (connections, pairs, people's tokens) stay in `core/repositories/`, and a use case's own stores in `useCases/<name>/repositories/` (Mirror's message map and Redis sync requests).
@@ -52,7 +52,7 @@ The gateway carries everything between Spaces and an external app (a provider). 
 
 A person signs in once per Spaces workspace (`GET /user/connect`, then the provider redirects to `/user/callback`). The token lands in `UserExternalToken` under the provider's CONNECTION sourceType, e.g. `slack-connection`, and only if it is for the configured provider workspace. Removing the config deletes that workspace's tokens.
 
-- Outbound posts, edits and deletes use the sender's token when there is one. Otherwise the bot posts under the sender's provider name and photo (`findUser()`), or their Spaces ones when they have no provider account. A message with files is one post with the text and files; from the bot, its text starts with the sender's name (`prefixAuthor()`), since files can't carry a custom name.
+- Outbound posts, edits and deletes use the sender's token when there is one. Otherwise the bot posts under the sender's provider name and photo (`findUser()`), or their Spaces ones when they have no provider account. A message with files is one post with the text and files; the provider decides how to show the sender (Slack puts the name in the text of a bot post with files, since files can't carry a custom name). Which errors mean "fall back to the bot" is Mirror's choice (`SENDER_FALLBACK`); core only drops a rejected token.
 - A rejected token is dropped, and a person who can't reach the channel or didn't post that message falls back to the bot. These never pause a link.
 - The provider echoes their post back as theirs. A lock per link and person is held until the post is mapped; an echo that arrives first gets 503 and is skipped on retry.
 - Edits and deletes made in the provider to messages that came from Spaces are not copied back, so a change never bounces between the two.
@@ -68,10 +68,10 @@ A person signs in once per Spaces workspace (`GET /user/connect`, then the provi
 
 The gateway stores its rows in `ExternalSource`, with `recordType` set. Every older row has `recordType = null` and is left alone. A future use case uses the same columns under its own sourceType.
 
-| `recordType` | sourceType        | One per                                                                              | Holds                                                                                                                                                                               |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CONNECTION` | `<id>-connection` | provider workspace (name `<id>-connection-<workspace id>`); every use case shares it | The encrypted credentials, the admin's `description`; `externalIdentifier` is the provider workspace                                                                                |
-| `PAIR`       | `<id>-mirror`     | Mirror link (name `mirror-link-<connection id>-<channel id>`)                        | `recordParentId` → its `CONNECTION`, `externalIdentifier` (provider channel), `spacesIdentifier` (Spaces channel), `recordState` (why it stopped, e.g. `CHANNEL_GONE`), `createdBy` |
+| `recordType` | sourceType        | One per                                                                              | Holds                                                                                                                                                                                     |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONNECTION` | `<id>-connection` | provider workspace (name `<id>-connection-<workspace id>`); every use case shares it | The encrypted credentials, the admin's `description`; `externalIdentifier` is the provider workspace                                                                                      |
+| `PAIR`       | `<id>-mirror`     | Mirror link (name `mirror-link-<connection id>-<channel id>`)                        | `recordParentId` → its `CONNECTION`, `externalIdentifier` (provider channel), `spacesIdentifier` (Spaces channel), `recordStateReason` (why it stopped, e.g. `CHANNEL_GONE`), `createdBy` |
 
 - PAIR rows go through `PairRepository`, scoped by the use case's sourceType suffix (`-mirror`); the use case builds each pair's unique name.
 - Query the gateway's rows by `recordType` and sourceType. A use case may set `channelId` on its PAIR when the Spaces side is a channel (Mirror does); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
@@ -108,22 +108,21 @@ A use case asks for the groups it needs: Mirror takes `ProviderServices<MirrorAp
 
 Run every call through `this.call()`: it maps failures with `toGatewayError()` and retries only `RATE_LIMITED`. Use `this.callIgnoring(fn, codes)` for errors that mean "already done", like already in channel.
 
-| `toGatewayError()` returns | When                                     | Then                                  |
-| -------------------------- | ---------------------------------------- | ------------------------------------- |
-| `RATE_LIMITED`             | 429; set `retryAfterMs`                  | Retried up to 3 times                 |
-| `PROVIDER_AUTH`            | Token revoked or invalid                 | Every link on the config pauses       |
-| `CHANNEL_GONE`             | Channel deleted or archived, bot removed | That link pauses                      |
-| `NOT_MESSAGE_AUTHOR`       | The token didn't post that message       | A person's edit falls back to the bot |
-| `NOT_PERMITTED`            | The token lacks a scope                  | A person's call falls back to the bot |
-| `PROVIDER_ERROR`           | Anything else; set `providerCode`        | Events answer 5xx; jobs retry         |
+| `toGatewayError()` returns | When                                     | Then                                                                                                                           |
+| -------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `RATE_LIMITED`             | 429; set `retryAfterMs`                  | Waits and retries up to 3 times when the wait is 3 s or less; a longer wait throws, so the job retries or the provider resends |
+| `PROVIDER_AUTH`            | Token revoked or invalid                 | A person's token is dropped; Mirror pauses every link on the config                                                            |
+| `CHANNEL_GONE`             | Channel deleted or archived, bot removed | Mirror pauses that link                                                                                                        |
+| `NOT_MESSAGE_AUTHOR`       | The token didn't post that message       | Mirror falls back to the bot                                                                                                   |
+| `NOT_PERMITTED`            | The token lacks a scope                  | Mirror falls back to the bot                                                                                                   |
+| `PROVIDER_ERROR`           | Anything else; set `providerCode`        | Events answer 5xx; jobs retry                                                                                                  |
 
-Never retry anything else yourself: a timed-out post may already be sent.
+Never retry anything else yourself: a timed-out post may already be sent. Codes only a use case throws (Mirror's `LINK_NOT_FOUND`, `CHANNEL_TAKEN`…) live in that use case (`useCases/mirror/errors.ts`, `MirrorError`). Provider quirks stay in the provider: Slack's `shareFiles` waits for the shared message itself, and `findPostedMessage` allows for clock skew.
 
 ## BaseTransformer
 
 - `toSpaces(message, config)`: provider message → Spaces HTML.
 - `toProvider(html, mentions)`: Spaces HTML → provider text. `mentions` maps Spaces user ids to provider user ids; anyone unmapped stays plain `@Name`.
-- `prefixAuthor(name, text)`: the sender's name in front of a bot post that can't show it otherwise.
 
 ## Provider app setup
 

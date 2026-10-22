@@ -1,5 +1,6 @@
 import { GatewayError } from '../errors';
 import type {
+  MessageUpdate,
   OutboundFile,
   OutboundMessage,
   PostedMessageMatch,
@@ -11,20 +12,28 @@ import type {
 const MAX_RATE_LIMIT_RETRIES = 3;
 const DEFAULT_RETRY_AFTER_MS = 1_000;
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const MAX_INLINE_WAIT_MS = 3_000;
+
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A provider's API, bound to one workspace's credentials. Every call fails as a GatewayError. */
 export abstract class BaseApi {
-  /** Runs a provider call, mapping any failure. Only RATE_LIMITED is retried: nothing was written. */
+  /** Runs a provider call, mapping any failure. Only a short RATE_LIMITED wait is retried here: nothing was written. */
   protected async call<T>(fn: () => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
         return await fn();
       } catch (error) {
         const gatewayError = error instanceof GatewayError ? error : this.toGatewayError(error);
-        if (gatewayError.code !== 'RATE_LIMITED' || attempt === MAX_RATE_LIMIT_RETRIES)
+        const waitMs = gatewayError.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS;
+        if (
+          gatewayError.code !== 'RATE_LIMITED' ||
+          attempt === MAX_RATE_LIMIT_RETRIES ||
+          waitMs > MAX_INLINE_WAIT_MS
+        )
           throw gatewayError;
-        await sleep(gatewayError.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS);
+        await sleep(waitMs);
       }
     }
   }
@@ -53,7 +62,7 @@ export abstract class BaseApi {
 export interface MessagingApi {
   /** Posts a message and returns its provider id. */
   postMessage(message: OutboundMessage): Promise<string>;
-  updateMessage(channelId: string, messageId: string, text: string): Promise<void>;
+  updateMessage(channelId: string, messageId: string, update: MessageUpdate): Promise<void>;
   deleteMessage(channelId: string, messageId: string): Promise<void>;
   findPostedMessage(
     channelId: string,
@@ -67,7 +76,7 @@ export interface MessagingApi {
 export interface FileApi {
   downloadFile(url: string): Promise<Buffer>;
   uploadFile(file: OutboundFile): Promise<string>;
-  shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void>;
+  shareFiles(message: OutboundMessage, fileIds: string[]): Promise<string>;
   findFileMessage(channelId: string, fileId: string): Promise<string | null>;
 }
 

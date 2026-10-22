@@ -3,14 +3,8 @@ import { AppError } from '../re-exports';
 export type GatewayErrorCode =
   | 'VALIDATION_ERROR'
   | 'INVALID_SIGNATURE'
-  | 'NOT_CHANNEL_MEMBER'
-  | 'NOT_CHANNEL_ADMIN'
   | 'NOT_CONFIGURED'
-  | 'LINK_NOT_FOUND'
-  | 'REQUEST_NOT_FOUND'
-  | 'REQUEST_CLOSED'
   | 'ALREADY_CONFIGURED'
-  | 'CHANNEL_TAKEN'
   | 'RATE_LIMITED'
   | 'LOCK_HELD'
   | 'PROVIDER_AUTH'
@@ -24,14 +18,8 @@ export type GatewayErrorCode =
 const STATUS: Record<GatewayErrorCode, number> = {
   VALIDATION_ERROR: 400,
   INVALID_SIGNATURE: 401,
-  NOT_CHANNEL_MEMBER: 403,
-  NOT_CHANNEL_ADMIN: 403,
   NOT_CONFIGURED: 404,
-  LINK_NOT_FOUND: 404,
-  REQUEST_NOT_FOUND: 404,
-  REQUEST_CLOSED: 409,
   ALREADY_CONFIGURED: 409,
-  CHANNEL_TAKEN: 409,
   RATE_LIMITED: 429,
   LOCK_HELD: 503,
   PROVIDER_AUTH: 502,
@@ -52,27 +40,22 @@ export class GatewayError extends AppError {
   readonly retryAfterMs?: number;
   readonly providerCode?: string;
 
+  constructor(code: GatewayErrorCode, message: string, options?: GatewayErrorOptions);
+  constructor(code: string, message: string, options: GatewayErrorOptions, statusCode: number);
   constructor(
-    readonly code: GatewayErrorCode,
+    readonly code: string,
     message: string,
-    options: GatewayErrorOptions = {}
+    options: GatewayErrorOptions = {},
+    statusCode?: number
   ) {
-    super(message, STATUS[code]);
+    super(message, statusCode ?? STATUS[code as GatewayErrorCode]);
     this.name = 'GatewayError';
     this.retryAfterMs = options.retryAfterMs;
     this.providerCode = options.providerCode;
   }
 }
 
-/** Errors that pause a link instead of being retried. */
-export function isPausingError(error: unknown): error is GatewayError {
-  return (
-    error instanceof GatewayError &&
-    (error.code === 'PROVIDER_AUTH' || error.code === 'CHANNEL_GONE')
-  );
-}
-
-const RETRYABLE: ReadonlySet<GatewayErrorCode> = new Set<GatewayErrorCode>([
+const RETRYABLE: ReadonlySet<string> = new Set<GatewayErrorCode>([
   'RATE_LIMITED',
   'LOCK_HELD',
   'PROVIDER_ERROR',

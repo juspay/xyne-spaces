@@ -8,6 +8,7 @@ import {
 } from '../../../re-exports';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
+import { MirrorError } from '../errors';
 import { PairRepository } from '../../../core/repositories/pairRepository';
 import { MessageSourceRepository } from '../repositories/messageSourceRepository';
 import { SyncRequestRepository } from '../repositories/syncRequestRepository';
@@ -16,12 +17,7 @@ import type { ProviderChannel } from '../../../core/types';
 import type { ConfigService } from '../../../core/services/configService';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, deskSourceName } from '../messageSources';
-import {
-  MIRROR_SOURCE_SUFFIX,
-  type MirrorApi,
-  type MirrorConnection,
-  type MirrorLink,
-} from '../types';
+import { mirrorSourceType, type MirrorApi, type MirrorConnection, type MirrorLink } from '../types';
 import type { MemberSyncService } from './memberSyncService';
 
 // Unique, so there is one link per provider channel; (spacesId, sourceType) keeps one per Spaces channel.
@@ -38,9 +34,9 @@ export interface LinkView {
   externalChannel: ProviderChannel | null;
 }
 
-/** One Spaces channel ⇄ one provider channel, enforced by two unique keys on the link's PAIR row. */
+/** One Spaces channel ⇄ one provider channel: the link's unique name, and the checks on approval. */
 export class LinkService {
-  private readonly pairs = new PairRepository(MIRROR_SOURCE_SUFFIX);
+  private readonly pairs: PairRepository;
   private readonly requests = new SyncRequestRepository();
   private readonly sources = new SourceRepository();
   private readonly messageSources = new MessageSourceRepository();
@@ -50,7 +46,9 @@ export class LinkService {
     private readonly config: ConfigService<MirrorApi>,
     private readonly identity: IdentityService,
     private readonly members: MemberSyncService
-  ) {}
+  ) {
+    this.pairs = new PairRepository(mirrorSourceType(provider.id));
+  }
 
   async findChannelLink(spacesChannelId: string): Promise<LinkView | null> {
     const link = await this.pairs.findBySpacesId(spacesChannelId);
@@ -125,7 +123,7 @@ export class LinkService {
 
     const link = await this.createLink({
       name: linkName(connection.sourceId, input.externalChannelId),
-      sourceType: `${this.provider.id}${MIRROR_SOURCE_SUFFIX}`,
+      sourceType: mirrorSourceType(this.provider.id),
       displayName: 'Mirror link',
       workspaceId,
       connectionId: connection.sourceId,
@@ -194,23 +192,23 @@ export class LinkService {
       throw new GatewayError('VALIDATION_ERROR', 'Only a channel in this workspace can be linked');
     }
     if (isDeskChannelType(channel.type)) {
-      throw new GatewayError('CHANNEL_TAKEN', 'A desk channel cannot be linked');
+      throw new MirrorError('CHANNEL_TAKEN', 'A desk channel cannot be linked');
     }
 
     const [spacesLink, externalLink] = await Promise.all([
       this.pairs.findBySpacesId(input.spacesChannelId),
       this.pairs.findByName(linkName(connection.sourceId, input.externalChannelId)),
     ]);
-    if (spacesLink) throw new GatewayError('CHANNEL_TAKEN', 'This channel is already linked');
+    if (spacesLink) throw new MirrorError('CHANNEL_TAKEN', 'This channel is already linked');
     if (externalLink)
-      throw new GatewayError(
+      throw new MirrorError(
         'CHANNEL_TAKEN',
         `That ${this.provider.displayName} channel is already linked`
       );
 
     const deskName = deskSourceName(this.provider.id, input.externalChannelId);
     if (deskName && (await this.sources.findActiveNames([deskName])).size > 0) {
-      throw new GatewayError(
+      throw new MirrorError(
         'CHANNEL_TAKEN',
         `That ${this.provider.displayName} channel is used by a desk`
       );
@@ -229,7 +227,7 @@ export class LinkService {
     const channels = externalUserId ? await api.listSharedChannels(externalUserId) : [];
     const channel = channels.find((candidate) => candidate.id === externalChannelId);
     if (!channel) {
-      throw new GatewayError(
+      throw new MirrorError(
         'NOT_CHANNEL_MEMBER',
         `${subject} and ${connection.appName ?? 'the Mirror app'} must both be in that ${this.provider.displayName} channel`
       );
@@ -242,7 +240,7 @@ export class LinkService {
       return await this.pairs.create(data);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new GatewayError('CHANNEL_TAKEN', 'One of these channels was just linked');
+        throw new MirrorError('CHANNEL_TAKEN', 'One of these channels was just linked');
       }
       throw error;
     }
@@ -251,7 +249,7 @@ export class LinkService {
   private async getLinkById(workspaceId: string, linkId: string): Promise<MirrorLink> {
     const link = await this.pairs.findById(linkId);
     if (!link || link.workspaceId !== workspaceId)
-      throw new GatewayError('LINK_NOT_FOUND', 'Link not found');
+      throw new MirrorError('LINK_NOT_FOUND', 'Link not found');
     return link;
   }
 
