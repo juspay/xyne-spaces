@@ -311,6 +311,14 @@ type AppLogEvents = {
     error: unknown;
   }>;
 
+  push_registration_outcome: Readonly<{
+    outcome: 'registered' | 'register_failed' | 'permission_denied' | 'token_unavailable';
+    stage: 'permission' | 'token' | 'register';
+    trigger: 'start' | 'foreground' | 'token_refresh';
+    platform: 'ios' | 'android';
+    error: string | null;
+  }>;
+
   video_playback_ready: VideoPlaybackReadyFields;
 
   video_playback_failed: VideoPlaybackFailedFields;

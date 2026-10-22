@@ -464,6 +464,31 @@ completed.
 
 ---
 
+### `push_registration_outcome`
+
+**Purpose:** Result of registering this device for push with the backend. Before
+this event existed, a device that never registered left no trace anywhere, so
+"user gets no mobile push" could not be told apart from "push dropped".
+
+**Fields:**
+
+| Field      | Meaning                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| `outcome`  | `registered` · `register_failed` · `permission_denied` · `token_unavailable`               |
+| `stage`    | `permission` · `token` · `register` — the boot step that produced the outcome              |
+| `trigger`  | `start` (sign-in / app start) · `foreground` (recovery on return to app) · `token_refresh` |
+| `platform` | `ios` · `android`                                                                          |
+| `error`    | Short redacted error for `register_failed`, otherwise `null`. Never contains tokens        |
+
+**When:** Once per boot of `NotificationService` (`start` or `foreground`), and
+on every FCM token rotation. `permission_denied` / `token_unavailable` mean the
+boot stopped early; it is retried automatically when the app returns to the
+foreground with permission granted.
+
+**Typical level:** `info`
+
+---
+
 ### `video_playback_ready`
 
 **Purpose:** A video source reached `readyToPlay` in a native player. Pair with
