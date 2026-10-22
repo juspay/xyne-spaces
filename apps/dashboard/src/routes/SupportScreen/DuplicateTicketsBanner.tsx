@@ -1,6 +1,6 @@
 import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { TicketReferenceRelation, TicketStatusV2 } from '@xyne/shared';
+import { TicketReferenceRelation } from '@xyne/shared';
 import {
   AlertTriangle,
   BulbDefault,
@@ -28,7 +28,6 @@ interface ReferenceEntry {
   xyneId: string;
   title: string;
   channelId: string;
-  solved: boolean;
 }
 
 type Kind = 'duplicate' | 'related';
@@ -42,7 +41,6 @@ type RelatedTicket = {
   xyneId?: string;
   title?: string;
   channelId?: string;
-  statusV2?: string | null;
 };
 
 const toEntry = (
@@ -57,7 +55,6 @@ const toEntry = (
     xyneId: related.xyneId,
     title: related.title || related.xyneId,
     channelId: related.channelId,
-    solved: related.statusV2 === TicketStatusV2.COMPLETED,
   };
 };
 
@@ -146,11 +143,6 @@ const ReferenceStrip = ({
                   {entry.xyneId}
                 </span>
                 <span className='min-w-0 truncate text-sm text-foreground'>{entry.title}</span>
-                {kind === 'related' && entry.solved && (
-                  <Badge variant='secondary' className='ml-auto shrink-0'>
-                    Solved
-                  </Badge>
-                )}
               </Link>
             </li>
           ))}
@@ -215,7 +207,6 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
       );
     }
 
-    relatedEntries.sort((a, b) => Number(b.solved) - Number(a.solved));
     return { duplicates: duplicateEntries, related: relatedEntries };
   }, [ticket]);
 
@@ -225,7 +216,6 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
 
   const toggle = (kind: Kind) => (): void => setExpanded(prev => (prev === kind ? null : kind));
   const dismiss = (kind: Kind) => (): void => setDismissed(prev => ({ ...prev, [kind]: true }));
-  const solvedCount = related.filter(entry => entry.solved).length;
 
   return (
     <>
@@ -246,9 +236,7 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
         <ReferenceStrip
           kind='related'
           icon={<BulbDefault className='size-4 shrink-0' />}
-          summary={`${related.length} related ticket${related.length === 1 ? '' : 's'}${
-            solvedCount > 0 ? ` · ${solvedCount} solved` : ''
-          }`}
+          summary={`${related.length} related ticket${related.length === 1 ? '' : 's'}`}
           entries={related}
           isExpanded={expanded === 'related'}
           onToggle={toggle('related')}
