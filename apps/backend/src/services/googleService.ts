@@ -1212,8 +1212,8 @@ const GMAIL_MAX_ATTEMPTS = 4;
 export function isRetryableGmailError(error: unknown): boolean {
   const status = getHttpStatus(error);
   if (status !== undefined && RETRYABLE_STATUSES.has(status)) return true;
-  // Some Gmail paths report the per-user concurrency cap as 403.
-  return status === 403 && /rate limit|too many concurrent/i.test(getErrorMessage(error));
+  // Some Gmail paths report the per-user concurrency cap / API quota as 403.
+  return status === 403 && /rate limit|too many concurrent|quota exceeded/i.test(getErrorMessage(error));
 }
 
 async function withGmailRetry<T>(label: string, call: () => Promise<T>): Promise<T> {
