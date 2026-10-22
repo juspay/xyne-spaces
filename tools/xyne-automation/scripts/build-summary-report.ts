@@ -129,6 +129,20 @@ const ms = (n: number): string =>
     : n >= 1000
       ? `${(n / 1000).toFixed(1)}s`
       : `${n}ms`;
+// Release-check times are stored as UTC ISO strings; show them in the machine's local zone with
+// the zone name ("22 Oct 2026, 12:31 pm IST"), so a raw "…T07:01:03Z" is not read as wrong.
+const localTime = (iso: string): string => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+};
 const specName = (s: Spec): string => s.specHeading || path.basename(s.fileName);
 
 // Gauge stores screenshots as files (ScreenshotFile) in html-report/images, or inline base64 (screenshot).
@@ -217,7 +231,7 @@ const moduleTable = moduleRows
 const releaseBlock = releaseInfo
   ? `<div class="release">
   <div><b>Release check</b> · branch <code>${esc(releaseInfo.branch)}</code> · commit <code>${esc(releaseInfo.commit)}</code></div>
-  <div class="muted">Run by ${esc(releaseInfo.runBy)} · ${esc(releaseInfo.startedAt)} → ${esc(releaseInfo.finishedAt)} · modules: ${esc(releaseInfo.modules.length ? releaseInfo.modules.join(', ') : 'all')}</div>
+  <div class="muted">Run by ${esc(releaseInfo.runBy)} · ${esc(localTime(releaseInfo.startedAt))} → ${esc(localTime(releaseInfo.finishedAt))} · modules: ${esc(releaseInfo.modules.length ? releaseInfo.modules.join(', ') : 'all')}</div>
   ${
     releaseInfo.uncommittedFiles.length
       ? `<div class="warnline">⚠️ Run with uncommitted changes (results may not match the commit): ${esc(releaseInfo.uncommittedFiles.join(', '))}</div>`
@@ -283,7 +297,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   table.mods{border-collapse:collapse;margin:4px 0 8px}table.mods th,table.mods td{border:1px solid #d0d7de;padding:4px 10px;text-align:left}table.mods th{background:#f6f8fa}
 </style></head><body>
 <div class="hdr"><h1>${releaseInfo ? `Release check — ${esc(releaseInfo.branch)}` : 'Automation report'}</h1><span class="badge ${status}">${status.toUpperCase()}</span></div>
-<div class="muted">commit <code>${esc(meta.commitHash ?? '')}</code> · ${esc(result.timestamp)} · ${esc(meta.mode ?? '')} · tags <code>${esc(result.tags || '—')}</code></div>
+<div class="muted">commit <code>${esc(meta.commitHash ?? '')}</code> · ${esc(releaseInfo ? localTime(releaseInfo.finishedAt) : result.timestamp)} · ${esc(meta.mode ?? '')} · tags <code>${esc(result.tags || '—')}</code></div>
 <div class="chips">
   <div class="chip"><b>${passedCount}</b> / ${allScenarios.length} scenarios passed</div>
   <div class="chip"><b>${failed.length}</b> failed</div>
