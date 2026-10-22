@@ -1,3 +1,5 @@
+import type { KbCollectionNode } from '@/services/claw/clawKnowledgeBaseTypes';
+import type { Skill } from '@/services/claw/clawSkillsTypes';
 import type { AvailableTools, IntegrationToolEntry } from '@/services/claw/clawToolsTypes';
 import { slugify, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { resolvePromptChange } from './promptEdits';
@@ -19,8 +21,6 @@ export type ResolvedTools =
       tools: ToolSelection;
       unknown: string[];
       removed: string[];
-      deduped: string[];
-      trimmedSubagents: string[];
     }
   | { status: 'catalog-unavailable' }
   | { status: 'nothing-proposed' };
@@ -89,67 +89,63 @@ function addSubagent(tools: ToolSelection, name: string): ToolSelection {
   return { ...tools, subagents: [...tools.subagents, name] };
 }
 
-export const MAX_SUBAGENTS = 2;
-
-interface JudgedSelection {
-  tools: ToolSelection;
-  deduped: string[];
-  trimmedSubagents: string[];
+function normalizeMcpKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_\s]+/g, ' ');
 }
 
-function judgeSelection(
-  tools: ToolSelection,
-  catalog: AvailableTools,
-  catalogs: Catalogs,
-): JudgedSelection {
-  const serverTypeOf = new Map(catalog.subagents.map(s => [s.name, s.serverType]));
-  const coveredServers = new Set(
-    tools.subagents.map(name => serverTypeOf.get(name)).filter((t): t is string => Boolean(t)),
-  );
-
-  const deduped: string[] = [];
-  const direct = tools.direct.filter(slug => {
-    const entry = catalogs.mcpEntries.find(e =>
-      e.tools.some(t => t.slug === slug || t.name === slug),
-    );
-    const server = entry?.server?.type ?? entry?.slug;
-    if (server && coveredServers.has(server)) {
-      deduped.push(slug);
-      return false;
-    }
-    return true;
-  });
-
-  const trimmedSubagents = tools.subagents.slice(MAX_SUBAGENTS);
-  const subagents = tools.subagents.slice(0, MAX_SUBAGENTS);
-
-  return { tools: { ...tools, subagents, direct }, deduped, trimmedSubagents };
+function mcpKeyTails(entry: McpCatalogEntry): string[] {
+  const tails = new Set<string>();
+  for (const source of [entry.slug, entry.label]) {
+    const words = normalizeMcpKey(source).split(' ').filter(Boolean);
+    if (words.length > 1) tails.add(words.slice(1).join(' '));
+  }
+  return [...tails];
 }
 
 function expandMcpNames(
   names: readonly string[],
   entries: readonly McpCatalogEntry[],
-): { tools: string[]; unknown: string[] } {
+): {
+  matches: { entry: McpCatalogEntry; tool: IntegrationToolEntry }[];
+  unknown: string[];
+} {
   const byKey = new Map<string, McpCatalogEntry>();
+  const addKey = (key: string, entry: McpCatalogEntry): void => {
+    if (key && !byKey.has(key)) byKey.set(key, entry);
+  };
   for (const entry of entries) {
-    byKey.set(entry.slug.toLowerCase(), entry);
-    byKey.set(entry.label.toLowerCase(), entry);
+    addKey(normalizeMcpKey(entry.slug), entry);
+    addKey(normalizeMcpKey(entry.label), entry);
+  }
+  const tailCounts = new Map<string, number>();
+  for (const entry of entries) {
+    for (const tail of mcpKeyTails(entry)) {
+      tailCounts.set(tail, (tailCounts.get(tail) ?? 0) + 1);
+    }
+  }
+  for (const entry of entries) {
+    for (const tail of mcpKeyTails(entry)) {
+      if (tailCounts.get(tail) === 1) addKey(tail, entry);
+    }
   }
 
-  const tools: string[] = [];
+  const matches: { entry: McpCatalogEntry; tool: IntegrationToolEntry }[] = [];
   const unknown: string[] = [];
   const seen = new Set<string>();
   for (const name of names) {
-    const entry = byKey.get(name.trim().toLowerCase());
+    const entry = byKey.get(normalizeMcpKey(name));
     if (!entry) {
       if (!unknown.includes(name)) unknown.push(name);
       continue;
     }
     if (seen.has(entry.slug)) continue;
     seen.add(entry.slug);
-    for (const tool of entry.tools) tools.push(tool.slug);
+    for (const tool of entry.tools) matches.push({ entry, tool });
   }
-  return { tools, unknown };
+  return { matches, unknown };
 }
 
 export function resolveProposedTools(
@@ -177,7 +173,14 @@ export function resolveProposedTools(
   const expandedMcps = expandMcpNames(mcpNames, catalogs.mcpEntries);
   const unknown: string[] = [...expandedMcps.unknown];
 
-  for (const raw of [...names, ...expandedMcps.tools]) {
+  for (const { entry, tool } of expandedMcps.matches) {
+    tools = keepCallableAgents(
+      selectMcpTools(catalogs.mcpEntries, tools, entry, [tool], true),
+      tools,
+    );
+  }
+
+  for (const raw of names) {
     const match = matchTool(raw, catalogs);
 
     switch (match.kind) {
@@ -199,22 +202,13 @@ export function resolveProposedTools(
     }
   }
 
-  const judged = judgeSelection(tools, catalog, catalogs);
-
-  const granted = new Set(grantedNames(judged.tools));
+  const granted = new Set(grantedNames(tools));
   const removed = grantedNames(current).filter(name => !granted.has(name));
 
-  return {
-    status: 'resolved',
-    tools: judged.tools,
-    unknown,
-    removed,
-    deduped: judged.deduped,
-    trimmedSubagents: judged.trimmedSubagents,
-  };
+  return { status: 'resolved', tools, unknown, removed };
 }
 
-const FIELDS_THIS_DRAFT_CANNOT_SET = ['modelId', 'skills', 'knowledge', 'scope', 'memory'] as const;
+const FIELDS_THIS_DRAFT_CANNOT_SET = ['modelId', 'scope', 'memory'] as const;
 
 export interface DraftPatch {
   patch: Partial<WizardState>;
@@ -224,6 +218,31 @@ export interface DraftPatch {
 export interface DraftPatchContext {
   toolsIntent?: 'replace' | 'merge';
   anchorPrompt?: string;
+  skillCatalog?: readonly Skill[];
+  kbCollections?: readonly KbCollectionNode[];
+}
+
+function resolveByName<T>(
+  names: readonly string[],
+  items: readonly T[],
+  keysOf: (item: T) => (string | undefined)[],
+  idOf: (item: T) => string,
+): { ids: string[]; unknown: string[] } {
+  const byKey = new Map<string, string>();
+  for (const item of items) {
+    for (const key of keysOf(item)) {
+      const normalized = key?.trim().toLowerCase();
+      if (normalized && !byKey.has(normalized)) byKey.set(normalized, idOf(item));
+    }
+  }
+  const ids: string[] = [];
+  const unknown: string[] = [];
+  for (const name of names) {
+    const id = byKey.get(name.trim().toLowerCase());
+    if (id === undefined) unknown.push(name);
+    else if (!ids.includes(id)) ids.push(id);
+  }
+  return { ids, unknown };
 }
 
 function text(value: unknown): string | undefined {
@@ -297,10 +316,48 @@ export function paramsToDraftPatch(
       if (resolved.unknown.length > 0) {
         problems.push(`Not added — no such capability here: ${resolved.unknown.join(', ')}.`);
       }
-      if (resolved.trimmedSubagents.length > 0) {
-        problems.push(
-          `Not added — this draft keeps at most ${MAX_SUBAGENTS} subagents, so these were dropped: ${resolved.trimmedSubagents.join(', ')}.`,
+    }
+  }
+
+  const proposedSkills = stringList(params['skills']);
+  if (proposedSkills !== null) {
+    if (!context.skillCatalog) {
+      problems.push('Skills not applied — the skill list is still loading. Try again.');
+    } else {
+      const { ids, unknown } = resolveByName(
+        proposedSkills,
+        context.skillCatalog,
+        skill => [skill.id, skill.slug, skill.name, skill.label],
+        skill => skill.id,
+      );
+      patch.selectedSkillIds = ids;
+      if (unknown.length > 0) {
+        problems.push(`Skills not added — no such skill here: ${unknown.join(', ')}.`);
+      }
+    }
+  }
+
+  const knowledge = params['knowledge'];
+  if (knowledge && typeof knowledge === 'object') {
+    const scope = text((knowledge as Record<string, unknown>)['scope']);
+    if (scope === 'USER' || scope === 'COLLECTIONS') patch.selectedKbScope = scope;
+
+    const names = stringList((knowledge as Record<string, unknown>)['collections']);
+    if (names !== null) {
+      if (!context.kbCollections) {
+        problems.push('Knowledge not applied — the collection list is still loading. Try again.');
+      } else {
+        const { ids, unknown } = resolveByName(
+          names,
+          context.kbCollections,
+          node => [node.id, node.name],
+          node => node.id,
         );
+        patch.selectedKbResources = ids.map(id => ({ collectionId: id, fileId: null }));
+        if (ids.length > 0) patch.selectedKbScope = 'COLLECTIONS';
+        if (unknown.length > 0) {
+          problems.push(`Knowledge not added — no such collection here: ${unknown.join(', ')}.`);
+        }
       }
     }
   }

@@ -11,6 +11,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { PencilEditLine } from '@xyne/icons';
 import { ChevronLeft, Loader2 } from 'lucide-react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/Button/index';
 import { Popover } from '@/components/ui/Popover';
 import { AgentColorRow } from './AgentColorRow';
@@ -37,8 +39,31 @@ import { SubagentCapabilityRow } from '../../shared/pickers/subagent/SubagentCap
 import { CallableAgentCapabilityRow } from '../../shared/pickers/callableAgent/CallableAgentCapabilityRow';
 
 const PROMPT_MIN_HEIGHT = 72;
-const PROMPT_MAX_HEIGHT = 420;
 const PROMPT_FLASH_MS = 1400;
+
+const PROMPT_MARKDOWN: Components = {
+  h1: ({ children }) => (
+    <h1 className='mt-5 text-base font-semibold text-foreground first:mt-0'>{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className='mt-5 text-sm font-semibold text-foreground first:mt-0'>{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className='mt-4 text-sm font-medium text-foreground first:mt-0'>{children}</h3>
+  ),
+  p: ({ children }) => <p className='mt-2 first:mt-0'>{children}</p>,
+  ul: ({ children }) => <ul className='mt-2 list-disc space-y-1 pl-5 first:mt-0'>{children}</ul>,
+  ol: ({ children }) => <ol className='mt-2 list-decimal space-y-1 pl-5 first:mt-0'>{children}</ol>,
+  strong: ({ children }) => <strong className='font-semibold text-foreground'>{children}</strong>,
+  code: ({ children }) => (
+    <code className='rounded bg-muted px-1 py-0.5 text-[13px]'>{children}</code>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className='mt-2 border-l-2 border-border pl-3 text-muted-foreground'>
+      {children}
+    </blockquote>
+  ),
+};
 
 function comparable(state: WizardState): string {
   return JSON.stringify([
@@ -52,6 +77,18 @@ function comparable(state: WizardState): string {
     state.selectedKbScope,
     state.selectedKbResources,
   ]);
+}
+
+function grantedCount(state: WizardState): number {
+  const { subagents, direct, custom, gateway, callableAgents } = state.tools;
+  return (
+    subagents.length +
+    direct.length +
+    custom.length +
+    gateway.length +
+    callableAgents.length +
+    state.selectedSkillIds.length
+  );
 }
 
 interface DraftErrors {
@@ -113,12 +150,14 @@ const ClawAgentCreateV2 = ({
     [onDraftChange],
   );
 
+  const [promptEditing, setPromptEditing] = useState(false);
+
   useLayoutEffect(() => {
     const el = promptRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT), PROMPT_MAX_HEIGHT)}px`;
-  }, [state.systemPrompt]);
+    el.style.height = `${Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT)}px`;
+  }, [state.systemPrompt, promptEditing]);
 
   useLayoutEffect(() => {
     const el = descriptionRef.current;
@@ -164,6 +203,13 @@ const ClawAgentCreateV2 = ({
     }
     return next;
   }, [state.name, state.systemPrompt, slug, nameCheck.nameError, nameCheck.slugError]);
+
+  const untouched =
+    !isEdit &&
+    state.name.trim().length === 0 &&
+    state.description.trim().length === 0 &&
+    state.systemPrompt.trim().length === 0 &&
+    grantedCount(state) === 0;
 
   const visibleErrors: DraftErrors = showErrors
     ? errors
@@ -239,8 +285,18 @@ const ClawAgentCreateV2 = ({
   return (
     <div className='flex h-full min-h-0 flex-col' data-component='ClawAgentCreateV2'>
       <div ref={scrollRef} className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
-        <div className={cn('mx-auto flex w-full max-w-[720px] flex-col px-6', !hideBack && 'pt-6')}>
-          <div className='sticky top-0 z-10 flex flex-col gap-10 bg-background pb-8 pt-6'>
+        <div
+          className={cn(
+            'mx-auto flex w-full max-w-[720px] flex-col px-6',
+            !hideBack && !showDraftHeader && 'pt-6',
+          )}
+        >
+          <div
+            className={cn(
+              'sticky top-0 z-10 flex flex-col gap-10 bg-background pb-8',
+              showDraftHeader ? 'pt-12' : 'pt-6',
+            )}
+          >
             {(!hideBack || showDraftHeader) && (
               <div className='flex w-full items-center gap-3'>
                 {!hideBack && (
@@ -254,26 +310,6 @@ const ClawAgentCreateV2 = ({
                     <ChevronLeft className='size-4' aria-hidden />
                     Back
                   </button>
-                )}
-
-                {showDraftHeader && (
-                  <div className='ml-auto flex items-center gap-3'>
-                    <Pill tone={isCreated ? 'success' : 'warning'} size='md'>
-                      {isCreated ? 'Created' : 'Draft · not created yet'}
-                    </Pill>
-                    {!isCreated && (
-                      <Button
-                        onClick={handleSubmit}
-                        disabled={busy}
-                        loading={createMutation.isPending}
-                        className='rounded-xl'
-                        data-track-category='Claw Agents'
-                        data-track-name='Create agent v2: create'
-                      >
-                        Create agent
-                      </Button>
-                    )}
-                  </div>
                 )}
               </div>
             )}
@@ -402,7 +438,43 @@ const ClawAgentCreateV2 = ({
                     <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
                   </p>
                 )}
+
+                {showDraftHeader && (
+                  <span className='w-fit'>
+                    <Pill tone={isCreated ? 'success' : 'warning'}>
+                      {isCreated ? 'Created' : 'Draft · not created yet'}
+                    </Pill>
+                  </span>
+                )}
               </div>
+
+              {showDraftHeader && (
+                <div className='shrink-0'>
+                  {!isCreated ? (
+                    <Button
+                      onClick={handleSubmit}
+                      disabled={busy || untouched}
+                      loading={createMutation.isPending}
+                      className='rounded-xl'
+                      data-track-category='Claw Agents'
+                      data-track-name='Create agent v2: create'
+                    >
+                      Create agent
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleSubmit}
+                      disabled={busy || !edited}
+                      loading={saveMutation.saving}
+                      className='rounded-xl'
+                      data-track-category='Claw Agents'
+                      data-track-name='Create agent v2: save changes'
+                    >
+                      Save changes
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -495,23 +567,52 @@ const ClawAgentCreateV2 = ({
                 Instructions
               </label>
 
-              <textarea
-                id='agent-v2-prompt'
-                ref={promptRef}
-                rows={1}
-                value={state.systemPrompt}
-                onChange={e => update({ systemPrompt: e.target.value })}
-                placeholder='Ai drafted instructions will be updated here...'
-                aria-invalid={visibleErrors.systemPrompt !== undefined}
-                aria-describedby={visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined}
-                style={{ minHeight: PROMPT_MIN_HEIGHT, maxHeight: PROMPT_MAX_HEIGHT }}
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: prompt'
-                className={cn(
-                  '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-y-auto rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-none',
-                  promptFlash && 'bg-primary/5',
-                )}
-              />
+              {!promptEditing && state.systemPrompt.trim().length > 0 ? (
+                <div
+                  role='button'
+                  tabIndex={0}
+                  onClick={() => setPromptEditing(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setPromptEditing(true);
+                    }
+                  }}
+                  title='Click to edit'
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: edit prompt'
+                  className={cn(
+                    '-mx-2 w-[calc(100%+1rem)] cursor-text rounded-lg px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500',
+                    promptFlash && 'bg-primary/5',
+                  )}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={PROMPT_MARKDOWN}>
+                    {state.systemPrompt}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <textarea
+                  id='agent-v2-prompt'
+                  ref={promptRef}
+                  rows={1}
+                  autoFocus={promptEditing}
+                  value={state.systemPrompt}
+                  onChange={e => update({ systemPrompt: e.target.value })}
+                  onBlur={() => setPromptEditing(false)}
+                  placeholder='Ai drafted instructions will be updated here...'
+                  aria-invalid={visibleErrors.systemPrompt !== undefined}
+                  aria-describedby={
+                    visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined
+                  }
+                  style={{ minHeight: PROMPT_MIN_HEIGHT }}
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: prompt'
+                  className={cn(
+                    '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-hidden rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-none',
+                    promptFlash && 'bg-primary/5',
+                  )}
+                />
+              )}
 
               {visibleErrors.systemPrompt && (
                 <p id='agent-v2-prompt-error' className='text-xs text-destructive'>

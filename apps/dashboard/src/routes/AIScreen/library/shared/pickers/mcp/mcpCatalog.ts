@@ -21,7 +21,7 @@ export interface McpCatalogEntry {
   isGateway: boolean;
   scope: McpScope;
   selectable: boolean;
-  legacyNames: ReadonlySet<string>;
+  ownedKeys: ReadonlySet<string>;
 }
 
 function metaString(server: McpServer, key: string): string | undefined {
@@ -81,10 +81,10 @@ export function buildMcpCatalog(
       const isGateway = integration.kind === 'gateway';
       const server = serverByType.get(integration.slug);
       const tools = [...integration.readTools, ...integration.writeTools];
-      const legacyNames = new Set(
+      const ownedKeys = new Set(
         tools
-          .map(tool => tool.name)
-          .filter(name => name && keyOwner.get(name) === integration.slug),
+          .flatMap(tool => [tool.slug, tool.name])
+          .filter(key => key && keyOwner.get(key) === integration.slug),
       );
       return {
         slug: integration.slug,
@@ -98,13 +98,15 @@ export function buildMcpCatalog(
         isGateway,
         scope: connectorScope(server),
         selectable: tools.length > 0,
-        legacyNames,
+        ownedKeys,
       };
     });
 }
 
-function legacyKeysOf(entry: McpCatalogEntry, tools: readonly IntegrationToolEntry[]): Set<string> {
-  return new Set(tools.map(tool => tool.name).filter(name => entry.legacyNames.has(name)));
+function ownedKeysOf(entry: McpCatalogEntry, tools: readonly IntegrationToolEntry[]): Set<string> {
+  return new Set(
+    tools.flatMap(tool => [tool.slug, tool.name]).filter(key => entry.ownedKeys.has(key)),
+  );
 }
 
 function gatewayServiceOf(entry: McpCatalogEntry): string | null {
@@ -123,8 +125,8 @@ export function isToolSelected(
   entry: McpCatalogEntry,
   tool: IntegrationToolEntry,
 ): boolean {
-  if (selection.direct.includes(tool.slug)) return true;
-  if (entry.legacyNames.has(tool.name) && selection.direct.includes(tool.name)) return true;
+  if (entry.ownedKeys.has(tool.slug) && selection.direct.includes(tool.slug)) return true;
+  if (entry.ownedKeys.has(tool.name) && selection.direct.includes(tool.name)) return true;
   const service = gatewayServiceOf(entry);
   return !!service && (selection.gateway ?? []).includes(service);
 }
@@ -157,9 +159,9 @@ export function setToolsSelected(
 
   const service = gatewayServiceOf(entry);
   if (!service) {
-    const touched = new Set(tools.map(tool => tool.slug));
-    const legacy = legacyKeysOf(entry, tools);
-    const rest = base.direct.filter(key => !touched.has(key) && !legacy.has(key));
+    const owned = ownedKeysOf(entry, tools);
+    const touched = new Set(tools.map(tool => tool.slug).filter(slug => entry.ownedKeys.has(slug)));
+    const rest = base.direct.filter(key => !owned.has(key));
     return { ...base, direct: next ? [...rest, ...touched] : rest };
   }
 

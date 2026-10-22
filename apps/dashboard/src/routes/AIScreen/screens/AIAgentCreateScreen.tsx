@@ -7,10 +7,7 @@ import { AgentDraftBuilderPanel } from '../library/agents/create/AgentDraftBuild
 import { INITIAL_WIZARD_STATE, type WizardState } from '../../ClawAgentsScreen/create/wizardState';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 import { useClawAgentDetail } from '../../../hooks/useClawAgentDetail';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { wizardStateFromAgent } from '../library/agents/create/agentDraft';
-
-const AUTOSAVE_DELAY_MS = 1200;
 
 const AIAgentCreateScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
@@ -22,17 +19,9 @@ const AIAgentCreateScreen = (): ReactElement => {
   const saveRef = useRef<((options?: { quiet?: boolean }) => Promise<void>) | null>(null);
   const createdRef = useRef(false);
 
-  const [editTick, setEditTick] = useState(0);
   const applyPatch = useCallback((patch: Partial<WizardState>) => {
     setDraft(prev => ({ ...prev, ...patch }));
-    setEditTick(tick => tick + 1);
   }, []);
-
-  const autosaveTick = useDebouncedValue(editTick, AUTOSAVE_DELAY_MS);
-  useEffect(() => {
-    if (autosaveTick === 0 || !createdRef.current) return;
-    void saveRef.current?.({ quiet: true }).catch(() => {});
-  }, [autosaveTick]);
 
   const [instructionsPatchNonce, setInstructionsPatchNonce] = useState(0);
 
@@ -75,7 +64,6 @@ const AIAgentCreateScreen = (): ReactElement => {
   createdRef.current = createdSlug !== null;
   const applyAiPatch = useCallback((patch: Partial<WizardState>) => {
     setDraft(prev => ({ ...prev, ...patch }));
-    setEditTick(tick => tick + 1);
     if (patch.systemPrompt !== undefined && !createdRef.current) {
       setInstructionsPatchNonce(n => n + 1);
     }

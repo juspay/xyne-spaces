@@ -6,6 +6,8 @@ import type { PendingAction } from '@/components/Chat/XyneAISidebar/utils/XyneAI
 import { FlowDraftScopeContext, type FlowDraftScope } from '@/components/flowUI/FlowContext';
 import { EDITS_STATE_KEY } from '@/components/flowUI/nodes/agent/useDraftAgentEditor';
 import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
+import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
+import { useClawSkills } from '@/hooks/useClawSkills';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { wizardStateFromAgent } from './agentDraft';
@@ -87,6 +89,12 @@ export function AgentDraftBuilderPanel({
   onRequestSave,
 }: AgentDraftBuilderPanelProps): ReactElement {
   const { data: catalog, isPending: catalogPending } = useClawAvailableTools();
+  const { data: skills } = useClawSkills();
+  const { data: kbTree } = useClawKnowledgeBaseTree();
+  const skillsRef = useRef(skills);
+  skillsRef.current = skills;
+  const kbRef = useRef(kbTree?.collections);
+  kbRef.current = kbTree?.collections;
 
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -119,6 +127,8 @@ export function AgentDraftBuilderPanel({
       buildHiddenContext(
         draftRef.current,
         catalogRef.current,
+        skillsRef.current,
+        kbRef.current,
         createdSlugRef.current,
         savedStateRef.current,
       ),
@@ -127,12 +137,11 @@ export function AgentDraftBuilderPanel({
 
   const applyProposal = useCallback(
     (params: Record<string, unknown>, context: DraftPatchContext = {}): void => {
-      const { patch, problems } = paramsToDraftPatch(
-        params,
-        draftRef.current,
-        catalogRef.current,
-        context,
-      );
+      const { patch, problems } = paramsToDraftPatch(params, draftRef.current, catalogRef.current, {
+        ...context,
+        ...(skillsRef.current ? { skillCatalog: skillsRef.current } : {}),
+        ...(kbRef.current ? { kbCollections: kbRef.current } : {}),
+      });
 
       problems.forEach(problem => toast.warning(problem, { duration: Infinity }));
 
@@ -233,7 +242,9 @@ export function AgentDraftBuilderPanel({
             emptyStateTitle='What would you like to create today?'
             emptyStateSubtitle='Describe the job and I’ll set the agent up on the left.'
             composerPlaceholder={
-              createdSlug ? 'Ask Xyne AI to update this agent…' : 'Describe the agent you want…'
+              createdSlug
+                ? 'Change this agent — add a tool, rewrite its instructions…'
+                : 'Describe what this agent should do…'
             }
             showAgentHeader
             hideAgentName

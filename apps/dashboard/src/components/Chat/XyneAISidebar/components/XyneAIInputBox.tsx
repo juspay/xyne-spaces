@@ -103,6 +103,7 @@ const isValidBase64 = (str: string): boolean => {
 };
 
 export interface XyneAIInputBoxProps {
+  placeholder?: string | undefined;
   channelId?: string | null;
   threadInfo?: ThreadInfo | null | undefined;
   canvasInfo?: CanvasInfo | null | undefined;
@@ -275,6 +276,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onSelectThinking,
       collectionsList: collectionsListProp = [],
       sentNonce = 0,
+      placeholder,
     },
     ref,
   ): ReactElement => {
@@ -981,6 +983,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         />
         <Composer
           ref={composerRef}
+          {...(placeholder === undefined ? {} : { placeholder })}
           value={inputValue}
           onValueChange={onInputChange}
           isStreaming={isStreaming}

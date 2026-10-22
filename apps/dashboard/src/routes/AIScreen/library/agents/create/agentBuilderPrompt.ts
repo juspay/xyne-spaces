@@ -1,8 +1,9 @@
+import type { KbCollectionNode } from '@/services/claw/clawKnowledgeBaseTypes';
+import type { Skill } from '@/services/claw/clawSkillsTypes';
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { buildBuiltinCatalog } from '../../shared/pickers/builtin/builtinCatalog';
-import { buildMcpCatalog } from '../../shared/pickers/mcp/mcpCatalog';
-import { MAX_SUBAGENTS } from './agentDraftPatch';
+import { buildMcpCatalog, isEntryEnabled } from '../../shared/pickers/mcp/mcpCatalog';
 
 const MAX_DIGEST_CHARS = 16_000;
 
@@ -34,10 +35,16 @@ function renderSections(sections: CatalogGroup[][]): string[][] {
   return sections.map(groups => groups.map(group => renderGroup(group, 1)));
 }
 
-export function buildCatalogDigest(catalog: AvailableTools | null | undefined): string[] {
+export function buildCatalogDigest(
+  catalog: AvailableTools | null | undefined,
+  skills?: readonly Skill[] | null,
+  collections?: readonly KbCollectionNode[] | null,
+): string[] {
   if (!catalog) return [];
 
   const subagents = catalog.subagents.map(subagent => `  ${subagent.name}`);
+  const skillNames = (skills ?? []).map(skill => `  ${skill.name}`);
+  const collectionNames = (collections ?? []).map(node => `  ${node.name}`);
 
   const builtins: CatalogGroup[] = buildBuiltinCatalog(catalog)
     .filter(group => group.tools.length > 0)
@@ -58,12 +65,27 @@ export function buildCatalogDigest(catalog: AvailableTools | null | undefined): 
     'CATALOGUE — these are the only grantable ids. Copy them exactly; anything',
     'else is dropped. An id absent here does not exist for this workspace.',
     ...section('Subagents (grant by name):', subagents),
-    ...section('Connected products (grant the individual tool ids):', productLines),
+    ...section(
+      'Integrations — the NAME before each colon is what `mcps` accepts (copy it exactly); the ids after it are individual tools for `tools`:',
+      productLines,
+    ),
     ...section('Built-in tools (grant the individual tool ids):', builtinLines),
+    ...section('Skills — attach by name via `skills`:', skillNames),
+    ...section(
+      'Knowledge collections — attach by name via `knowledge.collections`:',
+      collectionNames,
+    ),
   ];
 }
 
-function draftSummary(draft: WizardState): string[] {
+function attachedMcps(state: WizardState, catalog: AvailableTools | null | undefined): string[] {
+  if (!catalog) return [];
+  return buildMcpCatalog(catalog, [])
+    .filter(entry => isEntryEnabled(state.tools, entry))
+    .map(entry => entry.label);
+}
+
+function draftSummary(draft: WizardState, mcps: string[]): string[] {
   const tools = [
     ...draft.tools.subagents,
     ...draft.tools.direct,
@@ -76,7 +98,14 @@ function draftSummary(draft: WizardState): string[] {
     `Handle: @${effectiveSlug(draft) || '(unset)'}`,
     `Description: ${draft.description.trim() || '(unset)'}`,
     `Instructions: ${draft.systemPrompt.trim() || '(unset)'}`,
+    `Subagents: ${draft.tools.subagents.join(', ') || '(none)'}`,
+    `MCPs attached: ${mcps.join(', ') || '(none)'}`,
     `Tools: ${tools.join(', ') || '(none)'}`,
+    '',
+    'Those lines are the CURRENT state — read them before you answer. Do not',
+    'claim an MCP, subagent or tool is attached unless it is listed above, and',
+    'do not assume something you added earlier survived: the user removes things',
+    'by hand too.',
   ];
 }
 
@@ -99,14 +128,21 @@ function unsavedFields(saved: WizardState, draft: WizardState): string[] {
   return changed;
 }
 
-function savedSummary(saved: WizardState, draft: WizardState): string[] {
+function savedSummary(saved: WizardState, draft: WizardState, mcps: string[]): string[] {
   const unsaved = unsavedFields(saved, draft);
   return [
     '[Agent saved — this is what is stored right now.]',
     `Name: ${saved.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(saved) || '(unset)'}`,
     `Description: ${saved.description.trim() || '(unset)'}`,
+    `Subagents: ${saved.tools.subagents.join(', ') || '(none)'}`,
+    `MCPs attached: ${mcps.join(', ') || '(none)'}`,
     `Tools: ${toolNames(saved).join(', ') || '(none)'}`,
+    '',
+    'Those lines are the CURRENT state — read them before you answer. Do not',
+    'claim an MCP, subagent or tool is attached unless it is listed above, and',
+    'do not assume something you added earlier survived: the user removes things',
+    'by hand too.',
     '',
     'Saved instructions — anchor promptEdits against THIS text, character for',
     'character. It is what the server will search; the form may differ.',
@@ -155,10 +191,21 @@ const HOW_TO_NAME_TOOLS = [
   'for, with nothing to show it happened. Use `tools` for subagents, built-ins',
   'and individual tool slugs only.',
   '',
-  `This draft keeps at most ${MAX_SUBAGENTS} subagents — propose more and the`,
-  'extras are dropped without being granted. Never report a capability you',
-  'could not fit: reach for an MCP or individual tool slugs instead, or say',
-  'which subagent you would trade away and let the user choose.',
+  'An integration listed under "MCPs attached" already brings its whole tool',
+  'set. Keep its name in `mcps` and do NOT copy its individual tool ids into',
+  '`tools` — that list is long, it adds nothing, and re-typing it is how ids',
+  "get lost. Granting a subagent for a system never removes that system's MCP",
+  'or tools; the two coexist.',
+  '',
+  '`skills` and `knowledge.collections` REPLACE their lists rather than adding',
+  'to them, so always send the complete intended set — everything already',
+  'attached, plus what you are adding, minus only what the user asked to drop.',
+  'Send a partial list and the rest are removed without being mentioned.',
+  '',
+  'There is no cap on how many subagents, MCPs or tools this agent can hold.',
+  'When the user asks for one, add it and leave everything else alone — never',
+  'drop or swap an existing capability to "make room", and never tell them you',
+  'had to trade one away.',
 ];
 
 const SELECTION_DISCIPLINE = [
@@ -257,16 +304,20 @@ const STAY_IN_CHARACTER = [
 export function buildHiddenContext(
   draft: WizardState,
   catalog?: AvailableTools | null,
+  skills?: readonly Skill[] | null,
+  collections?: readonly KbCollectionNode[] | null,
   createdSlug?: string | null,
   saved?: WizardState | null,
 ): string {
   return [
-    ...(saved ? savedSummary(saved, draft) : draftSummary(draft)),
+    ...(saved
+      ? savedSummary(saved, draft, attachedMcps(saved, catalog))
+      : draftSummary(draft, attachedMcps(draft, catalog))),
     '',
     ...STANDING_TASK,
     '',
     ...HOW_TO_NAME_TOOLS,
-    ...buildCatalogDigest(catalog),
+    ...buildCatalogDigest(catalog, skills, collections),
     '',
     ...SELECTION_DISCIPLINE,
     '',
