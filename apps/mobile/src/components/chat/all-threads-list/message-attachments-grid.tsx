@@ -179,25 +179,49 @@ export const MessageAttachmentsGrid = memo(function MessageAttachmentsGrid({
   if (visible.length === 1) {
     mediaBlock = (
       <View style={gridStyle}>
-        <MediaCell attachment={visible[0]!} onPress={() => openAttachment(visible[0]!.id)} />
+        <MediaCell
+          key={visible[0]!.id}
+          attachment={visible[0]!}
+          onPress={() => openAttachment(visible[0]!.id)}
+        />
       </View>
     );
   } else if (visible.length === 2) {
     mediaBlock = (
       <View style={{ ...gridStyle, flexDirection: 'row', gap: ATTACHMENT_GRID_GAP }}>
-        <MediaCell attachment={visible[0]!} onPress={() => openAttachment(visible[0]!.id)} />
-        <MediaCell attachment={visible[1]!} onPress={() => openAttachment(visible[1]!.id)} />
+        <MediaCell
+          key={visible[0]!.id}
+          attachment={visible[0]!}
+          onPress={() => openAttachment(visible[0]!.id)}
+        />
+        <MediaCell
+          key={visible[1]!.id}
+          attachment={visible[1]!}
+          onPress={() => openAttachment(visible[1]!.id)}
+        />
       </View>
     );
   } else if (visible.length === 3) {
     mediaBlock = (
       <View style={{ ...gridStyle, gap: ATTACHMENT_GRID_GAP }}>
         <View style={{ flex: 1, flexDirection: 'row', gap: ATTACHMENT_GRID_GAP }}>
-          <MediaCell attachment={visible[0]!} onPress={() => openAttachment(visible[0]!.id)} />
-          <MediaCell attachment={visible[1]!} onPress={() => openAttachment(visible[1]!.id)} />
+          <MediaCell
+            key={visible[0]!.id}
+            attachment={visible[0]!}
+            onPress={() => openAttachment(visible[0]!.id)}
+          />
+          <MediaCell
+            key={visible[1]!.id}
+            attachment={visible[1]!}
+            onPress={() => openAttachment(visible[1]!.id)}
+          />
         </View>
         <View style={{ flex: 1 }}>
-          <MediaCell attachment={visible[2]!} onPress={() => openAttachment(visible[2]!.id)} />
+          <MediaCell
+            key={visible[2]!.id}
+            attachment={visible[2]!}
+            onPress={() => openAttachment(visible[2]!.id)}
+          />
         </View>
       </View>
     );
@@ -205,12 +229,25 @@ export const MessageAttachmentsGrid = memo(function MessageAttachmentsGrid({
     mediaBlock = (
       <View style={{ ...gridStyle, gap: ATTACHMENT_GRID_GAP }}>
         <View style={{ flex: 1, flexDirection: 'row', gap: ATTACHMENT_GRID_GAP }}>
-          <MediaCell attachment={visible[0]!} onPress={() => openAttachment(visible[0]!.id)} />
-          <MediaCell attachment={visible[1]!} onPress={() => openAttachment(visible[1]!.id)} />
+          <MediaCell
+            key={visible[0]!.id}
+            attachment={visible[0]!}
+            onPress={() => openAttachment(visible[0]!.id)}
+          />
+          <MediaCell
+            key={visible[1]!.id}
+            attachment={visible[1]!}
+            onPress={() => openAttachment(visible[1]!.id)}
+          />
         </View>
         <View style={{ flex: 1, flexDirection: 'row', gap: ATTACHMENT_GRID_GAP }}>
-          <MediaCell attachment={visible[2]!} onPress={() => openAttachment(visible[2]!.id)} />
           <MediaCell
+            key={visible[2]!.id}
+            attachment={visible[2]!}
+            onPress={() => openAttachment(visible[2]!.id)}
+          />
+          <MediaCell
+            key={visible[3]!.id}
             attachment={visible[3]!}
             overflowCount={overflow}
             onPress={() => openAttachment(visible[3]!.id)}

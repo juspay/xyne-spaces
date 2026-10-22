@@ -74,30 +74,37 @@ export function useMtlsImage(
   } else if (attachmentId) {
     chatOpenProfiler.count('use_mtls_image_hook_disabled');
   }
+  const requestKey = enabled ? attachmentId : undefined;
   const [state, setState] = useState<{
+    key: string | undefined;
     uri: string | null;
     isLoading: boolean;
     error: Error | null;
   }>({
+    key: requestKey,
     uri: null,
-    isLoading: !!attachmentId && enabled,
+    isLoading: !!requestKey,
     error: null,
   });
+  if (state.key !== requestKey) {
+    setState({ key: requestKey, uri: null, isLoading: !!requestKey, error: null });
+  }
 
   const fetchImage = useCallback(async (): Promise<void> => {
+    const key = requestKey;
+    const commit = (next: { uri: string | null; isLoading: boolean; error: Error | null }): void =>
+      setState(prev => (prev.key === key ? { key, ...next } : prev));
     if (!enabled) {
       if (attachmentId) chatOpenProfiler.count('use_mtls_image_disabled');
-      setState({ uri: null, isLoading: false, error: null });
       return;
     }
     if (!attachmentId) {
       chatOpenProfiler.count('use_mtls_image_no_attachment');
-      setState({ uri: null, isLoading: false, error: null });
       return;
     }
     chatOpenProfiler.count('use_mtls_image_fetch_attempt');
     if (!isValidAttachmentId(attachmentId)) {
-      setState({
+      commit({
         uri: null,
         isLoading: false,
         error: new Error('Invalid attachment id'),
@@ -116,7 +123,7 @@ export function useMtlsImage(
         await AsyncStorage.removeItem(CACHE_METADATA_KEY(attachmentId));
       } else if (await isCacheFresh(attachmentId)) {
         chatOpenProfiler.count('use_mtls_image_file_cache_hit');
-        setState({ uri: localPath, isLoading: false, error: null });
+        commit({ uri: localPath, isLoading: false, error: null });
         return;
       } else {
         // The chat list and the save action read this same file, so it stays until
@@ -130,14 +137,14 @@ export function useMtlsImage(
       chatOpenProfiler.count('use_mtls_image_inflight_join');
       try {
         const cachedUri = await existingRequest;
-        setState({ uri: cachedUri, isLoading: false, error: null });
+        commit({ uri: cachedUri, isLoading: false, error: null });
         return;
       } catch {
         // Let it fall through to retry
       }
     }
 
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => (prev.key === key ? { ...prev, isLoading: true, error: null } : prev));
 
     const fetchPromise = (async (): Promise<string> => {
       const url = buildAttachmentResourceUrl(API_BASE_URL, attachmentId, 'download');
@@ -175,13 +182,13 @@ export function useMtlsImage(
       if (getAuthSessionGeneration() !== startedGeneration) {
         return;
       }
-      setState({ uri, isLoading: false, error: null });
+      commit({ uri, isLoading: false, error: null });
     } catch (error) {
       // Preview failure is a supported UI state; keep it observable without
       // showing a development error overlay for a recoverable media fallback.
       chatOpenProfiler.count('use_mtls_image_fetch_failed');
       const normalized = error instanceof Error ? error : new Error(String(error));
-      setState({
+      commit({
         uri: refresh && file.exists ? localPath : null,
         isLoading: false,
         error: normalized,
@@ -189,7 +196,7 @@ export function useMtlsImage(
     } finally {
       inflightRequests.delete(attachmentId);
     }
-  }, [attachmentId, enabled]);
+  }, [attachmentId, enabled, requestKey]);
 
   useEffect(() => {
     void fetchImage();
