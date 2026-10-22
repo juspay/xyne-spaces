@@ -15,7 +15,7 @@ import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
 import { checkTwinDelivery } from "./twin-delivery-check.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
-import { promoteIfOversized } from "./tool-output.js";
+import { modelRelativeInlineCap, promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
@@ -51,9 +51,12 @@ import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunConte
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-trace.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
 import { xorThreshold } from "./xor.js";
-import { attachRunMessages, pinRunTask } from "./run-context.js";
+import { attachRunMessages, pinRunInlineCap, pinRunTask } from "./run-context.js";
 import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
 import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
+import { hasNestedRequiredShape, makePrepareArguments, plainJsonSchema, schemaExample } from "./tool-args-repair.js";
+import { installToolCallRepair } from "./tool-call-repair.js";
+import { installHonestErrorFlag, installToolOutcomeMetric } from "./tool-outcome.js";
 import { assessAnswer, type AnswerAssessment } from "./xor-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -706,10 +709,16 @@ export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: stri
   // the model can set per call (R3); it is stripped here, before the tool (or
   // its MCP server) ever sees the params.
   const offerSift = optEnabled("jev_result_sift");
+  const offerExamples = optEnabled("tool_call_examples");
   return tools.map((tool) => {
     const orig = tool.execute.bind(tool);
     // Only a `sift` we added is ours to strip; a tool's own `sift` param passes through.
     const ownsSift = offerSift && withSiftParam(tool.parameters) !== tool.parameters;
+    // Plain JSON (not Type.Unsafe) so pi-ai converts "5" → 5 before validating,
+    // and a prepareArguments that renames misspelled fields and explains a
+    // missing one (tool-args-repair.ts) before pi's validator answers.
+    const parameters = plainJsonSchema(ownsSift ? withSiftParam(tool.parameters) : tool.parameters);
+    const example = offerExamples && hasNestedRequiredShape(parameters) ? schemaExample(parameters) : undefined;
     const wrapped: ToolDefinition["execute"] = async (...args) => {
       const [toolCallId, rawParams, ...rest] = args;
       const { params, sift } = ownsSift ? takeSiftParam(rawParams) : { params: rawParams, sift: undefined };
@@ -732,12 +741,24 @@ export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: stri
           return block;
         }));
         (result as { content: unknown[] }).content = mapped;
+        metric.observe(
+          "tool_result_bytes",
+          mapped.reduce<number>((sum, block) => {
+            const text = (block as { type?: string; text?: unknown }).text;
+            return sum + (typeof text === "string" ? Buffer.byteLength(text) : 0);
+          }, 0),
+          { tool: tool.name },
+        );
       }
       return result;
     };
-    return ownsSift
-      ? { ...tool, parameters: withSiftParam(tool.parameters), execute: wrapped }
-      : { ...tool, execute: wrapped };
+    return {
+      ...tool,
+      parameters,
+      ...(example ? { description: `${tool.description ?? ""}\n\nExample arguments: ${example}` } : {}),
+      prepareArguments: makePrepareArguments(tool.name, parameters, tool.prepareArguments?.bind(tool)),
+      execute: wrapped,
+    } as ToolDefinition;
   });
 }
 
@@ -2639,6 +2660,30 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     installAwakeningInbox(session.agent, { sessionId });
   }
 
+  // XYNE-66597: fix a call's tool name before pi's "not found" check, flag
+  // claw-written "Error:" results as errors, and count every call's outcome.
+  // The outcome hook goes last so it sees a block from any beforeToolCall above.
+  const mcpToolNames = new Set(
+    (customTools ?? []).filter((tool) => "mcpToolName" in tool).map((tool) => tool.name),
+  );
+  installToolCallRepair(session.agent, {
+    ...(fastToolController && fastCatalogNameSet.size > 0
+      ? {
+          catalogNames: () => fastCatalogNameSet,
+          loadTools: async (names: string[]) =>
+            (await fastToolController.loadTools?.(names)) ?? { loaded: [], alreadyLoaded: [] },
+          findLoadedTool: (name: string) => session.agent.state.tools.find((tool) => tool.name === name),
+          autoLoad: () => optEnabled("tool_auto_load"),
+        }
+      : {}),
+    ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
+  });
+  installHonestErrorFlag(session.agent, (name) => mcpToolNames.has(name));
+  const recordToolOutcome = installToolOutcomeMetric(session.agent, () => ({
+    model: session.model?.id ?? model.id,
+    agent: progressMeta?.agentSlug ?? undefined,
+  }));
+
   // verifyResponses: wire the submit-response tool's evidence accessor to the
   // live transcript. Set BEFORE any prompt so the tool — which verifies inside
   // its execute, mid-loop — sees the tool results gathered so far. Lazy: reads
@@ -2773,6 +2818,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     recorder?.record(kind, data, extras);
   };
   pinRunTask(task);
+  if (optEnabled("tool_result_cap_by_model")) {
+    pinRunInlineCap(modelRelativeInlineCap(model.contextWindow));
+  }
   // Lazy view of the live transcript for classifier call sites (result sift,
   // context gate): read at call time, so a tool mid-loop sees every prior turn.
   attachRunMessages(() => (session as unknown as { messages?: readonly unknown[] }).messages);
@@ -3219,6 +3267,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "tool_execution_end") {
       toolsUsed.push(event.toolName);
+      recordToolOutcome(event);
       // Tool just finished — the model is about to start its next turn.
       // Stamp now so the next text_delta gives us a clean TTFT.
       turnStartedAt = Date.now();

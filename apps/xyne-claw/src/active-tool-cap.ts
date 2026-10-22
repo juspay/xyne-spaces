@@ -2,6 +2,15 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { oneLineDescription, type ToolCatalogItem } from "./tool-catalog.js";
 
 export const ACTIVE_TOOL_CAP_DEFAULT = 25;
+
+/**
+ * Always loaded, whatever their usage rank (XYNE-66597: a search tool plus a
+ * few fixed tools, the rest from usage). The five file tools (read, write,
+ * grep, find, ls) and search-tools / load-tools are registered outside the
+ * capped list and counted by the caller's `fixedExtra`. A name missing from a
+ * run is simply not there.
+ */
+export const ALWAYS_LOADED_TOOL_NAMES: readonly string[] = ["ask-user-question", "propose-plan", "todo-write", "todo-read"];
 const ACTIVE_TOOL_CAP_FLOOR = 10;
 const USAGE_RANK_MAX = 200;
 const DEMOTED_CATALOG_FALLBACK = "agent-tools";

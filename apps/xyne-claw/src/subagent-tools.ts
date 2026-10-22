@@ -60,6 +60,8 @@ import { installStreamModelFallback } from "./stream-model-fallback.js";
 import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
+import { installToolCallRepair } from "./tool-call-repair.js";
+import { installHonestErrorFlag, installToolOutcomeMetric } from "./tool-outcome.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
 import crypto from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
@@ -159,6 +161,41 @@ const MCP_REQUEST_TIMEOUT_MS = 600_000;
 type SubagentExecResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type CachedEntry = { promise: Promise<SubagentExecResult>; insertedAt: number };
 const subagentResultCache = new Map<string, Map<string, CachedEntry>>();
+
+/**
+ * One run per key: a concurrent or later identical call gets the same promise.
+ * The in-flight promise is stored BEFORE it settles so a concurrent caller sees
+ * it. A failed answer (details.failed, or a rejection) is shared with calls
+ * already waiting on it but not kept, so the next identical call runs the
+ * subagent again. Exported for tests.
+ */
+export function shareSubagentRun(
+  subMap: Map<string, CachedEntry>,
+  key: string,
+  run: () => Promise<SubagentExecResult>,
+  onHit?: () => void,
+): Promise<SubagentExecResult> {
+  const existing = subMap.get(key);
+  if (existing) {
+    onHit?.();
+    return existing.promise;
+  }
+  const exec = (async (): Promise<SubagentExecResult> => run())();
+  const entry: CachedEntry = { promise: exec, insertedAt: Date.now() };
+  subMap.set(key, entry);
+  const forget = (): void => {
+    if (subMap.get(key) === entry) subMap.delete(key);
+  };
+  exec.then((result) => {
+    if (result.details?.["failed"] === true) forget();
+  }, forget);
+  return exec;
+}
+
+/** The child's working dir: the parent's own, else the per-run workspace. Exported for tests. */
+export function subagentWorkingDir(progressCtx: Pick<SubagentProgressCtx, "parentSessionId" | "parentWorkingDir"> | undefined): string {
+  return progressCtx?.parentWorkingDir ?? (progressCtx?.parentSessionId ? workspacePath(progressCtx.parentSessionId) : process.cwd());
+}
 
 function normalizeQuestion(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, " ");
@@ -402,6 +439,10 @@ function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel:
 export interface SubagentProgressCtx {
   progressUrl?: ProgressDest;
   parentSessionId: string;
+  /** The parent run's working directory. A conversation run's workspace is
+   *  keyed by the conversation, not by parentSessionId, so the child must be
+   *  told where it is rather than derive it. */
+  parentWorkingDir?: string;
   /** Persistent parent agent session key used for filesystem debug artifacts. */
   parentDebugSessionId?: string;
   parentToolsUsed?: string[];
@@ -696,19 +737,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const subMap = subagentResultCache.get(parentSid) ?? new Map<string, CachedEntry>();
         if (!subagentResultCache.has(parentSid)) subagentResultCache.set(parentSid, subMap);
         const key = subagentCacheKey(def.name, question);
-        const existing = subMap.get(key);
-        if (existing) {
-          log.info(`[${def.name}] Cache hit (parent=${parentSid.slice(0,8)} key=${key.slice(0,8)}) — sharing in-flight/completed result`);
-          return existing.promise;
-        }
-        // Stash the in-flight promise BEFORE awaiting so a concurrent caller
-        // with the same key sees it. The real execution continues below; we
-        // wrap it in an inner async IIFE so we can await it as the cached promise.
-        const exec = (async (): Promise<SubagentExecResult> => {
-          return await doExecute();
-        })();
-        subMap.set(key, { promise: exec, insertedAt: Date.now() });
-        return exec;
+        return shareSubagentRun(subMap, key, doExecute, () =>
+          log.info(`[${def.name}] Cache hit (parent=${parentSid.slice(0,8)} key=${key.slice(0,8)}) — sharing in-flight/completed result`),
+        );
       }
       return await doExecute();
 
@@ -1098,7 +1129,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         );
 
         const parentSessionId = progressCtx?.parentSessionId;
-        const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
+        const childWorkingDir = subagentWorkingDir(progressCtx);
 
         // ── Follow-up session persistence. When this subagent supports
         // follow-ups AND we have a conversation to scope under, the child
@@ -1186,6 +1217,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
         });
+        // Same tool-call repair, error flag and outcome metric as the parent (agent.ts).
+        const childMcpToolNames = new Set((tools ?? []).filter((t) => "mcpToolName" in t).map((t) => t.name));
+        installToolCallRepair(session.agent, { agentSlug: `subagent:${def.name}` });
+        installHonestErrorFlag(session.agent, (name) => childMcpToolNames.has(name));
+        const recordChildToolOutcome = installToolOutcomeMetric(session.agent, () => ({
+          model: session.model?.id ?? model.id,
+          agent: `subagent:${def.name}`,
+        }));
 
         // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
         // Without this the child never checks the tool_result that just landed
@@ -1272,6 +1311,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           }
           if (event.type === "tool_execution_end") {
             toolsUsed.push(event.toolName);
+            recordChildToolOutcome(event);
             // Surface inner tool names to the parent's toolsUsed so chain
             // conditions can match on specific MCP tools (e.g.
             // Bitbucket__create_pull_request) rather than only the subagent
@@ -1552,6 +1592,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // a real negative result and looped retrying.
         const lastText = session.getLastAssistantText();
         let text: string;
+        const noOutputFailure = !lastText && providerError !== null;
         if (lastText) {
           text = lastText;
         } else if (providerError !== null) {
@@ -1649,9 +1690,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         }
         return {
           content: [{ type: "text" as const, text }],
-          details: followUpEnabled && followUpHandle
-            ? { session_id: followUpHandle, resumed: followUpResumed }
-            : {},
+          details: {
+            ...(followUpEnabled && followUpHandle ? { session_id: followUpHandle, resumed: followUpResumed } : {}),
+            ...(noOutputFailure ? { failed: true } : {}),
+          },
         };
       } catch (err) {
         if (stickyTimer) clearInterval(stickyTimer);
@@ -1672,7 +1714,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         });
         await finishChildCapture(failedStatus, msg, failedDurationMs);
         await writeLegacyChildSnapshot("subagent_error", { status: failedStatus, error: msg });
-        return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: {} };
+        return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: { failed: true } };
       } finally {
         // Belt-and-braces for the sticky-label interval. The success path
         // (above) and the catch path both clear it, but an exit that reaches

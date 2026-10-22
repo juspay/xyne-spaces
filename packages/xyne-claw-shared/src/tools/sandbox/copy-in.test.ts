@@ -24,8 +24,8 @@ describe("sandbox-copy-in tool definition", () => {
     expect(sandboxCopyIn.source).toBe("custom:sandbox");
   });
 
-  it("requires only sessionId (skillPath/contextPath are XOR, enforced at runtime)", () => {
-    expect(sandboxCopyIn.inputSchema.required).toEqual(["sessionId"]);
+  it("requires nothing up front (sessionId defaults to the conversation's sandbox; skillPath/contextPath are XOR, enforced at runtime)", () => {
+    expect(sandboxCopyIn.inputSchema.required).toEqual([]);
   });
 
   it("exposes both skillPath and contextPath inputs", () => {
