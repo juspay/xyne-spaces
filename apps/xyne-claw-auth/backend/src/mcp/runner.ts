@@ -480,6 +480,18 @@ export function clearToolListCache(): void {
   userToolListInflight.clear();
 }
 
+/** The description a listing in this process cached for a tool, so the gate can classify a name that has no verb. */
+export function cachedToolDescription(serverType: string, tool: string): string | undefined {
+  const shared = toolListCache.get(serverType)?.tools.find((t) => t.name === tool);
+  if (shared) return shared.description || undefined;
+  for (const [key, entry] of userToolListCache) {
+    if (key.split(":")[1] !== serverType) continue;
+    const hit = entry.tools.find((t) => t.name === tool);
+    if (hit) return hit.description || undefined;
+  }
+  return undefined;
+}
+
 const ROTATING_CREDENTIAL_FIELD = /token|secret|password|expires|refresh|cookie/i;
 
 function credentialFingerprint(credentials: Record<string, unknown>): string {

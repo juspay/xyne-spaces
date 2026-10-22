@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { listToolsForUser, callTool } from "../mcp/runner.js";
+import { listToolsForUser, callTool, cachedToolDescription } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition, isWriteToolUnderPolicy } from "../mcp/connector-definitions.js";
@@ -2006,7 +2006,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
       const requiresApproval = requiresGatewayToolApproval(descriptor);
       const effectivePermission = effectiveGrant(permission, requiresApproval);
-      const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, grant: permission, permissionHint: effectivePermission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, c1: governance });
+      const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, grant: permission, permissionHint: effectivePermission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, description: descriptor.description, c1: governance });
       if (gate.enforce && gate.decision === "block") {
         res.json({ success: true, data: { content: blockedToolResultText(gate) } });
         return;
@@ -2156,7 +2156,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       : (definition?.writeTools?.includes(tool) ?? false);
     const effectivePermission = effectiveGrant(permission, isWriteTool);
     // A declared write policy settles reads too; without one only a write is known.
-    const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, grant: permission, permissionHint: effectivePermission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), c1: governance });
+    const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, grant: permission, permissionHint: effectivePermission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), description: cachedToolDescription(serverType, tool), c1: governance });
     if (gate.enforce && gate.decision === "block") {
       res.json({ success: true, data: { content: blockedToolResultText(gate) } });
       return;

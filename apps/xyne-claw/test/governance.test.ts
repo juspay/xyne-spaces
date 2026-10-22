@@ -26,7 +26,7 @@ function fakeAgent() {
 }
 const toolCall = (name: string, id = "call-1", args: unknown = {}) => ({ toolCall: { id, name, type: "toolCall", arguments: args }, args, assistantMessage: {}, context: {} }) as never;
 const run = (extra: Record<string, unknown> = {}) =>
-  createRunGovernance({ sessionId: "sess-1", userId: "u1", conversationId: "conv-1", agentSlug: "helper", role: "parent", toolMeta: [{ name: "slack__send", serverType: "slack", mcpToolName: "send_message", isWriteTool: true }, { name: "gmail__read", serverType: "google", mcpToolName: "get_messages" }, { name: "Xyne_Spaces__spaces-messages", serverType: "xyne-spaces", mcpToolName: "spaces-messages", declaredWrite: false }], ...extra });
+  createRunGovernance({ sessionId: "sess-1", userId: "u1", conversationId: "conv-1", agentSlug: "helper", role: "parent", toolMeta: [{ name: "slack__send", serverType: "slack", mcpToolName: "send_message", isWriteTool: true }, { name: "gmail__read", serverType: "google", mcpToolName: "get_messages" }, { name: "Xyne_Spaces__spaces-messages", serverType: "xyne-spaces", mcpToolName: "spaces-messages", declaredWrite: false }, { name: "Acme__widgets", serverType: "acme", mcpToolName: "widgets", description: "Returns every widget in the workspace." }], ...extra });
 const events = () => posted.flatMap((p) => p.events as Array<Record<string, unknown>>);
 const findings = () => posted.flatMap((p) => p.findings as Array<Record<string, unknown>>);
 
@@ -57,6 +57,9 @@ describe("governance hooks", () => {
     // A noun-named tool outside its server's declared writes is a read: no critic, recorded under its own name.
     expect(await agent.beforeToolCall(toolCall("Xyne_Spaces__spaces-messages", "m1", { channelId: "C1" }))).toBeUndefined();
     expect(governanceDecisionFor("m1")).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW-READ", criticStatus: "not_needed" });
+    // A name without a verb or a declared policy is classified by its description.
+    expect(await agent.beforeToolCall(toolCall("Acme__widgets", "w1", {}))).toBeUndefined();
+    expect(governanceDecisionFor("w1")).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW-READ", criticStatus: "not_needed" });
     expect(ask).not.toHaveBeenCalled();
     // Shadow: the call is decided without waiting, and the critic's verdict follows as its own record.
     expect(await agent.beforeToolCall(toolCall("slack__send", "s1", { channel: "C1", text: "hello" }))).toBeUndefined();
@@ -146,7 +149,7 @@ describe("governance hooks", () => {
   });
 
   it("reads the loader's stamps off a tool definition", () => {
-    expect(toolMetaOf({ name: "slack__send", serverToolKey: "slack__send_message", mcpToolName: "send_message", isWriteTool: true, declaredWrite: true })).toEqual({ name: "slack__send", serverType: "slack", mcpToolName: "send_message", isWriteTool: true, declaredWrite: true });
-    expect(toolMetaOf({ name: "read" })).toEqual({ name: "read" });
+    expect(toolMetaOf({ name: "slack__send", serverToolKey: "slack__send_message", mcpToolName: "send_message", isWriteTool: true, declaredWrite: true, description: "Sends a message" })).toEqual({ name: "slack__send", serverType: "slack", mcpToolName: "send_message", isWriteTool: true, declaredWrite: true, description: "Sends a message" });
+    expect(toolMetaOf({ name: "read", description: "Reads a file" })).toEqual({ name: "read" });
   });
 });

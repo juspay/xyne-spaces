@@ -34,6 +34,7 @@ describe("gateCall", () => {
     expect(gate).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW-READ", effect: "read" });
     expect(queue).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: "c7", subjectId: "d1", riskLevelAtCall: "none", carriedPrivateData: false }));
     expect(record).not.toHaveBeenCalled();
+    expect(await gateCall({ ...base, writeTool: undefined, tool: "widgets", params: {}, description: "Returns every widget in the workspace.", c1: { risk: "none", privateData: false } })).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW-READ", effect: "read" });
   });
 
   it("blocks a secret in the arguments and, in enforce mode, a side effect the audit cannot record", async () => {
