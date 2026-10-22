@@ -57,6 +57,7 @@ import {
   enqueueMessage,
   dequeueMessage,
   clearQueue,
+  queueDepth,
   type QueuedMessage,
 } from "../lib/message-queue.js";
 import { createTraceId, createLogger } from "../logger.js";
@@ -554,6 +555,13 @@ import {
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
+import {
+  postDroppedNotice,
+  publishQueueNotice,
+  queueEventFor,
+  queueNoticeTargetFor,
+  refreshQueueNotice,
+} from "../lib/queue-notice.js";
 import { postGoalPhase, USE_EPHEMERAL_PROGRESS } from "../lib/goal-phase.js";
 import { postGeneratedMarkdownFile } from "../lib/spaces-generated-file.js";
 import { normalizeReviewRoomReason, reviewRoomFailureText } from "../lib/review-room-notice.js";
@@ -1191,17 +1199,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       explicitQueueOnly,
     });
     if (gate.kind === "queued") {
-      await postAgentMessage(
-        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+      await publishQueueNotice(
         {
-          channelId: payload.channelId,
           conversationId: payload.conversationId,
-          markdownText: gate.notice,
-          metadata: { contentFormat: "markdown" },
-        }
-      ).catch((err) => {
-        log.warn("Failed to post queue notice", { error: errMsg(err) });
-      });
+          agentSlug: runAgentSlug,
+          channelId: payload.channelId,
+          orgId: agent.orgId,
+          spacesAppUserId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+        },
+        queueEventFor(gate.enq, gate.interrupted),
+      );
       return;
     }
     slotToken = gate.slotToken;
@@ -1905,6 +1913,7 @@ export async function reconcileStoppedRuns(conversationId: string, targetAgentSl
   const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
     .filter((run) => run.agentSlug === targetAgentSlug);
   const queued = await clearQueue(conversationId, targetAgentSlug);
+  await refreshQueueNotice({ conversationId, agentSlug: targetAgentSlug }, { kind: "cleared", discarded: queued });
 
   const summary: StopReconcileSummary = {
     stopped: 0,
@@ -2125,6 +2134,7 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
     return;
   }
+  const noticeScope = { conversationId, agentSlug, twinUserScopeId };
   try {
     // Twin and messaging-channel FIFO entries carry a fully-built replay blob
     // (dispatchPayload + sessionContext) and are replayed VERBATIM (approval
@@ -2141,9 +2151,15 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     // time from the run that just finished.
     await refreshSlot(conversationId, agentSlug, undefined, twinUserScopeId);
     clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${twinUserScopeId ? ` owner ${twinUserScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
+    const remaining = await queueDepth(conversationId, agentSlug, twinUserScopeId);
+    await refreshQueueNotice(noticeScope, remaining > 0 ? { kind: "queued", depth: remaining } : { kind: "drained" });
   } catch (err) {
     clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
+    const target = await queueNoticeTargetFor(next);
+    if (target) await postDroppedNotice(target, 1, "It could not be started after the previous reply finished.");
+    const remaining = await queueDepth(conversationId, agentSlug, twinUserScopeId);
+    await refreshQueueNotice(noticeScope, remaining > 0 ? { kind: "queued", depth: remaining } : { kind: "cleared", discarded: 0 });
   }
 }
 
