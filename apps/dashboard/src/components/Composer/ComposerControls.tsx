@@ -61,6 +61,7 @@ import type {
   ComposerFastControl,
   ComposerModelControl,
   ComposerPlusControl,
+  ComposerProviderControl,
   ComposerTrayItem,
   ContextRef,
   ThinkingLevel,
@@ -980,6 +981,58 @@ function ThinkingSlider({
   );
 }
 
+function ProviderSubMenu({ provider }: { provider: ComposerProviderControl }): ReactElement {
+  const current = provider.options.find(o => o.value === provider.selected);
+  return (
+    <Menu.Sub>
+      <Menu.SubTrigger
+        className={MENU_ROW}
+        disabled={Boolean(provider.disabled || provider.saving)}
+        data-track-category='XyneAI'
+        data-track-name='OPEN_PROVIDER_LIST'
+        data-testid='composer-provider'
+      >
+        Provider
+        <span className='ml-auto max-w-[110px] truncate text-muted-foreground'>
+          {current?.label ?? provider.selected}
+        </span>
+        {provider.saving ? (
+          <Loader2 className='size-4 shrink-0 animate-spin text-muted-foreground' aria-hidden />
+        ) : (
+          <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+        )}
+      </Menu.SubTrigger>
+      <Menu.Portal>
+        <Menu.SubContent
+          sideOffset={10}
+          alignOffset={-6}
+          collisionPadding={12}
+          className={cn(MENU_SURFACE, 'w-[260px]')}
+        >
+          <div className='px-2.5 pb-2 pt-1.5 text-[13px] leading-snug text-muted-foreground'>
+            Your next messages to this agent run here. Only you are affected.
+          </div>
+          {provider.options.map(option => (
+            <Menu.Item
+              key={option.value}
+              onSelect={() => provider.onSelect(option.value)}
+              className={MENU_ROW}
+              data-track-category='XyneAI'
+              data-track-name='SELECT_PROVIDER'
+              data-track-metadata={JSON.stringify({ provider: option.value })}
+            >
+              <span className='min-w-0 flex-1 truncate'>{option.label}</span>
+              {option.value === provider.selected && (
+                <Check className='size-4 shrink-0' aria-hidden />
+              )}
+            </Menu.Item>
+          ))}
+        </Menu.SubContent>
+      </Menu.Portal>
+    </Menu.Sub>
+  );
+}
+
 /**
  * Model picker: the pill names what runs ("Auto" = the agent's own model), the
  * menu says what that choice is good for, and the Model / Thinking rows open
@@ -1140,6 +1193,7 @@ export function ModelMenu({
               </Menu.SubContent>
             </Menu.Portal>
           </Menu.Sub>
+          {model.provider && <ProviderSubMenu provider={model.provider} />}
           <ThinkingSlider value={model.thinkingLevel} onChange={model.onSelectThinking} />
         </Menu.Content>
       </Menu.Portal>
