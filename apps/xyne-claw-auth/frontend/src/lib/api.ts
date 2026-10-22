@@ -9075,3 +9075,40 @@ export async function publishLoopCommand(id: string, published: boolean): Promis
 export async function deleteLoopCommand(id: string): Promise<void> {
   await request(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+export interface LoopCostRow {
+  model: string | null;
+  runs: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface LoopRunSummary {
+  runs: number;
+  outcomes: { completed: number; "no-report": number; stopped: number; running: number };
+  completionRate: number | null;
+  avgPasses: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+}
+
+export interface LoopCommandStats extends LoopRunSummary {
+  id: string;
+  name: string;
+  template: string;
+  version: number;
+  published: boolean;
+  composite: boolean;
+  findings: { proved: number; refuted: number; conjecture: number };
+  costRows: LoopCostRow[];
+  byVersion: Array<LoopRunSummary & { version: number }>;
+  daily: Array<{ day: string; runs: number }>;
+  recent: Array<{ id: string; version: number | null; status: string; passes: number; ms: number; createdAt: string; report: string | null }>;
+}
+
+export async function getLoopCommandStats(days: number): Promise<{ days: number; commands: LoopCommandStats[] }> {
+  const data = await request<{ success: boolean; data: { days: number; commands: LoopCommandStats[] } }>(`${AUTH_API_URL}/api/v1/loop-commands/stats?days=${days}`);
+  return data.data;
+}
