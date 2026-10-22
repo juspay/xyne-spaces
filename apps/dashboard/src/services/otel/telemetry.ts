@@ -34,16 +34,23 @@ export function initializeTelemetry(): void {
   try {
     // Stable per-browser device id; persisted in localStorage so it survives reloads.
     const deviceId = getOrGenerateDeviceId();
+    // Each tab owns its own MeterProvider and therefore its own cumulative
+    // counters, so `service.instance.id` is per tab: it is the series identity
+    // these counters must stay monotonic within for `increase()`/`rate()` to hold.
+    const instanceId = getOrGenerateInstanceId();
     const platformName = detectPlatform();
 
     // Create resource with service identification.
     // `platform.name` becomes the Prometheus label `platform_name` after OTLP→Collector
     // export and is what lets dashboards filter web/electron/mobile separately.
+    // `device.id` becomes `device_id` and is what groups a device's tabs back together.
     const resource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: OTEL_SERVICE_NAME,
-      [SEMRESATTRS_SERVICE_INSTANCE_ID]: deviceId,
+      [SEMRESATTRS_SERVICE_INSTANCE_ID]: instanceId,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- OTel semantic-convention dotted key (becomes `platform_name` in Prometheus)
       'platform.name': platformName,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- OTel semantic-convention dotted key (becomes `device_id` in Prometheus)
+      'device.id': deviceId,
     });
 
     // Create OTLP/HTTP exporter
@@ -87,12 +94,13 @@ export function initializeTelemetry(): void {
       });
 
     // Emit a single bridge breadcrumb pairing the OTel `service_instance_id`
-    // (= the per-browser device UUID, the only varying label on every frontend
-    // metric) with the bridge's identifying envelope (`clientSessionId`,
-    // `emailId`, `platformName`). This is the join key from Prometheus frontend
-    // metrics back to a specific user/session in the logging-bridge stream.
+    // (per tab) and `device_id` (per browser) with the bridge's identifying
+    // envelope (`clientSessionId`, `emailId`, `platformName`). This is the join
+    // key from Prometheus frontend metrics back to a specific user/session in the
+    // logging-bridge stream.
     logger.info(Event.OTEL_INSTANCE_REGISTERED, {
-      serviceInstanceId: deviceId,
+      serviceInstanceId: instanceId,
+      deviceId,
       platformName,
     });
   } catch (error) {
@@ -112,4 +120,25 @@ function getOrGenerateDeviceId(): string {
     window.localStorage.setItem('otel_device_id', id);
   }
   return id;
+}
+
+/**
+ * Per-tab metric instance id. Held in sessionStorage so a reload reuses it
+ * instead of orphaning the tab's series, and falls back to a module-scoped id
+ * when sessionStorage is unavailable (private mode, blocked storage).
+ */
+let inMemoryInstanceId: string | null = null;
+
+function getOrGenerateInstanceId(): string {
+  try {
+    let id = window.sessionStorage.getItem('otel_instance_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      window.sessionStorage.setItem('otel_instance_id', id);
+    }
+    return id;
+  } catch {
+    inMemoryInstanceId ??= crypto.randomUUID();
+    return inMemoryInstanceId;
+  }
 }
