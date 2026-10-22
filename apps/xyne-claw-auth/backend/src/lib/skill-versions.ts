@@ -74,14 +74,16 @@ export interface ManifestEntry {
 
 export const subjectKeyOf = (skillId: string): string => `skill:${skillId}`;
 const bundlePath = (orgId: string, sha256: string): string => `governance/skill-bundles/${orgId}/${sha256}.json`;
-const EXECUTABLE = /(^|\/)scripts\/|\.(sh|bash|zsh|py|rb|pl|php|js|mjs|cjs|ts|ps1|bat|cmd|exe|bin|wasm|jar|so|dylib|dll|zip|tar|gz|tgz|7z)$/i;
-const BINARY = /^(image|audio|video)\/|pdf|octet-stream|zip|msword|officedocument/i;
-const isText = (f: SkillBundleFile): boolean => !(f.contentType && BINARY.test(f.contentType)) && !/\.(png|jpe?g|gif|webp|pdf|docx?|xlsx?|pptx?|zip|gz|tgz|exe|bin|wasm)$/i.test(f.relativePath);
+const EXECUTABLE_EXT = /\.(sh|bash|zsh|py|rb|pl|php|js|mjs|cjs|ts|ps1|bat|cmd|exe|bin|wasm|jar|so|dylib|dll|zip|tar|gz|tgz|7z)$/i;
+const isExecutablePath = (path: string): boolean => path.startsWith("scripts/") || path.includes("/scripts/") || EXECUTABLE_EXT.test(path);
+const BINARY_TYPE = /pdf|octet-stream|zip|msword|officedocument/i;
+const isBinaryType = (contentType: string): boolean => /^(image|audio|video)\//.test(contentType) || BINARY_TYPE.test(contentType);
+const isText = (f: SkillBundleFile): boolean => !(f.contentType && isBinaryType(f.contentType)) && !/\.(png|jpe?g|gif|webp|pdf|docx?|xlsx?|pptx?|zip|gz|tgz|exe|bin|wasm)$/i.test(f.relativePath);
 
 /** SHA-256 over one canonical string: name, description, SKILL.md (LF) and the sorted (path, executable, sha256) list. */
 export function hashSkillBundle(bundle: SkillBundle): { sha256: string; executable: boolean; files: Array<[string, number, string]> } {
   const files = bundle.files
-    .map((f): [string, number, string] => [f.relativePath, EXECUTABLE.test(f.relativePath) ? 1 : 0, sha256Hex(f.content)])
+    .map((f): [string, number, string] => [f.relativePath, isExecutablePath(f.relativePath) ? 1 : 0, sha256Hex(f.content)])
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const canonical = JSON.stringify([bundle.name, bundle.description, bundle.content.replace(/\r\n/g, "\n"), files]);
   return { sha256: sha256Hex(canonical), executable: files.some((f) => f[1] === 1), files };
