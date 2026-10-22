@@ -4,7 +4,8 @@ import { dispatchExperimentChecker, dispatchExperimentEpoch, postExperimentNotic
 import { errMsg } from "../../lib/errors.js";
 import { createLogger } from "../../logger.js";
 import { LOOP_COMMANDS, loopCommandFor, type LoopCommandDef, type LoopKey } from "xyne-claw-shared";
-import { advanceLoop, passesExhausted, pastDeadline, pastHardStop, type LoopSpec } from "../engine.js";
+import { advanceLoop, passesExhausted, pastDeadline, pastHardStop, type LoopEdge, type LoopNode, type LoopSpec } from "../engine.js";
+import { decided, xorDecideNode, type Decision } from "../decide.js";
 
 const log = createLogger("experiment");
 
@@ -16,11 +17,13 @@ const NO_FINAL_REPORT = "(experiment ended without final report)";
 
 export interface ExperimentLedger {
   run: ExperimentRun;
+  decision?: Decision;
 }
 
 export interface ExperimentCtx {
   now: number;
   sessionId?: string;
+  lastResult?: string;
 }
 
 type ExperimentSpec = LoopSpec<ExperimentLedger, ExperimentCtx, boolean>;
@@ -56,6 +59,66 @@ async function finalEpoch(ledger: ExperimentLedger) {
   return { ledger: { run: finishing }, output: true };
 }
 
+type ExperimentNode = LoopNode<ExperimentLedger, ExperimentCtx, boolean>;
+type ExperimentEdge = LoopEdge<ExperimentLedger, ExperimentCtx>;
+
+function checkerStage(spec: ExperimentSpec, progressGated: boolean): { nodes: Record<string, ExperimentNode>; edges: ExperimentEdge[] } {
+  return {
+    nodes: {
+      checker: {
+        kind: "checker",
+        run: async (ledger) => {
+          await dispatchExperimentChecker(ledger.run, ledger.run.epoch).catch((err) => {
+            log.warn(`[experiment] checker dispatch threw id=${ledger.run.id} epoch=${ledger.run.epoch}: ${errMsg(err)}`);
+          });
+        },
+      },
+    },
+    edges: [
+      { from: "pass", on: "result", to: "checker", label: "epoch finished" },
+      {
+        from: "checker",
+        on: "done",
+        to: "pass",
+        label: "keep going",
+        when: (ledger, ctx) =>
+          progressGated
+            ? !passesExhausted(spec.policy, ledger)
+            : !pastDeadline(spec.policy, ledger, ctx.now),
+      },
+      { from: "checker", on: "done", to: "report", label: "deadline or backstop reached" },
+    ],
+  };
+}
+
+function judgeStage(spec: ExperimentSpec, def: LoopCommandDef): { nodes: Record<string, ExperimentNode>; edges: ExperimentEdge[] } {
+  const judge = def.judge;
+  if (!judge) throw new Error(`[loop] ${def.command} uses the fix-retry graph but has no judge`);
+  return {
+    nodes: {
+      judge: xorDecideNode<ExperimentLedger, ExperimentCtx>({
+        questions: judge.questions,
+        state: (_ledger, ctx) => ctx.lastResult ?? "",
+        context: `The last pass of a ${def.command} run just finished. Judge its own report below.`,
+      }) as ExperimentNode,
+    },
+    edges: [
+      { from: "pass", on: "result", to: "judge", label: "pass finished" },
+      {
+        from: "judge",
+        on: "done",
+        to: "pass",
+        label: "judge found something to fix",
+        when: (ledger, ctx) =>
+          decided(ledger.decision, judge.retryWhen.question, judge.retryWhen.value) &&
+          ledger.run.epoch <= judge.maxRetries &&
+          !pastDeadline(spec.policy, ledger, ctx.now),
+      },
+      { from: "judge", on: "done", to: "report", label: "clean, unsure, or out of retries" },
+    ],
+  };
+}
+
 function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
   const progressGated = def.graph === "progress";
   const spec: ExperimentSpec = {
@@ -71,14 +134,6 @@ function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
     },
     nodes: {
       pass: { kind: "pass", run: nextEpoch },
-      checker: {
-        kind: "checker",
-        run: async (ledger) => {
-          await dispatchExperimentChecker(ledger.run, ledger.run.epoch).catch((err) => {
-            log.warn(`[experiment] checker dispatch threw id=${ledger.run.id} epoch=${ledger.run.epoch}: ${errMsg(err)}`);
-          });
-        },
-      },
       report: {
         kind: "report",
         run: async (ledger) => {
@@ -117,65 +172,56 @@ function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
       },
       idle: { kind: "wait" },
     },
-    edges: [
-      { from: "report", on: "result", to: "done", label: "final report delivered" },
-      {
-        from: "pass",
-        on: "result",
-        to: "brake",
-        label: "epoch died too fast",
-        when: async (_ledger, ctx) => (await epochLivedMs(ctx.sessionId, ctx.now)) < (spec.policy.minPassMs ?? 0),
-      },
-      { from: "pass", on: "result", to: "checker", label: "epoch finished" },
-      {
-        from: "checker",
-        on: "done",
-        to: "pass",
-        label: "keep going",
-        when: (ledger, ctx) =>
-          progressGated
-            ? !passesExhausted(spec.policy, ledger)
-            : !pastDeadline(spec.policy, ledger, ctx.now),
-      },
-      { from: "checker", on: "done", to: "report", label: "deadline or backstop reached" },
-
-      {
-        from: "*",
-        on: "tick",
-        to: "forceDone",
-        label: "past deadline grace",
-        when: (ledger, ctx) => pastHardStop(spec.policy, ledger, ctx.now),
-      },
-      {
-        from: "*",
-        on: "tick",
-        to: "idle",
-        label: "epoch session still running",
-        when: (ledger) => sessionIsActive(ledger.run.currentSessionId),
-      },
-      {
-        from: "*",
-        on: "tick",
-        to: "idle",
-        label: "recently touched",
-        when: (ledger, ctx) => ctx.now - ledger.run.updatedAt.getTime() <= (spec.policy.staleAfterMs ?? 0),
-      },
-      {
-        from: "*",
-        on: "tick",
-        to: "rescuePass",
-        label: "stalled before deadline",
-        when: (ledger, ctx) => ledger.run.status === "running" && !pastDeadline(spec.policy, ledger, ctx.now),
-      },
-      {
-        from: "*",
-        on: "tick",
-        to: "rescueReport",
-        label: "stalled after deadline",
-        when: (ledger) => ledger.run.status === "running",
-      },
-    ],
+    edges: [],
   };
+  const stage = def.graph === "fix-retry" ? judgeStage(spec, def) : checkerStage(spec, progressGated);
+  Object.assign(spec.nodes, stage.nodes);
+  spec.edges = [
+    { from: "report", on: "result", to: "done", label: "final report delivered" },
+    {
+      from: "pass",
+      on: "result",
+      to: "brake",
+      label: "epoch died too fast",
+      when: async (_ledger, ctx) => (await epochLivedMs(ctx.sessionId, ctx.now)) < (spec.policy.minPassMs ?? 0),
+    },
+    ...stage.edges,
+    {
+      from: "*",
+      on: "tick",
+      to: "forceDone",
+      label: "past deadline grace",
+      when: (ledger, ctx) => pastHardStop(spec.policy, ledger, ctx.now),
+    },
+    {
+      from: "*",
+      on: "tick",
+      to: "idle",
+      label: "epoch session still running",
+      when: (ledger) => sessionIsActive(ledger.run.currentSessionId),
+    },
+    {
+      from: "*",
+      on: "tick",
+      to: "idle",
+      label: "recently touched",
+      when: (ledger, ctx) => ctx.now - ledger.run.updatedAt.getTime() <= (spec.policy.staleAfterMs ?? 0),
+    },
+    {
+      from: "*",
+      on: "tick",
+      to: "rescuePass",
+      label: "stalled before deadline",
+      when: (ledger, ctx) => ledger.run.status === "running" && !pastDeadline(spec.policy, ledger, ctx.now),
+    },
+    {
+      from: "*",
+      on: "tick",
+      to: "rescueReport",
+      label: "stalled after deadline",
+      when: (ledger) => ledger.run.status === "running",
+    },
+  ];
   return spec;
 }
 
@@ -191,7 +237,7 @@ function currentNode(run: ExperimentRun): string {
   return run.status === "finishing" ? "report" : "pass";
 }
 
-export async function continueExperimentAfterResult(conversationId: string, sessionId: string): Promise<boolean> {
+export async function continueExperimentAfterResult(conversationId: string, sessionId: string, lastResult?: string): Promise<boolean> {
   const active = await experimentRepository.findActiveByConversation(conversationId);
   if (!active) return false;
   if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
@@ -199,7 +245,7 @@ export async function continueExperimentAfterResult(conversationId: string, sess
     from: currentNode(active),
     on: "result",
     ledger: { run: active },
-    ctx: { now: Date.now(), sessionId },
+    ctx: { now: Date.now(), sessionId, ...(lastResult ? { lastResult } : {}) },
   });
   return step.output ?? false;
 }

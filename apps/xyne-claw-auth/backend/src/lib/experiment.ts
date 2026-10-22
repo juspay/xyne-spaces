@@ -22,7 +22,7 @@ export type ExperimentCommand =
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
   | { sub: "list" }
-  | { sub: "unknown"; token: string };
+  | { sub: "unknown"; token: string; command?: string };
 
 /** Providers a /experiment run may pin (must stay a subset of the /internal/run
  *  proxy's OVERRIDABLE set — personal-cred providers still require the
@@ -44,7 +44,11 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   const commandWord = loop.command;
   const kind = loop.kind ?? undefined;
   const rest = trimmed.slice(commandWord.length).trim();
-  if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS, ...(kind ? { kind } : {}) };
+  if (!rest) {
+    return loop.positional
+      ? { sub: "unknown", token: "", command: commandWord }
+      : { sub: "start", durationMs: DEFAULT_DURATION_MS, ...(kind ? { kind } : {}) };
+  }
   const [first, ...tail] = rest.split(/\s+/);
   const firstLower = first?.toLowerCase() ?? "";
   if (firstLower === "status") return { sub: "status" };
@@ -63,12 +67,13 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
       : unit === "h" ? amount * 60 * 60 * 1000
       : amount * 60 * 1000;
     focusParts = tail;
-  } else if (focusParts.length === 1 && !/^(?:focus|provider|model)=/i.test(firstLower)) {
+  } else if (!loop.positional && focusParts.length === 1 && !/^(?:focus|provider|model)=/i.test(firstLower)) {
     return { sub: "unknown", token: first! };
   }
   durationMs = Math.min(Math.max(durationMs, 1), MAX_DURATION_MS);
   const { focusParts: cleanedFocusParts, provider, model, invalidProvider } = extractProviderOverride(focusParts);
   const { focus, dropped: droppedFocus } = normalizeFocus(cleanedFocusParts.join(" "));
+  if (loop.positional && !focus) return { sub: "unknown", token: "", command: commandWord };
   const resolvedProvider = invalidProvider === undefined
     ? provider ?? (model ? "spaces" : undefined)
     : undefined;
@@ -304,7 +309,19 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
   }, appToken);
 }
 
+const DEADLINE_FINISH = "\n\nDeadline reached - call end-experiment with your final report now. First deliver (sandbox-deliver-files) any proof artifact that has not yet been attached to this thread.";
+
+const EPOCH_FINISH: Record<LoopKey, string> = {
+  experiment: DEADLINE_FINISH,
+  understanding: DEADLINE_FINISH,
+  framework: DEADLINE_FINISH,
+  security: DEADLINE_FINISH,
+  "repo-history": DEADLINE_FINISH,
+  "ui-test": "\n\nThe judge found no fixture problems left, or the retries ran out - write the final report now: one line per variation with its verdict, the real UI defects you found with their screenshots, and which videos were delivered. The harness already delivered the videos and failing screenshots; deliver anything still missing with sandbox-deliver-files, then call end-experiment with the report.",
+};
+
 const EPOCH_EXIT: Record<LoopKey, string> = {
+  "ui-test": `EXIT: this is a /ui-test run. A judge reads your reply after every pass. If the reply reports fixture or harness problems (requests served by the fallback mock, wrong or missing fixtures, a harness error, a dev server that was not up), the loop sends you back to fix them, a few times at most. When the reply shows a clean harness run, the loop asks you for the final report. So END EVERY PASS with a short status: the pass/fail/unsure counts, and say explicitly whether any requests hit the fallback mock.`,
   experiment: `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
   understanding: `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`,
   framework: `EXIT: this is a framework run — it ends when the candidate list is EXHAUSTED, not on the clock. Enumerate the STRUCTURAL candidates in scope as open conjectures (convention drift, missing paved paths, change-amplification, boilerplate, duplication — not just copy-paste), then close each (proved = a real, tagged opportunity with evidence and a named consequence; refuted = it is incidental or taste). When ZERO remain open and the markdown report is delivered, call end-experiment. Do NOT keep looping to the safety cap re-describing opportunities you already closed.`,
@@ -313,6 +330,13 @@ const EPOCH_EXIT: Record<LoopKey, string> = {
 };
 
 const EPOCH_INSTRUCTIONS: Record<LoopKey, string> = {
+  "ui-test": `Read the ledger below before doing anything. The route under test is the focus.
+
+FIRST PASS (no harness run recorded in the ledger yet): find the page's code for that route and list the states worth seeing — empty, loading, error, long text, many items, missing permissions, a narrow viewport. Write a ui-tester spec with one variation per state and a mock for every API the page calls. Start the app in your sandbox (sandbox-run-detached), then ask the ui-tester subagent to run ui-test-variations with that spec.
+
+LATER PASSES: the last run had fixture problems. Fix the mocks the harness flagged (the requests served by the fallback mock and the endpoint contracts it printed), then run the same spec again. Do NOT drop variations to get a clean run.
+
+After every run, record each FAIL or UNSURE variation in the ledger (experiment-ledger action=record, status=conjecture, title = the variation id, note = what the screenshot shows and the evidence) and record a finding titled \`harness run <n>\` with the counts.`,
   experiment: `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
   understanding: `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
   framework: `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: STRUCTURAL gaps that make this codebase harder to extend safely than it should be — convention drift (one concept done several inconsistent ways), missing paved paths (a common need solved ad-hoc everywhere), change-amplification (adding one feature touches N files for lack of a seam), boilerplate, and plain duplication. Duplication is only one shape — do NOT reduce this to finding copy-paste. Pick or advance ONE candidate per epoch.
@@ -344,6 +368,7 @@ Deliver ONE self-contained .html decision-log (no network, no JavaScript — it 
 };
 
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
+  const loop = loopCommandFor(run.kind);
   const remaining = formatRemaining(run.deadlineAt);
   const sandboxId = /(?:^|\s)sandboxId=([^\s]+)/.exec(run.sandboxNote ?? "")?.[1];
   // The sandbox is ephemeral and WILL recycle across a multi-hour run, taking
@@ -359,15 +384,12 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   const sandboxInstruction = sandboxId
     ? `YOUR SANDBOX: ${sandboxId}. This experiment has ONE machine. Reuse this sandbox for every command — do NOT create a new one. Only create a new sandbox if this one is provably unreachable, and if you do, immediately record the new id with experiment-ledger action=sandbox-note.`
     : "";
-  const finalInstruction = run.status === "finishing"
-    ? "\n\nDeadline reached - call end-experiment with your final report now. First deliver (sandbox-deliver-files) any proof artifact that has not yet been attached to this thread."
-    : "";
+  const finalInstruction = run.status === "finishing" ? EPOCH_FINISH[loop.key] : "";
   // EXIT RULE — must match what end-experiment actually enforces for this run's
   // kind. It did not: every epoch was told the time-boxed rule, so an
   // understanding run whose frontier had closed kept looping to the safety cap
   // instead of ending. The agent was obeying the prompt, not being refused —
   // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
-  const loop = loopCommandFor(run.kind);
   const exitInstruction = EPOCH_EXIT[loop.key];
   return [
     `You are in /experiment mode, epoch ${run.epoch}.`,

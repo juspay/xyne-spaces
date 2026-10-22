@@ -3468,7 +3468,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return;
     }
     if (ctx?.conversationId && ctx.agentSlug) {
-      experimentContinues = await continueExperimentAfterResult(ctx.conversationId, sessionId).catch((err) => {
+      experimentContinues = await continueExperimentAfterResult(ctx.conversationId, sessionId, resultWithCitations).catch((err) => {
         clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
         return false;
       });

@@ -1,4 +1,6 @@
-export const LOOP_KINDS = ["understanding", "framework", "security", "repo-history"] as const;
+import type { DecideQuestion } from "./tools/xor/questions.js";
+
+export const LOOP_KINDS = ["understanding", "framework", "security", "repo-history", "ui-test"] as const;
 
 export type LoopKind = (typeof LOOP_KINDS)[number];
 
@@ -10,13 +12,16 @@ export interface LoopCommandDef {
   key: LoopKey;
   command: string;
   kind: LoopKind | null;
-  graph: "timeboxed" | "progress";
-  exit: "deadline" | "frontier";
+  graph: "timeboxed" | "progress" | "fix-retry";
+  exit: "deadline" | "frontier" | "judge";
   deadlineReleases: boolean;
   deliverable: "html" | "md" | null;
   proofRule: "delivered-artifact" | "file-line-citation";
   closeCheck: LoopCloseCheck | null;
   skills: readonly string[];
+  subagents?: readonly string[];
+  positional?: "route";
+  judge?: LoopJudge;
   modeLog: string;
   start: {
     title: string;
@@ -24,6 +29,12 @@ export interface LoopCommandDef {
     durationLabel: string;
     seedFrontier: boolean;
   };
+}
+
+export interface LoopJudge {
+  questions: readonly DecideQuestion[];
+  retryWhen: { question: string; value: string | boolean };
+  maxRetries: number;
 }
 
 const TIMEBOXED_START = {
@@ -108,6 +119,39 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     skills: [],
     modeLog: "Repo-history mode — injected experiment tools (epoch {epoch}, progress-gated exit at HEAD)",
     start: TIMEBOXED_START,
+  },
+  {
+    key: "ui-test",
+    command: "/ui-test",
+    kind: "ui-test",
+    graph: "fix-retry",
+    exit: "judge",
+    deadlineReleases: true,
+    deliverable: null,
+    proofRule: "delivered-artifact",
+    closeCheck: null,
+    skills: [],
+    subagents: ["ui-tester"],
+    positional: "route",
+    judge: {
+      questions: [
+        {
+          id: "fixtureErrors",
+          type: "yesno",
+          question:
+            "Does this UI test report show fixture or harness problems that kept variations from rendering as intended: requests served by the fallback mock, missing or wrong mock fixtures, a harness error, or a dev server that was not running?",
+        },
+      ],
+      retryWhen: { question: "fixtureErrors", value: true },
+      maxRetries: 4,
+    },
+    modeLog: "UI-test mode — injected experiment tools (epoch {epoch}, judge-gated fix-and-retry)",
+    start: {
+      title: "**/ui-test started**",
+      mode: "Mode: plan the variations, run the UI harness, fix fixtures until the judge finds none broken, then report with videos",
+      durationLabel: "Safety cap",
+      seedFrontier: false,
+    },
   },
 ];
 

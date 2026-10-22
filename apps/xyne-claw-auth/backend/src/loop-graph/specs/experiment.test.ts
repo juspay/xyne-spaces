@@ -6,6 +6,10 @@ const repo = vi.hoisted(() => ({
   updates: [] as Array<[string, Record<string, unknown>]>,
 }));
 const lib = vi.hoisted(() => ({ epochs: [] as Array<Record<string, unknown>>, checkers: [] as number[], notices: 0 }));
+const xor = vi.hoisted(() => ({
+  reply: null as null | { ok: true; answers: Record<string, unknown>; unavailable: boolean; ms: number } | { ok: false; status: number; error: string },
+  asked: [] as string[],
+}));
 
 vi.mock("../../repositories/index.js", () => ({
   experimentRepository: {
@@ -25,6 +29,12 @@ vi.mock("../../lib/experiment.js", () => ({
   dispatchExperimentEpoch: vi.fn(async (run: Record<string, unknown>) => { lib.epochs.push(run); return { sessionId: "next" }; }),
   dispatchExperimentChecker: vi.fn(async (_run: unknown, epoch: number) => { lib.checkers.push(epoch); }),
   postExperimentNotice: vi.fn(async () => { lib.notices += 1; }),
+}));
+vi.mock("../../services/xorTryClient.js", () => ({
+  tryChecksViaClaw: vi.fn(async (req: { item: { text: string } }) => {
+    xor.asked.push(req.item.text);
+    return xor.reply ?? { ok: false, status: 503, error: "xor is not configured" };
+  }),
 }));
 vi.mock("../../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -62,6 +72,8 @@ beforeEach(() => {
   lib.epochs = [];
   lib.checkers = [];
   lib.notices = 0;
+  xor.reply = null;
+  xor.asked = [];
 });
 
 describe("experiment loop spec", () => {
@@ -71,7 +83,7 @@ describe("experiment loop spec", () => {
 
   it("has one valid spec per loop command, picked by the run's kind", () => {
     for (const spec of Object.values(EPOCH_LOOPS)) expect(validateLoopSpec(spec as never)).toEqual([]);
-    expect(Object.keys(EPOCH_LOOPS).sort()).toEqual(["experiment", "framework", "repo-history", "security", "understanding"]);
+    expect(Object.keys(EPOCH_LOOPS).sort()).toEqual(["experiment", "framework", "repo-history", "security", "ui-test", "understanding"]);
     expect(epochLoopFor("security").id).toBe("security");
     expect(epochLoopFor(null).id).toBe("experiment");
     expect(epochLoopFor("repo-history").policy.maxPasses?.({} as never)).toBe(1000);
@@ -156,5 +168,58 @@ describe("superviseExperiment", () => {
   it("does nothing for a stalled run that is already finishing", async () => {
     await superviseExperiment(run({ status: "finishing", updatedAt: minutes(-11) }) as never, NOW);
     expect(repo.updates).toEqual([]);
+  });
+});
+
+describe("/ui-test fix-and-retry loop", () => {
+  const answer = (value: boolean, confidence: number) => ({
+    ok: true as const,
+    answers: { fixtureErrors: { value, confidence, unsure: confidence < 0.7 } },
+    unavailable: false,
+    ms: 3,
+  });
+  const uiRun = (overrides: Record<string, unknown> = {}) => run({ kind: "ui-test", epoch: 1, focus: "/settings", ...overrides });
+
+  it("judges the pass's own report and sends it back to fix fixtures, without a checker", async () => {
+    repo.active = uiRun();
+    xor.reply = answer(true, 0.92);
+    expect(await continueExperimentAfterResult("conv", "s-3", "3 pass, 2 fail; 4 requests hit the fallback mock")).toBe(true);
+    expect(xor.asked).toEqual(["3 pass, 2 fail; 4 requests hit the fallback mock"]);
+    expect(lib.checkers).toEqual([]);
+    expect(lib.epochs.map((e) => [e["epoch"], e["status"]])).toEqual([[2, "running"]]);
+  });
+
+  it("moves to the report when the judge finds no fixture problems", async () => {
+    repo.active = uiRun();
+    xor.reply = answer(false, 0.95);
+    await continueExperimentAfterResult("conv", "s-3", "6 pass, 1 fail, no fallback requests");
+    expect(lib.epochs.map((e) => e["status"])).toEqual(["finishing"]);
+  });
+
+  it("reports instead of looping when the judge is unsure or unavailable", async () => {
+    repo.active = uiRun();
+    xor.reply = answer(true, 0.4);
+    await continueExperimentAfterResult("conv", "s-3", "unclear output");
+    xor.reply = null;
+    await continueExperimentAfterResult("conv", "s-3", "anything");
+    expect(lib.epochs.map((e) => e["status"])).toEqual(["finishing", "finishing"]);
+  });
+
+  it("stops retrying after the retry budget or the deadline", async () => {
+    xor.reply = answer(true, 0.9);
+    repo.active = uiRun({ epoch: 5 });
+    await continueExperimentAfterResult("conv", "s-3", "still broken");
+    repo.active = uiRun({ epoch: 2, deadlineAt: minutes(-1) });
+    await continueExperimentAfterResult("conv", "s-3", "still broken");
+    expect(lib.epochs.map((e) => e["status"])).toEqual(["finishing", "finishing"]);
+  });
+
+  it("ends after the report pass and is a valid graph", async () => {
+    repo.active = uiRun({ status: "finishing" });
+    expect(await continueExperimentAfterResult("conv", "s-3", "final report")).toBe(false);
+    expect(xor.asked).toEqual([]);
+    expect(validateLoopSpec(epochLoopFor("ui-test") as never)).toEqual([]);
+    expect(Object.keys(epochLoopFor("ui-test").nodes)).toContain("judge");
+    expect(Object.keys(epochLoopFor("ui-test").nodes)).not.toContain("checker");
   });
 });

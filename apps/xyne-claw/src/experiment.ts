@@ -561,7 +561,7 @@ export function buildExperimentTools(
               { refused: true, reason: wantsHtml ? "missing-html-artifact" : "missing-md-artifact" },
             );
           }
-        } else if (!pastDeadline) {
+        } else if (loop.exit === "deadline" && !pastDeadline) {
           let open = "unknown";
           try {
             const ledger = await readLedger(ctx);

@@ -87,6 +87,19 @@ export const COMMAND_REGISTRY: readonly CommandDef[] = [
     surfaces: WEBHOOK_ONLY,
   },
   {
+    name: "ui-test",
+    label: "UI test",
+    help: "Render every state of one page with mocked APIs, fix the fixtures until a judge finds none broken, then report with videos",
+    argsHint: "<route> [focus]",
+    details: [
+      "Needs the agent to have sandbox tools; the ui-tester subagent is added for the run.",
+      "e.g. `/ui-test /settings/billing`",
+    ],
+    section: "autonomy",
+    kind: "control",
+    surfaces: WEBHOOK_ONLY,
+  },
+  {
     name: "design",
     label: "Design",
     help: "Produce a self-contained HTML artifact",
