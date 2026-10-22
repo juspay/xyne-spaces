@@ -24,7 +24,7 @@ import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
 import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
-import { canvasLabelsApi } from '../../api/canvasLabelsApi';
+import { getCachedCanvasLabels, loadCanvasLabels } from './useCanvasLabels';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -117,19 +117,20 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
       return;
     }
 
+    // Go through the shared label store: rows mounted in the same tick share one bulk
+    // request, and labels the list already loaded are not requested again.
+    const cached = getCachedCanvasLabels(canvas.id);
+    if (cached) {
+      setRestLabels(cached);
+      return;
+    }
+
     let cancelled = false;
-    canvasLabelsApi
-      .getCanvasLabels([canvas.id])
-      .then(labelsByCanvasId => {
-        if (!cancelled) {
-          setRestLabels(labelsByCanvasId[canvas.id] ?? []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRestLabels(undefined);
-        }
-      });
+    void loadCanvasLabels([canvas.id]).then(() => {
+      if (!cancelled) {
+        setRestLabels(getCachedCanvasLabels(canvas.id));
+      }
+    });
 
     return () => {
       cancelled = true;
