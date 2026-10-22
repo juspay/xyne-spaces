@@ -24,6 +24,8 @@ import type {
 } from '../../../services/Knowledge/collectionService';
 import { Upload } from 'lucide-react';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
+import { useAIComposerDraft } from '../../../hooks/useAIComposerDraft';
+import { NEW_CHAT_DRAFT_SCOPE } from '../../../utils/aiComposerDraft';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
@@ -154,6 +156,9 @@ interface XyneAISidebarProps {
   /** Re-applies the supplied context on every explicit Ask AI open. */
   contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
+  /** Keep the composer's text as a per-conversation draft across navigation
+   *  and remounts (XYNE-67287). Off for embedded uses (agent builder, desk). */
+  persistDraft?: boolean;
   onClose?: () => void;
   preserveStreamingOnClose?: boolean;
   hideHeaderClose?: boolean;
@@ -267,6 +272,7 @@ const XyneAISidebar = ({
   onInterceptPendingAction,
   hiddenContext,
   composerPlaceholder,
+  persistDraft = false,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -373,6 +379,33 @@ const XyneAISidebar = ({
   }, [kbFolderIdProp, kbFolderNameProp, kbOpenNonce]);
   // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
+
+  // Draft persistence (XYNE-67287): the typed text, per conversation. Text
+  // only here — context chips picked on /ai are kept in the stored draft.
+  const draftStore = useAIComposerDraft({
+    scope: persistDraft ? conversationId || NEW_CHAT_DRAFT_SCOPE : null,
+    onRestore: (draft, { initial }): void => {
+      // An automatic first query owns the box.
+      if (autoSendPendingQueryRef.current !== null) return;
+      if (initial) {
+        const text = draft?.text ?? '';
+        if (text) setInputValue(prev => prev || text);
+        return;
+      }
+      // Switched chats: the previous chat's text was saved under its own key.
+      setInputValue(draft?.text ?? '');
+    },
+  });
+  const draftSaveReadyRef = useRef(false);
+  useEffect(() => {
+    if (!persistDraft) return;
+    // The mount value is what the box was given, not typed — never saved.
+    if (!draftSaveReadyRef.current) {
+      draftSaveReadyRef.current = true;
+      return;
+    }
+    draftStore.save({ text: inputValue }, { keepExistingContext: true });
+  }, [persistDraft, inputValue, draftStore]);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
   const autoSendTriggerRef = useRef<'auto_send' | null>(null);
 
@@ -2087,6 +2120,7 @@ const XyneAISidebar = ({
       }
 
       setInputValue('');
+      draftStore.clear();
       setAttachments([]);
       setSelectedActivities([]);
       setBrowserContext(null); // Clear browser context after submit
@@ -2179,6 +2213,7 @@ const XyneAISidebar = ({
       abortCurrentRequest,
       isLegacyConversation,
       kbCollectionIdProp,
+      draftStore,
     ],
   );
 
@@ -2199,7 +2234,10 @@ const XyneAISidebar = ({
   const routedSubmit = useRoutedSubmit<'button' | 'enter' | undefined>({
     assistant,
     value: inputValue,
-    clear: () => setInputValue(''),
+    clear: () => {
+      setInputValue('');
+      draftStore.clear();
+    },
     submit: trigger => void handleSubmit(trigger),
   });
 
