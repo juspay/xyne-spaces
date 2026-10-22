@@ -7,6 +7,7 @@ import type {
   DecisionAnswer,
   DecisionQuestion,
   ScoreQuestion,
+  ValueQuestion,
   YesNoQuestion,
 } from './types';
 
@@ -104,6 +105,22 @@ const readScore = (
   return { type: 'score', score, level, ...(confidence !== undefined ? { confidence } : {}) };
 };
 
+/**
+ * A value as `dtype` asks: a number for int/float, a string otherwise. XOR marks a value the
+ * state does not hold with `unknown`; that is an answer (null), not an unusable reply.
+ */
+const readValue = (question: ValueQuestion, answer: Record<string, unknown>): DecisionAnswer | null => {
+  const confidence = isProbability(answer.confidence) ? { confidence: answer.confidence } : {};
+  if (answer.unknown === true || answer.value === null) return { type: 'value', value: null, ...confidence };
+  const raw = answer.value;
+  if (question.dtype === 'string') {
+    return typeof raw === 'string' || typeof raw === 'number' ? { type: 'value', value: String(raw), ...confidence } : null;
+  }
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isFinite(value) || (question.dtype === 'int' && !Number.isInteger(value))) return null;
+  return { type: 'value', value, ...confidence };
+};
+
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
 const readAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | null => {
   if (!raw || typeof raw !== 'object') return null;
@@ -114,6 +131,8 @@ const readAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | 
   }
 
   if (question.type === 'score') return readScore(question, answer);
+
+  if (question.type === 'value') return readValue(question, answer);
 
   const choice = answer.choice;
   // Own keys only: `in` would also accept "constructor" and the like.
@@ -169,7 +188,9 @@ export const readNouls = (answers: Record<string, DecisionAnswer> | null): Recor
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
  * `target` sends it to another service with the same wire format, e.g. XOR; `engine` names
- * it in logs. Never throws.
+ * it in logs. `images` (base64 data URLs) go to the target's vision model, and are left out
+ * when it has none. Value questions go to the vision model too: the text model rejects them.
+ * Never throws.
  */
 export const requestClassifierAnswers = async (
   state: string | Record<string, unknown>,
@@ -181,22 +202,30 @@ export const requestClassifierAnswers = async (
     onFailure,
     target = envConfig.jev,
     engine = 'jev',
+    images = [],
   }: {
     partial?: boolean;
     onFailure?: (failure: AskFailure) => void;
     target?: ClassifierTarget;
     engine?: ClassifierEngine;
+    images?: string[];
   } = {}
 ): Promise<Record<string, DecisionAnswer> | null> => {
-  const { apiKey, url, model } = target;
+  const { apiKey, url } = target;
   if (!apiKey) return null;
+  const withImages = images.length > 0 && Boolean(target.visionModel);
+  const asksValues = Object.values(questions).some((question) => question.type === 'value');
+  const model = target.visionModel && (withImages || asksValues) ? target.visionModel : target.model;
   const logContext = { engine, model, host: hostOf(url) };
+  if (images.length > 0 && !withImages) {
+    logger.info('Classifier has no vision model; asking without images', { images: images.length, ...logContext });
+  }
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, state, questions }),
+      body: JSON.stringify({ model, state, questions, ...(withImages ? { images } : {}) }),
       signal: signal
         ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
         : AbortSignal.timeout(timeoutMs),

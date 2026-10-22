@@ -179,6 +179,9 @@ function toOutput(
     };
   }
 
+  // This step never asks for a value.
+  if (answer.type !== 'choice') return UNANSWERED;
+
   // askDecision only returns a choice that is one of our keys, so the index is valid.
   const option = options[Number(answer.choice.slice(1))]!;
   return {
