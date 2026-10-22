@@ -236,11 +236,13 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   const handleToggleExpandEmails = (next: boolean): void => {
     if (!canManageTicketVisibility) return;
 
+    const timestamp = Date.now();
     try {
       zero.mutate(
         mutators.channel.updateExpandChannelEmailsByDefault({
           channelId: channel.id,
           expand: next,
+          updatedAt: timestamp,
         }),
       );
     } catch {

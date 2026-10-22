@@ -1724,8 +1724,9 @@ export function createMutators(
         z.object({
           channelId: z.string(),
           expand: z.boolean(),
+          updatedAt: z.number(),
         }),
-        async ({ tx, args: { channelId, expand } }) => {
+        async ({ tx, args: { channelId, expand, updatedAt } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -1747,7 +1748,7 @@ export function createMutators(
             id: channelId,
             expandChannelEmailsByDefault: expand,
             // Bump updatedAt so clients' incremental channel sync (updatedAt > watermark) picks it up.
-            updatedAt: Date.now(),
+            updatedAt,
           });
         },
       ),
