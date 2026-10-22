@@ -1072,6 +1072,12 @@ export async function prepareRun(
     // chooses the text injected into the prompt. Dropped from the merged config
     // first so a stored or per-request value cannot survive, then set from the
     // DB. Null leaves the runtime on the legacy `designSystem` text.
+    //
+    // Scope, so this does not read stronger than it is: only `designSystemRef`
+    // is server-owned. A caller can still pass the legacy `designSystem` string
+    // in `agentConfig`, and the runtime uses it when the agent has no stored
+    // system. Closing that means retiring the legacy key, which is its own
+    // migration.
     {
       const { designSystemRef: _untrustedDesignSystemRef, ...withoutRef } = mergedAgentConfig;
       mergedAgentConfig = withoutRef;

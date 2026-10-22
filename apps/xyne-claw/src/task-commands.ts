@@ -89,8 +89,11 @@ const DESIGN_SYSTEM_FENCE_TAG = "design_system_reference";
  * read something the author never wrote.
  */
 function escapeFenceTags(designMd: string): string {
+  // Deliberately loose: `< / TAG >` with inner spaces, and `<TAG anything>`
+  // with trailing attributes, both read as the tag to a model even though a
+  // strict pattern misses them.
   return designMd.replace(
-    new RegExp(`<(/?)\\s*${DESIGN_SYSTEM_FENCE_TAG}\\s*>`, "gi"),
+    new RegExp(`<\\s*(/?)\\s*${DESIGN_SYSTEM_FENCE_TAG}\\b[^>]*>`, "gi"),
     (_match, slash: string) => `&lt;${slash}${DESIGN_SYSTEM_FENCE_TAG}&gt;`,
   );
 }
@@ -147,8 +150,11 @@ export function buildDesignSystemPromptInjection(
     return { status: "oversized", length: designSystem.length };
   }
 
+  // A resolved system can itself be "legacy": resolveForAgent returns the
+  // agent's pre-migration text with that origin. Relabelling it "agent" would
+  // make the dispatch log claim a stored record was used when none exists.
   const origin: DesignSystemOriginLabel = refMd
-    ? ref?.origin === "conversation" || ref?.origin === "agent"
+    ? ref?.origin === "conversation" || ref?.origin === "agent" || ref?.origin === "legacy"
       ? ref.origin
       : "agent"
     : "legacy";
