@@ -325,12 +325,6 @@ const envSchema = Joi.object({
   // Dynamic Dashboard tunables
   DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
   DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(30),
-  // userAllChannels backend cache (XYNE-67041)
-  CHANNEL_LIST_CACHE_ENABLED: Joi.boolean().default(false),
-  CHANNEL_LIST_CACHE_TTL_SEC: Joi.number().default(300),
-  CHANNEL_LIST_CACHE_MAX_ROWS: Joi.number().default(300000),
-  CHANNEL_LIST_CACHE_MAX_ENTRIES: Joi.number().default(50),
-  CHANNEL_LIST_CACHE_REBUMP_MS: Joi.number().default(10000),
   DASHBOARD_QUERY_CACHE_TTL_SEC: Joi.number().default(60),
   DASHBOARD_QUERY_CACHE_MAX_VALUE_BYTES: Joi.number().default(2 * 1024 * 1024),
   DASHBOARD_PG_STATEMENT_TIMEOUT_MS: Joi.number().default(60000),
@@ -747,14 +741,6 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
-  },
-  /** Backend cache for the userAllChannels full load; see src/zero/channel-list-cache.ts. */
-  channelListCache: {
-    enabled: envVars.CHANNEL_LIST_CACHE_ENABLED as boolean,
-    ttlSec: envVars.CHANNEL_LIST_CACHE_TTL_SEC as number,
-    maxRows: envVars.CHANNEL_LIST_CACHE_MAX_ROWS as number,
-    maxEntries: envVars.CHANNEL_LIST_CACHE_MAX_ENTRIES as number,
-    rebumpMs: envVars.CHANNEL_LIST_CACHE_REBUMP_MS as number,
   },
   sdk: {
     /** Master switch. The router is not mounted at all when false. */

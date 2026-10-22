@@ -9,8 +9,6 @@ export class ChannelsACL extends BaseQueryACL<'channels'> {
     super(ctx, 'channels');
   }
 
-  // KEEP IN SYNC: apps/backend/src/zero/channel-list-cache.ts mirrors these rules to
-  // cache the userAllChannels full load. Change both together.
   canSelect<TReturn>(query: Query<'channels', Schema, TReturn>): Query<'channels', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query

@@ -35,7 +35,6 @@ import { createZeroAuditJobs, flushAuditTrail } from './audit';
 import type { AuditJobsAccumulator } from './audit';
 import { decryptQueryResult } from './encryption-interceptor';
 import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
-import { serveUserAllChannelsFromCache } from './channel-list-cache';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -637,49 +636,26 @@ export async function runCatalogQuery(
 
   const { ast, format } = buildQueryInternals(queryDef, name, args, ctx);
 
-  // userAllChannels full loads: serve the part shared by the workspace from the backend
-  // cache. Any failure here falls through to the normal query below.
   try {
-    const cached = await serveUserAllChannelsFromCache(name, args, ctx, (query) => {
-      // @ts-ignore - asQueryInternals works with any Query type at runtime
-      const internals = asQueryInternals(query);
-      return executeCatalogAst(provider, internals.ast, internals.format, name);
+    const serverSchema = await fetchServerSchema();
+    const data = await provider.transaction(async (tx) => {
+      // Flat queries: build JSON in the app instead of json_agg in Postgres.
+      const flat = await executeFlatCatalogQuery(
+        // @ts-ignore - DBTransaction exposes query(sql, params) at runtime
+        tx.dbTransaction,
+        ast,
+        format,
+        serverSchema,
+        name,
+      );
+      if (flat !== NOT_FLAT) return flat;
+      return executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema);
     });
-    if (cached) return cached;
-  } catch (error) {
-    logger.warn('channel_list_cache_failed', { query: name, error: error instanceof Error ? error.message : error });
-  }
-
-  try {
-    return await executeCatalogAst(provider, ast, format, name);
+    conformToZeroShape(data, format as ZeroResultFormat);
+    return await decryptQueryResult(data, { queryName: name });
   } catch (error) {
     throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
   }
-}
-
-/** Execute a compiled catalog query on `provider` and return its rows in Zero's shape. */
-async function executeCatalogAst(
-  provider: typeof dbProvider,
-  ast: Parameters<typeof executePostgresQuery>[1],
-  format: Parameters<typeof executePostgresQuery>[2],
-  name: string,
-): Promise<unknown> {
-  const serverSchema = await fetchServerSchema();
-  const data = await provider.transaction(async (tx) => {
-    // Flat queries: build JSON in the app instead of json_agg in Postgres.
-    const flat = await executeFlatCatalogQuery(
-      // @ts-ignore - DBTransaction exposes query(sql, params) at runtime
-      tx.dbTransaction,
-      ast,
-      format,
-      serverSchema,
-      name,
-    );
-    if (flat !== NOT_FLAT) return flat;
-    return executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema);
-  });
-  conformToZeroShape(data, format as ZeroResultFormat);
-  return await decryptQueryResult(data, { queryName: name });
 }
 
 export async function handleQueriesFallback(request: Request): Promise<any> {
