@@ -13,6 +13,7 @@ import {
   toOpenRef,
   updateConversationArtifact,
 } from "../lib/conversation-artifacts.js";
+import { refreshSandboxLiveness } from "../lib/sandbox-liveness.js";
 
 const log = createLogger("conversation-artifacts-routes");
 
@@ -59,6 +60,9 @@ conversationArtifactsRouter.get("/", async (req: Request, res: Response): Promis
       return;
     }
     const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req), spacesUserIdOf(req));
+    // XYNE-66339: mark previews of sandboxes that ended without a destroy call
+    // (idle, deadline, lost pod) in the background; an open pane refetches.
+    void refreshSandboxLiveness(rows);
     res.json({ success: true, artifacts: rows.map(serialize) });
   } catch (err) {
     log.error("list failed", err);

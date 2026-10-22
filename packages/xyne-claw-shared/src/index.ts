@@ -195,3 +195,6 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 
 export * from "./reply-format/index.js";
+
+// XYNE-66339: sandbox liveness for claw-auth's ended-preview check.
+export { checkSandboxLiveness, MAX_LIVENESS_IDS, type SandboxLiveness } from "./tools/sandbox/liveness.js";

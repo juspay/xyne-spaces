@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
 // and Redis at import time, neither of which the ACL logic needs.
 vi.mock("../lib/users-jit.js", () => ({ orgIdForSpacesUser: vi.fn(async () => null) }));
 vi.mock("../lib/panel-signals.js", () => ({ signalArtifacts: vi.fn() }));
+// The liveness check (XYNE-66339) has its own tests; pass rows through here.
+vi.mock("../lib/sandbox-liveness.js", () => ({ refreshSandboxLiveness: vi.fn(async () => undefined) }));
 vi.mock("../lib/conversation-access.js", () => ({
   baseConversationId: (id: string | null | undefined) => (id ? id.split("__branch__")[0] : undefined),
   checkConversationAccess: vi.fn(async (conversationId: string, userId: string) => {
