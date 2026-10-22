@@ -7,6 +7,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
+import { resolveProjectInstructions } from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -975,6 +976,33 @@ export async function prepareRun(
           "[run] failed to load user agent instructions:",
           errMsg(err),
         );
+      }
+
+      // Appended AFTER the user's own instructions, so precedence runs
+      // agent prompt -> user per-agent instructions -> project -> message.
+      // Inside the daily_brief guard for the same reason: a brief can execute
+      // on a shared agent, and a project's instructions have no business
+      // reaching it.
+      // Every id this user's rows may be keyed under. A chat filed under their
+      // workspace-scoped Spaces id is still theirs, and matching the canonical
+      // id alone would silently skip the project's instructions.
+      const projectLookupIds = conversationId
+        ? [
+            ...new Set(
+              [
+                resolved.userId,
+                await spacesUserIdForClawUser(resolved.userId).catch(() => null),
+              ].filter((id): id is string => Boolean(id)),
+            ),
+          ]
+        : [];
+      const projectInstructions = conversationId
+        ? await resolveProjectInstructions(conversationId, projectLookupIds, agent.orgId)
+        : null;
+      if (projectInstructions) {
+        additionalInstructions = additionalInstructions
+          ? `${additionalInstructions}\n\n${projectInstructions}`
+          : projectInstructions;
       }
     }
 
