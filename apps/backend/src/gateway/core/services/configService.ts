@@ -15,7 +15,10 @@ interface StoredConfig {
 }
 
 // Saved beside the provider's own credentials schema, which drops keys it doesn't know.
-const ConfigInputSchema = z.object({ appName: z.string().trim().min(1).max(80).optional() });
+const ConfigInputSchema = z.object({
+  appName: z.string().trim().min(1).max(80).optional(),
+  description: z.string().trim().max(500).optional(),
+});
 
 /** One provider workspace per Spaces workspace, saved encrypted on a CONNECTION row in ExternalSource. */
 export class ConfigService {
@@ -36,7 +39,7 @@ export class ConfigService {
     input: unknown
   ): Promise<ProviderWorkspace> {
     const credentials = this.provider.credentialsSchema.parse(input);
-    const { appName } = ConfigInputSchema.parse(input);
+    const { appName, description } = ConfigInputSchema.parse(input);
     const workspace = await this.provider.validateCredentials(credentials);
     const name = this.provider.configSourceName(workspace.externalWorkspaceId);
 
@@ -63,6 +66,7 @@ export class ConfigService {
       await this.sources.update(existing.id, {
         credentials: encrypted,
         displayName: workspace.name,
+        description: description || null,
         isActive: true,
       });
     } else {
@@ -72,6 +76,7 @@ export class ConfigService {
         displayName: workspace.name,
         externalWorkspaceId: workspace.externalWorkspaceId,
         credentials: encrypted,
+        description: description || null,
         workspaceId,
         createdBy: userId,
       });
@@ -116,6 +121,7 @@ export class ConfigService {
       workspace: stored.workspace,
       credentials: this.provider.credentialsSchema.parse(stored.credentials),
       appName: stored.appName ?? null,
+      description: source.description,
     };
   }
 

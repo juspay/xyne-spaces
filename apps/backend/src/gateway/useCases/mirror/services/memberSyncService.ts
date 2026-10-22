@@ -1,4 +1,4 @@
-import { logger, repositories } from '../../../re-exports';
+import { db, logger, repositories } from '../../../re-exports';
 import type { BaseApi } from '../../../core/base/baseApi';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
@@ -6,7 +6,7 @@ import type { ProviderConfig, SpacesMemberChange } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import type { MirrorLink } from '../types';
 
-/** Additions sync both ways in every channel; removals only in private channels. */
+/** Additions sync both ways in every channel, apps included; removals only when both channels are private. */
 export class MemberSyncService {
   constructor(
     private readonly provider: BaseProvider,
@@ -45,7 +45,7 @@ export class MemberSyncService {
 
     if (change.type === 'added') {
       await api.inviteMembers(link.externalId, [externalUserId]);
-    } else if ((await api.getChannel(link.externalId)).isPrivate) {
+    } else if (await this.isPrivateOnBothSides(api, link)) {
       await api.removeMember(link.externalId, externalUserId);
     }
   }
@@ -66,10 +66,18 @@ export class MemberSyncService {
       await this.addMemberToSpaces(api, link, event.userId);
       return;
     }
-    if (!(await api.getChannel(link.externalId)).isPrivate) return;
+    if (!(await this.isPrivateOnBothSides(api, link))) return;
 
     const userId = await this.identity.findSpacesUserId(link.workspaceId, event.userId);
     if (userId) await repositories.channelParticipants.removeParticipant(link.spacesId, userId);
+  }
+
+  private async isPrivateOnBothSides(api: BaseApi, link: MirrorLink): Promise<boolean> {
+    const [external, spaces] = await Promise.all([
+      api.getChannel(link.externalId),
+      db.channel.findUnique({ where: { id: link.spacesId }, select: { visibility: true } }),
+    ]);
+    return external.isPrivate && spaces?.visibility === 'PRIVATE';
   }
 
   private async addMemberToSpaces(

@@ -69,11 +69,13 @@ export interface SlackSignInStatus {
 export interface SlackConnection {
   workspace: { externalWorkspaceId: string; name: string; botUserId: string; appId: string } | null;
   appName: string | null;
+  description: string | null;
   urls: { events: string; userSignInRedirect: string };
 }
 
 export interface SlackConnectionInput {
   appName: string;
+  description: string;
   botToken: string;
   signingSecret: string;
   clientId: string;

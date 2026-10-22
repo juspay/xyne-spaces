@@ -16,7 +16,7 @@ export class SourceRepository {
 
   async findActiveConfig(workspaceId: string, sourceType: string): Promise<ExternalSource | null> {
     return await db.externalSource.findFirst({
-      where: { workspaceId, sourceType, kind: 'CONNECTION', isActive: true },
+      where: { workspaceId, sourceType, recordType: 'CONNECTION', isActive: true },
     });
   }
 
@@ -54,16 +54,18 @@ export class SourceRepository {
     displayName: string;
     externalWorkspaceId: string;
     credentials: string;
+    description: string | null;
     workspaceId: string;
     createdBy: string;
   }): Promise<ExternalSource> {
     return await db.externalSource.create({
       data: {
-        kind: 'CONNECTION',
+        recordType: 'CONNECTION',
         name: data.name,
         sourceType: data.sourceType,
         displayName: data.displayName,
         credentials: data.credentials,
+        description: data.description,
         workspaceId: data.workspaceId,
         externalIdentifier: data.externalWorkspaceId,
         createdBy: data.createdBy,
@@ -73,7 +75,12 @@ export class SourceRepository {
 
   async update(
     id: string,
-    data: { credentials?: string; displayName?: string; isActive?: boolean }
+    data: {
+      credentials?: string;
+      displayName?: string;
+      description?: string | null;
+      isActive?: boolean;
+    }
   ): Promise<void> {
     await this.sources.update(id, data);
   }

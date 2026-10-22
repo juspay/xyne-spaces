@@ -75,16 +75,16 @@ A person signs in once per Spaces workspace (`GET /user/connect`, then the provi
 
 ## Data
 
-The gateway stores its rows in `ExternalSource`, with `kind` set. Every older row has `kind = null` and is left alone. A future use case uses the same columns under its own sourceType.
+The gateway stores its rows in `ExternalSource`, with `recordType` set. Every older row has `recordType = null` and is left alone. A future use case uses the same columns under its own sourceType.
 
-| `kind`       | sourceType        | One per                                                                              | Holds                                                                                                                            |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `CONNECTION` | `<id>-connection` | provider workspace (name `<id>-connection-<workspace id>`); every use case shares it | The encrypted credentials; `externalIdentifier` is the provider workspace                                                        |
-| `PAIR`       | `<id>-mirror`     | Mirror link (name `mirror-link-<connection id>-<channel id>`)                        | `parentId` → its `CONNECTION`, `externalIdentifier` (provider channel), `spacesId` (Spaces channel), `statusReason`, `createdBy` |
+| `recordType` | sourceType        | One per                                                                              | Holds                                                                                                                                                                               |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONNECTION` | `<id>-connection` | provider workspace (name `<id>-connection-<workspace id>`); every use case shares it | The encrypted credentials, the admin's `description`; `externalIdentifier` is the provider workspace                                                                                |
+| `PAIR`       | `<id>-mirror`     | Mirror link (name `mirror-link-<connection id>-<channel id>`)                        | `recordParentId` → its `CONNECTION`, `externalIdentifier` (provider channel), `spacesIdentifier` (Spaces channel), `recordState` (why it stopped, e.g. `CHANNEL_GONE`), `createdBy` |
 
 - PAIR rows go through `PairRepository`, scoped by the use case's sourceType suffix (`-mirror`); the use case builds each pair's unique name.
-- Query the gateway's rows by `kind` and sourceType, and never set `channelId`, `ownerUserId` or `boardId` on them, so older code that filters on those never sees them.
-- 1:1 is enforced by the database: the unique `name` allows one link per provider channel, and the unique `(spacesId, sourceType)` one per Spaces channel.
+- Query the gateway's rows by `recordType` and sourceType. A PAIR also sets `channelId` (the same Spaces channel); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
+- One link per provider channel: the unique `name`. One link per Spaces channel: links are made only on approval, one request per channel can be pending, and approval checks again. `(workspaceId, spacesIdentifier)` is indexed, since every Spaces message checks it.
 - The message map stays in `ExternalMessage`, under the channel's self-serve migration source (`buildMessageSource()`), so a migration and Mirror each skip what the other copied. Older migrations' rows (`legacyMessageSourceNames()`) are read too.
 
 ## Jobs

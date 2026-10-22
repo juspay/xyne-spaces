@@ -43,6 +43,7 @@ export interface ProviderConfig<TCredentials = unknown> {
   workspace: ProviderWorkspace;
   credentials: TCredentials;
   appName: string | null;
+  description: string | null;
 }
 
 /** The ExternalSource row that scopes a link's message map. */

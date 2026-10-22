@@ -14,6 +14,7 @@ export class ConfigController {
     res.json({
       workspace: config?.workspace ?? null,
       appName: config?.appName ?? null,
+      description: config?.description ?? null,
       urls: { events: `${base}/events`, userSignInRedirect: `${base}/user/callback` },
     });
   });

@@ -2893,14 +2893,14 @@ model ExternalSource {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  // Gateway (Xyne Mirror): these columns, the unique and the parentId index; null on every older row
-  kind            String?
-  parentId        String?
-  spacesId        String?
-  statusReason    String?
+  // Gateway (Xyne Mirror): these columns and the spacesIdentifier index; null on every older row
+  recordType      String?
+  recordParentId  String?
+  recordState     String?
+  spacesIdentifier String?
+  description     String?
   createdBy       String?
 
-  @@unique([spacesId, sourceType])
   @@index([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
@@ -2908,7 +2908,7 @@ model ExternalSource {
   @@index([channelId])
   @@index([externalIdentifier])
   @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
-  @@index([parentId])
+  @@index([workspaceId, spacesIdentifier])
   @@map("external_sources")
   @@schema("workflow")
 }

@@ -22,11 +22,11 @@ function toPair(row: ExternalSource): Pair {
     id: row.id,
     workspaceId: row.workspaceId,
     provider: providerOf(row.sourceType),
-    connectionId: row.parentId ?? '',
+    connectionId: row.recordParentId ?? '',
     externalId: row.externalIdentifier ?? '',
-    spacesId: row.spacesId ?? '',
+    spacesId: row.spacesIdentifier ?? '',
     status: row.isActive ? 'ACTIVE' : 'PAUSED',
-    statusReason: row.statusReason,
+    statusReason: row.recordState,
     createdBy: row.createdBy ?? '',
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -51,7 +51,9 @@ export class PairRepository {
   }
 
   async findBySpacesId(spacesId: string): Promise<Pair | null> {
-    const row = await db.externalSource.findFirst({ where: { spacesId, ...this.scope } });
+    const row = await db.externalSource.findFirst({
+      where: { spacesIdentifier: spacesId, ...this.scope },
+    });
     return row && toPair(row);
   }
 
@@ -59,14 +61,14 @@ export class PairRepository {
   async listActiveSpacesIds(workspaceId: string): Promise<string[]> {
     const rows = await db.externalSource.findMany({
       where: { workspaceId, isActive: true, ...this.scope },
-      select: { spacesId: true },
+      select: { spacesIdentifier: true },
     });
-    return rows.flatMap((row) => (row.spacesId ? [row.spacesId] : []));
+    return rows.flatMap((row) => (row.spacesIdentifier ? [row.spacesIdentifier] : []));
   }
 
   async listByConnection(connectionId: string): Promise<Pair[]> {
     const rows = await db.externalSource.findMany({
-      where: { parentId: connectionId, ...this.scope },
+      where: { recordParentId: connectionId, ...this.scope },
     });
     return rows.map(toPair);
   }
@@ -74,15 +76,16 @@ export class PairRepository {
   async create(data: CreatePairInput): Promise<Pair> {
     const row = await db.externalSource.create({
       data: {
-        kind: 'PAIR',
+        recordType: 'PAIR',
         name: data.name,
         sourceType: data.sourceType,
         displayName: data.displayName,
         credentials: encrypt('{}'), // a PAIR uses its CONNECTION's credentials
         workspaceId: data.workspaceId,
-        parentId: data.connectionId,
+        recordParentId: data.connectionId,
         externalIdentifier: data.externalId,
-        spacesId: data.spacesId,
+        spacesIdentifier: data.spacesId,
+        channelId: data.spacesId,
         createdBy: data.createdBy,
       },
     });
@@ -96,15 +99,15 @@ export class PairRepository {
   ): Promise<Pair> {
     const row = await db.externalSource.update({
       where: { id },
-      data: { isActive: status === 'ACTIVE', statusReason },
+      data: { isActive: status === 'ACTIVE', recordState: statusReason },
     });
     return toPair(row);
   }
 
   async pauseByConnection(connectionId: string, statusReason: GatewayErrorCode): Promise<void> {
     await db.externalSource.updateMany({
-      where: { parentId: connectionId, ...this.scope, isActive: true },
-      data: { isActive: false, statusReason },
+      where: { recordParentId: connectionId, ...this.scope, isActive: true },
+      data: { isActive: false, recordState: statusReason },
     });
   }
 
@@ -114,7 +117,7 @@ export class PairRepository {
 
   private get scope() {
     return {
-      kind: 'PAIR',
+      recordType: 'PAIR',
       ...(this.sourceTypeSuffix ? { sourceType: { endsWith: this.sourceTypeSuffix } } : {}),
     };
   }

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import Button from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import Input from '../../components/ui/Input/Input';
+import Textarea from '../../components/ui/Textarea/Textarea';
 import { useClipboard } from '../../hooks/useClipboard';
 import { useRefreshSlackMirror, useSlackConnection } from '../../hooks/useSlackMirror';
 import { useSelf } from '../../hooks/useUsers';
@@ -85,6 +86,9 @@ function ConnectedCard(props: {
           Connected to {workspace.name} ({workspace.externalWorkspaceId})
         </p>
         <p className='text-sm text-muted-foreground'>App: {connection.appName ?? 'unnamed'}</p>
+        {connection.description && (
+          <p className='text-sm text-muted-foreground'>{connection.description}</p>
+        )}
       </div>
       <div className='flex gap-2'>
         <Button size='sm' variant='outline' trackId='slack_connection_replace' onClick={onReplace}>
@@ -126,6 +130,7 @@ function ConnectionForm(props: {
   const { connection, onCancel, onSaved } = props;
   const refresh = useRefreshSlackMirror();
   const [form, setForm] = useState({ ...EMPTY_FORM, appName: connection.appName ?? '' });
+  const [description, setDescription] = useState(connection.description ?? '');
   const ready = Object.values(form).every(value => !!value.trim());
   const set =
     (key: keyof typeof EMPTY_FORM): ((event: ChangeEvent<HTMLInputElement>) => void) =>
@@ -136,6 +141,7 @@ function ConnectionForm(props: {
     try {
       await saveSlackConnection({
         appName: form.appName.trim(),
+        description: description.trim(),
         botToken: form.botToken.trim(),
         signingSecret: form.signingSecret.trim(),
         clientId: form.clientId.trim(),
@@ -154,6 +160,16 @@ function ConnectionForm(props: {
     <div className='rounded-lg border border-border bg-card p-4 space-y-3'>
       <Field label='Slack app name' hint='Shown in the instructions people see, e.g. Xyne Mirror.'>
         {id => <Input id={id} value={form.appName} onChange={set('appName')} maxLength={80} />}
+      </Field>
+      <Field label='Description' hint='Optional. What this app is for, for other admins.'>
+        {id => (
+          <Textarea
+            id={id}
+            value={description}
+            onChange={event => setDescription(event.target.value)}
+            maxLength={500}
+          />
+        )}
       </Field>
       <Field label='Bot token' hint='Starts with xoxb-. OAuth & Permissions in your Slack app.'>
         {id => (
