@@ -1025,6 +1025,37 @@ export const mutators = defineMutators({
         });
       },
     ),
+    updateExpandChannelEmailsByDefault: defineMutator(
+      z.object({
+        channelId: z.string(),
+        expand: z.boolean(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { channelId, expand, updatedAt } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only update this setting for default channels');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (channel.createdBy !== ctx.userID && (!participant || participant.role !== ChannelRole.ADMIN)) {
+          throw new Error('Only channel admins or the owner can change how channel emails are shown');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          expandChannelEmailsByDefault: expand,
+          // Bump updatedAt so clients' incremental channel sync (updatedAt > watermark) picks it up.
+          updatedAt,
+        });
+      },
+    ),
     updateCallSummaryPrompt: defineMutator(
       z.object({
         channelId: z.string(),

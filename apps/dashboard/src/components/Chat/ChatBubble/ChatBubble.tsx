@@ -1375,6 +1375,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         <>
           <MessageBubble
             message={message}
+            expandChannelEmailsByDefault={channel?.expandChannelEmailsByDefault === true}
             showAvatar={showAvatar}
             isPinned={conversation?.pinned || false}
             isBookmarked={isBookmarked}

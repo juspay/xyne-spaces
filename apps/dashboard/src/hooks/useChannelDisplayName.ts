@@ -40,6 +40,7 @@ export const useChannelDisplayName = (
     addUserPolicy: null,
     isArchived: false,
     showTicketsTabTicketsInChat: true,
+    expandChannelEmailsByDefault: null,
     callSummaryPrompt: null,
     workspaceId: workspaceId,
     connectId: null,

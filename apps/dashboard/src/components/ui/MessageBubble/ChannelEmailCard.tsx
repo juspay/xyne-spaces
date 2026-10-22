@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Mail } from 'lucide-react';
 import { EmailBodyRenderer } from '../../xyne-desk/EmailBody/EmailBodyRenderer';
 import { parseFromField } from '../../xyne-desk/EmailComposer/helpers';
@@ -11,6 +11,7 @@ interface ChannelEmailCardProps {
   bcc?: string[];
   body: string;
   emailId: string;
+  expandByDefault?: boolean;
   attachments?: ReadonlyArray<{
     id: string;
     metadata?: unknown;
@@ -36,8 +37,14 @@ export const ChannelEmailCard: React.FC<ChannelEmailCardProps> = ({
   body,
   emailId,
   attachments = [],
+  expandByDefault = false,
 }) => {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(expandByDefault);
+
+  // When an admin flips the channel setting, re-apply the new default to cards already on screen.
+  useEffect(() => {
+    setExpanded(expandByDefault);
+  }, [expandByDefault]);
   const parsedFrom = parseFromField(from);
   const fromDisplay = parsedFrom.name || parsedFrom.email || from;
   const fromValue = parsedFrom.email ? `${parsedFrom.name} <${parsedFrom.email}>` : parsedFrom.name;
@@ -49,6 +56,7 @@ export const ChannelEmailCard: React.FC<ChannelEmailCardProps> = ({
         onClick={() => setExpanded(prev => !prev)}
         data-track-category='MESSAGE'
         data-track-name='TOGGLE_EMAIL_CARD'
+        aria-expanded={expanded}
         className='flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors'
       >
         <Mail className='h-4 w-4 shrink-0 text-muted-foreground' />

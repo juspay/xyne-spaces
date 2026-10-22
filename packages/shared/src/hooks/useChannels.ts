@@ -126,7 +126,8 @@ export const useChannelLookup = (channelId: string): ChannelLookup => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
+      a?.expandChannelEmailsByDefault === b?.expandChannelEmailsByDefault,
   );
   const visibleChannel = useSelector(
     stateMachineActor,
@@ -138,7 +139,8 @@ export const useChannelLookup = (channelId: string): ChannelLookup => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
+      a?.expandChannelEmailsByDefault === b?.expandChannelEmailsByDefault,
   );
   const cachedChannel = channel || visibleChannel;
 
