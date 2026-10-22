@@ -18,6 +18,7 @@ import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser, useUsersById } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
@@ -222,6 +223,7 @@ const DmListItemComponent = ({
               <p className='text-[16px] tracking-[-0.32px] text-foreground font-medium min-w-0 truncate'>
                 {displayName}
               </p>
+              {isDM && <GuestLabel role={targetUser?.role} />}
               {isDM && (
                 <StatusIndicator
                   statusEmoji={targetUser?.statusEmoji}
@@ -345,6 +347,7 @@ const DmListItemComponent = ({
             )}
           >
             <span className='font-semibold truncate min-w-0'>{displayName}</span>
+            {isDM && <GuestLabel role={targetUser?.role} />}
             {isDM && (
               <StatusIndicator
                 statusEmoji={targetUser?.statusEmoji}

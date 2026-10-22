@@ -5,6 +5,7 @@ import { useChannelSearch, useUserGroupSearch } from '@xyne/shared/hooks';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
 import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { guestSuffix } from '../GuestLabel';
 import Avatar from '../Avatar/Avatar';
 
 const DEFAULT_USER_LIMIT = 20;
@@ -61,7 +62,7 @@ export function UnifiedParticipantSearch({
       .map(user => ({
         ...user,
         label: getUserDisplayName(user),
-        subtitle: user.email ?? '',
+        subtitle: `${user.email ?? ''}${guestSuffix(user.role)}`,
         value: `user:${user.id}`,
         icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
       }));

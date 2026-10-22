@@ -33,6 +33,7 @@ import { PhoneDefault } from '@xyne/icons';
 import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { guestSuffix } from '../../ui/GuestLabel';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -785,7 +786,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               defaults.push({
                 leftSlot: <Avatar userId={selfUser.id} size='sm' />,
                 label: getForwardUserLabel(selfUser),
-                description: selfUser.email,
+                description: `${selfUser.email ?? ''}${guestSuffix(selfUser.role)}`,
                 value: selfUser.id,
               });
             }
@@ -804,7 +805,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             defaults.push({
               leftSlot: <Avatar userId={otherUser.id} size='sm' />,
               label: getUserDisplayName(otherUser),
-              description: otherUser.email,
+              description: `${otherUser.email ?? ''}${guestSuffix(otherUser.role)}`,
               value: otherUser.id,
             });
           }
@@ -880,7 +881,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             .map(currUser => ({
               leftSlot: <Avatar userId={currUser.id} size='sm' />,
               label: getForwardUserLabel(currUser),
-              description: currUser.email,
+              description: `${currUser.email ?? ''}${guestSuffix(currUser.role)}`,
               value: currUser.id,
             }));
 

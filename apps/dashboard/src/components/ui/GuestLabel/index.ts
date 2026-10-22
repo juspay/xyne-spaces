@@ -1,1 +1,1 @@
-export { GuestLabel } from './GuestLabel';
+export { GuestLabel, guestSuffix } from './GuestLabel';

@@ -54,6 +54,7 @@ import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/C
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
@@ -513,6 +514,7 @@ const ConversationHeader = ({
                 <ChannelIcon channel={channel} />
               </span>
               <span className='visual-regression-hide truncate'>{displayName}</span>
+              {isDM && <GuestLabel role={dmUser?.role} />}
               {isDM && (
                 <StatusIndicator
                   statusEmoji={dmUser?.statusEmoji}
