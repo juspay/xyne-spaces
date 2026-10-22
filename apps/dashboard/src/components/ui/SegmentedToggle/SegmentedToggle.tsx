@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { cn } from '../../../utils/classNames';
 
 export type SegmentedToggleOption<T extends string> = {
@@ -19,6 +19,9 @@ interface SegmentedToggleProps<T extends string> {
   tone?: keyof typeof TONE;
   trackCategory?: string;
   trackPrefix?: string;
+  /** Mount with the pill on this option and slide it to `value`, e.g. for a value that just changed
+   *  in a list row that was remounted. Otherwise the pill mounts in place. */
+  animateFrom?: T;
 }
 
 export function SegmentedToggle<T extends string>({
@@ -29,6 +32,7 @@ export function SegmentedToggle<T extends string>({
   tone = 'accent',
   trackCategory,
   trackPrefix,
+  animateFrom,
 }: SegmentedToggleProps<T>): React.ReactElement {
   const toneClass = TONE[tone];
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,9 +41,13 @@ export function SegmentedToggle<T extends string>({
     width: 0,
   });
 
+  // No transition until the pill has been placed once, so it never slides in from the left edge.
+  const [animated, setAnimated] = useState(false);
+  const target = animated ? value : (animateFrom ?? value);
+
   const updatePill = useCallback(() => {
     if (!containerRef.current) return;
-    const activeIndex = options.findIndex(o => o.value === value);
+    const activeIndex = options.findIndex(o => o.value === target);
     if (activeIndex < 0) return;
     const buttons = containerRef.current.querySelectorAll<HTMLButtonElement>(
       '[data-slot="segmented-toggle-item"]',
@@ -47,11 +55,16 @@ export function SegmentedToggle<T extends string>({
     const btn = buttons[activeIndex];
     if (!btn) return;
     setPillStyle({ left: btn.offsetLeft, width: btn.offsetWidth });
-  }, [options, value]);
+  }, [options, target]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     updatePill();
   }, [updatePill]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setAnimated(true));
+    return (): void => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     const observer = new ResizeObserver(() => updatePill());
@@ -71,7 +84,8 @@ export function SegmentedToggle<T extends string>({
       {/* Inline style required: pill position is dynamically measured from DOM via ResizeObserver */}
       <div
         className={cn(
-          'absolute top-0.5 bottom-0.5 rounded-full transition-[left,width] duration-200 ease-in-out',
+          'absolute top-0.5 bottom-0.5 rounded-full',
+          animated && 'transition-[left,width] duration-200 ease-in-out',
           toneClass.pill,
         )}
         style={{ left: pillStyle.left, width: pillStyle.width }}

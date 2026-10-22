@@ -391,3 +391,49 @@ describe("spaces-send-ticket-email (queue-time)", () => {
     expect(err).toBeNull();
   });
 });
+
+describe("bulk ticket batch size (queue-time)", () => {
+  const updates = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ ticketId: `t-${i + 1}`, status: "CANCELLED" }));
+  const creates = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ title: `Ticket ${i + 1}`, description: "Body" }));
+  const createParams = { projectId: "proj_1", boardId: "board_1", channelId: ticketParams.channelId };
+
+  it("refuses an update batch over the cap before it reaches an approval card", async () => {
+    const err = await validateWriteAction("xyne-spaces", "spaces-update-bulk-tickets", { tickets: updates(123) }, CREDS);
+    expect(err).toMatch(/123 > 100/);
+    expect(err).toMatch(/split/i);
+  });
+
+  it("lets an update batch at the cap through", async () => {
+    const err = await validateWriteAction("xyne-spaces", "spaces-update-bulk-tickets", { tickets: updates(100) }, CREDS);
+    expect(err).toBeNull();
+  });
+
+  it("refuses an empty update batch", async () => {
+    const err = await validateWriteAction("xyne-spaces", "spaces-update-bulk-tickets", { tickets: [] }, CREDS);
+    expect(err).toMatch(/at least one ticket/);
+  });
+
+  it("refuses a create batch over the cap before looking up any board", async () => {
+    const err = await validateWriteAction(
+      "xyne-spaces",
+      "spaces-create-bulk-tickets",
+      { ...createParams, tickets: creates(101) },
+      CREDS,
+    );
+    expect(err).toMatch(/101 > 100/);
+    expect(interact).not.toHaveBeenCalled();
+    expect(spacesFetch).not.toHaveBeenCalled();
+  });
+
+  it("lets a create batch at the cap through", async () => {
+    const err = await validateWriteAction(
+      "xyne-spaces",
+      "spaces-create-bulk-tickets",
+      { ...createParams, tickets: creates(100) },
+      CREDS,
+    );
+    expect(err).toBeNull();
+  });
+});

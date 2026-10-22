@@ -32,6 +32,8 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 import { prefixWorkspacePath } from '../../lib/workspacePath';
+import { isSdlcResourceKind } from '../../routes/SdlcScreen/sdlcFrameMessages';
+import { refreshSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -813,6 +815,10 @@ export const NotificationHandler: React.FC = () => {
   const clientCommandListenerRef = useRef((command: ClientCommand): void => {
     runClientCommandRef.current(command);
   });
+  // Main-lane views refetch here; the SDLC frame has no socket, so it hears it from us.
+  const sdlcResourceChangedListenerRef = useRef(({ kind }: { kind?: unknown }): void => {
+    if (isSdlcResourceKind(kind)) refreshSdlcResource(kind);
+  });
 
   useEffect(() => {
     handleNotificationRef.current = handleNotification;
@@ -829,6 +835,7 @@ export const NotificationHandler: React.FC = () => {
           // Set up notification listeners after connection is established
           websocketService.on('notification_received', notificationReceivedListenerRef.current);
           websocketService.on('client_command', clientCommandListenerRef.current);
+          websocketService.on('sdlc_resource_changed', sdlcResourceChangedListenerRef.current);
 
           // Setup presence listeners after socket is connected
           setupPresenceListeners(user.id, websocketService);
@@ -854,6 +861,10 @@ export const NotificationHandler: React.FC = () => {
           notificationReceivedListenerRef.current,
         );
         websocketService.removeListener('client_command', clientCommandListenerRef.current);
+        websocketService.removeListener(
+          'sdlc_resource_changed',
+          sdlcResourceChangedListenerRef.current,
+        );
       }
 
       websocketService.disconnect();

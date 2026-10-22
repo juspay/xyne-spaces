@@ -21,6 +21,7 @@ export const useClawAuthAgents = (): UseQueryResult<Agent[], Error> => {
     queryKey: clawAuthAgentsKey(user?.id),
     queryFn: () => listClawAuthAgents(user!.id),
     enabled: !!user?.id,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 };

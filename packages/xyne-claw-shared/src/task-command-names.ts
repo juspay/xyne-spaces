@@ -1,4 +1,4 @@
-export const TASK_COMMAND_NAMES = ["explainer", "record-skill", "design", "dashboard", "spec", "review", "learn"] as const;
+export const TASK_COMMAND_NAMES = ["explainer", "record-skill", "design", "dashboard", "spec", "review", "learn", "brand"] as const;
 
 export type TaskCommandName = (typeof TASK_COMMAND_NAMES)[number];
 
@@ -6,6 +6,9 @@ export const IMMEDIATE_TASK_COMMAND_RE = new RegExp(`^\\/(?:${TASK_COMMAND_NAMES
 
 export const RECORD_SKILL_COMMAND_RE = /^\/record-skill(?:\s|$)/i;
 
+/** Commands that may run in a user's LOCAL sandbox. `/brand` is deliberately
+ *  absent: extracting a brand needs the remote `browser` sandbox profile to
+ *  open the site and read computed styles. */
 export const LOCAL_SANDBOX_COMMANDS = ["design", "dashboard", "spec", "review", "learn"] as const;
 
 export type LocalSandboxCommandName = (typeof LOCAL_SANDBOX_COMMANDS)[number];

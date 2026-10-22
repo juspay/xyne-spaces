@@ -6,7 +6,8 @@ import { findOrCreateConversation } from '@/apps/core/conversationUtils';
 import { createTicketWithConversation } from '@/apps/core/ticketutils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
-import { MessageType, AppIncomingWebhookAction, validateFlowDefinition } from '@xyne/shared';
+import { MessageType, AppIncomingWebhookAction, validateFlowDefinition, flowFallbackLabel } from '@xyne/shared';
+import { encodeHtmlAttr } from '@/utils/contentUtils';
 import type { FlowDefinition } from '@xyne/shared';
 import { config } from '@/config/env';
 import {
@@ -82,7 +83,7 @@ function encodeFlowContent(flow: FlowDefinition): string | null {
   }
 
   const escapedJSON = JSON.stringify(result.data).replace(/"/g, '&quot;');
-  return `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
+  return `<div data-flow-json="${escapedJSON}">${encodeHtmlAttr(flowFallbackLabel(result.data))}</div>`;
 }
 
 /**

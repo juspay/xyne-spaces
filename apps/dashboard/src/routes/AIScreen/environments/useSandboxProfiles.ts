@@ -16,6 +16,8 @@ export function useSandboxProfiles(refreshKey?: string): UseQueryResult<SdlcSand
     queryKey: [...SANDBOX_PROFILES_KEY, refreshKey ?? null],
     queryFn: async () =>
       (await apiInstance.get<SdlcSandboxProfileList>('/sdlc/sandbox-profiles')).data,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 

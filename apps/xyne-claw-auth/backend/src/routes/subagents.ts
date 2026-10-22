@@ -33,8 +33,13 @@ import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import {
   ValidationError,
   validateSubagentInput,
+  nextChecksVersion,
 } from "../lib/subagent-resolver.js";
-import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, SUBAGENT_TEMPLATES, getSubagentTemplate, loadTemplateSamples, validateDecideQuestions } from "xyne-claw-shared";
+import { evalChecksViaClaw, tryChecksViaClaw } from "../services/xorTryClient.js";
+import { runRegressionGate } from "../lib/subagent-eval-gate.js";
+import type { DecideQuestion } from "xyne-claw-shared";
+import type { SubagentSample } from "../lib/subagent-resolver.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
@@ -45,6 +50,24 @@ const router = Router();
 const SUBAGENT_MCP_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const isValidInstanceSlug = (v: unknown): v is string =>
   typeof v === "string" && SUBAGENT_MCP_SLUG_RE.test(v);
+
+const jsonOrNull = (v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull =>
+  v === null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
+
+function fastColumns(
+  v: Awaited<ReturnType<typeof validateSubagentInput>>,
+  existing: { checks: unknown; checksVersion: number } | null,
+) {
+  const checksVersion = nextChecksVersion(existing, v.checks);
+  return {
+    ...(v.fast !== undefined ? { fast: v.fast } : {}),
+    ...(v.checks !== undefined ? { checks: jsonOrNull(v.checks) } : {}),
+    ...(checksVersion !== undefined ? { checksVersion } : {}),
+    ...(v.samples !== undefined ? { samples: jsonOrNull(v.samples) } : {}),
+    ...(v.model !== undefined ? { model: v.model } : {}),
+    ...(v.budget !== undefined ? { budget: jsonOrNull(v.budget) } : {}),
+  };
+}
 
 // ── Response shapes ──────────────────────────────────────────────────────
 
@@ -88,6 +111,13 @@ function dbRowAsListItem(
      *  agent-pinned instances. Editor UI reads this to render per-server
      *  instance dropdowns. */
     mcpInstanceMap: row.mcpInstanceMap ?? {},
+    fast: row.fast,
+    checks: row.checks ?? [],
+    checksVersion: row.checksVersion,
+    samples: row.samples ?? [],
+    model: row.model,
+    budget: row.budget ?? {},
+    evalReport: row.evalReport ?? null,
     enabled: row.enabled,
     createdByUserId: row.createdByUserId,
     // Resolved display name/email of the creator (createdByUserId is a bare
@@ -143,12 +173,76 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const creatorById = new Map(creators.map((u) => [u.id, u]));
   const items = [
     ...SUBAGENT_DEFINITIONS.map(builtinAsListItem),
-    ...customs.map((c) =>
-      dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null),
-    ),
+    ...customs.map((c) => {
+      const item = dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null);
+      return { ...item, samples: [], sampleCount: Array.isArray(c.samples) ? c.samples.length : 0, evalReport: null };
+    }),
   ];
   ok(res, items);
 }));
+
+// ── GET /templates — cloneable fast subagent templates ───────────────────
+router.get("/templates", asyncHandler(async (_req: Request, res: Response) => {
+  const items = await Promise.all(
+    SUBAGENT_TEMPLATES.map(async (t) => ({
+      id: t.id,
+      title: t.title,
+      summary: t.summary,
+      requires: t.requires,
+      defaultName: t.defaults.name,
+      fast: t.defaults.fast,
+      tools: t.defaults.tools.custom,
+      checks: t.defaults.checks.length,
+      samples: (await loadTemplateSamples(t)).length,
+      screenshotSamples: Boolean(t.imageSamples),
+    })),
+  );
+  ok(res, items);
+}));
+
+// ── POST /templates/:id/clone — create a subagent from a template ────────
+router.post("/templates/:id/clone", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const template = getSubagentTemplate(typeof req.params.id === "string" ? req.params.id : "");
+  if (!template) throw notFound("template not found");
+  const requested = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim() : null;
+  const name = requested ?? (await freeName(template.defaults.name, orgId));
+  const samples = await loadTemplateSamples(template);
+  const validated = await validateSubagentInput(
+    prisma,
+    { ...template.defaults, name, samples, tools: template.defaults.tools },
+    { isCreate: true, orgId },
+  ).catch((err) => {
+    if (err instanceof ValidationError) throw new HttpError(400, err.message, undefined, { field: err.field });
+    throw err;
+  });
+  const created = await subagentDefinitionRepository.create({
+    name: validated.name,
+    description: validated.description,
+    progressLabels: validated.progressLabels,
+    systemPrompt: validated.systemPrompt,
+    paramName: validated.paramName,
+    paramDescription: validated.paramDescription,
+    tools: validated.tools as object,
+    ...fastColumns(validated, null),
+    createdByUserId: requesterId,
+    org: { connect: { id: orgId } },
+  });
+  log.info(`[subagents/clone] template=${template.id} name=${created.name} samples=${samples.length} userId=${requesterId}`);
+  res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
+}));
+
+async function freeName(base: string, orgId: string): Promise<string> {
+  for (let i = 1; i <= 20; i++) {
+    const candidate = i === 1 ? base : `${base}-${i}`;
+    const taken = await prisma.subagentDefinition.findUnique({ where: { orgId_name: { orgId, name: candidate } }, select: { id: true } });
+    if (!taken) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
 
 // ── GET /:name — single subagent ─────────────────────────────────────────
 router.get("/:name", asyncHandler(async (req: Request, res: Response) => {
@@ -203,6 +297,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     ...(Object.keys(validated.mcpInstanceMap).length > 0
       ? { mcpInstanceMap: validated.mcpInstanceMap as object }
       : {}),
+    ...fastColumns(validated, null),
     createdByUserId: requesterId,
     // Phase-2: stamp the creating org so no null-org subagent is minted (which
     // would block the future NOT-NULL flip).
@@ -217,6 +312,106 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   });
 
   res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
+}));
+
+const storedChecks = (v: unknown): DecideQuestion[] | null => (Array.isArray(v) && v.length > 0 ? (v as DecideQuestion[]) : null);
+const storedSamples = (v: unknown): SubagentSample[] => (Array.isArray(v) ? (v as SubagentSample[]) : []);
+const MODEL_ID_RE = /^[a-zA-Z0-9._:/-]{1,100}$/;
+
+function parseModels(raw: unknown, min: number): string[] | undefined {
+  if (raw === undefined || raw === null) {
+    if (min > 0) throw badRequest(`compare must list at least ${min} model id`);
+    return undefined;
+  }
+  if (!Array.isArray(raw) || raw.length < min || raw.length > 3 || !raw.every((m) => typeof m === "string" && MODEL_ID_RE.test(m))) {
+    throw badRequest(`compare must be ${Math.max(min, 1)}–3 model ids`);
+  }
+  return raw as string[];
+}
+
+function parseVariants(raw: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([, v]) => Array.isArray(v))
+      .map(([k, v]) => [k, (v as unknown[]).filter((x): x is string => typeof x === "string" && x.trim().length > 0).slice(0, 4)]),
+  );
+}
+
+// ── POST /checks/eval-all — score every subagent's checks on new models (admin) ─
+router.post("/checks/eval-all", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  if (!(await isClawAdmin(requesterId))) throw forbidden("Only claw admins can run evals across all subagents");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const compare = parseModels((req.body as Record<string, unknown>)?.["compare"], 1)!;
+  const rows = await prisma.subagentDefinition.findMany({
+    where: { orgId, enabled: true, NOT: [{ checks: { equals: Prisma.DbNull } }, { samples: { equals: Prisma.DbNull } }] },
+    select: { id: true, name: true, checks: true, samples: true, checksVersion: true },
+    take: 50,
+  });
+  const results = [];
+  for (const row of rows) {
+    const checks = storedChecks(row.checks);
+    const samples = storedSamples(row.samples);
+    if (!checks || samples.length === 0) continue;
+    const r = await evalChecksViaClaw({ checks, samples, compare });
+    if (!r.ok) {
+      results.push({ name: row.name, error: r.error });
+      continue;
+    }
+    await prisma.subagentDefinition.update({
+      where: { id: row.id },
+      data: { evalReport: { ...r, checksVersion: row.checksVersion, ranBy: requesterId } as unknown as Prisma.InputJsonValue },
+    });
+    results.push({
+      name: row.name,
+      overall: r.report.models.map((m) => ({ model: m.model, accuracy: m.overall.accuracy, unsureRate: m.overall.unsureRate, confidentWrong: m.overall.confidentWrong })),
+      regressions: r.regressions.flatMap((x) => x.regressions.map((g) => ({ model: x.model, ...g }))),
+    });
+  }
+  ok(res, { compare, subagents: results });
+}));
+
+// ── POST /:name/checks/eval — score this subagent's checks on its samples ───
+router.post("/:name/checks/eval", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!existing) throw notFound("subagent not found");
+  if (!(await canEditSubagent(existing, requesterId))) throw forbidden("Only the owner, contributors, or admins can run this subagent's evals");
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const checks = storedChecks(existing.checks);
+  const samples = storedSamples(existing.samples);
+  if (!checks) throw badRequest("this subagent has no checks yet");
+  if (samples.length === 0) throw badRequest("save at least one sample from Try it before running evals");
+  const compare = parseModels(body["compare"], 0);
+  const variants = parseVariants(body["variants"]);
+  const r = await evalChecksViaClaw({ checks, samples, ...(compare ? { compare } : {}), ...(variants ? { variants } : {}) });
+  if (!r.ok) throw new HttpError(r.status, r.error);
+  const evalReport = { ...r, checksVersion: existing.checksVersion, ranBy: requesterId };
+  await prisma.subagentDefinition.update({ where: { id: existing.id }, data: { evalReport: evalReport as unknown as Prisma.InputJsonValue } });
+  ok(res, evalReport);
+}));
+
+// ── POST /checks/try — run one xor decision on a pasted sample ──────────
+router.post("/checks/try", asyncHandler(async (req: Request, res: Response) => {
+  if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
+  const body = (req.body ?? {}) as { checks?: unknown; text?: unknown; image?: unknown; context?: unknown };
+  const v = validateDecideQuestions(body.checks);
+  if ("error" in v) throw new HttpError(400, `checks: ${v.error}`, undefined, { field: "checks" });
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const image = typeof body.image === "string" ? body.image : "";
+  if (!text && !image) throw badRequest("paste some text or add a screenshot to try");
+  const result = await tryChecksViaClaw({
+    questions: v.questions,
+    item: { ...(text ? { text } : {}), ...(image ? { image } : {}) },
+    ...(typeof body.context === "string" && body.context.trim() ? { context: body.context } : {}),
+  });
+  if (!result.ok) throw new HttpError(result.status, result.error);
+  ok(res, { answers: result.answers, unavailable: result.unavailable, ms: result.ms });
 }));
 
 // ── PUT /:name — update (owner OR admin OR EDITOR share) ─────────────────
@@ -255,6 +450,24 @@ router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
     throw err;
   });
 
+  if ((req.body as Record<string, unknown>)?.["force"] !== true) {
+    const gate = await runRegressionGate({
+      oldChecks: storedChecks(existing.checks),
+      newChecks: validated.checks,
+      samples: validated.samples !== undefined ? validated.samples ?? [] : storedSamples(existing.samples),
+      evaluate: (r) => evalChecksViaClaw(r),
+    });
+    if (gate.blocked) {
+      log.info(`[subagents/update] eval gate blocked name=${name} ${gate.from}% → ${gate.to}%`);
+      throw new HttpError(
+        409,
+        `The new checks score worse on this subagent's samples (${gate.from}% → ${gate.to}% confident and right). Rephrase them, or save anyway.`,
+        "EVAL_REGRESSION",
+        { regression: gate },
+      );
+    }
+  }
+
   const updated = await subagentDefinitionRepository.update(name, existing.orgId, {
     description: validated.description,
     progressLabels: validated.progressLabels,
@@ -267,6 +480,7 @@ router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
     mcpInstanceMap: Object.keys(validated.mcpInstanceMap).length > 0
       ? (validated.mcpInstanceMap as Prisma.InputJsonValue)
       : Prisma.JsonNull,
+    ...fastColumns(validated, existing),
   });
 
   await subagentDefinitionRepository.replaceSkills(updated.id, validated.skillIds);

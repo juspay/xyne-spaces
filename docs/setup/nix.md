@@ -39,6 +39,69 @@ libraries, generates local secrets, and generates both Prisma clients. Backend a
 dashboard recipes also run preparation before launching. After changing the Nix
 environment, exit and re-enter `nix develop` so commands inherit the new variables.
 
+## Without Nix
+
+If you cannot install Nix, run the same stack from a container. The image is
+Linux (amd64 and arm64) and runs as uid 1000.
+
+The GHCR image is not published until CI 1 runs the workflow. Until then, build and
+run it from this checkout (a cold build compiles Y-Sweet and takes about 15 minutes):
+
+```bash
+just dev-image
+```
+
+`just dev-image` builds `.#packages.<system>.dev-image` (default `x86_64-linux` on an
+Intel/AMD host), loads it, and runs it against the checkout with the dashboard and
+backend ports published. It needs a Linux builder: use Linux, or on macOS
+[nix-darwin's `nix.linux-builder`](https://nixcademy.com/posts/macos-linux-builder/)
+(same arch as the host), or
+[nix-rosetta-builder / a `nixos/nix` container](https://github.com/JamesGuthrie/nix-docker-builder-macos)
+as an ssh-ng builder for both arches; Nix only uses it when a Linux system is requested,
+which is why the recipe names `.#packages.<system>.dev-image`. With an arm64 builder,
+pass the system:
+
+```bash
+just dev-image aarch64-linux
+```
+
+Otherwise run the published image; it is multi-arch (amd64 and arm64), so Apple
+Silicon runs the arm64 image natively:
+
+```bash
+docker run --rm -it -v "$PWD":/src -p 3000:3000 -p 3001:3001 \
+  ghcr.io/juspay/xyne-spaces-dev
+```
+
+The first run executes `just prepare` and installs the workspace into the mount;
+the services, backend and dashboard follow. Open http://localhost:3000. The
+workspace, `node_modules` and the pnpm store live in the mount, so a second run
+reuses them. Do not share the checkout with a host Node install: the container's
+`node_modules` are Linux builds.
+
+On Linux the checkout must be writable by uid 1000, the image's user; the CI
+image job runs `chown -R 1000:1000` on it first. Docker Desktop on macOS handles
+the mount itself.
+
+Check the running container from inside it:
+
+```bash
+docker exec <container> nix-smoke-test --existing-services
+```
+
+### Over a LAN or Tailscale
+
+Pass extra docker flags through `just dev-image` to add the host to Vite and the
+dashboard's origin to the backend's CORS list:
+
+```bash
+just dev-image -e __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.ts.net \
+  -e CORS_ORIGIN=http://localhost:3000,http://<your-host>:3000
+```
+
+A leading dot allows the whole domain (Vite's own variable, as in
+[Access over a LAN or Tailscale](#access-over-a-lan-or-tailscale)).
+
 ## Automatic shell loading with direnv
 
 The repository already tracks an [`.envrc`](../../.envrc). With direnv,
@@ -141,6 +204,7 @@ deletes references; a new entry needs a justification in the PR description.
 
 ```bash
 nix flake check -L
+nix build .#dev-image
 nix build .#xyne-space-services
 nix develop --command just prepare
 # Stop any running local services/backend before this command:
@@ -155,7 +219,8 @@ kill unrelated processes. To check the backend against services you already have
 running, use `nix run .#nix-smoke-test -- --existing-services`.
 
 The [Nix CI workflow](../../.github/workflows/nix-ci.yml) runs these checks on Linux
-for pull requests, protected-branch pushes and `fix/nix-*` branches. It also supports
-manual dispatch and uploads logs on failure. This is a startup check, not a full UI,
-provider, or call-transcription integration test. macOS and ARM runtime behavior
-are not covered by the Linux CI job.
+when dispatched manually; its pull-request and push triggers stay off until CI 1. It
+uploads logs on failure. Its `publish` input pushes the dev image to GHCR: `:latest`
+from `main`, and `:sha-<short>` from any other ref. This is a startup check, not a
+full UI, provider, or call-transcription integration test. macOS and ARM runtime
+behavior are not covered by the Linux CI job.

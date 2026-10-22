@@ -919,6 +919,17 @@ export async function getAwakeningStatus(agentId: string): Promise<AwakeningStat
   return data.data;
 }
 
+/** Regenerates the card Spaces routes unprompted questions by. */
+export async function regenerateRoutingCard(
+  slug: string,
+): Promise<{ text: string; sourceHash: string; generatedAt: string }> {
+  const data = await request<{ success: boolean; data: { text: string; sourceHash: string; generatedAt: string } }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/proactivity/card`,
+    { method: "POST" },
+  );
+  return data.data;
+}
+
 export async function updateAgentDesignSystem(
   slug: string,
   designSystem: string | null,
@@ -3113,6 +3124,194 @@ export function chatAttachmentDownloadUrl(attachmentId: string): string {
   return `${AUTH_API_URL}/api/v1/agent-chat/attachments/${attachmentId}/download`;
 }
 
+/** An attachment's bytes as text. Used for the small text files a brand
+ *  extraction delivers (DESIGN.md, tokens.css) — not for binaries. */
+export async function fetchChatAttachmentText(attachmentId: string, userId: string): Promise<string> {
+  const res = await fetch(chatAttachmentDownloadUrl(attachmentId), {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!res.ok) throw new ApiError(res.status, `Could not read attachment: HTTP ${res.status}`);
+  return res.text();
+}
+
+// --- Brand extraction (XYNE-66818) -----------------------------------------
+//
+// Render-only mirrors of the BrandSummary contract in
+// packages/xyne-claw-shared/src/brand-extraction.ts. They are declared here
+// rather than imported because this frontend has no workspace dependencies by
+// design — shared constants are fetched at runtime (see SettingsTab).
+//
+// Validation is NOT duplicated: the backend parses and validates with the
+// canonical implementation and this client only ever sees an accepted payload.
+// Keep these in step with that file when a field is added.
+
+export type BrandColorRole =
+  | "primary" | "accent" | "background" | "surface" | "text"
+  | "muted" | "border" | "success" | "warning" | "danger";
+
+export interface BrandColor {
+  hex: string;
+  token: string;
+  role: BrandColorRole;
+  occurrences?: number;
+}
+
+export interface BrandFont {
+  family: string;
+  fallbacks?: string[];
+  role: "heading" | "body" | "mono";
+  weights?: number[];
+  sourceUrl?: string;
+}
+
+export interface BrandTypeStep {
+  name: string;
+  sizePx: number;
+  lineHeightPx?: number;
+  weight?: number;
+  letterSpacingPx?: number;
+}
+
+export interface BrandScaleValue {
+  token: string;
+  value: string;
+}
+
+export interface BrandAssetRef {
+  kind: "logo" | "favicon" | "screenshot-desktop" | "screenshot-mobile";
+  file: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface BrandSummary {
+  version: 1;
+  name: string;
+  source: "url" | "screenshot" | "repo";
+  sourceUrl?: string;
+  sourceRepo?: string;
+  sourceCommit?: string;
+  extractedAt: string;
+  colors: BrandColor[];
+  fonts: BrandFont[];
+  typeScale: BrandTypeStep[];
+  radii?: BrandScaleValue[];
+  spacing?: BrandScaleValue[];
+  shadows?: BrandScaleValue[];
+  assets?: BrandAssetRef[];
+  gaps?: string[];
+}
+
+/** Filenames a brand extraction delivers. Both XYNE-66818 (url/screenshot)
+ *  and XYNE-66819 (repo) emit exactly these. */
+export const BRAND_SUMMARY_FILENAME = "brand.json";
+export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
+export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
+
+/**
+ * The validated brand summary for a delivered `brand.json`.
+ *
+ * Returns null when the attachment is not a valid summary (422) — the card
+ * then says so rather than rendering a half-understood payload.
+ */
+export interface BrandSummaryResult {
+  summary: BrandSummary;
+  /** Set once this brand.json has been saved, so the card stays saved across
+   *  a reload instead of offering to create a duplicate. */
+  savedDesignSystemId: string | null;
+}
+
+export async function fetchBrandSummary(
+  attachmentId: string,
+  userId: string,
+): Promise<BrandSummaryResult | null> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/brand-summary`,
+    { credentials: "include", headers: { "x-user-id": userId } },
+  );
+  if (res.status === 422) return null;
+  if (!res.ok) throw new ApiError(res.status, `Could not read brand summary: HTTP ${res.status}`);
+  const body = (await res.json()) as {
+    success: boolean;
+    data: BrandSummary;
+    savedDesignSystemId?: string | null;
+  };
+  if (!body.data) return null;
+  return { summary: body.data, savedDesignSystemId: body.savedDesignSystemId ?? null };
+}
+
+/** Record the DesignSystem a brand.json was saved as. Returns the id that is
+ *  now recorded — which may be an EARLIER one if this attachment was already
+ *  saved, so the caller shows that rather than its own duplicate. */
+export async function recordBrandSaved(
+  attachmentId: string,
+  designSystemId: string,
+  userId: string,
+): Promise<string> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/brand-saved`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "x-user-id": userId },
+      body: JSON.stringify({ designSystemId }),
+    },
+  );
+  if (!res.ok) throw new ApiError(res.status, `Could not record the save: HTTP ${res.status}`);
+  const body = (await res.json()) as { data: { savedDesignSystemId: string } };
+  return body.data.savedDesignSystemId;
+}
+
+// --- Design systems (XYNE-66817) -------------------------------------------
+
+export interface DesignSystemRecord {
+  id: string;
+  orgId: string;
+  name: string;
+  designMd: string;
+  tokensCss: string;
+  assets: unknown;
+  source: string;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourceCommit: string | null;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDesignSystemInput {
+  name: string;
+  designMd?: string;
+  tokensCss?: string;
+  assets?: Record<string, unknown> | null;
+  /** "manual" | "url" | "screenshot" | "repo" | "file" | "library". */
+  source?: string;
+  sourceUrl?: string | null;
+  sourceRepo?: string | null;
+  sourceCommit?: string | null;
+}
+
+export async function createDesignSystem(
+  input: CreateDesignSystemInput,
+): Promise<DesignSystemRecord> {
+  const result = await request<{ success: true; data: DesignSystemRecord }>(
+    `${AUTH_API_URL}/api/v1/design-systems`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return result.data;
+}
+
+export async function listDesignSystems(): Promise<DesignSystemRecord[]> {
+  const result = await request<{ success: true; data: DesignSystemRecord[] }>(
+    `${AUTH_API_URL}/api/v1/design-systems`,
+  );
+  return result.data ?? [];
+}
+
 export interface SlidePptConfig {
   title?: string;
   layout?: string;
@@ -4536,6 +4735,114 @@ export interface SubagentDef {
   updatedAt?: string;
   skills: Array<{ id: string; slug: string; name: string }>;
   shares?: SubagentShareEntry[];
+  fast?: boolean;
+  checks?: SubagentCheck[];
+  checksVersion?: number;
+  samples?: SubagentSample[];
+  model?: string | null;
+  budget?: { maxToolCalls?: number };
+  evalReport?: SubagentEvalReport | null;
+}
+
+export interface EvalStats {
+  labelled: number;
+  correct: number;
+  confidentWrong: number;
+  unsure: number;
+  accuracy: number;
+  unsureRate: number;
+}
+
+export interface EvalModelReport {
+  model: string;
+  overall: EvalStats;
+  checks: Array<EvalStats & { id: string; question: string; variantOf?: string }>;
+  meanMs: number;
+  unavailable: number;
+}
+
+export interface SubagentEvalReport {
+  report: { samples: number; models: EvalModelReport[]; ranAt: string };
+  regressions: Array<{ model: string; regressions: Array<{ id: string; question: string; from: number; to: number; confidentWrongFrom: number; confidentWrongTo: number }> }>;
+  markdown: string;
+  checksVersion: number;
+}
+
+export interface SubagentTemplateSummary {
+  id: string;
+  title: string;
+  summary: string;
+  requires: string[];
+  defaultName: string;
+  fast: boolean;
+  tools: string[];
+  checks: number;
+  samples: number;
+  screenshotSamples: boolean;
+}
+
+export async function listSubagentTemplates(): Promise<SubagentTemplateSummary[]> {
+  const data = await request<{ success: boolean; data: SubagentTemplateSummary[] }>(`${AUTH_API_URL}/api/v1/subagents/templates`);
+  return data.data;
+}
+
+export async function cloneSubagentTemplate(id: string, name?: string): Promise<SubagentDef> {
+  const data = await request<{ success: boolean; data: SubagentDef }>(
+    `${AUTH_API_URL}/api/v1/subagents/templates/${encodeURIComponent(id)}/clone`,
+    { method: "POST", body: JSON.stringify(name ? { name } : {}) },
+  );
+  return data.data;
+}
+
+export async function runSubagentEvals(name: string, payload: { compare?: string[]; variants?: Record<string, string[]> }): Promise<SubagentEvalReport> {
+  const data = await request<{ success: boolean; data: SubagentEvalReport }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/checks/eval`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+export type SubagentCheckType = "yesno" | "choice" | "score" | "value";
+
+export interface SubagentCheck {
+  id: string;
+  question: string;
+  type: SubagentCheckType;
+  options?: Record<string, string> | string[];
+  dtype?: "string" | "int" | "float";
+  pattern?: string;
+  expect?: string | number | boolean;
+  threshold?: number;
+}
+
+export type CheckValue = string | number | boolean | null;
+
+export interface SubagentSample {
+  input: string;
+  image?: string;
+  expected: Record<string, CheckValue>;
+  label?: string;
+}
+
+export interface CheckAnswer {
+  value: CheckValue;
+  confidence: number | null;
+  unsure: boolean;
+  ok?: boolean;
+}
+
+export interface CheckTryResult {
+  answers: Record<string, CheckAnswer>;
+  unavailable: boolean;
+  ms: number;
+}
+
+export async function tryChecks(payload: { checks: SubagentCheck[]; text?: string; image?: string; context?: string }): Promise<CheckTryResult> {
+  const data = await request<{ success: boolean; data: CheckTryResult }>(
+    `${AUTH_API_URL}/api/v1/subagents/checks/try`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
 }
 
 export interface SubagentInputBody {
@@ -4549,6 +4856,10 @@ export interface SubagentInputBody {
   skillIds?: string[];
   /** Optional. Omit or pass `{}` to clear/inherit-all. */
   mcpInstanceMap?: Record<string, string>;
+  fast?: boolean;
+  checks?: SubagentCheck[] | null;
+  samples?: SubagentSample[] | null;
+  force?: boolean;
 }
 
 export async function listSubagents(): Promise<SubagentDef[]> {

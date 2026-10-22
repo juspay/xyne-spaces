@@ -337,3 +337,65 @@ describe("/learn", () => {
     expect(command?.nudge).toContain("lesson.html");
   });
 });
+
+describe("/brand task command", () => {
+  it("parses only as a leading token, like the other task commands", () => {
+    expect(parseTaskCommand("/brand https://stripe.com")?.command).toBe("/brand");
+    expect(parseTaskCommand("  /BRAND\nuse the attached screenshot")?.command).toBe("/brand");
+    expect(parseTaskCommand("please /brand this site")).toBeNull();
+    expect(parseTaskCommand("/branding guidelines")).toBeNull();
+  });
+
+  it("runs immediately rather than waiting for plan approval", () => {
+    expect(resolveTaskCommandMode("/brand https://stripe.com", "plan")).toBe("auto");
+  });
+
+  it("claims the browser sandbox and the Playwright tools extraction needs", () => {
+    const command = parseTaskCommand("/brand https://stripe.com");
+    expect(command?.sandboxProfile).toBe("browser");
+    expect(command?.requiredTool).toBe("sandbox-deliver-files");
+    // brand-skills is /brand's own folder. The extraction skills must NOT sit
+    // in design-skills, which /design and /dashboard load wholesale — those
+    // runs would be told "measure, never improve" and "deliver brand.json".
+    expect(command?.skillPaths).toEqual(["brand-skills", "design-skills"]);
+    // Computed styles are read through evaluate; screenshots and navigation
+    // are what makes this a browser run rather than a fetch.
+    for (const tool of ["sandbox-pw-navigate", "sandbox-pw-evaluate", "sandbox-pw-screenshot"]) {
+      expect(command?.autoTools).toContain(tool);
+    }
+  });
+
+  it("does NOT inject an existing design system into the run", () => {
+    // /brand PRODUCES a system. Injecting the agent's current one would let it
+    // leak into the extraction and describe the old brand as the new one.
+    const command = parseTaskCommand("/brand https://stripe.com");
+    const injection = buildDesignSystemPromptInjection(command, {
+      designSystem: "# Previous brand\nPrimary is red.",
+    });
+    expect(injection.status).toBe("absent");
+  });
+
+  it("still injects for /design, so the gate was narrowed and not broken", () => {
+    const injection = buildDesignSystemPromptInjection(parseTaskCommand("/design a page"), {
+      designSystem: "# Brand",
+    });
+    expect(injection.status).toBe("injected");
+  });
+});
+
+describe("skill isolation between /brand and /design", () => {
+  it("keeps the brand skills out of /design and /dashboard", () => {
+    // Both load design-skills wholesale, so a brand skill living there told a
+    // design run to "measure, never improve" and "deliver brand.json".
+    for (const task of ["/design a page", "/dashboard revenue"]) {
+      expect(parseTaskCommand(task)?.skillPaths).toEqual(["design-skills"]);
+    }
+  });
+
+  it("gives /brand its own folder first, then the shared design guidance", () => {
+    expect(parseTaskCommand("/brand https://x.com")?.skillPaths).toEqual([
+      "brand-skills",
+      "design-skills",
+    ]);
+  });
+});

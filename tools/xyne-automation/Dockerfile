@@ -3,7 +3,11 @@ FROM mcr.microsoft.com/playwright:v1.63.0-noble
 WORKDIR /app
 
 COPY package*.json ./
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+# Install pnpm via npm, not corepack: on the CI runner's egress proxy
+# `corepack prepare` fails fetching pnpm's packument from registry.npmjs.org,
+# while npm (and pnpm itself) pull package tarballs from the same registry
+# fine. A global npm install also lands pnpm on PATH for pwuser below.
+RUN npm install -g pnpm@10.15.0
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile --ignore-scripts
 
 RUN cd node_modules/@getgauge/cli && \
@@ -23,11 +27,11 @@ RUN mkdir -p /app/reports
 RUN chown -R pwuser:pwuser /app
 USER pwuser
 
-# Install gauge plugins + corepack pnpm as pwuser (the runtime user) so they cache
-# in its home, not /root — otherwise the runtime re-downloads pnpm and re-installs
-# plugins each run. Pre-create the global gauge config to silence its missing-file warning.
-RUN corepack prepare pnpm@10.15.0 --activate \
-  && mkdir -p /home/pwuser/.gauge/config \
+# Install gauge plugins as pwuser (the runtime user) so they cache in its home,
+# not /root — otherwise the runtime re-installs plugins each run. pnpm is already
+# a global binary (npm install -g above), so no corepack step is needed here.
+# Pre-create the global gauge config to silence its missing-file warning.
+RUN mkdir -p /home/pwuser/.gauge/config \
   && : > /home/pwuser/.gauge/config/gauge.properties \
   && pnpm exec gauge install ts \
   && pnpm exec gauge install html-report \

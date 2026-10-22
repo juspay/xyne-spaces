@@ -1,4 +1,5 @@
 import { LIMITS } from './constants';
+import type { Scope } from './scope';
 
 export interface MenuItem {
   track: string;
@@ -10,6 +11,8 @@ export interface MenuItem {
   opens?: 'menu' | 'dialog';
   /** A toggle, tab or choice: pressing it again undoes or changes what it set. */
   toggles?: true;
+  /** The page's own content or the app's navigation; a menu's items share their opener's. */
+  scope?: Scope;
 }
 
 export interface Peeked<V extends MenuItem> {
@@ -41,6 +44,7 @@ export function hiddenTargets<V extends MenuItem>(
       items.filter(isNew).map(item => ({
         ...item,
         label: `${item.label} (via "${opener.text}")`,
+        ...(opener.scope && { scope: opener.scope }),
         opener,
       })),
     )

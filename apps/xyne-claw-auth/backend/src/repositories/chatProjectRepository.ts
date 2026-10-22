@@ -193,6 +193,18 @@ export const chatProjectRepository = {
     return new Map(rows.map((row) => [row.conversationId, row.projectId]));
   },
 
+  /** Every conversation this user has filed into ANY project. The complement
+   *  is what `?projectId=none` lists, so it is an exclusion set rather than a
+   *  membership lookup — an empty result correctly means "nothing is filed",
+   *  not "no filter". */
+  filedConversationIds: async (userIds: string | string[]): Promise<string[]> => {
+    const rows = await prisma.chatProjectItem.findMany({
+      where: { ...userIdFilter(userIds) },
+      select: { conversationId: true },
+    });
+    return [...new Set(rows.map((row) => row.conversationId))];
+  },
+
   conversationIdsInProject: async (
     projectId: string,
     userIds: string | string[],
