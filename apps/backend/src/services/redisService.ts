@@ -88,6 +88,11 @@ export interface LabelUnreadCountsEvent {
   timestamp: string;
 }
 
+export interface SdlcResourceChangedEvent {
+  workspaceId: string;
+  kind: string;
+}
+
 class RedisService {
   private redis: Redis | null = null;
   private publisher: Redis | null = null;
@@ -602,6 +607,26 @@ class RedisService {
   private readonly TICKET_COUNTS_CHANNEL = 'global:ticket-counts';
 
   private readonly LABEL_UNREAD_COUNTS_CHANNEL = 'global:label-unread-counts';
+
+  private readonly SDLC_RESOURCE_CHANGED_CHANNEL = 'global:sdlc-resource-changed';
+
+  /** Room membership is per pod, like label-unread counts, so every pod hears it and emits locally. */
+  async broadcastSdlcResourceChanged(event: SdlcResourceChangedEvent): Promise<void> {
+    if (!this.publisher) throw new Error('Redis publisher not initialized');
+    await this.publisher.publish(this.SDLC_RESOURCE_CHANGED_CHANNEL, JSON.stringify(event));
+  }
+
+  async subscribeToSdlcResourceChanged(callback: (event: SdlcResourceChangedEvent) => void): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+    const channel = this.SDLC_RESOURCE_CHANGED_CHANNEL;
+    if (!this.subscriptionCallbacks.has(channel)) this.subscriptionCallbacks.set(channel, []);
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+    this.setupGlobalMessageHandler();
+    if (!this.activeSubscriptions.has(channel)) {
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
 
   /**
    * Publish a live kanban-count change to every pod.
