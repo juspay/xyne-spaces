@@ -20,7 +20,12 @@
 
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
-import { chatProjectRepository } from "../repositories/index.js";
+import {
+  chatProjectRepository,
+  chatProjectKnowledgeRepository,
+  isChatProjectKnowledgeType,
+  DuplicateKnowledgeError,
+} from "../repositories/index.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
 
@@ -339,6 +344,169 @@ chatProjectsRouter.put("/chat/projects/reorder", async (req: Request, res: Respo
 });
 
 // GET /agent-chat/chat/projects/:projectId — owner-only
+// Knowledge routes are declared BEFORE `/chat/projects/:projectId` for the same
+// reason `reorder` is: a later `/:projectId` pattern would otherwise swallow
+// `/:projectId/knowledge`.
+
+const KNOWLEDGE_TITLE_MAX_CHARS = 200;
+
+interface ParsedKnowledge {
+  type: string;
+  refId: string;
+  title: string;
+  storagePath: string | null;
+  mimeType: string | null;
+  size: number | null;
+}
+
+function parseKnowledgeBody(body: unknown): { value: ParsedKnowledge } | { error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Request body must be an object" };
+  }
+  const raw = body as Record<string, unknown>;
+
+  if (!isChatProjectKnowledgeType(raw["type"])) {
+    return { error: "type must be one of file, kb_collection, channel, ticket, canvas" };
+  }
+  const refId = typeof raw["refId"] === "string" ? raw["refId"].trim() : "";
+  if (!refId) return { error: "refId is required" };
+
+  const title = typeof raw["title"] === "string" ? raw["title"].trim() : "";
+  if (!title) return { error: "title is required" };
+  if (title.length > KNOWLEDGE_TITLE_MAX_CHARS) {
+    return { error: `title must be ${KNOWLEDGE_TITLE_MAX_CHARS} characters or less` };
+  }
+
+  const storagePath = typeof raw["storagePath"] === "string" ? raw["storagePath"].trim() : "";
+  // A file is only durable if its GCS path is recorded: the ChatAttachment row
+  // it came from cascades away with its chat message.
+  if (raw["type"] === "file" && !storagePath) {
+    return { error: "storagePath is required for a file" };
+  }
+
+  const size = typeof raw["size"] === "number" && Number.isFinite(raw["size"]) ? raw["size"] : null;
+  const mimeType = typeof raw["mimeType"] === "string" ? raw["mimeType"].trim() : "";
+
+  return {
+    value: {
+      type: raw["type"],
+      refId,
+      title,
+      storagePath: storagePath || null,
+      mimeType: mimeType || null,
+      size,
+    },
+  };
+}
+
+// GET /agent-chat/chat/projects/:projectId/knowledge
+chatProjectsRouter.get(
+  "/chat/projects/:projectId/knowledge",
+  async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const project = await chatProjectRepository.findOwned(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+      );
+      if (!project) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      const items = await chatProjectKnowledgeRepository.listForProject(project.id, project.orgId);
+      res.json({ success: true, data: items });
+    } catch (err) {
+      log.error("[chat-projects] knowledge list error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// POST /agent-chat/chat/projects/:projectId/knowledge
+chatProjectsRouter.post(
+  "/chat/projects/:projectId/knowledge",
+  async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const project = await chatProjectRepository.findOwned(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+      );
+      if (!project) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      const parsed = parseKnowledgeBody(req.body);
+      if ("error" in parsed) {
+        res.status(400).json({ success: false, error: parsed.error });
+        return;
+      }
+
+      const created = await chatProjectKnowledgeRepository.create(
+        project.id,
+        // The parent row's org, never the request's.
+        project.orgId,
+        caller.primaryUserId,
+        { ...parsed.value, type: parsed.value.type as never },
+      );
+      res.status(201).json({ success: true, data: created });
+    } catch (err) {
+      if (err instanceof DuplicateKnowledgeError) {
+        res.status(409).json({ success: false, error: err.message });
+        return;
+      }
+      log.error("[chat-projects] knowledge create error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+// DELETE /agent-chat/chat/projects/:projectId/knowledge/:knowledgeId
+chatProjectsRouter.delete(
+  "/chat/projects/:projectId/knowledge/:knowledgeId",
+  async (
+    req: Request<{ projectId: string; knowledgeId: string }>,
+    res: Response,
+  ): Promise<void> => {
+    try {
+      const caller = await requireProjectCaller(req, res);
+      if (!caller) return;
+
+      const project = await chatProjectRepository.findOwned(
+        req.params.projectId,
+        caller.aliases,
+        caller.orgId,
+      );
+      if (!project) {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+
+      const removed = await chatProjectKnowledgeRepository.deleteOwned(
+        req.params.knowledgeId,
+        project.id,
+        project.orgId,
+      );
+      if (!removed) {
+        res.status(404).json({ success: false, error: "Knowledge item not found" });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      log.error("[chat-projects] knowledge delete error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
 chatProjectsRouter.get(
   "/chat/projects/:projectId",
   async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {
