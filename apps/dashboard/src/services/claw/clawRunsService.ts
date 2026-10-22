@@ -25,3 +25,12 @@ export function listAgentRuns(
 export function getAgentRun(userId: string, sessionId: string): Promise<AgentRun> {
   return clawApiRequest<AgentRun>(`/runs/${encodeURIComponent(sessionId)}`, { userId });
 }
+
+export function listConversationRuns(
+  userId: string,
+  conversationId: string,
+  agentSlug: string,
+): Promise<AgentRun[]> {
+  const params = new URLSearchParams({ conversationId, agentSlug, limit: '200' });
+  return clawApiRequest<AgentRun[]>(`/runs?${params.toString()}`, { userId });
+}

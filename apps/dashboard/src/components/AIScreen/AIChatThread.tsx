@@ -11,6 +11,7 @@ import {
   forwardRef,
   useImperativeHandle,
   type ReactElement,
+  type ReactNode,
 } from 'react';
 import {
   Menu,
@@ -60,6 +61,7 @@ import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
+import { AboutAgentPanel } from './AboutAgentPanel';
 import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
@@ -279,10 +281,12 @@ function ChatTopbar({
   onOpenSidebar,
   onToggleSidebar,
   sidebarCollapsed,
+  agentInfo,
 }: {
   onOpenSidebar?: () => void;
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
+  agentInfo?: ReactNode;
 }): ReactElement {
   return (
     <header
@@ -316,6 +320,7 @@ function ChatTopbar({
           <SidebarLeftOpen size={16} aria-hidden='true' />
         </button>
       )}
+      {agentInfo}
     </header>
   );
 }
@@ -1619,6 +1624,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // specific tool call; null means show the whole turn (opened via the toolbar
   // debug button).
   const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
+  const [debugAgentSlug, setDebugAgentSlug] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
   const isLoadingSession = useRef(false);
   // Captures whether this thread instance was opened on an existing session
@@ -2525,6 +2531,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   });
 
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
+  const chatAgentSlug =
+    [...displayMessages].reverse().find(m => m.agentSlug)?.agentSlug ||
+    effectiveAgentSlug ||
+    'ask-ai';
 
   const streamingBotTurnIndex = useMemo(() => {
     const idx = displayMessages.findIndex(m => m.type === 'bot' && m.isStreaming);
@@ -2620,6 +2630,22 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
           onToggleSidebar={onToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
+          agentInfo={
+            isV2 ? (
+              <AboutAgentPanel
+                agentSlug={chatAgentSlug}
+                conversationId={conversationId}
+                running={isAnyMessageStreaming}
+                onOpenDebugger={(): void => {
+                  setDebugAgentSlug(chatAgentSlug);
+                  setDebugTurnIndex(null);
+                  setDebugSessionId(null);
+                  setDebugFocusToolCallId(null);
+                  setShowDebugger(true);
+                }}
+              />
+            ) : undefined
+          }
         />
 
         {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
@@ -2754,6 +2780,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 // null falls back to turn-index for unlinked live runs.
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(null);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2764,6 +2791,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 setDebugTurnIndex(botTurnIndex);
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(toolCallId);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2860,7 +2888,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          agentSlug={debugAgentSlug ?? (effectiveAgentSlug || 'ask-ai')}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}
