@@ -46,6 +46,10 @@ export interface C1Handoff {
   toolCallId?: string | undefined;
   criticStatus?: string | undefined;
   criticLevel?: string | undefined;
+  criticSource?: string | undefined;
+  criticCategories?: string[] | undefined;
+  criticReasons?: string[] | undefined;
+  judgeMs?: number | undefined;
 }
 
 export interface GateInput {
@@ -181,15 +185,16 @@ export async function gateCall(input: GateInput): Promise<GateResult> {
       toolName: input.tool,
       decision: verdict.decision,
       reasonCode: verdict.reasonCode,
-      reasonText: verdict.reasonText,
+      reasonText: input.c1?.criticReasons?.length ? `${verdict.reasonText} Critic: ${input.c1.criticReasons.join("; ")}`.slice(0, 1_900) : verdict.reasonText,
       policyVersion: verdict.policyVersion,
       scannerVersion: argScan.scannerVersion,
-      checkTierReached: "parser",
+      checkTierReached: input.c1?.criticSource === "xor" ? "xor_judge" : "parser",
+      ...(typeof input.c1?.judgeMs === "number" ? { judgeMs: input.c1.judgeMs } : {}),
       toolEffect: descriptor.effect,
       destinationKind: descriptor.destination.kind,
       destinationHost: descriptor.destination.host ?? null,
       riskLevelAtCall: conversation.risk,
-      ...(critic.status === "decided" ? { matchedRuleIds: [`critic.${critic.level}`] } : {}),
+      ...(critic.status === "decided" ? { matchedRuleIds: [`critic.${input.c1?.criticSource ?? "c1"}.${critic.level}`, ...(input.c1?.criticCategories ?? []).map((c) => `critic.${c}`)] } : {}),
       carriedPrivateData: conversation.privateData,
       argumentsRedacted: secretInArguments ? "[redacted: secret in arguments]" : argsText.slice(0, 2_048),
       gateMs: Date.now() - nowMs,

@@ -14,7 +14,7 @@ const log = createLogger("governance-audit");
 export const GOVERNANCE_EVENT_TYPES = [
   "content_scan", "content_finding", "tool_call", "approval_requested", "approval_decided", "approval_expired",
   "kill_switch_set", "kill_switch_enforced", "kill_switch_cleared", "admin_override", "version_status_changed",
-  "config_changed", "run_started", "tool_outcome",
+  "config_changed", "run_started", "tool_outcome", "critic_verdict",
 ] as const;
 export type GovernanceEventType = (typeof GOVERNANCE_EVENT_TYPES)[number];
 export const ACTOR_KINDS = ["user", "agent", "system", "admin"] as const;
