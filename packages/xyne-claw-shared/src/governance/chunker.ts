@@ -2,10 +2,12 @@ import { sha256Hex } from "./canonical.js";
 import type { Chunk, ChunkOptions } from "./types.js";
 
 // Cut ranks, best first: email, blank line, HTML block end, list item, sentence end, newline, whitespace.
+// Bounded quantifiers only: these run at every candidate cut, and an unbounded class before a literal is quadratic on a miss.
 const NONE = 7;
-const EMAIL_LINE = /From:|Subject:|-----Original Message-----|On .{3,80} wrote:[ \t]*$/my;
-const HEADER_LINE = /-----Original Message-----|[A-Za-z][A-Za-z-]*:/y;
-const LIST_ITEM = /[ \t]*(?:[-*+]|\d{1,9}[.)])\s/y;
+const EMAIL_LINE = /From:|Subject:|-----Original Message-----/y;
+const WROTE_LINE = /On .{3,80} wrote:[ \t]{0,8}$/my;
+const HEADER_LINE = /-----Original Message-----|[A-Za-z][A-Za-z-]{0,60}:/y;
+const LIST_ITEM = /[ \t]{0,16}(?:[-*+]|\d{1,9}[.)])\s/y;
 const HTML_END = /(?<=<\/(?:p|div|li|tr|h[1-6])>|<(?:br|hr)\s{0,8}\/?>)/iy;
 const SENTENCE_END = /(?<=[.!?]\s{1,3})/y;
 
@@ -32,7 +34,7 @@ export function estimateTokens(text: string): number {
 
 // A header line opens a message only if it does not continue a header block, so From/Subject never split.
 function emailStart(t: string, e: number): boolean {
-  if (!matchAt(EMAIL_LINE, t, e)) return false;
+  if (!matchAt(EMAIL_LINE, t, e) && !matchAt(WROTE_LINE, t, e)) return false;
   return !matchAt(HEADER_LINE, t, e > 1 ? t.lastIndexOf("\n", e - 2) + 1 : 0);
 }
 
