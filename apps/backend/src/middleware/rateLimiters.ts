@@ -52,7 +52,7 @@ export const chatProjectsLimiter: RateLimitRequestHandler = rateLimit({
 
 export const designSharesLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 300,
   keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
   message: {
     success: false,

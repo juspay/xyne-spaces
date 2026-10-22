@@ -119,20 +119,20 @@ router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAICo
 
 router.post(
   '/v2/design-shares',
-  authMiddleware.authenticate,
   designSharesLimiter,
+  authMiddleware.authenticate,
   xyneAIControllerV2.publishDesignShare
 );
 router.get(
   '/v2/design-shares/conversation/:convId',
-  authMiddleware.authenticate,
   designSharesLimiter,
+  authMiddleware.authenticate,
   xyneAIControllerV2.getDesignShare
 );
 router.delete(
   '/v2/design-shares/:shareId',
-  authMiddleware.authenticate,
   designSharesLimiter,
+  authMiddleware.authenticate,
   xyneAIControllerV2.revokeDesignShare
 );
 
