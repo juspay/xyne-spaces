@@ -383,11 +383,11 @@ export function useV2ChatProjectActions() {
     [queryClient, invalidateProjects],
   );
 
-  const renameProject = useCallback(
-    async (projectId: string, name: string): Promise<void> => {
-      const rollback = patchProjectInCache(queryClient, projectId, { name });
+  const updateProject = useCallback(
+    async (projectId: string, patch: ChatProjectInput): Promise<void> => {
+      const rollback = patchProjectInCache(queryClient, projectId, patch);
       try {
-        await updateV2ChatProject(projectId, { name });
+        await updateV2ChatProject(projectId, patch);
       } catch (error) {
         rollback();
         throw error;
@@ -395,6 +395,13 @@ export function useV2ChatProjectActions() {
       invalidateProjects();
     },
     [queryClient, invalidateProjects],
+  );
+
+  const renameProject = useCallback(
+    async (projectId: string, name: string): Promise<void> => {
+      await updateProject(projectId, { name });
+    },
+    [updateProject],
   );
 
   const deleteProject = useCallback(
@@ -443,5 +450,12 @@ export function useV2ChatProjectActions() {
     [queryClient, invalidateProjects],
   );
 
-  return { moveChatToProject, renameProject, deleteProject, createProject, reorderProjects };
+  return {
+    moveChatToProject,
+    updateProject,
+    renameProject,
+    deleteProject,
+    createProject,
+    reorderProjects,
+  };
 }
