@@ -1,15 +1,19 @@
 import { z } from 'zod';
-import { SDLC_HUB_KNOWLEDGE_FOLDER } from '@xyne/shared';
-import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
+import { SDLC_AGENT_SLUG, SDLC_HUB_KNOWLEDGE_FOLDER } from '@xyne/shared';
+import { withOptions } from '@xyne/workflow-sdk';
+import { BaseAgentProvider, HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import type {
+  AgentDescriptor,
   AgentDispatchRecord,
   AgentRunInput,
   AgentRunResult,
   AsyncAgentCapability,
 } from '@xyne/workflow-sdk/agents/host';
-import type { ResumePayload, StepExecutionContext } from '@xyne/workflow-sdk';
+import type { FieldOptionsContext, FieldOptionsPage, ResumePayload, StepExecutionContext } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
-import { collectClawResult } from './claw-provider';
+import { hubOptions } from '@/sdlc/workflowOptions';
+import type { XyneCtx } from '../types';
+import { collectClawResult, listClawAgents } from './claw-provider';
 import { dispatchSdlcAgent } from './sdlc-dispatch';
 
 const SectionSchema = z.object({
@@ -25,8 +29,10 @@ type SdlcArtifactType = keyof typeof ARTIFACT_TYPE_FOLDERS;
 
 /** Key order is form order: the builder renders properties as they are declared. */
 export const SdlcArtifactConfigSchema = z.object({
-  channelId: z.string().min(1)
+  channelId: withOptions(z.string().min(1))
     .describe('SDLC hub this artifact belongs to'),
+  agentSlug: withOptions(z.string().min(1)).default(SDLC_AGENT_SLUG)
+    .describe("Agent that writes the document. It gets the hub's SDLC tools."),
   artifactType: z.enum(['Hub Knowledge']).default('Hub Knowledge')
     .describe('What kind of document this step writes'),
   artifactTitle: z.string().min(1).max(255)
@@ -44,6 +50,10 @@ export class SdlcArtifactAgentProvider
   readonly name = 'SDLC Agent';
   readonly configSchema = SdlcArtifactConfigSchema;
 
+  override async listAgents(): Promise<AgentDescriptor[]> {
+    return listClawAgents();
+  }
+
   async dispatch(
     stepConfig: SdlcArtifactConfig,
     input: AgentRunInput,
@@ -53,6 +63,7 @@ export class SdlcArtifactAgentProvider
     return dispatchSdlcAgent({
       ctx,
       run: input,
+      agentSlug: stepConfig.agentSlug,
       channelId: stepConfig.channelId,
       task: buildArtifactTask(stepConfig, folderId, input.task),
     });
@@ -121,3 +132,11 @@ function buildArtifactTask(
 }
 
 export const sdlcArtifactAgentProvider = new SdlcArtifactAgentProvider();
+
+/** HostAgentStep answers every picker with agents, whatever the field; the hub picker is answered here. */
+export class SdlcArtifactStep extends HostAgentStep<typeof SdlcArtifactConfigSchema> {
+  override async getOptions(ctx: FieldOptionsContext<Record<string, unknown>>): Promise<FieldOptionsPage> {
+    if (ctx.field === 'channelId') return hubOptions(ctx.caller as XyneCtx, ctx);
+    return super.getOptions(ctx);
+  }
+}

@@ -69,6 +69,7 @@ import type {
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { sdlcVcs, type ParsedRepository } from './vcs';
+import { requireSdlcLinks, sdlcLinkMarkers } from './sdlcLinks';
 import { sdlcWikiPageStore } from './wiki/SdlcWikiPageStore';
 
 export const SDLC_FOLDERS = [SDLC_HUB_KNOWLEDGE_FOLDER, 'PRDs', 'Tech Docs'] as const;
@@ -524,8 +525,9 @@ export class SdlcHubService implements SdlcHub {
       throw new AppError('Track folder not found in this track', 404);
     }
 
-    // No file/line verification: code links are free markdown, so a wrong path or range shows up as a broken link, not an error.
-    const content = await convertMarkdownToBlockNote(input.markdown);
+    // Marked links only; P2 adds file and line checks against the repository.
+    const markdown = await this.linkedMarkdown(actor, channelId, input.markdown, repo?.id, `artifact:${channelId}/${input.title}`);
+    const content = await convertMarkdownToBlockNote(markdown);
     const artifact = await commitAndSyncCanvasArtifact(
       () => createArtifactFromClawTx(this, actor, input, content, channelId, folder, projectId, repo, hubKnowledge, trackFolderId, repoIds),
       syncToYSweet,
@@ -597,6 +599,21 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
+  /** An agent's markdown with its marked links built; code links follow the repository's base branch. */
+  private async linkedMarkdown(actor: SdlcActor, channelId: string, markdown: string, repoId: string | null | undefined, key: string): Promise<string> {
+    const repo = repoId
+      ? await this.prisma.repo.findFirst({ where: { id: repoId }, select: { url: true, canonicalUrl: true, baseBranch: true } })
+      : null;
+    const branch = Array.isArray(repo?.baseBranch) && typeof repo.baseBranch[0] === 'string' ? repo.baseBranch[0] : 'HEAD';
+    return requireSdlcLinks({
+      markdown,
+      workspaceId: actor.workspaceId,
+      channelId,
+      code: repo ? { url: repo.canonicalUrl ?? repo.url, ref: branch } : null,
+      key,
+    });
+  }
+
   /** Content write after the caller has checked the hub role and found the artifact. */
   private async writeArtifactContent(
     actor: SdlcActor,
@@ -605,7 +622,9 @@ export class SdlcHubService implements SdlcHub {
     markdown: string,
     extra: { title?: string | undefined; repoId?: string | undefined; relatedCanvasIds?: string[] | undefined } = {}
   ): Promise<SdlcArtifact> {
-    const content = await convertMarkdownToBlockNote(markdown);
+    const repoId = extra.repoId
+      ?? (await this.prisma.sdlcArtifact.findUnique({ where: { artifactId: canvasId }, select: { repoId: true } }))?.repoId;
+    const content = await convertMarkdownToBlockNote(await this.linkedMarkdown(actor, channelId, markdown, repoId, `artifact:${canvasId}`));
     return commitAndSyncCanvasArtifact(
       () => writeArtifactContentTx(this, actor, channelId, canvasId, content, extra),
       syncToYSweet,
@@ -619,7 +638,7 @@ export class SdlcHubService implements SdlcHub {
   ): Promise<SdlcArtifact> {
     const existing = await this.requireClawArtifact(actor, input.canvasId);
     const markdown = mutateMarkdownSection({
-      markdown: await readCanvasMarkdown(existing),
+      markdown: sdlcLinkMarkers(await readCanvasMarkdown(existing)),
       action: input.action,
       heading: input.heading,
       ...(input.action === 'remove_section' ? {} : { sectionMarkdown: input.markdown }),

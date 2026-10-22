@@ -12,12 +12,15 @@ interface TableOfContentsProps {
   onHeadingClick?: (id: string) => void;
   /** Shown as an "On this page" list on the right, in place of the hover rail on the left. */
   pinned?: boolean;
+  /** The heading being read, marked in the pinned list. */
+  activeId?: string | undefined;
 }
 
 export const TableOfContents: React.FC<TableOfContentsProps> = ({
   headings,
   onHeadingClick,
   pinned = false,
+  activeId,
 }) => {
   const handleClick = useCallback(
     (id: string) => {
@@ -34,7 +37,8 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
     <button
       key={heading.id}
       onClick={() => handleClick(heading.id)}
-      className={`block w-full text-left text-sm truncate hover:text-foreground hover:bg-accent rounded pr-2 py-1 transition-colors ${
+      aria-current={pinned && heading.id === activeId ? 'location' : undefined}
+      className={`block w-full text-left text-sm truncate hover:text-foreground hover:bg-accent rounded pr-2 py-1 transition-colors aria-[current=location]:font-medium aria-[current=location]:!text-foreground aria-[current=location]:bg-accent ${
         heading.level === 1
           ? 'font-medium text-foreground pl-0'
           : heading.level === 2
@@ -63,12 +67,12 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
         // Only where the page has room beside the text: narrower, the rail below takes over.
         <nav
           aria-label='On this page'
-          className='absolute right-6 top-24 z-30 hidden max-h-[70vh] w-48 overflow-y-auto border-l pl-3 xl:block'
+          className='absolute right-12 top-28 z-30 hidden max-h-[70vh] w-60 overflow-y-auto border-l pl-4 xl:block'
         >
-          <p className='mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
+          <p className='mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground'>
             On this page
           </p>
-          <div className='space-y-1'>{pinnedItems}</div>
+          <div className='space-y-1 [&>button]:text-[15px]'>{pinnedItems}</div>
         </nav>
       )}
       <div

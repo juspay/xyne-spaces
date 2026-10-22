@@ -5610,7 +5610,13 @@ function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
-  return { ...def, appHandler: def.handler };
+  // Act as the person who started the run (claw-auth sets sdlcActingUserId from the run's verified context): on the
+  // app-tools server ctx.userId is the bot, which Spaces rejects as an acting user.
+  const handler: ToolDef["handler"] = (args, ctx) => {
+    const { sdlcActingUserId, ...rest } = args;
+    return def.handler(rest, typeof sdlcActingUserId === "string" && sdlcActingUserId ? { ...ctx, userId: sdlcActingUserId } : ctx);
+  };
+  return { ...def, handler, appHandler: handler };
 }
 
 const spacesSdlcListRepositories = sdlcTool({

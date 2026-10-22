@@ -11,6 +11,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { requireSdlcHubReader } from './sdlcChannelMembership';
+import { sdlcLinkMarkers } from './sdlcLinks';
 
 export interface SdlcActorInput {
   workspaceId: string;
@@ -131,7 +132,8 @@ export class SdlcArtifactVersionStore {
     const blocks = Array.isArray(canvas.content)
       ? canvas.content as unknown as BlockNoteBlock[]
       : [];
-    const markdown = await convertBlockNoteToMarkdown(blocks);
+    // The agent reads links in the form it writes them, so a page it sends back is checked again.
+    const markdown = sdlcLinkMarkers(await convertBlockNoteToMarkdown(blocks));
     return {
       artifact,
       markdown,

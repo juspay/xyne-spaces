@@ -1326,6 +1326,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   // around it.
   const canvasTitleHeader = !selectedCanvas?.id ? null : (
     <div className='canvas-block-row group/canvas-editor-title'>
+      {/* Wiki pages read as a docs site: the page opens with its title. */}
+      {pinnedOutline && currentTitle && (
+        <h1 className='mb-2 text-3xl font-bold tracking-tight text-foreground'>{currentTitle}</h1>
+      )}
       <CanvasLabelManager
         canvas={selectedCanvas}
         workspaceId={user?.workspaceId}
@@ -1342,7 +1346,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
       {/* Main Content Area */}
-      <main className='flex-1 overflow-hidden flex flex-col'>
+      {/* relative: the pinned outline sits inside the page, so the version history panel beside it stays clear. */}
+      <main className='relative flex-1 overflow-hidden flex flex-col'>
         {isCreating || selectedCanvas ? (
           <>
             {/* Canvas Header — Electron window-drag region; interactive

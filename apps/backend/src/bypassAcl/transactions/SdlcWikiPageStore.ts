@@ -47,7 +47,7 @@ export function ensureFolderPathTx(self: SdlcWikiPageStore, parent: string, name
     return folderId;
   });
 }
-export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string) {
+export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string, sourcePaths: string[]) {
   return transaction(['Canvas', 'SdlcArtifact', 'ConnectGroup'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
@@ -87,6 +87,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
         artifactType: 'WIKI',
         artifactStatus: 'ACTIVE',
         ...(commitSha ? { generationCommit: commitSha } : {}),
+        sourcePaths: JSON.stringify(sourcePaths),
         createdBy: scope.actorUserId,
       },
     });
@@ -100,7 +101,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
     return { artifact: canvas.id, canvasId: canvas.id, content };
   });
 }
-export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<"update" | "replace_section" | "insert_section" | "remove_section">, content: BlockNoteBlock[], scope: WikiScope, markdown: string, commitSha: string | undefined) {
+export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<"update" | "replace_section" | "insert_section" | "remove_section">, content: BlockNoteBlock[], scope: WikiScope, markdown: string, commitSha: string | undefined, sourcePaths: string[]) {
   return transaction(['Canvas', 'SdlcArtifact'], 'edit wiki page: canvas update, version record and artifact commit sha must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
     await tx.canvas.update({
       where: { id: existing.id },
@@ -112,12 +113,10 @@ export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<
       },
     });
     await recordVersion(tx, scope, existing.id, markdown, content, page.action, commitSha);
-    if (commitSha) {
-      await tx.sdlcArtifact.update({
-        where: { artifactId: existing.id },
-        data: { generationCommit: commitSha },
-      });
-    }
+    await tx.sdlcArtifact.update({
+      where: { artifactId: existing.id },
+      data: { ...(commitSha ? { generationCommit: commitSha } : {}), sourcePaths: JSON.stringify(sourcePaths) },
+    });
     return { artifact: existing.id, canvasId: existing.id, content };
   });
 }
