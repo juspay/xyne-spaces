@@ -319,6 +319,8 @@ export interface S2SClawAgent {
   ownerUserId?: string | null;
   /** Set on a user-scoped list: ownerUserId is a Claw id, which Spaces cannot compare. */
   ownedByScopeUser?: boolean;
+  /** What routing reads to pick it for a channel question nobody tagged: the owner's text or the generated card. */
+  proactivity?: { description: string | null } | null;
 }
 
 export interface S2SRunAgentRequest {

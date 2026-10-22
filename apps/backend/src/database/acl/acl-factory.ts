@@ -136,6 +136,11 @@ import {
   UnscopedACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
+import {
+  AgentProactivityDecisionsACL,
+  AgentProactivityXorCallsACL,
+  AgentProactivityXorQuestionsACL,
+} from './tables/agent-proactivity-decisions-acl'
 
 export class ACLFactory {
   static getACL(
@@ -206,6 +211,12 @@ export class ACLFactory {
     // userId) by radarRuleStore — there is no route that reads anyone else's.
     case 'radarRule':
       return new BaseQueryACL(ctx, prisma)
+    case 'agentProactivityDecision':
+      return new AgentProactivityDecisionsACL(ctx, prisma)
+    case 'agentProactivityXorCall':
+      return new AgentProactivityXorCallsACL(ctx, prisma)
+    case 'agentProactivityXorQuestion':
+      return new AgentProactivityXorQuestionsACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
