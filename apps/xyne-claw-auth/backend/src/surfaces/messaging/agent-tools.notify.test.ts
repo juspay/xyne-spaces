@@ -56,6 +56,20 @@ describe("findNotifyTarget", () => {
     expect(await findNotifyTarget("u1", "org1")).toMatchObject({ account: { id: "acc-own" }, chatId: "919@s.whatsapp.net" });
   });
 
+  it("says how the target was found: a code-verified number vs their own device", async () => {
+    identities = [{ orgId: "org1", surfaceUserId: "919876543210" }];
+    orgAccounts = [account()];
+    expect(await findNotifyTarget("u1", "org1")).toMatchObject({ via: "identity" });
+    identities = [];
+    ownedAccounts = [account({ id: "acc-own", channel: "whatsapp", channelConfig: {}, config: { desiredState: "running", connState: "connected", selfId: "919@s.whatsapp.net" } })];
+    expect(await findNotifyTarget("u1", "org1")).toMatchObject({ via: "own-device" });
+  });
+
+  it("for approvals, never falls back to the own-device chat", async () => {
+    ownedAccounts = [account({ id: "acc-own", channel: "whatsapp", channelConfig: {}, config: { desiredState: "running", connState: "connected", selfId: "919@s.whatsapp.net" } })];
+    expect(await findNotifyTarget("u1", "org1", { verifiedIdentityOnly: true })).toBeNull();
+  });
+
   it("is null when there is nowhere to reach them", async () => {
     expect(await findNotifyTarget("u1", "org1")).toBeNull();
     expect(await findNotifyTarget("", "org1")).toBeNull();
@@ -103,6 +117,14 @@ describe("notifyUser", () => {
     await notifyUser({ userId: "u1", orgId: "org1", text: long });
     expect(enqueueAndWait.mock.calls[0]?.[1]).toMatchObject({ text: "lead", templateText: long });
     expect(enqueueOutbound).toHaveBeenCalledWith("acc-cloud", { kind: "file", chatId: "919", attachment: document });
+  });
+
+  it("uses a target the caller already resolved instead of looking it up again", async () => {
+    enqueueAndWait.mockResolvedValue({ ok: true });
+    const target = { account: account() as never, chatId: "910000000002", via: "identity" as const };
+    expect(await notifyUser({ userId: "u1", orgId: "org1", text: "hi", target })).toEqual({ ok: true, viaTemplate: false });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(enqueueAndWait).toHaveBeenCalledWith("acc-cloud", { kind: "text", chatId: "910000000002", text: "hi" });
   });
 
   it("refuses when the user has no WhatsApp", async () => {

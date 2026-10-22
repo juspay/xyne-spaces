@@ -46,6 +46,15 @@ import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpEr
 
 import { createLogger } from "../logger.js";
 import { notifyUser } from "../surfaces/messaging/agent-tools.js";
+import { enqueueAndWait } from "../surfaces/messaging/delivery.js";
+import {
+  deliverInOrder,
+  isChannelBroadcast,
+  loadDeliveryPreference,
+  resolveDeliveryTargets,
+  scheduledDeliveryTargets,
+  type SendOutcome,
+} from "../lib/delivery-preference.js";
 import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
 import { channelOfConversationId } from "../surfaces/messaging/ids.js";
 
@@ -192,7 +201,7 @@ function nextFireText(row: { type: string; nextRunAt: Date | null; cronExpressio
   return null;
 }
 
-async function postScheduledFailureNotice(row: {
+type ScheduledDeliveryRow = {
   id: string;
   userId: string;
   agentSlug: string;
@@ -206,20 +215,33 @@ async function postScheduledFailureNotice(row: {
   nextRunAt: Date | null;
   cronExpression: string | null;
   status: string;
-}, error: string | null | undefined): Promise<void> {
-  if (row.replyMode === WHATSAPP_REPLY_MODE) {
+};
+
+async function postScheduledFailureNotice(row: ScheduledDeliveryRow, error: string | null | undefined): Promise<void> {
+  const { targets, skipped } = await scheduledDeliveryTargets(row);
+  const delivered = await deliverInOrder(targets, async (target): Promise<SendOutcome> => {
+    if (target.surface === "spaces") return postScheduledFailureNoticeToSpaces(row, error);
     const next = nextFireText(row);
     const text = [`Your scheduled task didn't go through: ${error?.trim() || "something went wrong"}.`, ...(next ? [`I'll try again ${next}.`] : [])].join(" ");
-    const sent = await notifyUser({ userId: row.userId, orgId: row.orgId, text });
-    if (!sent.ok) log.warn(`[scheduled-jobs/result] Job ${row.id}: WhatsApp failure notice not sent: ${sent.error}`);
-    return;
+    const sent = await notifyUser({ userId: row.userId, orgId: row.orgId, text, target: target.whatsapp });
+    return sent.ok ? { ok: true } : { ok: false, error: sent.error };
+  });
+  if (!delivered.ok) {
+    const why = [...delivered.failed.map((f) => `${f.surface}: ${f.error}`), ...skipped.map((s) => `${s.surface}: ${s.reason}`)];
+    log.warn(`[scheduled-jobs/result] Job ${row.id}: failure notice not sent (${why.join("; ") || "no target"})`);
+  } else {
+    const after = delivered.failed.length > 0 ? ` after ${delivered.failed.map((f) => f.surface).join(", ")} failed` : "";
+    log.info(`[scheduled-jobs/result] Job ${row.id}: failure notice sent on ${delivered.surface}${after}`);
   }
+}
+
+async function postScheduledFailureNoticeToSpaces(row: ScheduledDeliveryRow, error: string | null | undefined): Promise<SendOutcome> {
   const agent = await prisma.agent.findFirst({
     where: { slug: row.agentSlug, orgId: row.orgId },
   });
   if (!agent?.spacesAppToken || !agent.spacesAppId) {
     log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials for failure notice`);
-    return;
+    return { ok: false, error: "agent has no Spaces app credentials" };
   }
 
   let effectiveWorkspaceId = row.workspaceId;
@@ -230,7 +252,7 @@ async function postScheduledFailureNotice(row: {
   }
   if (!effectiveWorkspaceId) {
     log.error(`[scheduled-jobs/result] Job ${row.id}: missing workspaceId for failure notice`);
-    return;
+    return { ok: false, error: "missing workspaceId" };
   }
 
   const next = nextFireText(row);
@@ -241,7 +263,7 @@ async function postScheduledFailureNotice(row: {
   const appToken = decryptStoredField(agent.spacesAppToken);
   const spacesAppUserId = agent.spacesAppUserId ?? "";
 
-  if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
+  if (isChannelBroadcast(row)) {
     await spacesAppFetch("/chat/postMessage", {
       channelId: row.targetChannelId ?? row.channelId!,
       markdownText: message,
@@ -249,10 +271,12 @@ async function postScheduledFailureNotice(row: {
       workspaceId: effectiveWorkspaceId,
       metadata: { contentFormat: "markdown" },
     }, appToken);
-    return;
+    return { ok: true };
   }
 
-  if (row.channelId && row.conversationId) {
+  // A job set up from a WhatsApp chat has a phone chat as its channelId, not a
+  // Spaces channel, so when its person chose Spaces it reaches them as a DM.
+  if (row.replyMode !== WHATSAPP_REPLY_MODE && row.channelId && row.conversationId) {
     await spacesAppFetch("/chat/postMessage", {
       channelId: row.channelId,
       conversationId: row.conversationId,
@@ -261,7 +285,7 @@ async function postScheduledFailureNotice(row: {
       workspaceId: effectiveWorkspaceId,
       metadata: { contentFormat: "markdown" },
     }, appToken);
-    return;
+    return { ok: true };
   }
 
   // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
@@ -277,6 +301,7 @@ async function postScheduledFailureNotice(row: {
     workspaceId: effectiveWorkspaceId,
     metadata: { contentFormat: "markdown" },
   }, appToken);
+  return { ok: true };
 }
 
 /**
@@ -1138,22 +1163,26 @@ router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Res
 // mounted under requireAuth (which accepts a browser cookie) for job
 // management, so without this an ordinary logged-in user could POST a forged
 // result that posts a message as the agent into the job owner's channel.
+type ScheduledResultPayload = {
+  sessionId?: string;
+  userId?: string;
+  status?: string;
+  result?: string;
+  error?: string;
+  toolsUsed?: string[];
+  toolInvocations?: unknown;
+  tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+  provider?: string;
+  model?: string;
+  lastTurn?: number;
+  /** Signed write actions the run could not take without the person's OK. */
+  pendingActions?: unknown[];
+};
+
 router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
-  const payload = req.body as {
-    sessionId?: string;
-    userId?: string;
-    status?: string;
-    result?: string;
-    error?: string;
-    toolsUsed?: string[];
-    toolInvocations?: unknown;
-    tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
-    attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
-    provider?: string;
-    model?: string;
-    lastTurn?: number;
-  };
+  const payload = req.body as ScheduledResultPayload;
 
   log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
@@ -1298,34 +1327,125 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     });
     return;
   }
+  // Writes the run was not allowed to make alone. Independent of where the
+  // result goes, and sent first so the card is waiting when the text lands.
+  if (payload.pendingActions?.length) {
+    await deliverScheduledApprovals(row, payload.pendingActions, payload.sessionId).catch((err) => {
+      log.warn(`[scheduled-jobs/result] Job ${id}: approval delivery failed: ${errMsg(err)}`);
+    });
+  }
   if (!payload.result && !payload.attachments?.length) {
     // Completed with nothing to deliver — not a failure; do not alarm the thread.
     log.info(`[scheduled-jobs/result] Job ${id}: completed with empty result — nothing to post`);
     return;
   }
 
-  if (row.replyMode === WHATSAPP_REPLY_MODE) {
+  const { targets, skipped } = await scheduledDeliveryTargets(row);
+  const delivered = await deliverInOrder(targets, async (target): Promise<SendOutcome> => {
+    if (target.surface === "spaces") return postScheduledResultToSpaces(id, row, payload, dashboardShareAnnouncement);
     const sent = await notifyUser({
       userId: row.userId,
       orgId: row.orgId,
       text: payload.result?.trim() || "Here's what you asked for.",
       ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+      target: target.whatsapp,
     });
-    if (sent.ok) {
-      log.info(`[scheduled-jobs/result] Job ${id}: delivered on WhatsApp${sent.viaTemplate ? " (template)" : ""}`);
-    } else {
-      log.warn(`[scheduled-jobs/result] Job ${id}: WhatsApp delivery failed: ${sent.error}`);
-    }
-    return;
+    if (!sent.ok) return { ok: false, error: sent.error };
+    log.info(`[scheduled-jobs/result] Job ${id}: delivered on WhatsApp${sent.viaTemplate ? " (template)" : ""}`);
+    return { ok: true };
+  });
+  if (!delivered.ok) {
+    const why = [...delivered.failed.map((f) => `${f.surface}: ${f.error}`), ...skipped.map((s) => `${s.surface}: ${s.reason}`)];
+    log.warn(`[scheduled-jobs/result] Job ${id}: result not delivered (${why.join("; ") || "no target"})`);
+  } else if (delivered.failed.length > 0) {
+    log.info(`[scheduled-jobs/result] Job ${id}: result fell back to ${delivered.surface} after ${delivered.failed.map((f) => f.surface).join(", ")}`);
   }
+});
 
+/**
+ * Approval cards for a scheduled run's gated writes, on the first surface in
+ * the person's order that can carry one and is verified as them.
+ *
+ * Before delivery preferences these were never shown anywhere — the scheduled
+ * callback ignored them — so a person who has not chosen an order sees no
+ * change. With an order, a WhatsApp number proven by one-time code gets the
+ * native Approve/Decline card (approvals.ts re-checks the tapper's identity at
+ * redemption). Spaces has no card path from a scheduled callback yet, so
+ * reaching it is logged, not faked.
+ */
+async function deliverScheduledApprovals(
+  row: ScheduledDeliveryRow,
+  pendingActions: unknown[],
+  sessionId: string | undefined,
+): Promise<void> {
+  const preference = await loadDeliveryPreference(row.userId, row.orgId);
+  if (!preference) return;
+  // Only actions signed for this job's owner: the card goes to the owner's
+  // phone, and must never carry somebody else's write.
+  const own = pendingActions.filter(
+    (a) => !!a && typeof a === "object" && (a as { userId?: unknown }).userId === row.userId,
+  );
+  if (own.length === 0) return;
+  const { targets, skipped } = await resolveDeliveryTargets({
+    userId: row.userId,
+    orgId: row.orgId,
+    purpose: "approval",
+    legacy: [],
+    preference,
+  });
+  const conversationId = sessionId
+    ? ((await agentRunRepository.findBySessionId(sessionId).catch(() => null))?.conversationId ?? undefined)
+    : undefined;
+  const delivered = await deliverInOrder(targets, async (target): Promise<SendOutcome> => {
+    if (target.surface === "spaces") return { ok: false, error: "no Spaces approval card from a scheduled run" };
+    const { account, chatId } = target.whatsapp;
+    // Plain text, no template: a card can only follow inside WhatsApp's
+    // 24-hour window, and a free-form send failing is how we learn it is shut.
+    const intro = await enqueueAndWait(account.id, {
+      kind: "text",
+      chatId,
+      text: `Your scheduled task needs your OK before it goes ahead (${own.length === 1 ? "1 action" : `${own.length} actions`}).`,
+    });
+    if (!intro.ok) return { ok: false, error: intro.error };
+    // Lazy, as in webhook.ts: approvals pulls in the write-execution stack.
+    const { enqueueApprovalCards } = await import("../surfaces/messaging/approvals.js");
+    await enqueueApprovalCards({
+      target: {
+        channel: account.channel,
+        connectedSurfaceId: account.id,
+        accountKey: account.accountKey,
+        chatId,
+        senderId: chatId,
+        isGroup: false,
+      },
+      userId: row.userId,
+      pendingActions: own,
+      ...(conversationId ? { conversationId } : {}),
+      agentSlug: row.agentSlug,
+    });
+    return { ok: true };
+  });
+  if (delivered.ok) {
+    log.info(`[scheduled-jobs/result] Job ${row.id}: ${own.length} approval card(s) sent on ${delivered.surface}`);
+  } else {
+    const why = [...delivered.failed.map((f) => `${f.surface}: ${f.error}`), ...skipped.map((s) => `${s.surface}: ${s.reason}`)];
+    log.warn(`[scheduled-jobs/result] Job ${row.id}: ${own.length} approval(s) not delivered (${why.join("; ")})`);
+  }
+}
+
+async function postScheduledResultToSpaces(
+  id: string,
+  row: ScheduledDeliveryRow,
+  payload: ScheduledResultPayload,
+  dashboardShareAnnouncement: string | null,
+): Promise<SendOutcome> {
   // Resolve agent's Spaces app token scoped to the job's org.
   const agent = await prisma.agent.findFirst({
     where: { slug: row.agentSlug, orgId: row.orgId },
   });
   if (!agent?.spacesAppToken || !agent.spacesAppId) {
     log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials`);
-    return;
+    return { ok: false, error: "agent has no Spaces app credentials" };
   }
 
   const appToken = decryptStoredField(agent.spacesAppToken);
@@ -1394,10 +1514,10 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     // clear error so the user knows to recreate the job.
     if (!effectiveWorkspaceId) {
       log.error(`[scheduled-jobs/result] Job ${id}: missing workspaceId on row — Spaces will reject delivery. Recreate the job.`);
-      return;
+      return { ok: false, error: "missing workspaceId" };
     }
 
-    if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
+    if (isChannelBroadcast(row)) {
       // Top-level channel post — no conversationId, new message in channel.
       // Prefer the explicit `targetChannelId` override (set by the user in the
       // Scheduled Jobs UI). Falls back to the originating channelId if not set.
@@ -1428,8 +1548,10 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       }
 
       log.info(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
-    } else if (row.channelId && row.conversationId) {
-      // Reply in the original thread (default "thread" mode)
+    } else if (row.replyMode !== WHATSAPP_REPLY_MODE && row.channelId && row.conversationId) {
+      // Reply in the original thread (default "thread" mode). A job set up
+      // from a WhatsApp chat has a phone chat here, not a Spaces channel, so
+      // when its person chose Spaces it is DM'd below instead.
       if (payload.attachments?.length) {
         const form = new FormData();
         for (const att of payload.attachments) {
@@ -1475,10 +1597,14 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       }, appToken);
 
       log.info(`[scheduled-jobs/result] DM'd result to user ${row.userId}`);
+    } else {
+      return { ok: false, error: "no Spaces destination on the job" };
     }
+    return { ok: true };
   } catch (err) {
     log.error(`[scheduled-jobs/result] Failed to deliver result for job ${id}:`, err);
+    return { ok: false, error: errMsg(err) };
   }
-});
+}
 
 export { router as scheduledJobsRouter };

@@ -85,6 +85,7 @@ import { proactiveInboxRouter, gmailPushRouter } from "../routes/proactive-inbox
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
+import { deliveryPreferenceRouter } from "../routes/delivery-preference.js";
 import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
@@ -343,6 +344,8 @@ function mountRunAndWebhooks(app: Express): void {
 }
 
 function mountWorkspace(app: Express): void {
+  // Where agent messages reach the signed-in person (Spaces / WhatsApp / Teams).
+  app.use(`${BASE}/settings/delivery-preference`, requireAuth, requireNoAccessToken, deliveryPreferenceRouter);
   app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
   // Local harness: device management is user-authed; the bridge router is
   // device-token authed inside (requireDevice) and rate-limited per device.

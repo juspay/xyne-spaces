@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
+import { allowsSurface, loadDeliveryPreference } from "../lib/delivery-preference.js";
 import { sdlcRunChannelId, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
@@ -774,7 +775,11 @@ export async function canNotifyOnWhatsApp(
   runCtx: { channelDelivery?: unknown; agentOrgId?: string | null | undefined } | null | undefined,
 ): Promise<boolean> {
   if (!userId || runCtx?.channelDelivery) return false;
-  return (await findNotifyTarget(userId, runCtx?.agentOrgId ?? null).catch(() => null)) !== null;
+  // A person whose chosen delivery order leaves WhatsApp out has said "not
+  // there"; no order chosen keeps the old answer (lib/delivery-preference.ts).
+  const orgId = runCtx?.agentOrgId ?? null;
+  if (!allowsSurface(await loadDeliveryPreference(userId, orgId), "whatsapp")) return false;
+  return (await findNotifyTarget(userId, orgId).catch(() => null)) !== null;
 }
 
 /**

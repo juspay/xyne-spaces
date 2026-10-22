@@ -325,6 +325,10 @@ export interface NotifyTarget {
   account: ChannelAccount;
   chatId: string;
   template?: MessageTemplate;
+  /** How it was found. "identity": a number the person proved is theirs with
+   *  a one-time code (UserSurfaceIdentity.verifiedAt). "own-device": the "You"
+   *  chat on a WhatsApp they connected themselves. */
+  via: "identity" | "own-device";
 }
 
 export function isRunning(account: ChannelAccount): boolean {
@@ -335,8 +339,15 @@ export function isRunning(account: ChannelAccount): boolean {
  * Where this user can be reached. Their linked number on the org's business
  * number first (that is the assistant they talk to), else their own linked
  * device, where the message lands in their "You" chat. Null when neither.
+ *
+ * `verifiedIdentityOnly` drops the own-device fallback, for approval prompts:
+ * those go only to a number proven to be this person's with a one-time code.
  */
-export async function findNotifyTarget(userId: string, orgId?: string | null): Promise<NotifyTarget | null> {
+export async function findNotifyTarget(
+  userId: string,
+  orgId?: string | null,
+  opts: { verifiedIdentityOnly?: boolean } = {},
+): Promise<NotifyTarget | null> {
   if (!userId) return null;
   const identities = await prisma.userSurfaceIdentity
     .findMany({
@@ -356,13 +367,13 @@ export async function findNotifyTarget(userId: string, orgId?: string | null): P
     const account = (await listOrgAccounts("whatsapp-cloud", identity.orgId)).map(toChannelAccount).find(isRunning);
     if (!account) continue;
     const template = (account.channelConfig as { notificationTemplate?: MessageTemplate } | null)?.notificationTemplate;
-    return { account, chatId: identity.surfaceUserId, ...(template ? { template } : {}) };
+    return { account, chatId: identity.surfaceUserId, via: "identity", ...(template ? { template } : {}) };
   }
-  if (orgId) {
+  if (orgId && !opts.verifiedIdentityOnly) {
     const own = (await listOwnedAccounts("whatsapp", orgId, userId))
       .map(toChannelAccount)
       .find((account) => isRunning(account) && account.config.connState === "connected" && !!account.config.selfId);
-    if (own) return { account: own, chatId: own.config.selfId! };
+    if (own) return { account: own, chatId: own.config.selfId!, via: "own-device" };
   }
   return null;
 }
@@ -377,8 +388,10 @@ export async function notifyUser(input: {
   orgId?: string | null;
   text: string;
   attachments?: OutboxAttachment[];
+  /** Already resolved by the caller (lib/delivery-preference.ts); skips the lookup. */
+  target?: NotifyTarget;
 }): Promise<{ ok: true; viaTemplate: boolean } | { ok: false; error: string }> {
-  const target = await findNotifyTarget(input.userId, input.orgId);
+  const target = input.target ?? (await findNotifyTarget(input.userId, input.orgId));
   if (!target) {
     return { ok: false, error: "This person has no WhatsApp linked to Claw, so they can't be messaged there." };
   }

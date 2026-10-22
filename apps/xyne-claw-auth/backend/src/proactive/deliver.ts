@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { deliveryPlan, loadDeliveryPreference } from "../lib/delivery-preference.js";
 import { errMsg } from "../lib/errors.js";
 import { dispatchOrQueueChannelRun } from "../surfaces/messaging/busy.js";
 import { channelConversationId } from "../surfaces/messaging/ids.js";
@@ -23,6 +24,14 @@ export async function deliverNudge(input: {
     select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true, delegationTier: true },
   });
   if (!agent || !agent.enabled) return { ok: false, reason: "agent_unavailable" };
+
+  // A nudge is an agent run in a messaging chat, so of the person's order
+  // (lib/delivery-preference.ts) only WhatsApp can carry it today: Spaces
+  // has no nudge path and Teams no channel. With no order chosen this is
+  // ["whatsapp"], the old behaviour; one that leaves WhatsApp out is a "not
+  // there", which is respected rather than overridden.
+  const plan = deliveryPlan(await loadDeliveryPreference(input.userId, agent.orgId), ["whatsapp"]);
+  if (!plan.includes("whatsapp")) return { ok: false, reason: "preference_excludes_whatsapp" };
 
   const bindings = await prisma.surfaceAgent.findMany({
     where: { agentId: agent.id },

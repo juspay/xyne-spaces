@@ -82,6 +82,7 @@ model User {
   inboxContacts  InboxContact[]
   nudgeLogs      NudgeLog[]
   proactivePrefs ProactivePrefs?
+  deliveryPreferences DeliveryPreference[]
 
   /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
   /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
@@ -3348,6 +3349,26 @@ model ProactivePrefs {
   updatedAt       DateTime @updatedAt
 
   @@map("proactive_prefs")
+}
+
+/// Where a person wants agent messages they did not ask for in that moment
+/// (proactive nudges, scheduled-job results, approval prompts) to reach them,
+/// per org. `order` is a JSON array of surface keys ("spaces", "whatsapp",
+/// "teams"), most preferred first, de-duplicated, with "spaces" always present
+/// as the last resort (lib/delivery-preference.ts). A plain JSON list rather
+/// than an enum so a surface that is not live yet ("teams") can be stored and
+/// skipped until it exists. No row = never chosen = today's routing.
+model DeliveryPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId     String
+  order     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, orgId])
+  @@map("delivery_preferences")
 }
 
 /// A folder of Xyne AI chats that carries shared instructions and knowledge,

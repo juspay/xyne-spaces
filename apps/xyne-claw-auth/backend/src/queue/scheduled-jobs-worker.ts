@@ -20,6 +20,7 @@ import {
 
 import { createLogger } from "../logger.js";
 import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
+import { scheduledDeliveryTargets } from "../lib/delivery-preference.js";
 import { notificationSurfaceInstructions } from "../surfaces/messaging/dispatch.js";
 const log = createLogger("scheduled-jobs-worker");
 
@@ -105,8 +106,14 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
 
   const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
   // A job set up from a WhatsApp chat answers there (scheduled-jobs.ts
-  // result handler), so its run writes for a phone.
-  const textsBack = row.replyMode === WHATSAPP_REPLY_MODE;
+  // result handler), so its run writes for a phone — as does one whose
+  // person put WhatsApp first and can be reached on it (delivery-preference).
+  const textsBack =
+    row.replyMode === WHATSAPP_REPLY_MODE ||
+    (await scheduledDeliveryTargets(row).then(
+      ({ targets }) => targets[0]?.surface === "whatsapp",
+      () => false,
+    ));
   const dispatchPayload = {
     userId,
     task,
