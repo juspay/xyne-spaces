@@ -54,6 +54,8 @@ interface StageFormFieldsProps {
   booleanButtonsFullWidth?: boolean;
   /** Renders settled values as an audit summary instead of disabled controls. */
   readOnlySummary?: boolean;
+  /** Fields holding a value XOR suggested, not yet changed by the agent: marked "Suggested". */
+  suggestedFieldIds?: ReadonlySet<string>;
 }
 
 export const StageFormFields = ({
@@ -71,6 +73,7 @@ export const StageFormFields = ({
   trackNamePrefix,
   booleanButtonsFullWidth = false,
   readOnlySummary = false,
+  suggestedFieldIds,
 }: StageFormFieldsProps): React.JSX.Element => {
   const docAttachmentIds = useMemo(() => {
     const attachmentIds = new Set<string>();
@@ -186,6 +189,14 @@ export const StageFormFields = ({
                 <label className='mb-1 block text-sm font-medium text-foreground'>
                   {field.fieldName}
                   {!field.isOptional && <span className='text-red-500'>*</span>}
+                  {suggestedFieldIds?.has(field.id) && (
+                    <span
+                      className='ml-2 rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground'
+                      title='Suggested from the ticket and its thread. Check it before submitting.'
+                    >
+                      Suggested
+                    </span>
+                  )}
                 </label>
               )}
 

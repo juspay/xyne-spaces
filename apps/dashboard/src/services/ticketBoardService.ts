@@ -77,6 +77,21 @@ export const suggestTicketFields = async (
   return response.data.data ?? {};
 };
 
+/** XOR's suggested values for a stage form, read from the ticket and its thread: field id → value. */
+export const suggestStageFormFields = async (
+  ticketId: string,
+  formId: string,
+  options?: { signal?: AbortSignal },
+): Promise<Record<string, string[]>> => {
+  const requestConfig = options?.signal ? { signal: options.signal } : undefined;
+  const response = await apiInstance.post<{ success: boolean; data?: Record<string, string[]> }>(
+    `/tickets/${ticketId}/stage-form-suggestions`,
+    { formId },
+    requestConfig,
+  );
+  return response.data.data ?? {};
+};
+
 export const generateReleaseNotes = async (
   ticketId: string,
   options?: { signal?: AbortSignal },

@@ -99,7 +99,8 @@ export type QuestionFeature =
   | 'radar_dedup'
   | 'automation_step'
   | 'summary_template'
-  | 'ticket_fields';
+  | 'ticket_fields'
+  | 'stage_form_fields';
 
 export type DecisionFeature = TaskFeature | QuestionFeature;
 
