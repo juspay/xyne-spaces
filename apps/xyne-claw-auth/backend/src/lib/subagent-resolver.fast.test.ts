@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AppPrismaClient } from "../db.js";
+import { SUBAGENT_TEMPLATES, loadTemplateSamples } from "xyne-claw-shared";
 import { nextChecksVersion, toCustomSubagentSpec, validateSubagentInput, ValidationError } from "./subagent-resolver.js";
 
 const prisma = {
@@ -116,5 +117,26 @@ describe("toCustomSubagentSpec", () => {
     expect(spec).not.toHaveProperty("model");
     expect(spec).not.toHaveProperty("budget");
     expect(spec.checks).toHaveLength(2);
+  });
+});
+
+describe("screenshot samples and templates", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("accepts a screenshot sample without text and rejects bad images", async () => {
+    const v = await validate({ checks: CHECKS, samples: [{ input: "", image: PNG, expected: { failure: true } }] });
+    expect(v.samples).toEqual([{ input: "", image: PNG, expected: { failure: true } }]);
+    const bad = await validate({ samples: [{ input: "", image: "https://x/y.png", expected: {} }] }).catch((e: unknown) => e);
+    expect((bad as ValidationError).field).toBe("samples[0].image");
+    const empty = await validate({ samples: [{ input: "", expected: {} }] }).catch((e: unknown) => e);
+    expect((empty as ValidationError).field).toBe("samples[0].input");
+  });
+
+  it.each(SUBAGENT_TEMPLATES.map((t) => [t.id, t] as const))("the %s template with its samples passes create validation", async (_id, t) => {
+    const samples = await loadTemplateSamples(t);
+    const v = await validateSubagentInput(prisma, { ...t.defaults, samples } as Parameters<typeof validateSubagentInput>[1], { isCreate: true, orgId: "org1" });
+    expect(v).toMatchObject({ name: t.defaults.name, fast: true, budget: t.defaults.budget });
+    expect(v.samples).toHaveLength(samples.length);
+    expect(v.checks?.length).toBe(t.defaults.checks.length);
   });
 });

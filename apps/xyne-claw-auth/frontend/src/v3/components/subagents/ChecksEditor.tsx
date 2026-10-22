@@ -108,10 +108,10 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
   const [text, setText] = useState("");
   const [image, setImage] = useState<{ name: string; url: string } | null>(null);
   const [trying, setTrying] = useState(false);
-  const [result, setResult] = useState<{ checks: SubagentCheck[]; res: CheckTryResult; text: string } | null>(null);
+  const [result, setResult] = useState<{ checks: SubagentCheck[]; res: CheckTryResult; text: string; image?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const first = useRef(true);
+  const lastSent = useRef<string | null>(null);
 
   const ids = drafts.map((d) => d.id);
   const problems = drafts.map((d) => draftProblem(d, ids));
@@ -119,10 +119,13 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
   const built = useMemo(() => drafts.map(fromDraft), [drafts]);
 
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
+    const key = `${valid}:${JSON.stringify(built)}`;
+    if (lastSent.current === null) {
+      lastSent.current = key;
       return;
     }
+    if (key === lastSent.current) return;
+    lastSent.current = key;
     onChange(built, valid);
   }, [built, valid]);
 
@@ -149,7 +152,7 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
         ...(image ? { image: image.url } : {}),
         ...(context?.trim() ? { context: context.trim() } : {}),
       });
-      setResult({ checks: built, res, text: text.trim() });
+      setResult({ checks: built, res, text: text.trim(), ...(image ? { image: image.url } : {}) });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Try failed");
     } finally {
@@ -158,13 +161,13 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
   };
 
   const saveSample = () => {
-    if (!result || !result.text) return;
+    if (!result || (!result.text && !result.image)) return;
     const expected: Record<string, CheckValue> = {};
     for (const c of result.checks) {
       const a = result.res.answers[c.id];
       if (a && a.value !== null && !a.unsure) expected[c.id] = a.value;
     }
-    onSamplesChange([...samples, { input: result.text, expected }].slice(0, MAX_SAMPLES));
+    onSamplesChange([...samples, { input: result.text, ...(result.image ? { image: result.image } : {}), expected }].slice(0, MAX_SAMPLES));
   };
 
   const unsure = result ? result.checks.filter((c) => result.res.answers[c.id]?.unsure) : [];
@@ -340,10 +343,8 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
                 <div className="flex items-center justify-between text-[11px] text-xyne-fg-muted">
                   <span>{result.res.ms} ms</span>
                   {canEdit && (
-                    <Button size="sm" onClick={saveSample} disabled={!result.text || confident === 0 || samples.length >= MAX_SAMPLES}>
-                      {!result.text
-                        ? "Screenshots can't be saved as samples yet"
-                        : unsure.length > 0
+                    <Button size="sm" onClick={saveSample} disabled={(!result.text && !result.image) || confident === 0 || samples.length >= MAX_SAMPLES}>
+                      {unsure.length > 0
                           ? `Save as sample (${confident} confident answer${confident === 1 ? "" : "s"}, unsure ones left out)`
                           : "Save as sample"}
                     </Button>
@@ -360,8 +361,9 @@ export function ChecksEditor({ checks, onChange, samples, onSamplesChange, canEd
         <p className="text-[12px] text-xyne-fg-muted">Saved examples with the answers you expect. They become this subagent's test set.</p>
         {samples.map((s, i) => (
           <div key={i} className="flex items-start gap-2 rounded-lg border border-xyne-border bg-xyne-surface p-2 text-[12px]">
+            {s.image && <img src={s.image} alt="" className="h-10 w-16 shrink-0 rounded border border-xyne-border object-cover object-top" />}
             <div className="min-w-0 flex-1">
-              <p className="truncate font-mono text-xyne-fg-secondary">{s.input}</p>
+              <p className="truncate font-mono text-xyne-fg-secondary">{s.input || s.label || "Screenshot"}</p>
               <p className="mt-0.5 text-xyne-fg-muted">
                 {Object.entries(s.expected).map(([k, v]) => `${k}: ${fmt(v)}`).join(" · ") || "no expected answers"}
               </p>

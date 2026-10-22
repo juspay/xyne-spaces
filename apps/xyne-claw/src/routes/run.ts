@@ -2330,6 +2330,14 @@ export async function processTask(
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
+    const clonedUiTesterTools: Record<string, ToolDefinition[]> =
+      !fastModeEnabled && uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? Object.fromEntries(
+            (customSubagents ?? [])
+              .filter((c) => (c.tools.custom ?? []).includes("ui-test-variations"))
+              .map((c) => [c.name, buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files"), checks: c.checks })]),
+          )
+        : {};
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
@@ -2372,7 +2380,9 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
+          uiTesterTools.length > 0 || Object.keys(clonedUiTesterTools).length > 0
+            ? { ...(uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : {}), ...clonedUiTesterTools }
+            : undefined,
           customSubagents,
           directPickSuffixes,
           customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
