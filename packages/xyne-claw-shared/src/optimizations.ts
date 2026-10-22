@@ -101,8 +101,8 @@ export const OPTIMIZATIONS = {
   },
   jev_result_sift: {
     label: "Filter large tool results",
-    summary: "Large list results from search tools are filtered to the items relevant to this conversation before the agent reads them.",
-    detail: "The full result is always saved to a file first, and the agent can ask for the raw result on any call.",
+    summary: "The agent can ask for a large list result to be filtered to the items relevant to this conversation.",
+    detail: "Filtering happens only on calls that ask for it. The full result is always saved to a file first.",
     group: "context",
     defaultOn: false,
     scope: "agent",
