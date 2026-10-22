@@ -476,6 +476,7 @@ async function dispatchContinuationRun(opts: {
         agentSlug: opts.agentSlug,
         orgId,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       }),
     });
     const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
@@ -1748,6 +1749,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
 
+        // TODO: no eventType here (or on the other /internal/run continuations), so claw withholds
+        // ask-user-question (presentation-catalog.ts); the agent asks in plain text until the original event type is forwarded.
         const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
           method: "POST",
           headers: {
@@ -1763,6 +1766,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             agentSlug: answerAgentSlug,
             orgId: answerOrgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
           }),
         });
 
@@ -2470,6 +2474,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             agentSlug: goalAgentSlug,
             orgId: agent.orgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
             fastMode: fastModeEnabled,
           };
 

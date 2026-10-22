@@ -6,7 +6,12 @@ import {
   findCommand,
   taskPrefixCommandNames,
 } from "@xyne/shared/commands";
-import { TASK_COMMAND_NAMES } from "xyne-claw-shared";
+import { IMMEDIATE_TASK_COMMAND_RE, LOOP_COMMANDS, TASK_COMMAND_NAMES } from "xyne-claw-shared";
+import { parseSlashCommand } from "./parseSlashCommand.js";
+import { buildHelpText } from "./webhook-commands/help.js";
+
+process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
+const { parseExperimentCommand } = await import("./experiment.js");
 
 describe("command registry", () => {
   it("has unique command names", () => {
@@ -54,5 +59,42 @@ describe("command registry", () => {
 
   it("stays in sync with xyne-claw-shared TASK_COMMAND_NAMES", () => {
     expect(new Set(taskPrefixCommandNames())).toEqual(new Set(TASK_COMMAND_NAMES));
+  });
+});
+
+describe("every webhook command routes, is listed in /help, and has its own help", () => {
+  const EXAMPLE_ARGS: Record<string, string> = { goal: "ship the release", eval: "what is 2+2" };
+  for (const def of commandsForSurface("webhook")) {
+    const invocation = `/${def.name}${EXAMPLE_ARGS[def.name] ? ` ${EXAMPLE_ARGS[def.name]}` : ""}`;
+    it(`/${def.name}`, () => {
+      const routed =
+        parseSlashCommand(invocation) !== null ||
+        parseExperimentCommand(invocation) !== null ||
+        (def.kind === "task-prefix" && IMMEDIATE_TASK_COMMAND_RE.test(invocation));
+      expect(routed).toBe(true);
+      expect(buildHelpText({ chat: false })).toContain(`\`/${def.name}`);
+      expect(buildHelpText({ chat: false, command: def.name })).toContain(`/${def.name}`);
+      expect(parseSlashCommand(`/help ${def.name}`)).toEqual({ kind: "help", command: def.name });
+    });
+  }
+
+  it("lists every loop command and parses it into its own kind", () => {
+    for (const loop of LOOP_COMMANDS) {
+      expect(findCommand(loop.command)?.section).toBe("autonomy");
+      const parsed = parseExperimentCommand(`${loop.command} 2h focus area`);
+      expect(parsed).toMatchObject({ sub: "start", ...(loop.kind ? { kind: loop.kind } : {}) });
+      if (!loop.kind) expect(parsed).not.toHaveProperty("kind");
+    }
+  });
+
+  it("answers an unknown /help topic with the full list", () => {
+    const text = buildHelpText({ chat: false, command: "nope" });
+    expect(text).toContain("No command called `/nope`");
+    expect(text).toContain("`/goal");
+  });
+
+  it("adds the chat-only commands in a messenger chat", () => {
+    expect(buildHelpText({ chat: true })).toContain("`/agents`");
+    expect(buildHelpText({ chat: false })).not.toContain("`/agents`");
   });
 });

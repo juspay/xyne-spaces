@@ -16,6 +16,7 @@ export * from './types';
 
 import {
   AccessType,
+  AgentProactivityMode,
   ActivityClassification,
   ActivityClassificationJobType,
   ActivityType,
@@ -794,6 +795,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    agentProactivityMode: enumeration<AgentProactivityMode>().optional(), // Agents answering without a mention
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
@@ -1751,6 +1753,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     metricsGuestVisibility: string().optional(),
+    metricsMinAccess: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),

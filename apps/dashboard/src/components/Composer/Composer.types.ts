@@ -174,6 +174,7 @@ export interface ComposerProps {
   agent: ComposerAgentControl | null;
   model: ComposerModelControl | null;
 
+  lastUserMessage?: string;
   onEnterVoiceMode?: () => void;
   /** Files pasted into the editor (a large text paste arrives as a file). */
   onFilesPasted: (files: File[]) => void;

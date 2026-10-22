@@ -26,6 +26,7 @@ import {
   watchAppFocus,
 } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
+import { setupSpacesMcpIpcHandlers } from './spaces-mcp-handlers';
 import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
@@ -224,6 +225,9 @@ export function setupIpcHandlers(): void {
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
+
+  // Spaces MCP sign-in and status for the Developers tab
+  setupSpacesMcpIpcHandlers();
 
   // Webview preload path handler
   ipcMain.on('get-webview-preload-path', (event) => {

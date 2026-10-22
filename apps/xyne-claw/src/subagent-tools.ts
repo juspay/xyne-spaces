@@ -51,7 +51,7 @@ import {
 import { compactionExtension } from "./compaction-extension.js";
 import { installMidTurnCompaction } from "./mid-turn-compaction.js";
 import { createScopedToolMap } from "./scoped-tools.js";
-import type { ClawStreamMeta } from "xyne-claw-shared";
+import type { ClawStreamMeta, DecideQuestion } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
@@ -160,6 +160,41 @@ const MCP_REQUEST_TIMEOUT_MS = 600_000;
 type SubagentExecResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 type CachedEntry = { promise: Promise<SubagentExecResult>; insertedAt: number };
 const subagentResultCache = new Map<string, Map<string, CachedEntry>>();
+
+/**
+ * One run per key: a concurrent or later identical call gets the same promise.
+ * The in-flight promise is stored BEFORE it settles so a concurrent caller sees
+ * it. A failed answer (details.failed, or a rejection) is shared with calls
+ * already waiting on it but not kept, so the next identical call runs the
+ * subagent again. Exported for tests.
+ */
+export function shareSubagentRun(
+  subMap: Map<string, CachedEntry>,
+  key: string,
+  run: () => Promise<SubagentExecResult>,
+  onHit?: () => void,
+): Promise<SubagentExecResult> {
+  const existing = subMap.get(key);
+  if (existing) {
+    onHit?.();
+    return existing.promise;
+  }
+  const exec = (async (): Promise<SubagentExecResult> => run())();
+  const entry: CachedEntry = { promise: exec, insertedAt: Date.now() };
+  subMap.set(key, entry);
+  const forget = (): void => {
+    if (subMap.get(key) === entry) subMap.delete(key);
+  };
+  exec.then((result) => {
+    if (result.details?.["failed"] === true) forget();
+  }, forget);
+  return exec;
+}
+
+/** The child's working dir: the parent's own, else the per-run workspace. Exported for tests. */
+export function subagentWorkingDir(progressCtx: Pick<SubagentProgressCtx, "parentSessionId" | "parentWorkingDir"> | undefined): string {
+  return progressCtx?.parentWorkingDir ?? (progressCtx?.parentSessionId ? workspacePath(progressCtx.parentSessionId) : process.cwd());
+}
 
 function normalizeQuestion(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, " ");
@@ -403,6 +438,10 @@ function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel:
 export interface SubagentProgressCtx {
   progressUrl?: ProgressDest;
   parentSessionId: string;
+  /** The parent run's working directory. A conversation run's workspace is
+   *  keyed by the conversation, not by parentSessionId, so the child must be
+   *  told where it is rather than derive it. */
+  parentWorkingDir?: string;
   /** Persistent parent agent session key used for filesystem debug artifacts. */
   parentDebugSessionId?: string;
   parentToolsUsed?: string[];
@@ -547,11 +586,12 @@ export interface SubagentProviderResolution {
  * (e.g. for testing). User can still explicitly pin a subagent via
  * subagentProviders[def.name] regardless of this gate.
  */
-function resolveProviderForSubagent(
+export function resolveProviderForSubagent(
   def: SubagentDefinition,
   resolution: SubagentProviderResolution | undefined,
 ): { provider: string; config: CopilotConfig | ClaudeConfig | CodexConfig } | undefined {
   const explicit = resolution?.subagentProviders?.[def.name];
+  if (def.fast && !explicit) return undefined;
   const followParent = process.env["XYNE_SUBAGENT_FOLLOW_PARENT"] === "1";
   const parentIsAnthropicOAuth =
     resolution?.parentProvider === "claude"
@@ -697,19 +737,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const subMap = subagentResultCache.get(parentSid) ?? new Map<string, CachedEntry>();
         if (!subagentResultCache.has(parentSid)) subagentResultCache.set(parentSid, subMap);
         const key = subagentCacheKey(def.name, question);
-        const existing = subMap.get(key);
-        if (existing) {
-          log.info(`[${def.name}] Cache hit (parent=${parentSid.slice(0,8)} key=${key.slice(0,8)}) — sharing in-flight/completed result`);
-          return existing.promise;
-        }
-        // Stash the in-flight promise BEFORE awaiting so a concurrent caller
-        // with the same key sees it. The real execution continues below; we
-        // wrap it in an inner async IIFE so we can await it as the cached promise.
-        const exec = (async (): Promise<SubagentExecResult> => {
-          return await doExecute();
-        })();
-        subMap.set(key, { promise: exec, insertedAt: Date.now() });
-        return exec;
+        return shareSubagentRun(subMap, key, doExecute, () =>
+          log.info(`[${def.name}] Cache hit (parent=${parentSid.slice(0,8)} key=${key.slice(0,8)}) — sharing in-flight/completed result`),
+        );
       }
       return await doExecute();
 
@@ -813,12 +843,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       const childStartedIso = new Date(execStartedAt).toISOString();
       const litellmPick = resolvedProvider
         ? undefined
-        : pickSubagentLitellmModel({
-            key: progressCtx?.parentSessionId,
-            fastModel: LITELLM.subagentFastModel,
-            standardModel: LITELLM.model,
-            fastPercent: LITELLM.subagentFastModelPercent,
-          });
+        : def.fast
+          ? { model: def.model || LITELLM.subagentFastModel, arm: "fast" as const }
+          : pickSubagentLitellmModel({
+              key: progressCtx?.parentSessionId,
+              fastModel: LITELLM.subagentFastModel,
+              standardModel: LITELLM.model,
+              fastPercent: LITELLM.subagentFastModelPercent,
+            });
       const childProvider = resolvedProvider?.provider ?? "litellm";
       const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
@@ -1099,7 +1131,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         );
 
         const parentSessionId = progressCtx?.parentSessionId;
-        const childWorkingDir = parentSessionId ? workspacePath(parentSessionId) : process.cwd();
+        const childWorkingDir = subagentWorkingDir(progressCtx);
 
         // ── Follow-up session persistence. When this subagent supports
         // follow-ups AND we have a conversation to scope under, the child
@@ -1186,6 +1218,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         toolBudget = installToolBudget(session.agent, {
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
+          ...(def.maxToolCalls ? { maxCalls: def.maxToolCalls } : {}),
         });
 
         // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
@@ -1564,6 +1597,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // a real negative result and looped retrying.
         const lastText = session.getLastAssistantText();
         let text: string;
+        const noOutputFailure = !lastText && providerError !== null;
         if (lastText) {
           text = lastText;
         } else if (providerError !== null) {
@@ -1661,9 +1695,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         }
         return {
           content: [{ type: "text" as const, text }],
-          details: followUpEnabled && followUpHandle
-            ? { session_id: followUpHandle, resumed: followUpResumed }
-            : {},
+          details: {
+            ...(followUpEnabled && followUpHandle ? { session_id: followUpHandle, resumed: followUpResumed } : {}),
+            ...(noOutputFailure ? { failed: true } : {}),
+          },
         };
       } catch (err) {
         if (stickyTimer) clearInterval(stickyTimer);
@@ -1684,7 +1719,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         });
         await finishChildCapture(failedStatus, msg, failedDurationMs);
         await writeLegacyChildSnapshot("subagent_error", { status: failedStatus, error: msg });
-        return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: {} };
+        return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: { failed: true } };
       } finally {
         // Belt-and-braces for the sticky-label interval. The success path
         // (above) and the catch path both clear it, but an exit that reaches
@@ -1760,6 +1795,24 @@ export interface CustomSubagentSpec {
   paramDescription: string;
   tools: { direct?: string[]; custom?: string[] };
   skills: Array<{ slug: string; name: string; description: string; content: string }>;
+  fast?: boolean;
+  model?: string;
+  budget?: { maxToolCalls?: number };
+  checks?: DecideQuestion[];
+  checksVersion?: number;
+}
+
+export function withChecks(systemPrompt: string, checks: DecideQuestion[] | undefined, version: number | undefined): string {
+  if (!checks || checks.length === 0) return systemPrompt;
+  return [
+    systemPrompt,
+    "",
+    `## Checks (question bank v${version ?? 1})`,
+    "Judge items with xor-decide. Pass these as its `questions` unchanged, dropping any that do not apply to this task. Add a question only when none of these covers what was asked. Report unsure answers as unsure; never turn them into pass or fail yourself.",
+    "```json",
+    JSON.stringify(checks, null, 2),
+    "```",
+  ].join("\n");
 }
 
 /**
@@ -1836,6 +1889,7 @@ export function buildSubagentTools(
   // accessible inside the subagent palette, so delegating still works. Empty
   // / undefined = legacy behavior (everything stays inside the wrapper).
   directPickSuffixes?: string[],
+  subagentOnlyTools?: ToolDefinition[],
 ): {
   subagentTools: ToolDefinition[];
   directTools: ToolDefinition[];
@@ -1962,7 +2016,11 @@ export function buildSubagentTools(
         log.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
         continue;
       }
-      const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
+      const ownTools = subagentOnlyTools ?? [];
+      const toolsConfig = spec.fast && ownTools.length > 0
+        ? { ...spec.tools, custom: [...new Set([...(spec.tools.custom ?? []), ...ownTools.map((t) => t.name)])] }
+        : spec.tools;
+      const palette = resolveCustomSubagentTools(toolsConfig, groups, [...(customTools ?? []), ...ownTools]);
       if (palette.length === 0) {
         const referenced = (spec.tools.direct?.length ?? 0) + (spec.tools.custom?.length ?? 0);
         if (referenced > 0) {
@@ -1987,13 +2045,25 @@ export function buildSubagentTools(
         name: spec.name,
         description: spec.description,
         progressLabels: spec.progressLabels,
-        systemPrompt: spec.systemPrompt,
+        systemPrompt:
+          palette.some((t) => t.name === "xor-decide") && !(bonusToolsBySubagent?.[spec.name] ?? []).some((t) => t.name === "ui-test-variations")
+            ? withChecks(spec.systemPrompt, spec.checks, spec.checksVersion)
+            : spec.systemPrompt,
         paramName: spec.paramName,
         paramDescription: spec.paramDescription,
         // Synthetic serverType — never matched against an MCP group. Kept
         // distinct from any real serverType so the "find by serverType"
         // loops above don't accidentally re-process this entry.
         serverType: `custom-defined:${spec.name}`,
+        ...(spec.fast || palette.some((t) => ownTools.includes(t)) ? { delegationPreferred: true } : {}),
+        ...(spec.fast
+          ? {
+              fast: true,
+              thinkingLevel: "low" as const,
+              ...(spec.model ? { model: spec.model } : {}),
+              ...(spec.budget?.maxToolCalls ? { maxToolCalls: spec.budget.maxToolCalls } : {}),
+            }
+          : {}),
       };
       const bonus = bonusToolsBySubagent?.[spec.name] ?? [];
       subagentTools.push(

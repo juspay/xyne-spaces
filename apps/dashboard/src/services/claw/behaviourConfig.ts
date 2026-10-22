@@ -1,3 +1,5 @@
+import { MAX_DELEGATIONS_PER_RUN_BOUNDS, clampMaxDelegationsPerRun } from './delegationBudget';
+
 // behaviourConfig — read / validate / apply the Behaviour-tab settings that
 // live inside an agent's free-form `config` bag. Mirrors the extract-and-apply
 // logic in xyne-claw-auth's AgentDetailPageV3 so the same keys are written the
@@ -35,6 +37,10 @@ export interface BehaviourDraft {
    * from the default), otherwise the agent runtime uses its own built-in default.
    */
   planModePrompt: string;
+  planTracking: boolean;
+  postTodos: boolean;
+  maxDelegationsPerRun: number;
+  prefetchContext: boolean;
   /** Verify claims against tool evidence before replying (config.verifyResponses). */
   verifyResponses: boolean;
   /** Extra delivery criteria, only meaningful when verifyResponses is on. */
@@ -71,6 +77,10 @@ interface BehaviourConfigShape {
   autoGoal?: unknown;
   planMode?: unknown;
   planModePrompt?: unknown;
+  planTracking?: unknown;
+  postTodos?: unknown;
+  maxDelegationsPerRun?: unknown;
+  prefetchContext?: unknown;
   verifyResponses?: unknown;
   verifyResponseCriteria?: unknown;
   citationReflection?: unknown;
@@ -94,6 +104,10 @@ export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
       typeof c.planModePrompt === 'string' && c.planModePrompt.trim()
         ? c.planModePrompt
         : DEFAULT_PLAN_MODE_PROMPT,
+    planTracking: c.planTracking !== false,
+    postTodos: c.postTodos !== false,
+    maxDelegationsPerRun: clampMaxDelegationsPerRun(c.maxDelegationsPerRun),
+    prefetchContext: c.prefetchContext === true,
     verifyResponses: c.verifyResponses === true,
     verifyResponseCriteria:
       typeof verifyResponseCriteria === 'string' ? verifyResponseCriteria : '',
@@ -172,6 +186,16 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
   } else {
     delete next['planModePrompt'];
   }
+
+  setOrDelete('planTracking', !draft.planTracking, false);
+  setOrDelete('postTodos', !draft.postTodos, false);
+  const maxDelegations = clampMaxDelegationsPerRun(draft.maxDelegationsPerRun);
+  setOrDelete(
+    'maxDelegationsPerRun',
+    maxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT,
+    maxDelegations,
+  );
+  setOrDelete('prefetchContext', draft.prefetchContext);
 
   if (draft.verifyResponses) {
     next['verifyResponses'] = true;

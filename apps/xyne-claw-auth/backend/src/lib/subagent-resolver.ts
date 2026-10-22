@@ -14,7 +14,7 @@
 
 import type { SubagentDefinition, Skill, SkillFile } from "@prisma/client";
 import type { AppPrismaClient } from "../db.js";
-import { SUBAGENT_DEFINITIONS, type SubagentDefinition as BuiltinDef } from "xyne-claw-shared";
+import { SUBAGENT_DEFINITIONS, validateDecideQuestions, type DecideQuestion, type SubagentDefinition as BuiltinDef } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("subagent-resolver");
@@ -43,6 +43,22 @@ export interface CustomSubagentSpec {
     content: string;
     files?: Array<{ relativePath: string; content: string; contentType?: string | null }>;
   }>;
+  fast?: boolean;
+  model?: string;
+  budget?: SubagentBudget;
+  checks?: DecideQuestion[];
+  checksVersion?: number;
+}
+
+export interface SubagentBudget {
+  maxToolCalls?: number;
+}
+
+export interface SubagentSample {
+  input: string;
+  image?: string;
+  expected: Record<string, string | number | boolean | null>;
+  label?: string;
 }
 
 /** Same shape as AgentToolsConfig from xyne-claw-shared, minus nested
@@ -78,6 +94,11 @@ export interface SubagentInput {
   /** Optional `{ serverType: instanceSlug }` map. Omit or pass `{}` for
    *  the inherit-all default. */
   mcpInstanceMap?: unknown;
+  fast?: unknown;
+  checks?: unknown;
+  samples?: unknown;
+  model?: unknown;
+  budget?: unknown;
 }
 
 export interface ValidatedSubagentInput {
@@ -91,6 +112,11 @@ export interface ValidatedSubagentInput {
   skillIds: string[];
   /** Always a plain object (possibly empty). Empty == inherit all. */
   mcpInstanceMap: Record<string, string>;
+  fast?: boolean;
+  checks?: DecideQuestion[] | null;
+  samples?: SubagentSample[] | null;
+  model?: string | null;
+  budget?: SubagentBudget | null;
 }
 
 const BUILTIN_NAMES: ReadonlySet<string> = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
@@ -233,6 +259,90 @@ function validateMcpInstanceMap(raw: unknown): Record<string, string> {
   return out;
 }
 
+const MODEL_RE = /^[a-zA-Z0-9._:/-]{1,100}$/;
+const MAX_SAMPLES = 50;
+const MAX_IMAGE_SAMPLES = 20;
+const SAMPLE_IMAGE_MAX_CHARS = 1_400_000;
+const SAMPLE_IMAGE_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+const SAMPLE_INPUT_MAX_CHARS = 8_000;
+const MAX_TOOL_CALLS_CAP = 200;
+
+function validateFast(raw: unknown): boolean | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "boolean") throw new ValidationError("fast", "must be a boolean");
+  return raw;
+}
+
+function validateChecks(raw: unknown): DecideQuestion[] | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || (Array.isArray(raw) && raw.length === 0)) return null;
+  const v = validateDecideQuestions(raw);
+  if ("error" in v) throw new ValidationError("checks", v.error);
+  return v.questions;
+}
+
+function validateSamples(raw: unknown, checkIds: Set<string> | null): SubagentSample[] | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || (Array.isArray(raw) && raw.length === 0)) return null;
+  if (!Array.isArray(raw)) throw new ValidationError("samples", "must be an array");
+  if (raw.length > MAX_SAMPLES) throw new ValidationError("samples", `at most ${MAX_SAMPLES} samples`);
+  let images = 0;
+  return raw.map((item, i) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new ValidationError(`samples[${i}]`, "must be an object");
+    const o = item as Record<string, unknown>;
+    const input = typeof o["input"] === "string" ? o["input"].trim() : "";
+    const image = typeof o["image"] === "string" && o["image"] ? o["image"] : undefined;
+    if (image !== undefined && (!SAMPLE_IMAGE_RE.test(image) || image.length > SAMPLE_IMAGE_MAX_CHARS)) {
+      throw new ValidationError(`samples[${i}].image`, "must be a base64 png/jpeg/webp data URL under 1 MB");
+    }
+    if (image !== undefined && ++images > MAX_IMAGE_SAMPLES) throw new ValidationError("samples", `at most ${MAX_IMAGE_SAMPLES} screenshot samples`);
+    if ((!image && input.length < 1) || input.length > SAMPLE_INPUT_MAX_CHARS) {
+      throw new ValidationError(`samples[${i}].input`, `must be 1–${SAMPLE_INPUT_MAX_CHARS} chars, or add a screenshot`);
+    }
+    const rawExpected = o["expected"];
+    if (!rawExpected || typeof rawExpected !== "object" || Array.isArray(rawExpected)) {
+      throw new ValidationError(`samples[${i}].expected`, "must be an object of { checkId: expected answer }");
+    }
+    const expected: SubagentSample["expected"] = {};
+    for (const [k, v] of Object.entries(rawExpected as Record<string, unknown>)) {
+      if (checkIds && !checkIds.has(k)) throw new ValidationError(`samples[${i}].expected`, `"${k}" is not a check id`);
+      if (v !== null && typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") {
+        throw new ValidationError(`samples[${i}].expected.${k}`, "must be a string, number, boolean or null");
+      }
+      expected[k] = v as SubagentSample["expected"][string];
+    }
+    const label = typeof o["label"] === "string" && o["label"].trim() ? o["label"].trim().slice(0, 120) : undefined;
+    return { input, ...(image ? { image } : {}), expected, ...(label ? { label } : {}) };
+  });
+}
+
+function validateModel(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string" || !MODEL_RE.test(raw.trim())) {
+    throw new ValidationError("model", "must be a model id (letters, digits, . _ : / -; up to 100 chars)");
+  }
+  return raw.trim();
+}
+
+function validateBudget(raw: unknown): SubagentBudget | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new ValidationError("budget", "must be an object like { maxToolCalls }");
+  const max = (raw as Record<string, unknown>)["maxToolCalls"];
+  if (max === undefined || max === null) return null;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > MAX_TOOL_CALLS_CAP) {
+    throw new ValidationError("budget.maxToolCalls", `must be an integer 1–${MAX_TOOL_CALLS_CAP}`);
+  }
+  return { maxToolCalls: max };
+}
+
+export function nextChecksVersion(previous: { checks: unknown; checksVersion: number } | null, checks: DecideQuestion[] | null | undefined): number | undefined {
+  if (checks === undefined) return undefined;
+  if (!previous) return checks ? 1 : 0;
+  return JSON.stringify(previous.checks ?? null) === JSON.stringify(checks) ? previous.checksVersion : previous.checksVersion + 1;
+}
+
 export async function validateSubagentInput(
   prisma: AppPrismaClient,
   input: SubagentInput,
@@ -256,6 +366,11 @@ export async function validateSubagentInput(
   }
   const tools = validateToolsConfig(input.tools);
   const mcpInstanceMap = validateMcpInstanceMap(input.mcpInstanceMap);
+  const fast = validateFast(input.fast);
+  const checks = validateChecks(input.checks);
+  const samples = validateSamples(input.samples, checks ? new Set(checks.map((c) => c.id)) : null);
+  const model = validateModel(input.model);
+  const budget = validateBudget(input.budget);
 
   // Tools are OPTIONAL — a subagent with no tools (just a system prompt + skills)
   // is a valid reasoning/summarize/critique helper. We intentionally do NOT block
@@ -272,6 +387,11 @@ export async function validateSubagentInput(
     tools,
     skillIds: await validateSkillIds(prisma, input.skillIds),
     mcpInstanceMap,
+    ...(fast !== undefined ? { fast } : {}),
+    ...(checks !== undefined ? { checks } : {}),
+    ...(samples !== undefined ? { samples } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(budget !== undefined ? { budget } : {}),
   };
 }
 
@@ -306,6 +426,7 @@ export function toCustomSubagentSpec(row: DbRowWithSkills): CustomSubagentSpec {
     paramDescription: row.paramDescription,
     tools: row.tools as SubagentToolsConfig,
     ...(Object.keys(cleanMap).length > 0 ? { mcpInstanceMap: cleanMap } : {}),
+    ...fastFields(row),
     skills: row.skills.map((s) => ({
       slug: s.skill.slug,
       name: s.skill.name,
@@ -321,6 +442,17 @@ export function toCustomSubagentSpec(row: DbRowWithSkills): CustomSubagentSpec {
           }
         : {}),
     })),
+  };
+}
+
+function fastFields(row: SubagentDefinition): Pick<CustomSubagentSpec, "fast" | "model" | "budget" | "checks" | "checksVersion"> {
+  const checks = Array.isArray(row.checks) ? (row.checks as unknown as DecideQuestion[]) : [];
+  const budget = row.budget as SubagentBudget | null;
+  return {
+    ...(row.fast ? { fast: true } : {}),
+    ...(row.fast && row.model ? { model: row.model } : {}),
+    ...(row.fast && budget?.maxToolCalls ? { budget: { maxToolCalls: budget.maxToolCalls } } : {}),
+    ...(checks.length > 0 ? { checks, checksVersion: row.checksVersion } : {}),
   };
 }
 

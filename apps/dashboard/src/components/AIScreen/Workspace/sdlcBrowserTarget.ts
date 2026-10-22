@@ -38,6 +38,10 @@ export function registerSdlcFramePoster(post: (message: unknown) => void): () =>
   };
 }
 
+export function postToSdlcFrame(message: unknown): void {
+  framePoster?.(message);
+}
+
 export function requestSdlcBrowser(): boolean {
   if (!framePoster) return false;
   framePoster({ type: SDLC_FRAME_MESSAGE.showBrowser });

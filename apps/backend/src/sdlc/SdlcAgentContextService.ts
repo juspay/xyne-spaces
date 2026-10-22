@@ -13,6 +13,8 @@ export type { SdlcAgentContext };
 export interface SdlcAgentContextInput {
   channelId?: string;
   conversationId: string;
+  /** The Spaces thread the run was opened from, when it is not the run's own conversation. */
+  threadConversationId?: string;
   generationCommit?: string;
 }
 
@@ -71,7 +73,7 @@ export class SdlcAgentContextService {
       },
       execution: {
         conversationId: input.conversationId,
-        linked: await this.linkedItem(membership.channelId, input.conversationId),
+        linked: await this.linkedItem(membership.channelId, input),
       },
       generationCommit: input.generationCommit ?? null,
     };
@@ -104,7 +106,7 @@ export class SdlcAgentContextService {
       actorUserId: actor.userId,
       execution: {
         conversationId: input.conversationId,
-        linked: await this.linkedItem(channelId, input.conversationId),
+        linked: await this.linkedItem(channelId, input),
       },
       generationCommit: input.generationCommit ?? null,
     };
@@ -112,7 +114,15 @@ export class SdlcAgentContextService {
 
   /** A conversation is the discussion of at most one hub item; the agent fetches more with the SDLC tools. */
   // Scoped to the hub: a conversation id from another hub or workspace resolves to nothing.
-  private async linkedItem(channelId: string, conversationId: string): Promise<SdlcLinkedItem | null> {
+  private async linkedItem(
+    channelId: string,
+    { conversationId, threadConversationId }: SdlcAgentContextInput
+  ): Promise<SdlcLinkedItem | null> {
+    const own = await this.linkedItemFor(channelId, conversationId);
+    return own ?? (threadConversationId ? this.linkedItemFor(channelId, threadConversationId) : null);
+  }
+
+  private async linkedItemFor(channelId: string, conversationId: string): Promise<SdlcLinkedItem | null> {
     const owner = await resolveInheritedOwner(this.prisma, conversationId, channelId);
     if (!owner) {
       const ticket = await this.prisma.ticket.findFirst({

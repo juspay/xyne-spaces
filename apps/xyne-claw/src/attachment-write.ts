@@ -101,6 +101,7 @@ export async function writeAttachmentToContext(
     const md = await xlsxBufferToMarkdown(buffer, safeName);
     const out = `${safeName}.md`;
     await writeFile(joinPath(contextDir, out), md, "utf8");
+    await writeFile(joinPath(contextDir, safeName), buffer);
     return { relPath: `.context/${out}`, kind: "xlsx → md", byteSize: Buffer.byteLength(md, "utf8") };
   }
 
@@ -108,6 +109,7 @@ export async function writeAttachmentToContext(
     const md = await pdfBufferToMarkdown(buffer, safeName);
     const out = `${safeName}.md`;
     await writeFile(joinPath(contextDir, out), md, "utf8");
+    await writeFile(joinPath(contextDir, safeName), buffer);
     return { relPath: `.context/${out}`, kind: "pdf → md", byteSize: Buffer.byteLength(md, "utf8") };
   }
 

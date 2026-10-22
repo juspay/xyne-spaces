@@ -172,3 +172,16 @@ export async function requireSdlcHubReader(
   });
   if (!channel) throw new AppError('SDLC hub not found', 404);
 }
+
+/** Hub Knowledge and the Wiki are read by every member's runs, so only hub admins write them. */
+export async function isSdlcHubAdmin(
+  db: Db,
+  actor: { userId: string },
+  channelId: string
+): Promise<boolean> {
+  const participant = await db.channelParticipant.findFirst({
+    where: { channelId, userId: actor.userId },
+    select: { role: true },
+  });
+  return participant?.role === 'ADMIN';
+}

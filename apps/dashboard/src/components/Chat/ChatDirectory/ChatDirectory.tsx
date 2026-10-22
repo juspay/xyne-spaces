@@ -16,7 +16,10 @@ import { useShortcutById } from '../../../shortcuts';
 import {
   ChevronRight,
   PlusDefault,
+  FolderAi,
+  FolderCancel,
   FolderPlus,
+  ArrowTurnUpLeft,
   SearchDefault,
   ClockDefault,
   PencilEdit,
@@ -53,6 +56,7 @@ import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
 import ProjectSectionSuggestionCard from './ProjectSectionSuggestionCard';
+import { Button } from '../../ui/Button';
 import SectionOrganizerDialog, {
   type OrganizerGroup,
   type OrganizerMode,
@@ -71,7 +75,7 @@ import { affinityService } from '../../../services/affinityService';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
-import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { settleMutation, surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { toast } from 'sonner';
 import {
   useChannelSort,
@@ -128,7 +132,39 @@ import { stateMachineActor, type VisibleChannel } from '../../../machines/stateM
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
 
 const SECTION_SUGGESTION_DISMISSED_KEY = 'xyne:section-suggestion-dismissed';
-const CREATE_SECTION_CHUNK_SIZE = 25;
+const SECTION_SUGGESTION_USED_KEY = 'xyne:section-suggestion-used';
+const SECTION_SUGGESTION_OPT_OUT_KEY = 'xyne:section-suggestion-opted-out';
+const SECTION_ORGANIZE_LAST_KEY = 'xyne:section-organize-last';
+const ORGANIZE_UNDO_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const CREATE_SECTION_CHUNK_SIZE = 200;
+
+interface OrganizeRecord {
+  at: number;
+  sections: { id: string; name: string; channelIds: string[]; isNew: boolean }[];
+}
+
+const readFlag = (key: string): boolean => localStorage.getItem(key) === 'true';
+
+const readOrganizeRecord = (): OrganizeRecord | null => {
+  try {
+    const raw = localStorage.getItem(SECTION_ORGANIZE_LAST_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as OrganizeRecord;
+    if (!Array.isArray(parsed?.sections) || typeof parsed.at !== 'number') return null;
+    if (Date.now() - parsed.at > ORGANIZE_UNDO_WINDOW_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeOrganizeRecord = (record: OrganizeRecord | null): void => {
+  if (!record) {
+    localStorage.removeItem(SECTION_ORGANIZE_LAST_KEY);
+    return;
+  }
+  localStorage.setItem(SECTION_ORGANIZE_LAST_KEY, JSON.stringify(record));
+};
 
 const ContainerDropZone = ({
   id,
@@ -347,10 +383,26 @@ const ChatDirectory = ({
     currentUserId: context.userID,
   });
 
-  const [suggestionDismissed, setSuggestionDismissed] = useState(
-    () => localStorage.getItem(SECTION_SUGGESTION_DISMISSED_KEY) === 'true',
+  const [suggestionDismissed, setSuggestionDismissed] = useState(() =>
+    readFlag(SECTION_SUGGESTION_DISMISSED_KEY),
   );
+  const [suggestionUsed, setSuggestionUsed] = useState(() => readFlag(SECTION_SUGGESTION_USED_KEY));
+  const [suggestionOptedOut, setSuggestionOptedOut] = useState(() =>
+    readFlag(SECTION_SUGGESTION_OPT_OUT_KEY),
+  );
+  const [organizeRecord, setOrganizeRecord] = useState<OrganizeRecord | null>(() =>
+    readOrganizeRecord(),
+  );
+  const [confirmUndoOrganize, setConfirmUndoOrganize] = useState(false);
+  const [undoingOrganize, setUndoingOrganize] = useState(false);
+  const [sectionDraft, setSectionDraft] = useState<{
+    name: string;
+    emoji: string;
+    selectedChannelIds: string[];
+  } | null>(null);
   const [showOrganizer, setShowOrganizer] = useState(false);
+  const suggestionsEnabled =
+    !suggestionOptedOut && (showOrganizer || (!suggestionDismissed && !suggestionUsed));
   const [organizerMode, setOrganizerMode] = useState<OrganizerMode>('project');
   const [activeWindowDays, setActiveWindowDays] = useState(DEFAULT_ACTIVE_WINDOW_DAYS);
   const [suggestionsNowMs, setSuggestionsNowMs] = useState(() => Date.now());
@@ -382,7 +434,7 @@ const ChatDirectory = ({
 
   const contactWeightByChannelId = useMemo(() => {
     const weights = new Map<string, number>();
-    if (suggestionDismissed) return weights;
+    if (!suggestionsEnabled) return weights;
     void affinityVersion;
 
     let hasAffinity = false;
@@ -401,11 +453,11 @@ const ChatDirectory = ({
       weights.set(channelId, recencyScore.get(otherId) ?? 0);
     }
     return weights;
-  }, [dmCounterpartByChannelId, dmRank, suggestionDismissed, affinityVersion, usersById]);
+  }, [dmCounterpartByChannelId, dmRank, suggestionsEnabled, affinityVersion, usersById]);
 
   const suggestionChannels = useMemo(
     () =>
-      suggestionDismissed
+      !suggestionsEnabled
         ? []
         : (channelData ?? []).map(channel => ({
             id: channel.id,
@@ -416,7 +468,7 @@ const ChatDirectory = ({
             isBotDm: isBotDmChannel(channel),
             contactWeight: contactWeightByChannelId.get(channel.id) ?? 0,
           })),
-    [channelData, suggestionDismissed, isBotDmChannel, contactWeightByChannelId],
+    [channelData, suggestionsEnabled, isBotDmChannel, contactWeightByChannelId],
   );
 
   const candidateProjectIdsKey = useMemo(
@@ -434,12 +486,18 @@ const ChatDirectory = ({
       }),
     [candidateProjectIdsKey],
   );
-  const [projects] = useCachedQuery(projectsQuery, {
-    enabled: !suggestionDismissed && candidateProjectIdsKey.length > 0,
+  const [projects, projectsDetails] = useCachedQuery(projectsQuery, {
+    enabled: suggestionsEnabled && candidateProjectIdsKey.length > 0,
   });
+  const projectsLoading = candidateProjectIdsKey.length > 0 && projectsDetails.type !== 'complete';
 
   const existingSectionNames = useMemo(
     () => (channelSections ?? []).map(section => section.name),
+    [channelSections],
+  );
+
+  const existingSections = useMemo(
+    () => (channelSections ?? []).map(section => ({ id: section.id, name: section.name })),
     [channelSections],
   );
 
@@ -449,9 +507,9 @@ const ChatDirectory = ({
         channels: suggestionChannels,
         statuses: allChannelsUserStatus ?? [],
         projects: projects ?? [],
-        existingSectionNames,
+        existingSections,
       }),
-    [suggestionChannels, allChannelsUserStatus, projects, existingSectionNames],
+    [suggestionChannels, allChannelsUserStatus, projects, existingSections],
   );
 
   const activitySuggestions = useMemo(
@@ -459,14 +517,14 @@ const ChatDirectory = ({
       computeActivitySectionSuggestions({
         channels: suggestionChannels,
         statuses: allChannelsUserStatus ?? [],
-        existingSectionNames,
+        existingSections,
         nowMs: suggestionsNowMs,
         activeWindowDays,
       }),
     [
       suggestionChannels,
       allChannelsUserStatus,
-      existingSectionNames,
+      existingSections,
       suggestionsNowMs,
       activeWindowDays,
     ],
@@ -477,9 +535,9 @@ const ChatDirectory = ({
       computeDmSectionSuggestions({
         channels: suggestionChannels,
         statuses: allChannelsUserStatus ?? [],
-        existingSectionNames,
+        existingSections,
       }),
-    [suggestionChannels, allChannelsUserStatus, existingSectionNames],
+    [suggestionChannels, allChannelsUserStatus, existingSections],
   );
 
   const sectionSuggestions =
@@ -491,6 +549,8 @@ const ChatDirectory = ({
 
   const showSuggestionCard =
     !suggestionDismissed &&
+    !suggestionUsed &&
+    !suggestionOptedOut &&
     (projectSuggestions.length > 0 || activitySuggestions.length > 0 || dmSuggestions.length > 0);
 
   const channelsById = useMemo(
@@ -501,92 +561,254 @@ const ChatDirectory = ({
   const handleDismissSuggestion = useCallback(() => {
     localStorage.setItem(SECTION_SUGGESTION_DISMISSED_KEY, 'true');
     setSuggestionDismissed(true);
-    toast('You can create sections any time from the channel menu.', { duration: 5000 });
+    toast('You can still find this under New section.', { duration: 5000 });
   }, []);
+
+  const markSuggestionUsed = useCallback(() => {
+    localStorage.setItem(SECTION_SUGGESTION_USED_KEY, 'true');
+    setSuggestionUsed(true);
+  }, []);
+
+  const setOptedOut = useCallback((optedOut: boolean) => {
+    localStorage.setItem(SECTION_SUGGESTION_OPT_OUT_KEY, String(optedOut));
+    setSuggestionOptedOut(optedOut);
+    toast(
+      optedOut
+        ? 'Section suggestions are off. Turn them back on from the channel menu.'
+        : 'Section suggestions are back on.',
+      { duration: 5000 },
+    );
+  }, []);
+
+  const statusesRef = useRef(allChannelsUserStatus);
+  useEffect(() => {
+    statusesRef.current = allChannelsUserStatus;
+  }, [allChannelsUserStatus]);
+
+  const revertOrganize = useCallback(
+    async (record: OrganizeRecord) => {
+      const timestamp = Date.now();
+      const remaining: OrganizeRecord['sections'] = [];
+      setUndoingOrganize(true);
+
+      const sectionIdByChannelId = new Map(
+        (statusesRef.current ?? []).map(status => [status.channelId, status.sectionId]),
+      );
+
+      for (const section of record.sections) {
+        if (section.isNew) {
+          const removed = await settleMutation(
+            zero.mutate(mutators.channelSection.remove({ id: section.id, timestamp })),
+          );
+          if (!removed) remaining.push(section);
+          continue;
+        }
+
+        const stillInSection = section.channelIds.filter(
+          channelId => sectionIdByChannelId.get(channelId) === section.id,
+        );
+        const failedChannelIds: string[] = [];
+
+        for (let i = 0; i < stillInSection.length; i += CREATE_SECTION_CHUNK_SIZE) {
+          const chunk = stillInSection.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const items = chunk.map(channelId => ({ channelId, position: '' }));
+          if (items.length === 0) continue;
+          const detached = await settleMutation(
+            zero.mutate(mutators.channel.moveManyToSection({ sectionId: null, items, timestamp })),
+          );
+          if (!detached) failedChannelIds.push(...chunk);
+        }
+
+        if (failedChannelIds.length > 0) {
+          remaining.push({ ...section, channelIds: failedChannelIds });
+        }
+      }
+
+      const next = remaining.length > 0 ? { ...record, sections: remaining } : null;
+      writeOrganizeRecord(next);
+      setOrganizeRecord(next);
+      setConfirmUndoOrganize(false);
+      setUndoingOrganize(false);
+
+      if (next) {
+        toast.error(
+          `Couldn't undo ${remaining.length} of ${record.sections.length} section${record.sections.length === 1 ? '' : 's'}. Try again from the channel menu.`,
+          { duration: 8000 },
+        );
+        return;
+      }
+
+      toast('Your sidebar is back to how it was.', { duration: 5000 });
+    },
+    [zero],
+  );
+
+  const liveSectionIds = useMemo(
+    () => new Set((channelSections ?? []).map(section => section.id)),
+    [channelSections],
+  );
+  const canUndoOrganize =
+    !!organizeRecord && organizeRecord.sections.some(section => liveSectionIds.has(section.id));
+  const undoChannelCount =
+    organizeRecord?.sections.reduce((sum, s) => sum + s.channelIds.length, 0) ?? 0;
+  const undoNewSectionCount = organizeRecord?.sections.filter(s => s.isNew).length ?? 0;
+
+  const suggestionMenuActions = useMemo(
+    () => [
+      ...(canUndoOrganize
+        ? [
+            {
+              label: 'Undo organize sidebar',
+              icon: ArrowTurnUpLeft,
+              trackName: 'UNDO_ORGANIZE_SIDEBAR',
+              onSelect: (): void => setConfirmUndoOrganize(true),
+            },
+          ]
+        : []),
+      {
+        label: suggestionOptedOut ? 'Suggest sections' : "Don't suggest sections",
+        icon: suggestionOptedOut ? FolderAi : FolderCancel,
+        trackName: suggestionOptedOut
+          ? 'ENABLE_SECTION_SUGGESTIONS'
+          : 'DISABLE_SECTION_SUGGESTIONS',
+        onSelect: (): void => setOptedOut(!suggestionOptedOut),
+      },
+    ],
+    [canUndoOrganize, suggestionOptedOut, setOptedOut],
+  );
 
   const handleCreateSections = useCallback(
     async (groups: OrganizerGroup[]) => {
       const timestamp = Date.now();
-      const created: { id: string; channelIds: string[] }[] = [];
+      const created: OrganizeRecord['sections'] = [];
       let prevSectionKey = lastSectionPosition;
 
       setShowOrganizer(false);
+      setSectionDraft(null);
 
-      for (const group of groups) {
-        const sectionId = crypto.randomUUID();
-        const position = keyBetween(prevSectionKey, null);
-        prevSectionKey = position;
+      const requestedChannelCount = groups.reduce((sum, g) => sum + g.channelIds.length, 0);
 
-        const sectionCreated = await surfaceMutationError(
-          zero.mutate(
-            mutators.channelSection.create({
-              id: sectionId,
-              name: group.name.trim(),
-              emoji: null,
-              position,
-              filterMode: ChannelFilterMode.ALL,
-              timestamp,
-            }),
-          ),
-        );
-        if (!sectionCreated) continue;
+      // Every mutation is fired in call order and awaited together. Zero applies a client's
+      // mutations in the order they were called, so a move lands after the create it depends
+      // on without waiting for the create's server round trip.
+      const runs = groups.map(group => {
+        const sectionId = group.mergeIntoSectionId ?? crypto.randomUUID();
 
-        const movedChannelIds: string[] = [];
-        let prevChannelKey: string | null = null;
-        for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
-          const chunk = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
-          const positions = chunk.map(() => {
-            const channelPosition = keyBetween(prevChannelKey, null);
-            prevChannelKey = channelPosition;
-            return channelPosition;
-          });
-          const results = await Promise.all(
-            chunk.map((channelId, index) =>
-              surfaceMutationError(
-                zero.mutate(
-                  mutators.channel.moveToSection({
-                    channelId,
-                    sectionId,
-                    position: positions[index] ?? keyBetween(null, null),
-                    timestamp,
-                  }),
-                ),
-              ),
+        let sectionCreated: Promise<boolean> = Promise.resolve(true);
+        if (!group.mergeIntoSectionId) {
+          const position = keyBetween(prevSectionKey, null);
+          prevSectionKey = position;
+
+          sectionCreated = surfaceMutationError(
+            zero.mutate(
+              mutators.channelSection.create({
+                id: sectionId,
+                name: group.name.trim(),
+                emoji: null,
+                position,
+                filterMode: ChannelFilterMode.ALL,
+                timestamp,
+              }),
             ),
           );
-          chunk.forEach((channelId, index) => {
-            if (results[index]) movedChannelIds.push(channelId);
+        }
+
+        let prevChannelKey: string | null = group.mergeIntoSectionId
+          ? ((statusesRef.current ?? [])
+              .filter(status => status.sectionId === group.mergeIntoSectionId)
+              .map(status => status.sectionPosition ?? '')
+              .filter(position => position !== '')
+              .sort()
+              .pop() ?? null)
+          : null;
+        const chunks = [];
+        for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
+          const channelIds = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const items = channelIds.map(channelId => {
+            const channelPosition = keyBetween(prevChannelKey, null);
+            prevChannelKey = channelPosition;
+            return { channelId, position: channelPosition };
+          });
+          chunks.push({
+            channelIds,
+            moved: settleMutation(
+              zero.mutate(mutators.channel.moveManyToSection({ sectionId, items, timestamp })),
+            ),
           });
         }
 
-        created.push({ id: sectionId, channelIds: movedChannelIds });
-      }
+        return { group, sectionId, sectionCreated, chunks };
+      });
 
-      if (created.length === 0) return;
+      // Recorded before the results are in, so closing the tab mid-run still leaves
+      // something for Undo to clean up. Trimmed to what actually landed below.
+      const requested: OrganizeRecord['sections'] = runs.map(run => ({
+        id: run.sectionId,
+        name: run.group.name.trim(),
+        channelIds: run.group.channelIds,
+        isNew: !run.group.mergeIntoSectionId,
+      }));
+      writeOrganizeRecord({ at: timestamp, sections: requested });
+
+      await Promise.all(runs.flatMap(run => [run.sectionCreated, ...run.chunks.map(c => c.moved)]));
+
+      for (const run of runs) {
+        // The section was never created, so its moves failed with "Section not found"
+        // and there is nothing to undo for this group.
+        if (!(await run.sectionCreated)) continue;
+
+        const movedChannelIds: string[] = [];
+        for (const chunk of run.chunks) {
+          if (await chunk.moved) movedChannelIds.push(...chunk.channelIds);
+        }
+
+        created.push({
+          id: run.sectionId,
+          name: run.group.name.trim(),
+          channelIds: movedChannelIds,
+          isNew: !run.group.mergeIntoSectionId,
+        });
+      }
 
       const sectionCount = created.length;
       const channelCount = created.reduce((sum, s) => sum + s.channelIds.length, 0);
+      const skippedChannelCount = requestedChannelCount - channelCount;
+
+      if (skippedChannelCount > 0) {
+        toast.error(
+          `Couldn't add ${skippedChannelCount} channel${skippedChannelCount === 1 ? '' : 's'}. You can try those again from New section.`,
+        );
+      }
+
+      const record: OrganizeRecord | null =
+        created.length > 0 ? { at: timestamp, sections: created } : null;
+      writeOrganizeRecord(record);
+      setOrganizeRecord(record);
+
+      if (!record) return;
+
+      // Sections exist but nothing landed in them: the run failed, so don't
+      // claim success over the error, and don't spend the one-shot card on it.
+      // The record is still kept so Undo can clear the empty sections.
+      if (channelCount === 0) return;
+
+      markSuggestionUsed();
+
+      const newSectionCount = created.filter(s => s.isNew).length;
       toast(
-        `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channel${channelCount === 1 ? '' : 's'}.`,
+        newSectionCount === sectionCount
+          ? `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channel${channelCount === 1 ? '' : 's'}.`
+          : `${channelCount} channel${channelCount === 1 ? '' : 's'} organized into ${sectionCount} section${sectionCount === 1 ? '' : 's'}.`,
         {
           duration: 8000,
           action: {
             label: 'Undo',
-            onClick: () => {
-              const undoTimestamp = Date.now();
-              for (const section of created) {
-                void surfaceMutationError(
-                  zero.mutate(
-                    mutators.channelSection.remove({ id: section.id, timestamp: undoTimestamp }),
-                  ),
-                );
-              }
-            },
+            onClick: () => void revertOrganize(record),
           },
         },
       );
     },
-    [zero, lastSectionPosition],
+    [zero, lastSectionPosition, markSuggestionUsed, revertOrganize],
   );
 
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
@@ -1386,6 +1608,7 @@ const ChatDirectory = ({
                               setShowAddSectionForm(true);
                             },
                           },
+                          ...suggestionMenuActions,
                         ]}
                       />
                     </div>
@@ -1484,6 +1707,7 @@ const ChatDirectory = ({
                             setShowAddSectionForm(true);
                           },
                         },
+                        ...suggestionMenuActions,
                       ]}
                     />
                   </div>
@@ -1551,7 +1775,10 @@ const ChatDirectory = ({
 
         <Dialog
           open={showAddSectionForm}
-          onOpenChange={setShowAddSectionForm}
+          onOpenChange={open => {
+            setShowAddSectionForm(open);
+            if (!open) setSectionDraft(null);
+          }}
           testId='add-section-dialog'
         >
           {showAddSectionForm && (
@@ -1560,12 +1787,40 @@ const ChatDirectory = ({
               existingNames={(channelSections ?? []).map(s => s.name)}
               lastSectionPosition={lastSectionPosition}
               prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
-              onClose={() => setShowAddSectionForm(false)}
+              onClose={() => {
+                setShowAddSectionForm(false);
+                setSectionDraft(null);
+              }}
+              {...(sectionDraft && {
+                initialName: sectionDraft.name,
+                initialEmoji: sectionDraft.emoji,
+                initialSelectedChannelIds: sectionDraft.selectedChannelIds,
+              })}
+              {...(!suggestionOptedOut && {
+                onUseSuggestions: (draft: {
+                  name: string;
+                  emoji: string;
+                  selectedChannelIds: string[];
+                }): void => {
+                  setSectionDraft(draft);
+                  setShowAddSectionForm(false);
+                  setSuggestionsNowMs(Date.now());
+                  setOrganizerMode(addSectionSource === 'dms' ? 'dms' : 'project');
+                  setShowOrganizer(true);
+                },
+              })}
             />
           )}
         </Dialog>
 
-        <Dialog open={showOrganizer} onOpenChange={setShowOrganizer} className='max-w-lg'>
+        <Dialog
+          open={showOrganizer}
+          onOpenChange={open => {
+            setShowOrganizer(open);
+            if (!open && sectionDraft) setShowAddSectionForm(true);
+          }}
+          className='max-w-lg'
+        >
           {showOrganizer && (
             <SectionOrganizerDialog
               suggestions={sectionSuggestions}
@@ -1575,8 +1830,16 @@ const ChatDirectory = ({
               onModeChange={setOrganizerMode}
               activeWindowDays={activeWindowDays}
               onActiveWindowDaysChange={setActiveWindowDays}
-              onCancel={() => setShowOrganizer(false)}
+              onCancel={() => {
+                setShowOrganizer(false);
+                if (sectionDraft) setShowAddSectionForm(true);
+              }}
               onConfirm={groups => void handleCreateSections(groups)}
+              isLoading={organizerMode === 'project' && projectsLoading}
+              onOptOut={() => {
+                setShowOrganizer(false);
+                setOptedOut(true);
+              }}
             />
           )}
         </Dialog>
@@ -1601,6 +1864,80 @@ const ChatDirectory = ({
                 onSubmit={handleRenameSection}
                 onCancel={() => setSectionToRename(null)}
               />
+            </div>
+          )}
+        </Dialog>
+
+        <Dialog
+          open={confirmUndoOrganize}
+          onOpenChange={open => {
+            if (!open) setConfirmUndoOrganize(false);
+          }}
+          testId='undo-organize-dialog'
+        >
+          {organizeRecord && (
+            <div className='p-4 space-y-4'>
+              <div className='flex items-start justify-between gap-2'>
+                <div className='text-xl font-medium text-foreground'>
+                  Undo organizing your sidebar?
+                </div>
+                <button
+                  type='button'
+                  onClick={() => setConfirmUndoOrganize(false)}
+                  aria-label='Close'
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='CLOSE_UNDO_ORGANIZE'
+                  className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                >
+                  <MultipleCrossCancelDefault size={20} />
+                </button>
+              </div>
+              <div className='space-y-3 text-sm text-foreground'>
+                {undoChannelCount === 0 ? (
+                  <p>
+                    This removes the{' '}
+                    <span className='font-semibold'>
+                      {undoNewSectionCount} empty section
+                      {undoNewSectionCount === 1 ? '' : 's'}
+                    </span>{' '}
+                    this created.
+                  </p>
+                ) : (
+                  <p>
+                    This puts the{' '}
+                    <span className='font-semibold'>
+                      {undoChannelCount} channel{undoChannelCount === 1 ? '' : 's'}
+                    </span>{' '}
+                    back where they were
+                    {undoNewSectionCount > 0 &&
+                      ` and removes the ${undoNewSectionCount} section${undoNewSectionCount === 1 ? '' : 's'} this created`}
+                    . Channels you&apos;ve moved since will stay where you put them.
+                  </p>
+                )}
+                <p>Don&apos;t worry — you won&apos;t be removed from any channel.</p>
+              </div>
+              <div className='flex justify-end gap-3 pt-2'>
+                <button
+                  onClick={() => setConfirmUndoOrganize(false)}
+                  disabled={undoingOrganize}
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='CANCEL_UNDO_ORGANIZE'
+                  className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50'
+                >
+                  Cancel
+                </button>
+                <Button
+                  type='button'
+                  variant='default'
+                  size='default'
+                  disabled={undoingOrganize}
+                  onClick={() => void revertOrganize(organizeRecord)}
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='CONFIRM_UNDO_ORGANIZE'
+                >
+                  {undoingOrganize ? 'Undoing…' : 'Undo organize'}
+                </Button>
+              </div>
             </div>
           )}
         </Dialog>

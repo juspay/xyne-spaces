@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react';
 import { spacesBaseUrl } from '../developerTools';
+import { McpSignIn } from './McpSignIn';
 import {
   Callout,
   CodeBlock,
@@ -104,6 +105,8 @@ const WRITE_COUNT = ALL_TOOLS.filter(tool => tool.write).length;
 
 const SERVER_NAME = 'xyne-spaces';
 const MCP_PACKAGE = '@xyne/spaces-mcp';
+/** Placeholder for the folder holding `node` and `npx`, e.g. /opt/homebrew/bin. */
+const NODE_BIN = '<node-folder>';
 const SETUP_OPTIONS = [
   'Claude Code',
   'Cursor',
@@ -204,13 +207,31 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
       </>
     );
   }
-  const config = JSON.stringify({ mcpServers: { [SERVER_NAME]: serverConfig(baseUrl) } }, null, 2);
+  // Apps opened from the Dock do not get the terminal's PATH, so `npx` alone is
+  // often not found. `npx` also starts `node` through PATH, so the full path
+  // to `npx` is not enough on its own: Node's folder goes on PATH as well.
+  const config = JSON.stringify(
+    {
+      mcpServers: {
+        [SERVER_NAME]: {
+          command: `${NODE_BIN}/npx`,
+          args: ['-y', MCP_PACKAGE],
+          env: { XYNE_SPACES_BASE_URL: baseUrl, PATH: `${NODE_BIN}:/usr/bin:/bin` },
+        },
+      },
+    },
+    null,
+    2,
+  );
   return (
     <>
+      <Text>Find the folder Node is installed in by running this in a terminal:</Text>
+      <CodeBlock code='dirname "$(which npx)"' trackName='Spaces MCP: copy find node folder' />
       <Text>
-        Add this to your client&apos;s MCP config and restart it. In Claude Desktop that is Settings
-        → Developer → Edit Config; for Windsurf, Zed or Continue it is the client&apos;s own MCP
-        config file.
+        Add the config below to your client&apos;s MCP config, replacing both{' '}
+        <InlineCode>{NODE_BIN}</InlineCode> with what that printed, then quit and reopen the client.
+        In Claude Desktop that is Settings → Developer → Edit Config; for Windsurf, Zed or Continue
+        it is the client&apos;s own MCP config file.
       </Text>
       <CodeBlock code={config} trackName='Spaces MCP: copy client config' />
     </>
@@ -275,29 +296,23 @@ export function McpDoc(): ReactElement {
             />
           </Step>
           <Step n={2} title='Sign in with Xyne SSO'>
-            <Text>
-              Ask your agent to run <InlineCode>spaces_login</InlineCode>. It opens an approval page
-              and shows a short code. Check the page shows the same code as your terminal, then
-              approve.
-            </Text>
-            <Callout tone='warning'>
-              Never approve a sign-in link someone else sent you: approving gives whoever started it
-              access to your account.
-            </Callout>
+            <McpSignIn />
           </Step>
           <Step n={3} title='Choose what it may do'>
             <Text>
-              It starts <strong>read-only</strong>. To let it send messages, create threads and
-              update tickets, add this to the server&apos;s <InlineCode>env</InlineCode> in your
-              client&apos;s MCP config (with Claude Code, add{' '}
-              <InlineCode>--env XYNE_SPACES_READONLY=0</InlineCode> to the command above), then
-              restart your agent:
+              It starts <strong>read-only</strong>. To let your agents send messages, create threads
+              and update tickets, run this in a terminal:
             </Text>
             <CodeBlock
-              code='"XYNE_SPACES_READONLY": "0"'
+              code={`npx -y ${MCP_PACKAGE} writes on`}
               trackName='Spaces MCP: copy enable writes'
             />
-            <Text>Writes are real and immediate, and other people see them.</Text>
+            <Text>
+              It applies to every agent on this computer, and agents already running pick it up
+              without a restart. <InlineCode>writes off</InlineCode> makes them read-only again, and{' '}
+              <InlineCode>writes</InlineCode> on its own shows the current setting. Writes are real
+              and immediate, and other people see them.
+            </Text>
           </Step>
         </div>
       </DocSection>

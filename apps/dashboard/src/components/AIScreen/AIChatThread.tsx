@@ -41,7 +41,9 @@ import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
+  ApprovedActionPayload,
   Message,
+  PendingAction,
   PlanTodo,
   MessageAttachment,
   ToolInvocation as ToolInvocationType,
@@ -135,7 +137,10 @@ import { TurnErrorCard } from '../Chat/XyneAISidebar/components/TurnErrorCard';
 import { isErrorOnlyContent } from '../Chat/XyneAISidebar/components/turnAnswer';
 import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
-import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
+import {
+  pendingActionErrorMessage,
+  respondToPendingAction,
+} from '../../services/XyneAI/XyneAIPendingActionService';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
   resolveActivePath,
@@ -264,6 +269,7 @@ function stripUnknownCiteLinks(content: string, validCitationKeys: Set<string>):
  *  Four hours keeps one sitting under a single stamp while still marking a
  *  thread picked back up later in the day. */
 const TURN_SEPARATOR_GAP_MS = 4 * 60 * 60 * 1000;
+const APPROVE_AND_CONTINUE_PROMPT = 'Continue with the approved result.';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Topbar
@@ -639,6 +645,7 @@ function ChatMessageBubble({
   agentSlug,
   recipientAgentSlug,
   onPendingActionResolved,
+  onApproveAndContinue,
   conversationId,
   onFlowActionComplete,
   readOnly = false,
@@ -654,6 +661,7 @@ function ChatMessageBubble({
   /** Agent a user message was sent to — shown as "To <agent>" above it. */
   recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
+  onApproveAndContinue?: ((message: Message, action: PendingAction) => Promise<void>) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
@@ -1284,6 +1292,14 @@ function ChatMessageBubble({
                 );
                 onPendingActionResolved?.();
               }}
+              {...(onApproveAndContinue
+                ? {
+                    onApproveAndContinue: async (action: PendingAction): Promise<void> => {
+                      await onApproveAndContinue(message, action);
+                      onPendingActionResolved?.();
+                    },
+                  }
+                : {})}
               onDecline={async action => {
                 await respondToPendingAction(
                   message,
@@ -1724,6 +1740,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const voiceChatTitle = useMemo(
     () => chatTitleOf(savedChatTitle, transcriptMessages),
     [savedChatTitle, transcriptMessages],
+  );
+  const lastUserMessage = useMemo(
+    () => [...transcriptMessages].reverse().find(message => message.type === 'user')?.content,
+    [transcriptMessages],
   );
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
@@ -2362,6 +2382,49 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [submitQuery, isLegacyConversation, displayMessages, messages, designStudio, pageSelection],
   );
 
+  const handleApproveAndContinue = useCallback(
+    async (message: Message, action: PendingAction): Promise<void> => {
+      const ownerSlug = message.agentSlug || effectiveAgentSlug || 'ask-ai';
+      let approvedAction: ApprovedActionPayload;
+      let failure: unknown = null;
+      try {
+        const { resultText } = await respondToPendingAction(
+          message,
+          action,
+          requirePendingActionIndex(message.pendingActions, action),
+          true,
+          ownerSlug,
+        );
+        approvedAction = { tool: action.tool, result: resultText };
+      } catch (err) {
+        failure = err;
+        approvedAction = { tool: action.tool, error: pendingActionErrorMessage(err) };
+      }
+
+      isAtBottomRef.current = true;
+      setShowJumpPill(false);
+      const parentMessageId =
+        !isLegacyConversation && !usesDraftStreamKeyRef.current
+          ? displayMessages[displayMessages.length - 1]?.id
+          : undefined;
+      await submitQuery(
+        APPROVE_AND_CONTINUE_PROMPT,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        parentMessageId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { agentSlug: ownerSlug, approvedAction },
+      );
+      if (failure) throw new Error(pendingActionErrorMessage(failure));
+    },
+    [effectiveAgentSlug, isLegacyConversation, displayMessages, submitQuery],
+  );
+
   const handleStop = useCallback((): void => {
     abortCurrentRequest();
   }, [abortCurrentRequest]);
@@ -2649,6 +2712,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         // A pending action belongs to the agent that proposed
                         // it, which after a switch may not be the one picked.
                         agentSlug={message.agentSlug ?? effectiveAgentSlug ?? undefined}
+                        {...(isV2 ? { onApproveAndContinue: handleApproveAndContinue } : {})}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
                           const refreshArtifacts = (): void => {
@@ -2785,6 +2849,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               voiceStageHost={voiceStageHost}
               voiceMessages={transcriptMessages}
               voiceChatTitle={voiceChatTitle}
+              lastUserMessage={lastUserMessage}
             />
           </div>
         </div>

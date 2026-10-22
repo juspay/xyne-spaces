@@ -14,6 +14,7 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { listS2SClawSkills } from '@/services/clawAgentService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { ensureLink } from './entityLinkService';
+import { notifySdlcResourceChanged } from './sdlcResourceChanged';
 import type { SdlcActor } from './types';
 
 export interface HubKnowledgeDocument {
@@ -26,25 +27,23 @@ export interface HubKnowledge {
   documents: HubKnowledgeDocument[];
   /** Every other Knowledge File, by name; the agent reads one when it needs it. */
   files: { canvasId: string; title: string }[];
-  /** Claw skill ids. Claw-auth drops the ones this user may not read. */
+  /** Claw skill ids. Claw-auth loads only the global ones into a run. */
   skills: { skillId: string; pinned: boolean }[];
+  /** Left out when the actor is not a member of an SDLC hub. */
+  isHubAdmin?: boolean;
 }
 
 const hubSource = (channelId: string) => ({ sourceType: 'CHANNEL', sourceId: channelId });
-const userSource = (userId: string) => ({ sourceType: 'USER', sourceId: userId });
-
-/** The hub's skill links and pins, plus the pins this user set for their own runs. */
-async function readLinks(channelId: string, userId: string): Promise<SdlcHubKnowledgeLinks> {
+/**
+ * The hub's skill links and pins. Read modes are hub-wide only: the old per-user pins
+ * (sourceType USER) are still in the table but never read, so they change nothing.
+ */
+async function readLinks(channelId: string): Promise<SdlcHubKnowledgeLinks> {
   const edges = await db.sdlcEntityLink.findMany({
     where: {
       channelId,
-      OR: [
-        {
-          ...hubSource(channelId),
-          relationType: { in: [SDLC_HUB_SKILL_RELATION, SDLC_HUB_PIN_RELATION] },
-        },
-        { ...userSource(userId), relationType: SDLC_HUB_PIN_RELATION },
-      ],
+      ...hubSource(channelId),
+      relationType: { in: [SDLC_HUB_SKILL_RELATION, SDLC_HUB_PIN_RELATION] },
     },
     orderBy: { createdAt: 'asc' },
     select: {
@@ -57,10 +56,7 @@ async function readLinks(channelId: string, userId: string): Promise<SdlcHubKnow
   });
   const pins = edges.filter((edge) => edge.relationType === SDLC_HUB_PIN_RELATION);
   const skillPins = pins.filter((pin) => pin.targetType === 'SKILL');
-  const pinnedBy = (sourceType: string) =>
-    new Set(skillPins.filter((pin) => pin.sourceType === sourceType).map((pin) => pin.targetId));
-  const hubPinned = pinnedBy('CHANNEL');
-  const myPinned = pinnedBy('USER');
+  const hubPinned = new Set(skillPins.map((pin) => pin.targetId));
   return {
     pinnedCanvasIds: pins.filter((pin) => pin.targetType === 'CANVAS').map((pin) => pin.targetId),
     skills: edges
@@ -69,7 +65,7 @@ async function readLinks(channelId: string, userId: string): Promise<SdlcHubKnow
         skillId: edge.targetId,
         linkedBy: edge.createdBy,
         pinnedForHub: hubPinned.has(edge.targetId),
-        pinnedForMe: myPinned.has(edge.targetId),
+        pinnedForMe: false,
       })),
   };
 }
@@ -81,7 +77,7 @@ export async function readHubKnowledge(
   const empty: HubKnowledge = { documents: [], files: [], skills: [] };
   const participant = await db.channelParticipant.findFirst({
     where: { channelId, userId: actorUserId, channel: { type: 'SDLC' } },
-    select: { id: true },
+    select: { role: true },
   });
   if (!participant) return empty;
   const [placements, links] = await Promise.all([
@@ -95,7 +91,7 @@ export async function readHubKnowledge(
       },
       select: { targetId: true },
     }),
-    readLinks(channelId, actorUserId),
+    readLinks(channelId),
   ]);
   const canvases =
     placements.length === 0
@@ -127,8 +123,9 @@ export async function readHubKnowledge(
       .map((canvas) => ({ canvasId: canvas.id, title: canvas.title })),
     skills: links.skills.map((skill) => ({
       skillId: skill.skillId,
-      pinned: skill.pinnedForHub || skill.pinnedForMe,
+      pinned: skill.pinnedForHub,
     })),
+    isHubAdmin: participant.role === ChannelRole.ADMIN,
   };
 }
 
@@ -150,7 +147,7 @@ export async function listHubKnowledgeLinks(
   channelId: string
 ): Promise<SdlcHubKnowledgeLinks> {
   await requireMember(actor, channelId);
-  return readLinks(channelId, actor.userId);
+  return readLinks(channelId);
 }
 
 const skillLink = (channelId: string, skillId: string) => ({
@@ -162,10 +159,9 @@ const skillLink = (channelId: string, skillId: string) => ({
 });
 
 /**
- * A hub admin links a global skill, which every member's runs then get by name.
- * A member links only their own personal skill, which reaches only their runs.
- * Open door: when that personal skill is later made global, its name and description reach
- * every member's runs with no hub admin step. Close it here when hub approval exists.
+ * Hub admins only. A global skill reaches every member's runs at once. A personal one (always the
+ * admin's own: the list holds global skills and the caller's) is linked now but reaches no run
+ * until a claw admin makes it global; claw-auth loads only global skills into hub runs.
  */
 export async function linkHubSkill(
   actor: SdlcActor,
@@ -173,15 +169,13 @@ export async function linkHubSkill(
   skillId: string
 ): Promise<void> {
   const { isAdmin } = await requireMember(actor, channelId);
-  // The list holds global skills and the caller's own, so a personal one found here is theirs.
+  if (!isAdmin) throw new AppError('Only a hub admin can add a skill to this hub', 403);
   const skill = (await listS2SClawSkills(actor.userId, actor.workspaceId)).find(
     (candidate) => candidate.id === skillId
   );
   if (!skill) throw new AppError('Skill not found', 404);
-  if (skill.scope === 'global' && !isAdmin) {
-    throw new AppError('Only a hub admin can link a global skill', 403);
-  }
   await ensureLink(db, skillLink(channelId, skillId), actor);
+  notifySdlcResourceChanged('knowledge', { channelId });
 }
 
 export async function unlinkHubSkill(
@@ -203,34 +197,33 @@ export async function unlinkHubSkill(
       relationType: SDLC_HUB_PIN_RELATION,
     },
   });
+  notifySdlcResourceChanged('knowledge', { channelId });
 }
 
 /**
- * Sets or clears one pin. See SDLC_HUB_PIN_RELATION for the two kinds.
- * - `hub`: hub admins only, on a Knowledge File or a global skill.
- * - `me`: any member, on a Linked Skill they can use. Knowledge Files have no personal pin.
+ * Sets or clears a hub-wide pin (Always read), hub admins only. The per-user `me` scope is
+ * retired: new writes are refused, and old ones are never read (see readLinks).
  */
 export async function setHubPin(
   actor: SdlcActor,
   channelId: string,
   { scope, pinned, ...target }: SdlcHubPin
 ): Promise<void> {
+  if (scope !== 'hub') throw new AppError('A read mode applies to the whole hub', 400);
   const { isAdmin } = await requireMember(actor, channelId);
-  const forHub = scope === 'hub';
-  if (forHub && !isAdmin) throw new AppError('Only hub admins can pin for everyone', 403);
-  if (!forHub && target.targetType === 'CANVAS') {
-    throw new AppError('Knowledge Files are pinned for everyone, by a hub admin', 400);
-  }
+  if (!isAdmin) throw new AppError('Only hub admins change a read mode', 403);
   const pin = {
     channelId,
-    ...(forHub ? hubSource(channelId) : userSource(actor.userId)),
+    ...hubSource(channelId),
     ...target,
     relationType: SDLC_HUB_PIN_RELATION,
   };
   if (!pinned) {
     await db.sdlcEntityLink.deleteMany({ where: pin });
+    notifySdlcResourceChanged('knowledge', { channelId });
     return;
   }
+  // Only items in the hub; a skill awaiting approval may have its read mode set already.
   const inHub = await db.sdlcEntityLink.findFirst({
     where:
       target.targetType === 'CANVAS'
@@ -245,15 +238,6 @@ export async function setHubPin(
     select: { id: true },
   });
   if (!inHub) throw new AppError('Not found in Hub Knowledge', 404);
-  if (target.targetType === 'SKILL') {
-    // The list holds global skills and the caller's own, so a miss is someone else's personal skill.
-    const skill = (await listS2SClawSkills(actor.userId, actor.workspaceId)).find(
-      (candidate) => candidate.id === target.targetId
-    );
-    if (!skill) throw new AppError('Skill not found', 404);
-    if (forHub && skill.scope !== 'global') {
-      throw new AppError('A personal skill can be pinned only for yourself', 400);
-    }
-  }
   await ensureLink(db, pin, actor);
+  notifySdlcResourceChanged('knowledge', { channelId });
 }
