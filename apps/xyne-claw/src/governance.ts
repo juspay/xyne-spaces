@@ -62,6 +62,8 @@ export interface RunGovernanceOptions {
   /** "parent" registers the run for D; a subagent shares its parent's conversation state. */
   role?: "parent" | "subagent" | undefined;
   parent?: RunGovernance | undefined;
+  /** The registry versions this run loaded, listed in its start event. */
+  loaded?: readonly { versionId: string; sha256: string; slug: string }[] | undefined;
 }
 
 type BeforeHook = (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
@@ -352,7 +354,8 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       };
       if (opts.role !== "subagent") {
         byRun.set(sessionId, run);
-        queueGovernance({ ...base(), loadedVersionIds: [] });
+        const loaded = opts.loaded ?? [];
+        queueGovernance({ ...base(), loadedVersionIds: loaded.map((l) => l.versionId), ...(loaded.length > 0 ? { reasonText: loaded.map((l) => `${l.slug}@${l.sha256.slice(0, 12)}`).join(", ") } : {}) });
       }
     },
     inspectAnswer(text) {

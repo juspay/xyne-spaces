@@ -44,6 +44,8 @@ describe("governance hooks", () => {
     g.install(agent as never);
     expect(governanceForRun("sess-1")).toBe(g);
     expect(events()[0]).toMatchObject({ eventType: "run_started", sessionId: "sess-1", loadedVersionIds: [] });
+    run({ sessionId: "sess-2", loaded: [{ versionId: "v1", sha256: "a".repeat(64), slug: "runbook" }] }).install(fakeAgent().agent as never);
+    expect(events().at(-1)).toMatchObject({ eventType: "run_started", sessionId: "sess-2", loadedVersionIds: ["v1"], reasonText: "runbook@aaaaaaaaaaaa" });
     expect(agent.streamFn({}, { systemPrompt: "You are helpful.", messages: [] })).toBe("stream-result");
     expect(await agent.beforeToolCall(toolCall("read"))).toBeUndefined();
     const after = await agent.afterToolCall({ ...toolCall("read"), result: { content: [{ type: "text", text: "raw" }] }, isError: false } as never);

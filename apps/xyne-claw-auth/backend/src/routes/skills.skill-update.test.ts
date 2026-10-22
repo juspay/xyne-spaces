@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
 vi.mock("../config.js", () => ({ CONFIG: { encryptionKey: Buffer.from("00".repeat(32), "hex"), spacesAppUrl: "http://spaces", spacesInternalUrl: "http://spaces" } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info() {}, warn() {}, error() {} }) }));
 vi.mock("../lib/audit.js", () => ({ writeAuditLog: vi.fn(async () => {}) }));
+vi.mock("../lib/skill-versions.js", () => ({ commitSkillVersion: vi.fn(async () => null), listSkillVersions: vi.fn(async () => []), decideSkillVersion: vi.fn(), rollbackSkill: vi.fn() }));
 vi.mock("../lib/spaces-db.js", () => ({ getWorkspaceIdForUser: vi.fn(async () => "ws-1") }));
 vi.mock("../lib/spaces-api.js", () => ({ spacesAppFetch: vi.fn(async () => ({ channelId: "c" })) }));
 vi.mock("../crypto.js", () => ({ decrypt: vi.fn(() => "tok"), encrypt: vi.fn() }));

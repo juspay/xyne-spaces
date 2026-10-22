@@ -5,6 +5,9 @@ import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { SDLC_AGENT_SLUG, getAllCustomTools } from "xyne-claw-shared";
 import { sdlcAgentDesiredState } from "../src/lib/sdlc-agent-sync.js";
+import { commitSkillVersion } from "../src/lib/skill-versions.js";
+import { flushGovernanceEvents } from "../src/lib/governance-audit.js";
+import { prisma as appPrisma, governancePrisma } from "../src/db.js";
 import {
   WORKFLOW_TOOL_NAMES,
   WORKFLOW_WRITE_TOOL_NAMES,
@@ -1276,12 +1279,14 @@ You:
   for (const def of askAISkillDefs) {
     const content = readSkillFile(def.file);
     if (content) {
-      await prisma.skill.upsert({
-        where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
-        create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source },
-        update: { name: def.name, description: def.description, content },
-      });
-      console.log(`[seed] Upserted skill: ${def.name}`);
+      const where = { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } };
+      const current = await prisma.skill.findUnique({ where });
+      // Compare, then write: an unchanged deploy is a no-op and makes no new version.
+      const skill = current && current.content === content && current.name === def.name && current.description === def.description
+        ? current
+        : await prisma.skill.upsert({ where, create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source }, update: { name: def.name, description: def.description, content } });
+      await commitSkillVersion(skill, { writtenBy: "seed", approvedVia: "ci_build", baselineIfFirst: current !== null });
+      console.log(`[seed] ${skill === current ? "Unchanged" : "Upserted"} skill: ${def.name}`);
     }
   }
 
@@ -1981,12 +1986,14 @@ Three claims, three tokens, each tied to its own source. That's the bar.`;
   for (const def of skillDefs) {
     const content = readSkillFile(def.file);
     if (content) {
-      await prisma.skill.upsert({
-        where: { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } },
-        create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source },
-        update: { name: def.name, description: def.description, content },
-      });
-      console.log(`[seed] Upserted skill: ${def.name}`);
+      const where = { orgId_slug: { orgId: defaultOrg.id, slug: def.slug } };
+      const current = await prisma.skill.findUnique({ where });
+      // Compare, then write: an unchanged deploy is a no-op and makes no new version.
+      const skill = current && current.content === content && current.name === def.name && current.description === def.description
+        ? current
+        : await prisma.skill.upsert({ where, create: { slug: def.slug, orgId: defaultOrg.id, name: def.name, description: def.description, content, source: def.source }, update: { name: def.name, description: def.description, content } });
+      await commitSkillVersion(skill, { writtenBy: "seed", approvedVia: "ci_build", baselineIfFirst: current !== null });
+      console.log(`[seed] ${skill === current ? "Unchanged" : "Upserted"} skill: ${def.name}`);
     }
   }
 
@@ -2829,4 +2836,7 @@ main()
     console.error("[seed] Error:", err);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    await flushGovernanceEvents().catch(() => 0);
+    await Promise.all([prisma.$disconnect(), appPrisma.$disconnect(), governancePrisma.$disconnect()]);
+  });
