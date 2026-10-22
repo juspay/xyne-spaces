@@ -191,7 +191,9 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
 
   const historyFooter = (
     <div className='flex items-center justify-between gap-3 border-t border-border pt-4'>
-      <p className='text-xs text-muted-foreground'>Once included, it can&apos;t be undone.</p>
+      <p className='text-xs text-muted-foreground'>
+        Included threads move with all their earlier messages.
+      </p>
       <div className='flex gap-3'>
         <Button
           variant='ghost'

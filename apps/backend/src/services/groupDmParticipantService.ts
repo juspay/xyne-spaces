@@ -40,6 +40,7 @@ export interface AddGroupDmParticipantsResult {
   conversationsMoved: number;
   movedEverything: boolean;
   destinationMembers: Array<{ userId: string; userName: string }>;
+  sourceMembers: Array<{ userId: string; userName: string }>;
   message: string;
 }
 
@@ -104,6 +105,7 @@ export class GroupDmParticipantService {
         conversationsMoved: 0,
         movedEverything: false,
         destinationMembers: [],
+        sourceMembers: [],
         message: 'Everyone selected is already in this conversation',
       };
     }
@@ -179,6 +181,8 @@ export class GroupDmParticipantService {
       movedEverything: moved > 0 && remaining === 0,
       destinationMembers:
         moved > 0 ? await this.membersExcept(allParticipantIds, currentUserId) : [],
+      sourceMembers:
+        moved > 0 ? await this.membersExcept(currentUserIds, currentUserId) : [],
       message:
         moved > 0
           ? `${moved} conversation(s) moved to this conversation`
