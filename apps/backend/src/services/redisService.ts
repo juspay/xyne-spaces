@@ -125,6 +125,23 @@ class RedisService {
     logger.info('All Redis connections established');
   }
 
+  /**
+   * Run `callback` every time the subscriber connection is ready again after a drop
+   * (not on the first connect). ioredis re-subscribes on its own, but messages
+   * published while it was down are gone, so state-bearing listeners must resync.
+   */
+  onSubscriberReconnect(callback: () => void): void {
+    if (!this.subscriber) return;
+    let connectedBefore = this.subscriber.status === 'ready';
+    this.subscriber.on('ready', () => {
+      if (connectedBefore) {
+        logger.warn('[redis:subscriber] reconnected — notifying resync listeners');
+        callback();
+      }
+      connectedBefore = true;
+    });
+  }
+
   async disconnect(): Promise<void> {
     try {
       if (this.redis) await this.redis.disconnect();

@@ -93,3 +93,66 @@ export function requestClawAgentCancel(params: {
     },
   );
 }
+
+/**
+ * Read-side of the ephemeral "agent is working" signal.
+ *
+ * xyne-claw-auth writes one hash field per running agent to
+ * `agent_progress:conversation:<id>` (see chatController.agentProgress). This
+ * module is the single reader of that hash, shared by the HTTP rehydrate
+ * endpoint (old clients) and the socket snapshot (`agent_progress_sync`), so
+ * the two can never disagree on what "running" means.
+ */
+
+export type AgentProgressEntry = Record<string, unknown>;
+
+export const agentProgressKey = (conversationId: string): string =>
+  `agent_progress:conversation:${conversationId}`;
+
+const doneSessionKey = (sessionId: string): string => `agent_progress_done_session:${sessionId}`;
+
+/**
+ * Current in-flight entries for a conversation — latest state only, one per
+ * running agent. Entries whose run already emitted `done` (tombstoned) and
+ * malformed fields are dropped and proactively deleted from the hash.
+ */
+export async function readAgentProgress(conversationId: string): Promise<AgentProgressEntry[]> {
+  const key = agentProgressKey(conversationId);
+  const raw = await redisService.getAllHashFields(key);
+
+  // Parse all entries first, separating malformed ones immediately.
+  const parsed: Array<{ field: string; entry: AgentProgressEntry }> = [];
+  const staleFields: string[] = [];
+  for (const [field, v] of Object.entries(raw)) {
+    try {
+      parsed.push({ field, entry: JSON.parse(v) as AgentProgressEntry });
+    } catch {
+      staleFields.push(field);
+    }
+  }
+
+  // Tombstone check — batch all Redis GETs in parallel (1 RTT regardless of N agents).
+  // Tombstone is set BEFORE hash-delete and BEFORE the done WebSocket event is broadcast,
+  // so any read that fires after a done sees an authoritative empty/filtered result.
+  const tombstoneResults = await Promise.all(
+    parsed.map(({ entry }) => {
+      const sid = typeof entry.sessionId === 'string' ? entry.sessionId : null;
+      return sid ? redisService.get(doneSessionKey(sid)) : Promise.resolve(null);
+    }),
+  );
+
+  const data: AgentProgressEntry[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    if (tombstoneResults[i]) {
+      staleFields.push(parsed[i].field); // done — proactively clean up
+    } else {
+      data.push(parsed[i].entry);
+    }
+  }
+
+  // Proactively delete stale fields so they don't accumulate in the hash.
+  if (staleFields.length > 0) {
+    await redisService.deleteHashField(key, staleFields).catch(() => { /* non-fatal */ });
+  }
+  return data;
+}

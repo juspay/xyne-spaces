@@ -4,6 +4,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { GridDashboardBento, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import axios from 'axios';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
@@ -365,7 +366,12 @@ const RecordingsV2Screen = (): ReactElement => {
       toast.success('Recording deleted');
     } catch (err) {
       logRecordingError('RecordingsV2Screen.deleteRecording', err);
-      toast.error('Failed to delete recording');
+      // 409: the recording is still in progress. The server's message says what to do.
+      const serverMessage =
+        axios.isAxiosError(err) && err.response?.status === 409
+          ? (err.response.data as { error?: string } | undefined)?.error
+          : undefined;
+      toast.error(serverMessage ?? 'Failed to delete recording');
     }
   }, [deleteRecording]);
 
