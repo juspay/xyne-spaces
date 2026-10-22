@@ -11,6 +11,28 @@ import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
 
+/**
+ * Puts the workspace token on the forwarded request's Authorization header.
+ *
+ * The workspace comes from the X-Workspace-Id header first and the
+ * xyne_last_workspace cookie second, the same order the auth middleware uses.
+ * Reading only the cookie made a request from one workspace run with the token
+ * of whichever workspace the user last opened (another window or tab, a call
+ * invite link), so the handler returned that workspace's rows.
+ */
+function setWorkspaceAuthorization(req: Request, headers: Headers): void {
+  const headerWorkspaceId = req.headers['x-workspace-id'];
+  const workspaceId =
+    (typeof headerWorkspaceId === 'string' && headerWorkspaceId) ||
+    (req.cookies?.xyne_last_workspace as string | undefined);
+  if (!workspaceId) return;
+
+  const token = req.cookies?.[`xyne_ws_${workspaceId}_token`] as string | undefined;
+  if (token) {
+    headers.set('authorization', `Bearer ${token}`);
+  }
+}
+
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
   if (error instanceof Error && error.message === 'Rate limit exceeded') {
     res.status(429).json({
@@ -48,11 +70,9 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         }
       });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      // Use the token for the workspace the request is for (X-Workspace-Id),
+      // the same one the auth middleware authenticated.
+      setWorkspaceAuthorization(req, headers);
 
       const webRequest = new Request(url, {
         method: 'POST',
@@ -87,11 +107,9 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
         }
       });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      // Use the token for the workspace the request is for (X-Workspace-Id),
+      // the same one the auth middleware authenticated.
+      setWorkspaceAuthorization(req, headers);
 
       const webRequest = new Request(url, {
         method: 'POST',
@@ -125,11 +143,9 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
       }
     });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      // Use the token for the workspace the request is for (X-Workspace-Id),
+      // the same one the auth middleware authenticated.
+      setWorkspaceAuthorization(req, headers);
 
     const webRequest = new Request(url, {
       method: 'POST',
@@ -172,11 +188,9 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       }
     });
 
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
+    // Use the token for the workspace the request is for (X-Workspace-Id),
+    // the same one the auth middleware authenticated.
+    setWorkspaceAuthorization(req, headers);
 
     const webRequest = new Request(url, {
       method: 'POST',
@@ -210,11 +224,9 @@ export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<
       }
     });
 
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
+    // Use the token for the workspace the request is for (X-Workspace-Id),
+    // the same one the auth middleware authenticated.
+    setWorkspaceAuthorization(req, headers);
 
     const webRequest = new Request(url, {
       method: 'POST',
