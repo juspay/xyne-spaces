@@ -8973,3 +8973,78 @@ export interface CuratorClassifierTrace {
     exchange: ClassifierExchange;
   }>;
 }
+
+export type LoopTemplateId = "deadline-checker" | "frontier" | "cursor-walk" | "until-condition" | "fix-retry";
+
+export interface LoopTemplateInfo {
+  id: LoopTemplateId;
+  title: string;
+  summary: string;
+  example: string;
+  exit: "deadline" | "frontier" | "judge";
+  question: { label: string; placeholder: string; retryWhen: boolean } | null;
+  deliverable: "required" | "optional" | "none";
+  defaultDurationMin: number;
+  maxDurationMin: number;
+}
+
+export interface LoopTemplateCatalogue {
+  templates: LoopTemplateInfo[];
+  skillBundles: Array<{ id: string; label: string; summary: string }>;
+  providers: string[];
+}
+
+export interface LoopCommandBody {
+  name?: string;
+  description: string;
+  template: LoopTemplateId;
+  instruction: string;
+  skills: string[];
+  subagents: string[];
+  provider?: string | null;
+  modelId?: string | null;
+  maxDurationMinutes: number;
+  maxPasses?: number | null;
+  deliverable?: "md" | "html" | null;
+  judgeQuestion?: string | null;
+}
+
+export interface LoopCommandRow extends Required<Omit<LoopCommandBody, "name">> {
+  id: string;
+  name: string;
+  command: string;
+  published: boolean;
+  enabled: boolean;
+  mine: boolean;
+  createdByUserId: string;
+  updatedAt: string;
+}
+
+export async function getLoopTemplates(): Promise<LoopTemplateCatalogue> {
+  const data = await request<{ success: boolean; data: LoopTemplateCatalogue }>(`${AUTH_API_URL}/api/v1/loop-commands/templates`);
+  return data.data;
+}
+
+export async function listLoopCommands(): Promise<LoopCommandRow[]> {
+  const data = await request<{ success: boolean; data: LoopCommandRow[] }>(`${AUTH_API_URL}/api/v1/loop-commands`);
+  return data.data;
+}
+
+export async function createLoopCommand(body: LoopCommandBody): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands`, { method: "POST", body: JSON.stringify(body) });
+  return data.data;
+}
+
+export async function updateLoopCommand(id: string, body: LoopCommandBody): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+  return data.data;
+}
+
+export async function publishLoopCommand(id: string, published: boolean): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/publish`, { method: "POST", body: JSON.stringify({ published }) });
+  return data.data;
+}
+
+export async function deleteLoopCommand(id: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

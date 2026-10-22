@@ -4,6 +4,7 @@ import { findCommand, renderCommandHelp } from "@xyne/shared/commands";
 import { experimentRepository } from "../../repositories/index.js";
 import { isClawAdmin } from "../../middleware/agent-acl.js";
 import {
+  type CustomCommandMatch,
   type ExperimentCommand,
   formatDuration,
   dispatchExperimentEpoch,
@@ -32,6 +33,7 @@ type ExperimentHandlers = {
   [K in ExperimentSub]: (
     ctx: WebhookCommandCtx,
     command: Extract<ExperimentCommand, { sub: K }>,
+    custom?: CustomCommandMatch | null,
   ) => Promise<void>;
 };
 
@@ -242,7 +244,7 @@ const handlers: ExperimentHandlers = {
     }
   },
 
-  start: async (ctx, experimentCommand) => {
+  start: async (ctx, experimentCommand, custom) => {
     const { agent, payload, log } = ctx;
     if (experimentCommand.invalidProvider !== undefined) {
       await ctx.reply([
@@ -267,9 +269,10 @@ const handlers: ExperimentHandlers = {
       provider: experimentCommand.provider ?? null,
       modelId: experimentCommand.model ?? null,
       kind: experimentCommand.kind ?? null,
+      commandId: experimentCommand.commandId ?? null,
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
-    const loop = loopCommandFor(experimentCommand.kind);
+    const loop = custom && experimentCommand.commandId === custom.commandId ? custom.def : loopCommandFor(experimentCommand.kind);
     // Seed the frontier from a list the user already gave us (e.g. 57 table
     // names). Ground truth beats model enumeration: with the paths pre-recorded
     // the run cannot exit by imagining fewer of them.
@@ -308,10 +311,12 @@ const handlers: ExperimentHandlers = {
 export async function handleExperimentCommand(
   ctx: WebhookCommandCtx,
   command: ExperimentCommand,
+  custom?: CustomCommandMatch | null,
 ): Promise<void> {
   const handler = handlers[command.sub] as (
     ctx: WebhookCommandCtx,
     command: ExperimentCommand,
+    custom?: CustomCommandMatch | null,
   ) => Promise<void>;
-  await handler(ctx, command);
+  await handler(ctx, command, custom);
 }

@@ -6,6 +6,7 @@ import { createLogger } from "../../logger.js";
 import { LOOP_COMMANDS, loopCommandFor, type LoopCommandDef, type LoopKey } from "xyne-claw-shared";
 import { advanceLoop, passesExhausted, pastDeadline, pastHardStop, type LoopEdge, type LoopNode, type LoopSpec } from "../engine.js";
 import { decided, xorDecideNode, type Decision } from "../decide.js";
+import { loopDefForRun } from "../../lib/loop-command-defs.js";
 
 const log = createLogger("experiment");
 
@@ -227,6 +228,21 @@ function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
 
 export const EPOCH_LOOPS = Object.fromEntries(LOOP_COMMANDS.map((def) => [def.key, buildEpochLoop(def)])) as Record<LoopKey, ExperimentSpec>;
 
+const customLoops = new WeakMap<LoopCommandDef, ExperimentSpec>();
+
+export function customEpochLoop(def: LoopCommandDef): ExperimentSpec {
+  const hit = customLoops.get(def);
+  if (hit) return hit;
+  const spec = buildEpochLoop(def);
+  customLoops.set(def, spec);
+  return spec;
+}
+
+async function loopSpecForRun(run: ExperimentRun): Promise<ExperimentSpec> {
+  const custom = await loopDefForRun(run);
+  return custom ? customEpochLoop(custom) : epochLoopFor(run.kind);
+}
+
 export const experimentLoop = EPOCH_LOOPS.experiment;
 
 export function epochLoopFor(kind: unknown): ExperimentSpec {
@@ -241,7 +257,7 @@ export async function continueExperimentAfterResult(conversationId: string, sess
   const active = await experimentRepository.findActiveByConversation(conversationId);
   if (!active) return false;
   if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
-  const step = await advanceLoop(epochLoopFor(active.kind), {
+  const step = await advanceLoop(await loopSpecForRun(active), {
     from: currentNode(active),
     on: "result",
     ledger: { run: active },
@@ -251,5 +267,5 @@ export async function continueExperimentAfterResult(conversationId: string, sess
 }
 
 export async function superviseExperiment(run: ExperimentRun, now = Date.now()): Promise<void> {
-  await advanceLoop(epochLoopFor(run.kind), { from: currentNode(run), on: "tick", ledger: { run }, ctx: { now } });
+  await advanceLoop(await loopSpecForRun(run), { from: currentNode(run), on: "tick", ledger: { run }, ctx: { now } });
 }

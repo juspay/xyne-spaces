@@ -27,6 +27,7 @@ import { skillsRouter } from "../routes/skills.js";
 import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
+import loopCommandsRouter from "../routes/loop-commands.js";
 import sandboxRouter from "../routes/sandbox.js";
 import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
@@ -204,6 +205,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
+  app.use(`${BASE}/loop-commands`, requireAuth, requireNoAccessToken, loopCommandsRouter);
   app.use(`${BASE}/sandbox-access`, requireUserAuth, sandboxAccessRouter); // sandbox-router → may this Spaces session open /claw-preview|code|term/<sandboxId>?
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);

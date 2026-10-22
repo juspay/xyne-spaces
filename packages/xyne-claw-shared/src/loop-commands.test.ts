@@ -3,7 +3,8 @@ import { LOOP_COMMANDS, LOOP_KINDS, loopCommandFor, loopCommandForWord, loopMode
 
 describe("loop command registry", () => {
   it("has one command per kind plus /experiment, with unique keys and command words", () => {
-    expect(LOOP_COMMANDS.map((def) => def.kind).filter(Boolean).sort()).toEqual([...LOOP_KINDS].sort());
+    expect(LOOP_COMMANDS.map((def) => def.kind).filter(Boolean).sort()).toEqual(LOOP_KINDS.filter((k) => k !== "custom").sort());
+    expect(LOOP_COMMANDS.some((def) => def.kind === "custom")).toBe(false);
     expect(new Set(LOOP_COMMANDS.map((def) => def.key)).size).toBe(LOOP_COMMANDS.length);
     expect(new Set(LOOP_COMMANDS.map((def) => def.command)).size).toBe(LOOP_COMMANDS.length);
   });

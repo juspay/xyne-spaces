@@ -2469,6 +2469,7 @@ model ExperimentRun {
   /// end-experiment stays locked until the open-conjecture frontier is exhausted).
   /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
   kind               String              @default("experiment")
+  commandId          String?
   status             String              @default("running") /// running | finishing | done | aborted
   epoch              Int                 @default(1)
   deadlineAt         DateTime
@@ -3572,4 +3573,32 @@ model FastSubagentAlert {
   @@unique([orgId, subagentName, kind, bucket])
   @@index([orgId, createdAt])
   @@map("fast_subagent_alerts")
+}
+
+/// A loop command a user built from a template (LOOP_TEMPLATES in xyne-claw-shared).
+/// Drafts run only for their creator; published ones run for anyone in the org.
+model LoopCommandDefinition {
+  id                 String   @id @default(cuid())
+  orgId              String
+  name               String
+  description        String
+  template           String
+  instruction        String   @db.Text
+  skills             String[] @default([])
+  subagents          String[] @default([])
+  provider           String?
+  modelId            String?
+  maxDurationMinutes Int
+  maxPasses          Int?
+  deliverable        String?
+  judgeQuestion      String?  @db.Text
+  published          Boolean  @default(false)
+  enabled            Boolean  @default(true)
+  createdByUserId    String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId, published])
+  @@map("loop_command_definitions")
 }
