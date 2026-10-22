@@ -28,7 +28,13 @@ import type {
   ContextRef,
   PickedContext,
 } from './Composer.types';
-import { ATOM_PLACEHOLDER, cleanEditorText, findTrigger, refKey } from './Composer.utils';
+import {
+  ATOM_PLACEHOLDER,
+  cleanEditorText,
+  composerKeyAction,
+  findTrigger,
+  refKey,
+} from './Composer.utils';
 import { ContextMention, VoiceShimmerMark, mentionRefs } from './ComposerEditor';
 import { ChannelMenu, CommandList, MentionPicker, type ComposerMenuHandle } from './ComposerMenus';
 import {
@@ -371,6 +377,29 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             event.preventDefault();
             return true;
           }
+        }
+        const current = editorRef.current;
+        const recalled = latest.current.lastUserMessage;
+        const action = current
+          ? composerKeyAction({
+              key: event.key,
+              menuOpen: active !== null,
+              isEmpty: current.isEmpty,
+              lastUserMessage: recalled,
+              modified: event.shiftKey || event.altKey || event.metaKey || event.ctrlKey,
+              isComposing: event.isComposing,
+            })
+          : null;
+        if (current && action === 'recall-last' && recalled) {
+          event.preventDefault();
+          current.chain().setContent(textToDoc(recalled)).focus('end').run();
+          return true;
+        }
+        if (current && action === 'clear') {
+          event.preventDefault();
+          event.stopPropagation();
+          current.commands.clearContent();
+          return true;
         }
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();

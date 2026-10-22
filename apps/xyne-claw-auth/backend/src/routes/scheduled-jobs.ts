@@ -14,6 +14,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
@@ -1168,8 +1169,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.toolsUsed ? { toolsUsed: payload.toolsUsed } : {}),
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
+      ...clawMetricsFields(payload),
     }).catch(() => {});
 
     if (payload.result?.trim() || payload.attachments?.length) {

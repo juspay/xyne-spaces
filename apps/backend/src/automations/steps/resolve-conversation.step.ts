@@ -9,6 +9,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { tagService, DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { logger } from '@/utils/logger';
+import { TicketContextSchema, loadTicketLinks } from '../triggers/ticket-context';
 import { TICKET_CREATED_EVENT, ticketCreatedTrigger } from '../triggers/ticket-created.trigger';
 import { TICKET_UPDATED_EVENT, ticketUpdatedTrigger } from '../triggers/ticket-updated.trigger';
 import { EMAIL_RECEIVED_EVENT, emailReceivedTrigger } from '../triggers/email-received.trigger';
@@ -45,6 +46,8 @@ const ResolveConversationOutputSchema = z.object({
   conversationId: z.string(),
   ticketId: z.string().nullable(),
   customFieldValues: z.record(z.string(), z.unknown()).nullable().describe('Ticket custom field values keyed by field name'),
+  parentTicket: TicketContextSchema.shape.parentTicket,
+  subTickets: TicketContextSchema.shape.subTickets,
   // One key per option, shaped by that trigger's own output; null when there is nothing to resolve.
   ...(Object.fromEntries<z.ZodTypeAny>(
     RESOLVE_AS_OPTIONS.map(type => [type, RESOLVABLE_TRIGGERS[type].outputSchema.nullable()]),
@@ -82,6 +85,8 @@ export class ResolveConversationStep extends BaseActionStep<
       select: { id: true, boardId: true, projectId: true, channelId: true, createdBy: true },
     });
 
+    const links = ticket ? await loadTicketLinks(ticket.id) : { parentTicket: null, subTickets: [] };
+
     const [resolved, customForm] = await Promise.all([
       Promise.all(
         config.resolveAs.map(async type => {
@@ -99,6 +104,7 @@ export class ResolveConversationStep extends BaseActionStep<
     return {
       conversationId,
       ticketId: ticket?.id ?? null,
+      ...links,
       customFieldValues: customForm
         ? Object.fromEntries(customForm.fields.map(f => [f.fieldName, f.value]))
         : null,

@@ -43,7 +43,10 @@ const CONTACTS_SOURCE_TYPES: Record<UserContactsProvider, string> = {
   MICROSOFT: 'microsoft_contacts',
 };
 
+const USER_CONTACTS_ENABLED = false;
+
 export function providerFromAuthProvider(provider: AuthProvider): UserContactsProvider | null {
+  if (!USER_CONTACTS_ENABLED) return null;
   if (provider === AuthProvider.GOOGLE) return 'GOOGLE';
   if (provider === AuthProvider.MICROSOFT) return 'MICROSOFT';
   return null;

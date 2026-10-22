@@ -1,6 +1,7 @@
 import { apiInstance } from './clients/apiClient';
 import {
   DisplaySearchResult,
+  DiscussionTitleVerdict,
   QueryIntent,
   RelatedContext,
   VespaSearchResponse,
@@ -176,6 +177,17 @@ export class SearchService {
       { text, ...(conversationId ? { conversationId } : {}) },
       signal ? { signal } : {},
     );
+    return response.data.success ? response.data.data : null;
+  }
+
+  async getDiscussionTitleVerdict(
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<DiscussionTitleVerdict | null> {
+    const response = await apiInstance.post<{
+      success: boolean;
+      data: DiscussionTitleVerdict | null;
+    }>(`${this.vespaBaseUrl}/discussion-title`, { text }, signal ? { signal } : {});
     return response.data.success ? response.data.data : null;
   }
 

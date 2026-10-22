@@ -662,9 +662,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -700,9 +702,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -852,9 +856,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -891,9 +897,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector(sel);
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -1029,9 +1037,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -1068,9 +1078,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -1107,9 +1119,11 @@ export default class BrowserSteps {
         // @ts-ignore - document exists in browser context
         const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
         if (virtuoso) {
+          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
           // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
           // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          virtuoso.scrollTop = virtuoso.scrollHeight;
+          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
+          scroller.scrollTop = scroller.scrollHeight;
         }
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
@@ -1269,10 +1283,17 @@ export default class BrowserSteps {
   // The composer shows a "Remove attachment <name>" button only once that upload finishes.
   @Step('waiting for attachment <fileName> to finish uploading')
   public async waitForAttachmentUpload(fileName: string): Promise<void> {
-    await testContext.activePage
+    const removeButton = testContext.activePage
       .getByRole('button', { name: `Remove attachment ${fileName}`, exact: true })
-      .first()
-      .waitFor({ state: 'visible', timeout: 60000 });
+      .first();
+    await removeButton.waitFor({ state: 'visible', timeout: 60000 });
+    // The tile (and its remove button) shows as soon as the file is picked; the
+    // composer keeps its send button disabled until the bytes finish uploading.
+    const sendButton = removeButton
+      .locator('xpath=ancestor::*[.//*[@data-testid="send-message-button"]][1]')
+      .locator('[data-testid="send-message-button"]')
+      .first();
+    await expect(sendButton).toBeEnabled({ timeout: 60000 });
   }
 
   @Step('attaching file to <selector>')

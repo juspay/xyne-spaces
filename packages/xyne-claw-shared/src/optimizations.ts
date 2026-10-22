@@ -163,14 +163,6 @@ export const OPTIMIZATIONS = {
     defaultOn: false,
     scope: "agent",
   },
-  jev_mode_router: {
-    label: "Jev mode routing",
-    summary: "Plain-text messages are routed to /review, /learn or no mode by Jev when it is confident; otherwise the LLM router decides.",
-    detail: "Saves the LLM router call on clear-cut messages.",
-    group: "routing",
-    defaultOn: true,
-    scope: "agent",
-  },
   jev_goal_prefilter: {
     label: "Goal done-check pre-filter",
     summary: "A /goal loop's done-check asks Jev first; only when Jev is unsure does the LLM judge run.",

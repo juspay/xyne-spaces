@@ -11,6 +11,7 @@ import {
   WORKSPACE_PREFIX,
 } from './constants';
 import type { MenuItem } from './paths';
+import { APP_AREAS, type Scope } from './scope';
 
 export interface Control extends MenuItem {
   id: string;
@@ -173,6 +174,17 @@ function labelOf(el: HTMLElement, text: string, name: string): string {
     .slice(0, LIMITS.labelLength);
 }
 
+/**
+ * The page's own content: inside its <main>, past the chat sidebar there. Anything else is the
+ * app's (its sidebars, the site map, menus and popups portalled to the body).
+ */
+const scopeOf = (el: HTMLElement): Scope =>
+  el.closest('main') &&
+  !el.closest(SELECTORS.siteMap) &&
+  !APP_AREAS.has(humanize(el.getAttribute('data-track-category') ?? ''))
+    ? 'page'
+    : 'app';
+
 function toControl(el: HTMLElement, id: string): Control {
   const track = trackOf(el);
   const name = humanize(track);
@@ -187,6 +199,7 @@ function toControl(el: HTMLElement, id: string): Control {
     label: labelOf(el, text, name),
     ...(path !== null && { href: path + (el as HTMLAnchorElement).search }),
     use,
+    scope: scopeOf(el),
     ...(isOpener(el, use) && {
       opens: el.getAttribute('aria-haspopup') === 'dialog' ? 'dialog' : 'menu',
     }),

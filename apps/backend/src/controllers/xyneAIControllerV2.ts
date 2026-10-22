@@ -29,12 +29,21 @@ import {
   downloadClawAttachment,
   listAccessibleClawAgents,
   listClawAgentModels,
+  warmClawAgent,
   deleteClawConversation,
   patchClawConversation,
   saveClawConversationNotes,
   ClawNotesError,
+  ClawRequestError,
   CMDK_ANSWER_AGENT_SLUG,
+  listClawChatProjects,
+  createClawChatProject,
+  getClawChatProject,
+  updateClawChatProject,
+  deleteClawChatProject,
+  reorderClawChatProjects,
   type ClawRunRequest,
+  type ClawChatProjectInput,
 } from '@/services/clawAgentService';
 import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
@@ -251,6 +260,24 @@ const FeedbackRequestSchema = z.object({
 /**
  * Controller for Xyne AI v2 - delegates all claw operations to clawAgentService.
  */
+/**
+ * Upstream statuses that mean something to the caller and are safe to hand
+ * back unchanged. Everything else is an upstream problem, reported as 503.
+ *
+ * A claw-auth 401 in particular must NOT reach the dashboard: its axios
+ * interceptor treats any 401 as session expiry and fires
+ * `/auth/refresh-session` plus a retry (services/clients/apiClient.ts), so a
+ * rejected forwarded cookie would burn a refresh and leave misleading auth
+ * logs for a Spaces session that is perfectly valid.
+ */
+const PASSTHROUGH_CLAW_STATUSES = new Set([400, 404, 409]);
+
+function clawStatusFor(error: unknown): number {
+  return error instanceof ClawRequestError && PASSTHROUGH_CLAW_STATUSES.has(error.status)
+    ? error.status
+    : 503;
+}
+
 export class XyneAIControllerV2 {
   /**
    * GET /api/xyne-ai/config
@@ -881,6 +908,8 @@ export class XyneAIControllerV2 {
               q: param('q'),
               limit: param('limit'),
               cursor: param('cursor'),
+              // `none` lists unfiled chats; any other value is a project id.
+              projectId: param('projectId'),
             }
           : { agentSlug: param('agentSlug') ?? 'ask-ai', fullAgentList: true }
       );
@@ -888,7 +917,9 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] listConversations error:', error);
-      res.status(503).json({ success: false, error: message });
+      // An unknown ?projectId= is a 404 from claw-auth, not an outage. Without
+      // this it would read as "claw-auth is down" and the client would retry.
+      res.status(clawStatusFor(error)).json({ success: false, error: message });
     }
   };
 
@@ -1273,9 +1304,13 @@ export class XyneAIControllerV2 {
       return;
     }
 
-    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
-    if (title === undefined && pinned === undefined) {
-      res.status(400).json({ success: false, error: 'title or pinned is required' });
+    const { title, pinned, projectId } = (req.body ?? {}) as {
+      title?: unknown;
+      pinned?: unknown;
+      projectId?: unknown;
+    };
+    if (title === undefined && pinned === undefined && projectId === undefined) {
+      res.status(400).json({ success: false, error: 'title, pinned or projectId is required' });
       return;
     }
     if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
@@ -1284,6 +1319,16 @@ export class XyneAIControllerV2 {
     }
     if (pinned !== undefined && typeof pinned !== 'boolean') {
       res.status(400).json({ success: false, error: 'pinned must be a boolean' });
+      return;
+    }
+    // null unfiles the chat and is a meaningful value, so it is checked
+    // separately from `undefined` (which means "leave membership alone").
+    if (
+      projectId !== undefined &&
+      projectId !== null &&
+      (typeof projectId !== 'string' || !projectId.trim())
+    ) {
+      res.status(400).json({ success: false, error: 'projectId must be a non-empty string or null' });
       return;
     }
 
@@ -1296,6 +1341,7 @@ export class XyneAIControllerV2 {
         {
           ...(typeof title === 'string' ? { title } : {}),
           ...(typeof pinned === 'boolean' ? { pinned } : {}),
+          ...(projectId === undefined ? {} : { projectId: projectId as string | null }),
         },
         agentSlug
       );
@@ -1303,10 +1349,139 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] updateConversation error:', error);
-      res.status(message === 'Conversation not found' ? 404 : 503).json({
-        success: false,
-        error: message,
-      });
+      // claw-auth 404s for a conversation that is not the caller's AND for a
+      // project that is not theirs, without distinguishing them; forward its
+      // status rather than matching on wording.
+      const status =
+        error instanceof ClawRequestError
+          ? clawStatusFor(error)
+          : message === 'Conversation not found'
+            ? 404
+            : 503;
+      res.status(status).json({ success: false, error: message });
+    }
+  };
+
+  // --- Chat projects ------------------------------------------------------
+  // Thin pass-through to claw-auth. Validation of names, lengths and sources
+  // lives there (routes/chat-projects.ts); duplicating it here would only let
+  // the two drift. What this layer owns is auth and status mapping.
+
+  private projectFailure(res: Response, label: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    logger.error(`[XyneAIv2] ${label} error:`, error);
+    res.status(clawStatusFor(error)).json({ success: false, error: message });
+  }
+
+  listChatProjects = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    try {
+      res.json(await listClawChatProjects({ headers: req.headers, userId }));
+    } catch (error) {
+      this.projectFailure(res, 'listChatProjects', error);
+    }
+  };
+
+  createChatProject = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    try {
+      const created = await createClawChatProject(
+        { headers: req.headers, userId },
+        (req.body ?? {}) as ClawChatProjectInput
+      );
+      res.status(201).json(created);
+    } catch (error) {
+      this.projectFailure(res, 'createChatProject', error);
+    }
+  };
+
+  getChatProject = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId } = req.params;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'projectId is required' });
+      return;
+    }
+    try {
+      res.json(await getClawChatProject({ headers: req.headers, userId }, projectId));
+    } catch (error) {
+      this.projectFailure(res, 'getChatProject', error);
+    }
+  };
+
+  updateChatProject = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId } = req.params;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'projectId is required' });
+      return;
+    }
+    try {
+      res.json(
+        await updateClawChatProject(
+          { headers: req.headers, userId },
+          projectId,
+          (req.body ?? {}) as ClawChatProjectInput
+        )
+      );
+    } catch (error) {
+      this.projectFailure(res, 'updateChatProject', error);
+    }
+  };
+
+  deleteChatProject = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId } = req.params;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'projectId is required' });
+      return;
+    }
+    try {
+      res.json(await deleteClawChatProject({ headers: req.headers, userId }, projectId));
+    } catch (error) {
+      this.projectFailure(res, 'deleteChatProject', error);
+    }
+  };
+
+  reorderChatProjects = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectIds } = (req.body ?? {}) as { projectIds?: unknown };
+    if (!Array.isArray(projectIds) || projectIds.some(id => typeof id !== 'string' || !id.trim())) {
+      res
+        .status(400)
+        .json({ success: false, error: 'projectIds must be an array of non-empty strings' });
+      return;
+    }
+    try {
+      res.json(
+        await reorderClawChatProjects({ headers: req.headers, userId }, projectIds as string[])
+      );
+    } catch (error) {
+      this.projectFailure(res, 'reorderChatProjects', error);
     }
   };
 
@@ -1436,6 +1611,18 @@ export class XyneAIControllerV2 {
       logger.error('[XyneAIv2] listAgentModels error:', error);
       res.status(503).json({ success: false, error: message });
     }
+  };
+
+  warmAgent = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    res.status(202).json({ success: true });
+    await warmClawAgent({ headers: req.headers, userId }, req.params['slug'] ?? 'ask-ai').catch((error) =>
+      logger.warn('[XyneAIv2] warmAgent failed:', error)
+    );
   };
 
   private handleError(res: Response, error: unknown, operation: string): void {

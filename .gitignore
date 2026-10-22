@@ -250,3 +250,5 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+apps/xyne-claw-auth/backend/src/extensions/
+apps/xyne-claw-auth/frontend/src/v3/extensions/

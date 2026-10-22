@@ -18,7 +18,15 @@ import { recordingService } from '../../services/Recording/recordingService';
 import { canvasService } from '../../services/Canvas/canvasService';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
-import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown, Layers } from 'lucide-react';
+import {
+  AudioLines,
+  Clock,
+  FileText,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  Layers,
+} from 'lucide-react';
 import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -620,7 +628,7 @@ export default function RecordingsScreen(): ReactElement {
             {recordings.length === 0 ? (
               <div className='flex flex-col items-center justify-center py-20 text-center'>
                 <div className='w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4'>
-                  <Mic className='w-8 h-8 text-muted-foreground' />
+                  <AudioLines className='w-8 h-8 text-muted-foreground' />
                 </div>
                 <h3 className='text-lg font-semibold text-foreground mb-2'>No recordings yet</h3>
                 <p className='text-sm text-muted-foreground max-w-sm'>
@@ -665,7 +673,7 @@ export default function RecordingsScreen(): ReactElement {
                             <div className='flex items-start gap-4'>
                               {/* Icon */}
                               <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50  flex items-center justify-center group-hover:bg-blue-100  transition-colors'>
-                                <Mic className='w-5 h-5 text-blue-600 ' />
+                                <AudioLines className='w-5 h-5 text-blue-600 ' />
                               </div>
 
                               {/* Content */}

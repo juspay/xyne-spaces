@@ -134,7 +134,7 @@ export class CallAdminController {
       const { rows, nextCursor } = await callAdminService.listCalls(actor, {
         mineOnly: query.scope === 'mine',
         statuses: query.status,
-        callType: query.type,
+        callTypes: query.type,
         search: query.search,
         summaryStatuses: query.summaryStatus,
         hasTranscript: query.hasTranscript,

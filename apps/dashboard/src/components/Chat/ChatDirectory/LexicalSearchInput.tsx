@@ -83,7 +83,7 @@ interface LexicalSearchInputProps {
   onPasteDetected?: () => void;
   onManualKeystroke?: () => void;
   autocompleteSuffix?: string;
-  onInsertTextReady?: (insertText: (text: string) => void) => void;
+  onInsertTextReady?: (insertText: InsertText) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
   /** Imperative "put quotes around the free text, or take them off again". */
   onToggleQuotesReady?: (toggleQuotes: () => void) => void;
@@ -328,16 +328,21 @@ function ClearEditorPlugin({ value }: { value: string | undefined }) {
   return null;
 }
 
+/**
+ *`continueWord` instead of starting a new word after a separating space.
+ */
+export type InsertText = (text: string, opts?: { continueWord?: boolean }) => void;
+
 function InsertTextPlugin({
   onInsertTextReady,
 }: {
-  onInsertTextReady?: (insertText: (text: string) => void) => void;
+  onInsertTextReady?: (insertText: InsertText) => void;
 }) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
     if (onInsertTextReady) {
-      const insertText = (text: string) => {
+      const insertText: InsertText = (text, opts) => {
         editor.update(() => {
           const selection = $getSelection();
           if (selection === null) return;
@@ -346,7 +351,7 @@ function InsertTextPlugin({
           // text and silently filters nothing. Add the separating space when the character
           // to the left isn't already whitespace (and isn't the start of the input).
           let prefix = '';
-          if ($isRangeSelection(selection) && selection.isCollapsed()) {
+          if (!opts?.continueWord && $isRangeSelection(selection) && selection.isCollapsed()) {
             const anchor = selection.anchor;
             const node = anchor.getNode();
             const before =

@@ -18,7 +18,7 @@ import {
   LifeBuoy,
   Megaphone,
   MessageCircle,
-  Mic,
+  AudioLines,
   Search,
   Settings,
   Sparkles,
@@ -558,7 +558,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                   className='flex items-center gap-2 p-1.5 rounded-lg border border-border/60'
                 >
                   <div className='h-7 w-7 rounded-md bg-[#57ab02]/10 text-[#57ab02] flex items-center justify-center shrink-0'>
-                    <Mic size={12} />
+                    <AudioLines size={12} />
                   </div>
                   <div className='flex-1 min-w-0'>
                     <p className='text-[10px] font-medium text-foreground truncate'>{r.title}</p>
@@ -581,7 +581,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
             <div className='flex-1 p-2 space-y-2 overflow-hidden'>
               <div className='flex items-center gap-2 rounded-lg border border-border/60 p-1.5'>
                 <div className='h-6 w-6 rounded-md bg-[#57ab02]/10 text-[#57ab02] flex items-center justify-center shrink-0'>
-                  <Mic size={11} />
+                  <AudioLines size={11} />
                 </div>
                 <div className='flex-1 min-w-0'>
                   <div className='flex items-center gap-1 mt-0.5'>

@@ -762,7 +762,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
     replace_section: ["canvasId", "heading", "markdown"],
     insert_section: ["canvasId", "heading", "markdown"],
     remove_section: ["canvasId", "heading"],
-    move: wiki ? ["canvasId", "folderPath"] : ["canvasId", "parentId"],
+    move: wiki ? ["canvasId", "folderPath"] : ["canvasId"],
   };
   const keys = required[action];
   if (!keys) return `action must be one of ${Object.keys(required).join(", ")}`;
@@ -770,10 +770,19 @@ register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
   const missing = keys.find((key) => key !== "folderPath" && !has(key));
   if (missing) return `${missing} is required for ${action}`;
   if (action === "move" && wiki && typeof params["folderPath"] !== "string") return "folderPath is required for move";
+  if (action === "move" && !wiki && !has("parentId") && !has("artifactTypeId")) return "move needs parentId or artifactTypeId";
   if (action === "update" && !wiki && !has("markdown") && !has("title") && !(params["relatedCanvasIds"] as unknown[] | undefined)?.length) {
     return "update needs markdown, title or relatedCanvasIds";
   }
   if (has("trackFolderId") && !has("trackId")) return "trackFolderId needs the trackId it sits in";
+  return null;
+});
+
+register("xyne-spaces", SDLC_TOOL_NAMES.createArtifactType, async (params) => {
+  for (const key of ["channelId", "name"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (String(params["name"]).trim().length > 80) return "name must be at most 80 characters";
   return null;
 });
 

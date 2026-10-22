@@ -590,6 +590,9 @@ const CalendarDayView = ({
                           title={otherMeta.title}
                           startsAt={otherMeta.startsAt}
                           endsAt={otherMeta.endsAt}
+                          details={otherMeta.details}
+                          open={openCallId === event.id}
+                          onOpenChange={open => setOpenCallId(open ? event.id : null)}
                         />
                       );
                     }
@@ -725,6 +728,9 @@ const CalendarDayView = ({
                             title={slot.title}
                             startsAt={slot.startsAt}
                             endsAt={slot.endsAt}
+                            details={slot}
+                            open={openCallId === id}
+                            onOpenChange={open => setOpenCallId(open ? id : null)}
                             zClass='z-[5]'
                           />
                         );
