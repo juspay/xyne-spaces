@@ -86,7 +86,7 @@ function judgeCallbackFields(): { judge?: { backend: string; calls: number; fail
   };
 }
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
-import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
+import { ALWAYS_LOADED_TOOL_NAMES, activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -498,7 +498,7 @@ The inline citation tokens are the only citation mechanism for Claw v3. Never us
 const RESULT_SIFT_GUIDE = `
 
 ## Filtered tool results
-Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
+Tool results are NOT filtered unless you ask. When a call may return a large list, pass "sift": true to get only the items most relevant to this conversation; omit "sift" to get the raw result. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again without "sift".`;
 
 const SPACES_MENTION_GUIDE = `
 
@@ -2381,6 +2381,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -2594,6 +2595,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -3466,7 +3468,9 @@ export async function processTask(
         pinned: new Set([
           PROPOSE_PLAN_TOOL_NAME,
           EMIT_BRIEF_TOOL_NAME,
-          "ask-user-question",
+          // Includes todo-write: the plan primer says the agent MUST call it,
+          // and demoting it to the catalog made that call fail with "not found".
+          ...ALWAYS_LOADED_TOOL_NAMES,
           ...forcedTaskCommandTools,
           ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
         ]),
