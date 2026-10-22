@@ -390,6 +390,22 @@ model UserSurfaceIdentity {
   @@map("user_surface_identities")
 }
 
+/// A Microsoft Entra tenant bound to the org whose people it holds. Teams
+/// messages are accepted only from a tenant bound to the account's org, and a
+/// sender is matched to a user of that org only. One tenant belongs to one
+/// org (tenantId is unique); an org may bind several tenants.
+model TeamsTenantBinding {
+  id            String   @id @default(cuid())
+  /// Entra tenant GUID, lower-case.
+  tenantId      String   @unique
+  orgId         String
+  boundByUserId String
+  createdAt     DateTime @default(now())
+
+  @@index([orgId])
+  @@map("teams_tenant_bindings")
+}
+
 model SurfaceAgent {
   id                        String                @id @default(cuid())
   agentId                   String
@@ -1831,6 +1847,13 @@ enum AgentAuditEvent {
   DESIGN_SYSTEM_CREATED
   DESIGN_SYSTEM_UPDATED
   DESIGN_SYSTEM_DELETED
+  // Teams identities and tenant bindings. Added by migration
+  // 20261022210100_teams_identity_audit_events (ALTER TYPE ADD VALUE) — kept
+  // here so a fresh `prisma generate` accepts them.
+  CHANNEL_IDENTITY_LINKED
+  CHANNEL_IDENTITY_UNLINKED
+  TEAMS_TENANT_BOUND
+  TEAMS_TENANT_UNBOUND
 }
 
 model AgentAuditLog {

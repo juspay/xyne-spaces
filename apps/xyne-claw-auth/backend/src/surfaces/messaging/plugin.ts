@@ -199,6 +199,12 @@ export interface InboundMessage {
    *  the account might answer in, so ordering holds and an ignored group
    *  costs nothing. Returns null to keep the id the plugin already set. */
   resolveSenderId?: () => Promise<string | null>;
+  /** Link the sender from the messenger's own directory, for a channel whose
+   *  provider vouches for who people are (Teams: Entra via Microsoft Graph).
+   *  Called by the core only when no identity row exists for the sender, so
+   *  a linked person never pays for it. Writes the row itself and returns
+   *  the user it linked, or null to leave the sender unlinked. */
+  linkSender?: () => Promise<string | null>;
   /** The person tapped a button or list row on a card WE sent; this is that
    *  option's `id`. Set only by plugins with native cards — a text fallback
    *  comes back as ordinary text and is matched by cards.ts instead. */

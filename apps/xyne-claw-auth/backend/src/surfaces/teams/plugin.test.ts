@@ -15,6 +15,12 @@ vi.mock("./auth.js", () => ({
   botFrameworkAuth: { verifyInbound, connectorToken: async () => "fake-bearer", dropToken },
 }));
 
+// Tenant → org bindings: TENANT is bound to org-1, nothing else is.
+const orgForTenant = vi.fn(async (tenantId: string) => (tenantId === "11111111-2222-3333-4444-555555555555" ? "org-1" : null));
+vi.mock("./tenants.js", () => ({ orgForTenant }));
+const linkTeamsSender = vi.fn(async (_input: Record<string, unknown>) => "user-1" as string | null);
+vi.mock("./identity.js", () => ({ linkTeamsSender }));
+
 const { teamsPlugin, TEAMS_NOT_LINKED_TEXT } = await import("./plugin.js");
 const { clearConversationRefCache } = await import("./conversations.js");
 type AuthStateStore = import("../messaging/plugin.js").AuthStateStore;
@@ -83,8 +89,10 @@ afterEach(() => {
 });
 
 describe("teamsPlugin inbound", () => {
-  it("says it is not linked in Teams terms, never 'add your number'", () => {
+  it("prompts an unlinked sender with how linking works, never 'add your number'", () => {
     expect(teamsPlugin.unlinkedText).toBe(TEAMS_NOT_LINKED_TEXT);
+    expect(TEAMS_NOT_LINKED_TEXT).toMatch(/sign in to Xyne once with that same work email/);
+    expect(TEAMS_NOT_LINKED_TEXT).not.toMatch(/number/i);
     expect(teamsPlugin.senderIdFromPhone).toBeUndefined();
   });
 
@@ -116,11 +124,37 @@ describe("teamsPlugin inbound", () => {
     });
   });
 
-  it("drops messages from a tenant outside the account's allowlist", async () => {
-    const other = { allowedTenantIds: ["99999999-2222-3333-4444-555555555555"] };
-    expect(await teamsPlugin.parseInbound!(activity(), account(other), authState)).toEqual([]);
+  it("drops a message from a tenant no org bound, before storing or looking anyone up", async () => {
+    const stranger = activity({
+      conversation: { id: PERSONAL, conversationType: "personal", tenantId: "99999999-2222-3333-4444-555555555555" },
+    });
+    expect(await teamsPlugin.parseInbound!(stranger, account(), authState)).toEqual([]);
     expect(authState.rows.has(`conversation-ref|${PERSONAL}`)).toBe(false);
-    expect(await teamsPlugin.parseInbound!(activity(), account({ allowedTenantIds: [TENANT] }), authState)).toHaveLength(1);
+    expect(linkTeamsSender).not.toHaveBeenCalled();
+  });
+
+  it("drops a message from a tenant bound to a different org", async () => {
+    const otherOrg = { ...(account() as Record<string, unknown>), orgId: "org-2" } as never;
+    expect(await teamsPlugin.parseInbound!(activity(), otherOrg, authState)).toEqual([]);
+    expect(authState.rows.has(`conversation-ref|${PERSONAL}`)).toBe(false);
+  });
+
+  it("hands the core a way to link the sender from the signed tenant and object id", async () => {
+    const [msg] = await teamsPlugin.parseInbound!(activity(), account(), authState);
+    expect(msg?.senderId).toBe(`${TENANT}:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`);
+    expect(linkTeamsSender).not.toHaveBeenCalled();
+    expect(await msg!.linkSender!()).toBe("user-1");
+    expect(linkTeamsSender.mock.calls[0]?.[0]).toMatchObject({
+      tenantId: TENANT,
+      aadObjectId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      senderId: `${TENANT}:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`,
+    });
+  });
+
+  it("offers no link for a sender without an Entra object id", async () => {
+    const [msg] = await teamsPlugin.parseInbound!(activity({ from: { id: "29:fake-federated" } }), account(), authState);
+    expect(msg?.senderId).toBe(`${TENANT}:bf:29:fake-federated`);
+    expect(msg?.linkSender).toBeUndefined();
   });
 });
 

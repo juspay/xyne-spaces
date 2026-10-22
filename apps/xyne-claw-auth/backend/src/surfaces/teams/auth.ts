@@ -13,6 +13,8 @@
  *
  * Outbound (us → Bot Connector): an Entra client-credentials token for the
  * App ID, scoped to the Bot Framework, cached until shortly before it expires.
+ * The same App ID also takes a Microsoft Graph token from a sender's tenant,
+ * to read who they are (identity.ts).
  *
  * Both halves take their HTTP client as a parameter so tests run against fake
  * keys and a fake token endpoint; nothing here reaches Microsoft in a test.
@@ -25,6 +27,7 @@ import {
   BOTFRAMEWORK_ISSUER,
   BOTFRAMEWORK_OPENID_METADATA_URL,
   BOTFRAMEWORK_SCOPE,
+  GRAPH_SCOPE,
   LOGIN_ORIGIN,
   MULTI_TENANT_AUTHORITY,
 } from "./schema.js";
@@ -161,14 +164,34 @@ export class BotFrameworkAuth {
   // ── outbound ──
 
   /** A bearer token for calls to the Bot Connector, cached per app. */
-  async connectorToken(input: { appId: string; appPassword: string; tenantId?: string | undefined }): Promise<string> {
-    const authority = input.tenantId || MULTI_TENANT_AUTHORITY;
-    const cacheKey = `${authority}:${input.appId}`;
+  connectorToken(input: { appId: string; appPassword: string; tenantId?: string | undefined }): Promise<string> {
+    return this.appToken(input.tenantId || MULTI_TENANT_AUTHORITY, BOTFRAMEWORK_SCOPE, input.appId, input.appPassword);
+  }
+
+  /**
+   * An app-only Microsoft Graph token from the sender's own tenant. That
+   * tenant only issues one once an admin there has consented to the app's
+   * Graph permission (identity.ts), for a multi- and a single-tenant
+   * registration alike.
+   */
+  graphToken(input: { appId: string; appPassword: string; tenantId: string }): Promise<string> {
+    return this.appToken(input.tenantId, GRAPH_SCOPE, input.appId, input.appPassword);
+  }
+
+  /** Forget a token the Bot Connector refused, so the next send fetches anew. */
+  dropToken(input: { appId: string; tenantId?: string | undefined }): void {
+    this.tokens.delete(tokenCacheKey(input.tenantId || MULTI_TENANT_AUTHORITY, BOTFRAMEWORK_SCOPE, input.appId));
+  }
+
+  /** Client-credentials token for (authority, scope), cached per app until
+   *  shortly before it expires; concurrent callers share one request. */
+  private appToken(authority: string, scope: string, appId: string, appPassword: string): Promise<string> {
+    const cacheKey = tokenCacheKey(authority, scope, appId);
     const cached = this.tokens.get(cacheKey);
-    if (cached && cached.expiresAt > this.now()) return cached.token;
+    if (cached && cached.expiresAt > this.now()) return Promise.resolve(cached.token);
     const pending = this.tokenInflight.get(cacheKey);
     if (pending) return pending;
-    const request = this.fetchToken(authority, input.appId, input.appPassword)
+    const request = this.fetchToken(authority, scope, appId, appPassword)
       .then(({ token, expiresInS }) => {
         // Renew five minutes early so a token never expires mid-send.
         this.tokens.set(cacheKey, { token, expiresAt: this.now() + Math.max(60, expiresInS - 300) * 1000 });
@@ -179,17 +202,17 @@ export class BotFrameworkAuth {
     return request;
   }
 
-  /** Forget a token the Bot Connector refused, so the next send fetches anew. */
-  dropToken(input: { appId: string; tenantId?: string | undefined }): void {
-    this.tokens.delete(`${input.tenantId || MULTI_TENANT_AUTHORITY}:${input.appId}`);
-  }
-
-  private async fetchToken(authority: string, appId: string, appPassword: string): Promise<{ token: string; expiresInS: number }> {
+  private async fetchToken(
+    authority: string,
+    scope: string,
+    appId: string,
+    appPassword: string,
+  ): Promise<{ token: string; expiresInS: number }> {
     const body = new URLSearchParams({
       grant_type: "client_credentials",
       client_id: appId,
       client_secret: appPassword,
-      scope: BOTFRAMEWORK_SCOPE,
+      scope,
     }).toString();
     const response = await this.http(`${LOGIN_ORIGIN}/${encodeURIComponent(authority)}/oauth2/v2.0/token`, {
       method: "POST",
@@ -205,6 +228,10 @@ export class BotFrameworkAuth {
     }
     return { token: payload.access_token, expiresInS: Number(payload.expires_in) || 3600 };
   }
+}
+
+function tokenCacheKey(authority: string, scope: string, appId: string): string {
+  return `${scope}|${authority}:${appId}`;
 }
 
 async function getJson(http: HttpFetch, url: string): Promise<unknown> {

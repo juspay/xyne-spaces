@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from "express";
 import QRCode from "qrcode";
 import { CONFIG } from "../../../config.js";
+import { writeAuditLog } from "../../../lib/audit.js";
 import { errMsg } from "../../../lib/errors.js";
 import { createLogger } from "../../../logger.js";
 import { prisma } from "../../../db.js";
@@ -393,6 +394,15 @@ router.delete("/accounts/:id/identities/:senderId", async (req: Request, res: Re
   const senderId = typeof req.params["senderId"] === "string" ? decodeURIComponent(req.params["senderId"]) : "";
   const result = await unlinkIdentity({ surfaceId: account.surfaceId, orgId: account.orgId, senderId });
   log.info(`[channels] identity unlinked account=${account.id} sender=${senderId} by=${resolved.userId}`);
+  if (result.count > 0) {
+    await writeAuditLog({
+      actorUserId: resolved.userId,
+      eventType: "CHANNEL_IDENTITY_UNLINKED",
+      targetId: senderId,
+      description: "Admin unlinked a member's channel identity",
+      metadata: { channel: account.channel, orgId: account.orgId, accountId: account.id, removed: result.count },
+    });
+  }
   res.json({ success: true, removed: result.count });
 });
 

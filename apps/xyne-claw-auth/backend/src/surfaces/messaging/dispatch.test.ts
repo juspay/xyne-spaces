@@ -11,8 +11,9 @@ vi.mock("./plugin.js", () => ({
   }),
 }));
 
-const { channelAgentConfig, channelSurfaceInstructions } = await import("./dispatch.js");
+const { buildChannelRun, channelAgentConfig, channelSurfaceInstructions } = await import("./dispatch.js");
 const { channelOfConversationId, channelConversationId } = await import("./ids.js");
+const { resolveAgentProviderConfigs } = await import("../../lib/agent-provider-config.js");
 
 describe("channelAgentConfig", () => {
   const chatTools = ["whatsapp_cloud_send_message", "whatsapp_cloud_send_document", "whatsapp_cloud_react"];
@@ -55,5 +56,41 @@ describe("channelOfConversationId", () => {
     expect(channelOfConversationId("scheduled_job_123")).toBeNull();
     expect(channelOfConversationId("whatsapp-notes")).toBeNull();
     expect(channelOfConversationId(null)).toBeNull();
+  });
+});
+
+// The invoke ACL is the channel core's, so Teams gets exactly WhatsApp's: an
+// agent restricted to a whitelist runs only for the users on it, whichever
+// channel the message came in on.
+describe("buildChannelRun invoke ACL", () => {
+  const restricted = {
+    id: "agent-1",
+    slug: "finance",
+    name: "Finance",
+    orgId: "org-1",
+    enabled: true,
+    delegationTier: "standard",
+    config: { privacy: { mode: "whitelist", whitelist: ["user-allowed"] } },
+  };
+  const run = (channel: "teams" | "whatsapp-cloud", userId: string) =>
+    buildChannelRun({
+      agent: restricted,
+      userId,
+      task: "q3 numbers",
+      conversationId: `conv-${channel}`,
+      eventType: "DIRECT_MESSAGE",
+      idempotencyKey: "m-1",
+      target: { channel, connectedSurfaceId: "acc-1", accountKey: "acct_1", chatId: "chat-1", senderId: "sender-1", isGroup: false },
+    });
+
+  it.each(["teams", "whatsapp-cloud"] as const)("refuses a %s sender who is not on the whitelist", async (channel) => {
+    await expect(run(channel, "user-other")).rejects.toThrow('agent "finance" is restricted');
+    expect(resolveAgentProviderConfigs).not.toHaveBeenCalled();
+  });
+
+  it.each(["teams", "whatsapp-cloud"] as const)("runs for a %s sender who is on it", async (channel) => {
+    vi.mocked(resolveAgentProviderConfigs).mockResolvedValueOnce({ providerOrder: [], providerConfigs: {} } as never);
+    const built = await run(channel, "user-allowed");
+    expect(built.body).toMatchObject({ userId: "user-allowed", agentSlug: "finance", triggerSource: channel });
   });
 });

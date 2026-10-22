@@ -23,12 +23,16 @@ export const BOTFRAMEWORK_SCOPE = "https://api.botframework.com/.default";
  *  uses its own tenant id instead (`appTenantId`). */
 export const MULTI_TENANT_AUTHORITY = "botframework.com";
 export const LOGIN_ORIGIN = "https://login.microsoftonline.com";
+/** Scope of the app-only token used to read a sender's directory entry. */
+export const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
+export const GRAPH_ORIGIN = "https://graph.microsoft.com";
 
 /** The only Bot Framework channel this plugin answers. Web Chat, the Emulator
  *  and every other channel an Azure Bot can be wired to are refused. */
 export const TEAMS_CHANNEL_ID = "msteams";
 
-const guid = z
+/** A tenant id or object id: a GUID, compared lower-case everywhere. */
+export const guidSchema = z
   .string()
   .trim()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a GUID")
@@ -44,22 +48,18 @@ export const teamsConfigSchema = z
      * Absent ⇒ a MultiTenant registration, whose outbound tokens come from the
      * shared botframework.com authority.
      */
-    appTenantId: guid.optional(),
-    /**
-     * Tenants whose messages this account accepts. Empty ⇒ any tenant the app
-     * is installed in; identities are still required before anyone runs an
-     * agent, so an empty list never lets a stranger in.
-     *
-     * SEAM (XYNE-66905): tenant → org binding replaces this hand-kept list.
-     */
-    allowedTenantIds: z.array(guid).max(100).default([]),
+    appTenantId: guidSchema.optional(),
+    // Which tenants may talk to this account is not per-account config: a
+    // tenant is bound to the org once, by an org admin (tenants.ts).
   })
   .strict();
 export type TeamsConfig = z.infer<typeof teamsConfigSchema>;
 
-/** Lenient read of stored residue: an unparseable blob means defaults. */
+/** Lenient read of stored residue: an unparseable blob means defaults, and a
+ *  key this version no longer knows (the old `allowedTenantIds`) is ignored
+ *  rather than costing the account its `appTenantId`. */
 export function teamsConfigOf(raw: unknown): TeamsConfig {
-  const parsed = teamsConfigSchema.safeParse(raw ?? {});
+  const parsed = teamsConfigSchema.strip().safeParse(raw ?? {});
   return parsed.success ? parsed.data : teamsConfigSchema.parse({});
 }
 

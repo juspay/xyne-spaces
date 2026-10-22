@@ -305,11 +305,17 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     }
   }
 
-  const linkedUserId = await resolveIdentity({
+  let linkedUserId = await resolveIdentity({
     surfaceId: account.surfaceId,
     senderId: msg.senderId,
     orgId: account.orgId,
   });
+  if (!linkedUserId && msg.linkSender) {
+    linkedUserId = await msg.linkSender().catch((err) => {
+      log.warn(`[inbound] sender link failed account=${account.id}: ${errMsg(err)}`);
+      return null;
+    });
+  }
 
   // Did they actually address the agent? A native @mention, a reply to one of
   // its messages, or opening with "/slug" — the last being the only one a

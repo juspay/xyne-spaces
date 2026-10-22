@@ -12,15 +12,18 @@
  * busy gate, /stop /status /help, approvals, questions (as numbered text),
  * the outbox, dedupe and rate limits — is the shared core's.
  *
- * Who may run an agent is the core's identity lookup (identity.ts), keyed by
- * the tenant-scoped Entra object id the Bot Connector signed (activity.ts).
- * No sender can link themselves here: there is no `senderIdFromPhone`, so the
- * self-service number linking is not offered for this channel, and until
- * Entra sign-in lands (XYNE-66905) every sender gets `unlinkedText`.
+ * Who may talk to it at all: only people of a Microsoft tenant an org admin
+ * bound to the account's org (tenants.ts). Anything else is dropped before
+ * the core sees it.
+ *
+ * Who may run an agent is the core's identity lookup (messaging/identity.ts),
+ * keyed by the tenant-scoped Entra object id the Bot Connector signed
+ * (activity.ts). A sender with no link yet is linked by what Microsoft Graph
+ * says their sign-in name is (identity.ts), never by anything they type:
+ * there is no `senderIdFromPhone`, so the self-service number linking is not
+ * offered for this channel. Whoever Graph cannot match gets `unlinkedText`.
  *
  * Extension points left for the follow-up tickets:
- *  - XYNE-66905 identity + tenant→org binding: activity.ts `teamsSenderId`,
- *    schema.ts `allowedTenantIds`, `unlinkedText` below.
  *  - XYNE-66906 Adaptive Cards: `capabilities.interactive` + `sendInteractive`,
  *    and `invoke` activities in activity.ts.
  *  - XYNE-66907 files: `capabilities.media` + `sendMedia`, and
@@ -36,6 +39,7 @@ import { parseTeamsActivity, type TeamsActivity } from "./activity.js";
 import { botFrameworkAuth } from "./auth.js";
 import { loadConversationRef, saveConversationRef } from "./conversations.js";
 import { formatForTeams } from "./format.js";
+import { linkTeamsSender } from "./identity.js";
 import {
   SECRET_APP_ID,
   SECRET_APP_PASSWORD,
@@ -43,6 +47,7 @@ import {
   teamsConfigSchema,
   type TeamsConfig,
 } from "./schema.js";
+import { orgForTenant } from "./tenants.js";
 
 const log = createLogger("teams");
 
@@ -65,10 +70,14 @@ export interface TeamsHandle {
   authState: AuthStateStore;
 }
 
-/** Shown to a sender with no linked Spaces identity. Never trusts anything
- *  they type: linking happens through Entra sign-in (XYNE-66905). */
+/** Shown to a sender Microsoft Graph could not match to a user of the org:
+ *  how linking works, since there is nothing for them to type. The two usual
+ *  causes are no Xyne account on their work email yet, or a tenant whose
+ *  admin has not granted the app directory access (identity.ts). */
 export const TEAMS_NOT_LINKED_TEXT =
-  "Your Microsoft Teams account isn't linked to Xyne yet, so I can't run agents for you. Linking from Teams is coming soon; ask your Xyne admin in the meantime.";
+  "I can't match your Microsoft Teams account to a Xyne user yet, so I can't run agents for you. " +
+  "I link you automatically by your Microsoft work sign-in: sign in to Xyne once with that same work email, then message me again. " +
+  "If you already use Xyne with that email, ask your Xyne admin to finish connecting your Microsoft organization.";
 
 class BotConnectorError extends Error {
   constructor(
@@ -203,14 +212,21 @@ export const teamsPlugin: ChannelPlugin<TeamsHandle, TeamsConfig> = {
   async parseInbound(payload, account, authState) {
     const msg = parseTeamsActivity(payload);
     if (!msg) return [];
-    const { allowedTenantIds } = teamsConfigOf(account.channelConfig);
-    if (allowedTenantIds.length > 0 && !allowedTenantIds.includes(msg.tenantId)) {
-      log.info(`[teams] message from a tenant this account does not serve account=${account.id} tenant=${msg.tenantId}`);
+    // A tenant nobody in this org bound is a stranger: no reply, nothing
+    // stored, no directory lookup. The tenant id is logged so the admin who
+    // is setting this up can find what to bind.
+    if ((await orgForTenant(msg.tenantId)) !== account.orgId) {
+      log.info(`[teams] message from a tenant not bound to this org account=${account.id} tenant=${msg.tenantId}`);
       return [];
     }
     // Before the core sees the message: its reply (or the "not linked"
     // notice) may be sent from another pod, which reads this row.
     await saveConversationRef(account.id, authState, msg.chatId, msg.conversationRef);
+    const { aadObjectId, tenantId, senderId } = msg;
+    if (aadObjectId) {
+      // After the ack, inside the per-chat queue, and only when no link exists.
+      msg.linkSender = () => linkTeamsSender({ account, authState, tenantId, aadObjectId, senderId });
+    }
     return [msg];
   },
 

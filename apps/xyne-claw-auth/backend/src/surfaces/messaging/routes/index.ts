@@ -17,6 +17,7 @@ import { accountsRouter } from "./accounts.js";
 import { channelOf } from "./context.js";
 import { numbersRouter } from "./numbers.js";
 import { webhookRouter } from "./webhook.js";
+import { teamsTenantsRouter } from "../../teams/routes.js";
 
 export const messagingRouter = Router({ mergeParams: true });
 
@@ -35,5 +36,8 @@ messagingRouter.use(connectRouter);
 // own token (hosted-files.ts).
 messagingRouter.use(hostedFilesRouter);
 messagingRouter.use(requireUserAuth, accountsRouter);
+// Teams only: which Microsoft tenants the org answers. Same admin gate as the
+// account routes; 404 on every other channel.
+messagingRouter.use(requireUserAuth, teamsTenantsRouter);
 // Self-service, so no admin gate — every route is scoped to the caller.
 messagingRouter.use(requireUserAuth, numbersRouter);

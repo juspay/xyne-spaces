@@ -60,6 +60,9 @@ export interface ConversationRef {
 export interface TeamsInbound extends InboundMessage {
   conversationRef: ConversationRef;
   tenantId: string;
+  /** The sender's Entra object id, lower-case; absent for a federated or
+   *  anonymous sender, who can then never be linked. */
+  aadObjectId?: string;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -82,9 +85,8 @@ export function tenantOf(activity: TeamsActivity): string {
  * by their tenant ("<tid>:<oid>"). Both come from the activity the Bot
  * Connector signed, never from anything the person typed.
  *
- * SEAM (XYNE-66905): Entra sign-in writes UserSurfaceIdentity rows with
- * exactly this value as surfaceUserId. Until then no row exists, and every
- * sender is told they are not linked yet.
+ * identity.ts writes UserSurfaceIdentity rows with exactly this value as
+ * surfaceUserId, once Microsoft Graph has said who the object id is.
  */
 export function teamsSenderId(tenantId: string, from: ChannelAccountRef | undefined): string | null {
   const oid = from?.aadObjectId?.trim().toLowerCase();
@@ -169,6 +171,7 @@ export function parseTeamsActivity(payload: unknown): TeamsInbound | null {
 
   const senderId = teamsSenderId(tenantId, activity.from);
   if (!senderId) return null;
+  const aadObjectId = activity.from?.aadObjectId?.trim().toLowerCase();
 
   const conversationType = conversationTypeOf(activity);
   const chatId = chatIdOf(activity, conversationType);
@@ -198,6 +201,7 @@ export function parseTeamsActivity(payload: unknown): TeamsInbound | null {
     ...(mediaKind ? { mediaKind, loadAttachments: async () => [] } : {}),
     ...(Number.isFinite(sentAt) ? { timestamp: Math.floor(sentAt / 1000) } : {}),
     tenantId,
+    ...(aadObjectId ? { aadObjectId } : {}),
     conversationRef: { serviceUrl, tenantId, conversationType, botId },
   };
 }

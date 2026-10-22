@@ -175,6 +175,27 @@ describe("BotFrameworkAuth.connectorToken", () => {
   });
 });
 
+describe("BotFrameworkAuth.graphToken", () => {
+  it("asks the sender's tenant for a Graph token, cached apart from the connector token", async () => {
+    const calls: Array<{ url: string; scope: string | null }> = [];
+    const http: HttpFetch = async (url, init) => {
+      calls.push({ url, scope: new URLSearchParams(init?.body ?? "").get("scope") });
+      return { ok: true, status: 200, json: async () => ({ access_token: `tok-${calls.length}`, expires_in: 3600 }) };
+    };
+    const a = auth(http);
+    const tenantId = "11111111-2222-3333-4444-555555555555";
+    expect(await a.graphToken({ appId: APP_ID, appPassword: "s", tenantId })).toBe("tok-1");
+    expect(await a.graphToken({ appId: APP_ID, appPassword: "s", tenantId })).toBe("tok-1");
+    // A single-tenant bot's connector token comes from the same authority,
+    // but is a different token for a different audience.
+    expect(await a.connectorToken({ appId: APP_ID, appPassword: "s", tenantId })).toBe("tok-2");
+    expect(calls).toEqual([
+      { url: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, scope: "https://graph.microsoft.com/.default" },
+      { url: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, scope: "https://api.botframework.com/.default" },
+    ]);
+  });
+});
+
 describe("sameServiceUrl", () => {
   it("ignores case and a trailing slash, nothing else", () => {
     expect(sameServiceUrl("https://SMBA.example.test/amer/", "https://smba.example.test/amer")).toBe(true);

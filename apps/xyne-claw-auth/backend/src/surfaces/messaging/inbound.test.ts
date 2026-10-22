@@ -307,8 +307,8 @@ describe("handleInbound", () => {
   });
 
   it("tells an unlinked sender on an org channel what the channel says, and runs nothing", async () => {
-    // Teams: identities come from Entra sign-in, so "add your number" would
-    // send them to a door that does not exist.
+    // Teams: identities come from the Entra directory, so "add your number"
+    // would send them to a door that does not exist.
     resolveIdentity.mockResolvedValue(null);
     const orgPlugin = {
       key: "teams",
@@ -322,6 +322,56 @@ describe("handleInbound", () => {
     expect(runChatSlashCommand).not.toHaveBeenCalled();
     const texts = enqueueOutbound.mock.calls.map((c) => (c[1] as { text?: string } | undefined)?.text);
     expect(texts).toContain("not linked yet (teams)");
+  });
+
+  describe("a channel that links senders from its own directory", () => {
+    const orgPlugin = {
+      key: "teams",
+      accountScope: "org",
+      unlinkedText: "link prompt (teams)",
+      capabilities: { groups: true, reactions: false, typing: true, media: false, maxTextChars: 8000 },
+    } as never;
+    const teamsCtx = { account, plugin: orgPlugin } as never;
+    const texts = () => enqueueOutbound.mock.calls.map((c) => (c[1] as { text?: string } | undefined)?.text);
+
+    it("runs as the user the directory linked on first contact", async () => {
+      resolveIdentity.mockResolvedValue(null);
+      const linkSender = vi.fn(async () => "user-7");
+      await handleInbound(teamsCtx, msg({ text: "hello", mentionedSelf: true, linkSender }));
+      await settle();
+      expect(linkSender).toHaveBeenCalledTimes(1);
+      expect(dispatchChannelRun.mock.calls[0]?.[0]).toMatchObject({ userId: "user-7" });
+      expect(texts()).not.toContain("link prompt (teams)");
+    });
+
+    it("sends the link prompt, and runs nothing, when the directory has no match", async () => {
+      resolveIdentity.mockResolvedValue(null);
+      const linkSender = vi.fn(async () => null);
+      await handleInbound(teamsCtx, msg({ text: "hello", mentionedSelf: true, linkSender }));
+      await settle();
+      expect(linkSender).toHaveBeenCalledTimes(1);
+      expect(dispatchChannelRun).not.toHaveBeenCalled();
+      expect(texts()).toContain("link prompt (teams)");
+    });
+
+    it("treats a failed lookup as unlinked rather than dropping the message silently", async () => {
+      resolveIdentity.mockResolvedValue(null);
+      const linkSender = vi.fn(async () => {
+        throw new Error("graph down");
+      });
+      await handleInbound(teamsCtx, msg({ text: "hello", mentionedSelf: true, linkSender }));
+      await settle();
+      expect(dispatchChannelRun).not.toHaveBeenCalled();
+      expect(texts()).toContain("link prompt (teams)");
+    });
+
+    it("never asks the directory about someone already linked", async () => {
+      const linkSender = vi.fn(async () => "user-7");
+      await handleInbound(teamsCtx, msg({ text: "hello", mentionedSelf: true, linkSender }));
+      await settle();
+      expect(linkSender).not.toHaveBeenCalled();
+      expect(dispatchChannelRun.mock.calls[0]?.[0]).toMatchObject({ userId: "user-1" });
+    });
   });
 
   it("starts typing before paying for the attachment, not after", async () => {
