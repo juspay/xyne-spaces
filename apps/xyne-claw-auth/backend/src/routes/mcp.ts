@@ -2005,12 +2005,14 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       }
 
       const requiresApproval = requiresGatewayToolApproval(descriptor);
-      const effectivePermission = effectiveGrant(permission, requiresApproval);
+      let effectivePermission = effectiveGrant(permission, requiresApproval);
       const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, grant: permission, permissionHint: effectivePermission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, c1: governance });
       if (gate.enforce && gate.decision === "block") {
         res.json({ success: true, data: { content: blockedToolResultText(gate) } });
         return;
       }
+      // An enforced ask (a kill switch, or policy under enforce) takes the approval card, like a write tool.
+      if (gate.enforce && gate.decision === "ask" && effectivePermission === "allow") effectivePermission = "ask";
 
       log.info(
         `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${requiresApproval ? " (gateway approval required, forced ask)" : ""}`,
@@ -2154,13 +2156,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const isWriteTool = definition?.writePolicy
       ? isWriteToolUnderPolicy(definition.writePolicy, tool)
       : (definition?.writeTools?.includes(tool) ?? false);
-    const effectivePermission = effectiveGrant(permission, isWriteTool);
+    let effectivePermission = effectiveGrant(permission, isWriteTool);
     // A declared write policy settles reads too; without one only a write is known.
     const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, grant: permission, permissionHint: effectivePermission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), c1: governance });
     if (gate.enforce && gate.decision === "block") {
       res.json({ success: true, data: { content: blockedToolResultText(gate) } });
       return;
     }
+    // An enforced ask (a kill switch, or policy under enforce) takes the approval card, like a write tool.
+    if (gate.enforce && gate.decision === "ask" && effectivePermission === "allow") effectivePermission = "ask";
 
     log.info(
       `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${isWriteTool ? " (write-tool, forced ask)" : ""}`,

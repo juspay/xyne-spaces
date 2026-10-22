@@ -42,17 +42,26 @@ beforeEach(() => {
 });
 
 describe("governance hooks", () => {
-  it("C1 blocks on a matching stop switch in enforce and records the enforcement in shadow", async () => {
+  it("C1 acts on a kill switch while the kill component enforces, whatever its own mode; kill=shadow only records", async () => {
     const { agent } = fakeAgent();
     run({ orgId: "org-1" }).install(agent as never);
     setKillSnapshotForTests({ epoch: 9, takenAtMs: Date.now(), switches: [{ scopeKind: "org", scopeId: "org-1", mode: "read_only", epoch: 9, reason: "incident" }] });
     expect(await agent.beforeToolCall(toolCall("read", "r0"))).toBeUndefined();
-    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w0", { content: "x" }))).toBeUndefined();
+    // C1 is in shadow; the kill component enforces by default, so the write is refused and the record says so.
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w0", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-KILL-READ-ONLY") });
     expect(governanceDecisionFor("w0")).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-READ-ONLY" });
-    expect(events().find((e) => e["eventType"] === "kill_switch_enforced")).toMatchObject({ subjectKind: "kill:org", subjectId: "org-1", reasonText: "shadow: would enforce at C1" });
-    process.env["GOVERNANCE_COMPONENT_MODES"] = "C1=enforce";
+    expect(events().find((e) => e["eventType"] === "kill_switch_enforced")).toMatchObject({ subjectKind: "kill:org", subjectId: "org-1", toolName: "write-memory-file", reasonText: "enforced at C1" });
+    // Ask-all: an MCP call goes on to claw-auth's approval card; a claw-local tool has no card yet, so it does not run.
+    setKillSnapshotForTests({ epoch: 10, takenAtMs: Date.now(), switches: [{ scopeKind: "org", scopeId: "org-1", mode: "ask_all", epoch: 10, reason: "review" }] });
+    expect(await agent.beforeToolCall(toolCall("slack__send", "a1", { channel: "C1", text: "hi" }))).toBeUndefined();
+    expect(governanceDecisionFor("a1")).toMatchObject({ decision: "ask", reasonCode: "GOV-KILL-ASK-ALL" });
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "a2", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("Needs approval (GOV-KILL-ASK-ALL)") });
+    // kill=shadow: recorded, never refused.
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "kill=shadow";
     resetComponentModes();
-    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w1", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-KILL-READ-ONLY") });
+    setKillSnapshotForTests({ epoch: 11, takenAtMs: Date.now(), switches: [{ scopeKind: "org", scopeId: "org-1", mode: "read_only", epoch: 11, reason: "incident" }] });
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w1", { content: "x" }))).toBeUndefined();
+    expect(events().filter((e) => e["eventType"] === "kill_switch_enforced").at(-1)).toMatchObject({ reasonText: "shadow: would enforce at C1" });
   });
 
   it("C1 asks the critic only after untyped content; shadow records its verdict afterwards, enforce waits for it; B records the outcome", async () => {

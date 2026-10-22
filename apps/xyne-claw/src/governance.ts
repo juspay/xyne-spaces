@@ -327,6 +327,9 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
     });
     const verdict = decideWith(critic.verdict);
+    // A switch an admin set acts whenever the kill component enforces, whatever C1's own mode.
+    const killActs = verdict.killSwitch !== undefined && componentMode("kill") === "enforce";
+    const acting = mode === "enforce" || killActs;
     const decision: C1Decision = {
       decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id,
       criticStatus: critic.verdict.status,
@@ -343,7 +346,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     }
     decisions.set(ctx.toolCall.id, decision);
     stats.decisions++;
-    if (verdict.killSwitch) queueGovernance({ ...base(), eventType: "kill_switch_enforced", toolCallId: ctx.toolCall.id, toolName: name, subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: mode === "enforce" ? "enforced at C1" : "shadow: would enforce at C1" });
+    if (verdict.killSwitch) queueGovernance({ ...base(), eventType: "kill_switch_enforced", toolCallId: ctx.toolCall.id, toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: `kill:${verdict.killSwitch.scopeKind}`, subjectId: verdict.killSwitch.scopeId, decision: verdict.decision, reasonCode: verdict.reasonCode, reasonText: acting ? "enforced at C1" : "shadow: would enforce at C1" });
     const event: GovernanceEvent = {
       ...base(),
       eventType: "tool_call",
@@ -372,7 +375,7 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     // An MCP call is recorded once, by C2 in claw-auth, which receives this decision with the call; a call C1
     // stops here never reaches claw-auth, so C1 records that one itself.
     if (meta?.serverType) {
-      if (verdict.decision === "block" && mode === "enforce" && !(await recordGovernanceNow(event))) stats.auditFailures++;
+      if (verdict.decision === "block" && acting && !(await recordGovernanceNow(event))) stats.auditFailures++;
     } else if (descriptor.effect !== "read") {
       const recorded = await recordGovernanceNow(event);
       if (!recorded) {
@@ -384,8 +387,13 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     }
     if (verdict.decision === "block") {
       stats.blocks++;
-      log.info(`[governance] C1 ${mode} block session=${sessionId} tool=${name} ${verdict.reasonCode}`);
-      if (mode === "enforce") return { block: true, reason: `Blocked by policy (${verdict.reasonCode}): ${verdict.reasonText} Do not retry; tell the user.` };
+      log.info(`[governance] C1 ${acting ? "enforce" : "shadow"} block session=${sessionId} tool=${name} ${verdict.reasonCode}`);
+      if (acting) return { block: true, reason: `Blocked by policy (${verdict.reasonCode}): ${verdict.reasonText} Do not retry; tell the user.` };
+    }
+    // An MCP call under ask-all goes on to claw-auth's approval card; a claw-local tool has no card yet (PR-15), so it does not run.
+    if (verdict.decision === "ask" && killActs && !meta?.serverType) {
+      log.info(`[governance] C1 kill ask session=${sessionId} tool=${name} ${verdict.reasonCode}: no approval card for a local tool`);
+      return { block: true, reason: `Needs approval (${verdict.reasonCode}): ${verdict.reasonText} Approval is not available for this tool in this run, so it does not run. Do not retry; tell the user.` };
     }
     // The outcome's duration counts from here, after the decision and its record.
     started.set(ctx.toolCall.id, Date.now());

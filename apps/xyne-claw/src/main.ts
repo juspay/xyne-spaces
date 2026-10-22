@@ -2,7 +2,10 @@
 process.env.SERVICE_NAME ||= "xyne-claw";
 
 import express from "express";
-import { startKillSwitchSync } from "./governance-kill.js";
+import { currentKillSnapshot, startKillSwitchSync } from "./governance-kill.js";
+import { parseComponentModes } from "xyne-claw-shared/governance";
+import { validateS2SKey } from "./middleware/auth.js";
+import { xorEnabled } from "./xor.js";
 import { DATA_DIR_IS_EXPLICIT, PATHS, SERVER } from "./config.js";
 import { initStore } from "./store.js";
 import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
@@ -86,6 +89,12 @@ app.get("/healthz/ready", (_req, res) => {
     return;
   }
   res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
+});
+
+// The governance dashboard reads this pod's modes and kill snapshot through claw-auth.
+app.get("/governance/modes", validateS2SKey, (_req, res) => {
+  const snap = currentKillSnapshot();
+  res.json({ service: "xyne-claw", modes: parseComponentModes(process.env), critic: xorEnabled(), criticBatch: process.env["GOVERNANCE_CRITIC_BATCH"] === "1", kill: { epoch: snap.epoch, ageMs: Date.now() - snap.takenAtMs, switches: snap.switches.length } });
 });
 
 app.use(runRouter);

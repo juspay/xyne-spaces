@@ -25,6 +25,8 @@ describe("kill snapshot on a claw pod", () => {
     const a = run("s-a");
     const b = run("s-b", { agentSlug: "other" });
     const c = run("s-c", { agentSlug: "other", orgId: "org-2" });
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "kill=shadow";
+    resetComponentModes();
     setKillSnapshotForTests({ epoch: 7, takenAtMs: Date.now(), switches: [{ scopeKind: "agent", scopeId: "helper", mode: "stop", epoch: 7, reason: "leaking" }, { scopeKind: "org", scopeId: "org-1", mode: "read_only", epoch: 7 }] });
     expect(applyKillSnapshot([a, b, c])).toBe(1);
     expect(a.aborted).toEqual([]);

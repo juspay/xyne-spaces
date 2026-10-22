@@ -54,9 +54,11 @@ describe("checkAnswer", () => {
 });
 
 describe("parseComponentModes", () => {
-  it("defaults to shadow and lets one component be overridden", () => {
-    expect(parseComponentModes({})).toMatchObject({ A: "shadow", C2: "shadow", D: "shadow" });
+  it("defaults to shadow, kill switches to enforce, and lets one component be overridden", () => {
+    expect(parseComponentModes({})).toMatchObject({ A: "shadow", C2: "shadow", D: "shadow", kill: "enforce" });
     expect(parseComponentModes({ GOVERNANCE_MODE: "enforce", GOVERNANCE_COMPONENT_MODES: "C2=off, D=bogus" })).toMatchObject({ A: "enforce", C2: "off", D: "enforce" });
     expect(parseComponentModes({ GOVERNANCE_MODE: "nope" }).A).toBe("shadow");
+    expect(parseComponentModes({ GOVERNANCE_MODE: "off" }).kill).toBe("off");
+    expect(parseComponentModes({ GOVERNANCE_COMPONENT_MODES: "kill=shadow" }).kill).toBe("shadow");
   });
 });

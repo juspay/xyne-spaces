@@ -32,6 +32,7 @@ import {
   PulseIcon,
   TagIcon,
   ShieldCheckIcon,
+  ScalesIcon,
   BuildingsIcon,
   SignOutIcon,
   SunIcon,
@@ -146,7 +147,10 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
 
 const ADMIN_GROUP: SidebarGroupConfig = {
   label: "Admin",
-  items: [{ label: "Admin", path: "/v3/admin", icon: ShieldCheckIcon }],
+  items: [
+    { label: "Admin", path: "/v3/admin", icon: ShieldCheckIcon },
+    { label: "Governance", path: "/v3/governance", icon: ScalesIcon },
+  ],
 };
 
 /* ── Sub-components ────────────────────────────────────────────────── */
