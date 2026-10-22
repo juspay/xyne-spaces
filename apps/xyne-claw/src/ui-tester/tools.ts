@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { buildSandboxStoreKey, getSandboxSession, sandboxConversationIdFromMeta } from "xyne-claw-shared";
+import { buildSandboxStoreKey, getSandboxSession, sandboxConversationIdFromMeta, type DecideQuestion } from "xyne-claw-shared";
 import { xor } from "../xor.js";
 import { createLogger } from "../logger.js";
 import { metric } from "../metrics.js";
@@ -9,7 +9,10 @@ import {
   buildQuestions,
   formatReport,
   judgeVariation,
+  standardQuestionsFrom,
   type CustomCheck,
+  type StandardKey,
+  type StandardQuestion,
   type VariationResult,
   type VariationVerdict,
 } from "./checks.js";
@@ -73,14 +76,20 @@ async function screenshotDataUrl(session: SandboxSession, path: string): Promise
   }
 }
 
-async function judgeAll(session: SandboxSession, results: VariationResult[], visual: boolean, signal?: AbortSignal): Promise<VariationVerdict[]> {
+async function judgeAll(
+  session: SandboxSession,
+  results: VariationResult[],
+  visual: boolean,
+  standard: Record<StandardKey, StandardQuestion>,
+  signal?: AbortSignal,
+): Promise<VariationVerdict[]> {
   return mapLimit(results, VISUAL_CONCURRENCY, async (r) => {
-    if (!visual || !r.screenshot) return judgeVariation(r, visual ? null : {});
+    if (!visual || !r.screenshot) return judgeVariation(r, visual ? null : {}, standard);
     const image = await screenshotDataUrl(session, r.screenshot);
     const answers = image
-      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r), purpose: "ui-tester", signal })
+      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r, standard), purpose: "ui-tester", signal })
       : null;
-    return judgeVariation(r, answers);
+    return judgeVariation(r, answers, standard);
   });
 }
 
@@ -174,9 +183,11 @@ function deliverables(verdicts: VariationVerdict[]): string[] {
 
 export interface UiTesterToolOptions {
   deliver?: ToolDefinition | undefined;
+  checks?: DecideQuestion[] | undefined;
 }
 
 export function buildUiTesterTools(meta: Record<string, string>, options: UiTesterToolOptions = {}): ToolDefinition[] {
+  const standard = standardQuestionsFrom(options.checks);
   const runVariations: ToolDefinition = {
     name: "ui-test-variations",
     label: "Test UI variations",
@@ -240,7 +251,7 @@ export function buildUiTesterTools(meta: Record<string, string>, options: UiTest
           return text(`Error: the harness failed (exit ${result.exitCode}). ${String(head?.["error"] ?? "").slice(0, 600)}\nstderr: ${(result.stderr ?? "").slice(-800)}`);
         }
         const summary = JSON.parse((await session.files.read(`${outDir}/summary.json`)).toString("utf8")) as { results: VariationResult[] };
-        const verdicts = await judgeAll(session, summary.results, p.visual !== false, signal);
+        const verdicts = await judgeAll(session, summary.results, p.visual !== false, standard, signal);
         let contracts = "";
         if (typeof spec["sourceDir"] === "string" && spec["sourceDir"]) {
           const resolved = await resolveSourceDir(session, spec["sourceDir"]);
@@ -306,7 +317,7 @@ export function buildUiTesterTools(meta: Record<string, string>, options: UiTest
       const session = sessionFor(meta);
       if (!session) return text(NO_SANDBOX);
       const results: VariationResult[] = shots.map((s) => ({ id: s.split("/").pop() ?? s, screenshot: s, checks }));
-      const verdicts = await judgeAll(session, results, true, signal);
+      const verdicts = await judgeAll(session, results, true, standard, signal);
       const detail = verdicts.map((v) => `${v.id}: ${Object.entries(v.visual).map(([k, a]) => `${k}=${a.choice}(${a.confidence})`).join(" ")}`).join("\n");
       return text(`${formatReport(verdicts)}\n\nRaw answers:\n${detail}`);
     },

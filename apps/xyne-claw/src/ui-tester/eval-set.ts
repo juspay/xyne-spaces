@@ -1,17 +1,12 @@
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { UI_TESTER_EVAL_DIR, UI_TESTER_STANDARD_CHECKS } from "xyne-claw-shared";
 import type { DecideQuestion } from "../xor-decide.js";
 import type { EvalSample, Expected } from "../xor-eval.js";
-import { STANDARD_QUESTIONS } from "./checks.js";
 import { VISUAL_STATE } from "./tools.js";
 
-export const UI_TESTER_EVAL_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../evals/ui-tester");
-
 export function uiTesterStandardChecks(): DecideQuestion[] {
-  return Object.entries(STANDARD_QUESTIONS).map(([id, q]) =>
-    q.type === "noul" ? { id, question: q.instructions, type: "yesno" } : { id, question: q.instructions, type: "choice", options: q.criteria },
-  );
+  return UI_TESTER_STANDARD_CHECKS.map((c) => ({ ...c, ...("options" in c ? { options: { ...c.options } } : {}) }) as DecideQuestion);
 }
 
 interface FixtureCase {

@@ -34,7 +34,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSubagentDetail } from "../hooks/useSubagentDetail";
 import {
   listSkills,
@@ -131,6 +131,7 @@ export function SubagentEditPageV3({
   const [draftSamples, setDraftSamples] = useState<SubagentSample[]>([]);
   const [evalReport, setEvalReport] = useState<SubagentEvalReport | null>(null);
   const [gateBlock, setGateBlock] = useState<string | null>(null);
+  const [draftsFor, setDraftsFor] = useState<string | null>(null);
 
   /* ── available skills ──────────────────────────────────────────── */
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
@@ -144,7 +145,8 @@ export function SubagentEditPageV3({
   const [toolsLoading, setToolsLoading] = useState(true);
 
   /* ── UI state ──────────────────────────────────────────────────── */
-  const [activeTab, setActiveTab] = useState<SubagentTopTabId>("persona");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SubagentTopTabId>(searchParams.get("tab") === "checks" ? "checks" : "persona");
   const [saving, setSaving] = useState(false);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [addingShare, setAddingShare] = useState(false);
@@ -168,6 +170,7 @@ export function SubagentEditPageV3({
     setDraftSamples(subagent.samples ?? []);
     setEvalReport(subagent.evalReport ?? null);
     setGateBlock(null);
+    setDraftsFor(subagent.name);
   }, [subagent?.name]);
 
   /* ── fetch skills ──────────────────────────────────────────────── */
@@ -509,7 +512,7 @@ export function SubagentEditPageV3({
                   </span>
                 </span>
               </label>
-              <ChecksEditor
+              {draftsFor === subagent.name && <ChecksEditor
                 key={subagent.name}
                 checks={draftChecks}
                 onChange={(checks, valid) => {
@@ -519,7 +522,7 @@ export function SubagentEditPageV3({
                 samples={draftSamples}
                 onSamplesChange={setDraftSamples}
                 canEdit={canEdit}
-              />
+              />}
               <ChecksEvalPanel
                 subagentName={subagent.name}
                 canEdit={canEdit}
