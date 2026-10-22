@@ -2,6 +2,7 @@ import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, Applicat
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
+  AgentProactivityMode,
   ChannelType,
   ChannelVisibility,
   MessageType,
@@ -1689,6 +1690,32 @@ export function createMutators(
           const row = rows.find(r => r.entityId === appId);
           if (!row) return;
           await tx.mutate.channel_published_tabs.delete({ id: row.id });
+        },
+      ),
+      updateAgentProactivityMode: defineMutator(
+        z.object({
+          channelId: z.string(),
+          mode: z.nativeEnum(AgentProactivityMode),
+        }),
+        async ({ tx, args: { channelId, mode } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          // Never DMs: an unprompted answer lands where everyone in the room reads it.
+          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+            throw new Error('Can only update this setting for default channels');
+          }
+
+          const participant = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+          if (channel.createdBy !== authData.sub && (!participant || participant.role !== ChannelRole.ADMIN)) {
+            throw new Error('Only channel admins or the owner can change how agents answer');
+          }
+
+          await tx.mutate.channels.update({ id: channelId, agentProactivityMode: mode });
         },
       ),
       updateShowTicketsTabTicketsInChat: defineMutator(

@@ -15,6 +15,7 @@ import {
   CpuIcon,
   CopyIcon,
   PulseIcon,
+  ChatCircleDotsIcon,
   HeartbeatIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
@@ -31,6 +32,7 @@ import {
 } from "../../../lib/api";
 import { withAdminRequestAlert } from "../../../lib/admin-request-notice";
 import { AwakeningTab } from "./tabs/AwakeningTab";
+import { ProactivityTab, readProactivity, summarizeProactivity } from "./tabs/ProactivityTab";
 import { readAwakening, summarize as summarizeAwakening } from "../../lib/awakeningBounds";
 import type { AgentPermissions } from "../../lib/agentPermissions";
 import { useSnackbar } from "../ui/Snackbar";
@@ -65,6 +67,7 @@ export type TabId =
   | "mcp"
   | "model"
   | "awakening"
+  | "proactivity"
   | "requests";
 
 function fmtNum(n: number): string {
@@ -282,6 +285,7 @@ export function AgentDetailRightColumn({
     : "Everyone can call it";
   // Awakening (config.awakening) — whether this agent acts unattended.
   const awakeningStatus = summarizeAwakening(readAwakening(agent.config));
+  const proactivityStatus = summarizeProactivity(readProactivity(agent.config));
   const pendingRequestCount = cloneRequests.length + delegationRequests.length;
   const activeDelegationCount = activeDelegations.length;
   const requestStatus =
@@ -336,6 +340,14 @@ export function AgentDetailRightColumn({
       status: awakeningStatus,
       icon: PulseIcon,
       // Editor-only: it governs whether the agent acts unattended.
+      show: permissions.canEdit,
+    },
+    {
+      id: "proactivity",
+      label: "Answer unprompted",
+      status: proactivityStatus,
+      icon: ChatCircleDotsIcon,
+      // Editor-only, like Awakening: it shapes when the agent speaks unasked.
       show: permissions.canEdit,
     },
     {
@@ -443,6 +455,9 @@ export function AgentDetailRightColumn({
           {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
           {activeTab === "awakening" && (
             <AwakeningTab agent={agent} canEdit={permissions.canEdit} onAgentUpdated={onAgentUpdated} />
+          )}
+          {activeTab === "proactivity" && (
+            <ProactivityTab agent={agent} canEdit={permissions.canEdit} onAgentUpdated={onAgentUpdated} />
           )}
           {activeTab === "privacy" && (
             <PrivacyTab

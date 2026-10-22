@@ -84,6 +84,7 @@ import { findUnresolvedConfiguredServers, visibleConnectors, type UnresolvedConf
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { loadKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { checkProactivityCall, isProactivityRun, SPACES_SERVERS as SPACES_SERVER_TYPES } from "../agent-proactivity/tool-policy.js";
 import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
@@ -1248,6 +1249,15 @@ async function buildMcpResolutionEntries(args: {
     entries.push({ type: "user", serverType: NOTIFY_SERVER_TYPE, serverName: "WhatsApp", enforcementType: "virtual" });
   }
 
+  // A proactivity run uses only what the agent itself was given: drop personal and
+  // org-wide fallback connectors, so an unprompted answer never shows more than
+  // tagging the agent would. The call route enforces the same (agent-proactivity/).
+  if (isProactivityRun(runCtx?.triggerSource)) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i]!.type !== "agent" && !SPACES_SERVER_TYPES.has(entries[i]!.serverType)) entries.splice(i, 1);
+    }
+  }
+
   log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
   return { entries, automationAppSwap, runCtx };
 }
@@ -1823,6 +1833,51 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
+    // A proactivity run (an answer nobody tagged the agent for) is read-only, reads only
+    // the room and public channels in Spaces, and uses only the agent's own connectors.
+    // Checked before everything below, so no later branch can widen it.
+    const { getSession: getRunSession } = await import("./webhook.js");
+    const proactivityCtx = await getRunSession(req.params.sessionId).catch(() => null);
+    let callParams = params ?? {};
+    if (isProactivityRun(proactivityCtx?.triggerSource)) {
+      const definitions = await Promise.all(
+        [serverType, ...(serverType === "xyne-spaces-app-tools" ? ["xyne-spaces"] : [])].map((type) =>
+          resolveConnectorDefinition(type).catch(() => undefined),
+        ),
+      );
+      const isWriteTool = definitions.some((definition) =>
+        definition?.writePolicy
+          ? isWriteToolUnderPolicy(definition.writePolicy, tool)
+          : (definition?.writeTools?.includes(tool) ?? false),
+      );
+      const isAgentConnector = sessionAgentTools?.id
+        ? Boolean(
+            await prisma.agentMcpConnection.findFirst({
+              where: { agentId: sessionAgentTools.id, mcpServer: { type: serverType } },
+              select: { id: true },
+            }),
+          )
+        : false;
+      const verdict = await checkProactivityCall({
+        serverType,
+        tool,
+        params: callParams,
+        isWriteTool,
+        isAgentConnector,
+        roomChannelId: proactivityCtx?.channelId ?? "",
+        bot:
+          proactivityCtx?.spacesAppUserId && proactivityCtx.workspaceId
+            ? { userId: proactivityCtx.spacesAppUserId, workspaceId: proactivityCtx.workspaceId }
+            : null,
+      });
+      if (!verdict.allow) {
+        log.info(`[mcp/call] proactivity run refused ${serverType}/${tool} session=${req.params.sessionId}`);
+        res.json({ success: true, data: { content: verdict.message, isError: true } });
+        return;
+      }
+      callParams = verdict.params;
+    }
+
     const callServerName = strictAgentToolsConfig
       ? await resolveServerNameForMcpCall(serverType, backendId)
       : serverType;
@@ -2110,7 +2165,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // Reads from Redis keyed by the URL sessionId (set in /run). If nothing was
     // attached, this is a no-op fast path.
     const attachedItems = await loadAttachedContextForSession(req.params.sessionId);
-    let effectiveParams = injectAttachedContextDefaults(serverType, tool, params ?? {}, attachedItems);
+    let effectiveParams = injectAttachedContextDefaults(serverType, tool, callParams, attachedItems);
 
     // xyne-dashboard: force-set the run's dashboard scalars (stored in /run,
     // see mcp/run-scalars.ts). Authoritative — overwrites anything the model
