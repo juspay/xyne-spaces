@@ -239,9 +239,16 @@ jobs:
         if: steps.affected.outputs.run == 'true'
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
 
+      # Builds images and starts the stack, leaving it running for the next step
+      # (tears down itself on failure).
+      - name: Start test environment
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm run test --phase=setup
+
+      # Only the Gauge run, then report copy and teardown.
       - name: Run automation tests
         if: steps.affected.outputs.run == 'true'
-        run: pnpm run test
+        run: pnpm run test --phase=test
 
       - name: Show container states and logs
         if: always() && steps.affected.outputs.run == 'true'
