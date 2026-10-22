@@ -8,6 +8,7 @@ import {
   decideForegroundRecovery,
   describeRegistrationError,
   isForegroundTransition,
+  isPermissionGranted,
   type ForegroundRecoveryInput,
 } from '@/src/notifications/bootRecoveryPolicy';
 
@@ -69,6 +70,14 @@ describe('notification boot recovery policy', (): void => {
     assert.equal(isForegroundTransition('active', 'background'), false);
   });
 
+  it('maps permission labels conservatively', (): void => {
+    assert.equal(isPermissionGranted('authorized'), true);
+    assert.equal(isPermissionGranted('provisional'), true);
+    assert.equal(isPermissionGranted('denied'), false);
+    assert.equal(isPermissionGranted('not_determined'), false);
+    assert.equal(isPermissionGranted('unknown'), null);
+  });
+
   it('keeps registration errors short and token-free', (): void => {
     const fakeToken = 'dGhpcyBpcyBhIGZha2UgZmNtIHRva2VuIHRoYXQgaXMgbG9uZyBlbm91Z2g6QVBBOTFi';
     const described = describeRegistrationError(new Error(`401 for ${fakeToken}`));
@@ -109,7 +118,7 @@ describe('NotificationService boot wiring', (): void => {
       SERVICE_SOURCE.indexOf('private async recoverOnForeground'),
     );
     const body = recovery.slice(0, recovery.indexOf('\n  }\n') + 4);
-    assert.match(body, /readNotificationPermissionGranted\(\)/);
+    assert.match(body, /readNotificationPermissionStatus\(\)/);
     assert.doesNotMatch(body, /requestNotificationPermission\(\)/);
   });
 
@@ -134,5 +143,46 @@ describe('NotificationService boot wiring', (): void => {
     const report = SERVICE_SOURCE.slice(SERVICE_SOURCE.indexOf('private reportRegistration'));
     const body = report.slice(0, report.indexOf('\n  }\n'));
     assert.doesNotMatch(body, /fcmToken|authToken/);
+  });
+
+  it('logs `registered` only when the backend answered, and `already_registered` for a deduped call', (): void => {
+    assert.match(SERVICE_SOURCE, /if \(result === 'skipped' \|\| !isCurrent\(\)\) return;/);
+    assert.match(
+      SERVICE_SOURCE,
+      /outcome: result === 'sent' \? 'registered' : 'already_registered'/,
+    );
+  });
+
+  it('reports each foreground recovery decision with permission status and device id', (): void => {
+    assert.match(SERVICE_SOURCE, /structuredLogger\.info\('push_registration_recovery'/);
+    const recovery = SERVICE_SOURCE.slice(
+      SERVICE_SOURCE.indexOf('private async recoverOnForeground'),
+    );
+    assert.match(recovery, /this\.reportRecovery\(\{/);
+    assert.match(SERVICE_SOURCE, /deviceId: getRegisteredDeviceId\(\)/);
+  });
+});
+
+const REGISTRY_SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/notifications/backend/deviceRegistry.ts'),
+  'utf8',
+);
+
+describe('deviceRegistry registration result', (): void => {
+  it('distinguishes a sent registration from a deduped or skipped one', (): void => {
+    assert.match(
+      REGISTRY_SOURCE,
+      /if \(fcmToken === lastRegisteredToken\) \{\s*return 'already_registered';/,
+    );
+    assert.match(REGISTRY_SOURCE, /lastRegisteredToken = fcmToken;\s*return 'sent';/);
+  });
+
+  it('exposes the install id without creating one', (): void => {
+    const getter = REGISTRY_SOURCE.slice(
+      REGISTRY_SOURCE.indexOf('export function getRegisteredDeviceId'),
+    );
+    const body = getter.slice(0, getter.indexOf('\n}\n'));
+    assert.match(body, /getExistingDeviceId\(\)/);
+    assert.doesNotMatch(body, /getOrCreateDeviceId/);
   });
 });

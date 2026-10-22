@@ -30,14 +30,24 @@ async function readCurrentStatus(): Promise<number | null> {
   }
 }
 
-/**
- * Read the current OS notification permission WITHOUT prompting.
- * Returns `null` when the status cannot be read. Used by foreground recovery,
- * which must never show a permission dialog.
- */
-export async function readNotificationPermissionGranted(): Promise<boolean | null> {
+export type NotificationPermissionStatus =
+  'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown';
+
+/** Read the OS notification permission as a label, WITHOUT prompting. For telemetry. */
+export async function readNotificationPermissionStatus(): Promise<NotificationPermissionStatus> {
   const status = await readCurrentStatus();
-  return status === null ? null : isGranted(status);
+  switch (status) {
+    case AuthorizationStatus.AUTHORIZED:
+      return 'authorized';
+    case AuthorizationStatus.PROVISIONAL:
+      return 'provisional';
+    case AuthorizationStatus.DENIED:
+      return 'denied';
+    case AuthorizationStatus.NOT_DETERMINED:
+      return 'not_determined';
+    default:
+      return 'unknown';
+  }
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {

@@ -55,6 +55,18 @@ export function decideForegroundRecovery(input: ForegroundRecoveryInput): Foregr
   return 'none';
 }
 
+/**
+ * Map an OS permission label to "can show notifications". `unknown` → `null`
+ * so recovery stays conservative and never acts on a status it could not read.
+ */
+export function isPermissionGranted(
+  status: 'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown',
+): boolean | null {
+  if (status === 'authorized' || status === 'provisional') return true;
+  if (status === 'denied' || status === 'not_determined') return false;
+  return null;
+}
+
 /** True only for a background/inactive → active transition. */
 export function isForegroundTransition(previous: string, next: string): boolean {
   return previous !== 'active' && next === 'active';

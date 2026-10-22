@@ -16,12 +16,18 @@ import {
 import { logger as structuredLogger } from '@/src/observability/logging/appLogger';
 import { prefetchActivitiesDelta } from '@/src/services/notificationCaching/activitiesPrefetch';
 
-import { registerDeviceWithBackend, resetDeviceRegistrationState } from './backend/deviceRegistry';
+import {
+  getRegisteredDeviceId,
+  registerDeviceWithBackend,
+  resetDeviceRegistrationState,
+} from './backend/deviceRegistry';
 import {
   canBeginBoot,
   decideForegroundRecovery,
   describeRegistrationError,
   isForegroundTransition,
+  isPermissionGranted,
+  type ForegroundRecoveryAction,
   type NotificationBootBlockReason,
   type NotificationBootPhase,
 } from './bootRecoveryPolicy';
@@ -52,8 +58,9 @@ import {
   subscribeToTokenRefresh,
 } from './platform/messaging';
 import {
-  readNotificationPermissionGranted,
+  readNotificationPermissionStatus,
   requestNotificationPermission,
+  type NotificationPermissionStatus,
 } from './platform/permissions';
 import { resolvePushToken } from './platform/pushToken';
 import { toRouteTargetFromMessage } from './tapCache';
@@ -218,10 +225,16 @@ class NotificationService {
     trigger: 'start' | 'foreground' | 'token_refresh',
   ): Promise<void> {
     try {
-      await registerDeviceWithBackend(authToken, fcmToken, { isCurrent });
-      if (!isCurrent()) return;
+      const result = await registerDeviceWithBackend(authToken, fcmToken, { isCurrent });
+      // `skipped`: nothing was sent (signed out / session changed / unsupported).
+      if (result === 'skipped' || !isCurrent()) return;
       this.registrationConfirmed = true;
-      this.reportRegistration({ outcome: 'registered', stage: 'register', trigger });
+      // `registered` only when the backend actually answered this attempt.
+      this.reportRegistration({
+        outcome: result === 'sent' ? 'registered' : 'already_registered',
+        stage: 'register',
+        trigger,
+      });
     } catch (error) {
       // Keep listening: token refresh and foreground recovery retry this.
       if (!isCurrent()) return;
@@ -236,18 +249,48 @@ class NotificationService {
   }
 
   private reportRegistration(fields: {
-    outcome: 'registered' | 'register_failed' | NotificationBootBlockReason;
+    outcome: 'registered' | 'already_registered' | 'register_failed' | NotificationBootBlockReason;
     stage: 'permission' | 'token' | 'register';
     trigger: 'start' | 'foreground' | 'token_refresh';
     error?: string;
   }): void {
+    // Fire-and-forget: the permission read is async and telemetry must never
+    // delay or affect notification setup.
+    void (async (): Promise<void> => {
+      try {
+        const permissionStatus = await readNotificationPermissionStatus().catch(
+          (): NotificationPermissionStatus => 'unknown',
+        );
+        structuredLogger.info('push_registration_outcome', {
+          outcome: fields.outcome,
+          stage: fields.stage,
+          trigger: fields.trigger,
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          permissionStatus,
+          deviceId: getRegisteredDeviceId(),
+          error: fields.error ?? null,
+        });
+      } catch {
+        // Telemetry must never affect notification setup.
+      }
+    })();
+  }
+
+  /** One event per foreground check that had something to consider. */
+  private reportRecovery(fields: {
+    action: ForegroundRecoveryAction;
+    phase: NotificationBootPhase;
+    registrationConfirmed: boolean;
+    permissionStatus: NotificationPermissionStatus;
+  }): void {
     try {
-      structuredLogger.info('push_registration_outcome', {
-        outcome: fields.outcome,
-        stage: fields.stage,
-        trigger: fields.trigger,
+      structuredLogger.info('push_registration_recovery', {
+        action: fields.action,
+        phase: fields.phase,
+        registrationConfirmed: fields.registrationConfirmed,
+        permissionStatus: fields.permissionStatus,
         platform: Platform.OS === 'ios' ? 'ios' : 'android',
-        error: fields.error ?? null,
+        deviceId: getRegisteredDeviceId(),
       });
     } catch {
       // Telemetry must never affect notification setup.
@@ -282,7 +325,7 @@ class NotificationService {
     const generation = this.lifecycleGeneration;
     this.recoveryInFlight = true;
     try {
-      const permissionGranted = await readNotificationPermissionGranted();
+      const permissionStatus = await readNotificationPermissionStatus();
       if (this.lifecycleGeneration !== generation || this.authToken !== authToken) return;
 
       const action = decideForegroundRecovery({
@@ -290,7 +333,14 @@ class NotificationService {
         hasAuthToken: true,
         registrationConfirmed: this.registrationConfirmed,
         recoveryInFlight: false,
-        permissionGranted,
+        permissionGranted: isPermissionGranted(permissionStatus),
+      });
+      // Only reached while blocked or unconfirmed, so healthy sessions stay quiet.
+      this.reportRecovery({
+        action,
+        phase: this.bootPhase,
+        registrationConfirmed: this.registrationConfirmed,
+        permissionStatus,
       });
 
       if (action === 'reboot') {
