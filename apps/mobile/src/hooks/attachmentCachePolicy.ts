@@ -107,6 +107,19 @@ export function buildAttachmentInflightKey(
   ]);
 }
 
+/**
+ * Stream URL for a video. `compat` asks the backend for its H.264 SDR
+ * rendition (served only when enabled server-side; otherwise 404).
+ */
+export function buildAttachmentStreamUrl(
+  apiBaseUrl: string,
+  attachmentId: string,
+  variant: 'original' | 'compat' = 'original',
+): string {
+  const url = buildAttachmentResourceUrl(apiBaseUrl, attachmentId, 'stream');
+  return variant === 'compat' ? `${url}?variant=compat` : url;
+}
+
 export function buildAttachmentResourceUrl(
   apiBaseUrl: string,
   attachmentId: string,

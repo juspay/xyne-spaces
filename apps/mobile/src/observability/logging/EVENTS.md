@@ -471,15 +471,16 @@ completed.
 
 **Fields:**
 
-| Field           | Meaning                                                       |
-| --------------- | ------------------------------------------------------------- |
-| `surface`       | `chat_viewer` · `attachments_viewer` · `call_recording`       |
-| `attachmentId`  | Attachment id (`null` for call recordings)                    |
-| `mimetype`      | Stored mimetype (e.g. `video/quicktime`)                      |
-| `fileExtension` | Lower-cased extension from the filename (never the full name) |
-| `sizeBytes`     | Stored size, when known                                       |
-| `timeToReadyMs` | Viewer opened → player `readyToPlay`                          |
-| `durationMs`    | Media duration from `sourceLoad`, when known                  |
+| Field           | Meaning                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `surface`       | `chat_viewer` · `attachments_viewer` · `call_recording`                                                           |
+| `variant`       | `original` · `compat` (server H.264 SDR rendition, used as a fallback when the device cannot decode the original) |
+| `attachmentId`  | Attachment id (`null` for call recordings)                                                                        |
+| `mimetype`      | Stored mimetype (e.g. `video/quicktime`)                                                                          |
+| `fileExtension` | Lower-cased extension from the filename (never the full name)                                                     |
+| `sizeBytes`     | Stored size, when known                                                                                           |
+| `timeToReadyMs` | Viewer opened → player `readyToPlay`                                                                              |
+| `durationMs`    | Media duration from `sourceLoad`, when known                                                                      |
 
 **When:** First `statusChange → readyToPlay` per opened source.
 
