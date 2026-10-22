@@ -11,6 +11,8 @@ import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
 import { getHeicRendition, HeicRenditionError, isHeicAttachment, toWebpFilename } from '../services/heicRenditionService';
 import { heicRenditionQueue } from '../queues/heicRenditionQueue';
+import { getVideoRendition, isVideoMimetype } from '../services/videoRenditionService';
+import { videoRenditionQueue } from '../queues/videoRenditionQueue';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
@@ -99,6 +101,24 @@ const forLog = (value: string): string => value.replace(/[\r\n]+/g, ' ').slice(0
  * so this never holds a result; the TTL cache does that.
  */
 const inFlightStreamTargets = new Map<string, Promise<StreamTargetResult>>();
+
+/** How long a READY compat rendition lookup is memoised (renditions are immutable). */
+const COMPAT_RENDITION_TTL_SECONDS = 300;
+/** Client retry hint while a compat rendition is being generated. */
+const COMPAT_PENDING_RETRY_AFTER_SECONDS = 10;
+
+interface ServedStreamFile {
+  path: string;
+  size: number;
+  mimetype: string;
+  filename: string;
+}
+
+/** `IMG_2311.MOV` → `IMG_2311.mp4`, for the compat rendition's Content-Disposition. */
+export const toMp4Filename = (filename: string): string => {
+  const base = (filename || 'video').replace(/\.[^./\\]+$/, '');
+  return `${base || 'video'}.mp4`;
+};
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -482,6 +502,83 @@ export class AttachmentController {
   }
 
   /**
+   * Resolve `?variant=compat` for an already-authorized attachment.
+   *
+   * - 404 VARIANT_DISABLED — VIDEO_RENDITION_ENABLED is off; clients keep the original.
+   * - 400 NOT_VIDEO / UNSUPPORTED — not a chat video in the default bucket.
+   * - 503 PENDING (+ Retry-After) — not generated yet; a job is enqueued and being consumed.
+   * - 422 FAILED (no Retry-After) — not generated and the job could not be queued
+   *   (Redis down, or no worker draining the queue), so clients stop polling.
+   * - 409 NOT_NEEDED — the original is already H.264 SDR; play it.
+   * - 422 FAILED / SKIPPED — no rendition will be available; offer download.
+   */
+  private async resolveCompatRendition(
+    attachment: MessageAttachment,
+    originalPath: string,
+  ): Promise<
+    | { ok: true; file: ServedStreamFile }
+    | { ok: false; status: number; body: Record<string, string>; retryAfterSeconds?: number }
+  > {
+    if (!config.videoRenditionEnabled) {
+      return { ok: false, status: 404, body: { error: 'Compatible variant is not enabled', code: 'VARIANT_DISABLED' } };
+    }
+    if (!isVideoMimetype(attachment.mimetype)) {
+      return { ok: false, status: 400, body: { error: 'Compatible variant is only available for videos', code: 'NOT_VIDEO' } };
+    }
+    // Renditions are generated from, and cached in, the default bucket only.
+    if (TRANSCRIPTION_BUCKET_TYPES.has(getAttachmentType(attachment))) {
+      return { ok: false, status: 400, body: { error: 'Compatible variant is not available for this file', code: 'UNSUPPORTED' } };
+    }
+
+    const memoKey = `video-compat:${originalPath}`;
+    const memo = cacheManager.get<ServedStreamFile>(memoKey);
+    if (memo) return { ok: true, file: memo };
+
+    const lookup = await getVideoRendition(storageService, originalPath);
+    switch (lookup.state) {
+      case 'ready': {
+        const file: ServedStreamFile = {
+          path: lookup.path,
+          size: lookup.size,
+          mimetype: 'video/mp4',
+          filename: toMp4Filename(attachment.originalFilename),
+        };
+        cacheManager.set(memoKey, file, COMPAT_RENDITION_TTL_SECONDS);
+        return { ok: true, file };
+      }
+      case 'pending': {
+        // Only promise "come back later" when a job is really queued and being
+        // consumed. If Redis is down or no worker is draining the queue, a 503 +
+        // Retry-After would keep clients polling forever; 422 makes them stop
+        // and show the original error instead.
+        const queued = await videoRenditionQueue.enqueue({ storagePath: originalPath });
+        if (!queued) {
+          logger.warn('[AttachmentController] Compat rendition could not be queued; answering FAILED', {
+            attachmentId: forLog(attachment.id),
+          });
+          return {
+            ok: false,
+            status: 422,
+            body: { error: 'Compatible video is temporarily unavailable', code: 'FAILED' },
+          };
+        }
+        return {
+          ok: false,
+          status: 503,
+          body: { error: 'Compatible video is being prepared', code: 'PENDING' },
+          retryAfterSeconds: COMPAT_PENDING_RETRY_AFTER_SECONDS,
+        };
+      }
+      case 'not_needed':
+        return { ok: false, status: 409, body: { error: 'Original video is already compatible', code: 'NOT_NEEDED' } };
+      case 'skipped':
+        return { ok: false, status: 422, body: { error: 'Compatible video is not available for this file', code: 'SKIPPED' } };
+      default:
+        return { ok: false, status: 422, body: { error: 'Compatible video could not be generated', code: 'FAILED' } };
+    }
+  }
+
+  /**
    * GET /api/attachments/:attachmentId/stream
    * Stream video/audio files with range request support (HTTP 206 Partial Content)
    * This enables seeking in video players
@@ -503,8 +600,32 @@ export class AttachmentController {
         return;
       }
 
-      const { attachment, filePath, fileSize } = resolved.target;
+      const { attachment } = resolved.target;
       const service = getAttachmentStorage(attachment);
+
+      // `?variant=compat` asks for the H.264 SDR rendition (see
+      // videoRenditionService). Any other value, or no value, keeps the
+      // original byte-for-byte behaviour.
+      let served: ServedStreamFile = {
+        path: resolved.target.filePath,
+        size: resolved.target.fileSize,
+        mimetype: attachment.mimetype,
+        filename: attachment.originalFilename,
+      };
+      if (req.query.variant === 'compat') {
+        const compat = await this.resolveCompatRendition(attachment, resolved.target.filePath);
+        if (!compat.ok) {
+          if (compat.retryAfterSeconds) {
+            res.setHeader('Retry-After', String(compat.retryAfterSeconds));
+          }
+          res.setHeader('Cache-Control', 'no-store');
+          res.status(compat.status).json(compat.body);
+          return;
+        }
+        served = compat.file;
+      }
+      const filePath = served.path;
+      const fileSize = served.size;
 
       const pipeToResponse = async (options?: { start: number; end: number }): Promise<void> => {
         const stream = await service.createReadStream(filePath, options);
@@ -546,8 +667,8 @@ export class AttachmentController {
       if (!range) {
         // No range requested - send entire file
         setSafeDownloadHeaders(res, {
-          mimetype: attachment.mimetype,
-          filename: attachment.originalFilename,
+          mimetype: served.mimetype,
+          filename: served.filename,
         });
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
@@ -595,8 +716,8 @@ export class AttachmentController {
       // Set headers for partial content
       res.status(206); // Partial Content
       setSafeDownloadHeaders(res, {
-        mimetype: attachment.mimetype,
-        filename: attachment.originalFilename,
+        mimetype: served.mimetype,
+        filename: served.filename,
       });
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
