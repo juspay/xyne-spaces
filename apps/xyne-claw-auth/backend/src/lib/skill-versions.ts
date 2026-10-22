@@ -116,14 +116,26 @@ async function filesOf(skill: SkillRow): Promise<SkillBundleFile[]> {
 }
 
 async function lastApprovedBundle(orgId: string, subjectKey: string, exceptSha256: string): Promise<SkillBundle | null> {
-  const v = await governancePrisma.staticContentVersion.findFirst({ where: { orgId, subjectKey, approvalStatus: "approved", contentSha256: { not: exceptSha256 } }, orderBy: { createdAt: "desc" }, select: { bytesStoragePath: true } });
-  return v?.bytesStoragePath ? loadBundle(v.bytesStoragePath) : null;
+  const v = await governancePrisma.staticContentVersion.findFirst({ where: { orgId, subjectKey, approvalStatus: "approved", contentSha256: { not: exceptSha256 } }, orderBy: { createdAt: "desc" }, select: { bytesStoragePath: true, contentSha256: true } });
+  return v?.bytesStoragePath ? loadBundle(v.bytesStoragePath, v.contentSha256) : null;
 }
 
-export async function loadBundle(path: string): Promise<SkillBundle | null> {
+/** The version row for the bytes the skill row holds right now, if any. */
+export async function currentSkillVersion(skill: SkillRow) {
+  const { sha256 } = hashSkillBundle({ name: skill.name, description: skill.description ?? "", content: skill.content, files: await filesOf(skill) });
+  return governancePrisma.staticContentVersion.findFirst({ where: { orgId: skill.orgId, subjectKey: subjectKeyOf(skill.id), contentSha256: sha256 } });
+}
+
+/** A stored bundle serves only if it still hashes to the version it belongs to. */
+export async function loadBundle(path: string, expectedSha256: string): Promise<SkillBundle | null> {
   try {
     const b = JSON.parse((await (await storage()).getFileBuffer(path)).toString("utf8")) as SkillBundle;
-    return typeof b?.content === "string" && Array.isArray(b.files) ? b : null;
+    if (typeof b?.content !== "string" || !Array.isArray(b.files)) return null;
+    if (hashSkillBundle(b).sha256 !== expectedSha256) {
+      log.error(`[skill-versions] bundle ${path} does not hash to its version ${expectedSha256.slice(0, 12)}; refusing it`);
+      return null;
+    }
+    return b;
   } catch (err) {
     log.warn(`[skill-versions] bundle ${path} unreadable: ${err instanceof Error ? err.message : String(err)}`);
     return null;
@@ -137,10 +149,16 @@ export async function commitSkillVersion(skill: SkillRow, write: SkillWrite): Pr
     const bundle: SkillBundle = { name: skill.name, description: skill.description ?? "", content: skill.content, files: await filesOf(skill) };
     const { sha256, executable, files } = hashSkillBundle(bundle);
     const subjectKey = subjectKeyOf(skill.id);
-    const path = bundlePath(skill.orgId, sha256);
-    const known = await governancePrisma.staticContentVersion.findFirst({ where: { orgId: skill.orgId, subjectKey }, orderBy: { createdAt: "desc" }, select: { id: true, contentSha256: true } });
-    if (known?.contentSha256 !== sha256) {
-      await (await storage()).uploadFile(Buffer.from(JSON.stringify(bundle)), path, "application/json").catch((err) => log.warn(`[skill-versions] bundle upload failed for ${skill.slug}: ${err instanceof Error ? err.message : String(err)}`));
+    const known = await governancePrisma.staticContentVersion.findFirst({ where: { orgId: skill.orgId, subjectKey }, orderBy: { createdAt: "desc" }, select: { id: true, contentSha256: true, bytesStoragePath: true } });
+    const sameHash = known?.contentSha256 === sha256 ? known : await governancePrisma.staticContentVersion.findFirst({ where: { orgId: skill.orgId, subjectKey, contentSha256: sha256 }, select: { id: true, contentSha256: true, bytesStoragePath: true } });
+    // The blob is uploaded once per hash; a row left without its blob by an earlier failure is repaired here.
+    let path: string | undefined = sameHash?.bytesStoragePath ?? undefined;
+    if (!path) {
+      path = await (await storage()).uploadFile(Buffer.from(JSON.stringify(bundle)), bundlePath(skill.orgId, sha256), "application/json").then(
+        () => bundlePath(skill.orgId, sha256),
+        (err) => { log.error(`[skill-versions] bundle upload failed for ${skill.slug}; the version is recorded without its bytes: ${err instanceof Error ? err.message : String(err)}`); return undefined; },
+      );
+      if (path && sameHash) await governancePrisma.staticContentVersion.update({ where: { id: sameHash.id }, data: { bytesStoragePath: path } });
     }
     const { version, created } = await commitStaticContentVersion({
       orgId: skill.orgId,
@@ -225,7 +243,7 @@ export async function resolveRunSkills(skills: readonly SkillRow[], runId?: stri
     const previous = versions.find((v) => v.contentSha256 !== sha256 && approved(v));
     const status = current?.approvalStatus ?? "unregistered";
     if (mode === "enforce") {
-      const bundle = previous?.bytesStoragePath ? await loadBundle(previous.bytesStoragePath) : null;
+      const bundle = previous?.bytesStoragePath ? await loadBundle(previous.bytesStoragePath, previous.contentSha256) : null;
       if (bundle && previous) {
         out.push({ slug: skill.slug, name: bundle.name, description: bundle.description, content: bundle.content, ...(bundle.files.length > 0 ? { files: bundle.files } : {}), versionId: previous.id, contentSha256: previous.contentSha256 });
         manifest.push({ skillId: skill.id, slug: skill.slug, sha256: previous.contentSha256, versionId: previous.id, status: `${status}; served previous`, served: "previous" });
@@ -252,7 +270,7 @@ export async function rollbackSkill(skill: SkillRow, versionId: string, actor: V
   const version = await governancePrisma.staticContentVersion.findUnique({ where: { id: versionId } });
   if (!version || version.orgId !== skill.orgId || version.subjectKey !== subjectKeyOf(skill.id)) return { ok: false, error: "Version not found" };
   if (version.approvalStatus !== "approved") return { ok: false, error: "Only an approved version can be rolled back to" };
-  const bundle = version.bytesStoragePath ? await loadBundle(version.bytesStoragePath) : null;
+  const bundle = version.bytesStoragePath ? await loadBundle(version.bytesStoragePath, version.contentSha256) : null;
   if (!bundle) return { ok: false, error: "The version's bundle is not in storage" };
   await prisma.$transaction(async (tx) => {
     await tx.skill.update({ where: { id: skill.id }, data: { name: bundle.name, description: bundle.description, content: bundle.content } });
@@ -268,10 +286,14 @@ export async function rollbackSkill(skill: SkillRow, versionId: string, actor: V
 export async function decideSkillVersion(skill: SkillRow, versionId: string, decision: "approve" | "reject", actor: VersionActor, reason?: string): Promise<{ ok: true; status: string } | { ok: false; error: string }> {
   const version = await governancePrisma.staticContentVersion.findUnique({ where: { id: versionId } });
   if (!version || version.orgId !== skill.orgId || version.subjectKey !== subjectKeyOf(skill.id)) return { ok: false, error: "Version not found" };
-  if (version.approvalStatus !== "pending" && version.approvalStatus !== "held") return { ok: false, error: `Version is ${version.approvalStatus}` };
-  if (decision === "approve" && version.parserVerdict === "injection") return { ok: false, error: "A version the parser blocked needs an admin override" };
+  // A version the parser blocked can only be released by a claw admin's written override.
+  const blocked = version.parserVerdict === "injection" || version.approvalStatus === "rejected";
+  const override = decision === "approve" && blocked;
+  if (version.approvalStatus !== "pending" && version.approvalStatus !== "held" && !override) return { ok: false, error: `Version is ${version.approvalStatus}` };
+  if (override && !actor.isAdmin) return { ok: false, error: "A version the parser blocked needs a claw admin override" };
+  if (override && !reason?.trim()) return { ok: false, error: "An override needs a written reason" };
   if (decision === "approve" && skill.scope === "global" && !actor.isAdmin) return { ok: false, error: "Only a claw admin approves a global skill" };
-  const updated = await setStaticContentApproval(version.id, { approvalStatus: decision === "approve" ? "approved" : "rejected", approvedVia: actor.isAdmin ? "claw_admin" : "owner", actorUserId: actor.userId, actorKind: actor.isAdmin ? "admin" : "user", overrideReason: reason });
+  const updated = await setStaticContentApproval(version.id, { approvalStatus: decision === "approve" ? "approved" : "rejected", approvedVia: override ? "admin_override" : actor.isAdmin ? "claw_admin" : "owner", actorUserId: actor.userId, actorKind: actor.isAdmin ? "admin" : "user", overrideReason: reason });
   return { ok: true, status: updated.approvalStatus };
 }
 

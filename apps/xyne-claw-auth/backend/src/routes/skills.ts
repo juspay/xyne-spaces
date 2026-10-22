@@ -22,7 +22,7 @@ import {
 } from "xyne-claw-shared";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 import { componentMode } from "xyne-claw-shared/governance";
-import { commitSkillVersion, decideSkillVersion, listSkillVersions, rollbackSkill, type VersionActor } from "../lib/skill-versions.js";
+import { commitSkillVersion, currentSkillVersion, decideSkillVersion, listSkillVersions, rollbackSkill, type VersionActor } from "../lib/skill-versions.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("skills");
@@ -238,11 +238,12 @@ router.post("/:slug/promote", requireClawAdmin, asyncHandler(async (req: Request
     throw notFound("Skill not found");
   }
   if (skill.scope === "global") throw badRequest("Skill is already global");
-  // Promotion needs the current version's scan to have passed.
-  const latest = (await listSkillVersions(skill))[0];
-  if (latest && (latest.approvalStatus === "rejected" || latest.parserVerdict === "injection")) {
-    if (componentMode("registry") === "enforce") throw badRequest("The skill's current version did not pass its scan");
-    log.warn(`[skills/promote] shadow: ${skill.slug} version ${latest.id} is ${latest.approvalStatus} (parser ${latest.parserVerdict ?? "none"}); enforce would refuse`);
+  // Promotion needs the live version, the bytes on the row right now, to be approved.
+  const live = await currentSkillVersion(skill);
+  if (!live || live.approvalStatus !== "approved") {
+    const why = live ? `${live.approvalStatus} (parser ${live.parserVerdict ?? "none"})` : "unregistered";
+    if (componentMode("registry") === "enforce") throw badRequest(`The skill's current version is ${why}; only an approved version can be promoted`);
+    log.warn(`[skills/promote] shadow: ${skill.slug} current version is ${why}; enforce would refuse`);
   }
 
   const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
