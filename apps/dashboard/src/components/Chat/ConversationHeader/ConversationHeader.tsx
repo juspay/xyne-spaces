@@ -37,16 +37,14 @@ import {
 } from '../ConversationPannel/ConversationPannel.utils';
 import { appIdOf, useChannelTabsStore } from '../../../hooks/barItems';
 import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
+import { useChannelTabDrag } from '../../../hooks/useChannelTabDrag';
+import { TAB_GAP_CLASS, TAB_SOCKET_CLASS } from '../../../constants/channelTabs';
 import {
-  BarAddMenu,
-  BarRemoveButton,
-  SortableBar,
   useChannelAppPublishing,
-  useStagedAppPublishing,
-  SortableBarItem,
-  type AppPublishOptions,
   useChannelTabBuiltIns,
+  type AppPublishOptions,
 } from '../../BarCustomize';
+import { ChannelTabsMenu } from './ChannelTabsMenu';
 import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
@@ -57,13 +55,13 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
-import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent, Globe, PencilEdit, PlusDefault } from '@xyne/icons';
+import { CalendarEvent, Globe } from '@xyne/icons';
+import { ChannelScopeType } from '@xyne/shared';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -86,13 +84,7 @@ import { channelTrackingMetadata } from '../../../services/Analytics/channelTrac
 interface ChannelTabTriggerProps {
   tab: ConversationTabListType;
   isActive: boolean;
-  /** Reserves room for the "×" drawn over the label while the strip is in edit mode. */
-  removable: boolean;
-  /**
-   * The published-app globe is drawn OUTSIDE this button, as its own unpublish
-   * control (a button can't contain a button), so the inline badge is dropped
-   * and room is reserved for it.
-   */
+  keyShortcuts?: string;
   globeAsControl?: boolean;
   onSelect: (tab: string, e?: React.MouseEvent) => void;
 }
@@ -101,13 +93,15 @@ interface ChannelTabTriggerProps {
 const ChannelTabTrigger = ({
   tab,
   isActive,
-  removable,
+  keyShortcuts,
   globeAsControl = false,
   onSelect,
 }: ChannelTabTriggerProps): JSX.Element => {
   const trigger = (
     <Tabs.Trigger value={tab.value} aria-description={tab.description} asChild>
       <button
+        data-tab-face=''
+        aria-keyshortcuts={keyShortcuts}
         data-testid={`channel-tab-${tab.value}`}
         data-track-category='CHANNELS'
         data-track-name='SWITCH_TAB'
@@ -115,19 +109,21 @@ const ChannelTabTrigger = ({
         onClick={e => onSelect(tab.value || '', e)}
         className={cn(
           'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-          removable && 'pr-7',
-          globeAsControl && 'pr-12',
+          globeAsControl && 'pr-[30px]',
           isActive
             ? 'bg-muted text-foreground'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
         )}
       >
-        <span className='shrink-0'>
+        <span data-tab-glyph='' className='shrink-0'>
           {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
         </span>
-        <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+        <span data-tab-text='' className={cn('text-sm font-medium tracking-[-0.28px]')}>
+          {tab.label}
+        </span>
         {tab.published && !globeAsControl && (
           <Globe
+            data-tab-badge=''
             size={12}
             className='shrink-0 text-muted-foreground'
             aria-label='Published to this channel'
@@ -155,49 +151,32 @@ interface ConversationHeaderProps {
   onClose?: () => void;
 }
 
-// × only hides a published app for this person; this is how someone who can
-// publish takes it away from everyone. Applied on Save.
 const UnpublishTabButton = ({
   tab,
   publish,
-  pending,
 }: {
   tab: ConversationTabListType;
   publish: AppPublishOptions;
-  pending: boolean;
 }): JSX.Element => {
   const label = tab.label.trim();
   return (
-    <Tooltip
-      content={
-        pending
-          ? 'Unpublishes on Save — click to keep it'
-          : 'Unpublish — remove from everyone’s tabs'
-      }
-      side='bottom'
-    >
+    <Tooltip content='Unpublish — remove from everyone’s tabs' side='bottom'>
       <button
         type='button'
-        aria-label={pending ? `Keep ${label} published` : `Unpublish ${label} from everyone's tabs`}
-        aria-pressed={pending}
+        aria-label={`Unpublish ${label} from everyone's tabs`}
+        onPointerDown={event => event.stopPropagation()}
         onClick={event => {
-          // The tab beneath is a trigger; this must not select it.
           event.preventDefault();
           event.stopPropagation();
           const appId = appIdOf(tab.value);
-          if (appId) publish.setPublished(appId, pending);
+          if (appId) publish.setPublished(appId, false, label);
         }}
-        className={cn(
-          'absolute right-6 top-1/2 z-[1] flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-colors',
-          pending
-            ? 'text-muted-foreground opacity-50 hover:opacity-100'
-            : 'text-primary hover:bg-primary/10',
-        )}
+        className='absolute right-1.5 top-1/2 z-[1] flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary'
         data-track-category='CHANNELS'
-        data-track-name={pending ? 'KeepChannelAppPublished' : 'UnpublishChannelAppFromTab'}
+        data-track-name='UnpublishChannelAppFromTab'
         data-track-metadata={JSON.stringify({ tab: tab.value })}
       >
-        <Globe size={12} aria-hidden='true' />
+        <Globe data-tab-badge='' size={12} className='shrink-0' aria-hidden='true' />
       </button>
     </Tooltip>
   );
@@ -223,48 +202,92 @@ const ConversationHeader = ({
   const tabsStore = isChannelTabsCustomizable(channel) ? layeredTabsStore : null;
   // Channel admins get step 2 in the app picker: publish to everyone's tabs.
   const appPublishing = useChannelAppPublishing(channelId, channel, publishedAppIds);
-  const stagedPublishing = useStagedAppPublishing(appPublishing);
-  const editPublishing = stagedPublishing.publish;
-  const { commit: commitPublishing, discard: discardPublishing } = stagedPublishing;
   const publishedAppIdSet = useMemo(() => new Set(publishedAppIds), [publishedAppIds]);
   const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
-  const [editSnapshot, setEditSnapshot] = useState<readonly string[] | null>(null);
-  const isEditingTabs = !!tabsStore && editSnapshot !== null;
-  const startEditingTabs = useCallback(() => {
-    if (tabsStore) setEditSnapshot(tabsStore.get());
-  }, [tabsStore]);
-  const saveTabs = useCallback(() => {
-    commitPublishing();
-    setEditSnapshot(null);
-  }, [commitPublishing]);
-  const cancelTabs = useCallback(() => {
-    discardPublishing();
-    if (tabsStore && editSnapshot) tabsStore.set(editSnapshot);
-    setEditSnapshot(null);
-  }, [tabsStore, editSnapshot, discardPublishing]);
-  // Tab edits are already persisted, so leaving the channel mid-edit keeps them;
-  // unsaved publish changes are dropped. The mode must not follow into the next channel.
+  const hiddenTabs = useMemo(
+    () => channelTabBuiltIns.filter(tab => !channelTabIds.includes(tab.id)),
+    [channelTabBuiltIns, channelTabIds],
+  );
+  const [isTabsMenuOpen, setIsTabsMenuOpen] = useState(false);
   useEffect(() => {
-    setEditSnapshot(null);
-    discardPublishing();
-  }, [channelId, discardPublishing]);
-  // Not while full-page search covers the channel: its Esc is full page's.
-  const coverage = usePageCoverage();
+    setIsTabsMenuOpen(false);
+  }, [channelId]);
+  const tabDrag = useChannelTabDrag({
+    hideHint: id => {
+      if (!tabsStore || tabsStore.locked.includes(id)) return null;
+      const appId = appIdOf(id);
+      if (!appId) return 'Hide tab';
+      return publishedAppIdSet.has(appId) ? 'Hide for you' : 'Remove tab';
+    },
+    slotFor: id => {
+      const order = channelTabBuiltIns.map(tab => tab.id);
+      const at = order.indexOf(id);
+      if (at === -1) return null;
+      return hiddenTabs.filter(tab => order.indexOf(tab.id) < at).length;
+    },
+    onDrop: drop => {
+      if (!tabsStore) return;
+      const stored = tabsStore.get();
+      if (drop.kind === 'remove') {
+        tabsStore.remove(drop.id);
+        return;
+      }
+      if (drop.kind === 'move') {
+        tabsStore.move(stored.indexOf(drop.id), stored.indexOf(drop.target));
+        return;
+      }
+      tabsStore.add(drop.id, drop.before ? stored.indexOf(drop.before) : undefined);
+    },
+  });
+  const { cancel: cancelTabDrag } = tabDrag;
   useEffect(() => {
-    if (!isEditingTabs) return undefined;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented || coverage.isCovered()) return;
-      // Esc that closes the "+" menu or the app picker is theirs, not a cancel.
-      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]')) return;
-      cancelTabs();
-    };
-    window.addEventListener('keydown', onKey);
-    return (): void => window.removeEventListener('keydown', onKey);
-  }, [isEditingTabs, cancelTabs, coverage]);
+    cancelTabDrag();
+  }, [channelId, cancelTabDrag]);
+  const focusTab = (id: string | undefined): void => {
+    if (!id) return;
+    requestAnimationFrame(() =>
+      tabDrag.listRef.current
+        ?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(id)}"] [data-tab-face]`)
+        ?.focus(),
+    );
+  };
+  const handleTabKeyDown = (id: string, event: React.KeyboardEvent<HTMLElement>): void => {
+    if (!tabsStore) return;
+    const index = channelTabIds.indexOf(id);
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (tabsStore.locked.includes(id)) return;
+      event.preventDefault();
+      tabsStore.remove(id);
+      focusTab(channelTabIds[index + 1] ?? channelTabIds[index - 1]);
+      return;
+    }
+    if (!event.altKey || !event.shiftKey) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = channelTabIds[index + (event.key === 'ArrowLeft' ? -1 : 1)];
+    if (!target) return;
+    const stored = tabsStore.get();
+    tabsStore.move(stored.indexOf(id), stored.indexOf(target));
+    focusTab(id);
+  };
   const handleTabSelect = useCallback(
-    (value: string, e?: React.MouseEvent) => setActiveTab?.(value, e),
+    (value: string, e?: React.MouseEvent) => {
+      setIsTabsMenuOpen(false);
+      setActiveTab?.(value, e);
+    },
     [setActiveTab],
   );
+  const setActiveTabRef = useRef(setActiveTab);
+  setActiveTabRef.current = setActiveTab;
+  const handleAddTab = (id: string, row: HTMLElement): void => {
+    if (!tabsStore) return;
+    tabDrag.flyIn(id, row, () => {
+      tabsStore.add(id);
+      setIsTabsMenuOpen(false);
+    });
+    setActiveTabRef.current?.(id);
+  };
   const channelUserStatus = useGetChannelUserStatus(channelId);
   useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
@@ -736,121 +759,69 @@ const ConversationHeader = ({
           )}
         </div>
       </div>
-      <Tabs.Root defaultValue={activeTab || 'chat'}>
+      <Tabs.Root value={activeTab || 'chat'}>
         <Tabs.List
-          className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
+          ref={tabDrag.listRef}
+          className='relative flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {tabsStore && isEditingTabs ? (
-            <>
-              <SortableBar store={tabsStore} ids={channelTabIds} direction='horizontal'>
-                {channelTabs?.map(tab => (
-                  <SortableBarItem
-                    key={tab.value}
-                    id={tab.value}
-                    as='span'
-                    className='relative inline-flex shrink-0 cursor-grab'
-                  >
-                    <ChannelTabTrigger
-                      tab={tab}
-                      isActive={activeTab === tab.value}
-                      removable={!tabsStore.locked.includes(tab.value)}
-                      globeAsControl={!!tab.published && !!editPublishing}
-                      onSelect={handleTabSelect}
-                    />
-                    {tab.published && editPublishing && (
-                      <UnpublishTabButton
-                        tab={tab}
-                        publish={editPublishing}
-                        pending={stagedPublishing.isPendingUnpublish(appIdOf(tab.value) ?? '')}
-                      />
-                    )}
-                    <BarRemoveButton
-                      store={tabsStore}
-                      id={tab.value}
-                      label={tab.label.trim()}
-                      trackCategory='CHANNELS'
-                      className='right-1.5 top-1/2 size-4 -translate-y-1/2 opacity-100'
-                    />
-                  </SortableBarItem>
-                ))}
-              </SortableBar>
-              <BarAddMenu
-                store={tabsStore}
-                builtIns={channelTabBuiltIns}
-                {...(editPublishing ? { publish: editPublishing } : {})}
-                publishedAppIds={publishedAppIdSet}
-                trackCategory='CHANNELS'
-                side='bottom'
-                align='start'
-                trigger={
-                  <button
-                    type='button'
-                    aria-label='Add a tab'
-                    data-testid='channel-tab-add'
-                    data-track-category='CHANNELS'
-                    data-track-name='OPEN_ADD_TAB_MENU'
-                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                  >
-                    <PlusDefault size={14} />
-                  </button>
-                }
+          {channelTabs?.map(tab => (
+            <span
+              key={tab.value}
+              data-tab-tile=''
+              data-tab-id={tab.value}
+              data-tab-label={tab.label.trim()}
+              {...(tabsStore && {
+                onPointerDown: (event: React.PointerEvent<HTMLElement>) =>
+                  tabDrag.startTabPress(tab.value, event),
+                onKeyDown: (event: React.KeyboardEvent<HTMLElement>) =>
+                  handleTabKeyDown(tab.value, event),
+              })}
+              className='relative inline-flex shrink-0'
+            >
+              {tabsStore && <span data-bar-socket aria-hidden className={TAB_SOCKET_CLASS} />}
+              <ChannelTabTrigger
+                tab={tab}
+                isActive={activeTab === tab.value}
+                {...(tabsStore && {
+                  keyShortcuts: tabsStore.locked.includes(tab.value)
+                    ? 'Alt+Shift+ArrowLeft Alt+Shift+ArrowRight'
+                    : 'Delete Alt+Shift+ArrowLeft Alt+Shift+ArrowRight',
+                })}
+                globeAsControl={!!tab.published && !!appPublishing}
+                onSelect={handleTabSelect}
               />
-              <span className='ml-auto flex shrink-0 items-center gap-1 pl-2'>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={cancelTabs}
-                  data-testid='channel-tabs-cancel'
-                  data-track-category='CHANNELS'
-                  data-track-name='CANCEL_EDIT_TABS'
-                  className='h-7 rounded-lg px-2.5 text-xs'
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size='sm'
-                  onClick={saveTabs}
-                  data-testid='channel-tabs-save'
-                  data-track-category='CHANNELS'
-                  data-track-name='SAVE_EDIT_TABS'
-                  className='h-7 rounded-lg px-3 text-xs'
-                >
-                  Save
-                </Button>
-              </span>
-            </>
-          ) : (
-            <>
-              {channelTabs?.map(tab => (
-                <span key={tab.value} className='inline-flex shrink-0'>
-                  <ChannelTabTrigger
-                    tab={tab}
-                    isActive={activeTab === tab.value}
-                    removable={false}
-                    onSelect={handleTabSelect}
-                  />
-                </span>
-              ))}
-              {tabsStore && (
-                <Tooltip content='Edit tabs' side='bottom'>
-                  <button
-                    type='button'
-                    aria-label='Edit tabs'
-                    onClick={startEditingTabs}
-                    data-testid='channel-tabs-edit'
-                    data-track-category='CHANNELS'
-                    data-track-name='EDIT_TABS'
-                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                  >
-                    <PencilEdit size={14} />
-                  </button>
-                </Tooltip>
+              {tab.published && appPublishing && (
+                <UnpublishTabButton tab={tab} publish={appPublishing} />
               )}
+            </span>
+          ))}
+          {tabsStore && (
+            <>
+              <span ref={tabDrag.gapRef} aria-hidden className={TAB_GAP_CLASS} />
+              <ChannelTabsMenu
+                open={isTabsMenuOpen}
+                onOpenChange={setIsTabsMenuOpen}
+                store={tabsStore}
+                hidden={hiddenTabs}
+                drag={tabDrag}
+                onAdd={handleAddTab}
+                {...(appPublishing ? { publish: appPublishing } : {})}
+                publishedAppIds={publishedAppIdSet}
+                {...(channel.scopeType === ChannelScopeType.DEFAULT && {
+                  onCustomize: () =>
+                    window.dispatchEvent(
+                      new CustomEvent('xyne-open-preferences', {
+                        detail: { section: 'channelTabs' },
+                      }),
+                    ),
+                })}
+              />
             </>
           )}
         </Tabs.List>
       </Tabs.Root>
+      {tabDrag.layer}
 
       <Dialog
         className='max-w-[760px] rounded-2xl overflow-hidden'

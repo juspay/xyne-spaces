@@ -1,7 +1,7 @@
 import { voiceDebug } from '../../../services/VoiceInput/voiceDebug';
-import { HIGHLIGHT, MESSAGES, SELECTORS, STOPPED, TIMING } from './constants';
+import { ASSISTANT_PANEL_ATTR, HIGHLIGHT, MESSAGES, SELECTORS, STOPPED, TIMING } from './constants';
 import type { HiddenTarget, Peeked } from './paths';
-import type { Used } from './walk';
+import type { Used, UseHow } from './walk';
 import {
   documents,
   findControl,
@@ -30,9 +30,13 @@ interface Pressed {
   popup: HTMLElement | undefined;
 }
 
+/** Marks Buddy's highlight layers, so waiting for the page to settle leaves them out. */
+const LAYER_ATTR = 'data-buddy-layer';
+
 function layer(css: Partial<CSSStyleDeclaration>): HTMLDivElement {
   const page = topDocument();
   const el = page.createElement('div');
+  el.setAttribute(LAYER_ATTR, '');
   Object.assign(
     el.style,
     { position: 'fixed', pointerEvents: 'none', zIndex: HIGHLIGHT.layer },
@@ -111,6 +115,19 @@ function holdRings(erasers: (() => void)[], signal: AbortSignal): void {
 
 const pause = (ms: number): Promise<void> => new Promise(resolve => window.setTimeout(resolve, ms));
 
+/**
+ * Buddy's own chat and highlights: they change while it works (the reply loader ticks every
+ * second), which is not the page loading, so it would keep every wait running to its cap.
+ */
+const OWN_UI = `[${ASSISTANT_PANEL_ATTR}], [${LAYER_ATTR}]`;
+const isOwnNode = (node: Node): boolean =>
+  !!(node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement)?.closest(OWN_UI);
+const isOwnChange = (record: MutationRecord): boolean => {
+  if (isOwnNode(record.target)) return true;
+  const nodes = [...record.addedNodes, ...record.removedNodes];
+  return record.type === 'childList' && nodes.length > 0 && nodes.every(isOwnNode);
+};
+
 /** Resolves once the page has been still for `quietMs`, after a cap, or once stopped. */
 export const settle = (
   quietMs: number = TIMING.settleQuietMs,
@@ -126,7 +143,8 @@ export const settle = (
     };
     signal?.addEventListener('abort', done);
     let quiet = window.setTimeout(done, quietMs);
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver(records => {
+      if (records.every(isOwnChange)) return;
       window.clearTimeout(quiet);
       quiet = window.setTimeout(done, quietMs);
     });
@@ -175,6 +193,23 @@ async function openByKey(el: HTMLElement): Promise<void> {
   await settle();
 }
 
+const pathNow = (): string =>
+  documents()
+    .map(doc => doc.location.pathname + doc.location.search)
+    .join(' ');
+
+/** The click has shown: the address moved, or the control became the current one. */
+const showed = (path: string, el: HTMLElement): boolean =>
+  pathNow() !== path || el.closest(SELECTORS.current) !== null;
+
+/** Waits, a frame at a time, for a click to show, up to TIMING.landMaxMs; or until stopped. */
+async function landed(path: string, el: HTMLElement, signal: AbortSignal): Promise<void> {
+  const started = Date.now();
+  while (!signal.aborted && !showed(path, el) && Date.now() - started < TIMING.landMaxMs) {
+    await pause(16);
+  }
+}
+
 const movedOn = (before: Snapshot, after: Snapshot): boolean =>
   after.path !== before.path || (after.dialog && !before.dialog);
 
@@ -207,7 +242,11 @@ function outcomeOf(control: Control, before: Snapshot, after: Snapshot): string 
 const live = (control: Control): Control | undefined =>
   control.el.isConnected ? control : findControl(control, control.id);
 
-async function show(control: Control, signal: AbortSignal): Promise<Pressed | null> {
+async function show(
+  control: Control,
+  signal: AbortSignal,
+  waitForPage = true,
+): Promise<Pressed | null> {
   const clear = highlight(control.el, control.text);
   let before: Snapshot;
   try {
@@ -218,7 +257,10 @@ async function show(control: Control, signal: AbortSignal): Promise<Pressed | nu
     }
     before = snapshot();
     press(control.el);
-    await settle(TIMING.settleQuietMs, signal);
+    // Ending here, the click only has to land; waiting for a page that is still loading to go
+    // quiet ran this wait to its cap on every navigation.
+    if (waitForPage) await settle(TIMING.settleQuietMs, signal);
+    else await landed(before.path, control.el, signal);
     if (signal.aborted) return null;
     await openByKey(control.el);
   } finally {
@@ -228,14 +270,15 @@ async function show(control: Control, signal: AbortSignal): Promise<Pressed | nu
   // A link elsewhere moves on even when the address changes only once the page has loaded.
   const leaving =
     !!control.href && !topDocument().location.pathname.endsWith(control.href.split('?')[0] ?? '');
-  if (leaving || movedOn(before, snapshot())) await turnOver(before, signal);
+  // Nothing more is read there when the walk ends here: the reply goes once the address moved.
+  if (waitForPage && (leaving || movedOn(before, snapshot()))) await turnOver(before, signal);
   return { before, after: snapshot(), popup: newPopup(before) };
 }
 
-async function click(control: Control, signal: AbortSignal): Promise<Used> {
+async function click(control: Control, signal: AbortSignal, waitForPage: boolean): Promise<Used> {
   const target = live(control);
   if (!target) return { reply: MESSAGES.gone(control.text), acted: false };
-  const pressed = await show(target, signal);
+  const pressed = await show(target, signal, waitForPage);
   return pressed
     ? { reply: outcomeOf(target, pressed.before, pressed.after), acted: true }
     : { reply: STOPPED, acted: false };
@@ -323,16 +366,21 @@ async function reveal(
 export async function openHidden(
   target: HiddenTarget<Control>,
   signal: AbortSignal,
+  how?: UseHow,
 ): Promise<Used> {
   const item = findControl(target, target.id) ?? (await reveal(target, signal));
   if (item === null) return { reply: STOPPED, acted: false };
   if (!item) return { reply: MESSAGES.notFound(target.text, target.opener.text), acted: false };
-  return actOn(item, signal);
+  return actOn(item, signal, how);
 }
 
 /** Clicks it, or points at it when it changes data. */
-export async function actOn(control: Control, signal: AbortSignal): Promise<Used> {
+export async function actOn(
+  control: Control,
+  signal: AbortSignal,
+  { waitForPage = true }: UseHow = {},
+): Promise<Used> {
   return control.use === 'click'
-    ? click(control, signal)
+    ? click(control, signal, waitForPage)
     : { reply: point(control, signal), acted: true };
 }

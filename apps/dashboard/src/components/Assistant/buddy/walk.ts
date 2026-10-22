@@ -17,11 +17,18 @@ import { decide, type Decision, type JevResult } from './decide';
 import { controlKey, normalise } from './history';
 import { groupControls } from './options';
 import { hiddenTargets, type HiddenTarget, type MenuItem, type Peeked } from './paths';
+import { namesAll } from './names';
+import { fitsRequest, inNamedPlace, rivalOf, scopeAsked } from './scope';
 
 // Sees the app only through a WalkEnv, so the eval can replay it.
 
 export interface WalkControl extends MenuItem {
   id: string;
+}
+
+/** How to use an option: without waiting for the page it opens when nothing more is read there. */
+export interface UseHow {
+  waitForPage?: boolean;
 }
 
 /** Whether it was used: an item can be gone from its menu. */
@@ -41,7 +48,7 @@ export interface WalkEnv<C extends WalkControl> {
   /** Whether the control is what was asked ('same'), a way to it ('leads') or not ('other'). */
   check(request: string, label: string): Promise<JevResult>;
   here(): string;
-  use(option: Option<C>): Promise<Used>;
+  use(option: Option<C>, how?: UseHow): Promise<Used>;
   ask(options: Option<C>[]): Promise<string>;
   log(step: string, detail?: string, data?: unknown): void;
   aborted(): boolean;
@@ -62,6 +69,8 @@ interface Round<C extends WalkControl> {
   offTarget?: Option<C>;
   /** The menu left open for the pick inside it, closed again if the pick is not used. */
   open?: Peeked<C>;
+  /** What Jev chose from, one per group of alike controls. */
+  offered?: Option<C>[];
 }
 
 /** What to say, null to let Ask AI answer, or STOPPED. */
@@ -103,7 +112,9 @@ async function choose<C extends WalkControl>(
   menus: Peeked<C>[] = [],
   onTheWay = false,
 ): Promise<Round<C> | null> {
-  const hidden = hiddenTargets(controls, menus).filter(item => untried(env, item));
+  const hidden = hiddenTargets(controls, menus).filter(
+    item => untried(env, item) && fitsRequest(request)(item),
+  );
   if (hidden.length > 0) env.log('offered from menus', `${hidden.length}`, hidden.map(traceOf));
   const groups = groupControls<Option<C>>([...controls, ...hidden]);
   const options = groups.map(({ id, description }) => ({ id, description }));
@@ -126,7 +137,8 @@ async function choose<C extends WalkControl>(
     (probability >= SURE_NONE || ASKS_A_QUESTION.test(request));
   const unsure = decision.kind === 'ask_ai' && !plainlyQuestion && result.route !== 'unavailable';
   const leaning = result.route === 'unavailable' ? undefined : result.chosen;
-  const round = { optionOf, decision, probability, unsure, ...(leaning && { leaning }) };
+  const offered = groups.map(group => group.members[0]);
+  const round = { optionOf, decision, probability, unsure, offered, ...(leaning && { leaning }) };
   // While looking in menus only a pick inside one counts, so the rest need no check.
   if (menus.length > 0 && !menuItemOf(round) && !asksAboutMenu(round)) return round;
   return checked(request, env, round);
@@ -265,6 +277,7 @@ async function lookInMenus<C extends WalkControl>(
 async function act<C extends WalkControl>(
   env: WalkEnv<C>,
   { optionOf, decision }: Round<C>,
+  how: UseHow,
 ): Promise<Used | { reply: null; acted: false }> {
   if (decision.kind === 'ask') {
     const options = decision.ids.map(optionOf).filter((o): o is Option<C> => !!o);
@@ -276,7 +289,7 @@ async function act<C extends WalkControl>(
     return { reply: null, acted: false };
   }
   env.log('chose', `${chosen.id} → ${chosen.use}: ${chosen.label}`);
-  return env.use(chosen);
+  return env.use(chosen, how);
 }
 
 const isCurrent = ({ label }: WalkControl): boolean => label.includes(CURRENT);
@@ -313,8 +326,14 @@ async function lookHere<C extends WalkControl>(
   onTheWay: boolean,
 ): Promise<Round<C> | null | undefined> {
   const screen = env.readScreen();
+  // Asked for this page's ("the canvas in this channel"), only this page's controls answer; and
+  // one that makes something ("New canvas") only a request to make something.
+  const onlyHere = scopeAsked(request) === 'page';
+  const fits = fitsRequest(request);
   const [controls, openers] = [screen.controls, screen.openers].map(found =>
-    found.filter(control => untried(env, control)),
+    found.filter(
+      control => untried(env, control) && fits(control) && (!onlyHere || control.scope === 'page'),
+    ),
   ) as [C[], C[]];
   env.log('read screen', `${controls.length} controls`, controls.map(traceOf));
   if (controls.length === 0) return undefined;
@@ -504,6 +523,25 @@ function towardNamed<C extends WalkControl>(
 }
 
 /**
+ * The same name in the other scope (this channel's Canvas tab, My Canvas): the scope the request
+ * names wins; with none named, the user is asked which, not given the one on this page.
+ */
+function scopeRivals<C extends WalkControl>(round: Round<C>, request: string): Round<C> {
+  if (round.decision.kind !== 'act' || !round.offered) return round;
+  const pick = round.optionOf(round.decision.id);
+  const rival = pick && rivalOf(pick, round.offered);
+  if (!pick || !rival) return round;
+  const asked = scopeAsked(request);
+  if (asked === pick.scope) return round;
+  if (asked === rival.scope) {
+    const why = `the request says ${asked === 'page' ? 'this page' : 'the app'}: "${rival.text}"`;
+    return { ...round, decision: { kind: 'act', id: rival.id, why } };
+  }
+  const why = `"${pick.text}" and "${rival.text}" have one name in two places`;
+  return { ...round, decision: { kind: 'ask', ids: [pick.id, rival.id], why } };
+}
+
+/**
  * Walks to what was asked. `confirmed` is an option the user just said yes to: it is used first,
  * and the walk goes on from where it leads.
  */
@@ -511,6 +549,8 @@ export async function runWalk<C extends WalkControl>(
   request: string,
   env: WalkEnv<C>,
   confirmed?: Option<C>,
+  /** No step follows: what ends the walk here needs no wait for the page it opens. */
+  last = true,
 ): Promise<WalkResult> {
   env.log('heard', `“${request}”`);
   const visited = [env.here()];
@@ -526,7 +566,7 @@ export async function runWalk<C extends WalkControl>(
       env.log('stopped', 'while looking');
       return { reply: STOPPED, why: 'stopped' };
     }
-    const round =
+    let round =
       found && !entered && !confirmed
         ? towardNamed(
             found,
@@ -535,6 +575,11 @@ export async function runWalk<C extends WalkControl>(
           )
         : found;
     if (round !== found) await closeUnused(env, found);
+    if (round && !entered && !confirmed) {
+      const sorted = scopeRivals(round, request);
+      if (sorted !== round) await closeUnused(env, round);
+      round = sorted;
+    }
     // On a page the walk went into, nothing found (or only the way back) may be a page still
     // filling in: it is looked at once more, after it has held still, before it is the answer.
     const early =
@@ -573,7 +618,9 @@ export async function runWalk<C extends WalkControl>(
       await closeUnused(env, round);
       return { reply: MESSAGES.opened(pick.text), why: 'arrived', ended: 'clicked' };
     }
-    const { reply, acted } = await act(env, round);
+    // All that was asked, with no step after it: the reply goes without waiting for the page.
+    const finishing = last && !!pick && namesAll(request, pick.text);
+    const { reply, acted } = await act(env, round, { waitForPage: !finishing });
     if (acted && pick) used.add(controlKey(pick));
     if (reply === STOPPED || env.aborted()) {
       await closeUnused(env, round);
@@ -585,7 +632,10 @@ export async function runWalk<C extends WalkControl>(
     }
     // A page that a button made (a new canvas, say) is what was asked for: nothing to look for.
     const made = !pick?.href && MAKES_SOMETHING.test(pick?.text ?? '');
-    if (!acted || !pick || made || visited.includes(env.here())) {
+    // So is a page that is all the request named ("open canvas" and the Canvas tab): looking on for
+    // something more specific there only finds what it holds, "＋ Canvas" among them.
+    const named = !!pick && namesAll(request, pick.text);
+    if (!acted || !pick || made || named || visited.includes(env.here())) {
       if (reply && round.decision.kind === 'ask') return { reply, why, ended: 'asked' };
       return { reply, why, ...(acted && pick?.use === 'click' && { ended: 'clicked' as const }) };
     }
@@ -626,11 +676,13 @@ export async function runSteps<C extends WalkControl>(
 ): Promise<WalkResult> {
   // "How do I…", "where can I…": asked the way to something, it is what the user wants done.
   const doing = request.replace(ASKS_FOR_A_WAY, '').trim() || request;
-  const steps = resume?.steps ?? stepsOf(doing);
+  // A step in a place it names ("tickets in the general channel") goes there first, then does it.
+  const steps = resume?.steps ?? stepsOf(doing).flatMap(step => inNamedPlace(step) ?? [step]);
   const replies: string[] = [];
   let result: WalkResult = { reply: null, why: 'nothing to do' };
   for (const [i, step] of steps.entries()) {
-    result = await runWalk(step, env, i === 0 ? resume?.confirmed : undefined);
+    const last = i === steps.length - 1;
+    result = await runWalk(step, env, i === 0 ? resume?.confirmed : undefined, last);
     if (result.reply === STOPPED) return result;
     if (result.reply === null) {
       if (i > 0) return { ...result, reply: [...replies, MESSAGES.noStep(step)].join(' ') };
