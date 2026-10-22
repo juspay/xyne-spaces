@@ -31,6 +31,7 @@ export class EmailClassificationRepository {
     return {
       channelId: pref.channelId,
       ownerUserId: pref.ownerUserId,
+      boardId: pref.boardId ?? null,
       enabled: pref.classificationEnabled || pref.priorityClassificationEnabled || false,
       classificationEnabled: pref.classificationEnabled ?? false,
       classificationPrompt: pref.classificationPrompt ?? '',

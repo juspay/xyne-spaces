@@ -123,6 +123,7 @@ export class EmailClassificationWorker {
         classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
           emailMetadata: buildEmailMetadata(emailRecord),
           evaluate: true,
+          emailId,
         });
       }
     } catch (error) {
