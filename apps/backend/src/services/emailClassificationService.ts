@@ -22,6 +22,13 @@ import type {
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { decide } from '@/services/decision/decide';
+import { primaryEngine } from '@/services/decision/routes';
+import {
+  formFieldQuestions,
+  prepareEmailFormFields,
+  readFormFieldAnswers,
+  type EmailFormFields,
+} from '@/services/emailFormFields';
 import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
@@ -112,12 +119,15 @@ export class EmailClassificationService {
       agentsConfig,
       emailMetadata,
       evaluate,
+      emailId,
     }: {
       ignoreEnabled?: boolean;
       agentsConfig?: AgentsConfig;
       emailMetadata?: EmailMetadata;
       /** Queue the decisions for the other engines to compare, while DECISION_EVAL_ENABLED is on. */
       evaluate?: boolean;
+      /** The email being classified, so XOR can read its screenshots. */
+      emailId?: string;
     } = {}
   ): Promise<{
     result: ClassificationResult & { priority?: PriorityClassificationResult };
@@ -136,10 +146,28 @@ export class EmailClassificationService {
     try {
       const decideOptions = { agentsConfig: cacConfig, evaluate };
 
+      // When XOR picks the category, the same XOR request also fills the desk's form fields (the
+      // LLM's JSON fills them otherwise): the fields the desk prompt names, and the email's
+      // screenshots. Without them XOR still picks the category, as before.
+      const formFields = config.classificationEnabled && primaryEngine('email_category', cacConfig) !== 'llm'
+        ? await prepareEmailFormFields({
+            boardId: config.boardId,
+            deskPrompt: config.classificationPrompt,
+            skipFieldNames: [config.categoryField, config.subCategoryField],
+            emailId,
+          }).catch((error) => {
+            logger.warn('[Classification] Could not prepare form fields for XOR', {
+              channelId,
+              error: error instanceof Error ? error.message : error,
+            });
+            return null;
+          })
+        : null;
+
       // Category and priority in parallel. A category failure fails classification; a
       // priority failure only leaves priority unset, as classifyPriority does.
       const categoryPromise = config.classificationEnabled
-        ? decide(this.categoryTask(config, input), decideOptions)
+        ? decide(this.categoryTask(config, input, formFields), decideOptions)
         : Promise.resolve(null);
 
       const priorityPromise = config.priorityClassificationEnabled
@@ -572,8 +600,14 @@ export class EmailClassificationService {
    * Category as one decision. The LLM gets the desk's classification prompt as system and the
    * email as user; XOR and Jev get the same two, plus the answer list they need: the desk's
    * mapping rows and other. Not put to them when the desk has no mappings or no prompt.
+   * With `formFields`, XOR is also asked the desk's form fields, with the email's screenshots,
+   * and its answers join the category in the output, as the LLM's JSON does.
    */
-  private categoryTask(config: ClassificationConfig, input: TaskInput): DecisionTask<ClassificationRawOutput> {
+  private categoryTask(
+    config: ClassificationConfig,
+    input: TaskInput,
+    formFields: EmailFormFields | null = null,
+  ): DecisionTask<ClassificationRawOutput> {
     const { mappings, categoryField, subCategoryField, classificationPrompt } = config;
     const userMessage = buildUserMessage(input);
     const criteria = {
@@ -586,14 +620,23 @@ export class EmailClassificationService {
       feature: 'email_category',
       input,
       question: askable
-        ? { state: userMessage, questions: { category: { type: 'choice', instructions: classificationPrompt, criteria } } }
+        ? {
+            state: userMessage,
+            questions: {
+              category: { type: 'choice', instructions: classificationPrompt, criteria },
+              ...(formFields ? formFieldQuestions(formFields) : {}),
+            },
+            images: formFields?.images,
+          }
         : null,
-      readAnswers: ({ category }) => {
+      readAnswers: (answers) => {
+        const { category } = answers;
         if (category?.type !== 'choice') return null;
         const mapping = mappings.find(m => m.id === category.choice);
         return {
           [categoryField]: mapping?.category ?? 'Other',
           ...(subCategoryField && mapping?.subCategory ? { [subCategoryField]: mapping.subCategory } : {}),
+          ...(formFields ? readFormFieldAnswers(formFields, answers) : {}),
         };
       },
       askLlm: async () => {
