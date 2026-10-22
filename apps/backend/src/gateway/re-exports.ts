@@ -39,9 +39,8 @@ export {
   buildSlackMigrationSourceName,
 } from '@/migration/slack/slackMigrationSource';
 export { buildSlackDeskSourceName } from '@/integrations/core/deskSources';
-export { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
-export { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
-export type { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
+export { extractMessageContent } from '@/migration/slack/utils/extractConversation';
+export { mapUserMentionIds } from '@/utils/mentionParser';
 export { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 
 export {

@@ -28,6 +28,7 @@ const slackMessageFields = {
   bot_profile: z.object({ name: z.string().optional() }).optional(),
   text: z.string().optional(),
   attachments: z.array(z.unknown()).optional(),
+  blocks: z.array(z.unknown()).optional(),
   files: z.array(SlackFileSchema).optional(),
 };
 

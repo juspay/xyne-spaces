@@ -81,6 +81,7 @@ export interface ProviderMessage {
   files: ProviderFile[];
   createdAt: Date;
   replyBroadcast: boolean;
+  raw: unknown;
 }
 
 export type ProviderEvent =

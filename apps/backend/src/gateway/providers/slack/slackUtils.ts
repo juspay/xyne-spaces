@@ -129,6 +129,7 @@ export function toProviderMessage(message: SlackMessage, channelId: string): Pro
     ),
     createdAt: slackTsToDate(message.ts),
     replyBroadcast: message.subtype === 'thread_broadcast',
+    raw: message,
   };
 }
 

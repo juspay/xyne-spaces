@@ -868,7 +868,7 @@ async function resolveHuddleRoom(room: any, botToken?: string): Promise<any> {
   return participant_names.length ? { ...room, participant_names } : room;
 }
 
-async function extractMessageContent(msg: any, isBotContext: boolean = false, botToken?: string, workspaceId?: string): Promise<string> {
+export async function extractMessageContent(msg: any, isBotContext: boolean = false, botToken?: string, workspaceId?: string): Promise<string> {
   const token = botToken || process.env.SLACK_BOT_TOKEN || '';
 
   if (!isBotContext) {
