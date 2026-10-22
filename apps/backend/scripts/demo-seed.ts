@@ -45,6 +45,7 @@ import {
   WorkspaceRole,
 } from '@xyne/shared';
 import { CHANNELS, DEMO_USERS, TICKETS, type Line } from './demo-seed-content';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '../src/database/connectGroup';
 
 const prisma = new PrismaClient();
 
@@ -156,6 +157,7 @@ async function wipe() {
     await prisma.channelUserStatus.deleteMany({ where: { channelId: { in: channelIds } } });
     await prisma.channelStats.deleteMany({ where: { channelId: { in: channelIds } } });
     await prisma.activity.deleteMany({ where: { channelId: { in: channelIds } } });
+    await prisma.connectGroup.deleteMany({ where: { entityType: ConnectEntityType.CHANNEL, entityId: { in: channelIds } } });
     await prisma.channel.deleteMany({ where: { id: { in: channelIds } } });
   }
 
@@ -329,6 +331,7 @@ async function ensureProjectAndBoard(workspaceId: string, createdBy: string) {
  */
 async function createConversation(
   channelId: string,
+  connectId: string,
   workspaceId: string,
   members: SeededUser[],
   parent: Line,
@@ -356,6 +359,7 @@ async function createConversation(
         // Denormalized from the conversation for ACL filtering. Rows without it
         // fall outside the workspace-scoped queries the client runs.
         workspaceId,
+        channelConnectId: connectId,
         content: line.text,
         msgType: MessageType.USER,
         showInChannel: false,
@@ -384,10 +388,10 @@ async function createConversation(
     if (line.react) {
       const reactor = members[(line.from + 1) % members.length];
       await prisma.reaction.create({
-        data: { messageId, userId: reactor.id, emojiName: line.react, workspaceId },
+        data: { messageId, userId: reactor.id, emojiName: line.react, workspaceId, channelConnectId: connectId },
       });
       await prisma.reactionCount.create({
-        data: { messageId, emojiName: line.react, count: 1, workspaceId },
+        data: { messageId, emojiName: line.react, count: 1, workspaceId, channelConnectId: connectId },
       });
     }
   }
@@ -396,6 +400,7 @@ async function createConversation(
     data: {
       conversationId,
       channelId,
+      channelConnectId: connectId,
       workspaceId,
       createdBy: members[parent.from % members.length].id,
       initialMessageId: messageIds[0],
@@ -415,13 +420,14 @@ async function createChannels(
   projectId: string,
   boardId: string
 ) {
-  const created: Array<{ id: string; slug: string; conversationId: string }> = [];
+  const created: Array<{ id: string; slug: string; conversationId: string; connectId: string }> = [];
 
   for (let i = 0; i < CHANNELS.length; i++) {
     const spec = CHANNELS[i];
     const members = spec.members.map((idx) => users[idx]);
     const admin = members[0];
     const channelId = createId();
+    const connectId = newConnectId();
 
     await prisma.channel.create({
       data: {
@@ -434,10 +440,17 @@ async function createChannels(
         createdBy: admin.id,
         projectId,
         workspaceId,
+        connectId,
         participantCount: members.length,
         isMigrated: false,
         lastActivityAt: minsAgo(i),
       },
+    });
+    await createConnectGroupForEntity(prisma, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channelId,
+      hostWorkspaceId: workspaceId,
+      connectId,
     });
     vespaJobs.push({ schema: 'chat_container', docId: channelId });
 
@@ -449,6 +462,7 @@ async function createChannels(
       data: {
         id: createId(),
         channelId,
+        channelConnectId: connectId,
         boardId,
         workspaceId,
         isDefault: true,
@@ -461,20 +475,21 @@ async function createChannels(
     // The DM/channel lists read channel_stats, not channels — without a row the
     // channel does not appear in the sidebar.
     await prisma.channelStats.create({
-      data: { channelId, lastActivityAt: minsAgo(i), participantCount: members.length, workspaceId },
+      data: { channelId, channelConnectId: connectId, lastActivityAt: minsAgo(i), participantCount: members.length, workspaceId },
     });
 
     for (let m = 0; m < members.length; m++) {
       await prisma.channelParticipant.create({
         data: {
           channelId,
+          channelConnectId: connectId,
           userId: members[m].id,
           role: m === 0 ? ChannelRole.ADMIN : ChannelRole.MEMBER,
           workspaceId,
         },
       });
       await prisma.channelUserStatus.create({
-        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general', workspaceId },
+        data: { channelId, channelConnectId: connectId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general', workspaceId },
       });
     }
 
@@ -509,6 +524,7 @@ async function createChannels(
         const base = (i + 1) * 10000 + c * 500 + t * 20;
         const { conversationId } = await createConversation(
           channelId,
+          connectId,
           workspaceId,
           members,
           threads[t].parent,
@@ -520,7 +536,7 @@ async function createChannels(
       }
     }
 
-    created.push({ id: channelId, slug: spec.slug, conversationId: firstConversationId });
+    created.push({ id: channelId, slug: spec.slug, conversationId: firstConversationId, connectId });
     console.log(`  💬 #${spec.slug} — ${conversationCount} conversations, ${members.length} members`);
   }
 
@@ -585,7 +601,7 @@ async function createTickets(
   workspaceId: string,
   projectId: string,
   boardId: string,
-  channels: Array<{ id: string; slug: string; conversationId: string }>
+  channels: Array<{ id: string; slug: string; conversationId: string; connectId: string }>
 ) {
   const bySlug = new Map(channels.map((c) => [c.slug, c]));
   const fallback = bySlug.get('general') ?? channels[0];
@@ -608,6 +624,7 @@ async function createTickets(
         conversationId,
         senderId: reporter.id,
         workspaceId,
+        channelConnectId: channel.connectId,
         content: spec.title,
         msgType: MessageType.USER,
         showInChannel: false,
@@ -628,6 +645,7 @@ async function createTickets(
           conversationId,
           senderId: speaker.id,
           workspaceId,
+          channelConnectId: channel.connectId,
           content: thread[m].text,
           msgType: MessageType.USER,
           showInChannel: false,
@@ -648,6 +666,7 @@ async function createTickets(
         assignedTo: assignee.id,
         conversationId,
         channelId: channel.id,
+        channelConnectId: channel.connectId,
         xyneId,
         projectId,
         workspaceId,
@@ -665,6 +684,7 @@ async function createTickets(
       data: {
         conversationId,
         channelId: channel.id,
+        channelConnectId: channel.connectId,
         workspaceId,
         createdBy: reporter.id,
         initialMessageId: messageId,

@@ -7,6 +7,7 @@ import { config } from '@/config/env';
 import { runScopedClawAgent } from '@/services/clawAgentService';
 import { initializeYSweetDoc } from '@/utils/ysweetUtils';
 import { newConnectId } from '@/database/connectGroup';
+import { channelConnectIdFor } from '@/database/connectStamp';
 import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
@@ -53,6 +54,9 @@ async function createTicketCanvas(
   // Same atomic canvas + connect_group create every other canvas path uses
   // (canvasController.createCanvas, release notes, commit analysis).
   const connectId = newConnectId();
+  // Slack Connect: the nested participant create below is invisible to the connect stamper, so the
+  // channel row carries its channel's handle explicitly (the canvas row itself is stamped).
+  const channelConnectId = await channelConnectIdFor(ticket.channelId);
   const canvas = await createCanvasWithConnectGroupTx(
     {
       id: canvasId,
@@ -88,6 +92,7 @@ async function createTicketCanvas(
             joinedAt: now,
             updatedAt: now,
             canvasConnectId: connectId,
+            channelConnectId,
           },
         ],
       },

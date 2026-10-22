@@ -10,6 +10,7 @@ import { getEncryptionProvider } from '@/services/encryption/provider';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
+import { withConnectStamp, setConnectStampBase } from './connectStamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
@@ -92,8 +93,10 @@ export class DatabaseClient {
 
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
+      // Slack Connect: base client (no ACL/stamp) used for the connectId lookups the stamper does.
+      setConnectStampBase(DatabaseClient.instance);
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
+      DatabaseClient.wrappedInstance = withConnectStamp(withWorkspaceStamp(withAclExtension(DatabaseClient.instance)));
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;

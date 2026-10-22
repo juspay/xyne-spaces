@@ -298,6 +298,7 @@ const VirtualizedStageList: React.FC<{
                   ((ticket as TicketWithTags).tagMappings ?? []).length > 0
                     ? ((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
                         workspaceId: m.workspaceId,
+                        channelConnectId: null,
                         id: m.id,
                         name: m.tagName,
                         ticketId: m.ticketId,
@@ -306,6 +307,7 @@ const VirtualizedStageList: React.FC<{
                         const name = typeof t === 'string' ? t : (t.name ?? '');
                         return {
                           workspaceId: typeof t === 'string' ? '' : (t.workspaceId ?? ''),
+                          channelConnectId: null,
                           id: (typeof t === 'string' ? undefined : t.id) ?? `${ticket.id}:${name}`,
                           name,
                           ticketId: ticket.id,

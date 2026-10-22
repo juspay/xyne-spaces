@@ -2352,7 +2352,13 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   const tagsByTicketId = useMemo(() => {
     const map = new Map<
       string,
-      { workspaceId: string; id: string; name: string; ticketId: string }[]
+      {
+        workspaceId: string;
+        channelConnectId: string | null;
+        id: string;
+        name: string;
+        ticketId: string;
+      }[]
     >();
     if (!kanbanSourceTickets) return map;
     for (const ticket of kanbanSourceTickets as KanbanLocalTicket[]) {
@@ -2360,6 +2366,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
         ticket.tagMappings && ticket.tagMappings.length > 0
           ? ticket.tagMappings.map((m: { id: string; tagName: string; ticketId: string }) => ({
               workspaceId: ticket.workspaceId ?? null,
+              channelConnectId: null,
               id: m.id,
               name: m.tagName,
               ticketId: m.ticketId,
@@ -2368,6 +2375,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
             ? ticket.tags
                 .map((tag: { id: string; name: string; ticketId?: string }) => ({
                   workspaceId: ticket.workspaceId,
+                  channelConnectId: null,
                   id: tag.id,
                   name: tag.name,
                   ticketId: ticket.id,

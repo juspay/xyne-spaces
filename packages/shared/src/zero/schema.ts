@@ -177,6 +177,7 @@ export const ticketTable = table('tickets')
     merchantId: string().optional(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     eta: number().optional(),
     priority: enumeration<TicketPriority>(),
     metadata: json().optional(),
@@ -209,6 +210,7 @@ export const ticketDescriptionTable = table('ticket_descriptions')
     ticketId: string(),
     workspaceId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     description: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -221,6 +223,7 @@ export const subTicketTable = table('sub_tickets')
     title: string(),
     description: string().optional(),
     workspaceId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     mappedTicketId: string().optional(),
     createdBy: string(),
     updatedBy: string(),
@@ -235,6 +238,7 @@ export const subTicketTable = table('sub_tickets')
 export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -244,6 +248,7 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
 export const ticketAssignmentTable = table('ticket_assignments')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -264,12 +269,14 @@ export const ticketActivityTable = table('ticket_activities')
     activityType: enumeration<ActivityType>(),
     value: json(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
   })
   .primaryKey('id');
 
 export const ticketEntityMappingTable = table('ticket_entity_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     ticketId: string(),
     entityType: enumeration<EntityType>(),
@@ -280,6 +287,7 @@ export const ticketEntityMappingTable = table('ticket_entity_mappings')
 export const ticketTagTable = table('ticket_tags')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     name: string(),
     ticketId: string(),
@@ -313,6 +321,7 @@ export const ticketTagMappingTable = table('ticket_tag_mappings')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     tagId: string(),
     tagName: string(),
     createdAt: number(),
@@ -322,6 +331,7 @@ export const ticketTagMappingTable = table('ticket_tag_mappings')
 export const ticketReferenceMappingTable = table('ticket_reference_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
@@ -335,6 +345,7 @@ export const ticketReferenceMappingTable = table('ticket_reference_mappings')
 export const ticketStageEtaTable = table('ticket_stage_eta')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -500,6 +511,7 @@ export const workflowTable = table('workflows')
     // Workspace owner. Denormalized (mirrors `Ticket.workspaceId`) so automation
     // rows can be scoped without a ticket. Required on every row.
     workspaceId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     context: string().optional(),
     status: string(),
     workflowName: string().optional(),
@@ -668,6 +680,7 @@ export const resourceAccessTable = table('resource_access')
 export const pullRequestsTable = table('pull_requests')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     prId: number(),
     ticketId: string().optional(),
@@ -754,6 +767,7 @@ export const invitationTable = table('invitations')
     entityId: string().optional(),
     entityType: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     isOrgApproved: boolean().optional(),
     inviteEmailSentAt: number().optional(),
     createdAt: number(),
@@ -802,6 +816,7 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
   .columns({
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     boardId: string(),
     workspaceId: string(),
     isDefault: boolean(),
@@ -816,6 +831,7 @@ export const channelPublishedTabTable = table('channel_published_tabs' /* Channe
     id: string(),
     workspaceId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     entityType: string(),
     entityId: string(),
     position: number(),
@@ -828,6 +844,7 @@ export const channelStatsTable = table('channel_stats')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     lastActivityAt: number(),
     participantCount: number(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
@@ -840,6 +857,7 @@ export const channelParticipantTable = table('channel_participants')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     userId: string(),
     joinedAt: number(),
     role: enumeration<ChannelRole>(),
@@ -857,6 +875,7 @@ export const channelUserStatusTable = table('channel_user_status')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     userId: string(),
     lastViewedAt: number(),
     lastViewedConversationId: string().optional(),
@@ -901,6 +920,7 @@ export const conversationTable = table("conversations")
   .columns({
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     createdBy: string(),
     initialMessageId: string(),
     workspaceId: string(),
@@ -929,6 +949,7 @@ export const conversationParticipantTable = table('conversation_participants')
     conversationId: string(),
     userId: string(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     participationType: enumeration<ConversationParticipation>().optional(),
     isSubscribed: boolean(),
     joinedAt: number(),
@@ -944,6 +965,7 @@ export const messageTable = table('messages')
     childConversationId: string().optional(),
     senderId: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -971,6 +993,7 @@ export const messageArtifactTable = table('message_artifacts') // Prisma model: 
     workspaceId: string(),
     messageId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     conversationId: string(),
     // Whether the artifact is the conversation's initial message decides
     // between the channel route and the thread route. It cannot be derived
@@ -1007,6 +1030,7 @@ export const messageAttachmentTable = table('message_attachments')
     metadata: json().optional(),
     conversationId: string().optional(),
     channelId: string().optional(), // denormalized conversation.channelId; NULL = not conversation-anchored
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
@@ -1025,6 +1049,7 @@ export const draftMessageTable = table('draft_messages')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     conversationId: string().optional(),
     messageId: string().optional(),
     userId: string(),
@@ -1042,6 +1067,7 @@ export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     conversationId: string().optional(),
     senderId: string(),
     content: string(),
@@ -1058,6 +1084,7 @@ export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */
 export const reactionTable = table('reactions')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -1069,6 +1096,7 @@ export const reactionTable = table('reactions')
 export const reactionCountTable = table('reaction_counts')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -1102,6 +1130,7 @@ export const activityTable = table('activities')
     ticketId: string().optional(),
     conversationId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     canvasId: string().optional(),
     savedViewId: string().optional(),
     trackId: string().optional(),
@@ -1135,6 +1164,7 @@ export const notificationPreferenceTable = table('notification_preferences')
 export const proactiveNudgeTable = table('proactive_nudges')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     messageId: string(),
     type: string(),
@@ -1174,6 +1204,7 @@ export const surfaceNudgeCountTable = table('surface_nudge_counts')
     nudgeCount: number(),
     userId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     gid: string().optional(),
     gidType: string().optional(),
     messageId: string().optional(),
@@ -1195,6 +1226,7 @@ export const callTable = table('calls')
     createdByUserId: string(),
     organizerId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     orgName: string().optional(),
     description: string().optional(),
     callType: enumeration<CallType>(),
@@ -1239,6 +1271,7 @@ export const entityAccessTable = table('entity_access' /* EntityAccess */)
     userId: string().optional(),
     userGroupId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     entityUserAccess: string(),
     metadata: json().optional(),
     createdAt: number(),
@@ -1265,6 +1298,7 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
 export const callParticipantTable = table('call_participants')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     callId: string(),
     userId: string(),
@@ -1291,6 +1325,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     description: string().optional(),
     organizerId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     recurrenceRule: string(),
     timezone: string(),
     startTime: string(),
@@ -1308,6 +1343,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
 export const recurringCallParticipantTable = table('recurring_call_participants')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
@@ -1329,6 +1365,7 @@ export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     name: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1343,6 +1380,7 @@ export const canvasTable = table('canvases')
     title: string(),
     content: json(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     folderId: string().optional(),
     projectId: string().optional(),
     createdBy: string(),
@@ -1426,6 +1464,7 @@ export const canvasParticipantTable = table('canvas_participants')
     userId: string().optional(),
     userGroupId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
@@ -1487,6 +1526,7 @@ export const linkTable = table('links')
     description: string().optional(),
     favicon: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     createdBy: string(),
     visibility: enumeration<LinkVisibility>(),
     createdAt: number(),
@@ -1497,6 +1537,7 @@ export const linkTable = table('links')
 export const linkAccessTable = table('link_access')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     linkId: string(),
     userId: string(),
@@ -1517,6 +1558,7 @@ export const repoTable = table('repos')
     projectId: string().optional(),
     /** @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links */
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
   })
@@ -1528,6 +1570,7 @@ export const sdlcEntityLinkTable = table('sdlc_entity_links')
     workspaceId: string(),
     // The only scope these rows carry; a repository is one end of the edge.
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     /** @deprecated -> scope is channelId; the repository is an endpoint of the edge */
     repoId: string().optional(),
     sourceType: string(),
@@ -1543,6 +1586,8 @@ export const sdlcEntityLinkTable = table('sdlc_entity_links')
 export const sdlcArtifactTable = table('sdlc_artifacts')
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
+    canvasConnectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
     artifactId: string(),
     /** @deprecated -> repository comes from the link table; no new reads or writes */
     repoId: string().optional(),
@@ -1593,6 +1638,7 @@ export const sdlcItemCommentTable = table('sdlc_item_comments')
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     id: string(),
     /** @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links */
     repoId: string().optional(),
@@ -1621,6 +1667,7 @@ export const emailTable = table('emails')
     replyTo: json<string[]>().optional(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     externalThreadId: string(),
     externalMessageId: string(),
     sentByUserId: string().optional(),
@@ -1640,6 +1687,7 @@ export const emailDraftTable = table('email_drafts')
     conversationId: string().optional(),
     userId: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     draftContent: string(),
     subject: string().optional(),
     fromAddress: string().optional(),
@@ -1661,6 +1709,7 @@ export const conversationLabelTable = table('conversation_labels')
     name: string(),
     color: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
@@ -1676,6 +1725,7 @@ export const conversationLabelMappingTable = table('conversation_label_mappings'
     labelName: string(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1688,6 +1738,7 @@ export const ticketUserMailboxTable = table('ticket_user_mailbox')
     ticketId: string(),
     userId: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     workspaceId: string(),
     state: enumeration<MailboxState>().optional(),
     starred: boolean(),
@@ -1713,6 +1764,7 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
   .columns({
     id: string(),
     workspaceId: string(), // denormalized tenant key (stamped on insert)
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     ticketId: string(),
     userId: string(),
     lastReadEmailId: string(),
@@ -1728,6 +1780,7 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
 export const emailChannelPreferenceTable = table('email_channel_preferences')
   .columns({
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     ownerUserId: string().optional(),
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
@@ -1766,6 +1819,7 @@ export const classificationMappingTable = table('classification_mappings') // Cl
     id: string(),
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     category: string(),
     subCategory: string().optional(),
     userGroupId: string(),
@@ -1961,6 +2015,7 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
     id: string(),
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     ticketId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     stageId: string(),
     formId: string().optional(),
     status: enumeration<TicketStageRequestStatus>(),
@@ -2023,6 +2078,7 @@ export const applicationTable = table('applications')
     boardId: string(),
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     regex: string(),
     repoId: string().optional(),
     deployedCommit: string().optional(),
@@ -2043,6 +2099,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     applicationReleaseId: string(),
     releaseId: string(),
     ticketId: string(),                    // dev ticket UUID — use devTicket relation for full ticket details
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
@@ -2064,6 +2121,7 @@ export const releaseEventTable = table('release_events')
     userId: string().optional(),
     userName: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     conversationId: string(),
     payload: json().optional(),
     createdAt: number(),
@@ -2077,6 +2135,7 @@ export const releaseChangeTable = table('release_changes')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     releaseId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     applicationReleaseId: string().optional(),
     applicationId: string().optional(),
     approvedBy: string().optional(),
@@ -2092,6 +2151,7 @@ export const releaseChangeTypeTable = table('release_change_types')
     applicationId: string(),
     changeType: string(),
     releaseId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     applicationReleaseId: string().optional(),
     devTicketXyneId: string().optional(),
     commitId: string().optional(),
@@ -2106,6 +2166,7 @@ export const rcaTable = table('rcas')
     id: string(),
     title: string(),
     ticketId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     ownerId: string(),
     summary: string().optional(),
     rootCause: string().optional(),
@@ -2125,6 +2186,7 @@ export const impactTable = table('impacts')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     rcaId: string().optional(),
     impactTypeId: string(),
     impact: string(),
@@ -2137,6 +2199,7 @@ export const coeTable = table('coes')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     rcaId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     ownerId: string(),
     actionTypeId: string(),
     action: string(),
@@ -2152,6 +2215,7 @@ export const releaseAttributionTable = table('release_attributions')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     releaseId: string(),
     releaseApplicationId: string().optional(),
     rootCauseTicketId: string().optional(),
@@ -2193,6 +2257,7 @@ export const channelDailyRecapTable = table('channel_daily_recaps')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     recapDate: number(),
     summary: string(),
     userId: string().optional(), // null for base recap, actual userId for custom recap
@@ -2204,6 +2269,7 @@ export const channelRecapTable = table('channel_recaps')
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     recapDate: number(),
     summary: string(),
     userId: string().optional(),// null for base recap, actual userId for custom recap
@@ -2346,6 +2412,7 @@ export const collectionPermissionTable = table('collection_permissions')
     // Grants every current+future member of this channel access — always
     // VIEWER, only offered for workspace-scoped collections in the UI.
     channelId: string().optional(),
+    channelConnectId: string().optional(), // Slack Connect: the channel's connect_group handle (null when the row has no channel / un-backfilled)
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),

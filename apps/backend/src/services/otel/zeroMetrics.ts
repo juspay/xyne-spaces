@@ -73,6 +73,20 @@ export function getConnectAclMode(): Counter {
   return _connectAclMode;
 }
 
+// Slack Connect — connect-stamp parent-handle cache reads, to size the cache and see the queries it saves.
+// Labels: path (committed = base-client write, fetches on a miss | tx = inside a transaction, read-only),
+// result (hit|stale|miss|inflight for committed; hit|miss for tx).
+let _connectStampCache: Counter | null = null;
+export function getConnectStampCache(): Counter {
+  if (!_connectStampCache) {
+    _connectStampCache = getMeter().createCounter('connect_stamp_cache', {
+      description: 'Slack Connect connect-stamp parent-handle cache reads by path and result',
+      unit: '1',
+    });
+  }
+  return _connectStampCache;
+}
+
 let _zeroQueryLatency: Histogram | null = null;
 export function getZeroQueryLatency(): Histogram {
   if (!_zeroQueryLatency) {
