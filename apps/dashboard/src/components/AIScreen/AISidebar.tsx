@@ -80,7 +80,7 @@ import {
   DropdownMenuSubContent,
 } from '../ui/dropdown-menu';
 import { SidebarProjects } from './SidebarProjects/SidebarProjects';
-import { DEFAULT_PROJECT_ICON } from './SidebarProjects/SidebarProjects.utils';
+import { DEFAULT_PROJECT_ICON, canFileSession } from './SidebarProjects/SidebarProjects.utils';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -299,19 +299,6 @@ function SessionTitle({ title }: { title: string }): ReactElement {
       </span>
     </span>
   );
-}
-
-/**
- * Whether a chat can be filed into a project.
- *
- * Mirrors isDirectChatConversation in claw-auth, which the conversation PATCH
- * uses to answer 400 "Only direct chats can be moved into a project". A Spaces
- * thread lists one row per agent while membership is keyed by conversation
- * alone, so it cannot be filed — offering the option on those rows only ever
- * produced "Could not move chat".
- */
-function canFileSession(session: ConversationHistoryType): boolean {
-  return session.sessionId.startsWith('chat-');
 }
 
 interface SessionHistoryProps {

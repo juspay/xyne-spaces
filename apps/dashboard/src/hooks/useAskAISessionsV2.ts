@@ -29,6 +29,7 @@ import {
   type V2ConversationPage,
 } from '../services/XyneAI/XyneAISessionsV2Service';
 import type { ConversationHistory } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { findSessionInCachedPages } from '../components/AIScreen/SidebarProjects/SidebarProjects.utils';
 
 // ============================================================================
 // Query Keys
@@ -226,6 +227,18 @@ function sessionsEntries(queryClient: QueryClient): SessionsEntry[] {
   return queryClient.getQueriesData<InfiniteData<V2ConversationPage>>({
     queryKey: V2_SESSIONS_KEY,
   });
+}
+
+/** Reads every cached list view. The search itself lives in the project utils
+ *  so it stays testable without loading the API client. */
+export function findCachedSessionByConversation(
+  queryClient: QueryClient,
+  conversationId: string,
+): ConversationHistory | null {
+  return findSessionInCachedPages(
+    sessionsEntries(queryClient).map(([, data]) => data?.pages),
+    conversationId,
+  );
 }
 
 function rollbackTo(queryClient: QueryClient, previous: SessionsEntry[]): () => void {
