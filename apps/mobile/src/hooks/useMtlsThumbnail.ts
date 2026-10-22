@@ -50,30 +50,37 @@ export function useMtlsThumbnail(
   } else if (attachmentId) {
     chatOpenProfiler.count('use_mtls_thumbnail_hook_disabled');
   }
+  const requestKey = enabled ? attachmentId : undefined;
   const [state, setState] = useState<{
+    key: string | undefined;
     uri: string | null;
     isLoading: boolean;
     error: Error | null;
   }>({
+    key: requestKey,
     uri: null,
-    isLoading: !!attachmentId && enabled,
+    isLoading: !!requestKey,
     error: null,
   });
+  if (state.key !== requestKey) {
+    setState({ key: requestKey, uri: null, isLoading: !!requestKey, error: null });
+  }
 
   const fetchThumbnail = useCallback(async () => {
+    const key = requestKey;
+    const commit = (next: { uri: string | null; isLoading: boolean; error: Error | null }): void =>
+      setState(prev => (prev.key === key ? { key, ...next } : prev));
     if (!enabled) {
       if (attachmentId) chatOpenProfiler.count('use_mtls_thumbnail_disabled');
-      setState({ uri: null, isLoading: false, error: null });
       return;
     }
     if (!attachmentId) {
       chatOpenProfiler.count('use_mtls_thumbnail_no_attachment');
-      setState({ uri: null, isLoading: false, error: null });
       return;
     }
     chatOpenProfiler.count('use_mtls_thumbnail_fetch_attempt');
     if (!isValidAttachmentId(attachmentId)) {
-      setState({
+      commit({
         uri: null,
         isLoading: false,
         error: new Error('Invalid attachment id'),
@@ -86,7 +93,7 @@ export function useMtlsThumbnail(
     const localPath = file.uri;
     if (file.exists && file.size > 0) {
       chatOpenProfiler.count('use_mtls_thumbnail_file_cache_hit');
-      setState({ uri: localPath, isLoading: false, error: null });
+      commit({ uri: localPath, isLoading: false, error: null });
       return;
     }
 
@@ -95,14 +102,14 @@ export function useMtlsThumbnail(
       chatOpenProfiler.count('use_mtls_thumbnail_inflight_join');
       try {
         const cachedUri = await existingRequest;
-        setState({ uri: cachedUri, isLoading: false, error: null });
+        commit({ uri: cachedUri, isLoading: false, error: null });
         return;
       } catch {
         // Let it fall through to retry
       }
     }
 
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => (prev.key === key ? { ...prev, isLoading: true, error: null } : prev));
 
     const fetchPromise = (async (): Promise<string> => {
       const url = buildAttachmentResourceUrl(API_BASE_URL, attachmentId, 'thumbnail');
@@ -136,7 +143,7 @@ export function useMtlsThumbnail(
       if (getAuthSessionGeneration() !== startedGeneration) {
         return;
       }
-      setState({ uri, isLoading: false, error: null });
+      commit({ uri, isLoading: false, error: null });
     } catch (error) {
       // Preview failure is a supported UI state; the attachment cell renders
       // its fallback icon and still lets the message layout settle. Keep the
@@ -144,7 +151,7 @@ export function useMtlsThumbnail(
       // every attachment whose preview endpoint is unavailable.
       chatOpenProfiler.count('use_mtls_thumbnail_fetch_failed');
       const normalized = error instanceof Error ? error : new Error(String(error));
-      setState({
+      commit({
         uri: null,
         isLoading: false,
         error: normalized,
@@ -152,7 +159,7 @@ export function useMtlsThumbnail(
     } finally {
       inflightRequests.delete(attachmentId);
     }
-  }, [attachmentId, enabled]);
+  }, [attachmentId, enabled, requestKey]);
 
   useEffect(() => {
     void fetchThumbnail();
