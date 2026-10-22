@@ -227,14 +227,20 @@ class AuthV2Middleware {
       });
 
       // Generate new token - role is fetched fresh from DB, not stored in JWT
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-      });
+      const accessTokenLifetimeSeconds = jwtService.getAccessTokenLifetimeSeconds(
+        session.refreshTokenExpiry
+      );
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId,
+          memberId: session.user.orgMemberId,
+        },
+        accessTokenLifetimeSeconds
+      );
 
       const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
 
@@ -254,7 +260,7 @@ class AuthV2Middleware {
           secure: isProduction,
           sameSite: 'strict',
           path: '/',
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: accessTokenLifetimeSeconds * 1000,
         });
         
         res.cookie('xyne_last_workspace', targetWorkspaceId, {

@@ -766,14 +766,20 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Generating new JWT token`);
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId ?? undefined,
-        memberId: session.user.orgMemberId,
-      });
+      const accessTokenLifetimeSeconds = jwtService.getAccessTokenLifetimeSeconds(
+        session.refreshTokenExpiry
+      );
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId ?? undefined,
+          memberId: session.user.orgMemberId,
+        },
+        accessTokenLifetimeSeconds
+      );
 
       await this.userSessionService.updateSession(session.id, {
         lastActivity: new Date(),
@@ -781,7 +787,7 @@ export class AuthV2Controller {
 
       const isProduction = process.env.NODE_ENV === 'production';
 
-      const cookieMaxAge = config.jwt.expirationSeconds * 1000;
+      const cookieMaxAge = accessTokenLifetimeSeconds * 1000;
       const targetWorkspaceId = session.user.workspaceId;
 
       // Set workspace-specific token cookie
@@ -2071,20 +2077,29 @@ export class AuthV2Controller {
         ? sessionRefreshExpiry.getTime() - Date.now()
         : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId ?? undefined,
-        memberId: targetUser.orgMemberId,
-      });
+      const accessTokenLifetimeSeconds = jwtService.getAccessTokenLifetimeSeconds(
+        sessionRefreshExpiry ?? undefined
+      );
+      const token = jwtService.generateToken(
+        {
+          sub: targetUser.id,
+          email: targetUser.email,
+          name: targetUser.name,
+          picture: targetUser.picture || undefined,
+          workspaceId: targetUser.workspaceId ?? undefined,
+          memberId: targetUser.orgMemberId,
+        },
+        accessTokenLifetimeSeconds
+      );
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
 
       // Set workspace-specific cookies
-      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+      res.cookie(`xyne_ws_${workspaceId}_token`, token, {
+        ...cookieBase,
+        maxAge: accessTokenLifetimeSeconds * 1000,
+      });
       res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
 
       // Set global session cookie (reusing existing session)
