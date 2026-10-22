@@ -4331,6 +4331,12 @@ export async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
+        ...(typeof agentConfig?.["spacesUserId"] === "string" && agentConfig["spacesUserId"]
+          ? {
+              spacesUserId: agentConfig["spacesUserId"],
+              ...(typeof agentConfig["workspaceId"] === "string" ? { spacesWorkspaceId: agentConfig["workspaceId"] } : {}),
+            }
+          : {}),
         // Answer from Context answers in one turn from the retrieved block: no tools.
         customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,
