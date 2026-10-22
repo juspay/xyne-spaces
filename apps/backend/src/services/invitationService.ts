@@ -29,7 +29,7 @@ import { acceptInvitationTx } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx2 } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx3 } from '@/bypassAcl/transactions/invitationService';
 import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
-import { setPasswordHash } from '@/services/orgMemberCredentialService';
+import { getPasswordHash, setPasswordHash } from '@/services/orgMemberCredentialService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -395,7 +395,7 @@ export class InvitationService {
         throw new Error(`orgMember not found for ${email}`);
       }
 
-      if (orgMember.passwordHash) {
+      if (await getPasswordHash(orgMember.memberId)) {
         return null;
       }
 

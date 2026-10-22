@@ -49,6 +49,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
 import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
@@ -213,6 +214,7 @@ const ChannelItemV2 = memo(
           <span className='flex h-4 w-4 shrink-0 items-center justify-center'>{getIcon()}</span>
           <span className='text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide truncate'>{displayName}</span>
+            {is1on1DM && <GuestLabel role={dmUser?.role} />}
             {hasSlashCommandArtifactSideEffect && (
               <span className='relative flex size-2 shrink-0' aria-label='Active incident'>
                 <span className='absolute inline-flex size-full animate-ping rounded-full bg-orange-500 opacity-70' />
