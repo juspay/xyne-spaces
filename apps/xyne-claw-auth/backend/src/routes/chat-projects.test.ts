@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
+import { Prisma } from "@prisma/client";
 
 /**
  * Drives the real chatProjectRepository against an in-memory prisma, so the
@@ -16,6 +17,8 @@ const state = vi.hoisted(() => ({
   items: [] as Array<Record<string, any>>,
   messages: [] as Array<Record<string, any>>,
   users: [] as Array<Record<string, any>>,
+  knowledge: [] as Array<Record<string, any>>,
+  attachments: [] as Array<Record<string, any>>,
 }));
 
 const matches = (filter: unknown, value: string): boolean => {
@@ -114,6 +117,69 @@ vi.mock("../db.js", () => ({
         return [...counts].map(([projectId, count]) => ({ projectId, _count: { projectId: count } }));
       }),
     },
+    chatProjectKnowledge: {
+      findMany: vi.fn(async (args: any) => {
+        const where = args?.where ?? {};
+        return state.knowledge.filter(
+          (row) =>
+            (where["projectId"] === undefined || row["projectId"] === where["projectId"]) &&
+            (where["orgId"] === undefined || row["orgId"] === where["orgId"]),
+        );
+      }),
+      create: vi.fn(async (args: any) => {
+        const data = args.data;
+        // Stands in for the [projectId, type, refId] unique index, which is
+        // what turns a second attach into a 409 instead of a duplicate row.
+        const clash = state.knowledge.some(
+          (row) =>
+            row["projectId"] === data.projectId &&
+            row["type"] === data.type &&
+            row["refId"] === data.refId,
+        );
+        if (clash) {
+          // A real instance, not a shaped object: the repository identifies a
+          // duplicate with `instanceof Prisma.PrismaClientKnownRequestError`,
+          // which a look-alike from another import path would fail.
+          throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+            code: "P2002",
+            clientVersion: "test",
+          });
+        }
+        const row = {
+          id: `know-${state.knowledge.length + 1}`,
+          storagePath: null,
+          mimeType: null,
+          size: null,
+          metadata: null,
+          createdAt: new Date(),
+          ...data,
+        };
+        state.knowledge.push(row);
+        return row;
+      }),
+      deleteMany: vi.fn(async (args: any) => {
+        const where = args?.where ?? {};
+        const hits = state.knowledge.filter(
+          (row) =>
+            (where["id"] === undefined || row["id"] === where["id"]) &&
+            (where["projectId"] === undefined || row["projectId"] === where["projectId"]) &&
+            (where["orgId"] === undefined || row["orgId"] === where["orgId"]),
+        );
+        state.knowledge = state.knowledge.filter((row) => !hits.includes(row));
+        return { count: hits.length };
+      }),
+    },
+    chatAttachment: {
+      findFirst: vi.fn(async (args: any) => {
+        const where = args?.where ?? {};
+        const owners = where["uploaderUserId"]?.in ?? [where["uploaderUserId"]];
+        return (
+          state.attachments.find(
+            (row) => row["id"] === where["id"] && owners.includes(row["uploaderUserId"]),
+          ) ?? null
+        );
+      }),
+    },
     chatMessage: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     $transaction: vi.fn(async (ops: Array<Promise<unknown>>) => Promise.all(ops)),
   },
@@ -123,7 +189,20 @@ vi.mock("../repositories/index.js", async () => {
   const actual = await vi.importActual<typeof import("../repositories/chatProjectRepository.js")>(
     "../repositories/chatProjectRepository.js",
   );
-  return { chatProjectRepository: actual.chatProjectRepository };
+  const knowledge = await vi.importActual<
+    typeof import("../repositories/chatProjectKnowledgeRepository.js")
+  >("../repositories/chatProjectKnowledgeRepository.js");
+  return {
+    chatProjectRepository: actual.chatProjectRepository,
+    chatProjectKnowledgeRepository: knowledge.chatProjectKnowledgeRepository,
+    chatAttachmentRepository: (
+      await vi.importActual<typeof import("../repositories/chatAttachmentRepository.js")>(
+        "../repositories/chatAttachmentRepository.js",
+      )
+    ).chatAttachmentRepository,
+    isChatProjectKnowledgeType: knowledge.isChatProjectKnowledgeType,
+    DuplicateKnowledgeError: knowledge.DuplicateKnowledgeError,
+  };
 });
 
 vi.mock("../middleware/agent-acl.js", () => ({
@@ -182,6 +261,9 @@ async function requestJson(
       status(code: number) { statusCode = code; return this; },
       setHeader() { return this; },
       json(payload: Record<string, any>) { resolve({ status: statusCode, body: payload }); return this; },
+      // A 204 answers with no body, so it ends the response rather than
+      // sending JSON.
+      end() { resolve({ status: statusCode, body: {} }); return this; },
     } as unknown as Response;
 
     (chatProjectsRouter as unknown as {
@@ -205,7 +287,189 @@ describe("chat project routes", () => {
       { conversationId: "conv-1", userId: CANONICAL, agentSlug: "researcher" },
     ];
     state.users = [{ id: CANONICAL, orgId: ORG }];
+    state.knowledge = [];
+    state.attachments = [
+      { id: "att-1", uploaderUserId: CANONICAL, url: "chat-attachments/org-1/att-1.pdf", mimeType: "application/pdf", size: 2048, originalFilename: "Spec.pdf" },
+      { id: "att-theirs", uploaderUserId: "user-other", url: "chat-attachments/org-1/att-theirs.pdf", mimeType: "application/pdf", size: 99, originalFilename: "Theirs.pdf" },
+    ];
     vi.clearAllMocks();
+  });
+
+  describe("project knowledge", () => {
+    const addProject = (): void => {
+      state.projects.push({
+        id: "proj-mine",
+        ownerUserId: CANONICAL,
+        orgId: ORG,
+        name: "Mine",
+        icon: null,
+        instructions: "",
+        instructionsEnabled: true,
+        spacesProjectId: null,
+        defaultAgentSlug: null,
+        sortOrder: 1,
+      });
+    };
+
+    const FILE_ITEM = { type: "file", refId: "att-1", title: "Spec.pdf" };
+
+    it("attaches, lists and detaches an item", async () => {
+      addProject();
+
+      const created = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: FILE_ITEM,
+      });
+      expect(created.status).toBe(201);
+      expect(created.body["data"]).toMatchObject({
+        projectId: "proj-mine",
+        type: "file",
+        refId: "att-1",
+        storagePath: "chat-attachments/org-1/att-1.pdf",
+      });
+
+      const listed = await requestJson("GET", "/chat/projects/proj-mine/knowledge");
+      expect(listed.status).toBe(200);
+      expect(listed.body["data"]).toHaveLength(1);
+
+      const id = created.body["data"]["id"] as string;
+      const removed = await requestJson("DELETE", `/chat/projects/proj-mine/knowledge/${id}`);
+      expect(removed.status).toBe(204);
+
+      const after = await requestJson("GET", "/chat/projects/proj-mine/knowledge");
+      expect(after.body["data"]).toHaveLength(0);
+    });
+
+    it("stamps orgId from the project row, never from the request body", async () => {
+      addProject();
+
+      const created = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { ...FILE_ITEM, orgId: "org-attacker" },
+      });
+
+      expect(created.status).toBe(201);
+      expect(state.knowledge[0]!["orgId"]).toBe(ORG);
+    });
+
+    it("answers 409 when the same item is attached twice", async () => {
+      addProject();
+      await requestJson("POST", "/chat/projects/proj-mine/knowledge", { body: FILE_ITEM });
+
+      const again = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: FILE_ITEM,
+      });
+
+      expect(again.status).toBe(409);
+      expect(state.knowledge).toHaveLength(1);
+    });
+
+    it("resolves a file's storage path from the attachment row, ignoring the request", async () => {
+      addProject();
+
+      const created = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: {
+          ...FILE_ITEM,
+          storagePath: "local-harness-sessions/user-other/conv-9/claude.jsonl",
+          mimeType: "text/evil",
+          size: -1,
+        },
+      });
+
+      expect(created.status).toBe(201);
+      expect(created.body["data"]).toMatchObject({
+        storagePath: "chat-attachments/org-1/att-1.pdf",
+        mimeType: "application/pdf",
+        size: 2048,
+      });
+    });
+
+    it("answers 404 for a file the caller does not own", async () => {
+      addProject();
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "file", refId: "att-theirs", title: "Theirs" },
+      });
+
+      expect(got.status).toBe(404);
+      expect(state.knowledge).toHaveLength(0);
+    });
+
+    it("answers 404 for a file id that does not exist", async () => {
+      addProject();
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "file", refId: "att-nope", title: "Ghost" },
+      });
+
+      expect(got.status).toBe(404);
+    });
+
+    it("refuses more than the per-project item cap", async () => {
+      addProject();
+      state.knowledge = Array.from({ length: 50 }, (_, i) => ({
+        id: `know-${i}`,
+        projectId: "proj-mine",
+        orgId: ORG,
+        type: "channel",
+        refId: `chan-${i}`,
+      }));
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "channel", refId: "chan-extra", title: "One too many" },
+      });
+
+      expect(got.status).toBe(400);
+      expect(got.body["error"]).toMatch(/at most 50/);
+    });
+
+    it("rejects an unknown type", async () => {
+      addProject();
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "spreadsheet", refId: "x", title: "X" },
+      });
+
+      expect(got.status).toBe(400);
+    });
+
+    it("answers 404 for another user's project", async () => {
+      const listed = await requestJson("GET", "/chat/projects/proj-theirs/knowledge");
+      const created = await requestJson("POST", "/chat/projects/proj-theirs/knowledge", {
+        body: FILE_ITEM,
+      });
+
+      expect(listed.status).toBe(404);
+      expect(created.status).toBe(404);
+      expect(state.knowledge).toHaveLength(0);
+    });
+
+    it("answers 404 for a project in another org", async () => {
+      const got = await requestJson("GET", "/chat/projects/proj-otherorg/knowledge");
+      expect(got.status).toBe(404);
+    });
+
+    it("will not detach an item belonging to a different project", async () => {
+      addProject();
+      await requestJson("POST", "/chat/projects/proj-mine/knowledge", { body: FILE_ITEM });
+      const id = state.knowledge[0]!["id"] as string;
+
+      state.projects.push({
+        id: "proj-second",
+        ownerUserId: CANONICAL,
+        orgId: ORG,
+        name: "Second",
+        icon: null,
+        instructions: "",
+        instructionsEnabled: true,
+        spacesProjectId: null,
+        defaultAgentSlug: null,
+        sortOrder: 2,
+      });
+
+      const got = await requestJson("DELETE", `/chat/projects/proj-second/knowledge/${id}`);
+
+      expect(got.status).toBe(404);
+      expect(state.knowledge).toHaveLength(1);
+    });
   });
 
   describe("full CRUD lifecycle", () => {
