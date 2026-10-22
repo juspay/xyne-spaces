@@ -5,7 +5,7 @@ import { MessageRepository } from '../database/repositories/messageRepository';
 import { logger } from '../utils/logger';
 import { redisService } from '../services/redisService';
 import { MessageType } from '@xyne/shared';
-import { messageMetadataService } from '../services/messageMetadataService';
+import { addReactionAsUser } from '../services/reactionService';
 import {
   ReactionResponse,
   GetReactionsResponse,
@@ -210,38 +210,8 @@ export class ReactionController {
         return;
       }
 
-      try {
-        await reactionRepository.addReaction({ messageId, userId, emojiName: emoji });
-      } catch (error: any) {
-        if (error?.code !== 'P2002') throw error;
-      }
-
-      const conversationId = await messageRepository.getConversationIdByMessageId(messageId);
-      try {
-        await messageMetadataService.addReaction(messageId, emoji, userId);
-        if (conversationId) await messageMetadataService.syncInitialMessageMd(conversationId);
-      } catch (mdError) {
-        logger.error('[reactAsUser] failed to update reactions_md — emoji may not render:', mdError);
-      }
-
-      const reactions = await reactionRepository.getMessageReactions(messageId, userId);
+      const reactions = await addReactionAsUser(messageId, userId, emoji);
       res.status(200).json({ success: true, reactions });
-
-      try {
-        if (conversationId) {
-          await redisService.broadcastMessageToSession(conversationId, {
-            messageId: `reaction-${messageId}-${Date.now()}`,
-            conversationId,
-            senderId: 'system',
-            senderName: 'System',
-            content: JSON.stringify({ type: 'reaction_updated', data: reactions, messageId }),
-            msgType: 'SYSTEM',
-            createdAt: new Date(),
-          });
-        }
-      } catch (broadcastError) {
-        logger.error('Error broadcasting reactAsUser update:', broadcastError);
-      }
 
       logger.info(`[reactAsUser] ${emoji} as user ${userId} on message ${messageId}`);
     } catch (error) {

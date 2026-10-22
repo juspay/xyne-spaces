@@ -231,7 +231,7 @@ export async function promoteIfOversized(
       return clean;
     }
     metric.count("tool_output_spill", { category: safeCat, tool: safeName });
-    return `${clean}\n\n[Full raw result also saved — forward it into a sandbox with sandbox-copy-in contextPath: "${relPath}" instead of pasting its content.]`;
+    return `${clean}\n\n[Full raw result also saved at ${absPath} — forward it into a sandbox with sandbox-copy-in contextPath: "${relPath}" instead of pasting its content.]`;
   }
   // Reflow to line-structured form so the spilled file is readable/greppable by
   // the line-oriented read/grep tools (a minified single-line JSON payload is

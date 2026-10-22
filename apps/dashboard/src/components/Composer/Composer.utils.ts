@@ -32,6 +32,26 @@ export function cleanEditorText(text: string): string {
   return text.replace(ZWSP, '');
 }
 
+export interface ComposerKeyState {
+  key: string;
+  menuOpen: boolean;
+  isEmpty: boolean;
+  lastUserMessage: string | undefined;
+  modified: boolean;
+  isComposing: boolean;
+}
+
+export type ComposerKeyAction = 'recall-last' | 'clear' | null;
+
+export function composerKeyAction(state: ComposerKeyState): ComposerKeyAction {
+  if (state.menuOpen || state.modified || state.isComposing) return null;
+  if (state.key === 'ArrowUp' && state.isEmpty && state.lastUserMessage?.trim()) {
+    return 'recall-last';
+  }
+  if (state.key === 'Escape' && !state.isEmpty) return 'clear';
+  return null;
+}
+
 // ── Picked context ──────────────────────────────────────────────────────────
 
 export const refKey = (ref: ContextRef): string => `${ref.kind}:${ref.id}`;

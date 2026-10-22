@@ -247,7 +247,12 @@ export default function RecordingDetailScreen(): ReactElement {
       void navigate('/recordings');
     } catch (err) {
       logRecordingError('RecordingDetailScreen.deleteRecording', err);
-      toast.error('Failed to delete recording');
+      // 409: the recording is still in progress. The server's message says what to do.
+      const serverMessage =
+        axios.isAxiosError(err) && err.response?.status === 409
+          ? (err.response.data as { error?: string } | undefined)?.error
+          : undefined;
+      toast.error(serverMessage ?? 'Failed to delete recording');
     } finally {
       setIsDeleting(false);
     }

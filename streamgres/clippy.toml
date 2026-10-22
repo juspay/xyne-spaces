@@ -1,0 +1,13 @@
+# `Value::Set` wraps a `SharedSet`, whose `Hash` and `Eq` are pointer
+# identity, never the mutable contents, so a `Value` stays a stable map key
+# while the set behind it changes (that stability is the point: a join
+# edge's `IN` leaf keeps its identity as members come and go).
+#
+# `RowData` (a key's values, behind `DataFrameKey`) carries a write-once
+# cell of the row's wire bytes (`RowData::wire`, a `OnceBox`). Its `Eq`
+# compares the values alone and a key's hash is computed from them at
+# construction, so filling the cell never moves a key in a map.
+ignore-interior-mutability = [
+    "streamgres::model::value::SharedSet",
+    "streamgres::model::row::RowData",
+]

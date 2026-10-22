@@ -38,7 +38,8 @@ const baseUrl = '${baseUrl}';
 // Prints a link and a short code; the user approves in the browser.
 const session = await xyneSsoLoginAndWait({ baseUrl, openBrowser: true });
 
-const sdk = createClient({ baseUrl, session });
+// The client renews the session by itself; save each renewal for next time.
+const sdk = createClient({ baseUrl, session, onSessionRefreshed: saveSession });
 const me = await sdk.users.me();
 console.log(\`Signed in as \${me.email}\`);`;
 
@@ -107,13 +108,15 @@ console.log(\`Signed in as \${me.email}\`);`;
           </Step>
           <Step n={3} title='Keep the session'>
             <Text>
-              <InlineCode>session</InlineCode> holds the user&apos;s session cookie and its{' '}
-              <InlineCode>expiresAt</InlineCode>. Store it securely and reuse it until it expires,
-              then sign in again. The SDK sends it as a <InlineCode>Cookie</InlineCode> header on
-              every request.
+              <InlineCode>session</InlineCode> holds the user&apos;s session cookie and a refresh
+              token. The client sends the cookie as a <InlineCode>Cookie</InlineCode> header and
+              renews it by itself, for as long as a Spaces browser login lasts. Each renewal
+              replaces the refresh token, so save every new session from{' '}
+              <InlineCode>onSessionRefreshed</InlineCode> and reuse the latest one next time.
             </Text>
             <Callout>
-              Treat the session like a password: it can do anything the user can, until it expires.
+              Treat the session like a password: it can do anything the user can. Sign out with{' '}
+              <InlineCode>xyneSsoLogout</InlineCode> to stop it being renewed.
             </Callout>
           </Step>
         </div>

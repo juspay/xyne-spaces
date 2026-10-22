@@ -345,7 +345,7 @@ export function SdlcWikiExplorer(props: {
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder='Search pages'
-          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-foreground/[0.06] pl-8 pr-2 text-[13px] outline-none placeholder:text-sidebar-foreground/60 focus:border-sidebar-border focus:bg-sidebar-accent'
+          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-accent pl-8 pr-2 text-[13px] outline-none placeholder:text-sidebar-foreground/60 focus:border-sidebar-border focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
           aria-label='Search research pages'
           data-track-category='SdlcHub'
           data-track-name='WikiSearched'
@@ -485,7 +485,7 @@ export function SdlcWikiHome(props: {
     .map(page => ({ page, detail: formatRelativeTime(Date.parse(page.updatedAt)) }));
 
   return (
-    <section className='mx-auto max-w-5xl'>
+    <section className='mx-auto max-w-6xl'>
       <h3 className='text-center text-lg font-medium'>
         Which repository would you like to understand?
       </h3>

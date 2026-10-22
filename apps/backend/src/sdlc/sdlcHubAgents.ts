@@ -5,6 +5,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { AppError } from '@/middleware/errorHandler';
 import { listScopedClawAgents } from '@/services/clawAgentService';
 import { ensureLink } from './entityLinkService';
+import { notifySdlcResourceChanged } from './sdlcResourceChanged';
 import type { SdlcActor } from './types';
 
 const participants = new ChannelParticipantRepository();
@@ -25,6 +26,7 @@ export async function promoteRegisteredAgent(
     await db.sdlcEntityLink.deleteMany({
       where: { channelId, relationType: SDLC_AGENT_PENDING_RELATION, targetId: agentId },
     });
+    notifySdlcResourceChanged('agents', { channelId });
   }
   return links.length;
 }
@@ -125,4 +127,5 @@ export async function markHubAgentPending(
     },
     actor
   );
+  notifySdlcResourceChanged('agents', { channelId });
 }

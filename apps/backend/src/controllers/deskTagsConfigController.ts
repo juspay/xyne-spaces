@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 import { TAG_FORMAT_REGEX, ChannelRole } from '@xyne/shared';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
-import { isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
+import { canViewDeskInsights } from '@/utils/channelMembership';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
@@ -285,7 +285,7 @@ export class DeskTagsConfigController {
     if (!userId) return;
 
     const ownerUserId = (await this.classificationRepo.findRawPreferenceByChannelId(channelId))?.ownerUserId;
-    if (!(await isDeskOwnerOrChannelAdmin(channelId, userId, ownerUserId))) {
+    if (!(await canViewDeskInsights(channelId, userId, ownerUserId))) {
       res.status(403).json({ error: 'Only the desk owner or a channel admin can view generated tags for this desk' });
       return;
     }

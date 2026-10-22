@@ -46,4 +46,23 @@ export const chatAttachmentRepository = {
     prisma.chatAttachment.findMany({
       where: { id: { in: attachmentIds }, uploaderUserId },
     }),
+
+  /**
+   * One attachment the caller uploaded, matched across every id they are
+   * verified under. Null when it does not exist or belongs to someone else, so
+   * a caller cannot tell the two apart.
+   *
+   * Alias-aware, unlike findManyByIdsForUser: an attachment uploaded under the
+   * caller's raw Spaces id is still theirs, and matching one id would answer
+   * "not found" for their own file.
+   */
+  findOwnedById: (id: string, uploaderUserIds: string | string[]) =>
+    prisma.chatAttachment.findFirst({
+      where: {
+        id,
+        ...(Array.isArray(uploaderUserIds)
+          ? { uploaderUserId: { in: uploaderUserIds } }
+          : { uploaderUserId: uploaderUserIds }),
+      },
+    }),
 };
