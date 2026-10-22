@@ -661,7 +661,11 @@ const ParticipantListItem = ({
 
   const popoverStyle = `w-full flex items-center gap-x-1 p-2 cursor-pointer hover:bg-accent rounded-md pr-6`;
   return (
-    <div className='px-4 group' data-testid={`channel-member-${participant.userId}`}>
+    <div
+      className='px-4 group'
+      data-testid={`channel-member-${participant.userId}`}
+      data-user-id={participant.userId}
+    >
       <div className='flex items-center py-3 px-2 gap-3 transition-colors relative group-hover:bg-accent rounded-lg'>
         <Avatar userId={participant.userId} size='md' showActiveStatus={true} />
         <div className='flex-1 min-w-0'>

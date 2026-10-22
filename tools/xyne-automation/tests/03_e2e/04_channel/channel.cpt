@@ -39,6 +39,9 @@
 * typing stored user <userAlias> field "email" in "[data-testid='user-search-input']"
 * clicking on stored user <userAlias> field "name" in "[data-testid='user-search-results']"
 * clicking on "[data-testid='add-people-submit']"
+* waiting for zero sync to settle fast
+* clicking on "button[aria-label='Close channel info']" if visible
+* waiting for "button[aria-label='Close channel info']" to disappear
 
 # Searching Browse channels for channel <channelAlias> of user <userAlias>
 * Navigating to chat

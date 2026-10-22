@@ -26,12 +26,22 @@ export interface StoredMessage {
   alias: string;
   baseText: string;
   text: string;
+  /** Server message id, captured from the rendered bubble when a scenario needs it. */
+  id?: string;
+}
+
+/** An uploaded file, keyed by alias, so API steps can reference its server id. */
+export interface StoredAttachment {
+  alias: string;
+  id: string;
+  fileName: string;
 }
 
 export interface StoredConversation extends StoredEntity {
   messages: Record<string, StoredMessage>;
   /** Set by the channel description steps; read back via `user:<alias>.channels.<alias>.description`. */
   description?: string;
+  attachments?: Record<string, StoredAttachment>;
 }
 
 export interface StoredProject extends StoredEntity {
