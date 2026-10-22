@@ -1,4 +1,4 @@
-FROM node:22.22.3-slim AS builder
+FROM node:22.23.4-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
@@ -109,6 +109,8 @@ FROM nginx:alpine AS runner
 
 # Install Node.js and npm for running node commands in pod
 RUN apk add --no-cache nodejs npm
+# eMudhra emSign G3 CA compromise (Oct 2026): force the patched CA bundle (>= 20261020-r0).
+RUN apk upgrade --no-cache ca-certificates
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 frontend && \

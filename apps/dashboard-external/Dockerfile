@@ -5,7 +5,7 @@
 # Stage 1: Build dashboard-external inside the workspace.
 # The separate shared-builder stage is gone: one workspace install resolves
 # @xyne/shared through its workspace:* link.
-FROM node:22.22.3-slim AS builder
+FROM node:22.23.4-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
@@ -59,6 +59,9 @@ RUN pnpm --filter xyne-spaces-dashboard-external run build
 
 # Stage 3: nginx — deployed without Istio mTLS for public access
 FROM nginx:alpine AS runner
+
+# eMudhra emSign G3 CA compromise (Oct 2026): force the patched CA bundle (>= 20261020-r0).
+RUN apk upgrade --no-cache ca-certificates
 
 RUN addgroup --system --gid 1001 frontend && \
     adduser --system --uid 1001 frontend
