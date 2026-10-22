@@ -1,6 +1,6 @@
 import { useValue } from '@legendapp/state/react';
 import { Check, Lock } from 'lucide-react-native';
-import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
@@ -62,6 +62,8 @@ type NameInputProps = {
   onSubmitEditing: () => void;
   placeholder?: string;
   error?: string | null;
+  /** Focus as the view arrives, so the keyboard comes up with it. */
+  focusOnArrive?: boolean;
 };
 
 /** The pill-shaped text field the section views share. */
@@ -71,12 +73,24 @@ export function NameInput({
   onSubmitEditing,
   placeholder = 'Name the section',
   error = null,
+  focusOnArrive = false,
 }: NameInputProps): ReactElement {
   const placeholderColor = useCSSVariable('--color-spaces-muted') as string;
+  const inputRef = useRef<TextInput>(null);
+
+  // A tray mounts a view only while it is showing, so mounting is arriving.
+  // One frame later rather than `autoFocus` on the input: the card is still
+  // morphing into this view, and focusing in the same frame fights its layout.
+  useEffect(() => {
+    if (!focusOnArrive) return undefined;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return (): void => cancelAnimationFrame(frame);
+  }, [focusOnArrive]);
 
   return (
     <View>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}

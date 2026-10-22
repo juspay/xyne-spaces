@@ -48,8 +48,6 @@ import {
   SEARCH_FILTER_ROW_TOP_GAP,
 } from '../constants';
 import { SearchInput, type SearchInputHandle } from './search-input';
-import { hostSearchField, searchField$ } from '../search-field-bridge';
-import { placeholderForTab } from '../utils/search-tabs';
 import { SearchResults } from './search-results';
 
 const TOOLBAR_TOP_PADDING = 10;
@@ -89,49 +87,12 @@ function parseInitialTab(params: RouteParams): GlobalSearchTab {
     : initialTabForSurface(parseSourceSurface(firstParam(params.sourceSurface)));
 }
 
-export type GlobalSearchScreenProps = {
-  /**
-   * Hands the field to whatever is hosting one — the bottom bar, in the Spaces
-   * shell. The toolbar then shows only the category tags and filters, so there
-   * is one input on screen rather than two.
-   */
-  fieldHostedElsewhere?: boolean;
-};
-
-export function GlobalSearchScreen({
-  fieldHostedElsewhere = false,
-}: GlobalSearchScreenProps = {}): ReactElement {
+export function GlobalSearchScreen(): ReactElement {
   const params = useLocalSearchParams<RouteParams>();
   const insets = useSafeAreaInsets();
 
   const [state, dispatch] = useSearchState(parseInitialTab(params));
   const inputRef = useRef<SearchInputHandle>(null);
-
-  /**
-   * Publishes this screen's query setter while the field lives elsewhere, and
-   * takes it back on unmount so a stale setter can never outlive the screen.
-   */
-  useEffect(() => {
-    if (!fieldHostedElsewhere) return;
-    hostSearchField({
-      setQuery: (query: string) => dispatch({ type: 'queryCommitted', query }),
-    });
-    return (): void => hostSearchField(null);
-  }, [dispatch, fieldHostedElsewhere]);
-
-  useEffect(() => {
-    if (fieldHostedElsewhere) searchField$.placeholder.set(placeholderForTab(state.tab));
-  }, [fieldHostedElsewhere, state.tab]);
-
-  // Bottom-bar field mirrors the committed query. `"ab"` rewrites that query
-  // with quotes, so push the rewrite into the hosted field.
-  const hostedExactRef = useRef(state.exactMatch);
-  useEffect(() => {
-    if (!fieldHostedElsewhere) return;
-    if (hostedExactRef.current === state.exactMatch) return;
-    hostedExactRef.current = state.exactMatch;
-    searchField$.query.set(state.query);
-  }, [fieldHostedElsewhere, state.exactMatch, state.query]);
 
   /** The locked conversation comes from the route and is never part of the state. */
   const scope = useMemo((): SearchScope | null => {
@@ -154,9 +115,7 @@ export function GlobalSearchScreen({
   const toolbarHeight =
     insets.top +
     TOOLBAR_TOP_PADDING +
-    // Zero when the bar hosts the field: the toolbar no longer draws that row,
-    // and leaving its height in would open a dead gap above the results.
-    (fieldHostedElsewhere ? 0 : SEARCH_BAR_HEIGHT) +
+    SEARCH_BAR_HEIGHT +
     // Must track the toolbar hiding the tags and filter row when scoped, or the list
     // gets a dead gap above it — listContentTop derives from this.
     (scope ? 0 : SEARCH_CATEGORY_ROW_TOP_GAP + SEARCH_CATEGORY_ROW_HEIGHT) +
@@ -210,7 +169,6 @@ export function GlobalSearchScreen({
         filterRowBlock={filterRowBlock}
         scrollOffset={scrollOffset}
         scope={scope}
-        fieldHostedElsewhere={fieldHostedElsewhere}
       />
     </View>
   );
@@ -236,13 +194,11 @@ const SearchToolbar = memo(function SearchToolbar({
   filterRowBlock,
   scrollOffset,
   scope,
-  fieldHostedElsewhere,
 }: {
   tab: GlobalSearchTab;
   chips: readonly SearchFilterChip[];
   structured: StructuredSearchFilters;
   onlyMyChannels: boolean;
-  fieldHostedElsewhere: boolean;
   includeBotMessages: boolean;
   exactMatch: boolean;
   sortBy: SortBy;
@@ -384,28 +340,20 @@ const SearchToolbar = memo(function SearchToolbar({
     <>
       <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
         <View pointerEvents='box-none' style={innerStyle}>
-          {fieldHostedElsewhere ? null : (
-            <SearchInput
-              ref={inputRef}
-              tab={tab}
-              chips={chips}
-              scope={scope}
+          <SearchInput
+            ref={inputRef}
+            tab={tab}
+            chips={chips}
+            scope={scope}
               exactMatch={exactMatch}
-              dispatch={dispatch}
-              onRequestClose={onRequestClose}
-              filterBadgeCount={filterBadgeCount}
-              {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
-            />
-          )}
+            dispatch={dispatch}
+            onRequestClose={onRequestClose}
+            filterBadgeCount={filterBadgeCount}
+            {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
+          />
           {scope ? null : (
             <>
-              <SearchCategoryTags
-                tab={tab}
-                onTabChange={onTabChange}
-                {...(fieldHostedElsewhere && filtersAvailable
-                  ? { onFilterPress: openFilters, filterBadgeCount }
-                  : {})}
-              />
+              <SearchCategoryTags tab={tab} onTabChange={onTabChange} />
               {filtersAvailable ? (
                 <Animated.View style={filterRowStyle}>
                   <GlobalSearchFilterBar

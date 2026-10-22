@@ -14,7 +14,10 @@ export const TRAY_ROW_HEIGHT = 52;
 
 type OptionRowProps = {
   label: string;
-  leading: ReactNode;
+  /** A muted second line under the label. */
+  description?: string;
+  /** Icon slot. Left out for a plain list of choices, which needs no icon column. */
+  leading?: ReactNode;
   trailing?: ReactNode;
   highlighted?: boolean;
   /** Accent-coloured label, for the row that creates or destroys rather than chooses. */
@@ -25,6 +28,7 @@ type OptionRowProps = {
 /** One tappable line of a tray list. */
 export function OptionRow({
   label,
+  description,
   leading,
   trailing,
   highlighted = false,
@@ -42,16 +46,25 @@ export function OptionRow({
       className={cn('flex-row items-center rounded-2xl px-3', highlighted && 'bg-spaces-surface')}
       style={{ height: TRAY_ROW_HEIGHT }}
     >
-      <View className='w-6 items-center justify-center'>{leading}</View>
-      <Text
-        numberOfLines={1}
-        className={cn(
-          'flex-1 text-[16px] font-medium ml-3',
-          emphasis ? 'text-spaces-accent' : 'text-spaces-foreground',
-        )}
-      >
-        {label}
-      </Text>
+      {leading !== undefined ? (
+        <View className='mr-3 w-6 items-center justify-center'>{leading}</View>
+      ) : null}
+      <View className='flex-1'>
+        <Text
+          numberOfLines={1}
+          className={cn(
+            'text-[16px] font-medium',
+            emphasis ? 'text-spaces-accent' : 'text-spaces-foreground',
+          )}
+        >
+          {label}
+        </Text>
+        {description !== undefined ? (
+          <Text numberOfLines={1} className='text-[13px] text-spaces-muted'>
+            {description}
+          </Text>
+        ) : null}
+      </View>
       {trailing}
     </Pressable>
   );

@@ -15,7 +15,7 @@
 import type { Href } from 'expo-router';
 
 /**
- * Every tab screen either shell hosts. `more` is classic-only and `search`
+ * Every tab screen either shell hosts. `more` is classic-only and `threads`
  * onward are Spaces-only; the union is fine because this module only builds a
  * path — asking for one the active shell does not host is a caller error.
  */
@@ -25,7 +25,6 @@ export const TAB_NAMES = [
   'calls',
   'activity',
   'more',
-  'search',
   'threads',
   'morning-brief',
   'bookmarks',

@@ -5,8 +5,9 @@
  * mTLS proxy (same contract as the dashboard web player).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
+import { getProxyEpoch, subscribeProxyEpoch } from '@/src/hooks/mtlsProxyRecovery';
 import { ensureProxyRunning, getProxiedUrl } from '@/src/hooks/useMtlsProxy';
 import { API_BASE_URL } from '@/src/config';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -43,6 +44,9 @@ export function useMtlsVideoStream(
   const { enabled = true, variant = 'original' } = options;
   const { token } = useAuth();
   const [streamState, setStreamState] = useState<StreamState | null>(null);
+  // Bumped when the native proxy is replaced (iOS suspension recovery). The
+  // old capability-bound URL no longer works, so request a fresh one.
+  const proxyEpoch = useSyncExternalStore(subscribeProxyEpoch, getProxyEpoch, getProxyEpoch);
 
   useEffect(() => {
     if (!attachmentId || !enabled) {
@@ -98,7 +102,7 @@ export function useMtlsVideoStream(
     return (): void => {
       mounted = false;
     };
-  }, [attachmentId, token, enabled, variant]);
+  }, [attachmentId, token, enabled, variant, proxyEpoch]);
 
   const currentGeneration = getAuthSessionGeneration();
   const isCurrentStream = Boolean(

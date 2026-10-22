@@ -8,14 +8,23 @@
  * first access is also what removes the flash — the first frame already renders
  * the right shell
  *
- * A change is applied by `applyFlagChanges()`, which re-reads storage and bumps
- * a generation that `(protected)/_layout.tsx` uses as a remount key.
+ * A change is applied by `applyFlagChanges()`, which re-reads storage. Only a
+ * flag marked `remountsShell` (one that picks the navigator) bumps the
+ * generation `(protected)/_layout.tsx` uses as a remount key; a screen-level
+ * flag is read through `useFlag()`, which re-renders just that screen.
  */
 import { useSyncExternalStore } from 'react';
 
 import { getBoolean, lotusStorage, setBoolean } from '@/src/services/localStorage';
 
-import { FLAGS, FLAG_KEYS, parentFlag, type FlagKey, type ResolvedFlags } from './registry';
+import {
+  FLAGS,
+  FLAG_KEYS,
+  parentFlag,
+  remountsShell,
+  type FlagKey,
+  type ResolvedFlags,
+} from './registry';
 
 const STORAGE_PREFIX = '@lotus_flags:';
 
@@ -80,6 +89,16 @@ export function enabledFlagKeys(): FlagKey[] {
 }
 
 /**
+ * Whether the user has ever set this flag, on or off.
+ *
+ * Key presence, not value: an explicit `false` is a decision, and only a key
+ * storage has never held means the user has not looked at the switch yet.
+ */
+export function isFlagTouched(key: FlagKey): boolean {
+  return lotusStorage.contains(storageKey(key));
+}
+
+/**
  * Forgets a flag entirely, so it falls back to its registry default.
  *
  * Not `setFlag(key, false)`: that writes an explicit `false`, which reads as
@@ -109,8 +128,10 @@ function emit(): void {
 }
 
 /**
- * Re-pin and remount. Debounced, so flipping three switches in a row rebuilds
- * once rather than three times, and so the caller's toast lands first.
+ * Re-pin, and remount only if a flag that shapes the route tree changed; the
+ * rest re-render where they are read. Debounced, so flipping three switches in
+ * a row applies once rather than three times, and so the caller's toast lands
+ * first.
  */
 export function applyFlagChanges(delayMs = 450): void {
   if (pending !== null) {
@@ -119,8 +140,16 @@ export function applyFlagChanges(delayMs = 450): void {
 
   pending = setTimeout((): void => {
     pending = null;
+    const previous = snapshot;
     snapshot = buildSnapshot();
-    generation += 1;
+    const next = snapshot;
+    // Nothing read the old snapshot, so nothing was built from it.
+    if (
+      previous !== null &&
+      FLAG_KEYS.some(key => remountsShell(key) && previous[key] !== next[key])
+    ) {
+      generation += 1;
+    }
     emit();
   }, delayMs);
 }
@@ -144,11 +173,12 @@ export function useFlagGeneration(): number {
 // --- react ------------------------------------------------------------------
 
 /**
- * Constant for the lifetime of the tree, since the snapshot is pinned. A hook
- * purely so call sites read like every other seam.
+ * Re-renders when an applied change flips this flag, so a screen-level flag
+ * swaps its screen in place without remounting the shell.
  */
 export function useFlag(key: FlagKey): boolean {
-  return isFlagOn(key);
+  const read = (): boolean => isFlagOn(key);
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 /** Tests only. */

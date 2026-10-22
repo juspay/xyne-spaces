@@ -12,21 +12,21 @@ import { withFallbackHydratedQueryArgs } from './with-fallback-hydrated-query-ar
  * Startup only syncs channels the user has joined. Public channels they have
  * not followed, including Xyne Desk channels, live in `userAllChannels`.
  */
-export function useHydrateWorkspaceChannels(): void {
+export function useHydrateWorkspaceChannels(enabled = true): void {
   const { user } = useAuth();
   const workspaceId = user?.workspaceId;
 
   const channelsQuery = useMemo(() => withFallbackHydratedQueryArgs(queries.userAllChannels()), []);
   const [allChannelRows, channelsDetails] = useFallbackHydratedQuery(channelsQuery, {
-    enabled: true,
+    enabled,
   });
 
   useEffect(() => {
-    if (!workspaceId || channelsDetails.type !== 'complete') return;
+    if (!enabled || !workspaceId || channelsDetails.type !== 'complete') return;
 
     stateMachineActor.send({
       type: 'ADD_ALL_CHANNELS',
       channels: filterAllChannelsForWorkspace(allChannelRows, workspaceId),
     });
-  }, [allChannelRows, channelsDetails.type, workspaceId]);
+  }, [allChannelRows, channelsDetails.type, workspaceId, enabled]);
 }

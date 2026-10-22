@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { ChannelFilterMode, ChannelSortOrder } from '@xyne/shared';
+
+import { ACTIVE_WINDOW_MS } from '@/src/components/chat/channel-list/channel-group-preferences';
 import {
   buildChannelLayout,
   countChannels,
+  type ChannelLayoutInput,
   type ChannelRowData,
   type ChannelSectionData,
 } from '@/src/features/channels/model/layout';
+
+const NOW = 1_000 * ACTIVE_WINDOW_MS;
 
 function channel(id: string, overrides: Partial<ChannelRowData> = {}): ChannelRowData {
   return {
@@ -17,6 +23,8 @@ function channel(id: string, overrides: Partial<ChannelRowData> = {}): ChannelRo
     hasUnread: false,
     messageUnreadCount: 0,
     isMentioned: false,
+    hasGroupMention: false,
+    isMuted: false,
     isStarred: false,
     lastActivityAtMs: 0,
     sectionId: null,
@@ -25,43 +33,58 @@ function channel(id: string, overrides: Partial<ChannelRowData> = {}): ChannelRo
   };
 }
 
-const section = (id: string, isCollapsed = false): ChannelSectionData => ({
+const section = (
+  id: string,
+  overrides: Partial<Omit<ChannelSectionData, 'id' | 'name'>> = {},
+): ChannelSectionData => ({
   id,
   name: id,
-  isCollapsed,
+  isCollapsed: false,
+  filterMode: ChannelFilterMode.ALL,
+  sortOrder: null,
+  ...overrides,
 });
+
+/** Everything shown, Recency, unless a test says otherwise. */
+const layout = (input: Partial<ChannelLayoutInput>): ReturnType<typeof buildChannelLayout> =>
+  buildChannelLayout({
+    channels: [],
+    sections: [],
+    filter: 'all',
+    isChannelsCollapsed: false,
+    channelsPreference: { filterMode: ChannelFilterMode.ALL, sortOrder: ChannelSortOrder.RECENCY },
+    now: NOW,
+    ...input,
+  });
 
 const ids = (groups: ReturnType<typeof buildChannelLayout>['groups'], index = 0): string[] =>
   groups[index]?.channelIds ?? [];
 
 describe('buildChannelLayout', () => {
   describe('with no sections', () => {
-    it('lists every channel under one headerless group', () => {
-      const { groups } = buildChannelLayout({
+    it('lists every channel under one Channels group that does not fold', () => {
+      const { groups } = layout({
         channels: [channel('a'), channel('b')],
-        sections: [],
-        filter: 'all',
-        isChannelsCollapsed: false,
+        isChannelsCollapsed: true,
       });
 
       assert.equal(groups.length, 1);
-      assert.equal(groups[0]?.kind, 'flat');
+      assert.equal(groups[0]?.kind, 'channels');
+      assert.equal(groups[0]?.isCollapsible, false);
+      assert.equal(groups[0]?.isCollapsed, false);
     });
 
-    it('keeps starred channels on top, then unread, then most recent', () => {
-      const { groups } = buildChannelLayout({
+    it("keeps starred channels on top, then the group's sort", () => {
+      const { groups } = layout({
         channels: [
           channel('old', { lastActivityAtMs: 1 }),
           channel('recent', { lastActivityAtMs: 9 }),
           channel('unread', { unreadCount: 2, hasUnread: true, lastActivityAtMs: 2 }),
           channel('starred', { isStarred: true, lastActivityAtMs: 0 }),
         ],
-        sections: [],
-        filter: 'all',
-        isChannelsCollapsed: false,
       });
 
-      assert.deepEqual(ids(groups), ['starred', 'unread', 'recent', 'old']);
+      assert.deepEqual(ids(groups), ['starred', 'recent', 'unread', 'old']);
     });
   });
 
@@ -74,11 +97,9 @@ describe('buildChannelLayout', () => {
     ];
 
     it('emits each section in order and Channels for the rest', () => {
-      const { groups } = buildChannelLayout({
+      const { groups } = layout({
         channels,
         sections: [section('checkout'), section('design'), section('empty')],
-        filter: 'all',
-        isChannelsCollapsed: false,
       });
 
       assert.deepEqual(
@@ -86,25 +107,19 @@ describe('buildChannelLayout', () => {
         ['checkout', 'design', 'empty', 'channels'],
       );
       assert.deepEqual(ids(groups, 3), ['random']);
+      assert.ok(groups.every(group => group.isCollapsible));
     });
 
-    it('orders a section by position, not by star', () => {
-      const { groups } = buildChannelLayout({
-        channels,
-        sections: [section('checkout')],
-        filter: 'all',
-        isChannelsCollapsed: false,
-      });
+    it('orders a section in manual order by position, not by star', () => {
+      const { groups } = layout({ channels, sections: [section('checkout')] });
 
       assert.deepEqual(ids(groups), ['releases', 'payments']);
     });
 
     it('keeps an empty section and skips an empty Channels group', () => {
-      const { groups } = buildChannelLayout({
+      const { groups } = layout({
         channels: [channel('only', { sectionId: 'a' })],
         sections: [section('a'), section('b')],
-        filter: 'all',
-        isChannelsCollapsed: false,
       });
 
       assert.deepEqual(
@@ -114,10 +129,9 @@ describe('buildChannelLayout', () => {
     });
 
     it("carries each group's collapsed state", () => {
-      const { groups } = buildChannelLayout({
+      const { groups } = layout({
         channels,
-        sections: [section('checkout', true), section('design')],
-        filter: 'all',
+        sections: [section('checkout', { isCollapsed: true }), section('design')],
         isChannelsCollapsed: true,
       });
 
@@ -128,27 +142,78 @@ describe('buildChannelLayout', () => {
     });
 
     it('treats a channel in a deleted section as unsectioned, not hidden', () => {
-      const { groups } = buildChannelLayout({
+      const { groups } = layout({
         channels: [channel('orphan', { sectionId: 'gone' })],
         sections: [section('a')],
-        filter: 'all',
-        isChannelsCollapsed: false,
       });
 
       assert.deepEqual(ids(groups, 1), ['orphan']);
     });
 
-    it('drops sections under a filter and answers one flat list', () => {
-      const { groups } = buildChannelLayout({
+    it('drops sections under a filter chip and answers one flat list', () => {
+      const { groups } = layout({
         channels,
         sections: [section('checkout'), section('design')],
         filter: 'starred',
-        isChannelsCollapsed: false,
       });
 
       assert.equal(groups.length, 1);
       assert.equal(groups[0]?.kind, 'flat');
       assert.deepEqual(ids(groups), ['payments']);
+    });
+  });
+
+  describe("a group's saved filter and sort", () => {
+    const recent = NOW - 1;
+    const stale = NOW - ACTIVE_WINDOW_MS - 1;
+
+    it('Active only drops channels quiet for 30 days, and keeps the header', () => {
+      const { groups } = layout({
+        channels: [channel('stale', { sectionId: 's', lastActivityAtMs: stale })],
+        sections: [section('s', { filterMode: ChannelFilterMode.ACTIVE })],
+      });
+
+      assert.equal(groups[0]?.id, 's');
+      assert.deepEqual(ids(groups), []);
+    });
+
+    it('sorts a section alphabetically, unread first', () => {
+      const { groups } = layout({
+        channels: [
+          channel('b', { sectionId: 's', lastActivityAtMs: recent }),
+          channel('c', { sectionId: 's', unreadCount: 1, lastActivityAtMs: recent }),
+          channel('a', { sectionId: 's', lastActivityAtMs: recent }),
+        ],
+        sections: [section('s', { sortOrder: ChannelSortOrder.ALPHABETICAL })],
+      });
+
+      assert.deepEqual(ids(groups), ['c', 'a', 'b']);
+    });
+
+    it('filters Channels by its own preference, keeping the header when nothing is left', () => {
+      const { groups } = layout({
+        channels: [channel('quiet', { lastActivityAtMs: recent, lastViewedAt: recent })],
+        sections: [section('s')],
+        channelsPreference: {
+          filterMode: ChannelFilterMode.UNREADS,
+          sortOrder: ChannelSortOrder.RECENCY,
+        },
+      });
+
+      assert.equal(groups[1]?.id, 'channels');
+      assert.deepEqual(ids(groups, 1), []);
+    });
+
+    it("reads Mentions from the sidebar's wider mention set", () => {
+      const { groups } = layout({
+        channels: [channel('replied', { hasGroupMention: true }), channel('other')],
+        channelsPreference: {
+          filterMode: ChannelFilterMode.MENTIONS,
+          sortOrder: ChannelSortOrder.RECENCY,
+        },
+      });
+
+      assert.deepEqual(ids(groups), ['replied']);
     });
   });
 
@@ -168,29 +233,14 @@ describe('buildChannelLayout', () => {
     });
 
     it('scopes Mentions to unread mentions', () => {
-      const { groups } = buildChannelLayout({
-        channels,
-        sections: [],
-        filter: 'mentions',
-        isChannelsCollapsed: false,
-      });
+      const { groups } = layout({ channels, filter: 'mentions' });
 
       assert.deepEqual(ids(groups), ['a']);
     });
 
     it('returns the same counts whichever chip is active', () => {
-      const all = buildChannelLayout({
-        channels,
-        sections: [],
-        filter: 'all',
-        isChannelsCollapsed: false,
-      });
-      const unread = buildChannelLayout({
-        channels,
-        sections: [],
-        filter: 'unread',
-        isChannelsCollapsed: false,
-      });
+      const all = layout({ channels });
+      const unread = layout({ channels, filter: 'unread' });
 
       assert.deepEqual(all.counts, unread.counts);
     });

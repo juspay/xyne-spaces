@@ -10,6 +10,7 @@ import { useMtlsThumbnail } from '@/src/hooks/useMtlsThumbnail';
 import { useCompatVideoFallback } from '@/src/hooks/useCompatVideoFallback';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
 import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
+import { stripVideoErrorCodeTags } from '@/src/observability/logging/media/videoPlayback';
 import type { AttachmentsViewerItem } from '@/src/machines/attachmentsMachine';
 import { safePlay } from '@/src/utils/safeVideoPlayer';
 
@@ -254,9 +255,10 @@ const VideoPage = ({ attachment, isActive = true }: VideoPageProps): ReactElemen
   const showThumbnailOverlay =
     isActive && isInitialLoading && !streamError && (compat.recovering || !playerErrorMessage);
   const showSpinner = isActive && isInitialLoading && !streamError;
-  const errorMessage = compat.recovering
+  const rawErrorMessage = compat.recovering
     ? null
     : (compat.originalError ?? streamError?.message ?? loadError ?? playerErrorMessage ?? null);
+  const errorMessage = rawErrorMessage ? stripVideoErrorCodeTags(rawErrorMessage) : null;
 
   if (!isActive) {
     return (

@@ -11,9 +11,10 @@ import { scheduleOnRN } from 'react-native-worklets';
 
 import { haptics } from '@/src/utils/haptics';
 
-import { PILL_HEIGHT, SEARCH_BUTTON_SIZE, SPRING_BOUNCY } from '../constants';
+import { PILL_HEIGHT, ACTION_BUTTON_SIZE, SPRING_BOUNCY } from '../constants';
 
-export function useButtonGestures(onToggleSearch: () => void): {
+/** Press, drag-stretch and glow for the round glass button beside the pill. */
+export function useButtonGestures(onPress: () => void): {
   pressed: SharedValue<number>;
   overflowX: SharedValue<number>;
   overflowY: SharedValue<number>;
@@ -25,7 +26,7 @@ export function useButtonGestures(onToggleSearch: () => void): {
   const pressed = useSharedValue(0);
   const overflowX = useSharedValue(0);
   const overflowY = useSharedValue(0);
-  const touchX = useSharedValue(SEARCH_BUTTON_SIZE / 2);
+  const touchX = useSharedValue(ACTION_BUTTON_SIZE / 2);
   const touchY = useSharedValue(PILL_HEIGHT / 2);
   const glowProgress = useSharedValue(0);
 
@@ -37,7 +38,7 @@ export function useButtonGestures(onToggleSearch: () => void): {
     () =>
       Gesture.Tap()
         .onBegin(() => {
-          touchX.set(SEARCH_BUTTON_SIZE / 2);
+          touchX.set(ACTION_BUTTON_SIZE / 2);
           touchY.set(PILL_HEIGHT / 2);
           pressed.set(withTiming(1, { duration: 80 }));
           cancelAnimation(glowProgress);
@@ -49,9 +50,9 @@ export function useButtonGestures(onToggleSearch: () => void): {
         })
         .onEnd(() => {
           scheduleOnRN(triggerHaptic);
-          scheduleOnRN(onToggleSearch);
+          scheduleOnRN(onPress);
         }),
-    [glowProgress, onToggleSearch, pressed, touchX, touchY, triggerHaptic],
+    [glowProgress, onPress, pressed, touchX, touchY, triggerHaptic],
   );
 
   const panGesture = useMemo(
@@ -71,7 +72,7 @@ export function useButtonGestures(onToggleSearch: () => void): {
           touchX.set(event.x);
           touchY.set(event.y);
           const nextOverflowX =
-            event.x < 0 ? event.x : event.x > SEARCH_BUTTON_SIZE ? event.x - SEARCH_BUTTON_SIZE : 0;
+            event.x < 0 ? event.x : event.x > ACTION_BUTTON_SIZE ? event.x - ACTION_BUTTON_SIZE : 0;
           const nextOverflowY =
             event.y < 0 ? event.y : event.y > PILL_HEIGHT ? event.y - PILL_HEIGHT : 0;
           overflowX.set(nextOverflowX);

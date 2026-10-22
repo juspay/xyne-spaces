@@ -1,3 +1,4 @@
+import { RecordingMessageCard } from '@/src/components/recordings/RecordingMessageCard';
 import { Image } from 'expo-image';
 import { memo, useCallback, type ReactElement, type ReactNode } from 'react';
 import {
@@ -14,7 +15,6 @@ import {
   ChevronRight,
   Download,
   Image as ImageIcon,
-  Mic,
   Paperclip,
   Play,
   Smile,
@@ -577,52 +577,14 @@ const PaintRecordingPreviewCard = memo(function PaintRecordingPreviewCard({
   row: ChatPaintRow;
   isCurrentUser: boolean;
 }): ReactElement | null {
-  const router = useRouter();
-  const { embeddedBgUser, embeddedTitleUser, embeddedMutedUser, ambientAccentColor } =
-    useChatRenderTokens();
-  const recording = row.recordingPreview;
-  const openRecording = useCallback((): void => {
-    if (!recording) return;
-    router.push({
-      pathname: '/recording/[recordingId]',
-      params: { recordingId: recording.callId },
-    });
-  }, [router, recording]);
-
-  if (!recording) return null;
-
-  return (
-    <PaintTicketCardShell
-      className={cn(
-        'mb-2.5 flex-row items-center gap-2.5 self-stretch rounded-lg px-2.5 py-2',
-        isCurrentUser ? '' : 'bg-conversation-composer-forwarded-bg-other',
-      )}
-      style={isCurrentUser ? { backgroundColor: embeddedBgUser } : undefined}
-      onPress={openRecording}
-    >
-      <View
-        className='h-8 w-8 shrink-0 items-center justify-center rounded-full'
-        style={{ backgroundColor: `${ambientAccentColor}26` }}
-      >
-        <Mic size={16} color={ambientAccentColor} strokeWidth={2.2} />
-      </View>
-      <View className='min-w-0 flex-1 flex-col'>
-        <Text
-          className={cn('text-sm font-medium', isCurrentUser ? '' : 'text-foreground')}
-          style={isCurrentUser ? { color: embeddedTitleUser } : undefined}
-          numberOfLines={1}
-        >
-          {recording.title || 'Recording shared'}
-        </Text>
-        <Text
-          className={cn('text-xs', isCurrentUser ? '' : 'text-tertiary')}
-          style={isCurrentUser ? { color: embeddedMutedUser } : undefined}
-        >
-          {formatAttachmentDuration(recording.durationMs / 1000)}
-        </Text>
-      </View>
-    </PaintTicketCardShell>
-  );
+  const tokens = useChatRenderTokens();
+  return row.recordingPreview ? (
+    <RecordingMessageCard
+      recording={row.recordingPreview}
+      isCurrentUser={isCurrentUser}
+      tokens={tokens}
+    />
+  ) : null;
 });
 
 const PaintParentPreview = memo(function PaintParentPreview({

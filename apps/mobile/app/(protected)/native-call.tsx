@@ -1,3 +1,5 @@
+import { parseCallInvitees } from '@/src/features/chat/thread-header/thread-call-invitees';
+import { useMemo } from 'react';
 import { useLocalSearchParams, Redirect, Stack } from 'expo-router';
 import { View } from 'react-native';
 import { NativeCallScreen } from '@/src/screens/NativeCallScreenV2';
@@ -14,12 +16,19 @@ import {
 export default function NativeCallRoute(): React.ReactElement {
   const params = useLocalSearchParams<{
     channelId?: string | string[];
+    conversationId?: string | string[];
+    targetUserIds?: string | string[];
     callType?: string | string[];
     initiateCall?: string | string[];
     initialMicrophoneEnabled?: string | string[];
     initialCameraEnabled?: string | string[];
   }>();
   const channelId = readSingleRouteParam(params.channelId);
+  const conversationId = readSingleRouteParam(params.conversationId);
+  const targetUserIds = useMemo(
+    () => parseCallInvitees(readSingleRouteParam(params.targetUserIds)),
+    [params.targetUserIds],
+  );
   const callType = readSingleRouteParam(params.callType);
   const initiateCall = readSingleRouteParam(params.initiateCall);
   const initialMicrophoneEnabled = parseOptionalBooleanRouteParam(params.initialMicrophoneEnabled);
@@ -46,6 +55,8 @@ export default function NativeCallRoute(): React.ReactElement {
       <Stack.Screen options={{ headerShown: false }} />
       <NativeCallScreen
         channelId={channelId ?? ''}
+        {...(conversationId ? { conversationId } : {})}
+        {...(targetUserIds ? { targetUserIds } : {})}
         callType={callType === CallType.VIDEO ? CallType.VIDEO : CallType.AUDIO}
         // Only initiate if explicitly requested and not already connected
         shouldInitiateCall={initiateCall === 'true' && !isAlreadyConnected}

@@ -1,10 +1,10 @@
 import type { ChatRow, MessageRowModel } from './chatRow.types';
 
-export type RowSurface = 'date' | 'unread-divider' | 'system' | 'call' | 'message';
+export type RowSurface = 'date' | 'unread-divider' | 'system' | 'call' | 'recording' | 'message';
 
 type SystemSurfaceModel = Pick<
   MessageRowModel,
-  'rowKind' | 'rowType' | 'isFlowJson' | 'ticketPreview' | 'callPreview'
+  'rowKind' | 'rowType' | 'isFlowJson' | 'ticketPreview' | 'callPreview' | 'recordingPreview'
 >;
 
 /**
@@ -13,18 +13,23 @@ type SystemSurfaceModel = Pick<
  */
 export const paintsAsSystemJoin = (model: SystemSurfaceModel): boolean => {
   if (model.rowKind !== 'SYSTEM' && model.rowType !== 'system') return false;
-  if (model.isFlowJson || model.ticketPreview || model.callPreview) return false;
+  if (model.isFlowJson || model.ticketPreview || model.callPreview || model.recordingPreview)
+    return false;
   return true;
 };
 
 /** V2 renders every Flow-JSON SYSTEM message in the centered system pill. */
 export const paintsAsSystemFlow = (
-  model: Pick<MessageRowModel, 'rowKind' | 'isFlowJson' | 'ticketPreview' | 'callPreview'>,
+  model: Pick<
+    MessageRowModel,
+    'rowKind' | 'isFlowJson' | 'ticketPreview' | 'callPreview' | 'recordingPreview'
+  >,
 ): boolean =>
   model.rowKind === 'SYSTEM' &&
   model.isFlowJson &&
   model.ticketPreview === null &&
-  model.callPreview === null;
+  model.callPreview === null &&
+  !model.recordingPreview;
 
 const paintsAsCenteredSystem = (model: SystemSurfaceModel): boolean =>
   paintsAsSystemJoin(model) || paintsAsSystemFlow(model);
@@ -32,6 +37,7 @@ const paintsAsCenteredSystem = (model: SystemSurfaceModel): boolean =>
 /** LegendList `getItemType` — one recycler pool per visual shape. */
 export const getRowType = (row: ChatRow): string => {
   if (row.type !== 'message') return row.type;
+  if (row.model.recordingPreview) return 'recording';
   if (row.model.callPreview) return 'call';
   if (paintsAsSystemFlow(row.model)) return 'system-flow';
   if (paintsAsSystemJoin(row.model)) return 'system';
@@ -55,6 +61,7 @@ export const rowSurface = (row: ChatRow): RowSurface => {
   if (row.type === 'unread-divider') {
     return 'unread-divider';
   }
+  if (row.model.recordingPreview) return 'recording';
   if (row.model.callPreview) {
     return 'call';
   }

@@ -14,10 +14,9 @@ import {
   type MentionPalette,
 } from '@/src/features/chat/v2/components/conversation-composer/rich-inline-text';
 import { useSelf } from '@/src/hooks/useUsers';
-import { DEFAULT_CHAT_BUBBLE_OPTION } from '@/src/theme/chatBubbleTheme';
-import { deriveChatBubbleContentTokens } from '@/src/theme/chatBubbleContentTokens';
 
 import { ACTIVITY_BODY_LINES, ACTIVITY_PREVIEW_CACHE_SIZE } from '../constants';
+import { mentionedYouColors } from '../model/mentioned-you-colors';
 import type { ActivityAttachment } from '../model/row';
 
 type BodyEnvironment = {
@@ -30,20 +29,10 @@ const BodyEnvironmentContext = createContext<BodyEnvironment | null>(null);
 
 /**
  * The mention chips' colours, as the shared tokens give them — except a mention
- * of *you*, which takes the colour the default chat bubble theme draws for the
- * same case: a soft yellow in light mode, a muted gold in dark. The shared token
- * is one saturated gold meant for a chat bubble's own background; on an
- * activity row's plain surface it reads as heavy.
- *
- * Built here rather than by changing the shared tokens, which chat reads too.
+ * of *you*, which takes the default chat bubble theme's colours for that case.
  */
 function buildMentionPalette(theme: string, tokens: MentionPalette): MentionPalette {
-  const mode = theme === 'dark' ? 'dark' : 'light';
-  const { mentionSelfBgOther, mentionSelfTextOther } = deriveChatBubbleContentTokens(
-    mode === 'dark' ? DEFAULT_CHAT_BUBBLE_OPTION.darkColor : DEFAULT_CHAT_BUBBLE_OPTION.lightColor,
-    mode,
-  );
-  return { ...tokens, mentionedYouBg: mentionSelfBgOther, mentionedYouText: mentionSelfTextOther };
+  return { ...tokens, ...mentionedYouColors(theme) };
 }
 
 /**

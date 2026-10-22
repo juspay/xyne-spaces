@@ -1,3 +1,4 @@
+import { GroupCallConfirmationSheet } from '@/src/components/call/GroupCallConfirmationSheet';
 import { ReactElement, ReactNode, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -164,6 +165,9 @@ const ConversationInfoScreen = (): ReactElement => {
     isStarred,
     handleStarToggle,
     handleCallPress,
+    isCallConfirmationOpen,
+    closeCallConfirmation,
+    confirmGroupCall,
     handleLeaveChannel,
   } = useConversationHeaderData(channelId ?? '');
 
@@ -416,6 +420,12 @@ const ConversationInfoScreen = (): ReactElement => {
         ) : null}
       </ScrollView>
 
+      <GroupCallConfirmationSheet
+        isOpen={isCallConfirmationOpen}
+        onClose={closeCallConfirmation}
+        onConfirm={confirmGroupCall}
+        channelName={displayName}
+      />
       <AddPeopleModal
         isOpen={showAddPeopleModal}
         onClose={() => setShowAddPeopleModal(false)}

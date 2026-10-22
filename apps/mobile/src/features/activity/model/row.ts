@@ -9,6 +9,7 @@ import {
 import type { ActivityWithRelated } from '@/src/types/activity';
 
 import type { ActivityNavigationTarget } from '../presentation/activityRowAssembler';
+import { describeRecordingSummary } from './recording-summary';
 
 /**
  * What the badge on the avatar says the activity is. Presentation-free: the
@@ -26,6 +27,7 @@ export type ActivityBadgeKind =
   | 'call'
   | 'workflow'
   | 'canvas'
+  | 'summary'
   | 'default';
 
 /** The pill after the verb: a channel or a ticket key. */
@@ -457,6 +459,22 @@ const TICKET_UPDATE_ACTIONS = [...TICKET_UPDATES.keys()];
 const CALL_ACTIONS = [...CALL_COPY.keys()];
 
 const DESCRIBERS: ReadonlyMap<string, Describer> = new Map<string, Describer>([
+  [
+    'recording_summary_ready',
+    (activity): Described | null => {
+      const summary = describeRecordingSummary(activity);
+      return summary
+        ? {
+            badge: 'summary',
+            actorName: summary.actorName,
+            verb: summary.description,
+            body: text(summary.body),
+            subject: null,
+            target: summary.target,
+          }
+        : null;
+    },
+  ],
   ['mentioned_user', describeMention],
   ['group_mention', describeMention],
   ['direct_message', describeDirectMessage],

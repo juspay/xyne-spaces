@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -22,7 +22,6 @@ import { useCSSVariable } from 'uniwind';
 import { useUsersById } from '@xyne/shared/hooks';
 
 import Avatar from '@/src/components/ui/avatar';
-import { Switch } from '@/src/components/ui/switch';
 import type {
   ActivityActorKind,
   ActivityViewMode,
@@ -40,6 +39,7 @@ import {
   type SegmentedControlClassNames,
   type SegmentedControlOption,
 } from '@/src/ui/segmented-control';
+import { Switch } from '@/src/ui/switch';
 import { getUserDisplayName } from '@/src/utils/channel-utils';
 import { haptics } from '@/src/utils/haptics';
 
@@ -121,16 +121,14 @@ function SwitchRow({
   return (
     <View className='flex-row items-center px-2' style={{ height: ROW_HEIGHT }}>
       <Text className='flex-1 text-[16px] text-bottomsheet-container-foreground'>{label}</Text>
+      {/*
+        Drawn in React Native, as in the Spaces tray: the app's native iOS
+        switch does not render inside this sheet.
+      */}
       <Switch
-        isSelected={value}
-        onSelectedChange={next => {
-          // The iOS switch gives its own toggle haptic; Android's does not.
-          if (Platform.OS === 'android') {
-            void (next ? haptics.toggleOn() : haptics.toggleOff());
-          }
-          onValueChange(next);
-          applyActivityPreferences();
-        }}
+        value={value}
+        onValueChange={onValueChange}
+        onSettled={applyActivityPreferences}
         accessibilityLabel={label}
       />
     </View>

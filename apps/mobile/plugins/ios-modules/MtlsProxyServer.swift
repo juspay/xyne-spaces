@@ -335,6 +335,111 @@ class MtlsProxyServer: NSObject {
         return isRunning ? currentPort : 0
     }
 
+    static let healthProbePath = "/proxy-health"
+
+    /// Probe the running listener over loopback. Reports `true` only when the
+    /// current listener answers the capability-bound health route with 204.
+    ///
+    /// iOS can reclaim an app's listening socket while the app is suspended
+    /// without delivering `.failed`/`.cancelled` to the NWListener, which
+    /// leaves `isRunning == true` while nothing accepts connections. This
+    /// probe is the only reliable way to tell from inside the app.
+    func checkHealth(timeout: TimeInterval = 1.0, completion: @escaping (Bool) -> Void) {
+        let session = sessionSnapshot()
+        guard session.isRunning,
+              session.currentPort > 0,
+              let nwPort = NWEndpoint.Port(rawValue: session.currentPort) else {
+            completion(false)
+            return
+        }
+
+        var components = URLComponents()
+        components.path = Self.healthProbePath
+        components.queryItems = [URLQueryItem(name: "capability", value: session.capability)]
+        guard let target = components.string else {
+            completion(false)
+            return
+        }
+
+        let probeQueue = DispatchQueue(label: "com.lotus.mtlsproxy.healthprobe", qos: .userInitiated)
+        let connection = NWConnection(host: "127.0.0.1", port: nwPort, using: .tcp)
+        let resultLock = NSLock()
+        var finished = false
+        let finish: (Bool) -> Void = { healthy in
+            resultLock.lock()
+            if finished {
+                resultLock.unlock()
+                return
+            }
+            finished = true
+            resultLock.unlock()
+            connection.cancel()
+            completion(healthy)
+        }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let request = "GET \(target) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data(request.utf8), completion: .contentProcessed { error in
+                    if error != nil {
+                        finish(false)
+                        return
+                    }
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) { data, _, _, _ in
+                        let statusLine = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                        finish(statusLine.hasPrefix("HTTP/1.1 204"))
+                    }
+                })
+            case .waiting(_), .failed(_):
+                // `.waiting` on loopback means the connection was refused:
+                // nothing is listening on this port any more.
+                finish(false)
+            case .cancelled:
+                finish(false)
+            default:
+                break
+            }
+        }
+        connection.start(queue: probeQueue)
+        probeQueue.asyncAfter(deadline: .now() + timeout) {
+            finish(false)
+        }
+    }
+
+    /// Replace a dead listener while keeping the in-memory auth token and
+    /// the allowlist policy. The capability rotates (inside `start`), so URLs
+    /// issued for the dead listener stop working and callers must request
+    /// fresh proxied URLs.
+    ///
+    /// Binds an ephemeral loopback port: the reclaimed socket may still hold
+    /// the original port, and a fixed-port bind can sit in `.waiting`
+    /// instead of failing. Proxied URLs always carry `currentPort`, so no
+    /// caller depends on the port number.
+    func restart(
+        allowedBaseURL: String,
+        completion: @escaping (Bool, UInt16, Error?) -> Void
+    ) {
+        sessionStateLock.lock()
+        guard policy != nil else {
+            sessionStateLock.unlock()
+            completion(false, 0, NSError(
+                domain: "MtlsProxyServer",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Proxy was not started"]
+            ))
+            return
+        }
+        // `start` short-circuits while `isRunning` is true. Mark the stale
+        // listener as stopped; `start` cancels it, rotates the capability and
+        // keeps the auth token (only `stop` clears that).
+        isRunning = false
+        sessionStateLock.unlock()
+
+        NSLog("[MtlsProxyServer] Restarting listener on an ephemeral port")
+        start(on: 0, allowedBaseURL: allowedBaseURL, completion: completion)
+    }
+
     /// Build a proxied URL for the given backend URL
     @objc(getProxiedUrl:)
     func getProxiedUrl(_ backendUrl: String) -> String? {
@@ -491,6 +596,24 @@ class MtlsProxyServer: NSObject {
                     })
                 })
             }
+            return
+        }
+
+        // Liveness probe used by `checkHealth`. Bound to the current
+        // capability so a 204 proves this exact listener generation is
+        // accepting connections, not just that something owns the port.
+        if request.path == Self.healthProbePath || request.path.hasPrefix(Self.healthProbePath + "?") {
+            let session = sessionSnapshot()
+            guard let probeCapability = extractQueryParam(from: request.path, named: "capability"),
+                  session.isRunning,
+                  constantTimeEquals(probeCapability, session.capability) else {
+                sendErrorResponse(connection, status: 403, message: "Invalid proxy capability")
+                return
+            }
+            let response = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
             return
         }
 

@@ -28,7 +28,7 @@ import { ProtectedStartupScreen } from '@/src/components/startup/ProtectedStartu
 import { isWorkspaceSwitchInProgress } from '@/src/services/workspaceSessionReset';
 import { useIncomingShareTarget } from '@/src/features/share-target';
 import { UpdatePromptGate } from '@/src/features/app-update';
-import { RevokedBetaFlagsGate } from '@/src/features/beta-flags';
+import { BetaFeaturesBanner, RevokedBetaFlagsGate } from '@/src/features/beta-flags';
 import { setRouteSnapshot } from '@/src/features/chat/navigation/routeSnapshot';
 import { ensureQueryCacheStorageReady } from '@/src/machines/queryCacheMachine';
 import { GuideReturnBar } from '@/src/features/user-guide/components/guide-return-bar';
@@ -159,6 +159,7 @@ function NativeShell(): ReactElement {
           <IncomingCallSync />
           <UpdatePromptGate />
           <RevokedBetaFlagsGate />
+          <BetaFeaturesBanner />
         </InitialStateLoader>
       </ZeroProvider>
       {/* Safety-critical UI must not wait for Zero or chat/query startup. */}

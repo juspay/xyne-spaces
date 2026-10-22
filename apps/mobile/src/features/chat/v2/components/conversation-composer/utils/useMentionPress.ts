@@ -1,3 +1,5 @@
+import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { resolveThreadContextLink } from '@/src/utils/threadContextLink';
 import { useCallback } from 'react';
 import { Alert, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -21,7 +23,8 @@ export const useMentionPress = (): ((url: string) => Promise<void>) => {
   const { token } = useAuth();
 
   return useCallback(
-    async (url: string) => {
+    async (rawUrl: string) => {
+      const url = resolveThreadContextLink(rawUrl, PUBLIC_DEEP_LINK_ORIGIN, MENTION_USER_SCHEME);
       if (url.startsWith(MENTION_USER_SCHEME)) {
         const userId = decodeURIComponent(url.slice(MENTION_USER_SCHEME.length));
 

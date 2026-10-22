@@ -1,3 +1,4 @@
+import { contentSignature } from '../model/contentSignature';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -128,4 +129,25 @@ describe('contentSignature', (): void => {
     const changed = messageRow(input(), 'dm');
     assert.equal(rowsAreEqual(original, changed), false);
   });
+});
+
+it('invalidates recording rows for ownership and lifecycle changes', () => {
+  const metadata = {
+    isRecordingMessage: true,
+    callId: 'recording',
+    operation: 'recording_active',
+    isHeadlessRecording: true,
+    createdBy: 'creator',
+    durationMs: 0,
+  };
+  const stamp = contentSignature(input({ metadata }));
+  for (const change of [
+    { callId: 'other' },
+    { createdBy: 'other' },
+    { operation: 'recording_ended' },
+    { durationMs: 1200 },
+    { isHeadlessRecording: false },
+  ]) {
+    assert.notEqual(contentSignature(input({ metadata: { ...metadata, ...change } })), stamp);
+  }
 });

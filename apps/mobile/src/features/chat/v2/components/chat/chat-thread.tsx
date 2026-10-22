@@ -1930,7 +1930,8 @@ function ChatThreadInner({
         customEmojiCount: paintItem.paint.body?.customEmojiIds.length ?? 0,
         hasMediaPlaceholder: !!paintItem.paint.mediaPlaceholder,
       });
-      const canRenderLandingRichContent = !isTicketActivity && !shouldKeepPaintPreview;
+      const canRenderLandingRichContent =
+        !paintItem.paint.recordingPreview && !isTicketActivity && !shouldKeepPaintPreview;
       const animateEntrance = rowEntranceController.getPending().has(item.messageId);
       const content =
         canRenderLandingRichContent &&

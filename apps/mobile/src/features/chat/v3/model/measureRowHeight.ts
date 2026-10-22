@@ -78,6 +78,7 @@ export const measureRowHeight = (
   if (row.type === 'date') return DATE_ROW_HEIGHT;
   if (row.type === 'unread-divider') return UNREAD_DIVIDER_HEIGHT;
   const model = row.model;
+  if (model.recordingPreview) return 64;
   if (model.callPreview) return CALL_ROW_HEIGHT;
   const charsPerLine = estimateCharsPerLine(textContainerWidthPx);
   const previewText = model.body.segments.length

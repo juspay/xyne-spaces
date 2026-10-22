@@ -6,6 +6,7 @@ import {
   CircleHelp,
   MessageCircle,
   Reply,
+  Sparkles,
   Target,
   UserPlus,
   type LucideIcon,
@@ -66,6 +67,7 @@ const TONES: Readonly<Record<ActivityBadgeKind, Tone>> = {
     fg: '--color-activity-call-icon',
   },
   default: NEUTRAL,
+  summary: { ...NEUTRAL, Icon: Sparkles },
 };
 
 type ActivityBadgeProps = {

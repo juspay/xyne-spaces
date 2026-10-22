@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { currentCallConversation } from '@/src/utils/currentCallConversation';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSelector } from '@xstate/react';
 import {
+  CallOrigin,
   ChannelAddUserPolicy,
   ChannelRole,
   ChannelScopeType,
@@ -14,10 +16,12 @@ import { resolveChannelMemberCount } from '@/src/features/chat/channel-members/c
 import { canPromoteConversationToChannel } from '@/src/features/chat/promoteToChannelPolicy';
 import { useChannelDisplayName, useVisibleChannel } from '@/src/hooks/useChannels';
 import { useUserPresence } from '@/src/hooks/usePresence';
-import { useCurrentCallExternalId, useIsInCall } from '@/src/hooks/useRoomMachine';
+import { useRoomSelector, useIsInCall } from '@/src/hooks/useRoomMachine';
 import { useSelf, useUser } from '@/src/hooks/useUsers';
 import { useQuery } from '@/src/hooks/useQuery';
 import { useZero } from '@/src/hooks/useZero';
+import { roomActor } from '@/src/machines/roomMachine';
+import { getRecordingState } from '@/src/stores/recordingStore';
 import { stateMachineActor } from '@/src/machines/appStateMachine';
 import { reportNotificationHeaderResolve } from '@/src/observability/logging/notification/reportNotificationHeaderResolve';
 import {
@@ -66,7 +70,8 @@ export const useConversationHeaderData = (
   const router = useRouter();
   const { userID: currentUserId } = useAuthContextValues();
   const isInCall = useIsInCall();
-  const currentCallExternalId = useCurrentCallExternalId();
+  const currentCallChannelId = useRoomSelector(state => state.channelId);
+  const currentConversationId = useRoomSelector(currentCallConversation);
 
   const { isVisibleChannelsReady, isUserDirectoryReady } = useStartupPhase();
   const channel = useVisibleChannel(channelId);
@@ -179,19 +184,72 @@ export const useConversationHeaderData = (
     zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: Date.now() }));
   }, [canUseMemberActions, zero, channelId]);
 
+  const callPromptOpen = useRef(false);
+  const [isCallConfirmationOpen, setIsCallConfirmationOpen] = useState(false);
+  const closeCallConfirmation = useCallback(() => {
+    callPromptOpen.current = false;
+    setIsCallConfirmationOpen(false);
+  }, []);
+  useEffect(closeCallConfirmation, [channelId, closeCallConfirmation]);
+  const confirmGroupCall = useCallback(() => {
+    if (!callPromptOpen.current) return;
+    closeCallConfirmation();
+    if (!canUseMemberActions || channel?.isArchived) return;
+    const recording = getRecordingState().status;
+    if (
+      !roomActor.getSnapshot().matches('idle') ||
+      (recording !== 'idle' && recording !== 'error')
+    ) {
+      Alert.alert('Call unavailable', 'Please finish your current call or recording first.');
+      return;
+    }
+    void startAudioCall(channelId);
+  }, [channelId, canUseMemberActions, channel?.isArchived, closeCallConfirmation]);
   const handleCallPress = useCallback(async () => {
     if (!canUseMemberActions) {
       Alert.alert('Join channel', 'Join this channel before starting a call.');
       return;
     }
 
-    const isUserInThisCall = currentCallExternalId === channelId;
+    const isUserInThisCall = currentCallChannelId === channelId && !currentConversationId;
     if (isInCall && !isUserInThisCall) {
       Alert.alert('Already in a call', 'Please leave your current call before starting a new one.');
       return;
     }
-    await startAudioCall(channelId);
-  }, [canUseMemberActions, channelId, isInCall, currentCallExternalId]);
+    if (isInCall) {
+      router.push('/(protected)/native-call');
+      return;
+    }
+    if (!isChannel) {
+      await startAudioCall(channelId);
+      return;
+    }
+    if (callPromptOpen.current) return;
+    callPromptOpen.current = true;
+    // Reuse the globally synced roster, as desktop does; no extra query per header.
+    const active = roomActor
+      .getSnapshot()
+      .context.activeCalls.find(
+        call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
+      );
+    if (active) {
+      callPromptOpen.current = false;
+      router.push({
+        pathname: '/(protected)/native-call',
+        params: { channelId: active.externalId },
+      });
+      return;
+    }
+    setIsCallConfirmationOpen(true);
+  }, [
+    canUseMemberActions,
+    channelId,
+    isInCall,
+    currentCallChannelId,
+    currentConversationId,
+    isChannel,
+    router,
+  ]);
 
   const handleLeaveChannel = useCallback(() => {
     if (!canLeaveChannel) return;
@@ -230,6 +288,9 @@ export const useConversationHeaderData = (
     isStarred,
     handleStarToggle,
     handleCallPress,
+    isCallConfirmationOpen,
+    closeCallConfirmation,
+    confirmGroupCall,
     handleLeaveChannel,
   };
 };
