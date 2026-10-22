@@ -25,6 +25,7 @@ import {
   useTicketsListData,
   useTicketsSearchOverlay,
   useTicketsSelection,
+  useOpenDeskConversation,
   useTicketUserGroupFilterOptions,
 } from '../hooks';
 import { TICKETS_SELECTION_FADE_MS } from '../constants';
@@ -62,6 +63,7 @@ export default function TicketsListScreen() {
   const currentUserId = user?.user_id ?? '';
   const { channelId: channelIdParam } = useLocalSearchParams<{ channelId: string }>();
   const channelId = typeof channelIdParam === 'string' ? channelIdParam : '';
+  useOpenDeskConversation(channelId);
 
   const channel = useChannelById(channelId);
   const channelName = channel?.name?.trim() || 'Desk';

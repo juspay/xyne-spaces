@@ -5,7 +5,12 @@ import { useMessages } from '@xyne/shared/messages';
 import { ChatThread } from '@/src/features/chat/v2/components/chat/chat-thread';
 import { isThreadTargetCached } from '@/src/features/chat/v2/components/chat/chat-thread-helpers';
 import { readConversationTicketId } from '@/src/features/chat/navigation/threadTicketSurface';
+import {
+  isDeskActivityChannel,
+  openDeskRoute,
+} from '@/src/features/xyne-desks/navigation/openDeskRoute';
 import { TICKET_ROUTE } from '@/src/notifications/config';
+import { useChannelById } from '@/src/hooks/useChannels';
 import { useQuery } from '@/src/hooks/useQuery';
 import { queries } from '@/src/zero/queries';
 import { useReportNotificationPhase } from '@/src/observability/logging/hooks/notification/useReportNotificationPhase';
@@ -70,6 +75,7 @@ const ChatThreadScreen = (): ReactElement => {
   const ticketId =
     (liveConversation ? readConversationTicketId(liveConversation) : null) ??
     readConversationTicketId(cachedConversation);
+  const channel = useChannelById(resolvedChannelId);
   const hasResolvedThreadTarget =
     isThreadTargetCached(cachedConversation?.messages ?? [], messageId) ||
     isThreadTargetCached(liveConversation?.messages ?? [], messageId);
@@ -105,7 +111,18 @@ const ChatThreadScreen = (): ReactElement => {
 
   useEffect(() => {
     if (isResolverHost || !ticketId || redirectedOpenKeyRef.current === openKey) return;
+    if (!channel) return;
     redirectedOpenKeyRef.current = openKey;
+    if (isDeskActivityChannel(channel.type)) {
+      openDeskRoute({
+        channelId: resolvedChannelId,
+        ticketId,
+        tab: 'messages',
+        ...(resolvedThreadId ? { conversationId: resolvedThreadId } : {}),
+        ...(messageId ? { messageId } : {}),
+      });
+      return;
+    }
     router.replace({
       pathname: TICKET_ROUTE,
       params: {
@@ -130,6 +147,7 @@ const ChatThreadScreen = (): ReactElement => {
     router,
     isResolverHost,
     ticketId,
+    channel,
   ]);
 
   return (

@@ -5,6 +5,8 @@ import { parseTicketMd, type Channel } from '@xyne/shared';
 
 import { navigateToMessage } from '@/src/components/activity/activity-v2-nav';
 import { shouldOpenActivityThread } from '@/src/components/activity/activity-v2-navigation-logic';
+import { deskActivityNavigation, type DeskActivityNavigation } from '@/src/features/xyne-desks/navigation/deskActivityTarget';
+import { openDeskRoute } from '@/src/features/xyne-desks/navigation/openDeskRoute';
 import { getChannelDisplayName } from '@/src/hooks/useChannels';
 import type { ActivityWithRelated } from '@/src/types/activity';
 
@@ -49,6 +51,7 @@ export type ActivityNavigationTarget =
       kind: 'channel';
       channelId: string;
     }
+  | DeskActivityNavigation
   | {
       kind: 'none';
     };
@@ -68,6 +71,11 @@ export const navigateToActivityTarget = (target: ActivityNavigationTarget): void
   }
 
   if (target.kind === 'none') {
+    return;
+  }
+
+  if (target.kind === 'desk') {
+    openDeskRoute(target);
     return;
   }
 
@@ -235,7 +243,10 @@ export const assembleActivityRowVm = ({
     channelLabel: resolvedChannelLabel,
     description: description ?? DEFAULT_DESCRIPTION_BY_ACTION[action] ?? 'updated activity in',
     timeLabel: getTimeLabel(activity),
-    navigationTarget: navigationTarget ?? getNavigationTarget(activity),
+    navigationTarget:
+      deskActivityNavigation(activity, channel) ??
+      navigationTarget ??
+      getNavigationTarget(activity),
     messagePreviewKind:
       activity.message?.conversation &&
       activity.message.messageId === activity.message.conversation.initialMessageId

@@ -6,6 +6,8 @@ import { Ticket } from 'lucide-react-native';
 import { useQuery } from '@/src/hooks/useQuery';
 import { queries } from '@/src/zero/queries';
 import { ActivityV2Card } from './activity-v2-card';
+import { openActivityOnDeskOr } from '@/src/features/xyne-desks/navigation/openDeskRoute';
+import { useChannelById } from '@/src/hooks/useChannels';
 import type { ActivityV2Props } from './activity-v2/activity-v2.types';
 import {
   createChatOpenIntent,
@@ -14,6 +16,8 @@ import {
 
 export const EtaActivity = ({ activity }: ActivityV2Props): ReactElement | null => {
   const [ticket] = useQuery(queries.ticketByIdV2({ ticketId: activity.actionSourceId ?? '' }));
+  const channelId = ticket?.channelId ?? ticket?.conversation?.channelId ?? activity.channelId ?? '';
+  const channel = useChannelById(channelId);
 
   const isWarning = activity.actorAction === 'eta_warning';
   const isBreach = activity.actorAction === 'eta_breach';
@@ -36,10 +40,22 @@ export const EtaActivity = ({ activity }: ActivityV2Props): ReactElement | null 
       badgeColorClass={bgClass}
       description='ticket in'
       onPress={() => {
-        const channelId = ticket?.conversation?.channelId ?? activity.channelId ?? '';
-        if (!channelId) return;
-        const intent = createChatOpenIntent({ channelId, openStartedAtMs: Date.now() }, 'activity');
-        if (intent) executeChatOpenIntent(router, intent);
+        openActivityOnDeskOr(
+          channel?.type,
+          {
+            channelId,
+            ...(ticket?.xyneId ? { xyneId: ticket.xyneId } : {}),
+            ...(ticket?.id ? { ticketId: ticket.id } : {}),
+          },
+          () => {
+            if (!channelId) return;
+            const intent = createChatOpenIntent(
+              { channelId, openStartedAtMs: Date.now() },
+              'activity',
+            );
+            if (intent) executeChatOpenIntent(router, intent);
+          },
+        );
       }}
     >
       <View className='gap-1'>

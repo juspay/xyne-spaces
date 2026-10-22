@@ -8,6 +8,7 @@ type MessagesTabProps = {
   conversationId: string | null;
   isMember: boolean;
   contentPaddingTop: number;
+  messageId?: string;
   /** Tapping the parent ticket card stays on this screen and opens Details. */
   onParentTicketPress: () => void;
 };
@@ -17,6 +18,7 @@ export const MessagesTab = memo(function MessagesTab({
   conversationId,
   isMember,
   contentPaddingTop,
+  messageId,
   onParentTicketPress,
 }: MessagesTabProps) {
   if (!conversationId) {
@@ -47,6 +49,7 @@ export const MessagesTab = memo(function MessagesTab({
         composerInsetMode='screen'
         onParentTicketPress={onParentTicketPress}
         hideHeader
+        {...(messageId ? { messageId } : {})}
       />
     </View>
   );

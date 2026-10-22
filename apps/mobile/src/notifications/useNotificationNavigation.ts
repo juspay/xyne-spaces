@@ -81,6 +81,17 @@ export function useNotificationNavigation(): void {
 
     if (!intent) return;
 
+    if (intent.desk?.channelId) {
+      clearNavIntent();
+      try {
+        performChatNavigation(intent);
+      } catch {
+        resetNavDedup();
+        persistNavIntent(intent);
+      }
+      return;
+    }
+
     if (matchesChatRouteTarget(pathname, intent, routeParams)) {
       clearNavIntent();
       return;

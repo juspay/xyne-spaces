@@ -9,6 +9,8 @@ import {
   restorePersistedChatWindow,
   type PersistedChatWindowTarget,
 } from './restorePersistedChatWindow';
+import { getChannelById } from '@/src/hooks/useChannels';
+import { isDeskActivityChannel } from '@/src/features/xyne-desks/navigation/openDeskRoute';
 import {
   getChatOpenAttemptId,
   releaseChatOpen,
@@ -363,6 +365,18 @@ export const buildResolvedChatRoute = (
   };
 
   if (location.destination === 'ticketThread' && location.ticketId && location.threadId) {
+    if (isDeskActivityChannel(getChannelById(location.channelId)?.type)) {
+      return {
+        pathname: '/xyne-desks/[channelId]/[ticketId]',
+        params: {
+          channelId: location.channelId,
+          ticketId: location.ticketId,
+          id: location.ticketId,
+          tab: 'messages',
+          ...(location.messageId ? { messageId: location.messageId } : {}),
+        },
+      };
+    }
     return {
       pathname: TICKET_ROUTE,
       params: {

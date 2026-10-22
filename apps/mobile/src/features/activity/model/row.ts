@@ -10,6 +10,7 @@ import type { ActivityWithRelated } from '@/src/types/activity';
 
 import type { ActivityNavigationTarget } from '../presentation/activityRowAssembler';
 import { describeRecordingSummary } from './recording-summary';
+import { deskActivityNavigation } from '@/src/features/xyne-desks/navigation/deskActivityTarget';
 
 /**
  * What the badge on the avatar says the activity is. Presentation-free: the
@@ -537,6 +538,12 @@ export function buildActivityRow(
     subject = null;
   }
 
+  const rawTarget = described.target ?? ctx.navigationTarget(activity);
+  const target =
+    rawTarget.kind === 'calls' || rawTarget.kind === 'canvas'
+      ? rawTarget
+      : (deskActivityNavigation(activity, channel) ?? rawTarget);
+
   return {
     id: activity.id,
     isUnread: !activity.isRead,
@@ -548,7 +555,7 @@ export function buildActivityRow(
     badge: described.badge,
     reactionEmoji: described.reactionEmoji ?? null,
     body: described.body.kind === 'none' ? NONE : described.body,
-    target: described.target ?? ctx.navigationTarget(activity),
+    target,
   };
 }
 

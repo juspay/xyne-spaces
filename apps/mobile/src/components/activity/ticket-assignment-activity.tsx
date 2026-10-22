@@ -5,11 +5,15 @@ import { UserPlus } from 'lucide-react-native';
 import { useUser } from '@/src/hooks/useUsers';
 import { ActivityV2Card } from './activity-v2-card';
 import { CopyableValue } from '@/src/components/ui/copyable-value';
+import { openActivityOnDeskOr } from '@/src/features/xyne-desks/navigation/openDeskRoute';
+import { useChannelById } from '@/src/hooks/useChannels';
 import type { ActivityV2Props } from './activity-v2/activity-v2.types';
 
 export const TicketAssignmentActivity = ({ activity }: ActivityV2Props): ReactElement | null => {
   const ticket = activity.ticket;
   const actorId = activity.actorId ?? 'system';
+  const channelId = ticket?.channelId ?? activity.channelId ?? '';
+  const channel = useChannelById(channelId);
   const assignedUser = useUser(ticket?.assignedTo ?? '');
 
   if (!ticket) return null;
@@ -30,12 +34,22 @@ export const TicketAssignmentActivity = ({ activity }: ActivityV2Props): ReactEl
       badgeColorClass='bg-blue-100'
       description={description}
       onPress={() => {
-        const ticketId = activity.ticketId ?? activity.actionSourceId ?? ticket.id;
-        if (!ticketId) return;
-        router.push({
-          pathname: '/ticket/[ticketId]',
-          params: { ticketId, selectedTab: 'activity' },
-        });
+        openActivityOnDeskOr(
+          channel?.type,
+          {
+            channelId,
+            ...(ticket.xyneId ? { xyneId: ticket.xyneId } : {}),
+            ...(ticket.id ? { ticketId: ticket.id } : {}),
+          },
+          () => {
+            const ticketId = activity.ticketId ?? activity.actionSourceId ?? ticket.id;
+            if (!ticketId) return;
+            router.push({
+              pathname: '/ticket/[ticketId]',
+              params: { ticketId, selectedTab: 'activity' },
+            });
+          },
+        );
       }}
     >
       <View className='gap-1'>
