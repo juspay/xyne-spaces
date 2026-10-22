@@ -206,6 +206,32 @@ export interface CssTokens {
 }
 
 /**
+ * Strip `/* … *\/` comments in one pass.
+ *
+ * Deliberately not a regex. `/\/\*[\s\S]*?\*\//g` backtracks quadratically on
+ * a file holding many unclosed `/*`: each one restarts the lazy scan and runs
+ * it to the end of the input. The CSS here comes from whatever repository the
+ * user pointed at, so that is reachable input, and CodeQL flags it.
+ *
+ * An unterminated comment runs to the end of the file, which is what the CSS
+ * spec says and what a browser does. The regex left that text in place, where
+ * the parser below would read the commented-out declarations as live — the one
+ * thing this strip exists to prevent.
+ */
+function stripCssComments(css: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const start = css.indexOf("/*", from);
+    if (start === -1) return out + css.slice(from);
+    out += css.slice(from, start);
+    const end = css.indexOf("*/", start + 2);
+    if (end === -1) return out;
+    from = end + 2;
+  }
+}
+
+/**
  * Custom properties from `:root` (and, for Tailwind v4, `@theme`).
  *
  * Blocks are brace-matched, not matched with a non-greedy regex: a nested rule
@@ -219,7 +245,7 @@ export interface CssTokens {
 export function parseCssCustomProperties(css: string): CssTokens {
   const out: CssTokens = { variables: [], unresolved: [] };
   // Comments first: a commented-out token must not look live.
-  const cleaned = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const cleaned = stripCssComments(css);
 
   const seen = new Set<string>();
   const selectorRe = /(?::root|@theme)[^{]*\{/g;

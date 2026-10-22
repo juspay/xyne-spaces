@@ -203,6 +203,32 @@ describe("parseCssCustomProperties", () => {
   it("survives an unterminated block", () => {
     expect(() => parseCssCustomProperties(":root { --a: #FFF;")).not.toThrow();
   });
+
+  // An unclosed comment runs to the end of the stylesheet, as it does in a
+  // browser. Leaving that text in would hand the parser declarations their
+  // author had commented out.
+  it("treats an unterminated comment as running to the end of the file", () => {
+    const css = ":root { --live: #FFF; }\n/* :root { --ghost: #DEAD00; }";
+    const tokens = parseCssCustomProperties(css);
+    expect(tokens.variables.map((v) => v.name)).toEqual(["live"]);
+  });
+
+  it("keeps declarations that follow a closed comment", () => {
+    const css = ":root { /* note */ --a: #FFF; /* another */ --b: #000; }";
+    const tokens = parseCssCustomProperties(css);
+    expect(tokens.variables.map((v) => v.name)).toEqual(["a", "b"]);
+  });
+
+  // Guards the ReDoS the lazy comment regex allowed: each unclosed `/*`
+  // restarted a scan to end of input, so cost grew with the square of the
+  // file. Sized so the difference cannot be mistaken for noise — the regex
+  // took ~7s on this input, linear stripping takes under a millisecond.
+  it("stays fast on many unclosed comment openers", () => {
+    const css = `:root { --a: #FFF; }\n${"/*a/".repeat(120_000)}`;
+    const started = Date.now();
+    expect(parseCssCustomProperties(css).variables.map((v) => v.name)).toEqual(["a"]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("colorVariables", () => {
