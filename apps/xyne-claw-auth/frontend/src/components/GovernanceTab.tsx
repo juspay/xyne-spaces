@@ -15,7 +15,8 @@ import {
 const PAGE = 50;
 const SCOPES = ["run", "agent", "user", "mcp_server", "tool", "org", "platform"] as const;
 const MODES = ["stop", "read_only", "ask_all"] as const;
-const EMPTY_FILTERS = { decision: "", risk: "", effect: "", tool: "", agent: "", days: "7" };
+const EMPTY_FILTERS = { eventType: "tool_call", decision: "", risk: "", effect: "", tool: "", agent: "", days: "7" };
+const EVENT_TYPES = ["tool_call", "tool_outcome", "run_started", "kill_switch_set", "kill_switch_enforced", "kill_switch_cleared", "content_scan", "version_status_changed", "admin_override", "config_changed"] as const;
 
 const badge = (decision: string | null): string =>
   decision === "block" ? "bg-red-950 text-red-400" : decision === "ask" ? "bg-amber-950 text-amber-400" : decision === "allow" ? "bg-green-950 text-green-400" : "bg-zinc-800 text-zinc-400";
@@ -37,6 +38,7 @@ export function GovernanceTab({ userId, orgScope }: { userId: string; orgScope: 
 
   const query = useCallback(() => ({
     since: new Date(Date.now() - Number(filters.days || 7) * 24 * 60 * 60_000).toISOString(),
+    eventType: filters.eventType,
     ...(filters.decision ? { decision: filters.decision } : {}),
     ...(filters.risk ? { risk: filters.risk } : {}),
     ...(filters.effect ? { effect: filters.effect } : {}),
@@ -115,7 +117,7 @@ export function GovernanceTab({ userId, orgScope }: { userId: string; orgScope: 
       <div className="flex items-center gap-2">
         {(["feed", "stats", "kill"] as const).map((s) => (
           <button key={s} onClick={() => setSection(s)} className={`${button} ${section === s ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"}`}>
-            {s === "feed" ? `Tool calls${total > 0 ? ` (${total})` : ""}` : s === "stats" ? "Stats" : `Kill switches${switches.filter((k) => !k.clearedAt).length > 0 ? ` (${switches.filter((k) => !k.clearedAt).length} live)` : ""}`}
+            {s === "feed" ? `${filters.eventType === "tool_call" ? "Tool calls" : "Events"}${total > 0 ? ` (${total})` : ""}` : s === "stats" ? "Stats" : `Kill switches${switches.filter((k) => !k.clearedAt).length > 0 ? ` (${switches.filter((k) => !k.clearedAt).length} live)` : ""}`}
           </button>
         ))}
         <span className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
@@ -130,6 +132,9 @@ export function GovernanceTab({ userId, orgScope }: { userId: string; orgScope: 
       {section === "feed" && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
+            <select className={input} value={filters.eventType} onChange={(e) => { setOffset(0); setFilters({ ...filters, eventType: e.target.value }); }}>
+              {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
             <select className={input} value={filters.decision} onChange={(e) => { setOffset(0); setFilters({ ...filters, decision: e.target.value }); }}>
               <option value="">Any decision</option>
               {["allow", "ask", "block"].map((d) => <option key={d} value={d}>{d}</option>)}
@@ -150,7 +155,7 @@ export function GovernanceTab({ userId, orgScope }: { userId: string; orgScope: 
           {loading && rows.length === 0 ? (
             <p className="text-sm text-zinc-500">Loading…</p>
           ) : rows.length === 0 ? (
-            <p className="text-sm text-zinc-500">No tool calls in this window.</p>
+            <p className="text-sm text-zinc-500">No {filters.eventType === "tool_call" ? "tool calls" : "events"} in this window.</p>
           ) : (
             <div className="rounded-lg border border-zinc-800 overflow-hidden">
               <table className="w-full text-sm">
@@ -176,7 +181,7 @@ export function GovernanceTab({ userId, orgScope }: { userId: string; orgScope: 
                         <td className="px-3 py-2 text-zinc-400">{r.toolEffect ?? "—"}{r.destinationKind && r.destinationKind !== "internal" ? ` → ${r.destinationHost ?? r.destinationKind}` : ""}</td>
                         <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 text-xs ${badge(r.decision)}`}>{r.decision ?? "—"}</span></td>
                         <td className={`px-3 py-2 text-xs ${riskBadge(r.riskLevelAtCall)}`}>{r.riskLevelAtCall ?? "—"}{r.carriedPrivateData ? " · private" : ""}</td>
-                        <td className="px-3 py-2 text-xs text-zinc-400">{r.reasonCode ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-zinc-400">{r.reasonCode ?? (r.subjectKind ? `${r.subjectKind}${r.subjectId ? ` ${r.subjectId}` : ""}` : "—")}</td>
                         <td className="px-3 py-2 text-xs">
                           {r.sessionId ? <a className="text-zinc-400 underline hover:text-zinc-200" href={`/claw/v3/runs?session=${encodeURIComponent(r.sessionId)}`} onClick={(e) => e.stopPropagation()}>trace</a> : "—"}
                         </td>
