@@ -36,7 +36,10 @@ import {
   nextChecksVersion,
 } from "../lib/subagent-resolver.js";
 import { SUBAGENT_DEFINITIONS, validateDecideQuestions } from "xyne-claw-shared";
-import { tryChecksViaClaw } from "../services/xorTryClient.js";
+import { evalChecksViaClaw, tryChecksViaClaw } from "../services/xorTryClient.js";
+import { runRegressionGate } from "../lib/subagent-eval-gate.js";
+import type { DecideQuestion } from "xyne-claw-shared";
+import type { SubagentSample } from "../lib/subagent-resolver.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
@@ -114,6 +117,7 @@ function dbRowAsListItem(
     samples: row.samples ?? [],
     model: row.model,
     budget: row.budget ?? {},
+    evalReport: row.evalReport ?? null,
     enabled: row.enabled,
     createdByUserId: row.createdByUserId,
     // Resolved display name/email of the creator (createdByUserId is a bare
@@ -246,6 +250,88 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
 }));
 
+const storedChecks = (v: unknown): DecideQuestion[] | null => (Array.isArray(v) && v.length > 0 ? (v as DecideQuestion[]) : null);
+const storedSamples = (v: unknown): SubagentSample[] => (Array.isArray(v) ? (v as SubagentSample[]) : []);
+const MODEL_ID_RE = /^[a-zA-Z0-9._:/-]{1,100}$/;
+
+function parseModels(raw: unknown, min: number): string[] | undefined {
+  if (raw === undefined || raw === null) {
+    if (min > 0) throw badRequest(`compare must list at least ${min} model id`);
+    return undefined;
+  }
+  if (!Array.isArray(raw) || raw.length < min || raw.length > 3 || !raw.every((m) => typeof m === "string" && MODEL_ID_RE.test(m))) {
+    throw badRequest(`compare must be ${Math.max(min, 1)}–3 model ids`);
+  }
+  return raw as string[];
+}
+
+function parseVariants(raw: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>)
+      .filter(([, v]) => Array.isArray(v))
+      .map(([k, v]) => [k, (v as unknown[]).filter((x): x is string => typeof x === "string" && x.trim().length > 0).slice(0, 4)]),
+  );
+}
+
+// ── POST /checks/eval-all — score every subagent's checks on new models (admin) ─
+router.post("/checks/eval-all", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  if (!(await isClawAdmin(requesterId))) throw forbidden("Only claw admins can run evals across all subagents");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const compare = parseModels((req.body as Record<string, unknown>)?.["compare"], 1)!;
+  const rows = await prisma.subagentDefinition.findMany({
+    where: { orgId, enabled: true, NOT: [{ checks: { equals: Prisma.DbNull } }, { samples: { equals: Prisma.DbNull } }] },
+    select: { id: true, name: true, checks: true, samples: true, checksVersion: true },
+    take: 50,
+  });
+  const results = [];
+  for (const row of rows) {
+    const checks = storedChecks(row.checks);
+    const samples = storedSamples(row.samples);
+    if (!checks || samples.length === 0) continue;
+    const r = await evalChecksViaClaw({ checks, samples, compare });
+    if (!r.ok) {
+      results.push({ name: row.name, error: r.error });
+      continue;
+    }
+    await prisma.subagentDefinition.update({
+      where: { id: row.id },
+      data: { evalReport: { ...r, checksVersion: row.checksVersion, ranBy: requesterId } as unknown as Prisma.InputJsonValue },
+    });
+    results.push({
+      name: row.name,
+      overall: r.report.models.map((m) => ({ model: m.model, accuracy: m.overall.accuracy, unsureRate: m.overall.unsureRate, confidentWrong: m.overall.confidentWrong })),
+      regressions: r.regressions.flatMap((x) => x.regressions.map((g) => ({ model: x.model, ...g }))),
+    });
+  }
+  ok(res, { compare, subagents: results });
+}));
+
+// ── POST /:name/checks/eval — score this subagent's checks on its samples ───
+router.post("/:name/checks/eval", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!existing) throw notFound("subagent not found");
+  if (!(await canEditSubagent(existing, requesterId))) throw forbidden("Only the owner, contributors, or admins can run this subagent's evals");
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const checks = storedChecks(existing.checks);
+  const samples = storedSamples(existing.samples);
+  if (!checks) throw badRequest("this subagent has no checks yet");
+  if (samples.length === 0) throw badRequest("save at least one sample from Try it before running evals");
+  const compare = parseModels(body["compare"], 0);
+  const variants = parseVariants(body["variants"]);
+  const r = await evalChecksViaClaw({ checks, samples, ...(compare ? { compare } : {}), ...(variants ? { variants } : {}) });
+  if (!r.ok) throw new HttpError(r.status, r.error);
+  const evalReport = { ...r, checksVersion: existing.checksVersion, ranBy: requesterId };
+  await prisma.subagentDefinition.update({ where: { id: existing.id }, data: { evalReport: evalReport as unknown as Prisma.InputJsonValue } });
+  ok(res, evalReport);
+}));
+
 // ── POST /checks/try — run one xor decision on a pasted sample ──────────
 router.post("/checks/try", asyncHandler(async (req: Request, res: Response) => {
   if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
@@ -299,6 +385,24 @@ router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
     if (err instanceof ValidationError) throw new HttpError(400, err.message, undefined, { field: err.field });
     throw err;
   });
+
+  if ((req.body as Record<string, unknown>)?.["force"] !== true) {
+    const gate = await runRegressionGate({
+      oldChecks: storedChecks(existing.checks),
+      newChecks: validated.checks,
+      samples: validated.samples !== undefined ? validated.samples ?? [] : storedSamples(existing.samples),
+      evaluate: (r) => evalChecksViaClaw(r),
+    });
+    if (gate.blocked) {
+      log.info(`[subagents/update] eval gate blocked name=${name} ${gate.from}% → ${gate.to}%`);
+      throw new HttpError(
+        409,
+        `The new checks score worse on this subagent's samples (${gate.from}% → ${gate.to}% confident and right). Rephrase them, or save anyway.`,
+        "EVAL_REGRESSION",
+        { regression: gate },
+      );
+    }
+  }
 
   const updated = await subagentDefinitionRepository.update(name, existing.orgId, {
     description: validated.description,

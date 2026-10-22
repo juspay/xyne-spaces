@@ -1,0 +1,775 @@
+{
+  "description": "ui-tester visual eval set: Xyne Claw Runs page states labelled against STANDARD_QUESTIONS, plus synthetic pages with labelled yes/no statements.",
+  "cases": [
+    {
+      "id": "runs-empty",
+      "image": "runs-empty.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "empty"
+      }
+    },
+    {
+      "id": "runs-typical",
+      "image": "runs-typical.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "data"
+      }
+    },
+    {
+      "id": "runs-long-text",
+      "image": "runs-long-text.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "data"
+      }
+    },
+    {
+      "id": "runs-many",
+      "image": "runs-many.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "data"
+      }
+    },
+    {
+      "id": "runs-server-error",
+      "image": "runs-server-error.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "both",
+        "placeholders": "no",
+        "toasts": "several",
+        "background": "light",
+        "content": "error"
+      }
+    },
+    {
+      "id": "runs-loading",
+      "image": "runs-loading.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "loading"
+      }
+    },
+    {
+      "id": "runs-malformed",
+      "image": "runs-malformed.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "yes",
+        "toasts": "none",
+        "background": "light",
+        "content": "data"
+      }
+    },
+    {
+      "id": "runs-mobile",
+      "image": "runs-mobile.jpg",
+      "expected": {
+        "cut_off": true,
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "light",
+        "content": "data"
+      }
+    },
+    {
+      "id": "runs-dark",
+      "image": "runs-dark.jpg",
+      "expected": {
+        "cut_off": false,
+        "overlap": "no",
+        "errors": "none",
+        "placeholders": "no",
+        "toasts": "none",
+        "background": "dark",
+        "content": "data"
+      }
+    },
+    {
+      "id": "login-clean",
+      "image": "login-clean.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "A sign-in form with email and password fields is shown.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "An error message is displayed on the page.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The Sign in button is disabled.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "A success confirmation is shown.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": false,
+        "s4": false
+      }
+    },
+    {
+      "id": "login-error",
+      "image": "login-error.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "An error message is displayed on the page.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The error says the email or password is invalid.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The user is signed in and sees a dashboard.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "The input fields are highlighted in red.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": true,
+        "s3": false,
+        "s4": true
+      }
+    },
+    {
+      "id": "button-disabled",
+      "image": "button-disabled.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Create key button is disabled (greyed out).",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The Create key button is enabled and clickable.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "There is a Cancel button.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true
+      }
+    },
+    {
+      "id": "button-enabled",
+      "image": "button-enabled.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Create key button is disabled (greyed out).",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The Create key button is enabled and clickable.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The key name field contains the text prod-ingest.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": false,
+        "s2": true,
+        "s3": true
+      }
+    },
+    {
+      "id": "toast-saved",
+      "image": "toast-saved.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "A notification confirming the changes were saved is visible.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "An error notification is visible.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "A modal dialog is open over the page.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": false
+      }
+    },
+    {
+      "id": "modal-delete",
+      "image": "modal-delete.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "A modal dialog is open over the page.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The dialog asks to confirm deleting a project.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The project being deleted is named payments-api.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "The project being deleted is named billing-api.",
+          "type": "yesno"
+        },
+        {
+          "id": "s5",
+          "question": "A success notification is visible.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": true,
+        "s3": true,
+        "s4": false,
+        "s5": false
+      }
+    },
+    {
+      "id": "table-orders",
+      "image": "table-orders.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "A table of orders is displayed.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The table has exactly 3 order rows.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "Order #1043 has status Failed.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "All orders have status Paid.",
+          "type": "yesno"
+        },
+        {
+          "id": "s5",
+          "question": "The total shown is ₹4,790.",
+          "type": "yesno"
+        },
+        {
+          "id": "s6",
+          "question": "The total shown is ₹5,790.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": true,
+        "s3": true,
+        "s4": false,
+        "s5": true,
+        "s6": false
+      }
+    },
+    {
+      "id": "empty-state",
+      "image": "empty-state.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The page shows an empty state saying there are no orders.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "A table of orders is displayed.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "An error message is displayed on the page.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": false
+      }
+    },
+    {
+      "id": "loading",
+      "image": "loading.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The page is still loading (a spinner or loading message is shown).",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The dashboard content with data has finished loading.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    },
+    {
+      "id": "broken-layout",
+      "image": "broken-layout.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The layout looks broken: content overflows its container or overlaps other content.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The layout looks clean, with nothing overflowing or overlapping.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    },
+    {
+      "id": "clean-cards",
+      "image": "clean-cards.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The layout looks broken: content overflows its container or overlaps other content.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The layout looks clean, with nothing overflowing or overlapping.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "Three revenue cards are shown side by side.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "This month's revenue is ₹3,20,000.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": false,
+        "s2": true,
+        "s3": true,
+        "s4": true
+      }
+    },
+    {
+      "id": "dark-settings",
+      "image": "dark-settings.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The page uses a dark theme.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "A success message says the settings were updated.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The notifications setting is Email only.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "The notifications setting is Push and SMS.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": true,
+        "s3": true,
+        "s4": false
+      }
+    },
+    {
+      "id": "404",
+      "image": "404.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The page shows a 404 / page-not-found error.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The requested page loaded successfully with its normal content.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    },
+    {
+      "id": "toggles",
+      "image": "toggles.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Email alerts toggle is switched on.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The SMS alerts toggle is switched on.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The Weekly digest toggle is switched on.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "All three toggles are switched on.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true,
+        "s4": false
+      }
+    },
+    {
+      "id": "checkboxes",
+      "image": "checkboxes.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Write checkbox is checked.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The Admin checkbox is checked.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "Exactly two checkboxes are checked.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": false,
+        "s2": true,
+        "s3": true
+      }
+    },
+    {
+      "id": "tabs",
+      "image": "tabs.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Billing tab is the selected tab.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The Overview tab is the selected tab.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The plan shown is Pro.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true
+      }
+    },
+    {
+      "id": "count-chips",
+      "image": "count-chips.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "Exactly 7 label chips are shown.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "Exactly 8 label chips are shown.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "Exactly 6 label chips are shown.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": false
+      }
+    },
+    {
+      "id": "dense-table",
+      "image": "dense-table.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "Exactly two services have a red status dot.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "All services have a green status dot.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "svc-105 has a red status dot.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "svc-104 has a red status dot.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true,
+        "s4": false
+      }
+    },
+    {
+      "id": "truncated",
+      "image": "truncated.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The file name is cut off with an ellipsis (…).",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The full file name is visible without truncation.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    },
+    {
+      "id": "misaligned",
+      "image": "misaligned.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The three buttons are vertically aligned on the same line.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "One of the buttons sits lower than the others.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": false,
+        "s2": true
+      }
+    },
+    {
+      "id": "aligned",
+      "image": "aligned.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The three buttons are vertically aligned on the same line.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "One of the buttons sits lower than the others.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    },
+    {
+      "id": "small-value",
+      "image": "small-value.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "Disk usage is 88%.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "Disk usage is 68%.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The error rate is 0.31%.",
+          "type": "yesno"
+        },
+        {
+          "id": "s4",
+          "question": "24 of 30 pods are shown.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true,
+        "s4": true
+      }
+    },
+    {
+      "id": "mobile-overflow",
+      "image": "mobile-overflow.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "Some form fields are cut off or overflow past the right edge of the screen.",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "All form fields fit within the screen width.",
+          "type": "yesno"
+        },
+        {
+          "id": "s3",
+          "question": "The pay button says Pay ₹1,200.",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false,
+        "s3": true
+      }
+    },
+    {
+      "id": "focus-ring",
+      "image": "focus-ring.jpg",
+      "checks": [
+        {
+          "id": "s1",
+          "question": "The Search field is focused (highlighted with a blue ring).",
+          "type": "yesno"
+        },
+        {
+          "id": "s2",
+          "question": "The Filter field is focused (highlighted with a blue ring).",
+          "type": "yesno"
+        }
+      ],
+      "expected": {
+        "s1": true,
+        "s2": false
+      }
+    }
+  ]
+}

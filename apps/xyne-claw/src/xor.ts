@@ -27,6 +27,7 @@ export interface XorRequest {
   purpose: string;
   images?: string[] | undefined;
   signal?: AbortSignal | undefined;
+  model?: string | undefined;
 }
 
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
@@ -115,6 +116,7 @@ async function post(
   questions: Record<string, XorQuestion>,
   signal: AbortSignal,
   images: string[],
+  modelOverride?: string,
 ): Promise<Record<string, XorAnswer>> {
   if (cfg.backend === "llm") {
     if (images.length > 0) throw new Error("llm backend cannot read images");
@@ -127,7 +129,7 @@ async function post(
     method: "POST",
     signal,
     headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ state, model: vision ? vision.model : cfg.model, questions, ...(images.length > 0 ? { images } : {}) }),
+    body: JSON.stringify({ state, model: modelOverride || (vision ? vision.model : cfg.model), questions, ...(images.length > 0 ? { images } : {}) }),
   });
   if (!res.ok) throw new Error(`xor ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, XorAnswer> };
@@ -163,7 +165,7 @@ export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | 
       at: new Date(started).toISOString(),
     });
   try {
-    const answers = await post(cfg, state, questions, controller.signal, images);
+    const answers = await post(cfg, state, questions, controller.signal, images, req.model);
     const elapsed = Date.now() - started;
     metric.observe("xor_ms", elapsed, { purpose, backend: cfg.backend, result: "ok", questions: count, images: images.length });
     record(elapsed, answers);

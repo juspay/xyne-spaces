@@ -143,6 +143,7 @@ export async function decideBatch(input: {
   purpose?: string;
   signal?: AbortSignal;
   ask?: XorAsk;
+  model?: string;
 }): Promise<DecideResult> {
   const ask = input.ask ?? xor;
   const xq = toXorQuestions(input.questions);
@@ -154,6 +155,7 @@ export async function decideBatch(input: {
       purpose: input.purpose ?? "xor-decide",
       ...(item.image ? { images: [item.image] } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.model ? { model: input.model } : {}),
     }).catch(() => null);
     if (!answers) unavailable += 1;
     return {
