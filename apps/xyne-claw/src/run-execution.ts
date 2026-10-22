@@ -1,4 +1,5 @@
 import { beginJudgeRun } from "./judge-trace.js";
+import { registerRunOrg } from "./governance.js";
 import { pinRunOptimizations, tierOptimizationDefaults } from "./optimizations.js";
 import {
   ensureActiveRun,
@@ -44,6 +45,7 @@ export interface InternalRunPayload {
   eventType?: string;
   scheduledJobId?: string;
   traceId?: string;
+  orgId?: string;
   skills?: {
     slug?: string;
     name: string;
@@ -245,6 +247,7 @@ export async function executeRunFromPayload(
   const effectiveMode = resolveTaskCommandMode(task ?? "", mode);
   const experiment = normalizeExperimentContext(rawExperiment);
   const activeRun = ensureActiveRun(sessionId, payload);
+  if (payload.orgId) registerRunOrg(sessionId, payload.orgId);
   const state: RunExecutionState = hooks ? { hooks } : {};
 
   beginJudgeRun();

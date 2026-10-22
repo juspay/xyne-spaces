@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { GovernanceTab } from "./GovernanceTab";
 import { useNavigate } from "react-router-dom";
 import { Shield, Trash2, UserPlus, ArrowUpCircle, ArrowDownCircle, ChevronLeft, CheckCircle, XCircle, Loader2, Plug, Image as ImageIcon, Key, Save, ChevronDown, ChevronRight, Eye } from "lucide-react";
 import {
@@ -38,7 +39,7 @@ function OrgBadge({ orgName, orgId }: { orgName?: string | null; orgId?: string 
 
 export function AdminPage({ userId }: Props) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"requests" | "connectors" | "mcpedits" | "workflowreqs" | "agents" | "admins" | "audit" | "usage" | "scheduled" | "globalmcp">("requests");
+  const [tab, setTab] = useState<"requests" | "connectors" | "mcpedits" | "workflowreqs" | "agents" | "admins" | "audit" | "usage" | "scheduled" | "globalmcp" | "governance">("requests");
   const [allOrgs, setAllOrgs] = useState(false);
   const adminOrgScope: AdminOrgScope = allOrgs ? "all" : "org";
   const [mcpRequests, setMcpRequests] = useState<McpServer[]>([]);
@@ -598,7 +599,7 @@ export function AdminPage({ userId }: Props) {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 border-b border-zinc-800">
-        {(["requests", "connectors", "mcpedits", "workflowreqs", "agents", "admins", "audit", "usage", "scheduled", "globalmcp"] as const).map((t) => (
+        {(["requests", "connectors", "mcpedits", "workflowreqs", "agents", "admins", "audit", "usage", "scheduled", "globalmcp", "governance"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium transition ${tab === t ? "border-b-2 border-zinc-100 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"}`}>
             {t === "requests" ? `Requests${requests.length > 0 ? ` (${requests.length})` : ""}`
@@ -610,10 +611,13 @@ export function AdminPage({ userId }: Props) {
               : t === "audit" ? `Audit Log${auditTotal > 0 ? ` (${auditTotal})` : ""}`
               : t === "usage" ? "Usage"
               : t === "scheduled" ? `Scheduled Jobs${scheduledTotal > 0 ? ` (${scheduledTotal})` : ""}`
-              : "Global MCP Creds"}
+              : t === "globalmcp" ? "Global MCP Creds"
+              : "Governance"}
           </button>
         ))}
       </div>
+
+      {tab === "governance" && <GovernanceTab userId={userId} orgScope={adminOrgScope} />}
 
       {/* ── Requests Tab ── */}
       {tab === "requests" && (

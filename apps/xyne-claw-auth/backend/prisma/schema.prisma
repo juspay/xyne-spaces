@@ -3593,3 +3593,27 @@ model GovernanceAuditEvent {
   @@index([orgId, occurredAt])
   @@map("governance_audit_events")
 }
+
+model KillSwitch {
+  id              String    @id @default(cuid())
+  orgId           String
+  scopeKind       String
+  scopeId         String
+  mode            String
+  reason          String
+  setBy           String
+  setByUserId     String?
+  triggerKey      String?
+  /// Moves on every set or clear: one integer tells a pod whether its snapshot is current.
+  epoch           BigInt
+  expiresAt       DateTime?
+  clearedByUserId String?
+  clearedAt       DateTime?
+  clearReason     String?
+  createdAt       DateTime  @default(now())
+
+  @@index([clearedAt, expiresAt])
+  @@index([orgId, createdAt])
+  @@index([epoch])
+  @@map("governance_kill_switches")
+}

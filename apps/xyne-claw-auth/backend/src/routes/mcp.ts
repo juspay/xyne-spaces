@@ -79,7 +79,7 @@ import {
   parseGatewayToolSelectionKey,
 } from "../mcpgateway/key-format.js";
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
-import { gateCall, blockedToolResultText, type C1Handoff } from "../lib/governance-gate.js";
+import { effectiveGrant, gateCall, blockedToolResultText, type C1Handoff } from "../lib/governance-gate.js";
 import { buildAgentCallProposalFlow, isEmptyToolsSelection, parseToolsConfig, resolveAgentToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { findUnresolvedConfiguredServers, visibleConnectors, type UnresolvedConfiguredServer } from "../lib/connector-access.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
@@ -2005,8 +2005,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       }
 
       const requiresApproval = requiresGatewayToolApproval(descriptor);
-      const effectivePermission = requiresApproval ? "ask" : (permission ?? "allow");
-      const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, permissionHint: permission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, c1: governance });
+      const effectivePermission = effectiveGrant(permission, requiresApproval);
+      const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, grant: permission, permissionHint: effectivePermission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, c1: governance });
       if (gate.enforce && gate.decision === "block") {
         res.json({ success: true, data: { content: blockedToolResultText(gate) } });
         return;
@@ -2154,9 +2154,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const isWriteTool = definition?.writePolicy
       ? isWriteToolUnderPolicy(definition.writePolicy, tool)
       : (definition?.writeTools?.includes(tool) ?? false);
-    const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
+    const effectivePermission = effectiveGrant(permission, isWriteTool);
     // A declared write policy settles reads too; without one only a write is known.
-    const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, permissionHint: permission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), c1: governance });
+    const gate = await gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, grant: permission, permissionHint: effectivePermission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), c1: governance });
     if (gate.enforce && gate.decision === "block") {
       res.json({ success: true, data: { content: blockedToolResultText(gate) } });
       return;

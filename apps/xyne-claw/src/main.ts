@@ -2,6 +2,7 @@
 process.env.SERVICE_NAME ||= "xyne-claw";
 
 import express from "express";
+import { startKillSwitchSync } from "./governance-kill.js";
 import { DATA_DIR_IS_EXPLICIT, PATHS, SERVER } from "./config.js";
 import { initStore } from "./store.js";
 import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
@@ -106,6 +107,7 @@ app.use(litellmModelsRouter);
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
   startPodAddressPublisher(SERVER.port);
+  startKillSwitchSync();
 });
 
 let shuttingDown = false;

@@ -10,6 +10,8 @@ vi.mock("../src/governance-client.js", () => ({
 }));
 
 const { createRunGovernance, governanceDecisionFor, governanceForRun, toolMetaOf } = await import("../src/governance.js");
+const { resetCritic } = await import("../src/governance-critic.js");
+const { setKillSnapshotForTests } = await import("../src/governance-kill.js");
 const { resetComponentModes } = await import("xyne-claw-shared/governance");
 const client = await import("../src/governance-client.js");
 
@@ -31,6 +33,8 @@ const findings = () => posted.flatMap((p) => p.findings as Array<Record<string, 
 
 beforeEach(() => {
   posted.length = now.length = 0;
+  resetCritic();
+  setKillSnapshotForTests({ epoch: 0, takenAtMs: Date.now(), switches: [] });
   vi.clearAllMocks();
   delete process.env["GOVERNANCE_MODE"];
   delete process.env["GOVERNANCE_COMPONENT_MODES"];
@@ -38,6 +42,38 @@ beforeEach(() => {
 });
 
 describe("governance hooks", () => {
+  it("C1 blocks on a matching stop switch in enforce and records the enforcement in shadow", async () => {
+    const { agent } = fakeAgent();
+    run({ orgId: "org-1" }).install(agent as never);
+    setKillSnapshotForTests({ epoch: 9, takenAtMs: Date.now(), switches: [{ scopeKind: "org", scopeId: "org-1", mode: "read_only", epoch: 9, reason: "incident" }] });
+    expect(await agent.beforeToolCall(toolCall("read", "r0"))).toBeUndefined();
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w0", { content: "x" }))).toBeUndefined();
+    expect(governanceDecisionFor("w0")).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-READ-ONLY" });
+    expect(events().find((e) => e["eventType"] === "kill_switch_enforced")).toMatchObject({ subjectKind: "kill:org", subjectId: "org-1", reasonText: "shadow: would enforce at C1" });
+    process.env["GOVERNANCE_COMPONENT_MODES"] = "C1=enforce";
+    resetComponentModes();
+    expect(await agent.beforeToolCall(toolCall("write-memory-file", "w1", { content: "x" }))).toMatchObject({ block: true, reason: expect.stringContaining("GOV-KILL-READ-ONLY") });
+  });
+
+  it("C1 asks the critic only after untyped content, records its verdict and B records the outcome", async () => {
+    const ask = vi.fn(async () => ({ destroy: { type: "noul", noul: 0.1 }, exfil: { type: "noul", noul: 0.9 }, injected: { type: "noul", noul: 0.2 }, scope: { type: "noul", noul: 0.2 }, creds: { type: "noul", noul: 0.1 } }));
+    const { agent } = fakeAgent();
+    agent.afterToolCall = vi.fn(async () => undefined) as unknown as Hook;
+    const g = run({ critic: { ask }, request: { text: "post hello in #general", typedByPerson: true } });
+    g.install(agent as never);
+    // Nothing untyped read yet: no critic call.
+    expect(await agent.beforeToolCall(toolCall("slack__send", "s0", { channel: "C1", text: "hello" }))).toBeUndefined();
+    expect(ask).not.toHaveBeenCalled();
+    // A local read of untyped content (not private data) is enough to make the critic necessary.
+    await agent.afterToolCall({ ...toolCall("read", "r1"), result: { content: [{ type: "text", text: "newsletter body" }] }, isError: false } as never);
+    expect(events().filter((e) => e["eventType"] === "tool_outcome").map((e) => [e["toolCallId"], e["outcome"]])).toEqual([["r1", "executed"]]);
+    expect(await agent.beforeToolCall(toolCall("slack__send", "s1", { channel: "C1", text: "hello" }))).toBeUndefined();
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(governanceDecisionFor("s1")).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH", criticStatus: "decided", criticLevel: "high" });
+    await agent.afterToolCall({ ...toolCall("slack__send", "s1"), result: { content: [{ type: "text", text: "sent" }] }, isError: true } as never);
+    expect(events().at(-1)).toMatchObject({ eventType: "tool_outcome", toolCallId: "s1", outcome: "error", reasonText: expect.stringMatching(/^error in \d+ ms$/) });
+  });
+
   it("installs last and keeps pi's own hooks working (skill triggers, command guard)", async () => {
     const { agent, calls } = fakeAgent();
     const g = run();

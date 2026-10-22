@@ -427,7 +427,7 @@ export async function loadMcpToolsForUser(
             ? ` Trusted SDLC fields (${Object.keys(trustedBindings).join(", ")}) are bound by the server; do not supply them.`
             : ""),
         parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, signal) {
           // For allowlisted servers, replace any `{{file:<relpath>}}` markers in
           // the params with the base64 content of the referenced workspace file
           // before the call leaves claw. The model never sees the bytes.
@@ -462,6 +462,8 @@ export async function loadMcpToolsForUser(
             sessionToken,
             {
               method: "POST",
+              // The run's abort signal: a kill or a cancel reaches the request in flight.
+              ...(signal ? { signal } : {}),
               headers: clawUserHeaders(clawUserId),
               body: JSON.stringify({
                 serverType: server.serverType,

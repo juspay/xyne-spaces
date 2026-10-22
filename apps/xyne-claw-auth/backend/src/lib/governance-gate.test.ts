@@ -7,9 +7,11 @@ const findRun = vi.fn(async () => ({ id: "run-1", orgId: "org-1", userId: "u1", 
 vi.mock("./governance-audit.js", () => ({ recordGovernanceEvent: record, queueGovernanceEvent: queue }));
 vi.mock("./audit.js", () => ({ orgIdForUser: vi.fn(async (id: string) => (id === "u1" ? "org-1" : undefined)) }));
 vi.mock("../db.js", () => ({ prisma: { agentRun: { findUnique: findRun } } }));
+const kill = { snapshot: { epoch: 0, takenAtMs: 0, switches: [] as Array<Record<string, unknown>> } };
+vi.mock("./governance-kill.js", () => ({ currentKillSnapshot: () => ({ ...kill.snapshot, takenAtMs: kill.snapshot.takenAtMs || Date.now() }), killForTool: () => null }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 
-const { gateCall, runContextForSession } = await import("./governance-gate.js");
+const { effectiveGrant, gateCall, runContextForSession } = await import("./governance-gate.js");
 const { resetComponentModes } = await import("xyne-claw-shared/governance");
 
 const base = { site: "mcp_call" as const, userId: "u1", agentSlug: "helper", sessionId: "sess-1", serverType: "slack", tool: "send_message", params: { text: "hi" }, writeTool: true };
@@ -55,6 +57,23 @@ describe("gateCall", () => {
     resetComponentModes();
     findRun.mockRejectedValueOnce(new Error("db down"));
     expect(await gateCall({ ...base, sessionId: "sess-2" })).toMatchObject({ decision: "allow", reasonCode: "GOV-ALLOW", recorded: false });
+  });
+
+  it("lets a deny grant beat the forced ask, and honours the critic level C1 handed over", async () => {
+    expect([effectiveGrant("deny", true), effectiveGrant("allow", true), effectiveGrant("ask", false), effectiveGrant(undefined, false)]).toEqual(["deny", "ask", "ask", "allow"]);
+    expect(await gateCall({ ...base, grant: "deny", permissionHint: "ask" })).toMatchObject({ decision: "block", reasonCode: "GOV-GRANT-DENY" });
+    const c1 = { decisionId: "d2", decision: "ask", risk: "none", privateData: false, pendingVerdicts: 0, toolCallId: "c9", criticStatus: "decided", criticLevel: "high" };
+    expect(await gateCall({ ...base, c1 })).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH" });
+    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ toolCallId: "c9", matchedRuleIds: ["critic.high"] }));
+  });
+
+  it("blocks on a matching stop switch, refuses side effects on a stale snapshot, and records the enforcement", async () => {
+    kill.snapshot = { epoch: 5, takenAtMs: 0, switches: [{ scopeKind: "org", scopeId: "org-1", mode: "stop", epoch: 5, reason: "incident" }] };
+    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STOP" });
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({ eventType: "kill_switch_enforced", subjectKind: "kill:org", subjectId: "org-1", reasonText: "shadow: would enforce at C2" }));
+    kill.snapshot = { epoch: 6, takenAtMs: Date.now() - 60_000, switches: [] };
+    expect(await gateCall(base)).toMatchObject({ decision: "block", reasonCode: "GOV-KILL-STALE" });
+    kill.snapshot = { epoch: 0, takenAtMs: 0, switches: [] };
   });
 
   it("caches the run behind a session id", async () => {
