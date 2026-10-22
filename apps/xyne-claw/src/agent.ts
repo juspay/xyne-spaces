@@ -24,7 +24,8 @@ import { compactionExtension, fitTask, setCompactionSubmitTool } from "./compact
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
-import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession } from "xyne-claw-shared";
+import { checkReplyFormat, replyFormatNudge, type ResultSectionLimits, getSandboxSession, isSharedOrReadOnlySandbox, isSandboxSessionOwnedByContext } from "xyne-claw-shared";
+import { decideSandboxPreviewAnnounce } from "./sandbox-preview-announce.js";
 import type {
   ClawAttachmentPayload,
   ClawSandboxPreviewPayload,
@@ -1879,6 +1880,7 @@ export interface RunTaskOptions {
    *  RAW conversationId + agentSlug, threaded separately so /webhook/progress
    *  can fall back to it when a refired run minted a fresh sessionId. */
   progressMeta?: { conversationId?: string | null; agentSlug?: string | null } | undefined;
+  sandboxToolMeta?: Record<string, string> | undefined;
   /** Set on a fallback attempt following an EMPTY completion: compact the
    *  resumed session before prompting the next provider so it doesn't inherit
    *  the same over-window context that produced nothing (and overflow again). */
@@ -2686,7 +2688,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   setCompactionSubmitTool(
     structuredOutputRef ? "submit-result" : verifyResponsesRef ? "submit-response" : requiredTool?.name,
   );
-  let sandboxPreviewEmitted = false;
+  // Sandbox IDs whose live preview was already announced in this run. One
+  // announce per distinct writable sandbox; shared sbx-git is never announced
+  // (XYNE-66338).
+  const announcedSandboxIds = new Set<string>();
+  const loggedSharedSandboxSkips = new Set<string>();
   const toolInvocations: ToolInvocation[] = [];
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let streamedText = "";
@@ -3318,10 +3324,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         });
         queueDebugPartialFlush();
 
-        // First time a sandbox-* tool succeeds, the kata session is live.
-        // Emit the noVNC preview URL once so claw-auth can drop a clickable
-        // "Open sandbox" link into the channel.
-        if (!sandboxPreviewEmitted && !event.isError && /sandbox/i.test(event.toolName) && SANDBOX_PREVIEW.baseUrl) {
+        // Each time a sandbox-* tool succeeds against a sandbox this run has
+        // not announced yet, emit its noVNC preview URL so claw-auth can record
+        // the Workspace preview and drop an "Open sandbox" link into the channel.
+        // The shared read-only sbx-git sandbox is skipped (XYNE-66338).
+        if (!event.isError && /sandbox/i.test(event.toolName) && SANDBOX_PREVIEW.baseUrl) {
           // routes/run.ts passes the caller-scoped sandbox store key as the
           // `conversationId` argument, so for our hook here `conversationId` IS
           // the sandbox storeKey. Falling back to the run's
@@ -3330,19 +3337,35 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           // unposted in prod sessions where the agent reused a kata session
           // from a prior run.
           const storeKey = conversationId ?? sessionId ?? "unknown";
-          const sbx = getSandboxSession(storeKey);
-          if (sbx?.id) {
+          const decision = decideSandboxPreviewAnnounce({
+            toolArgs: started.args,
+            toolResult: event.result,
+            storeKey,
+            announced: announcedSandboxIds,
+            getSession: getSandboxSession,
+            isOwned: (lookupKey) => isSandboxSessionOwnedByContext(lookupKey, opts.sandboxToolMeta ? { meta: opts.sandboxToolMeta } : undefined),
+            isSharedOrReadOnly: isSharedOrReadOnlySandbox,
+          });
+          if (decision.announce) {
+            const sandboxId = decision.sandboxId;
             const previewBase = SANDBOX_PREVIEW.baseUrl.replace(/\/+$/, "");
-            const sandboxPreviewUrl = `${previewBase}/claw-preview/${sbx.id}/`;
-            const sandboxCodePreviewUrl = `${previewBase}/claw-code/${sbx.id}`;
-            const sandboxTermUrl = `${previewBase}/claw-term/${sbx.id}/`;
-            sandboxPreviewEmitted = true;
+            const sandboxPreviewUrl = `${previewBase}/claw-preview/${sandboxId}/`;
+            const sandboxCodePreviewUrl = `${previewBase}/claw-code/${sandboxId}`;
+            const sandboxTermUrl = `${previewBase}/claw-term/${sandboxId}/`;
+            announcedSandboxIds.add(sandboxId);
             log.info(`[agent] Sandbox preview ready: ${sandboxPreviewUrl} | code: ${sandboxCodePreviewUrl} | term: ${sandboxTermUrl} (storeKey=${storeKey})`);
             // pushSandboxPreview goes to /webhook/progress which is keyed by
             // the run sessionId (the UUID), NOT the storeKey — claw-auth
             // looks the run session up. Use sessionId here.
-            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl }, progressMeta);
-          } else {
+            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl }, progressMeta);
+          } else if (decision.reason === "shared-readonly") {
+            if (decision.sandboxId && !loggedSharedSandboxSkips.has(decision.sandboxId)) {
+              loggedSharedSandboxSkips.add(decision.sandboxId);
+              log.info(`[agent] Sandbox preview skipped: shared read-only sandbox ${decision.sandboxId} (tool=${event.toolName})`);
+            }
+          } else if (decision.reason === "not-owned") {
+            log.warn(`[agent] Sandbox preview skipped: sandbox ${decision.sandboxId} is not owned by this run (tool=${event.toolName})`);
+          } else if (decision.reason === "no-session") {
             log.info(`[agent] Sandbox preview skipped: no SESSION_STORE entry for storeKey=${storeKey} (tool=${event.toolName})`);
           }
         }

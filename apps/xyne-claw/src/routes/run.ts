@@ -2733,6 +2733,7 @@ export async function processTask(
               ...(conversationId ? { conversationId } : {}),
               agentSlug: spec.slug,
             },
+            sandboxToolMeta: calleeMeta,
           });
           if (calleeInnerTools.length > 0) {
             subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
@@ -4373,6 +4374,7 @@ export async function processTask(
           conversationId: conversationId ?? null,
           agentSlug: agentSlug ?? null,
         },
+        sandboxToolMeta: meta,
         forceCompactBeforeRun,
         // submit-response verification: agent.ts wires the evidence accessor on
         // this ref so the tool can check drafts against gathered tool results.

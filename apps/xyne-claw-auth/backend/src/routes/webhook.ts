@@ -283,8 +283,8 @@ async function isLivePreviewMessageHidden(
 // retained forever.
 const announcedSandboxPreviews = new Set<string>();
 const ANNOUNCED_PREVIEWS_MAX = 5000;
-function rememberAnnouncedPreview(sessionId: string): void {
-  announcedSandboxPreviews.add(sessionId);
+function rememberAnnouncedPreview(key: string): void {
+  announcedSandboxPreviews.add(key);
   if (announcedSandboxPreviews.size > ANNOUNCED_PREVIEWS_MAX) {
     // Drop the oldest insertion (Set preserves insertion order).
     const oldest = announcedSandboxPreviews.values().next().value;
@@ -6581,7 +6581,11 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   // while the agent is still working. claw-side guards against re-emit, but we
   // also check the in-memory Set here in case run-recovery re-delivers.
   if (sandboxPreviewUrl && sandboxId) {
-    if (announcedSandboxPreviews.has(sessionId)) return;
+    // Dedupe per run + sandbox (XYNE-66338): a run that moves to a second
+    // writable sandbox must still get it announced, while run-recovery
+    // re-deliveries of the same frame are dropped.
+    const announceKey = `${sessionId}:${sandboxId}`;
+    if (announcedSandboxPreviews.has(announceKey)) return;
     // Resolve the run context BEFORE marking this run as announced. Claw emits
     // the preview once per run; if we marked it first and the lookup missed
     // (sandbox started before the session was registered, Redis blip), a
@@ -6598,8 +6602,8 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       return;
     }
     // Re-check after the await: a concurrent re-delivery may have won the race.
-    if (announcedSandboxPreviews.has(sessionId)) return;
-    rememberAnnouncedPreview(sessionId);
+    if (announcedSandboxPreviews.has(announceKey)) return;
+    rememberAnnouncedPreview(announceKey);
     const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     const ingest = await ingestSandboxPreviewSignals(
       { conversationId: ctx.conversationId, userId: ctx.senderId, orgId: ctx.agentOrgId ?? null, runId: sessionId },
