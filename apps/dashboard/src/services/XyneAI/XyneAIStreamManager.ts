@@ -131,6 +131,7 @@ export interface StreamRequest {
   tab?: string;
   /** Per-run thinking level (composer dropdown). Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  speed?: 'fast';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   sandboxMode?: 'remote' | 'local' | 'container' | undefined;
@@ -1276,6 +1277,7 @@ class XyneAIStreamManager {
           instant: request.instant ?? false,
           ...(request.tab && { tab: request.tab }),
           ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+          ...(request.speed ? { speed: request.speed } : {}),
           ...(request.approvedAction ? { approvedAction: request.approvedAction } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
