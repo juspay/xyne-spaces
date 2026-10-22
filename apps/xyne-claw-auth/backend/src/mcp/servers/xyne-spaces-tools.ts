@@ -18,6 +18,7 @@ import {
   appFetchBuffer,
   type SpacesAuthContext,
 } from "./xyne-spaces-client.js";
+import { MAX_BULK_TICKETS } from "./bulk-tickets.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
@@ -4563,6 +4564,8 @@ const spacesCreateBulkTickets: ToolDef = {
       tickets: {
         type: "array",
         minItems: 1,
+        maxItems: MAX_BULK_TICKETS,
+        description: `At most ${MAX_BULK_TICKETS} tickets per call; split a larger set into several calls.`,
         items: {
           type: "object",
           properties: {
@@ -4591,9 +4594,8 @@ const spacesCreateBulkTickets: ToolDef = {
     const tickets = Array.isArray(args["tickets"]) ? args["tickets"] as BulkTicketInput[] : [];
     if (tickets.length === 0) return err("tickets must contain at least one ticket.");
 
-    const MAX_TICKETS = 100;
-    if (tickets.length > MAX_TICKETS) {
-      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Create bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    if (tickets.length > MAX_BULK_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_BULK_TICKETS}). Create bulk tickets in batches of ${MAX_BULK_TICKETS} or fewer.`);
     }
 
     const defaultProjectId = optionalString(args["projectId"]);
@@ -4848,6 +4850,8 @@ const spacesUpdateBulkTickets: ToolDef = {
       tickets: {
         type: "array",
         minItems: 1,
+        maxItems: MAX_BULK_TICKETS,
+        description: `At most ${MAX_BULK_TICKETS} tickets per call; split a larger set into several calls.`,
         items: {
           type: "object",
           properties: {
@@ -4883,9 +4887,8 @@ const spacesUpdateBulkTickets: ToolDef = {
     const tickets = Array.isArray(args["tickets"]) ? (args["tickets"] as BulkTicketUpdateInput[]) : [];
     if (tickets.length === 0) return err("tickets must contain at least one ticket.");
 
-    const MAX_TICKETS = 100;
-    if (tickets.length > MAX_TICKETS) {
-      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Update bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    if (tickets.length > MAX_BULK_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_BULK_TICKETS}). Update bulk tickets in batches of ${MAX_BULK_TICKETS} or fewer.`);
     }
 
     const defaultStage = optionalString(args["defaultStage"]);
