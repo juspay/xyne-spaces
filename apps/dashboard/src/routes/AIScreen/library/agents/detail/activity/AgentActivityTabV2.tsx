@@ -20,6 +20,7 @@ import {
 import { useAgentChainWorkflows } from './chainWorkflowsService';
 import { createScheduledJob, type NewScheduledJob } from './createScheduledJob';
 import { CreateScheduleDialog } from './CreateScheduleDialog';
+import { RunDetailDialog } from './RunDetailDialog';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -62,9 +63,11 @@ function scheduleCadence(cron: string | null, nextRunAt: string | null): string 
 export function AgentActivityTabV2({
   agent,
   canEdit,
+  canManageRuns,
 }: {
   agent: Agent;
   canEdit: boolean;
+  canManageRuns: boolean;
 }): ReactElement {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -76,6 +79,7 @@ export function AgentActivityTabV2({
   const [runQuery, setRunQuery] = useState('');
   const [runSearchOpen, setRunSearchOpen] = useState(false);
   const [runStatus, setRunStatus] = useState<AgentRunStatusFilter>('all');
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
   const scheduleSearchRef = useRef<HTMLInputElement>(null);
   const runSearchRef = useRef<HTMLInputElement>(null);
 
@@ -121,6 +125,8 @@ export function AgentActivityTabV2({
         !q || run.task.toLowerCase().includes(q) || (run.userName ?? '').toLowerCase().includes(q),
     );
   }, [runs.data, runQuery]);
+
+  const openRun = openRunId ? runs.data?.find(run => run.sessionId === openRunId) : undefined;
 
   const createSchedule = async (job: NewScheduledJob): Promise<void> => {
     if (!user?.id || creating) return;
@@ -313,9 +319,14 @@ export function AgentActivityTabV2({
             </DetailEmpty>
           ) : (
             runItems.slice(0, 20).map(run => (
-              <div
+              <button
+                type='button'
                 key={run.id}
-                className='flex w-full items-center gap-3 border-b border-border p-4 last:border-b-0'
+                onClick={() => setOpenRunId(run.sessionId)}
+                data-testid='agent-run-row'
+                data-track-category='Claw Agents'
+                data-track-name='Agent detail v2: open run detail'
+                className='flex w-full items-center gap-3 border-b border-border p-4 text-left transition-colors last:border-b-0 hover:bg-muted/50'
               >
                 <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                   <span className='flex min-w-0 items-center gap-1.5'>
@@ -336,7 +347,7 @@ export function AgentActivityTabV2({
                     aria-hidden
                   />
                 )}
-              </div>
+              </button>
             ))
           )}
 
@@ -347,6 +358,14 @@ export function AgentActivityTabV2({
           )}
         </DetailCard>
       </DetailSection>
+
+      {openRun && (
+        <RunDetailDialog
+          run={openRun}
+          canManage={canManageRuns}
+          onClose={() => setOpenRunId(null)}
+        />
+      )}
 
       <CreateScheduleDialog
         open={scheduleOpen}

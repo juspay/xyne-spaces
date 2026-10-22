@@ -36,7 +36,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { useQueryClient } from '@tanstack/react-query';
 import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
@@ -1619,6 +1619,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // specific tool call; null means show the whole turn (opened via the toolbar
   // debug button).
   const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
+  const [debugAgentSlug, setDebugAgentSlug] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
   const isLoadingSession = useRef(false);
   // Captures whether this thread instance was opened on an existing session
@@ -2544,6 +2545,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     }
   }, [streamingBotTurnIndex]);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const debugRunParam = searchParams.get('debugRun');
+  const debugAgentParam = searchParams.get('debugAgent');
+  useEffect(() => {
+    if (!isV2 || !debugRunParam) return;
+    setDebugAgentSlug(debugAgentParam);
+    setDebugTurnIndex(null);
+    setDebugSessionId(debugRunParam);
+    setDebugFocusToolCallId(null);
+    setShowDebugger(true);
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('debugRun');
+        next.delete('debugAgent');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [isV2, debugRunParam, debugAgentParam, setSearchParams]);
+
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
   // can resolve to a ClawCitation that was produced by a tool call in turn 1.
@@ -2754,6 +2776,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 // null falls back to turn-index for unlinked live runs.
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(null);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2764,6 +2787,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 setDebugTurnIndex(botTurnIndex);
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(toolCallId);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2860,7 +2884,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          agentSlug={debugAgentSlug ?? (effectiveAgentSlug || 'ask-ai')}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}

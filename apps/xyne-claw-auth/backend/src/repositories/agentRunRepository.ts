@@ -921,6 +921,8 @@ export const agentRunRepository = {
         ratingComment: true,
         ratedAt: true,
         usedUserToken: true,
+        provider: true,
+        model: true,
         startedAt: true,
         completedAt: true,
         chatMessageId: true,
