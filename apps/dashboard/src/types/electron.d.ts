@@ -42,6 +42,26 @@ export interface BrowserImportProfile {
   account: string | null;
 }
 
+/** Mirrors `SpacesMcpStatus` in apps/electron/src/services/spaces-mcp.ts. */
+export type SpacesMcpStatus =
+  | {
+      state: 'signed_in';
+      user?: { name: string; email: string };
+      until: number;
+      renewsAutomatically: boolean;
+    }
+  | { state: 'signed_out' }
+  | { state: 'expired'; expiredAt: number }
+  | { state: 'invalid' }
+  | { state: 'other_deployment'; baseUrl: string }
+  | { state: 'unreachable'; message: string }
+  /** Asked from somewhere other than the main window */
+  | { state: 'unavailable' };
+
+export type SpacesMcpSignInResult =
+  | { ok: true; status: SpacesMcpStatus }
+  | { ok: false; message: string };
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -220,6 +240,10 @@ export interface ElectronAPI {
     fileName: string,
     html: string,
   ) => Promise<{ saved: boolean; filePath?: string }>;
+  /** Spaces MCP sign-in status, from `~/.xyne/agent/spaces.json`. Absent before the desktop release that adds it. */
+  getSpacesMcpStatus?: () => Promise<SpacesMcpStatus>;
+  /** Sign the Spaces MCP in as the app's user, writing `~/.xyne/agent/spaces.json`. */
+  signInSpacesMcp?: () => Promise<SpacesMcpSignInResult>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
   onRecordingStopForTeardown?: (callback: () => void) => () => void;
