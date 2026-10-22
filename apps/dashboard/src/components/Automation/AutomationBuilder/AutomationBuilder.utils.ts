@@ -183,7 +183,8 @@ function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
       ? (declaredRaw as Record<string, unknown>)
       : {};
   const properties: Record<string, JsonSchemaT> = {};
-  for (const [key, value] of Object.entries(declared)) {
+  for (const [rawKey, value] of Object.entries(declared)) {
+    const key = rawKey.replace(/\?$/, '');
     if (typeof value === 'string') {
       const t = value === 'secret' ? 'string' : value;
       properties[key] = { type: t as 'string' | 'number' | 'boolean' | 'object' | 'array' };
@@ -200,7 +201,7 @@ export function schemaFromPayload(value: unknown): SchemaNode {
     return Object.fromEntries(
       Object.entries(value)
         .filter(([k]) => k)
-        .map(([k, v]) => [k, schemaFromPayload(v)]),
+        .map(([k, v]) => (v === null ? [`${k}?`, 'any'] : [k, schemaFromPayload(v)])),
     );
   }
   return typeof value === 'number' || typeof value === 'boolean' ? typeof value : 'string';

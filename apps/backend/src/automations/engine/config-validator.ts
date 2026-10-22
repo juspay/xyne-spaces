@@ -33,6 +33,8 @@ function declaredLeafToZod(type: string): z.ZodTypeAny {
       return z.array(z.unknown());
     case 'object':
       return z.record(z.unknown());
+    case 'any':
+      return z.unknown();
     case 'secret':
     case 'string':
     default:

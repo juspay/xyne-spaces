@@ -74,7 +74,7 @@ export function WebhookTriggerForm({
     <div className='flex flex-col gap-5'>
       <Field
         label='Expected payload'
-        description='Listed fields are required (400 if missing), so keep only those present in every event. Leave empty to accept any JSON. Reach into lists by index, e.g. push.changes.0.new.name.'
+        description='Listed fields are required (400 if missing). End a key with ? (e.g. "closed_by?") to allow it to be missing or null, at any depth. Leave empty to accept any JSON. Reach into lists by index, e.g. push.changes.0.new.name.'
         error={issuesAt.get('bodySchema')}
       >
         {showPaste ? (
