@@ -232,7 +232,7 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";

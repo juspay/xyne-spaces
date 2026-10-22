@@ -10,6 +10,7 @@ import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { radarExecutionQueue } from '@/queues/radarExecutionQueue';
+import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
@@ -237,7 +238,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
         // a second lookup.
-        channel: { select: { scopeType: true } },
+        channel: { select: { scopeType: true, agentProactivityMode: true } },
       },
     });
 
@@ -250,6 +251,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelId: conversation.channelId,
         scopeType: conversation.channel?.scopeType ?? null,
       });
+    }
+
+    // Agent proactivity: whether an agent answers this without a mention. Only channels
+    // that turned it on, decided in the worker; schedule never throws.
+    if (conversation?.channel && conversation.channel.agentProactivityMode !== 'OFF') {
+      void proactiveEpisodeQueue.schedule({ type: 'message', messageId }, Date.now());
     }
 
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {

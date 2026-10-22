@@ -264,8 +264,9 @@ export const SBX_GIT: SbxGitConfig = {
 };
 
 /**
- * Read-only-job detector. Scheduled jobs and automation runs are diverted to
- * the shared sbx-git sandbox; everything else gets the normal per-project clone.
+ * Read-only-job detector. Scheduled jobs, automation runs and proactive drafts (an
+ * agent answering a channel question nobody tagged it in) are diverted to the shared
+ * sbx-git sandbox; everything else gets the normal per-project clone.
  * Mirrors the eventType checks claw already uses (run.ts:1577-78 / :1595).
  */
 export function isReadOnlyJob(
@@ -273,7 +274,7 @@ export function isReadOnlyJob(
   conversationId: string | undefined,
 ): boolean {
   const e = (eventType ?? "").trim().toLowerCase();
-  if (e === "automation" || e === "scheduled_job" || e === "scheduled") return true;
+  if (e === "automation" || e === "scheduled_job" || e === "scheduled" || e === "proactivity") return true;
   if ((conversationId ?? "").startsWith("scheduled_")) return true;
   return false;
 }

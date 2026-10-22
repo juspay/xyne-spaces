@@ -108,6 +108,7 @@ import {
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { generateRoutingCard, type RoutingCardInput } from "../routing-card.js";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -1740,6 +1741,10 @@ export async function processTask(
     // server-owned here and cannot be changed from the dashboard. Excluded from the
     // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
     const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Answering without a mention (claw-auth agent-proactivity): the run drafts a reply
+    // for the Spaces backend to check, and must never act or show a plan card in the
+    // thread. Read tools stay; every write goes, like the daily brief.
+    const isProactivity = eventType === "proactivity";
     // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
     // `postTodos`, which only hides the Spaces card while the agent still keeps
     // the list: this removes the todo tools AND the primer, so no turn is spent
@@ -1760,7 +1765,8 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
-      !isDailyBrief;
+      !isDailyBrief &&
+      !isProactivity;
     const planGatePreviousReply =
       planGateEligible && isShortFollowUp(task)
         ? readPreviousAgentReply(
@@ -3367,13 +3373,14 @@ export async function processTask(
       }
     }
 
-    // Read-only routing (sbx-git): scheduled / automation runs are diverted to
+    // Read-only routing (sbx-git): scheduled / automation / proactivity runs are diverted to
     // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
     // so they must not carry mutating sandbox tools. Strip them here as the
     // tool-level half of read-only enforcement (the sbx-git pod also mounts
     // repos read-only). A rare automation that genuinely needs to write/run can
     // opt out with agentConfig.allowWriteInReadOnlyJob.
-    const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    const isReadOnlyJob =
+      eventType === "automation" || eventType === "scheduled" || eventType === "proactivity" || isScheduledRun;
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -3448,6 +3455,18 @@ export async function processTask(
       );
       if (allTools.length !== beforeBrief) {
         log(`Daily brief read-only — stripped ${beforeBrief - allTools.length} write/mutating tool(s) (read tools + subagents kept)`);
+      }
+    }
+
+    if (isProactivity) {
+      const RO_PROACTIVE = new Set([
+        "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
+        "sandbox-create", "sandbox-destroy", "write",
+      ]);
+      const beforeProactive = allTools.length;
+      allTools = allTools.filter((t) => !isWriteTool(t, allGroups) && !RO_PROACTIVE.has(t.name));
+      if (allTools.length !== beforeProactive) {
+        log(`Proactivity read-only — stripped ${beforeProactive - allTools.length} write/mutating tool(s)`);
       }
     }
 
@@ -5743,6 +5762,36 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     res
       .status(500)
       .json({ success: false, error: "Failed to generate prompt" });
+  }
+});
+
+// ── Routing card for agent proactivity (called by xyne-claw-auth) ────────
+
+router.post("/generate-routing-card", validateS2SKey, async (req, res: Response) => {
+  const { name, description, systemPrompt, tools, skills, asked } = req.body as Partial<RoutingCardInput>;
+  if (typeof name !== "string" || typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+    res.status(400).json({ success: false, error: "name and systemPrompt are required" });
+    return;
+  }
+  try {
+    const card = await generateRoutingCard({
+      name,
+      description: typeof description === "string" ? description : "",
+      systemPrompt,
+      tools: Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [],
+      skills: Array.isArray(skills) ? skills.filter((k): k is string => typeof k === "string") : [],
+      asked: Array.isArray(asked)
+        ? asked.flatMap((a) =>
+            a && typeof a.question === "string"
+              ? [{ question: a.question, ...(typeof a.reply === "string" ? { reply: a.reply } : {}) }]
+              : [],
+          )
+        : [],
+    });
+    res.json({ success: true, data: { card } });
+  } catch (err) {
+    clog.error("[generate-routing-card] Failed:", err);
+    res.status(502).json({ success: false, error: "Failed to generate routing card" });
   }
 });
 
