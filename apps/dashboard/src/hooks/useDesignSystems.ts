@@ -48,7 +48,7 @@ export function useDesignSystemActions() {
     onSuccess: invalidate,
   });
 
-  const rename = useMutation({
+  const update = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string; designMd?: string } }) =>
       updateDesignSystem(id, patch),
     onSuccess: invalidate,
@@ -59,7 +59,7 @@ export function useDesignSystemActions() {
       setAgentDesignSystem(agentSlug, designSystemId),
   });
 
-  return { remove, rename, setDefault };
+  return { remove, update, setDefault };
 }
 
 export function useConversationDesignSystem(conversationId: string | undefined) {

@@ -45,7 +45,7 @@ function Meta({ system }: { system: DesignSystemRecord }): ReactElement {
 }
 
 function DesignMdEditor({ system }: { system: DesignSystemRecord }): ReactElement {
-  const { rename } = useDesignSystemActions();
+  const { update } = useDesignSystemActions();
   const [draft, setDraft] = useState(system.designMd);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ function DesignMdEditor({ system }: { system: DesignSystemRecord }): ReactElemen
   const overLimit = draft.length > MAX_DESIGN_MD_CHARS;
 
   const save = (): void => {
-    rename.mutate(
+    update.mutate(
       { id: system.id, patch: { designMd: draft } },
       {
         onSuccess: () => toast.success('Design system saved'),
@@ -89,12 +89,12 @@ function DesignMdEditor({ system }: { system: DesignSystemRecord }): ReactElemen
         </span>
         <Button
           size='sm'
-          disabled={!dirty || overLimit || rename.isPending}
+          disabled={!dirty || overLimit || update.isPending}
           onClick={save}
           data-track-category='XyneAI'
           data-track-name='SAVE_DESIGN_SYSTEM_MD'
         >
-          {rename.isPending ? 'Saving…' : 'Save'}
+          {update.isPending ? 'Saving…' : 'Save'}
         </Button>
       </div>
     </div>

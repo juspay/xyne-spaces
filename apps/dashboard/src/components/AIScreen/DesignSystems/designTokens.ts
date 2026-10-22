@@ -114,11 +114,9 @@ function isColorValue(value: string): boolean {
 
 function roleOf(token: string): PaletteRole | null {
   const lower = token.toLowerCase();
-  for (const role of PALETTE_ROLES) {
-    if (lower === role || lower.endsWith(`-${role}`) || lower.includes(`-${role}-`)) {
-      return role;
-    }
-  }
+  for (const role of PALETTE_ROLES) if (lower === role) return role;
+  for (const role of PALETTE_ROLES) if (lower.endsWith(`-${role}`)) return role;
+  for (const role of PALETTE_ROLES) if (lower.includes(`-${role}-`)) return role;
   return null;
 }
 

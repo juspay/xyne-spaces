@@ -114,8 +114,7 @@ router.get('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.a
 router.patch('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
 router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
 
-// Design systems. `conversations/...` is declared before `/:id` so a
-// conversation id is never read as a design system id.
+// `conversations/...` before `/:id`, or a conversation id is read as a system id.
 router.get('/v2/design-systems', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listDesignSystems);
 router.get('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getConversationDesignSystem);
 router.put('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.pinConversationDesignSystem);

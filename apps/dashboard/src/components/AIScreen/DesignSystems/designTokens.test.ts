@@ -142,6 +142,16 @@ describe('parseDesignTokens', () => {
     expect(tokens.isEmpty).toBe(false);
   });
 
+  it.each([
+    ['--brand-text-muted', 'muted'],
+    ['--brand-muted-text', 'text'],
+    ['--surface-background', 'background'],
+    ['--brand-primary', 'primary'],
+  ])('resolves %s to the most specific role, not the first listed', (token, role) => {
+    const { colors } = parseDesignTokens(`:root{${token}: #123456;}`);
+    expect(colors[0]?.role).toBe(role);
+  });
+
   it('does not mistake a font token for a colour', () => {
     const { colors, fonts } = parseDesignTokens(":root{--font-mono: 'Fira Code', monospace;}");
     expect(colors).toEqual([]);

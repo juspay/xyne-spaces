@@ -129,15 +129,6 @@ export const designSystemRepository = {
     return result.count === 1;
   },
 
-  /**
-   * The system pinned to a conversation, or null when it inherits the agent's
-   * default. Scoped by org as well as conversation so a pin written under one
-   * org is never read under another.
-   *
-   * resolveForAgent answers the same question for the dispatch path, but does
-   * not say WHICH rung it landed on. A caller showing the user whether this
-   * chat overrides its agent needs the pin itself.
-   */
   findConversationPin: async (
     conversationId: string,
     orgId: string,
