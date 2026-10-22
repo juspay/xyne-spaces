@@ -1,6 +1,8 @@
 import { parseSlashCommand } from "../parseSlashCommand.js";
 import { parseExperimentCommand, slashWord, type CustomCommandMatch } from "../experiment.js";
 import { findRunnableLoopCommand, toLoopDef } from "../loop-command-defs.js";
+import { getLoopTemplate } from "xyne-claw-shared";
+import type { LoopCommandDefinition } from "@prisma/client";
 import { handleExperimentCommand } from "./experiment.js";
 import { handleQueueClear, handleQueueShow } from "./queue.js";
 import { handleHelp } from "./help.js";
@@ -25,7 +27,35 @@ export type {
   WebhookCommandPayload,
 } from "./context.js";
 
-async function resolveCustomLoopCommand(ctx: WebhookCommandCtx): Promise<CustomCommandMatch | null> {
+async function startSequenceFromThread(ctx: WebhookCommandCtx, row: LoopCommandDefinition): Promise<void> {
+  const label = `Failed to start /${row.name}`;
+  const text = (ctx.userText ?? "").trim();
+  const rest = text.slice(text.toLowerCase().indexOf(`/${row.name}`) + row.name.length + 1).trim();
+  if (/^(status|stop|findings)\b/i.test(rest)) {
+    await ctx.reply(`Use \`/experiment ${rest.split(/\s+/)[0]!.toLowerCase()}\` for the step that is running.`, label);
+    return;
+  }
+  const { startSequence, sequenceSteps, stepText } = await import("../loop-sequence.js");
+  const result = await startSequence({
+    row,
+    conversationId: ctx.payload.conversationId,
+    channelId: ctx.payload.channelId,
+    agentSlug: ctx.agent.slug,
+    userId: ctx.payload.userId,
+    ...(rest ? { focus: rest } : {}),
+  });
+  if (!result.ok) {
+    await ctx.reply(result.error, label);
+    return;
+  }
+  const steps = sequenceSteps(result.sequence);
+  await ctx.reply(
+    [`**/${row.name} started** — ${steps.length} steps, one after another:`, ...steps.map((s, i) => `${i + 1}. \`${stepText(s, result.sequence.focus)}\``), "", "`/experiment status` shows the running step; `/experiment stop` stops the whole sequence."].join("\n"),
+    label,
+  );
+}
+
+async function resolveCustomLoopCommand(ctx: WebhookCommandCtx): Promise<CustomCommandMatch | { sequence: LoopCommandDefinition } | null> {
   const word = slashWord(ctx.userText);
   if (!word || !ctx.agent.orgId) return null;
   const row = await findRunnableLoopCommand(ctx.agent.orgId, ctx.payload.userId, word).catch((err: unknown) => {
@@ -33,9 +63,11 @@ async function resolveCustomLoopCommand(ctx: WebhookCommandCtx): Promise<CustomC
     return null;
   });
   if (!row) return null;
+  if (getLoopTemplate(row.template)?.composite) return { sequence: row };
   return {
     def: toLoopDef(row),
     commandId: row.id,
+    version: row.version,
     maxDurationMs: row.maxDurationMinutes * 60_000,
     provider: row.provider,
     modelId: row.modelId,
@@ -51,7 +83,12 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   const slash =
     rawSlash ??
     (ctx.autoGoalEnabled && !ctx.immediateTaskCommand ? parseSlashCommand(`/goal ${ctx.userText}`) : null);
-  const custom = await resolveCustomLoopCommand(ctx);
+  const resolved = await resolveCustomLoopCommand(ctx);
+  if (resolved && "sequence" in resolved) {
+    await startSequenceFromThread(ctx, resolved.sequence);
+    return { kind: "handled" };
+  }
+  const custom = resolved;
   const experimentCommand = parseExperimentCommand(ctx.userText, custom);
 
   if (experimentCommand) {

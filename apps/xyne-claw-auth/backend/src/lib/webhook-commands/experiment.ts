@@ -57,14 +57,20 @@ const handlers: ExperimentHandlers = {
   status: async (ctx) => {
     const run = await experimentRepository.findActiveByConversation(ctx.payload.conversationId);
     const findings = run ? await experimentRepository.listFindings(run.id) : [];
-    await ctx.reply(formatExperimentStatus(run, findings), REPLY_LABEL);
+    const status = formatExperimentStatus(run, findings);
+    const { prisma } = await import("../../db.js");
+    const seq = run?.sequenceId ? await prisma.loopSequenceRun.findUnique({ where: { id: run.sequenceId } }).catch(() => null) : null;
+    const steps = Array.isArray(seq?.steps) ? seq.steps.length : 0;
+    await ctx.reply(seq ? `**/${seq.commandName}** · step ${seq.stepIndex + 1}/${steps} (${seq.status})\n\n${status}` : status, REPLY_LABEL);
   },
 
   stop: async (ctx) => {
     const { payload, log } = ctx;
     const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+    const { stopSequencesInThread } = await import("../loop-sequence.js");
     if (!run) {
-      await ctx.reply("No active /experiment to stop.", REPLY_LABEL);
+      const stoppedSequences = await stopSequencesInThread(payload.conversationId);
+      await ctx.reply(stoppedSequences > 0 ? "Stopped the sequence (it was between steps)." : "No active /experiment to stop.", REPLY_LABEL);
       return;
     }
     const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
@@ -73,6 +79,7 @@ const handlers: ExperimentHandlers = {
       return;
     }
     await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+    const stoppedSequence = run.sequenceId ? (await stopSequencesInThread(payload.conversationId)) > 0 : false;
     // Cancel in-flight CHECKER sessions too. They never claim
     // currentSessionId (claiming it would chain the next epoch off their
     // completion), so before this they survived stop and kept posting into
@@ -100,6 +107,7 @@ const handlers: ExperimentHandlers = {
       }
     }
     const stoppedParts = [
+      ...(stoppedSequence ? ["stopped the whole sequence, no further steps will start"] : []),
       ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
       ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
     ];
@@ -270,6 +278,7 @@ const handlers: ExperimentHandlers = {
       modelId: experimentCommand.model ?? null,
       kind: experimentCommand.kind ?? null,
       commandId: experimentCommand.commandId ?? null,
+      commandVersion: custom && experimentCommand.commandId === custom.commandId ? custom.version ?? null : null,
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
     const loop = custom && experimentCommand.commandId === custom.commandId ? custom.def : loopCommandFor(experimentCommand.kind);

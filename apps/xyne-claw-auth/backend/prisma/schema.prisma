@@ -2470,6 +2470,9 @@ model ExperimentRun {
   /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
   kind               String              @default("experiment")
   commandId          String?
+  commandVersion     Int?
+  sequenceId         String?
+  sequenceStep       Int?
   status             String              @default("running") /// running | finishing | done | aborted
   epoch              Int                 @default(1)
   deadlineAt         DateTime
@@ -3592,6 +3595,8 @@ model LoopCommandDefinition {
   maxPasses          Int?
   deliverable        String?
   judgeQuestion      String?  @db.Text
+  steps              Json?
+  version            Int      @default(1)
   published          Boolean  @default(false)
   enabled            Boolean  @default(true)
   createdByUserId    String
@@ -3601,4 +3606,43 @@ model LoopCommandDefinition {
   @@unique([orgId, name])
   @@index([orgId, published])
   @@map("loop_command_definitions")
+}
+
+/// Every saved state of a loop command, so a change can be rolled back.
+model LoopCommandVersion {
+  id              String   @id @default(cuid())
+  orgId           String
+  commandId       String
+  version         Int
+  snapshot        Json
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  @@unique([commandId, version])
+  @@index([orgId, commandId])
+  @@map("loop_command_versions")
+}
+
+/// One run of a sequence loop command: its steps (snapshotted at start) run one experiment at a time.
+model LoopSequenceRun {
+  id             String    @id @default(cuid())
+  orgId          String
+  commandId      String
+  commandName    String
+  commandVersion Int
+  conversationId String
+  channelId      String
+  agentSlug      String
+  userId         String
+  focus          String?   @db.Text
+  steps          Json
+  stepIndex      Int       @default(0)
+  currentRunId   String?
+  status         String    @default("running")
+  createdAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  @@index([orgId, commandId, createdAt])
+  @@index([conversationId, status])
+  @@map("loop_sequence_runs")
 }

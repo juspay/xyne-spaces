@@ -6,7 +6,10 @@ import {
   SUBAGENT_DEFINITIONS,
   buildCustomLoopDef,
   getLoopTemplate,
+  MAX_SEQUENCE_STEPS,
+  MIN_SEQUENCE_STEPS,
   type LoopCommandDef,
+  type LoopSequenceStep,
   type LoopTemplateId,
 } from "xyne-claw-shared";
 import { prisma } from "../db.js";
@@ -37,6 +40,7 @@ export interface LoopCommandInput {
   maxPasses?: unknown;
   deliverable?: unknown;
   judgeQuestion?: unknown;
+  steps?: unknown;
 }
 
 export interface ValidatedLoopCommand {
@@ -52,6 +56,38 @@ export interface ValidatedLoopCommand {
   maxPasses: number | null;
   deliverable: "md" | "html" | null;
   judgeQuestion: string | null;
+  steps: LoopSequenceStep[] | null;
+}
+
+const STEP_COMMAND_RE = /^\/[a-z][a-z0-9-]{1,40}$/;
+
+function validateSteps(raw: unknown, selfName: string): LoopSequenceStep[] {
+  if (!Array.isArray(raw) || raw.length < MIN_SEQUENCE_STEPS || raw.length > MAX_SEQUENCE_STEPS) {
+    throw new LoopCommandValidationError("steps", `a sequence needs ${MIN_SEQUENCE_STEPS}–${MAX_SEQUENCE_STEPS} steps`);
+  }
+  return raw.map((r, i) => {
+    const o = (r ?? {}) as Record<string, unknown>;
+    const command = typeof o["command"] === "string" ? o["command"].trim().toLowerCase() : "";
+    const args = typeof o["args"] === "string" ? o["args"].trim() : "";
+    if (!STEP_COMMAND_RE.test(command)) throw new LoopCommandValidationError(`steps[${i}].command`, "must be a loop command like /ui-test");
+    if (command === `/${selfName}`) throw new LoopCommandValidationError(`steps[${i}].command`, "a sequence cannot run itself");
+    if (args.length > 300) throw new LoopCommandValidationError(`steps[${i}].args`, "at most 300 characters");
+    return { command, args };
+  });
+}
+
+export async function checkSequenceSteps(orgId: string, steps: LoopSequenceStep[]): Promise<void> {
+  const builtin = new Set(LOOP_COMMANDS.map((d) => d.command));
+  const customNames = steps.map((s) => s.command.slice(1)).filter((n) => !builtin.has(`/${n}`));
+  const rows = customNames.length
+    ? await prisma.loopCommandDefinition.findMany({ where: { orgId, name: { in: customNames } }, select: { name: true, template: true } })
+    : [];
+  steps.forEach((step, i) => {
+    if (builtin.has(step.command)) return;
+    const row = rows.find((r) => r.name === step.command.slice(1));
+    if (!row) throw new LoopCommandValidationError(`steps[${i}].command`, `${step.command} is not a loop command in this org`);
+    if (getLoopTemplate(row.template)?.composite) throw new LoopCommandValidationError(`steps[${i}].command`, `${step.command} is itself a sequence; sequences cannot nest`);
+  });
 }
 
 function str(v: unknown, field: string, min: number, max: number): string {
@@ -87,6 +123,23 @@ export function validateLoopCommand(input: LoopCommandInput, opts: { requireName
   if (opts.requireName && isReservedCommandName(name)) throw new LoopCommandValidationError("name", `/${name} is already a built-in command`);
   const template = getLoopTemplate(typeof input.template === "string" ? input.template : "");
   if (!template) throw new LoopCommandValidationError("template", "pick one of the templates");
+  if (template.composite) {
+    return {
+      name,
+      description: str(input.description, "description", 3, 300),
+      template: template.id,
+      instruction: "",
+      skills: [],
+      subagents: [],
+      provider: null,
+      modelId: null,
+      maxDurationMinutes: template.defaultDurationMin,
+      maxPasses: null,
+      deliverable: null,
+      judgeQuestion: null,
+      steps: validateSteps(input.steps, name || String(input.name ?? "")),
+    };
+  }
   const maxDurationMinutes =
     input.maxDurationMinutes === undefined || input.maxDurationMinutes === null ? template.defaultDurationMin : Number(input.maxDurationMinutes);
   if (!Number.isInteger(maxDurationMinutes) || maxDurationMinutes < 5 || maxDurationMinutes > template.maxDurationMin) {
@@ -119,6 +172,7 @@ export function validateLoopCommand(input: LoopCommandInput, opts: { requireName
     maxPasses,
     deliverable,
     judgeQuestion: template.question ? judgeQuestion : null,
+    steps: null,
   };
 }
 

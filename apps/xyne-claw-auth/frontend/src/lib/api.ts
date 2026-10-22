@@ -8974,7 +8974,12 @@ export interface CuratorClassifierTrace {
   }>;
 }
 
-export type LoopTemplateId = "deadline-checker" | "frontier" | "cursor-walk" | "until-condition" | "fix-retry";
+export type LoopTemplateId = "deadline-checker" | "frontier" | "cursor-walk" | "until-condition" | "fix-retry" | "sequence";
+
+export interface LoopSequenceStep {
+  command: string;
+  args: string;
+}
 
 export interface LoopTemplateInfo {
   id: LoopTemplateId;
@@ -8986,12 +8991,14 @@ export interface LoopTemplateInfo {
   deliverable: "required" | "optional" | "none";
   defaultDurationMin: number;
   maxDurationMin: number;
+  composite?: boolean;
 }
 
 export interface LoopTemplateCatalogue {
   templates: LoopTemplateInfo[];
   skillBundles: Array<{ id: string; label: string; summary: string }>;
   providers: string[];
+  builtinLoops: Array<{ command: string; summary: string; positional: string | null }>;
 }
 
 export interface LoopCommandBody {
@@ -9007,6 +9014,7 @@ export interface LoopCommandBody {
   maxPasses?: number | null;
   deliverable?: "md" | "html" | null;
   judgeQuestion?: string | null;
+  steps?: LoopSequenceStep[] | null;
 }
 
 export interface LoopCommandRow extends Required<Omit<LoopCommandBody, "name">> {
@@ -9018,6 +9026,25 @@ export interface LoopCommandRow extends Required<Omit<LoopCommandBody, "name">> 
   mine: boolean;
   createdByUserId: string;
   updatedAt: string;
+  version: number;
+}
+
+export interface LoopCommandVersionInfo {
+  version: number;
+  createdAt: string;
+  createdByUserId: string;
+  current: boolean;
+  snapshot: Partial<LoopCommandBody>;
+}
+
+export async function listLoopCommandVersions(id: string): Promise<LoopCommandVersionInfo[]> {
+  const data = await request<{ success: boolean; data: LoopCommandVersionInfo[] }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/versions`);
+  return data.data;
+}
+
+export async function rollbackLoopCommand(id: string, version: number): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/rollback`, { method: "POST", body: JSON.stringify({ version }) });
+  return data.data;
 }
 
 export async function getLoopTemplates(): Promise<LoopTemplateCatalogue> {

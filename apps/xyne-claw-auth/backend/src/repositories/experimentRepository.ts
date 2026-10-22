@@ -49,6 +49,9 @@ export const experimentRepository = {
     modelId?: string | null;
     kind?: string | null;
     commandId?: string | null;
+    commandVersion?: number | null;
+    sequenceId?: string | null;
+    sequenceStep?: number | null;
     deadlineAt: Date;
   }) {
     return prisma.experimentRun.create({
@@ -63,6 +66,8 @@ export const experimentRepository = {
         modelId: args.modelId ?? null,
         ...(args.kind ? { kind: args.kind } : {}),
         ...(args.commandId ? { commandId: args.commandId } : {}),
+        ...(args.commandVersion ? { commandVersion: args.commandVersion } : {}),
+        ...(args.sequenceId ? { sequenceId: args.sequenceId, sequenceStep: args.sequenceStep ?? 0 } : {}),
         deadlineAt: args.deadlineAt,
       },
     });

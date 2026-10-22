@@ -40,6 +40,10 @@ const customDefs = vi.hoisted(() => ({ byId: new Map<string, unknown>() }));
 vi.mock("../../lib/loop-command-defs.js", () => ({
   loopDefForRun: vi.fn(async (r: { kind?: string; commandId?: string }) => (r.kind === "custom" && r.commandId ? customDefs.byId.get(r.commandId) ?? null : null)),
 }));
+const seqHook = vi.hoisted(() => ({ finished: [] as Array<[string, string]> }));
+vi.mock("../../lib/loop-sequence.js", () => ({
+  onExperimentFinished: vi.fn(async (r: { id: string }, outcome: string) => { seqHook.finished.push([r.id, outcome]); }),
+}));
 vi.mock("../../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
@@ -277,5 +281,14 @@ describe("custom loop commands from templates", () => {
     await continueExperimentAfterResult("conv", "s-3", "recorded 2 findings");
     expect(lib.checkers).toEqual([3]);
     expect(lib.epochs.map((e) => e["epoch"])).toEqual([4]);
+  });
+});
+
+describe("sequence hook", () => {
+  it("tells the sequence when a run reaches done", async () => {
+    seqHook.finished.length = 0;
+    repo.active = run({ status: "finishing", sequenceId: "seq1" });
+    await continueExperimentAfterResult("conv", "s-3", "final report");
+    expect(seqHook.finished).toEqual([["exp-1", "done"]]);
   });
 });

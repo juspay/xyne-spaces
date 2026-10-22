@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LOOP_TEMPLATES, buildCustomLoopDef, type CustomLoopCommand } from "./loop-templates.js";
+import { LOOP_TEMPLATES, buildCustomLoopDef, fillStepArgs, type CustomLoopCommand } from "./loop-templates.js";
 import { loopCommandFor, loopFromPayload, resolveLoop } from "./loop-commands.js";
 
 const base: CustomLoopCommand = {
@@ -16,8 +16,19 @@ const base: CustomLoopCommand = {
 };
 
 describe("loop templates", () => {
-  it("covers the five catalogue shapes", () => {
-    expect(LOOP_TEMPLATES.map((t) => t.id)).toEqual(["deadline-checker", "frontier", "cursor-walk", "until-condition", "fix-retry"]);
+  it("covers the five loop shapes plus the sequence of commands", () => {
+    expect(LOOP_TEMPLATES.map((t) => t.id)).toEqual(["deadline-checker", "frontier", "cursor-walk", "until-condition", "fix-retry", "sequence"]);
+    expect(LOOP_TEMPLATES.filter((t) => t.composite).map((t) => t.id)).toEqual(["sequence"]);
+  });
+
+  it("refuses to build a loop definition from the sequence template", () => {
+    expect(() => buildCustomLoopDef({ ...base, template: "sequence" as never })).toThrow(/sequence of commands/);
+  });
+
+  it("fills {focus} into step arguments and leaves plain arguments alone", () => {
+    expect(fillStepArgs("30m {focus} auth", "payments")).toBe("30m payments auth");
+    expect(fillStepArgs("{focus}", undefined)).toBe("");
+    expect(fillStepArgs(" /settings ", "ignored")).toBe("/settings");
   });
 
   it.each([
