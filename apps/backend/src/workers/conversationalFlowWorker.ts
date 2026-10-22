@@ -27,6 +27,10 @@ import { initWorkflows } from '@/workflowsV2/runtime';
 
 const CONCURRENCY = config.workflows.conversationalFlow.workerConcurrency;
 
+const REPLICATION_SETTLE_MS = 100;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 class ConversationalFlowWorker {
   private isStarted = false;
 
@@ -51,10 +55,12 @@ class ConversationalFlowWorker {
    * where and how many.
    */
   private async runExecution(executionId: string): Promise<void> {
+    await wait(REPLICATION_SETTLE_MS);
     const workspaceId = await workspaceForExecution(executionId);
     if (!workspaceId) {
       logger.info(
-        `[CONVERSATIONAL-FLOW-WORKER] execution ${executionId} not found or not an SDK run — skipping`,
+        `[CONVERSATIONAL-FLOW-WORKER] execution ${executionId} not found or not an SDK run after ` +
+          `${String(REPLICATION_SETTLE_MS)}ms — skipping`,
       );
       return;
     }
