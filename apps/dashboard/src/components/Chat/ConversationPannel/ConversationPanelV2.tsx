@@ -33,6 +33,7 @@ import { ExpandedTicketView } from '../../Tickets/ExpandedTicketView/ExpandedTic
 import ChatListV4 from '../ChatList/ChatListV4';
 import { DiscussionListContext, type DiscussionScope } from './DiscussionListContext';
 import LinksTab from '../LinksTab/LinksTab';
+import ChannelBookmarksTab from '../ChannelBookmarksTab/ChannelBookmarksTab';
 import { Archive } from 'lucide-react';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 
@@ -386,6 +387,7 @@ const ConversationPanelV2 = ({
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
+          {tab === 'bookmarks' && <ChannelBookmarksTab channelId={channelId} />}
           {appIdOf(tab) !== null && (
             // An artifact app the user added as a tab. Keyed on the app so
             // switching between two app tabs boots a fresh sandbox instead of

@@ -114,6 +114,7 @@ import {
   type EtaRiskAcknowledgedActivityValue,
   resolveTicketDescription,
 } from '@xyne/shared';
+import { resolveBookmarkChannelId } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
   parseAppliedTags,
@@ -11373,6 +11374,10 @@ export function createMutators(
           bookmarkId: z.string(),
         }),
         async ({ tx, args: { entityId, entityType, metadata, timestamp, bookmarkId } }) => {
+          // Channel is always resolved server-side from the message's conversation,
+          // never taken from client args, so a client cannot file a bookmark under
+          // an arbitrary channel.
+          const channelId = await resolveBookmarkChannelId(tx, entityId, entityType);
           const existing = await getBookmarkIncludingDeleted(tx, entityId, entityType);
 
           if (existing) {
@@ -11383,6 +11388,7 @@ export function createMutators(
                 isCompleted: false,
                 updatedAt: timestamp,
                 metadata: metadata ?? null,
+                ...(channelId && !existing.channelId ? { channelId } : {}),
               });
             }
 
@@ -11410,6 +11416,7 @@ export function createMutators(
             isDeleted: false,
             isCompleted: false,
             metadata,
+            channelId,
           });
 
           enqueueBookmarkReminderSync({
