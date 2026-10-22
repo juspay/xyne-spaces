@@ -178,7 +178,9 @@ export function transitionTicketTx(currentStage: any, ticketId: string, userId: 
     const etaResult = evaluateEta({
       ticketId,
       ticketStatus: ticket.statusV2,
-      isTerminal: isTerminalStatus(ticket.statusV2),
+      // Landing on a Completed/Cancelled stage must not move the due date, even though this
+      // path leaves statusV2 itself unchanged.
+      isTerminal: isTerminalStatus(targetStage.defaultTicketStatusV2 ?? ticket.statusV2),
       currentTicketEta: lockedEta,
       currentTicketEtaManagement,
       boardType: boardEtaCtx.boardType,

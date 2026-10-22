@@ -12,7 +12,7 @@ export interface BuildForecastInput {
    */
   activeStageDeadline: Date | null;
   now: Date;
-  stagesById: ReadonlyMap<string, Pick<StageLike, 'id' | 'eta'>>;
+  stagesById: ReadonlyMap<string, Pick<StageLike, 'id' | 'eta' | 'defaultTicketStatusV2'>>;
 }
 
 /**

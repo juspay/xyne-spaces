@@ -7,7 +7,7 @@ import type { ActiveVisitContext } from './index';
 import type { StageLike, TransitionLike } from './types';
 
 export interface LoadedZeroEtaContext {
-  stages: Array<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta'>>;
+  stages: Array<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta' | 'defaultTicketStatusV2'>>;
   transitions: TransitionLike[];
   currentTicketEtaManagement: TicketEtaManagement;
   /**
@@ -33,9 +33,9 @@ export async function loadZeroEtaContext(
     ticketId: string;
     boardId: string;
     ticketMetadata: unknown;
-    stage: { id: string; eta: number | null | undefined };
+    stage: Pick<StageLike, 'id' | 'eta' | 'defaultTicketStatusV2'>;
     transition?: TransitionLike | null;
-    stages?: Array<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta'>>;
+    stages?: Array<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta' | 'defaultTicketStatusV2'>>;
   },
 ): Promise<LoadedZeroEtaContext> {
   const stages = input.stages ?? (await tx.run(zql.stages.where('boardId', input.boardId)));
@@ -46,7 +46,7 @@ export async function loadZeroEtaContext(
   );
   const activeVisitRow = visits.find(v => v.stageLeftAt === null) ?? null;
   const estimate = resolveStepEstimate(
-    { id: input.stage.id, eta: input.stage.eta },
+    input.stage,
     input.transition ?? null,
     { requireExplicitTransition: false },
   );
