@@ -144,9 +144,64 @@ detect that.
    access **every time** (XYNE-66811). Do not treat a stored id as proof of
    access.
 
-## Not in XYNE-66808
+## Filing chats (XYNE-66809)
 
-Moving a chat into a project is **XYNE-66809** (`projectId` on the conversation
-PATCH, plus `?projectId=` filtering on the conversation list). The repository
-support already exists — `moveConversation`, `removeConversation`,
-`projectIdsForConversations` — but no route is exposed yet.
+These live on the conversation routes, not under `/chat/projects`.
+
+### `PATCH /:slug/chat/:convId`
+
+Already takes `title` and `pinned`; now also `projectId`.
+
+```jsonc
+{ "projectId": "clx…" }   // file into a project
+{ "projectId": null }      // unfile — back to the main list
+```
+
+Omitting the key leaves membership untouched. At least one of `title`,
+`pinned`, `projectId` is required.
+
+The response now carries the resulting membership:
+
+```jsonc
+{ "title": "…", "pinned": false, "projectId": "clx…" }
+```
+
+`404` when the chat is not the caller's **or** the target project is not theirs
+— the two are not distinguished. Only the chat's owner can move it, and only
+into a project they own in the same org.
+
+### `GET /conversations` — `?projectId=`
+
+- `?projectId=<id>` — only that project's chats. `404` if it is not the
+  caller's.
+- `?projectId=none` — only unfiled chats.
+- omitted — everything.
+
+Filtering happens **inside** the list aggregate, so cursor pagination walks a
+complete, correctly ordered set. (Contrast `q`, which is matched in memory and
+therefore cannot page past the first screenful.) A project with no chats
+returns an empty page, never the full history.
+
+Every row now carries `projectId: string | null`, and the paged response adds:
+
+```jsonc
+{ "data": [...], "nextCursor": "…", "agents": [...], "projectCounts": { "clx…": 12 } }
+```
+
+`projectCounts` is **not** narrowed by `?projectId=` — the sidebar shows every
+project's total while one of them is open. It comes from the same source as
+`chatCount` on `GET /chat/projects`, so the two cannot disagree.
+
+### Deleting a chat
+
+`DELETE /:slug/chat/:convId` now also reclaims the chat's `ChatProjectItem`,
+but only once the caller has no messages left in that conversation — a chat
+answered by several agents survives a per-agent delete and keeps its project.
+There is no foreign key between membership and messages (a conversation is
+only an id shared by message rows), so nothing else would clean it up.
+
+## Not yet exposed
+
+Injecting a project's instructions into runs is **XYNE-66810**;
+`enabledInstructionsForConversation` is ready for it. Project knowledge is
+**XYNE-66811**.

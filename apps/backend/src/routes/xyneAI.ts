@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { xyneAIControllerV2 } from '@/controllers/xyneAIControllerV2';
 import { authMiddleware } from '@/middleware/auth';
+import { chatProjectsLimiter } from '@/middleware/rateLimiters';
 import { listClawAgentsInChannel } from '@/services/channelClawAgentService';
 import { ShareAgentConversationController } from '@/controllers/shareAgentConversationController';
 import { logger } from '@/utils/logger';
@@ -100,6 +101,18 @@ router.post('/v2/conversations/:convId/notes', authMiddleware.authenticate, xyne
 
 // PATCH /api/xyne-ai/v2/conversations/:convId - Rename and/or pin a conversation
 router.patch('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.updateConversation);
+
+// Chat projects. `reorder` is declared before `/:projectId` so it is never
+// read as an id.
+// chatProjectsLimiter is keyed by user rather than IP: these are authenticated
+// routes, and an IP-keyed budget would be shared by everyone behind one office
+// NAT. It runs before authenticate so an unauthenticated flood is also capped.
+router.get('/v2/chat-projects', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listChatProjects);
+router.post('/v2/chat-projects', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.createChatProject);
+router.put('/v2/chat-projects/reorder', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.reorderChatProjects);
+router.get('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getChatProject);
+router.patch('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
+router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
 
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);

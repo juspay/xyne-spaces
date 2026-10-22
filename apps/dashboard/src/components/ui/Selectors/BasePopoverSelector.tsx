@@ -16,6 +16,11 @@ export interface BaseSelectorPluginState<T extends BaseSelectorItem = BaseSelect
   shouldSelect: boolean;
 }
 
+const sameItems = <T extends BaseSelectorItem>(
+  a: readonly T[] | undefined,
+  b: readonly T[],
+): boolean => !!a && a.length === b.length && a.every((item, index) => item.id === b[index]?.id);
+
 export interface BasePopoverSelectorProps<T extends BaseSelectorItem> {
   editor: Editor | null;
   pluginKey: PluginKey<BaseSelectorPluginState<T>>;
@@ -98,11 +103,26 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
     if (!editor) return;
 
     const { view } = editor;
+    const nextSelectedIndex = isOpen ? selectedIndex : 0;
+    const pluginState = pluginKey.getState(view.state);
+
+    // Dispatching re-enters the editor's update handler, which setStates here. A
+    // caller that rebuilds `items` on every render would otherwise ping-pong until
+    // React's nested-update limit throws and takes the whole tree down.
+    if (
+      pluginState &&
+      pluginState.isOpen === isOpen &&
+      pluginState.selectedIndex === nextSelectedIndex &&
+      sameItems(pluginState.items, items)
+    ) {
+      return;
+    }
+
     view.dispatch(
       view.state.tr.setMeta(pluginKey, {
         items,
         isOpen,
-        selectedIndex: isOpen ? selectedIndex : 0,
+        selectedIndex: nextSelectedIndex,
       }),
     );
   }, [editor, pluginKey, items, isOpen, selectedIndex]);

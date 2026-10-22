@@ -311,6 +311,36 @@ export const copyTextToClipboard = async (text: string): Promise<void> => {
 };
 
 /**
+ * Copies text that still has to be fetched. Call it straight from the click handler,
+ * before any await: as with copyImageToClipboard, the ClipboardItem is built in the
+ * click's task and handed a PROMISE of the text, because awaiting the fetch first
+ * lets the user activation lapse and Safari/WebKit reject the write (NotAllowedError).
+ * A failure from `source` is rethrown as-is, so callers can tell it from a write failure.
+ */
+export const copyFetchedTextToClipboard = async (source: () => Promise<string>): Promise<void> => {
+  const text = Promise.resolve().then(source);
+  // Keep a handler attached so a failed fetch never escapes as an unhandled rejection.
+  void text.catch(() => undefined);
+
+  if (typeof ClipboardItem === 'undefined' || typeof navigator.clipboard?.write !== 'function') {
+    await navigator.clipboard.writeText(await text);
+    return;
+  }
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': text.then(value => new Blob([value], { type: 'text/plain' })),
+      }),
+    ]);
+  } catch (error) {
+    // Report the fetch's own error (e.g. nothing to copy) over the write it caused.
+    await text;
+    throw error;
+  }
+};
+
+/**
  * Converts an image blob to PNG via a canvas element.
  */
 const convertToPngBlob = (blob: Blob): Promise<Blob> => {

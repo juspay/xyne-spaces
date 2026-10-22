@@ -17,6 +17,13 @@ name: Nix CI
 # (allowPrivilegeEscalation: false) — staying on GitHub-hosted for now.
 on:
   workflow_dispatch:
+    inputs:
+      # One-off publish. `main` always pushes :latest; any other ref with
+      # `publish: true` pushes :sha-<7-char sha> only, never :latest.
+      publish:
+        description: Push the dev image to GHCR (non-main refs push :sha-<short>)
+        type: boolean
+        default: false
   # pull_request:
   # push:
   #   branches:
@@ -31,6 +38,8 @@ permissions:
   # Required by cache-nix-action `purge: true` — it calls the REST cache API to
   # evict stale entries. Without it the save aborts and nothing is ever cached.
   actions: write
+  # Required by the `image` job to push ghcr.io/juspay/xyne-spaces-dev.
+  packages: write
 
 concurrency:
   group: nix-ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -45,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: nixbuild/nix-quick-install-action@v34
+      - uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
         with:
           nix_conf: |
             substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
@@ -55,7 +64,7 @@ jobs:
       # Cache /nix/store across runs — a cold closure for this stack is minutes;
       # a warm restore is ~1 min. Keyed on the Nix inputs so it invalidates when
       # the flake, project.nix, or nix/ tree changes.
-      - uses: nix-community/cache-nix-action@v6
+      - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -93,3 +102,136 @@ jobs:
           path: .logs/
           include-hidden-files: true
           retention-days: 7
+
+  # Phase 1: the same Nix stack as one `docker run`, for contributors without
+  # Nix. One job per arch; each runs the smoke test inside its container so the
+  # image cannot drift from the flake.
+  image:
+    name: Build, run and publish the dev image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
+        with:
+          nix_conf: |
+            substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= juspay:5aHaNForWL03wKOGhUn/al4BZd3HqZDWZ3hrVTcf6Fg=
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
+        with:
+          # Per-arch keys: the two runners share no store paths.
+          primary-key: nix-image-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
+          restore-prefixes-first-match: nix-image-${{ runner.os }}-${{ matrix.arch }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-image-${{ runner.os }}-${{ matrix.arch }}-
+          purge-last-accessed: 604800
+          purge-primary-key: never
+
+      - name: Build the dev image
+        run: nix build -L .#packages.${{ matrix.system }}.dev-image
+
+      - name: Load the image
+        run: ./result | docker load
+
+      # The image runs as uid 1000; the runner owns the checkout as uid 1001.
+      - name: Hand the mounted checkout to the container user
+        run: sudo chown -R 1000:1000 "$GITHUB_WORKSPACE"
+
+      - name: Run the image against the checkout
+        run: |
+          docker run -d --name xyne-dev \
+            -v "$GITHUB_WORKSPACE":/src \
+            -p 3000:3000 -p 3001:3001 \
+            ghcr.io/juspay/xyne-spaces-dev:latest
+
+      - name: Wait for backend health
+        run: |
+          for attempt in $(seq 1 120); do
+            if [ "$(docker inspect -f '{{.State.Running}}' xyne-dev)" != "true" ]; then
+              echo "Container exited before becoming healthy" >&2
+              docker logs xyne-dev >&2
+              exit 1
+            fi
+            if curl -fsS http://127.0.0.1:3001/api/health >/dev/null; then
+              echo "Backend healthy after $attempt attempts"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Backend never became healthy" >&2
+          docker logs xyne-dev >&2
+          exit 1
+
+      - name: Run the smoke test inside the container
+        run: docker exec xyne-dev nix-smoke-test --existing-services
+
+      # The cache action's post step hashes the workspace as the runner user.
+      - name: Hand the checkout back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+
+      - name: Container and smoke test logs
+        if: always()
+        run: |
+          docker logs xyne-dev || true
+          docker exec xyne-dev sh -c 'cat .logs/nix-smoke/*.log' 2>/dev/null || true
+
+      - name: Publish ghcr.io/juspay/xyne-spaces-dev
+        if: github.ref == 'refs/heads/main' || inputs.publish == true
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tag=latest
+          else
+            # Non-main refs never touch :latest.
+            tag="sha-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+          # Per-arch image; the `manifest` job ties the two together.
+          docker tag ghcr.io/juspay/xyne-spaces-dev:latest "ghcr.io/juspay/xyne-spaces-dev:$tag-$ARCH"
+          docker push "ghcr.io/juspay/xyne-spaces-dev:$tag-$ARCH"
+
+  # One manifest over the per-arch images, so `docker run` picks the host's arch.
+  manifest:
+    name: Publish the multi-arch manifest
+    needs: image
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || inputs.publish == true
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Create and inspect the manifest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tag=latest
+          else
+            tag="sha-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+          docker buildx imagetools create -t "ghcr.io/juspay/xyne-spaces-dev:$tag" \
+            "ghcr.io/juspay/xyne-spaces-dev:$tag-amd64" \
+            "ghcr.io/juspay/xyne-spaces-dev:$tag-arm64"
+          docker manifest inspect "ghcr.io/juspay/xyne-spaces-dev:$tag" > /tmp/manifest.json
+          cat /tmp/manifest.json
+          echo "platforms:"
+          jq -r '.manifests[].platform | "  \(.os)/\(.architecture)"' /tmp/manifest.json
