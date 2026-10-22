@@ -41,6 +41,7 @@ import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDailyCron.js";
 import { startMcpRestartListener } from "../lib/mcp-restart-signal.js";
+import { initRoutingCardCron } from "../agent-proactivity/card-cron.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -84,6 +85,7 @@ const WORKERS: WorkerEntry[] = [
   // and the messenger before the shared connection goes away.
   { name: "messaging-account-manager", init: initMessagingAccountManager, close: closeMessagingAccountManager },
   { name: "digital-twin-daily", init: initDigitalTwinDaily },
+  { name: "agent-proactivity-card-cron", init: initRoutingCardCron },
   // Daily Brief: bounded worker (caps concurrent LLM runs) + leader-locked
   // enqueue cron (fans out opted-in users once/day). See services/dailyBrief*.
   { name: "daily-brief-worker", init: initDailyBriefWorker, close: closeDailyBriefWorker },

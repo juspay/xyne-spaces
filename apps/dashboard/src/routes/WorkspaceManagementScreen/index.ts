@@ -5,3 +5,4 @@ export { InvitationsTab } from './InvitationsTab';
 export { GuestUsersTab } from './GuestUsersTab';
 export { RepositoryCredentialsTab } from './RepositoryCredentialsTab';
 export { ToolbarTab } from './ToolbarTab';
+export { AgentActivityTab } from './AgentActivityTab';
