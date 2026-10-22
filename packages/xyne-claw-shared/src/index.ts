@@ -7,6 +7,7 @@ export { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "./tools/
 export { takeLlmCitations, peekLlmCitations, recordLlmCitations } from "./tools/add-citations/tools.js";
 export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-user/index.js";
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, resolveAgentToolsConfig, isEmptyToolsSelection, grantMatchesToolName, findUnusedGrants, type SubagentDefinition, type AgentToolsConfig, type AgentDelegationTier } from "./tools/subagents/index.js";
+export { SUBAGENT_TEMPLATES, getSubagentTemplate, loadTemplateSamples, UI_TESTER_EVAL_DIR, UI_TESTER_STANDARD_CHECKS, UI_TESTER_HARNESS_TOOLS, UI_TESTER_SANDBOX_TOOLS, type SubagentTemplate, type TemplateSample, type UiTesterStandardKey } from "./tools/subagents/templates.js";
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
 export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_AGENT_PRIVACY, type AgentPrivacy, type AgentPrivacyMode } from "./agent-privacy.js";
 export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, type OptimizationSpec, type OptimizationKey, type OptimizationGroup } from "./optimizations.js";
@@ -165,6 +166,7 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export { xorDecideTool, MAX_DECIDE_QUESTIONS, validateDecideQuestions, type DecideQuestion, type DecideType } from "./tools/xor/index.js";
 export { AGENT_TOOL_DEFS } from "./tools/agent-tools/index.js";
 export {
   TASK_COMMAND_NAMES,
@@ -175,6 +177,24 @@ export {
   parseLocalSandboxCommand,
 } from "./task-command-names.js";
 export type { TaskCommandName, LocalSandboxCommandName } from "./task-command-names.js";
+export {
+  BRAND_SUMMARY_FILENAME,
+  BRAND_DESIGN_MD_FILENAME,
+  BRAND_TOKENS_CSS_FILENAME,
+  BRAND_COLOR_ROLES,
+  isBrandSummary,
+  parseBrandSummary,
+} from "./brand-extraction.js";
+export type {
+  BrandSummary,
+  BrandColor,
+  BrandColorRole,
+  BrandFont,
+  BrandTypeStep,
+  BrandScaleValue,
+  BrandAssetRef,
+  BrandAssetKind,
+} from "./brand-extraction.js";
 export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
@@ -195,3 +215,4 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 
 export * from "./reply-format/index.js";
+export { LOOP_KINDS, LOOP_COMMANDS, parseLoopKind, withLoopKind, loopCommandFor, loopCommandForWord, loopModeLog, type LoopKind, type LoopKey, type LoopCloseCheck, type LoopCommandDef } from "./loop-commands.js";

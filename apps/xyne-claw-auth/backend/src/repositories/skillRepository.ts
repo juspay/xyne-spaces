@@ -77,6 +77,13 @@ export const skillRepository = {
     });
   },
 
+  /** Which of `slugs` are already taken in the org, visible to the caller or not. */
+  findTakenSlugs: async (orgId: string, slugs: string[]): Promise<Set<string>> => {
+    if (slugs.length === 0) return new Set();
+    const rows = await prisma.skill.findMany({ where: { orgId, slug: { in: slugs } }, select: { slug: true } });
+    return new Set(rows.map((r) => r.slug));
+  },
+
   findById: (id: string) =>
     prisma.skill.findUnique({ where: { id } }),
 

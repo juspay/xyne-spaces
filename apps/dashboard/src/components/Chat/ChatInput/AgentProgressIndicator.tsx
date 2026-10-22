@@ -89,13 +89,9 @@ export function AgentProgressIndicator({
         agentSlug: slug,
       });
       // Clear only after confirmed cancel — prevents hiding a still-running agent
-      // when the request is rejected (e.g. 403 non-owner) or fails.
+      // when the request is rejected (e.g. 403 non-owner) or fails. The store is shared,
+      // so every instance watching this conversation clears with it.
       clearAll();
-      // Notify sibling instances (e.g. channel input ↔ thread input both watching
-      // the same conversationId) so they clear immediately without waiting for the socket.
-      window.dispatchEvent(
-        new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
-      );
     } catch (err) {
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_error',

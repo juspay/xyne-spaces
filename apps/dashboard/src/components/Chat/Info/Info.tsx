@@ -26,6 +26,7 @@ import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
+import { AgentProactivityConfig } from '../Proactivity/AgentProactivityConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
 import ScheduledMessagesTab from '../AboutChannel/ScheduledMessagesTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
@@ -545,6 +546,19 @@ const Info = ({
                 <CallSummaryConfig
                   channelId={channel.id}
                   currentPrompt={channel.callSummaryPrompt}
+                  canManage={canManageAiPreferences}
+                />
+              </div>
+              <div className='mt-3 flex flex-col gap-0.5'>
+                <div className='text-[15px] font-semibold text-foreground'>Agents</div>
+                <p className='text-[13px] leading-[140%] text-muted-foreground'>
+                  Let agents in this channel reply to questions on their own.
+                </p>
+              </div>
+              <div className='rounded-[12px] border border-border bg-card'>
+                <AgentProactivityConfig
+                  channelId={channel.id}
+                  mode={channel.agentProactivityMode}
                   canManage={canManageAiPreferences}
                 />
               </div>

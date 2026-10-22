@@ -8,6 +8,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
+import { resolveProjectInstructions } from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -37,6 +38,7 @@ import {
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
+  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
 import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
 import { getSessionByConv } from "./session-context.js";
@@ -231,7 +233,7 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
@@ -982,6 +984,33 @@ export async function prepareRun(
           errMsg(err),
         );
       }
+
+      // Appended AFTER the user's own instructions, so precedence runs
+      // agent prompt -> user per-agent instructions -> project -> message.
+      // Inside the daily_brief guard for the same reason: a brief can execute
+      // on a shared agent, and a project's instructions have no business
+      // reaching it.
+      // Every id this user's rows may be keyed under. A chat filed under their
+      // workspace-scoped Spaces id is still theirs, and matching the canonical
+      // id alone would silently skip the project's instructions.
+      const projectLookupIds = conversationId
+        ? [
+            ...new Set(
+              [
+                resolved.userId,
+                await spacesUserIdForClawUser(resolved.userId).catch(() => null),
+              ].filter((id): id is string => Boolean(id)),
+            ),
+          ]
+        : [];
+      const projectInstructions = conversationId
+        ? await resolveProjectInstructions(conversationId, projectLookupIds, agent.orgId)
+        : null;
+      if (projectInstructions) {
+        additionalInstructions = additionalInstructions
+          ? `${additionalInstructions}\n\n${projectInstructions}`
+          : projectInstructions;
+      }
     }
 
     // Promote the attached-context prefix into `context` (NOT additionalInstructions).
@@ -1045,6 +1074,7 @@ export async function prepareRun(
       mergedAgentConfig = safeAgentConfig;
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
+    let sdlcContextError: string | undefined;
     if (!sdlcAgentRunContext) {
       // Claw chat sends no channel; a hub thread reopened there takes its hub from the thread's last run.
       const hubChannelId =
@@ -1058,9 +1088,21 @@ export async function prepareRun(
       const hubWorkspaceHint =
         typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
+        await resolveSdlcHubContextForUser(
+          resolved.userId,
+          hubChannelId,
+          conversationId,
+          hubWorkspaceHint,
+          attachedThreadConversationId,
+          (reason) => {
+            sdlcContextError = reason;
+          },
+        ),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+      // Only warn when the run is known to be in a hub, else a slow Spaces would warn every channel run.
+      else if (sdlcContextError && (agentSlug === SDLC_AGENT_SLUG || (!effectiveChannelId && hubChannelId)))
+        mergedAgentConfig = { ...mergedAgentConfig, sdlcContextError };
     }
     // Any agent running in an SDLC hub gets the SDLC tools on top of its own.
     if (sdlcAgentRunContext) {
@@ -1081,7 +1123,7 @@ export async function prepareRun(
         const hubWorkspaceId =
           typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
         const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
-        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, resolved.userId, agent.orgId);
+        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, agent.orgId);
         hubSkills = hub.skills.map(toRunSkill);
         if (hub.text) mergedContext = mergedContext ? `${hub.text}\n\n${mergedContext}` : hub.text;
       } catch (err) {

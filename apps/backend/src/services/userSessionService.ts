@@ -12,6 +12,7 @@ export type LogoutReason =
   | 'PASSWORD_RESET'
   | 'PROVIDER_REVOKED'
   | 'TOKEN_EXPIRED'
+  | 'REFRESH_TOKEN_REUSED'
   | 'TEST_CLEANUP';
 
 // How the session was minted — stored as the AUTH/LOGIN activity event's
@@ -22,7 +23,21 @@ export type LoginMethod =
   | 'TEST'
   | 'WORKSPACE_CREATED' // already signed in — a session for a workspace they just created
   | 'WORKSPACE_JOINED' // already signed in — a session for a community workspace they just joined
-  | 'AUTO_LOGIN'; // reused an existing session to auto-log into a single workspace
+  | 'AUTO_LOGIN' // reused an existing session to auto-log into a single workspace
+  | 'SDK_SSO'; // a Spaces SDK / MCP / CLI sign-in approved through Xyne SSO
+
+/**
+ * Marks a session minted by Xyne SSO for the Spaces SDK, MCP or CLI. Its
+ * `refreshToken` is this prefix plus the SHA-256 of a refresh token we issued,
+ * not an identity provider's token, so nothing may hand it to Google or
+ * Microsoft — see `isSdkSsoSession`.
+ */
+export const SDK_SSO_REFRESH_TOKEN_PREFIX = 'sdk_sso:';
+
+/** Whether a session's refresh token is one Xyne SSO issued, rather than a provider's. */
+export function isSdkSsoSession(session: { refreshToken: string | null }): boolean {
+  return session.refreshToken?.startsWith(SDK_SSO_REFRESH_TOKEN_PREFIX) ?? false;
+}
 
 export interface CreateSessionData {
   userId: string;
@@ -158,7 +173,11 @@ export class UserSessionService {
       });
 
       const provider = session.user.authProvider as AuthProvider;
-      if (provider === AuthProvider.GOOGLE || provider === AuthProvider.MICROSOFT) {
+      // An SDK SSO session's refresh token is ours, not the provider's
+      if (
+        loginMethod !== 'SDK_SSO' &&
+        (provider === AuthProvider.GOOGLE || provider === AuthProvider.MICROSOFT)
+      ) {
         void syncContactsGrantForUser({
           provider,
           userId: session.userId,

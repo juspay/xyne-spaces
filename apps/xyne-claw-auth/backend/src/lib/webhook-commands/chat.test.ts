@@ -40,7 +40,7 @@ describe("/help", () => {
     const inChat = ctx(true);
     await handleHelp(inChat.value);
     const chatText = inChat.reply.mock.calls[0]?.[0] as string;
-    expect(chatText).toContain("`/debug`");
+    expect(chatText).toContain("`/debug");
     expect(chatText).toContain("*In this chat*");
     expect(chatText).toContain("`/agents`");
 

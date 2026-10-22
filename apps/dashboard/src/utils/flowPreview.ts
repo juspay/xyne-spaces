@@ -6,6 +6,14 @@
  * buttons), which breaks list-row layout. These helpers collapse it to plain text.
  */
 
+import {
+  GENERIC_FLOW_CARD_LABEL,
+  decodeFlowJsonAttribute,
+  flowCardLabel,
+  flowCardType,
+  flowFallbackLabel,
+} from '@xyne/shared';
+
 /** Resolves a mentioned user id to the name shown in place of its token. */
 export type MentionNameResolver = (userId: string) => string | undefined;
 
@@ -48,18 +56,13 @@ export function stripFlowMarkup(raw: string, resolveUserName?: MentionNameResolv
  */
 export function getFlowJsonPreviewText(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
-  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
-  if (!attrMatch?.[1]) return null;
+  const decoded = decodeFlowJsonAttribute(content);
+  if (!decoded) return GENERIC_FLOW_CARD_LABEL;
+  const cardType = flowCardType(decoded);
+  if (cardType && cardType !== 'plan') return flowCardLabel(decoded);
 
   try {
-    const json = attrMatch[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
-    const flow = JSON.parse(json) as { title?: string; components?: unknown[] };
+    const flow = decoded as { title?: string; components?: unknown[] };
 
     const texts: string[] = [];
     if (typeof flow.title === 'string' && flow.title.trim()) {
@@ -97,8 +100,8 @@ export function getFlowJsonPreviewText(content: string): string | null {
     if (Array.isArray(flow.components)) walk(flow.components);
 
     const preview = stripFlowMarkup(texts.join(' — '));
-    return preview || null;
+    return preview || flowFallbackLabel(decoded);
   } catch {
-    return null;
+    return flowFallbackLabel(decoded);
   }
 }

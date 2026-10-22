@@ -39,7 +39,7 @@ import {
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
-import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
+import { flowMessageSearchText } from '@/utils/flowJson';
 import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
@@ -458,7 +458,7 @@ export const mapMessage = async (
   // that instead of the message. Reuses the same extraction the notification
   // path uses; plain HTML content falls through unchanged.
   const messageContent =
-    getFlowJsonContentForNotification(args.content || '') ||
+    flowMessageSearchText(args.content || '') ||
     extractPlainTextFromHtml(args.content || '') || '';
 
   const messageLinks = extractLinksFromContent(args.content || '');

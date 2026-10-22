@@ -9,13 +9,15 @@ import {
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { createSubagent, listSkills, getAvailableTools } from "../../../lib/api";
-import type { Skill, AvailableTools, SubagentDef } from "../../../lib/api";
+import type { Skill, AvailableTools, SubagentDef, SubagentCheck, SubagentSample } from "../../../lib/api";
+import { ChecksEditor } from "../subagents/ChecksEditor";
 import { SubagentToolsTab } from "../subagents/SubagentToolsTab";
 import { CreateSkillDialog } from "./CreateSkillDialog";
 import { Dialog } from "../ui/Dialog";
 import { TextField } from "../ui/TextField";
 import { Button } from "../ui/Button";
 import { InfoIcon } from "../ui/Tooltip";
+import { Switch } from "../ui/Switch";
 
 /* UTF-8 byte length — same as V1's `utf8ByteLength`. Used to surface
    the system-prompt size so authors can keep an eye on the token
@@ -111,7 +113,10 @@ interface CreateSubagentDialogProps {
   existingNames: string[];
 }
 
-const STEPS = ["Identity", "Instructions", "Skills", "Tools", "Review"];
+const STEPS = ["Identity", "Instructions", "Skills", "Tools", "Checks", "Review"];
+const XOR_DECIDE = "xor-decide";
+
+const splitTools = (s: string) => s.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -134,6 +139,10 @@ interface WizardState {
   nameValid: boolean;
   creating: boolean;
   error: string | null;
+  fast: boolean;
+  checks: SubagentCheck[];
+  checksValid: boolean;
+  samples: SubagentSample[];
 }
 
 const INIT: WizardState = {
@@ -155,6 +164,10 @@ const INIT: WizardState = {
   nameValid: false,
   creating: false,
   error: null,
+  fast: false,
+  checks: [],
+  checksValid: true,
+  samples: [],
 };
 
 export function CreateSubagentDialog({
@@ -269,6 +282,9 @@ export function CreateSubagentDialog({
         },
         skillIds:
           w.selectedSkillIds.length > 0 ? w.selectedSkillIds : undefined,
+        ...(w.fast ? { fast: true } : {}),
+        ...(w.checks.length > 0 ? { checks: w.checks } : {}),
+        ...(w.samples.length > 0 ? { samples: w.samples } : {}),
       });
       onCreated();
     } catch (err) {
@@ -309,12 +325,24 @@ export function CreateSubagentDialog({
     }
   }, [w.availableSkills, w.selectedSkillIds, u, userId]);
 
+  const setFast = (fast: boolean) => {
+    const tools = splitTools(w.customToolsInput);
+    u({
+      fast,
+      customToolsInput: fast && !tools.includes(XOR_DECIDE) ? [...tools, XOR_DECIDE].join("\n") : w.customToolsInput,
+    });
+  };
+
+  const usesXor = w.fast || splitTools(w.customToolsInput).includes(XOR_DECIDE);
+
   const canNext =
     w.step === 0
       ? w.name.trim().length > 0 && w.nameValid && !w.nameError
       : w.step === 1
         ? w.systemPrompt.trim().length > 0
-        : true;
+        : w.step === 4
+          ? w.checksValid
+          : true;
 
   return (
     <>
@@ -457,6 +485,15 @@ export function CreateSubagentDialog({
         {/* Step 2: Instructions */}
         {w.step === 1 && (
           <div className="space-y-4">
+            <label className="flex items-start gap-3 rounded-xl border border-xyne-border bg-xyne-surface p-3" data-id="fast-subagent-toggle">
+              <Switch checked={w.fast} onChange={setFast} ariaLabel="Fast subagent" />
+              <span>
+                <span className="block text-[13px] font-medium text-xyne-fg-primary">Fast subagent (cheap model + xor checks)</span>
+                <span className="block text-[12px] text-xyne-fg-muted">
+                  Runs on the fast model with low thinking and judges items with xor. Best for classifying, triaging or checking many items. Adds the xor-decide tool and a Checks step.
+                </span>
+              </span>
+            </label>
             <TextField
               label={`System prompt (${utf8ByteLength(w.systemPrompt)} bytes)`}
               info={HINTS.systemPrompt}
@@ -589,8 +626,26 @@ export function CreateSubagentDialog({
           </div>
         )}
 
-        {/* Step 5: Review */}
+        {/* Step 5: Checks */}
         {w.step === 4 && (
+          <div className="space-y-3">
+            {!usesXor && (
+              <p className="rounded-xl border border-xyne-border bg-xyne-surface-subtle p-3 text-[12px] text-xyne-fg-muted">
+                Checks are optional. They run through the xor-decide tool, so turn on Fast subagent on the Instructions step (or tick xor-decide in Tools) for the subagent to use them.
+              </p>
+            )}
+            <ChecksEditor
+              checks={w.checks}
+              onChange={(checks, checksValid) => u({ checks, checksValid })}
+              samples={w.samples}
+              onSamplesChange={(samples) => u({ samples })}
+              canEdit={true}
+            />
+          </div>
+        )}
+
+        {/* Step 6: Review */}
+        {w.step === 5 && (
           <div className="space-y-4">
             <div>
               <h3 className="font-medium text-xyne-fg-primary">
@@ -616,6 +671,16 @@ export function CreateSubagentDialog({
                 <span className="text-xyne-fg-muted">Progress labels:</span>{" "}
                 <span className="text-xyne-fg-primary">
                   {w.progressLabels.length}
+                </span>
+              </div>
+              <div>
+                <span className="text-xyne-fg-muted">Fast subagent:</span>{" "}
+                <span className="text-xyne-fg-primary">{w.fast ? "Yes" : "No"}</span>
+              </div>
+              <div>
+                <span className="text-xyne-fg-muted">Checks / samples:</span>{" "}
+                <span className="text-xyne-fg-primary">
+                  {w.checks.length} / {w.samples.length}
                 </span>
               </div>
             </div>

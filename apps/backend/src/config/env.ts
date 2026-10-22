@@ -164,6 +164,7 @@ const envSchema = Joi.object({
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_PROACTIVITY_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -906,6 +907,7 @@ export const config = {
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableProactivityWorker: envVars.ENABLE_PROACTIVITY_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
