@@ -1,5 +1,6 @@
 import { errMsg } from "../errors.js";
 import { loopCommandFor } from "xyne-claw-shared";
+import { findCommand, renderCommandHelp } from "@xyne/shared/commands";
 import { experimentRepository } from "../../repositories/index.js";
 import { isClawAdmin } from "../../middleware/agent-acl.js";
 import {
@@ -35,7 +36,12 @@ type ExperimentHandlers = {
 };
 
 const handlers: ExperimentHandlers = {
-  unknown: async (ctx) => {
+  unknown: async (ctx, experimentCommand) => {
+    const own = experimentCommand.command ? findCommand(experimentCommand.command) : undefined;
+    if (own) {
+      await ctx.reply(renderCommandHelp(own), REPLY_LABEL);
+      return;
+    }
     await ctx.reply([
       "/experiment <duration> [provider=…] [model=…] [focus…]",
       "/understanding [duration cap] [focus…] — coverage-gated: runs until the code-path frontier is exhausted",

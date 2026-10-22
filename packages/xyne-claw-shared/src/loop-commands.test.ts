@@ -34,6 +34,15 @@ describe("loop command registry", () => {
     }
   });
 
+  it("gives every fix-retry loop a judge, and only those exit on the judge", () => {
+    for (const def of LOOP_COMMANDS) {
+      expect(def.graph === "fix-retry").toBe(Boolean(def.judge));
+      expect(def.exit === "judge").toBe(def.graph === "fix-retry");
+      if (def.judge) expect(def.judge.questions.map((q) => q.id)).toContain(def.judge.retryWhen.question);
+    }
+    expect(loopCommandFor("ui-test").subagents).toEqual(["ui-tester"]);
+  });
+
   it("renders the mode log line", () => {
     expect(loopModeLog(loopCommandFor(undefined), { epoch: 3, remaining: "42m" })).toBe(
       "Experiment mode — injected experiment tools (epoch 3, remaining 42m)",

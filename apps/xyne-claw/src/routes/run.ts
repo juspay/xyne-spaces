@@ -2353,7 +2353,8 @@ export async function processTask(
     );
     const uiTesterTools =
       !fastModeEnabled &&
-      (toolsConfigEarly?.subagents ?? []).includes("ui-tester") &&
+      ((toolsConfigEarly?.subagents ?? []).includes("ui-tester") ||
+        (experiment ? (loopCommandFor(experiment.kind).subagents ?? []).includes("ui-tester") : false)) &&
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
@@ -4164,6 +4165,7 @@ export async function processTask(
       framework: frameworkGuide,
       security: securityGuide,
       "repo-history": repoHistoryGuide,
+      "ui-test": `\n\n## UI-test mode\nYou are in a /ui-test run (epoch ${run.epoch}; route ${run.focus ?? "unspecified"}). You test ONE route by rendering every state worth seeing with mocked APIs, through the ui-tester subagent (ui-test-variations), which screenshots, records a video, audits the DOM and runs visual checks on each variation. A judge reads your reply after each pass: fixture or harness problems send you back to fix them, and a clean run moves on to the final report. End every pass with the pass/fail/unsure counts and say explicitly whether any requests hit the fallback mock. Never drop variations to get a clean run; a failing variation is a finding, not a problem to hide.`,
     });
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
