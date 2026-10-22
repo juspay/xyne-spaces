@@ -20,6 +20,7 @@ import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
+import { PER_CALL_AUTH_SERVER_TYPES, spacesCallAuthMeta } from "./spaces-call-auth.js";
 const log = createLogger("runner");
 
 /**
@@ -80,6 +81,7 @@ interface McpSession {
    *  the cached child's env, and evict on mismatch. xyne-spaces uses this
    *  on every call; other server types currently only spawn once. */
   spawnedToken?: string;
+  spawnedIdentity?: string;
   /** Wall-clock ms of the last getOrCreateSession() hit. Drives idle eviction
    *  so the cache (and its spawned child processes) doesn't grow unbounded —
    *  the leak that OOM'd claw-auth. Stamped on every create AND reuse. */
@@ -95,6 +97,16 @@ const sessions = new Map<string, McpSession>();
 // plus un-cleaned-up failed connects grew claw-auth to ~100 node children /
 // 44 GiB → kubelet eviction (2026-06-14).
 const inflight = new Map<string, Promise<Client>>();
+
+interface ResolvedSession {
+  client: Client;
+  credentials: Record<string, unknown>;
+}
+
+function spawnIdentity(credentials: Record<string, unknown>): string {
+  const { sessionId: _sessionId, ...rest } = credentials;
+  return credentialFingerprint(rest);
+}
 
 /**
  * Global per-call timeout for MCP requests (10 minutes). Applied around
@@ -235,7 +247,7 @@ async function getOrCreateSession(
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
-): Promise<Client> {
+): Promise<ResolvedSession> {
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -329,20 +341,25 @@ async function getOrCreateSession(
           ? (credentials["apiKey"] as string)
           : undefined;
 
+  const perCallAuth = PER_CALL_AUTH_SERVER_TYPES.has(serverType);
+  const identity = perCallAuth ? spawnIdentity(credentials) : undefined;
   const existing = sessions.get(key);
   if (existing) {
     // For xyne-spaces, the token rotates frequently (refresh-flow) so the
     // child must be respawned with the new env every time the token changes.
     // For other server types, creds rarely change between calls — but if they
     // do (e.g. user re-enters Bitbucket token), the same eviction kicks in.
-    if (incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken) {
-      log.info(`[mcp/runner] evicting stale cached session for ${key} (token rotated)`);
+    const stale = perCallAuth
+      ? existing.spawnedIdentity !== identity
+      : Boolean(incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken);
+    if (stale) {
+      log.info(`[mcp/runner] evicting stale cached session for ${key} (${perCallAuth ? "identity changed" : "token rotated"})`);
       sessions.delete(key);
       await existing.transport.close().catch(() => {});
     } else {
       log.info(`[mcp/runner] reusing cached session for ${key}`);
       existing.lastUsedAt = Date.now(); // keep alive — only idle sessions are swept
-      return existing.client;
+      return { client: existing.client, credentials };
     }
   }
 
@@ -351,13 +368,13 @@ async function getOrCreateSession(
   const pending = inflight.get(key);
   if (pending) {
     log.info(`[mcp/runner] awaiting in-flight spawn for ${key}`);
-    return pending;
+    return { client: await pending, credentials };
   }
 
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, identity)
     .finally(() => inflight.delete(key));
   inflight.set(key, spawnPromise);
-  return spawnPromise;
+  return { client: await spawnPromise, credentials };
 }
 
 /** Spawn + connect a fresh MCP session. Always reaps the child on connect
@@ -368,6 +385,7 @@ async function spawnSession(
   serverType: string,
   credentials: Record<string, unknown>,
   incomingToken: string | undefined,
+  identity: string | undefined,
 ): Promise<Client> {
   const definition = await resolveConnectorDefinition(serverType);
   if (!definition) {
@@ -444,6 +462,7 @@ async function spawnSession(
     transport,
     lastUsedAt: Date.now(),
     ...(incomingToken ? { spawnedToken: incomingToken } : {}),
+    ...(identity !== undefined ? { spawnedIdentity: identity } : {}),
   });
   return client;
 }
@@ -579,7 +598,7 @@ async function fetchToolsFromServer(
   agentSlug?: string,
   lane?: SessionLane,
 ): Promise<McpToolInfo[]> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
+  const { client } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -708,12 +727,13 @@ export async function callTool(
   lane?: SessionLane,
   instance?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const { client, credentials: resolved } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const callMeta = PER_CALL_AUTH_SERVER_TYPES.has(serverType) ? spacesCallAuthMeta(resolved) : undefined;
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
   const result = await client
-    .callTool({ name: tool, arguments: params }, undefined, {
+    .callTool({ name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) }, undefined, {
       timeout: MCP_REQUEST_TIMEOUT_MS,
       signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
     })
