@@ -126,8 +126,8 @@ export function isHttpUrl(value: string | null | undefined): value is string {
  * infra-switch drives this off `SlackAttachment.color`
  * (`src/AlertProxy/Utils/Common.hs:447-449`): green when the alert state maps to
  * OK/RESOLVED/UP, red otherwise. The warning and info shades come from Slack's
- * named palette as resolved in `slackBlockKitToFlowJSON.ts:449-454`, so alerts
- * arriving straight from a provider match ones relayed through infra-switch.
+ * named attachment palette (`warning`, `good`, `danger`), so alerts arriving
+ * straight from a provider match ones relayed through infra-switch.
  */
 export const SEVERITY_STRIPE: Record<AlertSeverity, string> = {
   critical: '#d91009',
@@ -138,7 +138,6 @@ export const SEVERITY_STRIPE: Record<AlertSeverity, string> = {
 
 /**
  * Wrap card content in the Slack-style coloured left border.
- * Mirrors `withColorStripe` (`slackBlockKitToFlowJSON.ts:482-489`).
  */
 export function withColorStripe(
   id: string,
@@ -155,9 +154,7 @@ export function withColorStripe(
 
 /**
  * Lay fields out as a 2-column grid that wraps onto new rows, the way Slack
- * renders `section.fields`. Mirrors `fieldsToGrid`
- * (`slackBlockKitToFlowJSON.ts:497-509`) — a grid rather than a label/value
- * table, so the render paths agree.
+ * renders `section.fields` — a grid rather than a label/value table.
  *
  * `idPrefix` namespaces the generated component ids per provider (`sns`,
  * `pingdom`, `gcp`), since flow component ids must be unique within a screen.
