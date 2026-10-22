@@ -9,6 +9,7 @@ import {
   isDeskChannelType,
   parseDeskMetricsGuestVisibility,
   MAX_DUPLICATE_SCOPE_FIELDS,
+  type AccessType,
 } from '@xyne/shared';
 import {
   useEmailChannelPreference,
@@ -236,6 +237,7 @@ export function useDeskSettingsForm(
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
     metricsGuestVisibility: emailChannelPreference?.metricsGuestVisibility ?? null,
+    metricsMinAccess: (emailChannelPreference?.metricsMinAccess ?? null) as AccessType | null,
     appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
     deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
     deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
@@ -355,6 +357,7 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  const setMetricsMinAccess = (next: AccessType) => pref.setField('metricsMinAccess', next);
   // Flips what guests actually see, so a key inheriting a hidden column turns on in one click.
   const toggleGuestVisibility = (key: string) =>
     pref.setField(
@@ -479,6 +482,9 @@ export function useDeskSettingsForm(
       }
       if (d.metricsGuestVisibility !== s.metricsGuestVisibility) {
         patch.metricsGuestVisibility = d.metricsGuestVisibility;
+      }
+      if (d.metricsMinAccess !== s.metricsMinAccess) {
+        patch.metricsMinAccess = d.metricsMinAccess;
       }
       if (d.deskReportEnabled !== s.deskReportEnabled) {
         patch.deskReportEnabled = d.deskReportEnabled;
@@ -632,6 +638,8 @@ export function useDeskSettingsForm(
     setFrtStageNames,
     guestVisibility,
     toggleGuestVisibility,
+    metricsMinAccess: pref.draft.metricsMinAccess,
+    setMetricsMinAccess,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
     duplicateDetectionEnabled,
