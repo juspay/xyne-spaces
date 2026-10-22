@@ -12,6 +12,7 @@ const AISkillCreateScreen = (): ReactElement => {
         data-id='ai-skill-create-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         <ClawSkillCreateV2 />
       </main>
     </AIShell>

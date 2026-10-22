@@ -207,7 +207,7 @@ async function runClaimedJob(
 
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
 
-function connectionOptions(): {
+export function runQueueConnectionOptions(): {
   host: string;
   port: number;
   password?: string;
@@ -226,7 +226,7 @@ function connectionOptions(): {
 }
 
 export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
-  const connection = connectionOptions();
+  const connection = runQueueConnectionOptions();
   if (!connection) {
     clog.error("[run-queue] REDIS_HOST is not set — run queue worker not started");
     return null;

@@ -61,6 +61,51 @@ export const chatMessageRepository = {
     });
   },
 
+  /** Appends finished user/assistant pairs in one transaction, chained from
+   *  `parentId` so the tree stays linear. `createdAt` is set a millisecond
+   *  apart: rows of one transaction would otherwise share a timestamp and the
+   *  transcript (ordered by createdAt) could show a reply before its request. */
+  appendTurns: (data: {
+    conversationId: string;
+    agentSlug: string;
+    userId: string;
+    orgId: string;
+    parentId: string | null;
+    turns: Array<{ request: string; reply: string }>;
+  }) =>
+    prisma.$transaction(async (tx) => {
+      const { turns, parentId: firstParentId, ...owner } = data;
+      const start = Date.now();
+      const ids: string[] = [];
+      let parentId = firstParentId;
+      for (const [index, turn] of turns.flatMap((t) => [
+        { role: "user", content: t.request },
+        { role: "assistant", content: t.reply },
+      ]).entries()) {
+        const row = await tx.chatMessage.create({
+          data: { ...owner, ...turn, status: "completed", parentId, createdAt: new Date(start + index) },
+          select: { id: true },
+        });
+        ids.push(row.id);
+        parentId = row.id;
+      }
+      return ids;
+    }),
+
+  /** The pending action exactly as the run stored it, found by signature. */
+  findPendingAction: async (conversationId: string, signature: string): Promise<Record<string, unknown> | null> => {
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, pendingActions: { array_contains: [{ signature }] } },
+      select: { pendingActions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row || !Array.isArray(row.pendingActions)) return null;
+    const match = (row.pendingActions as Array<Record<string, unknown>>).find(
+      (action) => action && typeof action === "object" && action["signature"] === signature,
+    );
+    return match ?? null;
+  },
+
   resolvePendingAction: async (
     conversationId: string,
     signature: string,
@@ -206,12 +251,29 @@ export const chatMessageRepository = {
    *  activity and row counts — the whole all-agents history in one aggregate
    *  query instead of loading every message. Rows may be keyed by either of
    *  the caller's verified ids (see getRequesterAliases). */
+  /**
+   * `scope` narrows the aggregate itself rather than its result, so cursor
+   * pagination downstream still sees a complete, correctly ordered set.
+   *
+   * Both arrays are honoured when EMPTY and must be: an empty `only` means a
+   * project with no chats and has to return nothing, while an empty `exclude`
+   * means nothing is filed and has to return everything. Guarding on
+   * truthiness instead of `undefined` turns the first case into "no filter"
+   * and lists every chat the user has.
+   */
   conversationAgentGroupsForUser: async (
     userIds: string | string[],
+    scope?: { only?: string[]; exclude?: string[] },
   ): Promise<Array<{ conversationId: string; agentSlug: string; firstAt: Date; lastAt: Date; count: number }>> => {
+    const conversationId: Record<string, string[]> = {};
+    if (scope?.only !== undefined) conversationId["in"] = scope.only;
+    if (scope?.exclude !== undefined) conversationId["notIn"] = scope.exclude;
     const rows = await prisma.chatMessage.groupBy({
       by: ["conversationId", "agentSlug"],
-      where: userIdFilter(userIds),
+      where: {
+        ...userIdFilter(userIds),
+        ...(Object.keys(conversationId).length > 0 ? { conversationId } : {}),
+      },
       _min: { createdAt: true },
       _max: { createdAt: true },
       _count: { _all: true },
@@ -271,27 +333,69 @@ export const chatMessageRepository = {
    *  Scoped by all three to prevent one user from deleting another's chat
    *  even if they guess a conversationId. Returns the delete count. Alias
    *  array = both verified representations of the SAME caller. */
-  deleteConversation: async (userIds: string | string[], agentSlug: string, conversationId: string) => {
-    const result = await prisma.chatMessage.deleteMany({
-      where: { ...userIdFilter(userIds), agentSlug, conversationId },
-    });
-    if (result.count > 0) {
-      await prisma.chatConversationMeta.deleteMany({
-        where: { conversationId, agentSlug, ...userIdFilter(userIds) },
+  deleteConversation: (userIds: string | string[], agentSlug: string, conversationId: string) =>
+    // One transaction: a failure between the message delete and the membership
+    // delete would strand a ChatProjectItem whose chat no longer exists. The
+    // list would not show it (no messages) but countsByProject still would, so
+    // the sidebar reports one more chat than the project opens to.
+    prisma.$transaction(async (tx) => {
+      const result = await tx.chatMessage.deleteMany({
+        where: { ...userIdFilter(userIds), agentSlug, conversationId },
       });
-    }
-    return result.count;
-  },
+      if (result.count > 0) {
+        await tx.chatConversationMeta.deleteMany({
+          where: { conversationId, agentSlug, ...userIdFilter(userIds) },
+        });
+        await dropProjectMembershipIfChatGone(tx, userIds, conversationId);
+      }
+      return result.count;
+    }),
 
   /** Delete ONE user's rows in a direct chat across every agent that answered
    *  in it. A chat the user switched agents in is one conversation: deleting
    *  only the requesting agent's rows would leave the other agents' turns
    *  hanging off parents that no longer exist. Same user scoping as above. */
-  deleteConversationAllAgents: async (userIds: string | string[], conversationId: string) => {
-    const result = await prisma.chatMessage.deleteMany({ where: { ...userIdFilter(userIds), conversationId } });
-    if (result.count > 0) {
-      await prisma.chatConversationMeta.deleteMany({ where: { conversationId, ...userIdFilter(userIds) } });
-    }
-    return result.count;
-  },
+  deleteConversationAllAgents: (userIds: string | string[], conversationId: string) =>
+    prisma.$transaction(async (tx) => {
+      const result = await tx.chatMessage.deleteMany({
+        where: { ...userIdFilter(userIds), conversationId },
+      });
+      if (result.count > 0) {
+        await tx.chatConversationMeta.deleteMany({
+          where: { conversationId, ...userIdFilter(userIds) },
+        });
+        await dropProjectMembershipIfChatGone(tx, userIds, conversationId);
+      }
+      return result.count;
+    }),
 };
+
+/**
+ * Drop this user's ChatProjectItem once their last message in the conversation
+ * is gone. `chat_project_items` has no foreign key to `chat_messages` — it
+ * cannot, since a conversation is just an id shared by rows — so nothing else
+ * reclaims the membership, and a stale row would keep a deleted chat counted in
+ * its project and inside `?projectId=` results.
+ *
+ * Conditional on nothing remaining because the per-agent delete above removes
+ * only one agent's turns: a chat the user switched agents in still exists under
+ * the others and must keep its project.
+ */
+/** The client handed to an interactive `$transaction` callback. Derived from
+ *  the real client rather than `Prisma.TransactionClient`, which does not match
+ *  an extended client under `exactOptionalPropertyTypes`. */
+type ChatTransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function dropProjectMembershipIfChatGone(
+  tx: ChatTransactionClient,
+  userIds: string | string[],
+  conversationId: string,
+): Promise<void> {
+  const remaining = await tx.chatMessage.count({
+    where: { ...userIdFilter(userIds), conversationId },
+  });
+  if (remaining > 0) return;
+  await tx.chatProjectItem.deleteMany({
+    where: { conversationId, ...userIdFilter(userIds) },
+  });
+}

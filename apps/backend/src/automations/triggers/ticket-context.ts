@@ -10,6 +10,7 @@ const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.APP,
   ChannelType.CALL,
   ChannelType.SOCIAL_MEDIA,
+  ChannelType.CHANNELS,
 ]);
 
 export interface TicketUrlParams {
@@ -140,8 +141,22 @@ export async function getChannelMembership(
   return participant ? 'MEMBER' : 'EXTERNAL';
 }
 
+const LinkedTicketSchema = z.object({
+  id: z.string(),
+  xyneId: z.string().nullable(),
+  title: z.string().nullable(),
+  conversationId: z.string().nullable(),
+  channelId: z.string(),
+});
+
 export const TicketContextSchema = z.object({
   ticket: TicketSchema,
+  parentTicket: LinkedTicketSchema.nullable().describe(
+    'The ticket this one is linked to as a sub-ticket; null when it is not a sub-ticket.',
+  ),
+  subTickets: z
+    .array(LinkedTicketSchema)
+    .describe('Tickets linked to this one as sub-tickets; empty when there are none.'),
   board: BoardSchema.nullable(),
   project: ProjectSchema.nullable(),
   channel: ChannelSchema.nullable(),
@@ -192,9 +207,42 @@ export interface TicketLike {
   updatedAt?: Date | null;
 }
 
+const LINKED_TICKET_SELECT = {
+  id: true,
+  xyneId: true,
+  title: true,
+  conversationId: true,
+  channelId: true,
+} as const;
+
+type LinkedTicket = z.infer<typeof LinkedTicketSchema>;
+
+/** The ticket this one is a sub-ticket of, and the tickets linked under it. */
+export async function loadTicketLinks(
+  ticketId: string,
+): Promise<{ parentTicket: LinkedTicket | null; subTickets: LinkedTicket[] }> {
+  const [parentMapping, childMappings] = await Promise.all([
+    db.ticketSubTicketMapping.findFirst({
+      where: { subTicket: { mappedTicketId: ticketId } },
+      orderBy: { id: 'desc' },
+      select: { ticket: { select: LINKED_TICKET_SELECT } },
+    }),
+    db.ticketSubTicketMapping.findMany({
+      where: { ticketId, subTicket: { mappedTicketId: { not: null } } },
+      orderBy: { id: 'asc' },
+      select: { subTicket: { select: { mappedTicketId: true } } },
+    }),
+  ]);
+  const childIds = childMappings.flatMap(m => (m.subTicket.mappedTicketId ? [m.subTicket.mappedTicketId] : []));
+  const children = childIds.length
+    ? await db.ticket.findMany({ where: { id: { in: childIds } }, select: LINKED_TICKET_SELECT })
+    : [];
+  return { parentTicket: parentMapping?.ticket ?? null, subTickets: children };
+}
+
 export async function buildTicketContext(ticket: TicketLike): Promise<TicketContext> {
   const lastEmails = await loadLastEmails(ticket);
-  const [board, project, channel, assignee, creator, group] = await Promise.all([
+  const [board, project, channel, assignee, creator, group, links] = await Promise.all([
     db.board
       .findUnique({
         where: { id: ticket.boardId },
@@ -235,6 +283,7 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
           })
           .catch(() => null)
       : Promise.resolve(null),
+    loadTicketLinks(ticket.id).catch(() => ({ parentTicket: null, subTickets: [] })),
   ]);
 
   const ticketUrl = buildTicketUrl({
@@ -282,6 +331,8 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
 
   return {
     ticket: ticketRow,
+    parentTicket: links.parentTicket,
+    subTickets: links.subTickets,
     board: board
       ? ({
           id: board.id,

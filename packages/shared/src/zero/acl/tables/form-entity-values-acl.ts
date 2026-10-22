@@ -1,6 +1,7 @@
 import type { Query } from '@rocicorp/zero';
-import { type Schema, type Context } from '../../schema';
+import { type Schema, type Context, FormEntityType, WorkspaceRole } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { channelAccessWhere } from '../core/channel-access';
 import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class FormEntityValuesACL extends BaseQueryACL<'form_entity_values'> {
@@ -26,8 +27,18 @@ export class FormEntityValuesACL extends BaseQueryACL<'form_entity_values'> {
     }
 
     // Direct workspaceId check through form - formId is now on form_entity_values
-    return query.whereExists('form', (f) =>
+    const inWorkspace = query.whereExists('form', (f) =>
       f.where('workspaceId', '=', this.ctx.workspaceId)
+    );
+    if (this.ctx.role === WorkspaceRole.ADMIN || this.ctx.role === WorkspaceRole.OWNER) {
+      return inWorkspace;
+    }
+    // A channel's fields are read only by those who can see the channel (private ones: its members).
+    return inWorkspace.where(({ or, cmp, exists }) =>
+      or(
+        cmp('entityType', '!=', FormEntityType.CHANNEL),
+        exists('channel', (c) => c.where(channelAccessWhere(this.ctx)))
+      )
     );
   }
 }

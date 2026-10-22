@@ -12,6 +12,7 @@ const AILibraryScreen = (): ReactElement => {
         data-id='ai-library-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         <div className='relative flex-1 overflow-auto no-scrollbar'>
           <LibraryV2 />
         </div>

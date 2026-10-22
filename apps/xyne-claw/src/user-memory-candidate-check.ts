@@ -17,8 +17,8 @@ import type {
   UserMemoryCandidateVerdict,
   UserMemoryCuratorTrace,
 } from "xyne-claw-shared";
-import { jevAsk, jevEnabled, type JevAnswer, type JevQuestion } from "./jev.js";
-import { collectJudgeExchanges, recordJudgeOutcome, storableExchange } from "./judge-backend.js";
+import { xor, xorEnabled, type XorAnswer, type XorQuestion } from "./xor.js";
+import { collectJudgeExchanges, recordJudgeOutcome, storableExchange } from "./judge-trace.js";
 import { round3, type JudgeSiteDeps } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -30,8 +30,6 @@ const log = createLogger("memory-candidate-check");
 const SIMILAR_K = 5;
 const CONCURRENCY = 8;
 const DROP_AT = 0.7;
-// Background (nightly) work: no user is waiting, so allow a slow classifier reply.
-const BUDGET_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_TIMEOUT_MS"] ?? 8_000);
 const BATCH_DEADLINE_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_DEADLINE_MS"] ?? 30_000);
 const MAX_CONSECUTIVE_MISSES = 3;
 
@@ -60,7 +58,7 @@ export function mostSimilar(text: string, existing: readonly ExistingUserMemory[
     .map((x) => x.m);
 }
 
-const CANDIDATE_QUESTIONS: Record<string, JevQuestion> = {
+const CANDIDATE_QUESTIONS: Record<string, XorQuestion> = {
   verdict: {
     type: "choice",
     instructions: "Compared with the memories already stored about this user, what is the NEW candidate memory?",
@@ -90,7 +88,7 @@ function candidateState(c: UserMemoryCandidatePayload, similar: readonly Existin
 
 /** Pure: answers → keep/drop decision for one candidate. */
 export function decideCandidate(
-  answers: Record<string, JevAnswer>,
+  answers: Record<string, XorAnswer>,
 ): { keep: boolean; verdict: UserMemoryCandidateVerdict; p: number; worth?: number } | null {
   const a = answers["verdict"];
   const verdict = a?.choice as UserMemoryCandidateVerdict | undefined;
@@ -121,10 +119,10 @@ export async function checkMemoryCandidates(
   deps: JudgeSiteDeps = {},
 ): Promise<{ candidates: UserMemoryCandidatePayload[]; summary: CandidateCheckSummary | null }> {
   const enabled = deps.enabled ?? optEnabled("jev_memory_candidate_check");
-  if (!enabled || candidates.length === 0 || (!deps.ask && !jevEnabled())) {
+  if (!enabled || candidates.length === 0 || (!deps.ask && !xorEnabled())) {
     return { candidates: [...candidates], summary: null };
   }
-  const ask = deps.ask ?? jevAsk;
+  const ask = deps.ask ?? xor;
   const started = Date.now();
   // claw-auth waits on this inside /distill: a slow or down Jev must not sink
   // the batch. Stop asking after 3 misses in a row or once the batch deadline
@@ -134,10 +132,7 @@ export async function checkMemoryCandidates(
   const results = await mapLimit(candidates, CONCURRENCY, async (c) => {
     if (giveUp()) return { c, d: null, exchange: undefined };
     const { result: answers, exchanges } = await collectJudgeExchanges(() =>
-      ask(candidateState(c, mostSimilar(c.text, existing)), CANDIDATE_QUESTIONS, {
-        timeoutMs: BUDGET_MS,
-        purpose: "memory-candidate-check",
-      }),
+      ask({ state: candidateState(c, mostSimilar(c.text, existing)), questions: CANDIDATE_QUESTIONS, purpose: "memory-candidate-check" }),
     );
     misses = answers ? 0 : misses + 1;
     return { c, d: answers ? decideCandidate(answers) : null, exchange: exchanges[0] };

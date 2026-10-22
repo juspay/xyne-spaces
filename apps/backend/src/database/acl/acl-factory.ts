@@ -158,6 +158,13 @@ export class ACLFactory {
       return new ApplicationsACL(ctx, prisma)
     case 'applicationReleaseTicket':
       return new ApplicationReleaseTicketsACL(ctx, prisma)
+    case 'authSessionWorkspaceAccess':
+      // Child of authSession; same pre-workspace-context write path, so also unscoped.
+      return new UnscopedACL(ctx, prisma)
+    case 'authSession':
+      // Org-scoped device session table; written during login/refresh before any
+      // workspace context exists, so it is deliberately not workspace-scoped.
+      return new UnscopedACL(ctx, prisma)
     case 'board':
       return new BoardsACL(ctx, prisma)
     case 'boardComplexityScore':

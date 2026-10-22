@@ -23,7 +23,10 @@ import {
   activeGoalRepository,
   experimentRepository,
 } from "../repositories/index.js";
+// Direct import: route tests stub the index with factories lacking this.
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
+import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
@@ -61,7 +64,7 @@ import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
-import { agentDraftTranscript, prepareAgentDraftCard, renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
+import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard } from "../lib/connector-card-render.js";
 import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
@@ -249,16 +252,24 @@ async function scheduleCapacityRetryIfNeeded(
  * logged so an opted-out agent that starts posting again can be explained.
  */
 async function isLivePreviewMessageHidden(
-  agentId: string | undefined,
+  ctx: { agentId?: string | undefined; agentOrgId?: string | null | undefined; agentSlug?: string | undefined },
   log: { warn: (msg: string, meta?: Record<string, unknown>) => void },
 ): Promise<boolean> {
-  if (!agentId) return false;
+  const { agentId, agentOrgId, agentSlug } = ctx;
+  // A context resolved from an older run-recovery record can lack agentId;
+  // fall back to the org-scoped slug (unique per org) before assuming opt-in.
+  if (!agentId && !(agentOrgId && agentSlug)) return false;
   try {
-    const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } });
+    const agent = agentId
+      ? await prisma.agent.findUnique({ where: { id: agentId }, select: { config: true } })
+      : await prisma.agent.findUnique({
+          where: { orgId_slug: { orgId: agentOrgId!, slug: agentSlug! } },
+          select: { config: true },
+        });
     const config = agent?.config as { hideLivePreview?: unknown } | null | undefined;
     return config?.hideLivePreview === true;
   } catch (err) {
-    log.warn("hideLivePreview lookup failed; posting live preview message", { agentId, error: errMsg(err) });
+    log.warn("hideLivePreview lookup failed; posting live preview message", { agentId, agentOrgId, agentSlug, error: errMsg(err) });
     return false;
   }
 }
@@ -670,6 +681,12 @@ async function pendingActionTargetValidation(
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
 
+  if (action["tool"] === "create-agent" && ctx.agentOrgId) {
+    const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+    const error = await createAgentQueueError(params, ctx.agentOrgId);
+    if (error) return { error };
+  }
+
   if (action["tool"] === "user-send-message" && !!conversationId === !!channelId) {
     return { error: "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel" };
   }
@@ -787,14 +804,48 @@ export async function fetchConversationHistory(
 
 // buildAppActionFrontmatter removed — replaced by buildTwinApprovalFlow from xyne-claw-shared
 
+function rendersAgentDraftCard(action: Record<string, unknown>, ctx: SessionContext): boolean {
+  if (action["tool"] !== "create-agent" || !ctx.agentSlug || !ctx.agentOrgId) return false;
+  const params = action["params"] && typeof action["params"] === "object" ? (action["params"] as Record<string, unknown>) : {};
+  return draftSpecFromCreateAgentParams(params) !== null;
+}
+
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
   token: string;
   targetValidation: { channelName?: string };
+  runOwnerId?: string | undefined;
 }): Promise<void> {
   const { action, ctx, token, targetValidation } = args;
   const params = action["params"] as Record<string, unknown>;
+
+  // create-agent renders the agent draft card, not the generic write card: it
+  // is the same decision propose-agent raises, and the generic card truncates
+  // the system prompt at 200 chars — the one thing a reviewer must read.
+  if (action["tool"] === "create-agent" && ctx.agentSlug && ctx.agentOrgId) {
+    const spec = draftSpecFromCreateAgentParams(params);
+    if (spec) {
+      await postAgentDraftCard({
+        spec,
+        ctx: {
+          agentSlug: ctx.agentSlug,
+          agentOrgId: ctx.agentOrgId,
+          requesterId: ctx.senderId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          spacesAppUserId: ctx.spacesAppUserId,
+          spacesAppId: ctx.spacesAppId,
+          appToken: token,
+        },
+        runOwnerId: args.runOwnerId ?? ctx.senderId,
+        log: clog,
+      });
+      return;
+    }
+    clog.warn(`[agent-card] create-agent params were not a usable draft; falling back to the write card`);
+  }
+
   const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
 
   // The pending-action signature is minted before the Spaces delivery target is
@@ -816,9 +867,10 @@ async function postWriteApprovalAction(args: {
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const { flow: cardFlow, usedTicketCard: usedRichTicketCard } = buildWriteApprovalCardFlow(
+  const { flow: cardFlow, usedRichCard } = await buildWriteApprovalCardFlow(
     cardAction,
     actionDesc,
+    ctx.agentOrgId,
   );
   const writeFlow = withSpacesAppId(cardFlow, spacesAppId);
 
@@ -878,9 +930,9 @@ async function postWriteApprovalAction(args: {
     // (auth, channel validation, network) re-throws so the caller's skip/target
     // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
     // with no code change.
-    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    if (!usedRichCard || !isFlowSchemaRejection(err)) throw err;
     clog.warn(
-      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+      `[webhook/result] rich approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
     );
     await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
   }
@@ -2706,6 +2758,8 @@ export async function handleAutomationWebhook(
       channelName: payload.channelName ?? payload.channelId ?? "",
       conversationId: payload.conversationId ?? "",
       task: task!,
+      agentId: agent.id,
+      agentOrgId: agent.orgId ?? null,
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: "conversation",
@@ -3096,6 +3150,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       toolMs?: number;
       lastRetryReason?: string;
     };
+    /** Run-level outcome of the citation-reflection pass. */
+    citationReflection?: {
+      outcome?: string;
+      initialCited?: boolean;
+      sourcesWereCiteable?: boolean;
+      finalCited?: boolean;
+      rounds?: number;
+    };
+    /** Per-LLM-call series, stored verbatim (shape owned by xyne-claw's llm-turn-stats.ts). */
+    llmCalls?: unknown;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
@@ -3326,7 +3390,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
     const toolOf = (a: Record<string, unknown>): string =>
       typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
-    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const queued = pendingActionList.filter(
+      (a) => !pendingActionValidation.get(a)?.error && !rendersAgentDraftCard(a, ctx),
+    );
     const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
 
     const lines: string[] = [];
@@ -3383,7 +3449,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // is interrupted again. Defer settlement until the empty-result branch asks
   // recovery whether another bounded attempt will run; otherwise the generic
   // apology can be posted before the resumed answer.
+  // Claw ends the run right after a question card, often before any text.
+  const postedQuestion = (payload as { pendingQuestions?: Array<{ purpose?: string }> }).pendingQuestions?.some(
+    (q) => q.purpose !== "follow_up_suggestions"
+  );
   const emptyCompletedResult =
+    !postedQuestion &&
     payload.status === "completed" &&
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
@@ -3419,9 +3490,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-      ...(payload.latency ? { latency: payload.latency } : {}),
+      ...clawMetricsFields(payload),
       ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
   }
@@ -4525,108 +4594,22 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     ctx.agentSlug &&
     ctx.agentOrgId
   ) {
-    const token = ctx.appToken;
-    const spec = pendingAgentCard.agent;
-    try {
-      const orgId = ctx.agentOrgId;
-      const requesterId = ctx.senderId;
-
-      // Validation, duplicate check, capability resolution, AgentRequest
-      // persistence and the card itself are shared with the Xyne AI surface
-      // (run-stream.ts) — only delivery differs per surface.
-      const prepared = await prepareAgentDraftCard(spec, {
+    await postAgentDraftCard({
+      spec: pendingAgentCard.agent,
+      ctx: {
         agentSlug: ctx.agentSlug,
-        orgId,
-        userId: requesterId,
-        conversationId: ctx.conversationId,
-        channelId: ctx.channelId,
-        spacesAppId: ctx.spacesAppId,
-      });
-      if (!prepared.ok) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: prepared.message,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-      const { flow, identity } = prepared;
-
-      // A lead-in line so the card isn't dropped into the thread wordlessly.
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: prepared.leadIn,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch (e) {
-        // Non-fatal: the card is the deliverable and still posts below.
-        log.warn("Failed to post agent-draft lead-in (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-
-      await postFlowCard(flow, {
-        kind: "spaces",
+        agentOrgId: ctx.agentOrgId,
+        requesterId: ctx.senderId,
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
         spacesAppUserId: ctx.spacesAppUserId,
-        appToken: token,
-      });
-      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${prepared.requestId} conv=${ctx.conversationId}`);
-
-      // Persist an assistant transcript row: the interactive card exists only in
-      // Spaces, so without this the claw chat shows nothing for this turn and the
-      // next user message groups as a sibling branch. Same reasoning as the plan
-      // card's transcript row above.
-      try {
-        const parentId = await chatMessageRepository
-          .latestMessageId(ctx.conversationId, ctx.agentSlug)
-          .catch(() => null);
-        await chatMessageRepository.create({
-          conversationId: ctx.conversationId,
-          agentSlug: ctx.agentSlug,
-          userId: runOwnerId,
-          orgId,
-          ...(parentId ? { parentId } : {}),
-          role: "assistant",
-          content: agentDraftTranscript(identity),
-          status: "completed",
-          ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-        });
-      } catch (e) {
-        log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-    } catch (err) {
-      log.error("Failed to post agent draft card", {
-        error: errMsg(err),
-        slug: spec.slug,
-      });
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: "I drafted the agent but couldn't post it for approval. Please try again.",
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch {
-        // The user already lost this turn; don't compound it with a throw.
-      }
-    }
+        spacesAppId: ctx.spacesAppId,
+        appToken: ctx.appToken,
+      },
+      runOwnerId,
+      ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+      log,
+    });
     await deleteSession(sessionId).catch(() => {});
     return;
   }
@@ -4642,6 +4625,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  const draftCardIsTheReply = draftCardCarriesReply({
+    completed: payload.status === "completed",
+    conversation: ctx.responseMode === "conversation",
+    actions: pendingActionList.map((a) => ({
+      rendersDraftCard: rendersAgentDraftCard(a, ctx),
+      rejected: Boolean(pendingActionValidation.get(a)?.error),
+    })),
+    hasAttachments: Boolean(payload.attachments?.length),
+    hasPendingResponses: Boolean(payload.pendingResponses?.length),
+    replyText: typeof payload.result === "string" ? payload.result : "",
+  });
+
   // Notify user if result is empty (but not if copilot has pendingResponses, and
   // not when a capability card was just posted — there the card IS the answer
   // and an apology under it would be nonsense).
@@ -4655,7 +4650,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
     !payload.pendingResponses?.length &&
-    !postedAgentProfileCard
+    !postedAgentProfileCard &&
+    !draftCardIsTheReply &&
+    !postedQuestion
   ) {
     if (deferCompletedRecoveryForEmptyResult) {
       const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {
@@ -5175,7 +5172,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          await postWriteApprovalAction({ action, ctx, token, targetValidation });
+          await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -5252,7 +5249,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         },
       );
 
-      if (prepared.attachments.length > 0) {
+      if (draftCardIsTheReply) {
+        log.info(`Agent ${ctx.agentSlug}: reply dropped — the create-agent draft card carries it, thread ${ctx.conversationId}`);
+      } else if (prepared.attachments.length > 0) {
         const form = new FormData();
         for (const att of prepared.attachments) {
           const buffer = Buffer.from(att.data, "base64");
@@ -5532,7 +5531,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        await postWriteApprovalAction({ action, ctx, token, targetValidation });
+        await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
         approvalCardsSent += 1;
       }
 
@@ -6608,10 +6607,26 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   // also check the in-memory Set here in case run-recovery re-delivers.
   if (sandboxPreviewUrl && sandboxId) {
     if (announcedSandboxPreviews.has(sessionId)) return;
+    // Resolve the run context BEFORE marking this run as announced. Claw emits
+    // the preview once per run; if we marked it first and the lookup missed
+    // (sandbox started before the session was registered, Redis blip), a
+    // run-recovery re-delivery would be dropped by the dedup and the preview
+    // lost with no trace (XYNE-66341).
+    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch((err) => {
+      clog.warn(`[webhook/progress] sandbox preview: session context lookup threw for ${sessionId}: ${errMsg(err)}`);
+      return null;
+    });
+    if (!ctx) {
+      clog.warn(
+        `[webhook/progress] sandbox preview dropped: no session context (sessionId=${sessionId} sandboxId=${sandboxId} conversationId=${conversationId ?? "-"} agentSlug=${agentSlug ?? "-"}); a re-delivery can still announce it`,
+      );
+      return;
+    }
+    // Re-check after the await: a concurrent re-delivery may have won the race.
+    if (announcedSandboxPreviews.has(sessionId)) return;
     rememberAnnouncedPreview(sessionId);
-    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
-    if (!ctx) return;
-    await ingestSandboxPreviewSignals(
+    const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+    const ingest = await ingestSandboxPreviewSignals(
       { conversationId: ctx.conversationId, userId: ctx.senderId, orgId: ctx.agentOrgId ?? null, runId: sessionId },
       {
         sandboxId,
@@ -6619,13 +6634,38 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         ...(sandboxCodePreviewUrl ? { sandboxCodePreviewUrl } : {}),
       },
     );
+    if (!ingest.recorded) {
+      // Without the ownership row the sandbox access check returns 403
+      // unknown-sandbox, so posting the link would hand the user a dead URL.
+      log.error("Sandbox preview ownership row not recorded; not posting preview link", {
+        sessionId,
+        sandboxId,
+        conversationId: ctx.conversationId,
+        reason: ingest.reason ?? "unknown",
+      });
+    }
     if (ctx.responseMode !== "conversation") return;
-    const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
     // suppressed — the ownership row above is still written, because the sandbox
     // router's access check (and the Workspace pane) depend on it.
-    if (await isLivePreviewMessageHidden(ctx.agentId, log)) {
-      log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId})`);
+    if (await isLivePreviewMessageHidden(ctx, log)) {
+      log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
+      return;
+    }
+    if (!ingest.recorded) {
+      try {
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: systemNote("Live preview couldn't be attached to this conversation, so it isn't available for this run."),
+            metadata: { contentFormat: "markdown" },
+          },
+        );
+      } catch (err) {
+        log.warn("Failed to post sandbox preview failure note", { error: errMsg(err) });
+      }
       return;
     }
     try {
@@ -6646,7 +6686,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
           metadata: { contentFormat: "markdown" },
         }
       );
-      log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
+      log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
     } catch (err) {
       log.warn("Failed to announce sandbox preview", { error: errMsg(err) });
     }

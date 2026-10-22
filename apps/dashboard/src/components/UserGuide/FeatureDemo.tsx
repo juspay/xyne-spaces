@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, type ReactElement, type ReactNode } from 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessagesSquare,
-  Mic,
+  AudioLines,
   Ticket,
   Search,
   Bot,
@@ -344,7 +344,7 @@ function chatScenes(): SceneConfig[] {
             <div className='flex-1 p-2 space-y-1.5'>{chatMessages}</div>
             <div className='mx-2 mb-1.5 flex items-center gap-1'>
               <Ring show>
-                <button type='button' className='p-1 rounded text-primary'>
+                <button aria-label='Attach file' type='button' className='p-1 rounded text-primary'>
                   <Paperclip size={12} />
                 </button>
               </Ring>
@@ -413,7 +413,11 @@ function dmScenes(): SceneConfig[] {
                 <span className='text-primary font-medium'>DMs</span>
               </div>
               <Ring show>
-                <button type='button' className='p-0.5 rounded text-primary bg-primary/10'>
+                <button
+                  aria-label='Add'
+                  type='button'
+                  className='p-0.5 rounded text-primary bg-primary/10'
+                >
                   <Plus size={11} />
                 </button>
               </Ring>
@@ -511,7 +515,11 @@ function dmScenes(): SceneConfig[] {
               <Av initials='BK' color='bg-sky-500' />
               <span className='text-[10px] font-semibold text-foreground'>Bob Kumar</span>
               <Ring show>
-                <button type='button' className='ml-auto p-0.5 rounded text-primary bg-primary/10'>
+                <button
+                  aria-label='Add'
+                  type='button'
+                  className='ml-auto p-0.5 rounded text-primary bg-primary/10'
+                >
                   <Plus size={10} />
                 </button>
               </Ring>
@@ -1386,7 +1394,7 @@ function recordingsScenes(): SceneConfig[] {
                     className={`flex items-center gap-1.5 p-1.5 rounded border border-border/60 ${i === 0 ? 'bg-muted/30' : ''}`}
                   >
                     <div className='h-6 w-6 rounded-md bg-primary/10 text-primary flex items-center justify-center'>
-                      <Mic size={10} />
+                      <AudioLines size={10} />
                     </div>
                     <div className='flex-1'>
                       <p className='text-[10px] font-medium text-foreground'>{r.title}</p>

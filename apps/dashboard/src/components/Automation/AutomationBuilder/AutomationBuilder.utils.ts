@@ -110,7 +110,9 @@ export function buildVariableSources(
         ? buildOutputSchemaFromRunAgentConfig(step.config)
         : step.type === 'TRIGGER_WEBHOOK'
           ? buildOutputSchemaFromWebhookConfig(step.config)
-          : schema.outputSchema;
+          : step.type === 'ASK_JEV'
+            ? buildOutputSchemaFromAskJevConfig(step.config)
+            : schema.outputSchema;
     sources.push({
       sourceKey: step.id,
       role: 'output',
@@ -145,6 +147,34 @@ export function buildOutputSchemaFromRunAgentConfig(
 }
 
 type JsonSchemaT = import('../Automation.types').JsonSchema;
+
+// Mirrors AnswerOutputSchema in the backend's ask-jev.step.ts.
+const ASK_JEV_ANSWER_SCHEMA: JsonSchemaT = {
+  type: 'object',
+  properties: {
+    answered: { type: 'boolean' },
+    answer: { anyOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'null' }] },
+    confident: { type: 'boolean' },
+    confidence: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    score: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+};
+
+/** ASK_JEV outputs one answer per configured question, under the question's key. */
+export function buildOutputSchemaFromAskJevConfig(config: Record<string, unknown>): JsonSchemaT {
+  const questions = (config as { questions?: unknown }).questions;
+  const properties: Record<string, JsonSchemaT> = {};
+  if (Array.isArray(questions)) {
+    for (const question of questions) {
+      const key = (question as { key?: unknown } | null)?.key;
+      if (typeof key === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
+        properties[key] = ASK_JEV_ANSWER_SCHEMA;
+      }
+    }
+  }
+  return { type: 'object', properties };
+}
 
 function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
   const declared =

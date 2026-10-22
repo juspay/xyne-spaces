@@ -132,7 +132,17 @@ interface CanvasScreenProps {
   onToggleFullscreen?: () => void;
   onClose?: () => void;
   showAskAiAction?: boolean;
-  /** Off where the document opens with its own title, as SDLC pages do. */
+  /** Marks a document the viewer cannot edit, where nothing else on the screen says so. */
+  showViewOnly?: boolean;
+  /** Shows the document's headings as an "On this page" list on the right. */
+  pinnedOutline?: boolean;
+  /** What the host calls its documents, for the not-found screen. Without it: "Canvas". */
+  notFoundNoun?: string;
+  /** The host's own way back from the not-found screen, in place of the canvas list. */
+  notFoundBackLabel?: string;
+  onNotFoundBack?: () => void;
+  /** The host's own way out of the canvas (mobile back arrow, canvas deleted), in place of the canvas route. */
+  onBack?: () => void;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -172,6 +182,12 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onToggleFullscreen,
   onClose,
   showAskAiAction = true,
+  showViewOnly = false,
+  pinnedOutline = false,
+  notFoundNoun,
+  notFoundBackLabel,
+  onNotFoundBack,
+  onBack,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const askAIAvailable = useAskAIAvailable();
@@ -512,6 +528,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       !singleCanvas
     ) {
       setLastCanvasId(null);
+      if (onBack) {
+        onBack();
+        return;
+      }
       const canvasRoute = isOnChatCanvasPage ? '/chat/canvas' : `${baseRoute}/canvas`;
       void navigate(canvasRoute, { replace: true });
     }
@@ -521,6 +541,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     isOnChatCanvasPage,
     lastCanvasId,
     navigate,
+    onBack,
     setLastCanvasId,
     singleCanvas,
     singleCanvasDetails.type,
@@ -670,6 +691,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const handleBack = useCallback((): void => {
+    if (onBack) {
+      onBack();
+      return;
+    }
     if (isMobile && !isEditingMessage && !isCreatingMessage) {
       const canvasRoute = isOnChatCanvasPage ? '/chat/canvas' : `${baseRoute}/canvas`;
       void navigate(canvasRoute);
@@ -677,7 +702,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }
 
     void navigate(-1);
-  }, [baseRoute, isCreatingMessage, isEditingMessage, isMobile, isOnChatCanvasPage, navigate]);
+  }, [
+    baseRoute,
+    isCreatingMessage,
+    isEditingMessage,
+    isMobile,
+    isOnChatCanvasPage,
+    navigate,
+    onBack,
+  ]);
 
   const handleConfirmSend = (): void => {
     if (!selectedCanvas || !state?.channelId) return;
@@ -1356,7 +1389,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           handleTitleSave();
                         }}
                         className={cn(
-                          'h-auto min-w-0 flex-1 border-none bg-transparent px-0 py-0 text-base font-semibold text-foreground shadow-none focus:ring-0 focus-visible:border-none focus-visible:ring-0',
+                          'h-auto min-w-0 flex-1 truncate border-none bg-transparent px-0 py-0 text-base font-semibold text-foreground shadow-none focus:ring-0 focus-visible:border-none focus-visible:ring-0',
                           !canEdit && 'cursor-default',
                         )}
                         placeholder='Untitled Canvas'
@@ -1366,6 +1399,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                   {/* Actions */}
                   <div className='flex shrink-0 items-center gap-3' style={APP_NO_DRAG_STYLE}>
+                    {showViewOnly && selectedCanvas && !canEdit && !previewVersion && (
+                      <span className='rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                        View only
+                      </span>
+                    )}
                     {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
                     {isKnowledgeCanvas && selectedCanvas?.id && (
                       <div>
@@ -1808,6 +1846,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
                     header={canvasTitleHeader}
+                    pinnedOutline={pinnedOutline}
                   />
                 ) : selectedCanvas?.id &&
                   selectedCanvas.isCollaborative &&
@@ -1835,6 +1874,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
                     header={canvasTitleHeader}
+                    pinnedOutline={pinnedOutline}
                   />
                 ) : (
                   <CanvasEditor
@@ -1858,6 +1898,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
                     header={canvasTitleHeader}
+                    pinnedOutline={pinnedOutline}
                   />
                 )}
               </div>
@@ -1937,10 +1978,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               <div className='text-muted-foreground'>
                 <DocumentNotFoundIcon color='currentColor' size={64} />
               </div>
-              <h3 className='text-xl font-semibold text-foreground mb-2'>Canvas Not Found</h3>
+              <h3 className='text-xl font-semibold text-foreground mb-2'>
+                {notFoundNoun ? `${notFoundNoun} not found` : 'Canvas Not Found'}
+              </h3>
               <p className='text-muted-foreground mb-6'>
-                The canvas you are looking for does not exist or you do not have permission to view
-                it.
+                {notFoundNoun
+                  ? `This ${notFoundNoun} does not exist, or you do not have permission to view it.`
+                  : 'The canvas you are looking for does not exist or you do not have permission to view it.'}
               </p>
               <div className='flex justify-center w-full gap-3'>
                 <Button
@@ -1958,6 +2002,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   variant='default'
                   size='default'
                   onClick={() => {
+                    if (onNotFoundBack) {
+                      onNotFoundBack();
+                      return;
+                    }
                     // Navigate based on current route context
                     const canvasRoute = isOnChatCanvasPage ? '/chat/canvas' : `${baseRoute}/canvas`;
                     void navigate(canvasRoute);
@@ -1966,7 +2014,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   data-track-name='Go_To_Canvases'
                   data-track-metadata={JSON.stringify({ canvasId })}
                 >
-                  Go to Canvases
+                  {onNotFoundBack ? (notFoundBackLabel ?? 'Back') : 'Go to Canvases'}
                 </Button>
               </div>
             </div>

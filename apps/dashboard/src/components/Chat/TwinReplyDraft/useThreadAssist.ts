@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useThreadCatchupSummary } from '../ThreadCatchupSummary/useThreadCatchupSummary';
 import type { ThreadCatchupMessages } from '../ThreadCatchupSummary/ThreadCatchupSummary.utils';
 import { useTwinReplyDraft } from '../../../hooks/useTwinReplyDraft';
@@ -91,6 +92,15 @@ export function useThreadAssist(
     if (recapVisible && !recap.expanded) recap.toggleExpanded();
     else if (!recapVisible && recap.expanded) recap.toggleExpanded();
   }, [recapVisible, recap.expanded, recap.toggleExpanded]);
+
+  const { hash } = useLocation();
+  const openedFromDraft = new URLSearchParams(hash.replace(/^#/, '')).has('twinDraft');
+  useEffect(() => {
+    if (openedFromDraft && hasReply) {
+      setTab('reply');
+      setCollapsed(false);
+    }
+  }, [openedFromDraft, hasReply, conversationId]);
 
   const toggleCollapse = useCallback(() => setCollapsed(c => !c), []);
 

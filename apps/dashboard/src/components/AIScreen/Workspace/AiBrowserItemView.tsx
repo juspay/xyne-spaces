@@ -15,6 +15,7 @@ import { artifactKindIcon, linkHost, providerLabel } from './artifactKinds';
 import { safeHttpUrl } from './safeHttpUrl';
 import { registerWorkspacePage, showWorkspaceTab } from './workspaceBrowserTools';
 import { SignInImportBar, looksLikeSignIn } from './SignInImportBar';
+import { UnmountWhenCovered } from '../../../hooks/usePageCoverage';
 
 import { usePublishViewerAction } from './viewerActions';
 import { InlineCommentThread, type InlineCommentTarget } from './InlineCommentThread';
@@ -33,20 +34,29 @@ const playingItems = new Set<string>();
 /** Whether an item's page is playing: kept alive out of sight while it plays. */
 export const isWorkspacePagePlaying = (itemId: string): boolean => playingItems.has(itemId);
 
+interface AiBrowserItemViewProps {
+  item: WorkspaceItem;
+  /** On screen. Kept out of sight, the page stays as it was, and the agent can still
+   *  work in it; the toolbar's action is the shown one's. */
+  shown?: boolean;
+}
+
 /**
  * The AI screen's browser: the shared embedded browser plus the chrome only this
  * surface has — the header row, the sign-in offer, the selection capture, and
  * the registration that lets the agent's page tools drive it.
  */
-export function AiBrowserItemView({
-  item,
-  shown = true,
-}: {
-  item: WorkspaceItem;
-  /** On screen. Kept out of sight, the page stays as it was, and the agent can still
-   *  work in it; the toolbar's action is the shown one's. */
-  shown?: boolean;
-}): ReactElement {
+export function AiBrowserItemView(props: AiBrowserItemViewProps): ReactElement {
+  // Not under full-page search, as leaving the page took it: back on return with the page loaded
+  // anew, and nothing kept from the one before (the sign-in offer, a picked block, a comment).
+  return (
+    <UnmountWhenCovered fallback={<div className='h-full min-h-0 bg-background' />}>
+      <AiBrowserItem {...props} />
+    </UnmountWhenCovered>
+  );
+}
+
+function AiBrowserItem({ item, shown = true }: AiBrowserItemViewProps): ReactElement {
   const url = safeHttpUrl(item.url ?? null);
   const [atSignIn, setAtSignIn] = useState(false);
   const [copied, setCopied] = useState(false);

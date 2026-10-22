@@ -1,8 +1,12 @@
+import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { SDLC_ACTIVE_RUN_STATUSES } from '@xyne/shared';
 import { apiInstance } from '../../services/clients/apiClient';
 
 const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set(SDLC_ACTIVE_RUN_STATUSES);
+// The statuses that end soon. A paused, scheduled or waiting run can sit for hours.
+const MOVING_RUN_STATUSES: ReadonlySet<string> = new Set(['NEW', 'PENDING', 'RUNNING']);
 
 export type HubWorkflowPhase =
   | 'NOT_CONFIGURED'
@@ -72,7 +76,9 @@ export function useHubWorkflow(workflowId: string | null): HubWorkflow {
       }));
     },
     enabled: Boolean(workflowId),
-    refetchInterval: 60_000,
+    // A run that is moving is watched closely, so its end shows up without a reload.
+    refetchInterval: query =>
+      query.state.data?.some(run => MOVING_RUN_STATUSES.has(run.status)) ? 5_000 : 60_000,
   });
   const state = hubWorkflowState({ workflowId, runs: runs.data ?? null });
 
@@ -87,4 +93,18 @@ export function useHubWorkflow(workflowId: string | null): HubWorkflow {
       await queryClient.invalidateQueries({ queryKey });
     },
   };
+}
+
+/** Says when a run that was in progress on this page ends, so the result is not left to a reload. */
+export function useHubWorkflowFinishedToast(label: string, workflow: HubWorkflowState): void {
+  const { phase, workflowId } = workflow;
+  const previous = useRef({ phase, workflowId });
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { phase, workflowId };
+    // The same workflow only: another hub's finished run is not this one ending.
+    if (before.phase !== 'RUNNING' || before.workflowId !== workflowId) return;
+    if (phase === 'READY') toast.success(`${label} run completed`);
+    else if (phase === 'FAILED') toast.error(`${label} run failed. Open the run to see why.`);
+  }, [label, phase, workflowId]);
 }

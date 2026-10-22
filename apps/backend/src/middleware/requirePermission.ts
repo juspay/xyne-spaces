@@ -34,9 +34,13 @@ function isLegacyApp(req: Request): boolean {
   return new Date(createdAt) < PERMISSION_ENFORCEMENT_DATE
 }
 
-export function requirePermission(permission: string) {
+/**
+ * `strict`: no legacy bypass. For routes added after enforcement began: no legacy app can rely on
+ * them, so every app needs the scope granted.
+ */
+export function requirePermission(permission: string, options: { strict?: boolean } = {}) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (isLegacyApp(req)) { next(); return }
+    if (!options.strict && isLegacyApp(req)) { next(); return }
 
     const permissions = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)

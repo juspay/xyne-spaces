@@ -161,11 +161,10 @@ interface RunAgentSpec {
   slug: string;
   genChoice: string;
   opts: string;
-  judge: string;
 }
 
-function armTag(opts: string, judge: string): string {
-  return [opts ? `opts:${opts}` : "", judge ? `judge:${judge}` : ""].filter(Boolean).join(" · ");
+function armTag(opts: string): string {
+  return opts ? `opts:${opts}` : "";
 }
 
 function armTagOfModel(genModel?: string | null): string {
@@ -405,7 +404,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // generation-model choice. genChoice encodings: "" = default, "prov:<provider>"
   // = a provider the user configured in claw, "spaces:<model>" = platform LiteLLM,
   // "litellm:<model>" = a model off THAT agent's shared LiteLLM key.
-  const [runAgents, setRunAgents] = useState<RunAgentSpec[]>([{ slug: "", genChoice: "", opts: "", judge: "" }]);
+  const [runAgents, setRunAgents] = useState<RunAgentSpec[]>([{ slug: "", genChoice: "", opts: "" }]);
   const [genModels, setGenModels] = useState<EvalGenModels | null>(null);
   // Per-agent shared LiteLLM models (each agent's own key), fetched reactively
   // while the Run dialog is open. Keyed by agent slug. Distinct from
@@ -1084,7 +1083,6 @@ export function EvalsPageV3({ userId }: { userId: string }) {
           agentSlug: s.slug,
           ...decodeGenChoice(s.genChoice),
           ...(s.opts ? { optimizations: s.opts } : {}),
-          ...(s.judge ? { judgeBackend: s.judge } : {}),
         }));
         const { comparisonId, runs } = await startBackgroundGeneration({ agents: agentsPayload, ...scope }, userId);
         if (runs.length === 0) throw new Error("No runs started");
@@ -1093,7 +1091,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
           const agentRuns: AgentRun[] = runs.map((r, i) => {
             const spec = specs[i]?.slug === r.agentSlug ? specs[i] : specs.find((s) => s.slug === r.agentSlug);
             const g = spec ? decodeGenChoice(spec.genChoice) : {};
-            const tag = spec ? armTag(spec.opts, spec.judge) : "";
+            const tag = spec ? armTag(spec.opts) : "";
             return {
               slug: tag ? `${r.agentSlug}#${tag}` : r.agentSlug,
               name: `${agentNameBySlug.get(r.agentSlug) ?? r.agentSlug}${tag ? ` · ${tag}` : ""}`,
@@ -1120,7 +1118,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       if (submittingRun) return;
       // Start with one agent row prefilled to the default agent; the user can add
       // up to MAX_COMPARE_AGENTS to compare.
-      setRunAgents([{ slug: agentSlug || agents[0]?.slug || "", genChoice: "", opts: "", judge: "" }]);
+      setRunAgents([{ slug: agentSlug || agents[0]?.slug || "", genChoice: "", opts: "" }]);
       setPendingRun({ scope, label });
       // Lazily load the user's configured providers + platform models for the picker.
       if (!genModels) void listEvalGenModels(userId).then(setGenModels).catch(() => setGenModels({ providers: [], litellm: [] }));
@@ -2198,7 +2196,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
               </div>
               <div className="flex flex-col gap-2.5">
                 {runAgents.map((row, idx) => {
-                  const armOf = (r: RunAgentSpec): string => `${r.slug}|${r.opts}|${r.judge}`;
+                  const armOf = (r: RunAgentSpec): string => `${r.slug}|${r.opts}`;
                   const taken = new Set(runAgents.filter((_, i) => i !== idx).filter((r) => r.slug).map(armOf));
                   return (
                     <div key={idx} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle p-2.5">
@@ -2263,16 +2261,6 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                             ...optSwitches.map((o) => ({ value: `all,-${o.key}`, label: `All except ${o.key}` })),
                           ].filter((o) => o.value === DEFAULT_OPT || !taken.has(armOf({ ...row, opts: o.value })))}
                         />
-                        <SelectField
-                          placeholder="Harness judge…"
-                          value={toSel(row.judge)}
-                          onValueChange={(v) => setRow(idx, { judge: fromSel(v) })}
-                          options={[
-                            { value: DEFAULT_OPT, label: "Harness judge — as deployed" },
-                            ...judgeBackends.map((b) => ({ value: b.id, label: b.label })),
-                            { value: "llm", label: "LLM judge" },
-                          ]}
-                        />
                       </div>
                     </div>
                   );
@@ -2286,7 +2274,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                       const last = l[l.length - 1];
                       const usedOpts = new Set(l.map((r) => r.opts));
                       const nextOpts = ["none", "all"].find((o) => !usedOpts.has(o)) ?? "";
-                      return [...l, { slug: last?.slug ?? "", genChoice: last?.genChoice ?? "", opts: nextOpts, judge: last?.judge ?? "" }];
+                      return [...l, { slug: last?.slug ?? "", genChoice: last?.genChoice ?? "", opts: nextOpts }];
                     })
                   }
                   className="flex items-center gap-1.5 self-start text-[12px] text-xyne-brand hover:underline"

@@ -147,6 +147,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       canvasCreatedBy,
       currentUserRole,
       header,
+      pinnedOutline = false,
     },
     ref,
   ) => {
@@ -709,7 +710,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         )}
 
         {/* Table of Contents */}
-        <TableOfContents headings={tocHeadings} onHeadingClick={handleHeadingClick} />
+        <TableOfContents
+          headings={tocHeadings}
+          onHeadingClick={handleHeadingClick}
+          pinned={pinnedOutline}
+        />
 
         {/* Search Overlay */}
         {editor && (

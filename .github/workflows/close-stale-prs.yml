@@ -1,0 +1,38 @@
+name: Close Stale PRs
+
+# Nightly: closes open PRs with no commits in the last 30 days (a comment is
+# left explaining why; closed PRs can be reopened). Run manually with
+# dry_run=true to preview what would be closed.
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List stale PRs without closing them"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: close-stale-prs
+  cancel-in-progress: false
+
+jobs:
+  close-stale-prs:
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Close stale PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STALE_DAYS: "30"
+          # Scheduled runs have no inputs, so they actually close.
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: .github/scripts/close-stale-prs.sh

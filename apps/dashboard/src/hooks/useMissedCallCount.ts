@@ -1,18 +1,27 @@
-import { queries } from '../zero/queries';
-import { useMemo } from 'react';
-import { useCachedQuery } from './useCachedQuery';
+import { useEffect } from 'react';
+import { mutators } from '../zero/mutators';
+import { useUnreadActivities } from './useUnreadActivities';
+import { useZero } from './useZero';
+import { usePageCoverage, whenShown } from './usePageCoverage';
 
-/**
- * Hook to get the total missed call count across all channels
- * Uses Activity table with actorAction = 'missed_call' and isRead = false
- */
-export const useMissedCallCount = (): number => {
-  const [missedCallActivities] = useCachedQuery(queries.userMissedCalls());
+const isMissedCall = (activity: { actorAction: string }): boolean =>
+  activity.actorAction === 'missed_call';
 
-  return useMemo(() => {
-    if (!missedCallActivities) {
-      return 0;
-    }
-    return missedCallActivities.length;
-  }, [missedCallActivities]);
+/** Unread missed-call count for the Calls sidebar badge. */
+export const useMissedCallCount = (): number => useUnreadActivities(isMissedCall).length;
+
+/** Mount on the Calls screen to clear the sidebar missed-call badge. */
+export const useMarkMissedCallsReadOnVisit = (): void => {
+  const zero = useZero();
+  const hasUnread = useMissedCallCount() > 0;
+  // Under full-page search the Calls screen is off screen: calls missed meanwhile stay unread
+  // until it is back.
+  const coverage = usePageCoverage();
+
+  useEffect(() => {
+    if (!hasUnread) return undefined;
+    return whenShown(coverage, () => {
+      void zero.mutate(mutators.activities.markMissedCallsAsRead({}));
+    });
+  }, [hasUnread, zero, coverage]);
 };

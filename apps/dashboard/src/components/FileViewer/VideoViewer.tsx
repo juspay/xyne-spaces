@@ -711,6 +711,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       : 'text-white hover:text-muted transition-colors'
                   }
                   title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                  aria-label={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                   data-track-category='VIDEO_PLAYER'
                   data-track-name={isPlaying ? 'PauseVideo' : 'PlayVideo'}
                   data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
@@ -736,6 +737,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                         : 'text-white hover:text-muted transition-colors'
                     }
                     title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                    aria-label={isMuted ? 'Unmute (M)' : 'Mute (M)'}
                     data-track-category='VIDEO_PLAYER'
                     data-track-name={isMuted ? 'UnmuteVideo' : 'MuteVideo'}
                     data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
@@ -823,6 +825,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                           : 'text-white hover:text-muted transition-colors p-1'
                       }
                       title='Playback speed'
+                      aria-label='Playback speed'
                     >
                       <Settings
                         className={`${isImmersiveMode || !isCompactControls ? 'h-5 w-5' : 'h-4 w-4'}`}
@@ -858,6 +861,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                 {/* Fullscreen/Expand - Show in immersive or when not on mobile/compact */}
                 {(isImmersiveMode || !isMobile) && (
                   <button
+                    aria-label={isImmersiveMode ? 'Exit full screen' : 'Enter full screen'}
                     onClick={onExpand}
                     className={cn(
                       isImmersiveMode

@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { applySharedCredentialOverride } from "../lib/shared-credential-override.js";
 import type { UserProviderCredentials, SharedProviderCredential } from "@prisma/client";
 
 /** Binding rows (sharedCredentialId set) carry no key material — substitute
@@ -28,7 +29,7 @@ export const userProviderCredentialsRepository = {
       where: { userId_provider: { userId, provider } },
       include: { sharedCredential: true },
     });
-    return row ? materialize(row) : null;
+    return row ? materialize(await applySharedCredentialOverride(row, { userId })) : null;
   },
 
   listByUser: async (userId: string): Promise<UserProviderCredentials[]> => {
@@ -36,7 +37,7 @@ export const userProviderCredentialsRepository = {
       where: { userId },
       include: { sharedCredential: true },
     });
-    return rows.map(materialize);
+    return (await Promise.all(rows.map((row) => applySharedCredentialOverride(row, { userId })))).map(materialize);
   },
 
   upsert: (userId: string, provider: string, data: Record<string, unknown>) =>

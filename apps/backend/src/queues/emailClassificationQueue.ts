@@ -9,6 +9,9 @@ export interface EmailClassificationJobData {
   groupId: string | null;
   runClassification?: boolean;
   runPriority?: boolean;
+  runAssignment?: boolean;
+  /** Channels desks: the thread is in another channel, so an assignee must be in that one too. */
+  sourceChannelId?: string;
 }
 
 class EmailClassificationQueue {

@@ -146,6 +146,7 @@ export const DashboardCreation: React.FC = () => {
                       <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
                     </button>
                     <button
+                      aria-label={`Delete ${dashboard.name}`}
                       onClick={() => void handleDeleteDashboard(dashboard.id)}
                       className='p-1 text-muted-foreground hover:text-red-500'
                       data-track-category='Dashboards'

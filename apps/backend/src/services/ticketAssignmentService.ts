@@ -289,7 +289,15 @@ export class TicketAssignmentService {
     const { ticketId, userGroupId, boardId, createdBy, projectId, channelId, assignmentRoles, workspaceId } = params;
 
     const roleIds = assignmentRoles.map(s => s.roleId);
-    const slots = await evaluateRoleSlots(userGroupId, boardId, roleIds, projectId, channelId);
+    const slots = await evaluateRoleSlots(
+      userGroupId,
+      boardId,
+      roleIds,
+      projectId,
+      channelId,
+      undefined,
+      ticketId,
+    );
 
     const primarySlots = assignmentRoles.filter(s => s.isPrimary);
     let primarySlot: AssignmentRoleSlot;

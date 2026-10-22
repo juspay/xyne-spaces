@@ -3,6 +3,8 @@ import {
   isTransientProviderError,
   ProviderStallError,
   ProviderTerminalError,
+  ProviderRefusalError,
+  isRefusalTurnError,
 } from "../src/agent.js";
 
 // The exact OpenAI/Codex 5xx body that dead-ended euler-doctor on 2026-08-18:
@@ -43,4 +45,14 @@ test("non-transient errors are NOT misclassified", () => {
   expect(isTransientProviderError(new Error("tool arguments failed schema validation"))).toBe(false);
   expect(isTransientProviderError(undefined)).toBe(false);
   expect(isTransientProviderError(null)).toBe(false);
+});
+
+test("ProviderRefusalError is not transient (no fallback, no capacity retry)", () => {
+  expect(isTransientProviderError(new ProviderRefusalError("claude"))).toBe(false);
+});
+
+test("Claude's refusal turn error is recognised only for the claude provider", () => {
+  expect(isRefusalTurnError("claude", "An unknown error occurred")).toBe(true);
+  expect(isRefusalTurnError("codex", "An unknown error occurred")).toBe(false);
+  expect(isRefusalTurnError("claude", "529 overloaded_error")).toBe(false);
 });

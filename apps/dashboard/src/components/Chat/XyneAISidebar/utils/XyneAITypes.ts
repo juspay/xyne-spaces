@@ -306,6 +306,10 @@ export interface ConversationHistory {
   /** The agent to open and continue this conversation with — the one active
    *  most recently. Set by the all-agents history. */
   agentSlug?: string;
+  /** The chat project this conversation is filed in, null when unfiled.
+   *  Undefined on rows from a backend older than XYNE-66809, which renders
+   *  the same as unfiled. */
+  projectId?: string | null;
 }
 
 // ============================================================================
@@ -498,6 +502,14 @@ const hasFlowToken = (flow: FlowDefinition): boolean => {
   const token = flow.data?.['__xyneFlowToken'];
   return typeof token === 'string' && token.length > 0;
 };
+
+export function flowPhaseKey(flows: FlowDefinition[] | undefined): string {
+  if (!flows?.length) return '';
+  const phases = flows.map(
+    flow => (flow.components?.[0]?.props as { phase?: string } | undefined)?.phase ?? '',
+  );
+  return phases.some(Boolean) ? `#${phases.join('|')}` : '';
+}
 
 /**
  * Add a card to a message's list, keyed by `screenId`. Last write wins (pending

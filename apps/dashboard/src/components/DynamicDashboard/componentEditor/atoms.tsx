@@ -64,14 +64,17 @@ export const Section = ({
 );
 
 export const IconBtn = ({
+  label,
   onClick,
   children,
 }: {
+  label: string;
   onClick: () => void;
   children: ReactNode;
 }): ReactElement => (
   <button
     type='button'
+    aria-label={label}
     onClick={onClick}
     data-track-category='COMPONENT_EDITOR'
     data-track-name='Icon_Btn_Click'

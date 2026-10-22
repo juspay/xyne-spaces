@@ -162,6 +162,7 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
@@ -342,6 +343,28 @@ const envSchema = Joi.object({
   JEV_API_KEY: Joi.string().allow('').default(''),
   JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
   JEV_MODEL: Joi.string().default('jev-1.13.0'),
+  // XOR — same wire format as Jev, on LiteLLM's /v1/decisions. Unset XOR_URL => XOR is
+  // whatever JEV_URL points at when set explicitly, as before these existed.
+  XOR_URL: Joi.string().uri().allow('').default(''),
+  // Required with XOR_URL: without it every XOR feature would switch off silently.
+  XOR_API_KEY: Joi.when('XOR_URL', {
+    is: Joi.string().min(1),
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
+  XOR_MODEL: Joi.string().default('xor-latest'),
+  // The engine that answers typed decision questions live (services/decision): xor or jev. The
+  // LLM is only ever asked to compare: the features gate on probabilities it does not give.
+  DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
+  // Decision evaluation: every decision is also queued for the other engines, to compare them.
+  DECISION_EVAL_ENABLED: Joi.boolean().default(false),
+  ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
+  ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
+  ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
+  ELEVENLABS_TTS_MODEL: Joi.string().default('eleven_flash_v2_5'),
+  ELEVENLABS_TTS_VOICE_ID: Joi.string().allow('').default(''),
+  VOICE_INPUT_STT_STREAM_PROVIDER: Joi.string().valid('google', 'elevenlabs').default('google'),
+  TTS_PROVIDER: Joi.string().valid('azure', 'elevenlabs').default('azure'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -652,6 +675,7 @@ const envSchema = Joi.object({
   PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
   PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
+  DEEP_RESEARCH_BASE_URL: Joi.string().allow('').default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -880,6 +904,7 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
@@ -1018,6 +1043,31 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+    // Set by the deployer, not the public default: required before customer content goes to it.
+    urlIsExplicit: Boolean(process.env.JEV_URL?.trim()),
+  },
+  xor: {
+    apiKey: envVars.XOR_API_KEY,
+    url: envVars.XOR_URL,
+    model: envVars.XOR_MODEL,
+  },
+  decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
+  decisionEval: {
+    enabled: envVars.DECISION_EVAL_ENABLED,
+  },
+  elevenLabs: {
+    apiKey: envVars.ELEVENLABS_API_KEY as string,
+    apiUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, ''),
+    sttUrl: (envVars.ELEVENLABS_API_URL as string).replace(/\/+$/, '').replace(/^http/, 'ws'),
+    sttModel: envVars.ELEVENLABS_STT_MODEL as string,
+    ttsModel: envVars.ELEVENLABS_TTS_MODEL as string,
+    ttsVoiceId: envVars.ELEVENLABS_TTS_VOICE_ID as string,
+  },
+  voiceInputStream: {
+    provider: envVars.VOICE_INPUT_STT_STREAM_PROVIDER as 'google' | 'elevenlabs',
+  },
+  tts: {
+    provider: envVars.TTS_PROVIDER as 'azure' | 'elevenlabs',
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,
@@ -1384,4 +1434,5 @@ export const config = {
     serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
     flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
+  deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
 };

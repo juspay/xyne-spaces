@@ -167,6 +167,14 @@ export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
 export const SDLC_FOLDER_FLAT_RELATION = "FOLDER_ITEM_SECONDARY";
 
 /**
+ * A REPOSITORY -> BOARD edge scoped to a hub: that hub releases the repository
+ * through that main release board. Written only by project.saveReleaseBoardConfig.
+ * Partial unique indexes (raw migration) allow one per hub and repository, and one
+ * per board.
+ */
+export const SDLC_RELEASE_CONFIG_RELATION = "RELEASE_CONFIG";
+
+/**
  * Edges no user may write or delete through the generic link API. Derived or
  * structural: the app maintains them with the thing they describe.
  */
@@ -182,6 +190,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_AGENT_PENDING_RELATION,
   SDLC_HUB_SKILL_RELATION,
   SDLC_HUB_PIN_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
 ] as const;
 
 /**
@@ -202,6 +211,7 @@ export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_AGENT_PENDING_RELATION,
   SDLC_HUB_SKILL_RELATION,
   SDLC_HUB_PIN_RELATION,
+  SDLC_RELEASE_CONFIG_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */
@@ -681,7 +691,12 @@ export type EditSdlcClawArtifactSectionInput = z.infer<
 /** parentId is a folder inside the artifact's track, or the track itself for its root. */
 export const moveSdlcClawArtifactSchema = z.object({
   canvasId: z.string().min(1),
-  parentId: z.string().min(1),
+  // Track or track folder; Hub Knowledge has no track, so it ignores this.
+  parentId: z.string().min(1).optional(),
+  // New artifact type; required to file a canvas that is not an SDLC artifact yet.
+  folderId: z.string().min(1).optional(),
+  // Set by claw-auth only on a human-approved call; filing a personal canvas needs it.
+  adoptApproved: z.boolean().optional(),
 });
 export type MoveSdlcClawArtifactInput = z.infer<typeof moveSdlcClawArtifactSchema>;
 
@@ -696,6 +711,8 @@ export type CreateSdlcClawTrackFolderInput = z.infer<typeof createSdlcClawTrackF
 export const archiveSdlcClawArtifactSchema = z.object({
   canvasId: z.string().min(1),
   archived: z.boolean(),
+  generationCommit: z.string().trim().min(1).max(255).optional(),
+  repoId: z.string().min(1).optional(),
 });
 export type ArchiveSdlcClawArtifactInput = z.infer<typeof archiveSdlcClawArtifactSchema>;
 

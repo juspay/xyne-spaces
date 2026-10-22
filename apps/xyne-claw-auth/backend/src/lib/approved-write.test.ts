@@ -5,7 +5,18 @@ const prepareOAuthCustomTool = vi.fn();
 const markUsedUserTokenByConversation = vi.fn(async () => undefined);
 
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock("../routes/mcp.js", () => ({ verifyActionSignatureAny: () => true }));
+const verifyActionSignatureAny = vi.fn((_payloads: Array<Record<string, unknown>>, _signature: string) => true);
+vi.mock("../routes/mcp.js", () => ({
+  verifyActionSignatureAny,
+  // Same shape as routes/mcp.ts writeActionPayload: subagentId only when bound.
+  writeActionPayload: (a: Record<string, unknown>) => ({
+    serverType: a["serverType"],
+    tool: a["tool"],
+    params: a["params"],
+    userId: a["userId"],
+    ...(a["subagentId"] ? { subagentId: a["subagentId"] } : {}),
+  }),
+}));
 vi.mock("../repositories/index.js", () => ({ agentRunRepository: { markUsedUserTokenByConversation } }));
 vi.mock("./agent-tools-apply.js", () => ({ AGENT_TOOL_SLUGS: new Set<string>() }));
 const executeTool = vi.fn();
@@ -16,6 +27,11 @@ vi.mock("./oauth-custom-tool.js", () => ({
   isOAuthProvider: (s: string) => s === "google" || s === "microsoft",
   prepareOAuthCustomTool,
 }));
+const loadApprovedWriteCredentials = vi.fn();
+const callTool = vi.fn(async () => ({ content: "payout created" }));
+vi.mock("./credentials-loader.js", () => ({ loadApprovedWriteCredentials }));
+vi.mock("../mcp/runner.js", () => ({ callTool }));
+vi.mock("../mcp/connector-definitions.js", () => ({ hasConnectorDefinition: async () => true }));
 
 const { executeApprovedWrite } = await import("./approved-write.js");
 
@@ -123,6 +139,68 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
     await expect(
       executeApprovedWrite({ action: { ...action, serverType: "skill", tool: "update-skill" }, approverUserId: "user-1" }),
     ).resolves.toMatchObject({ ok: false, reason: "unsupported" });
+  });
+});
+
+describe("executeApprovedWrite — MCP connector write queued by a subagent", () => {
+  const subagentAction = {
+    serverType: "juspay-dashboard-stream",
+    tool: "create_payout_order",
+    params: { amount: 1, customerId: "c1" },
+    userId: "user-1",
+    signature: "sig",
+    agentSlug: "ny-payments",
+    spacesAppId: "app-1",
+    subagentId: "sub-payouts",
+  };
+
+  beforeEach(() => {
+    verifyActionSignatureAny.mockClear();
+    loadApprovedWriteCredentials.mockReset();
+    callTool.mockClear();
+  });
+
+  it("verifies the subagent id as signed and runs on that subagent's credential", async () => {
+    loadApprovedWriteCredentials.mockResolvedValue({
+      source: "subagent",
+      connectionId: "conn-a",
+      credentials: { apiKey: "KEY-A" },
+      isUserOwned: false,
+      instance: "subagent:conn-a",
+      viaSubagent: "sub-payouts",
+    });
+
+    const outcome = await executeApprovedWrite({ action: subagentAction, approverUserId: "user-1" });
+
+    expect(outcome).toMatchObject({ ok: true, resultText: "payout created" });
+    const [payloads] = verifyActionSignatureAny.mock.calls[0]!;
+    expect(payloads.every((p) => p["subagentId"] === "sub-payouts")).toBe(true);
+    expect(loadApprovedWriteCredentials).toHaveBeenCalledWith({
+      userId: "user-1",
+      serverType: "juspay-dashboard-stream",
+      agentSlug: "ny-payments",
+      spacesAppId: "app-1",
+      subagentId: "sub-payouts",
+    });
+    expect(callTool).toHaveBeenCalledWith(
+      "user-1",
+      "juspay-dashboard-stream",
+      { apiKey: "KEY-A" },
+      "create_payout_order",
+      subagentAction.params,
+      "ny-payments",
+      undefined,
+      "subagent:conn-a",
+    );
+  });
+
+  it("reports a missing connection when nothing resolves", async () => {
+    loadApprovedWriteCredentials.mockResolvedValue(null);
+
+    const outcome = await executeApprovedWrite({ action: subagentAction, approverUserId: "user-1" });
+
+    expect(outcome).toMatchObject({ ok: false, reason: "no-connection" });
+    expect(callTool).not.toHaveBeenCalled();
   });
 });
 

@@ -31,6 +31,25 @@ export const officeConversionLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Chat-project CRUD. Keyed by user, not IP: these are authenticated routes and
+ * an IP-keyed budget is shared by everyone behind one office NAT, so a busy
+ * office would throttle itself. 60/minute is far above what the sidebar needs
+ * — the project list is cached client-side — while still capping a loop.
+ */
+export const chatProjectsLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many project requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 15,
@@ -89,6 +108,19 @@ export const relatedContextLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+export const discussionTitleLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    success: false,
+    error: 'Too many discussion title requests. Please slow down.',
+    timestamp: new Date().toISOString(),
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /** Per-IP limiter for starting an SDK SSO sign-in: unauthenticated, and each call writes two Redis keys. */
 export const sdkSsoInitLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
@@ -138,6 +170,19 @@ export const searchFeedbackLimiter: RateLimitRequestHandler = rateLimit({
     success: false,
     error: 'Too many feedback posts. Please wait a minute and try again.',
   },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const ttsLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    success: false,
+    error: 'Too many text-to-speech requests. Please slow down.',
+    timestamp: new Date().toISOString(),
+  }),
   standardHeaders: true,
   legacyHeaders: false,
 });

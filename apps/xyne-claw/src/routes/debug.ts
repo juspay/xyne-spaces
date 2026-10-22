@@ -75,7 +75,7 @@ const log = createLogger("debug");
 const DEBUG_FORWARDED_HEADER = "x-debug-forwarded-from";
 const DEBUG_FORWARD_TIMEOUT_MS = Number(process.env["DEBUG_FORWARD_TIMEOUT_MS"] ?? 20_000);
 
-function isTrustedPodAddress(address: string): boolean {
+export function isTrustedPodAddress(address: string): boolean {
   let url: URL;
   try {
     url = new URL(address);
@@ -83,7 +83,8 @@ function isTrustedPodAddress(address: string): boolean {
     return false;
   }
   if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return false;
-  if (Number(url.port) !== SERVER.port) return false;
+  const port = url.port === "" ? 80 : Number(url.port);
+  if (port !== SERVER.port) return false;
   const octets = url.hostname.split(".").map(Number);
   if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return false;
   const [a, b] = octets as [number, number, number, number];

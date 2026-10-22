@@ -293,6 +293,7 @@ const AboutChannel = ({
 
             {canRename && !isEditingName && (
               <Button
+                aria-label='Edit channel name'
                 className='absolute right-0 top-0'
                 variant='ghost'
                 size='sm'
@@ -363,6 +364,7 @@ const AboutChannel = ({
 
           {isParticipant && !isEditingDescription && (
             <Button
+              aria-label='Edit channel description'
               className='absolute right-0 top-0'
               variant='ghost'
               size='sm'

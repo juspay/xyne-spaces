@@ -274,7 +274,7 @@ export const VisualBuilder = ({
                       on {j.on.from} = {j.on.to}
                     </span>
                   )}
-                  <IconBtn onClick={() => removeJoin(j.id, j.model, j.alias)}>
+                  <IconBtn label='Remove join' onClick={() => removeJoin(j.id, j.model, j.alias)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -383,7 +383,7 @@ export const VisualBuilder = ({
                         className='w-24'
                       />
                     )}
-                  <IconBtn onClick={() => removeById(setGroupBy, g.id)}>
+                  <IconBtn label='Remove group by' onClick={() => removeById(setGroupBy, g.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -458,7 +458,7 @@ export const VisualBuilder = ({
                     }
                     className='flex-1'
                   />
-                  <IconBtn onClick={() => removeById(setMeasures, m.id)}>
+                  <IconBtn label='Remove measure' onClick={() => removeById(setMeasures, m.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -531,7 +531,7 @@ export const VisualBuilder = ({
                       className='w-28 text-xs'
                     />
                   )}
-                  <IconBtn onClick={() => removeById(setFilters, f.id)}>
+                  <IconBtn label='Remove filter' onClick={() => removeById(setFilters, f.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>
@@ -601,7 +601,7 @@ export const VisualBuilder = ({
                     ]}
                     className='w-20'
                   />
-                  <IconBtn onClick={() => removeById(setOrderBy, o.id)}>
+                  <IconBtn label='Remove order by' onClick={() => removeById(setOrderBy, o.id)}>
                     <X size={12} />
                   </IconBtn>
                 </div>

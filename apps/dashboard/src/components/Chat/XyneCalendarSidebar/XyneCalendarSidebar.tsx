@@ -1035,6 +1035,7 @@ const XyneCalendarDayView = memo(
                     title={slot.title}
                     startsAt={slot.startsAt}
                     endsAt={slot.endsAt}
+                    details={slot.details}
                   />
                 );
               })}
@@ -1435,6 +1436,7 @@ const XyneCalendarSidebarTimeline = memo(
           isOpen={deleteModalOpen}
           onClose={closeDeleteModal}
           onConfirm={handleDeleteConfirm}
+          participantCount={deleteModalCall?.participantCount ?? 0}
           callLabel={
             deleteModalCall
               ? `${deleteModalCall.title ?? 'Scheduled Call'}${

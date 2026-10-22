@@ -4,9 +4,9 @@ import { TagMethod } from '@xyne/shared';
 import {
   Ai01,
   ChevronRight,
+  CopyDefault,
   DeleteDustbin02,
   DownloadBarDown,
-  MicOn,
   MusicQuaverNote,
   Share01,
   ThreeDotsMenuHorizontal,
@@ -28,6 +28,7 @@ import {
 } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
 import {
+  NoTranscriptError,
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
@@ -43,6 +44,7 @@ import {
   normalizeRecordingTags,
 } from '../../../utils/recordingUtils';
 import { cn } from '../../../utils/classNames';
+import { copyFetchedTextToClipboard } from '../../../utils/clipboardUtils';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
@@ -76,6 +78,8 @@ export interface RecordingsV2PillProps {
   pendingLabelCount?: number;
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
+  /** Summary is ready and the user hasn't opened the recording since. */
+  hasNewSummary?: boolean;
   onOpen: (recordingId: string) => void;
   onShare: (recording: RecordingsV2PillProps['recording']) => void;
   /** Give up your own access. Only offered to non-owners. */
@@ -135,7 +139,7 @@ export const RecordingsV2LivePill = ({
       aria-label={`${displayTitle}, recording in progress`}
     >
       <span className='flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary'>
-        <MicOn size={16} strokeWidth={2} variant='Contrast' />
+        <AudioLines size={16} strokeWidth={2} />
       </span>
 
       <span className='min-w-0 flex-1'>
@@ -171,6 +175,7 @@ const RecordingsV2Pill = ({
   suggestedTags = [],
   pendingLabelCount = 0,
   resolveLabel = (label: string) => label,
+  hasNewSummary = false,
   onOpen,
   onShare,
   onLeave,
@@ -220,6 +225,7 @@ const RecordingsV2Pill = ({
   const canDownloadTranscript = Boolean(recording.transcript);
   const canDownloadRecording = Boolean(menuDetail?.hasRecording);
   const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
+  const [isCopyingTranscript, setIsCopyingTranscript] = useState(false);
   const [isDownloadingRecording, setIsDownloadingRecording] = useState(false);
 
   const handleDownloadTranscript = async (): Promise<void> => {
@@ -246,6 +252,25 @@ const RecordingsV2Pill = ({
       toast.error('Failed to download transcript');
     } finally {
       setIsDownloadingTranscript(false);
+    }
+  };
+  const handleCopyTranscript = async (): Promise<void> => {
+    if (!canDownloadTranscript || isCopyingTranscript) return;
+    setIsCopyingTranscript(true);
+    try {
+      await copyFetchedTextToClipboard(() =>
+        recordingService.getCopyableTranscript(recording.externalId),
+      );
+      toast.success('Transcript copied');
+    } catch (err) {
+      if (err instanceof NoTranscriptError) {
+        toast.error("Transcript isn't available right now");
+        return;
+      }
+      logRecordingError('RecordingsV2Pill.copyTranscript', err);
+      toast.error('Could not copy the transcript');
+    } finally {
+      setIsCopyingTranscript(false);
     }
   };
   const handleDownloadRecording = async (): Promise<void> => {
@@ -351,8 +376,15 @@ const RecordingsV2Pill = ({
                 Generating title…
               </TextShimmer>
             ) : (
-              <span className='block truncate text-sm font-semibold text-foreground'>
-                {titleState.text}
+              <span className='flex min-w-0 items-center gap-2'>
+                <span className='truncate text-sm font-semibold text-foreground'>
+                  {titleState.text}
+                </span>
+                {hasNewSummary && (
+                  <span className='shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium leading-4 text-primary'>
+                    Summary ready
+                  </span>
+                )}
               </span>
             )}
             <span className='mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
@@ -407,6 +439,16 @@ const RecordingsV2Pill = ({
                 >
                   <DownloadBarDown size={16} className='shrink-0' />
                   <span className='flex-1'>Download transcript</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className='gap-2 rounded-lg'
+                  disabled={!canDownloadTranscript || isCopyingTranscript}
+                  onClick={() => void handleCopyTranscript()}
+                  data-track-category='RecordingsV2'
+                  data-track-name='copy_transcript'
+                >
+                  <CopyDefault size={16} className='shrink-0' />
+                  <span className='flex-1'>Copy transcript</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className='gap-2 rounded-lg'

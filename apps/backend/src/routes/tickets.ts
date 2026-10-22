@@ -8,8 +8,9 @@ import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
 import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
-import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
+import { ticketBoardSuggestionSchema, ticketFieldSuggestionsSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
+import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
 import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
@@ -22,6 +23,7 @@ const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
 const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
+const deskThreadCanvasController = new DeskThreadCanvasController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -30,6 +32,7 @@ router.post('/kanban/counts', kanbanTicketController.getCounts);
 router.post('/kanban/track-counts', kanbanTicketController.getTrackCounts);
 router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
+router.get('/board-fields', ticketController.getBoardTicketFields);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
@@ -37,6 +40,11 @@ router.post(
   '/:ticketId/flow-groups/:groupId/backlog',
   authorize('TICKETS', AccessType.WRITE),
   ticketController.backlogFlowGroup,
+);
+router.post(
+  '/:ticketId/flow-groups/:groupId/skip',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketController.skipFlowGroup,
 );
 // Bulk add/remove tags across many tickets in one request (additive semantics)
 router.post(
@@ -53,6 +61,7 @@ router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext,
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
 router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
+router.post('/suggest-fields', validate(ticketFieldSuggestionsSchema), ticketController.suggestFields);
 
 router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);
 
@@ -80,5 +89,8 @@ router.post(
 
 router.post('/:ticketId/merge', ticketController.mergeTicket);
 router.post('/:ticketId/unmerge', ticketController.unmergeTicket);
+
+// Desk: synthesize the ticket's chat/email thread into a canvas
+router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
 
 export default router;

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
-import { relatedContextLimiter } from '../middleware/rateLimiters';
+import { discussionTitleLimiter, relatedContextLimiter } from '../middleware/rateLimiters';
 import {
   vespaSearchQuerySchema,
   vespaSchemaQuerySchema,
@@ -11,6 +11,7 @@ import {
 import { schemaHandler } from '../services/vespaSearch/schemaHandler';
 import { queryIntentHandler } from '../services/queryIntent/handler';
 import { relatedContextHandler } from '../services/relatedContext/handler';
+import { discussionTitleHandler } from '../services/discussionTitle/handler';
 
 const router = Router();
 /**
@@ -20,6 +21,7 @@ const router = Router();
  * /api/vespaSearch/related only, behind user login.
  */
 export const relatedContextRouter = Router();
+export const discussionTitleRouter = Router();
 
 /**
  * @route GET /api/vespaSearch
@@ -92,6 +94,13 @@ relatedContextRouter.post(
   relatedContextLimiter,
   validate(relatedContextBodySchema),
   relatedContextHandler
+);
+
+discussionTitleRouter.post(
+  '/',
+  discussionTitleLimiter,
+  validate(relatedContextBodySchema),
+  discussionTitleHandler
 );
 
 export default router;

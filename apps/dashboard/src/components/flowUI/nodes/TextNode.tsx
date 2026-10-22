@@ -206,7 +206,7 @@ type BlockSegment =
   | { type: 'paragraph'; lines: string[] }
   | { type: 'codeblock'; code: string }
   | { type: 'bullets'; items: string[] }
-  | { type: 'ordered'; items: string[] }
+  | { type: 'ordered'; items: string[]; start: number }
   | { type: 'blockquote'; lines: string[] };
 
 function parseBlockSegments(content: string): BlockSegment[] {
@@ -262,12 +262,14 @@ function parseBlockSegments(content: string): BlockSegment[] {
 
     // Ordered list line: starts with "1. ", "2. ", etc. (allow leading whitespace)
     if (/^\s*\d+\.\s+/.test(line)) {
+      // Preserve the author's first number ("8. Amazon" must render as 8, not 1).
+      const start = Number.parseInt(line.trim(), 10) || 1;
       const items: string[] = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] ?? '')) {
         items.push((lines[i] ?? '').replace(/^\s*\d+\.\s+/, ''));
         i++;
       }
-      segments.push({ type: 'ordered', items });
+      segments.push({ type: 'ordered', items, start });
       continue;
     }
 
@@ -296,6 +298,12 @@ function parseBlockSegments(content: string): BlockSegment[] {
 interface TextNodeProps {
   node: FlowComponent;
   children?: React.ReactNode;
+  /**
+   * Inline-only mode: skip block parsing (lists, quotes, code fences) and
+   * render the content as a single paragraph. Used for table cells, where a
+   * value like "8. Amazon" is literal text, not a one-item ordered list.
+   */
+  inline?: boolean;
 }
 
 // Wrapper that resolves channel name via hook (must be a component to use hooks)
@@ -316,7 +324,7 @@ const FlowChannelMention: React.FC<{ channelId: string }> = ({ channelId }) => {
   );
 };
 
-export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
+export const TextNode: React.FC<TextNodeProps> = ({ node, children, inline = false }) => {
   const { data: customEmojis } = useCustomEmojis();
   const emojiMap = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -463,7 +471,9 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
       </React.Fragment>
     ));
 
-  const segments = parseBlockSegments(props.content);
+  const segments: BlockSegment[] = inline
+    ? [{ type: 'paragraph', lines: props.content.split('\n') }]
+    : parseBlockSegments(props.content);
 
   // If only one paragraph segment, keep the original single-<p> output for
   // backwards compatibility with existing callers that style the wrapper.
@@ -513,7 +523,11 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children }) => {
         }
         if (seg.type === 'ordered') {
           return (
-            <ol key={segIdx} className='list-decimal pl-6 my-2'>
+            <ol
+              key={segIdx}
+              start={seg.start !== 1 ? seg.start : undefined}
+              className='list-decimal pl-6 my-2'
+            >
               {seg.items.map((item, itemIdx) => (
                 <li key={itemIdx} className='my-1'>
                   {parseInlineContent(item).map((part, partIndex) => renderPart(part, partIndex))}

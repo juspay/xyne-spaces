@@ -18,3 +18,17 @@ export const ticketBoardSuggestionSchema = Joi.object({
         'any.required': 'Project ID is required',
     }),
 });
+
+export const ticketFieldSuggestionsSchema = Joi.object({
+    title: Joi.string().trim().allow('').required(),
+    description: Joi.string().trim().allow('').optional(),
+    boards: Joi.array()
+        .items(
+            Joi.object({
+                id: Joi.string().required(),
+                name: Joi.string().allow('').required(),
+                description: Joi.string().allow('').optional(),
+            }),
+        )
+        .required(),
+});

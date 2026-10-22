@@ -628,7 +628,7 @@ function judgeHeaderRows(
     out.push([
       "Judge",
       [
-        clean(judge["backend"], 20) || "jev",
+        clean(judge["backend"], 20) || "xor",
         `${calls} calls`,
         num(judge["questions"]) !== null ? `${num(judge["questions"])} questions` : "",
         num(judge["totalMs"]) !== null ? ms(judge["totalMs"]) : "",

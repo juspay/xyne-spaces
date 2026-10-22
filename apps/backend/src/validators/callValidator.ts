@@ -109,11 +109,16 @@ export const ScheduleCallSchema = z.object({
   externalInvitees: z.array(z.string().email()).optional(),
   externalInviteDelivery: z.enum(['standalone', 'conversation_reply']).optional(),
   invitation: CallInvitationSchema.optional(),
+  notifyParticipantsByEmail: z.boolean().optional(),
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
 }).refine(
-  (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
-  'Either channelId or targetUserIds is required'
+  // A guest-only call has no channel or teammates; it is backed by the organizer's self-DM.
+  (data) =>
+    data.channelId ||
+    (data.targetUserIds && data.targetUserIds.length > 0) ||
+    (data.externalInvitees && data.externalInvitees.length > 0),
+  'Either channelId, targetUserIds or externalInvitees is required'
 ).refine(
   (data) => data.startsAt < data.endsAt,
   'endsAt must be after startsAt'
@@ -164,12 +169,17 @@ export const RecurringScheduleCallSchema = z
     endsOn: z.number().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
     invitation: CallInvitationSchema.optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // Pinned onto every instance of the series; see ScheduleCallSchema.summaryTemplateId.
     summaryTemplateId: z.string().trim().min(1).optional(),
   })
   .refine(
-    (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
-    'Either channelId or targetUserIds is required',
+    // A guest-only series has no channel or teammates; it is backed by the organizer's self-DM.
+    (data) =>
+      data.channelId ||
+      (data.targetUserIds && data.targetUserIds.length > 0) ||
+      (data.externalInvitees && data.externalInvitees.length > 0),
+    'Either channelId, targetUserIds or externalInvitees is required',
   )
   .refine(
     (data) => !data.endsOn || data.endsOn > data.startsOn,
@@ -202,6 +212,7 @@ export const UpdateScheduleCallSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })
@@ -235,6 +246,7 @@ export const UpdateRecurringSeriesSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })
@@ -288,7 +300,7 @@ const adminListPaging = {
 export const CallAdminListCallsQuerySchema = z.object({
   ...adminListPaging,
   status: csvQueryList(z.nativeEnum(CallStatus)),
-  type: z.nativeEnum(CallType).optional(),
+  type: csvQueryList(z.nativeEnum(CallType)),
   summaryStatus: csvQueryList(z.enum(['pending', 'ready', 'failed'])),
   hasTranscript: z
     .enum(['true', 'false'])

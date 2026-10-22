@@ -110,7 +110,7 @@ in
                   room = {
                     auto_create = true;
                     empty_timeout = 300;
-                    max_participants = 100;
+                    max_participants = 500;
                   };
                   turn.enabled = false;
                 });

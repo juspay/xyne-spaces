@@ -1,0 +1,220 @@
+name: ci-pr
+
+# Every pull request: lints, the whole test suite with the live PostgreSQL
+# scenarios (accuracy), the benchmark against the base branch (performance),
+# and the image built and exercised end to end by scripts/smoke.mjs.
+#
+# `cargo fmt --check` is not run: a handful of files predate the formatter's
+# current rules and reformatting them belongs to its own change.
+
+on:
+  pull_request:
+  merge_group:
+    types:
+      - checks_requested
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: short
+  RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+  RUST_TOOLCHAIN: "1.89.0"
+
+jobs:
+  check:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+
+      - name: Install rust cache
+        uses: Swatinem/rust-cache@v2.7.7
+
+      - name: Clippy, warnings denied
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  test:
+    name: Tests (accuracy)
+    runs-on: ubuntu-latest
+    env:
+      STREAMGRES_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install rust cache
+        uses: Swatinem/rust-cache@v2.7.7
+
+      - name: Start PostgreSQL with logical replication
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17 \
+            -c wal_level=logical -c max_replication_slots=32 -c max_wal_senders=32
+          until docker exec pg pg_isready -U postgres; do sleep 1; done
+
+      - name: Unit, scenario, randomized and live PostgreSQL tests
+        run: cargo test --release --locked
+
+  perf:
+    name: Benchmark against the base branch (performance)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      STREAMGRES_BENCH_ONLY: routing,twins,window,join
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      # The base branch is checked out before the cache step: the cache
+      # restores ../base/target, which would otherwise create ../base and
+      # make the worktree step refuse a path that already exists; and the
+      # cache key then sees the base branch's lock file too.
+      - name: Check out the base branch beside the repository
+        run: |
+          git worktree remove --force ../base 2>/dev/null || rm -rf ../base
+          git worktree add --detach ../base "origin/${{ github.base_ref }}"
+
+      - name: Install rust cache
+        uses: Swatinem/rust-cache@v2.7.7
+        with:
+          workspaces: |
+            . -> target
+            ../base -> target
+
+      - name: Build the benchmark of this branch
+        run: cargo build --release --locked --bin bench
+
+      - name: Build the benchmark of the base branch
+        run: cargo build --release --locked --bin bench --manifest-path ../base/Cargo.toml
+
+      - name: Run both, alternating, five rounds
+        run: |
+          mkdir -p bench-out
+          for round in 1 2 3 4 5; do
+            ../base/target/release/bench > "bench-out/base-$round.txt"
+            ./target/release/bench > "bench-out/head-$round.txt"
+          done
+
+      - name: Compare
+        run: python3 scripts/bench-compare.py --base bench-out/base-*.txt --head bench-out/head-*.txt
+
+      - name: Keep the runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-runs
+          path: bench-out
+
+  image:
+    name: Image, end to end
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/server/Dockerfile
+          load: true
+          tags: streamgres:ci
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Start PostgreSQL and the collector
+        run: |
+          docker run -d --name pg --network host -e POSTGRES_PASSWORD=postgres postgres:17 \
+            -c wal_level=logical -c max_replication_slots=32 -c max_wal_senders=32
+          docker run -d --name collector --network host \
+            -v "$PWD/scripts/ci/otel-collector.yaml:/etc/otelcol-contrib/config.yaml" \
+            otel/opentelemetry-collector-contrib:0.146.1
+          until docker exec pg pg_isready -U postgres; do sleep 1; done
+          node scripts/smoke.mjs --prepare
+          # The server hears of schema changes through the schema-change
+          # event trigger and refuses to start without it: install the
+          # stack for app `xyne`, shard 0, over the publication the server uses.
+          docker exec pg psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c 'CREATE PUBLICATION xyne_sync_pub FOR ALL TABLES'
+          docker exec -i pg psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q \
+            < scripts/sql/ddl-triggers.sql
+
+      - name: Start the server from the image
+        run: |
+          docker run -d --name server --network host \
+            -e STREAMGRES_PG_DSN=postgresql://postgres:postgres@localhost:5432/postgres \
+            -e STREAMGRES_BASE_PATH=/sync \
+            -e STREAMGRES_APP_ID=xyne \
+            -e STREAMGRES_QUERY_URL=http://127.0.0.1:4849/query \
+            -e STREAMGRES_MUTATE_URL=http://127.0.0.1:4849/push \
+            -e STREAMGRES_ROW_LIMIT=600 \
+            -e STREAMGRES_ENABLE_ADMIN_ENDPOINTS=true \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+            -e OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
+            -e OTEL_METRICS_EXPORTER=otlp \
+            -e OTEL_LOGS_EXPORTER=otlp \
+            -e OTEL_TRACES_EXPORTER=none \
+            -e OTEL_METRIC_EXPORT_INTERVAL=2000 \
+            streamgres:ci
+          for _ in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4848/health)" = 200 ] && exit 0
+            sleep 1
+          done
+          docker logs server
+          exit 1
+
+      - name: Sync, schema refusal, heavy reads and the OTLP push, end to end
+        env:
+          SMOKE_COLLECTOR: http://127.0.0.1:9464/metrics
+        run: node scripts/smoke.mjs
+
+      - name: The server's log, when something failed
+        if: failure()
+        run: docker logs server | tail -200

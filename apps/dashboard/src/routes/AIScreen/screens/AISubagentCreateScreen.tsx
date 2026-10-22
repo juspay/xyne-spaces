@@ -12,6 +12,7 @@ const AISubagentCreateScreen = (): ReactElement => {
         data-id='ai-subagent-create-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         <ClawSubagentCreateV2 />
       </main>
     </AIShell>

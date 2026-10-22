@@ -103,6 +103,10 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
     const { op, args } = v1Request.parse(req.body);
 
     const target = resolveV1Operation(op);
+    req.sdkCall = {
+      op,
+      kind: !target || target.kind === 'retired' ? 'unknown' : target.kind,
+    };
     if (!target) {
       throw new SdkApiError('not_found', `Unknown operation "${op}" in API v1.`);
     }
@@ -131,7 +135,8 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
 
     if (endpoint === 'query') {
       const data = await callQuery(target.name, parsed.args, ctx);
-      res.status(200).json({ data: parsed.mapResult ? parsed.mapResult(data) : data });
+      const result = parsed.mapResult ? parsed.mapResult(data) : data;
+      res.status(200).json({ data: result ?? null });
       return;
     }
 

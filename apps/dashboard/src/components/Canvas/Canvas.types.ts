@@ -45,6 +45,8 @@ export interface CanvasEditorProps {
   currentUserRole?: CanvasRole | null;
   /** Scrolls with the document, above its first block. */
   header?: React.ReactNode;
+  /** Shows the headings as an "On this page" list on the right. */
+  pinnedOutline?: boolean;
 }
 
 export interface CollaborativeCanvasEditorRef {
@@ -176,4 +178,6 @@ export interface CanvasListProps {
   includeArchived?: boolean;
   onlyArchived?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
+  onCreateCanvasInFolder?: (folder: CanvasFolder) => void | Promise<void>;
+  onMoveCanvas?: (canvas: Canvas, folderId: string | null) => void | Promise<void>;
 }

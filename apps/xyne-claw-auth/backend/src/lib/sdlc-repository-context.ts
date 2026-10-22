@@ -98,26 +98,38 @@ export async function resolveSdlcHubContextForUser(
   channelId: string | undefined,
   conversationId: string | undefined,
   workspaceId?: string,
+  threadConversationId?: string,
+  onFailure?: (reason: string) => void,
 ): Promise<Record<string, unknown> | undefined> {
   if (!channelId || !conversationId) return undefined;
   const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceId);
   if (!auth) return undefined;
   try {
     const response = (await spacesFetch(
-      `/api/sdlc/channels/${encodeURIComponent(channelId)}/context?conversationId=${encodeURIComponent(conversationId)}`,
+      `/api/sdlc/channels/${encodeURIComponent(channelId)}/context?conversationId=${encodeURIComponent(conversationId)}${
+        threadConversationId ? `&threadConversationId=${encodeURIComponent(threadConversationId)}` : ""
+      }`,
       // Runs at the start of every channel run, which the 30 s default would stall.
       { signal: AbortSignal.timeout(5_000) },
       { ...auth, baseUrl: CONFIG.spacesInternalUrl },
     )) as { context?: Record<string, unknown> | null };
     return response.context ?? undefined;
-  } catch {
+  } catch (err) {
+    const reason = errMsg(err);
+    log.warn("[sdlc-hub-context] failed", {
+      channelId: channelId.replace(/[\r\n]/g, ""),
+      conversationId: conversationId.replace(/[\r\n]/g, ""),
+      status: reason.match(/Spaces API (\d{3})/)?.[1] ?? (err instanceof Error ? err.name : "unknown"),
+    });
+    onFailure?.(reason);
     return undefined;
   }
 }
 
 function s2sAuth(): { s2sKey: string; baseUrl: string } | undefined {
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  return s2sKey ? { s2sKey, baseUrl: CONFIG.spacesInternalUrl } : undefined;
+  // The SDLC backend ships ahead of the main one, so a new internal route can exist only there.
+  return s2sKey ? { s2sKey, baseUrl: CONFIG.sdlcBackendUrl || CONFIG.spacesInternalUrl } : undefined;
 }
 
 export interface SdlcHubKnowledge {

@@ -1,10 +1,8 @@
 import { config } from '@/config/env';
 import type { ParserOpenItem, ParserOperation } from '@/services/radar/radarParser';
-import {
-  askJevNouls,
-  isJevConfigured,
-  type JevNoulQuestion,
-} from '@/services/queryIntent/jevClient';
+import { askDecisionNouls } from '@/services/decision/ask';
+import { isDecisionEngineConfigured } from '@/services/decision/targets';
+import type { YesNoQuestion } from '@/services/decision/types';
 
 
 /**
@@ -55,7 +53,7 @@ class RadarDedupScorer {
    */
   isActive(): boolean {
     return (
-      config.radar.dedupEnabled && isJevConfigured() && !!config.jev.url && !!config.jev.model
+      config.radar.dedupEnabled && isDecisionEngineConfigured()
     );
   }
 
@@ -85,7 +83,7 @@ class RadarDedupScorer {
   /** One Jev call per create: every open item is its own question in the batch. */
   private async check(create: ParserOperation, items: ParserOpenItem[]): Promise<DedupCheck> {
     const questions = Object.fromEntries(
-      items.map((item, i): [string, JevNoulQuestion] => [
+      items.map((item, i): [string, YesNoQuestion] => [
         `i${i}`,
         {
           type: 'noul',
@@ -98,7 +96,7 @@ class RadarDedupScorer {
       'A workplace chat tracks open asks (who must do what).\n' +
       `New candidate ask: ${quoteAsk(create.title as string, create.contextSummary)}`;
 
-    const answers = await askJevNouls(state, questions, config.radar.dedupTimeoutMs);
+    const answers = await askDecisionNouls('radar_dedup', state, questions, config.radar.dedupTimeoutMs);
     if (!answers) return { create, item: null, probability: null, flagged: false };
 
     let best = 0;

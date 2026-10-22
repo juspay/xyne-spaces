@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
@@ -319,8 +320,7 @@ async function storeCallbackAttachments(
   const files = parseAgentAttachments(raw);
   if (files.length === 0) return [];
 
-  const storage = ctx.storage;
-  if (!storage) {
+  if (!ctx.files.available) {
     logger.warn(
       `[workflows] claw returned ${String(files.length)} attachment(s) but no storage adapter `
       + 'is configured; dropping them',
@@ -330,12 +330,10 @@ async function storeCallbackAttachments(
 
   return Promise.all(
     files.map((file) =>
-      storage.store(ctx.runtime.attributes, {
+      ctx.files.put({
         name: file.fileName,
         mimeType: file.mimeType,
-        // Strip any `data:<mime>;base64,` prefix and whitespace first, or
-        // Buffer.from silently truncates at the first invalid character.
-        bytes: new Uint8Array(
+        stream: Readable.from(
           Buffer.from(
             file.data.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, ''),
             'base64',

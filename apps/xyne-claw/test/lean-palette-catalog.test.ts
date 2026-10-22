@@ -47,4 +47,30 @@ describe("lean palette cataloguing", () => {
   it("does nothing without the open palette, whatever the lean flag says", () => {
     expect(buildToolCatalog({ groups: [heisenberg], customTools, catalogUnwrappedWrites: true })).toEqual([]);
   });
+
+  // Metrics tools arrive via the claw-builtin MCP server or as custom:agent-introspect; an open palette must make them lazy either way.
+  const metricsTools = ["get_agent_metrics", "find_metric_sessions"];
+  const builtin: McpToolGroup = {
+    serverType: "claw-builtin",
+    serverName: "Built-in",
+    tools: metricsTools.map((n) => tool(n)),
+    writeTools: [],
+  };
+
+  it("catalogues the agent metrics tools under an open palette (claw-builtin server and introspect source)", () => {
+    const viaServer = buildToolCatalog({ groups: [builtin], catalogUnwrapped: true });
+    expect(names(viaServer)).toEqual([...metricsTools].sort());
+    expect(viaServer.every((i) => !i.entry.name.includes("__"))).toBe(true);
+
+    const viaSource = buildToolCatalog({
+      groups: [],
+      customTools: metricsTools.map((n) => tool(n, { source: "custom:agent-introspect" })),
+      catalogUnwrapped: true,
+    });
+    expect(names(viaSource)).toEqual([...metricsTools].sort());
+  });
+
+  it("keeps the agent metrics tools out of the catalog without the open palette", () => {
+    expect(buildToolCatalog({ groups: [builtin], customTools: metricsTools.map((n) => tool(n, { source: "custom:agent-introspect" })) })).toEqual([]);
+  });
 });

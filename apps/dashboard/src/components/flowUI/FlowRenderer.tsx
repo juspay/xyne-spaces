@@ -1,7 +1,12 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { FlowContext, FlowContextValue, type FlowMessageContext } from './FlowContext';
+import {
+  FlowContext,
+  FlowContextValue,
+  useFlowDraftScope,
+  type FlowMessageContext,
+} from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
   FlowComponent,
@@ -14,6 +19,11 @@ import type {
 import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { flowActionService } from '@/services/flowActionService';
 import { toast } from 'sonner';
+import {
+  presentFlowActionError,
+  presentThrownFlowActionError,
+  type PresentedFlowActionError,
+} from './flowActionErrorPresenter';
 
 interface FlowRendererProps {
   flow: FlowDefinition;
@@ -167,6 +177,39 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     return isValid;
   }, [validatedFlow, state.values]);
 
+  const draftScope = useFlowDraftScope();
+  const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
+
+  const claimedScreenId = draftClaimsFlow ? (validatedFlow?.screenId ?? null) : null;
+  const seenFlowRef = useRef<FlowDefinition | null>(null);
+  seenFlowRef.current = validatedFlow;
+  useEffect(() => {
+    if (!claimedScreenId || !seenFlowRef.current) return;
+    draftScope?.onCardSeen?.(seenFlowRef.current);
+  }, [claimedScreenId, draftScope]);
+
+  // Lets an error toast's Retry button re-run the same action without making
+  // executeAction depend on itself.
+  const executeActionRef = useRef<((action: FlowAction) => Promise<boolean>) | null>(null);
+  const showFlowActionError = useCallback(
+    (presented: PresentedFlowActionError, action: FlowAction) => {
+      toast.error(
+        presented.text,
+        presented.retryable
+          ? {
+              action: {
+                label: 'Retry',
+                onClick: () => {
+                  void executeActionRef.current?.(action);
+                },
+              },
+            }
+          : undefined,
+      );
+    },
+    [],
+  );
+
   const executeAction = useCallback(
     async (action: FlowAction): Promise<boolean> => {
       if (!validatedFlow) {
@@ -248,13 +291,21 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         context: [stateRef.current.values],
       });
       try {
+        const draftValues =
+          action.type === 'submit' && draftClaimsFlow
+            ? draftScope?.valuesForSubmit?.(validatedFlow, action.actionId)
+            : null;
+
         const response = await flowActionService.execute({
           actionId: action.actionId,
           type: action.type,
-          values: stateRef.current.values,
+          values: draftValues
+            ? { ...stateRef.current.values, ...draftValues }
+            : stateRef.current.values,
           flowJSON: validatedFlow,
           messageId,
           conversationId,
+          ...(draftClaimsFlow ? { applyToDraft: true } : {}),
         });
 
         logger.info(LogEvent.INFO, {
@@ -264,8 +315,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         });
 
         if (response.type === 'error') {
-          toast.error(response.message);
+          showFlowActionError(presentFlowActionError(response), action);
           return false;
+        }
+        if (draftClaimsFlow && action.type === 'submit') {
+          draftScope?.onApplied(action.actionId, validatedFlow);
         }
         onAppAction(response);
         return true;
@@ -277,11 +331,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           error: message,
         });
         if (!isInputChange) {
-          toast.error(
+          const authorMessage =
             action.type === 'submit'
-              ? ((action as { errorMessage?: string }).errorMessage ?? message)
-              : message,
-          );
+              ? (action as { errorMessage?: string }).errorMessage
+              : undefined;
+          showFlowActionError(presentThrownFlowActionError(error, authorMessage), action);
         }
         return false;
       } finally {
@@ -294,8 +348,17 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         }
       }
     },
-    [validatedFlow, messageId, conversationId, onAppAction],
+    [
+      validatedFlow,
+      messageId,
+      conversationId,
+      onAppAction,
+      draftScope,
+      draftClaimsFlow,
+      showFlowActionError,
+    ],
   );
+  executeActionRef.current = executeAction;
 
   const isVisible = (component: FlowComponent): boolean => {
     if (component.hidden === undefined) return true;

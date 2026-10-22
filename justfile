@@ -20,6 +20,18 @@ cleanup:
 cleanup-ports:
     ./nix/scripts/cleanup-ports.sh
 
+# Build the dev image and run it against this checkout (Linux, or macOS via a Linux builder; extra args go to docker run)
+[group('nix')]
+dev-image SYSTEM=(arch() + "-linux") *ARGS:
+    nix build .#packages.{{SYSTEM}}.dev-image
+    ./result | docker load
+    docker run --rm -it \
+      -v "$PWD":/src \
+      -p 3000:3000 \
+      -p 3001:3001 \
+      {{ARGS}} \
+      ghcr.io/juspay/xyne-spaces-dev
+
 # Start backend development server
 [group('development')]
 backend: prepare
@@ -73,8 +85,3 @@ fresh-start: cleanup
 [group('nix')]
 reset:
     rm -rf ./data
-
-#one-click-setup
-[group('nix')]
-setup:
-    chmod +x setup.sh && ./setup.sh

@@ -4,6 +4,21 @@ import type { Request, Response } from "express";
 const state = vi.hoisted(() => ({
   artifacts: [] as Array<Record<string, any>>,
   messages: [] as Array<{ conversationId: string; userId: string }>,
+  // Spaces-side ACL: `${conversationId}|${spacesUserId}` pairs that may access.
+  spacesAccess: new Set<string>(),
+  accessChecks: [] as Array<{ conversationId: string; userId: string }>,
+}));
+
+// Keep the suite hermetic: these modules pull in the generated Prisma client
+// and Redis at import time, neither of which the ACL logic needs.
+vi.mock("../lib/users-jit.js", () => ({ orgIdForSpacesUser: vi.fn(async () => null) }));
+vi.mock("../lib/panel-signals.js", () => ({ signalArtifacts: vi.fn() }));
+vi.mock("../lib/conversation-access.js", () => ({
+  baseConversationId: (id: string | null | undefined) => (id ? id.split("__branch__")[0] : undefined),
+  checkConversationAccess: vi.fn(async (conversationId: string, userId: string) => {
+    state.accessChecks.push({ conversationId, userId });
+    return state.spacesAccess.has(`${conversationId}|${userId}`) ? "ok" : "denied";
+  }),
 }));
 
 vi.mock("../logger.js", () => ({
@@ -19,7 +34,12 @@ vi.mock("../db.js", () => ({
       findUnique: vi.fn(async (args: { where: { id: string } }) =>
         state.artifacts.find((a) => a["id"] === args.where.id) ?? null,
       ),
-      findMany: vi.fn(async () => state.artifacts),
+      findMany: vi.fn(async (args: { where: { conversationId?: string; createdByUserId?: { in: string[] } } }) =>
+        state.artifacts.filter((a) =>
+          (!args.where.conversationId || a["conversationId"] === args.where.conversationId) &&
+          (!args.where.createdByUserId || args.where.createdByUserId.in.includes(a["createdByUserId"])),
+        ),
+      ),
       update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = state.artifacts.find((a) => a["id"] === args.where.id);
         if (!row) throw new Error("not found");
@@ -42,7 +62,7 @@ vi.mock("../db.js", () => ({
 async function requestJson(
   method: string,
   url: string,
-  options: { userId?: string | null; body?: Record<string, unknown> } = {},
+  options: { userId?: string | null; spacesUserId?: string; body?: Record<string, unknown> } = {},
 ): Promise<{ status: number; body: Record<string, any> }> {
   const { conversationArtifactsRouter } = await import("./conversation-artifacts.js");
   return await new Promise((resolve, reject) => {
@@ -51,8 +71,15 @@ async function requestJson(
       method,
       url,
       originalUrl: url,
-      headers: options.userId === null ? {} : { "x-user-id": options.userId ?? "user-a" },
+      headers: options.userId === null
+        ? {}
+        : {
+            "x-user-id": options.userId ?? "user-a",
+            ...(options.spacesUserId ? { "x-spaces-user-id": options.spacesUserId } : {}),
+          },
       body: options.body ?? {},
+      // A bare Router has no query parser (the app adds it), so parse here.
+      query: Object.fromEntries(new URL(url, "http://test").searchParams),
     } as unknown as Request;
     const res = {
       status(code: number) { statusCode = code; return this; },
@@ -90,6 +117,8 @@ describe("conversation artifact route authorization", () => {
       { conversationId: "conv-1", userId: "user-a" },
       { conversationId: "conv-1", userId: "user-b" },
     ];
+    state.spacesAccess = new Set();
+    state.accessChecks = [];
     vi.clearAllMocks();
   });
 
@@ -119,5 +148,74 @@ describe("conversation artifact route authorization", () => {
 
   it("401s an unauthenticated PATCH", async () => {
     expect((await requestJson("PATCH", "/art-1", { userId: null, body: { pinned: true } })).status).toBe(401);
+  });
+
+  describe("collaborators who have not posted (XYNE-66344)", () => {
+    beforeEach(() => {
+      state.artifacts.push({
+        ...state.artifacts[0],
+        id: "art-thread",
+        conversationId: "thread-1",
+        refId: "pv-1",
+        kind: "PREVIEW",
+        title: "Owner's preview",
+        createdByUserId: "user-a",
+      });
+      state.artifacts.push({
+        ...state.artifacts[0],
+        id: "art-chat",
+        conversationId: "chat-abc",
+        refId: "pv-2",
+        kind: "PREVIEW",
+        title: "Owner's direct-chat preview",
+        createdByUserId: "user-a",
+      });
+      state.messages.push({ conversationId: "thread-1", userId: "user-a" });
+      state.messages.push({ conversationId: "chat-abc", userId: "user-a" });
+    });
+
+    it("lists the owner's artifacts to a channel member who has never posted", async () => {
+      state.spacesAccess.add("thread-1|spaces-d");
+      const listed = await requestJson("GET", "/?conversationId=thread-1", { userId: "user-d", spacesUserId: "spaces-d" });
+      expect(listed.status).toBe(200);
+      expect(listed.body["artifacts"].map((a: { id: string }) => a.id)).toEqual(["art-thread"]);
+      // Spaces' ACL is keyed by the workspace-scoped id, not the canonical one.
+      expect(state.accessChecks).toEqual([{ conversationId: "thread-1", userId: "spaces-d" }]);
+    });
+
+    it("lets that member GET and comment-read the artifact directly", async () => {
+      state.spacesAccess.add("thread-1|spaces-d");
+      expect((await requestJson("GET", "/art-thread", { userId: "user-d", spacesUserId: "spaces-d" })).status).toBe(200);
+    });
+
+    it("still refuses that member a PATCH — writes stay creator-only", async () => {
+      state.spacesAccess.add("thread-1|spaces-d");
+      const patched = await requestJson("PATCH", "/art-thread", {
+        userId: "user-d",
+        spacesUserId: "spaces-d",
+        body: { title: "hijacked" },
+      });
+      expect(patched.status).toBe(403);
+    });
+
+    it("hides the artifacts from a user Spaces denies", async () => {
+      const listed = await requestJson("GET", "/?conversationId=thread-1", { userId: "user-e", spacesUserId: "spaces-e" });
+      expect(listed.body["artifacts"]).toEqual([]);
+      expect((await requestJson("GET", "/art-thread", { userId: "user-e", spacesUserId: "spaces-e" })).status).toBe(404);
+    });
+
+    it("does not consult Spaces for direct chats, so they keep the posted-or-created rule", async () => {
+      state.spacesAccess.add("chat-abc|spaces-d");
+      const listed = await requestJson("GET", "/?conversationId=chat-abc", { userId: "user-d", spacesUserId: "spaces-d" });
+      expect(listed.body["artifacts"]).toEqual([]);
+      expect(state.accessChecks).toEqual([]);
+    });
+
+    it("falls back to x-user-id when requireAuth stamped no separate Spaces id (legacy ids)", async () => {
+      state.spacesAccess.add("thread-1|user-d");
+      const listed = await requestJson("GET", "/?conversationId=thread-1", { userId: "user-d" });
+      expect(listed.body["artifacts"].map((a: { id: string }) => a.id)).toEqual(["art-thread"]);
+      expect(state.accessChecks).toEqual([{ conversationId: "thread-1", userId: "user-d" }]);
+    });
   });
 });

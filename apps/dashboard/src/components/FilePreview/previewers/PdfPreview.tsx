@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useMountedStylesheet } from '../../../hooks/useMountedStylesheet';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { streamSourceOf } from '../streamSource';
 import { cn } from '../../../utils/classNames';
 import {
   DropdownMenu,
@@ -39,7 +40,7 @@ import {
 } from '../chrome';
 import type { PreviewerProps } from '../types';
 import { createPdfFinder, PDF_CURRENT, PDF_MATCHES, type PdfFinder } from './pdf/pdfFind';
-import { openPdf } from './pdf/pdfjs';
+import { openPdf, type PdfSource } from './pdf/pdfjs';
 import { PdfThumbnails } from './pdf/PdfThumbnails';
 
 /**
@@ -152,17 +153,17 @@ function PasswordPrompt(props: {
 
 /**
  * A PDF, drawn by pdf.js's own viewer — every page measured from the file, only those
- * near the view drawn, its text selectable and searchable, its links live — and fetched
- * a piece at a time, so a long scan opens at once. Zoom from the toolbar, with ⌘ or Ctrl
- * and + − 0, or by pinching and ⌘-scrolling about the pointer; it fits itself to the
- * pane until zoomed by hand. The pages, small, down the side; turn them a quarter at a
- * time. A password-protected file asks for its password.
+ * near the view drawn, its text selectable and searchable, its links live. Given an
+ * address it is fetched a piece at a time, so a long scan opens at once; given bytes
+ * there is nothing left to fetch. Zoom from the toolbar, with ⌘ or Ctrl and + − 0, or
+ * by pinching and ⌘-scrolling about the pointer; it fits itself to the pane until
+ * zoomed by hand. The pages, small, down the side; turn them a quarter at a time. A
+ * password-protected file asks for its password.
  */
-export default function PdfPreview(props: PreviewerProps): ReactElement {
+export function PdfDocumentView({ source }: { source: PdfSource }): ReactElement {
   useMountedStylesheet(pdfViewerCss);
   useMountedStylesheet(VIEWER_STYLES);
   const download = usePreviewDownload();
-  const fileId = props.file.id;
 
   const paneRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -231,7 +232,7 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
     );
 
     let cancelled = false;
-    const task = openPdf(getAttachmentStreamUrl(fileId));
+    const task = openPdf(source);
     task.onPassword = (update: (password: string) => void, reason: number) => {
       if (cancelled) return;
       passwordRef.current = update;
@@ -275,7 +276,7 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
       viewer.cleanup();
       void task.destroy();
     };
-  }, [fileId, attempt]);
+  }, [source, attempt]);
 
   const finder = useMemo(
     () =>
@@ -581,6 +582,11 @@ export default function PdfPreview(props: PreviewerProps): ReactElement {
       </div>
     </div>
   );
+}
+
+/** A stored PDF, read from the address the app serves it at. */
+export default function PdfPreview(props: PreviewerProps): ReactElement {
+  return <PdfDocumentView source={streamSourceOf(props.file, getAttachmentStreamUrl)} />;
 }
 
 function ZoomOption(props: {

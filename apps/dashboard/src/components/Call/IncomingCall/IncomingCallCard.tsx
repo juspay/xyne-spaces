@@ -7,12 +7,18 @@ import { cn } from '../../../utils/classNames';
 import { IncomingCallActions } from './IncomingCallActions';
 import { IncomingCallContextLine } from './IncomingCallContextLine';
 import { IncomingCallIdentity } from './IncomingCallIdentity';
+import {
+  IncomingCallCameraPreview,
+  IncomingCallMediaToggles,
+  type IncomingCallMediaState,
+} from './IncomingCallMediaToggles';
 import type { IncomingCallViewModel } from './IncomingCallCard.types';
 
 export interface IncomingCallCardProps {
   vm: IncomingCallViewModel;
   onAccept: () => void;
   onReject: () => void;
+  media?: IncomingCallMediaState;
   /**
    * Render into this element instead of the page: the desktop app's floating
    * incoming-call window. There the card stands alone, without the dimmed
@@ -36,6 +42,7 @@ export function IncomingCallCard({
   vm,
   onAccept,
   onReject,
+  media,
   container,
 }: IncomingCallCardProps): ReactElement {
   const prefersReducedMotion = useReducedMotion();
@@ -115,6 +122,10 @@ export function IncomingCallCard({
                 {vm.subtitle}
               </div>
             )}
+
+            {media?.cameraOn && media.previewStream && (
+              <IncomingCallCameraPreview stream={media.previewStream} />
+            )}
           </div>
 
           {vm.isInActiveCall && (
@@ -125,6 +136,8 @@ export function IncomingCallCard({
               </span>
             </div>
           )}
+
+          {media && <IncomingCallMediaToggles callId={vm.callId} {...media} />}
 
           <IncomingCallActions
             callId={vm.callId}
