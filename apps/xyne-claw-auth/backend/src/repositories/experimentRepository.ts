@@ -213,6 +213,10 @@ export const experimentRepository = {
     await prisma.experimentRun.update({ where: { id }, data: { checkerSessionIds: merged } });
   },
 
+  async addEpochSession(id: string, sessionId: string): Promise<void> {
+    await prisma.experimentRun.update({ where: { id }, data: { epochSessionIds: { push: sessionId } } });
+  },
+
   listFindingsByEpoch(experimentId: string, epoch: number) {
     return prisma.experimentFinding.findMany({
       where: { experimentId, epoch },

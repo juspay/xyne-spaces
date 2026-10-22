@@ -620,6 +620,9 @@ export async function dispatchExperimentEpoch(run: ExperimentRun): Promise<{ ses
   if (run.kind === "custom" && !custom) throw new Error(`the loop command for experiment ${run.id} no longer exists`);
   const task = buildEpochTask(run, buildLedgerMarkdown(run, findings, reviews), custom);
   const result = await dispatchExperimentRun(run, { task, claimAsCurrent: true, recover: true, loop: custom });
+  await Promise.resolve()
+    .then(() => experimentRepository.addEpochSession(run.id, result.sessionId))
+    .catch((err: unknown) => log.warn(`[experiment] could not record epoch session id=${run.id}: ${errMsg(err)}`));
   log.info(`[experiment] dispatched epoch=${run.epoch} id=${run.id} session=${result.sessionId}`);
   return result;
 }
