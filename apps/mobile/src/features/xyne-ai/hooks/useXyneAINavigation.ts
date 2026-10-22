@@ -37,6 +37,7 @@ import { extractTarget, looksLikeCommand } from '../navigation/command';
 import { findChannels, findPeople } from '../navigation/directory';
 import { answerLinkTarget } from '../navigation/answerLink';
 import { knownActions, resolve } from '../navigation/intent';
+import { traceNavigation } from '../navigation/trace';
 
 /** How long a command may take to open something before it is sent to Xyne AI instead. */
 const COMMAND_DEADLINE_MS = 4000;
@@ -107,6 +108,7 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
   const [choices, setChoices] = useState<NavigationChoices>();
   const opener = useRef<(id: string) => Promise<boolean>>(undefined);
   const request = useRef<AbortController>(null);
+  const offered = useRef(false);
 
   useEffect(() => () => request.current?.abort(), []);
 
@@ -120,12 +122,19 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
     open: (id: string) => void,
   ): boolean => {
     const found = resolve(target, items);
+    traceNavigation('resolve', {
+      target,
+      candidates: items.length,
+      first: items.slice(0, 5).map(item => item.name),
+      result: found.kind,
+    });
     if (found.kind === 'one') open(found.match.id);
     else if (found.kind === 'many') {
       opener.current = async id => {
         open(id);
         return true;
       };
+      offered.current = true;
       setChoices({ text, items: found.matches });
     }
     return found.kind !== 'none';
@@ -137,6 +146,7 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
     signal: AbortSignal,
   ): Promise<boolean> => {
     const target = extractTarget(entity, text);
+    traceNavigation('entity', { entity, target });
     if (!target) return false;
     switch (entity) {
       case 'ticket': {
@@ -144,6 +154,7 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
           queries.ticketByXyneIdV3({ xyneId: target, workspaceId: getActiveWorkspaceId() ?? '' }),
           { type: 'complete' },
         );
+        traceNavigation('ticket', { key: target, found: Boolean(ticket) });
         if (!ticket) return false;
         if (!signal.aborted) openTicket(ticket.id);
         return true;
@@ -204,9 +215,12 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
     request.current = mine;
     setChoices(undefined);
     setRouting(text);
+    offered.current = false;
+    let timedOut = false;
     // Settles on cancel (true) or after the deadline (false, so the message goes to Xyne AI).
     const settled = new Promise<boolean>(done => {
       const timer = setTimeout(() => {
+        timedOut = true;
         done(false);
         mine.abort();
       }, COMMAND_DEADLINE_MS);
@@ -216,11 +230,21 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
       });
     });
     try {
-      return await Promise.race([
+      const handled = await Promise.race([
         work(mine.signal).then(handled => handled || mine.signal.aborted),
         settled,
       ]);
-    } catch {
+      let outcome = 'unhandled (to Xyne AI)';
+      if (timedOut) outcome = 'timed out (deadline)';
+      else if (mine.signal.aborted) outcome = 'cancelled';
+      else if (handled) outcome = offered.current ? 'choices' : 'opened';
+      traceNavigation('outcome', { outcome, handled });
+      return handled;
+    } catch (error) {
+      traceNavigation('outcome', {
+        outcome: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
       return mine.signal.aborted;
     } finally {
       if (request.current === mine) cancel();
@@ -229,14 +253,22 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
 
   const route = (text: string): Promise<boolean> =>
     attempt(text, async signal => {
+      const started = Date.now();
+      traceNavigation('route', { text, actionsOffered: jev.length });
       const response = await routeIntent(text, jev, signal);
       if (signal.aborted) return true;
       const matches = knownActions(response, known);
+      traceNavigation('server', {
+        ms: Date.now() - started,
+        response,
+        mapped: matches.map(match => match.id),
+      });
       if (matches.length > 1) {
         opener.current = id => {
           const action = known.get(id);
           return action ? attempt(text, s => run(action, text, s)) : Promise.resolve(false);
         };
+        offered.current = true;
         setChoices({
           text,
           items: matches.map(({ id, title }) => ({ type: 'action', id, title })),
@@ -255,6 +287,7 @@ export function useXyneAINavigation(openUrl: (url: string) => Promise<void>): Xy
     route,
     cancel,
     pick: async id => {
+      traceNavigation('pick', { id });
       dismiss();
       return (await opener.current?.(id)) ?? true;
     },

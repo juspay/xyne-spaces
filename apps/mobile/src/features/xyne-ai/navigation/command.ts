@@ -4,8 +4,13 @@ const MAX_WORDS = 12;
 const MAX_LENGTH = 200;
 
 const VERBS = String.raw`open|go ?to|show(?:\s+me)?|take\s+me\s+to|navigate\s+to|message|dm|chat\s+with|text|view|launch`;
-const COMMAND = new RegExp(String.raw`^(?:please\s+)?(?:${VERBS})\s+\S`, 'i');
-const LEADING_VERB = new RegExp(String.raw`^(?:please\s+)?(?:${VERBS})\b\s*`, 'i');
+// "please", "can you", "could you please", "please can you just" ... before the verb.
+const POLITE_LEAD = String.raw`(?:(?:please|pls|kindly|(?:can|could|would|will)\s+you|can\s+u)\s+(?:just\s+)?)*`;
+const POLITE_ONLY = new RegExp(String.raw`^${POLITE_LEAD}`, 'i');
+const COMMAND = new RegExp(String.raw`^${POLITE_LEAD}(?:${VERBS})\s+\S`, 'i');
+const LEADING_VERB = new RegExp(String.raw`^${POLITE_LEAD}(?:${VERBS})\b\s*`, 'i');
+// "... for me please?", "... thanks!" in any order.
+const TRAILING_POLITE = /(?:[\s,.!?]+(?:please|pls|for\s+me|thanks|thank\s+you|thx))*[\s.!?]*$/i;
 const NAMES = NAVIGATION_ACTIONS.flatMap(({ names = [] }) => names)
   .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   .join('|');
@@ -21,14 +26,20 @@ const TRAILING_NOUN = new RegExp(String.raw`(?:\s+(?:${NOUNS}|page))+$`, 'i');
 const CHANNEL_NAME = /#[\w.-]+/;
 const TICKET_KEY = /\b[a-z][a-z0-9]*-\d+\b/i;
 
+const withoutTrailingPoliteness = (text: string): string =>
+  text.replace(TRAILING_POLITE, '').trim();
+
 /** Cheap check that keeps questions off the intent classifier. */
 export function looksLikeCommand(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed.endsWith('?') || trimmed.length > MAX_LENGTH || QUESTION_WORD.test(trimmed)) {
-    return false;
-  }
+  if (trimmed.length > MAX_LENGTH || QUESTION_WORD.test(trimmed)) return false;
   if (trimmed.split(/\s+/).length > MAX_WORDS) return false;
-  return COMMAND.test(trimmed) || BARE_NAME.test(trimmed);
+  // A question mark only passes a polite request ("can you open ...?"), not a plain question.
+  const polite =
+    trimmed.match(POLITE_ONLY)?.[0] || /[a-z]/i.test(trimmed.match(TRAILING_POLITE)?.[0] ?? '');
+  if (trimmed.endsWith('?') && !polite) return false;
+  const core = withoutTrailingPoliteness(trimmed);
+  return COMMAND.test(core) || BARE_NAME.test(core);
 }
 
 /** The name, `#channel` or ticket key a command is about; empty when it names none. */
@@ -38,8 +49,7 @@ export function extractTarget(entity: EntityKind, text: string): string {
     const channel = text.match(CHANNEL_NAME)?.[0];
     if (channel) return channel;
   }
-  return text
-    .trim()
+  return withoutTrailingPoliteness(text)
     .replace(LEADING_VERB, '')
     .replace(LEADING_FILLER, '')
     .replace(TRAILING_NOUN, '')
