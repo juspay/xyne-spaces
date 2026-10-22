@@ -89,7 +89,8 @@ export async function commitStaticContentVersion(input: CommitInput): Promise<{ 
     reasonCode = scan.findings[0]?.reasonCode;
     // What ran, so the record answers "which checks passed": the parser's rules for this kind; the judge and the detonator come later.
     const checked = allRules().filter((r) => (r.kinds === undefined || r.kinds.includes(contentKind)) && !(r.excludeKinds?.includes(contentKind) ?? false) && !r.outboundOnly).length;
-    detail = `parser ${scan.scannerVersion}: ${verdict}; ${checked} rules checked over ${text.length} chars in ${parserMs} ms, ${scan.findings.length} finding(s)${matchedRuleIds.length > 0 ? ` (${matchedRuleIds.slice(0, 12).join(", ")})` : ""}${scan.signals.length > 0 ? `, ${scan.signals.length} weak signal(s)` : ""}${scan.truncated ? ", text truncated at the size cap" : ""}${scan.budgetExceeded ? ", time budget exceeded" : ""}; judge and detonator not run (later phases)`.slice(0, 1_900);
+    const n = scan.findings.length;
+    detail = `${verdict}: ${n === 0 ? "no findings" : `${n} finding${n === 1 ? "" : "s"}${matchedRuleIds.length > 0 ? ` (${matchedRuleIds.slice(0, 12).join(", ")})` : ""}`}; ${checked} rules over ${text.length} chars in ${parserMs} ms${scan.signals.length > 0 ? `, ${scan.signals.length} weak signal${scan.signals.length === 1 ? "" : "s"}` : ""}${scan.truncated ? ", text truncated at the size cap" : ""}${scan.budgetExceeded ? ", time budget exceeded" : ""}. Judge and detonator not run (later phases).`.slice(0, 1_900);
     const rows = scan.findings.map((f) => ({
       orgId,
       foundIn: "static_version",
