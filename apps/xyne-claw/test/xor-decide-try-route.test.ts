@@ -12,14 +12,14 @@ const { xorDecideTryRouter } = await import("../src/routes/xor-decide-try.js");
 
 type Handler = (req: unknown, res: unknown) => Promise<void>;
 
-function handler(): Handler {
+function handler(path = "/xor-decide/try"): Handler {
   const layer = (xorDecideTryRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> }).stack
-    .find((l) => l.route?.path === "/xor-decide/try");
+    .find((l) => l.route?.path === path);
   const handlers = layer!.route!.stack;
   return handlers[handlers.length - 1]!.handle as Handler;
 }
 
-async function call(body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+async function call(body: unknown, path?: string): Promise<{ status: number; body: Record<string, unknown> }> {
   let status = 200;
   let sent: Record<string, unknown> = {};
   const res = {
@@ -32,7 +32,7 @@ async function call(body: unknown): Promise<{ status: number; body: Record<strin
       return res;
     },
   };
-  await handler()({ body }, res);
+  await handler(path)({ body }, res);
   return { status, body: sent };
 }
 
@@ -90,5 +90,38 @@ describe("POST /xor-decide/try", () => {
     enabled.value = false;
     const r = await call({ questions: QUESTIONS, item: { text: "x" } });
     expect(r.status).toBe(503);
+  });
+});
+
+describe("POST /xor-decide/eval", () => {
+  const SAMPLES = [
+    { input: "ERROR db refused", expected: { failure: true, cause: "db" } },
+    { input: "INFO ok", expected: { failure: false } },
+  ];
+
+  it("scores the samples on each requested model and returns a report and markdown", async () => {
+    xorMock.mockImplementation(async (req: { state: string; model?: string }) => ({
+      failure: { type: "noul", noul: req.state.includes("ERROR") ? 0.97 : 0.02 },
+      cause: { type: "choice", choice: req.model === "b" ? "net" : "db", confidence: 0.9 },
+    }));
+    const r = await call({ checks: QUESTIONS, samples: SAMPLES, models: ["a", "b"] }, "/xor-decide/eval");
+    const c = await call({ checks: QUESTIONS, samples: SAMPLES, compare: ["b"] }, "/xor-decide/eval");
+    expect((c.body["report"] as { models: Array<{ model: string }> }).models.map((m) => m.model)).toEqual(["current", "b"]);
+    expect(r.status).toBe(200);
+    const report = r.body["report"] as { models: Array<{ model: string; overall: { accuracy: number } }> };
+    expect(report.models.map((m) => [m.model, m.overall.accuracy])).toEqual([["a", 100], ["b", 66.7]]);
+    expect(String(r.body["markdown"])).toContain("### Regressions vs a");
+    expect(xorMock.mock.calls.slice(0, 4).map((c) => (c[0] as { model?: string }).model).sort()).toEqual(["a", "a", "b", "b"]);
+    expect(xorMock.mock.calls.slice(4).map((c) => (c[0] as { model?: string }).model ?? "none").sort()).toEqual(["b", "b", "none", "none"]);
+  });
+
+  it.each([
+    [{ checks: QUESTIONS, samples: [] }, /non-empty/],
+    [{ checks: QUESTIONS, samples: SAMPLES, models: ["a b"] }, /model ids/],
+    [{ checks: QUESTIONS, samples: [{ input: "x", expected: [] }] }, /expected must be an object/],
+  ])("rejects %j", async (body, msg) => {
+    const r = await call(body, "/xor-decide/eval");
+    expect(r.status).toBe(400);
+    expect(String(r.body["error"])).toMatch(msg);
   });
 });

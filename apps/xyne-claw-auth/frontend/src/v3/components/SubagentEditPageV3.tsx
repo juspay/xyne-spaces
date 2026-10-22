@@ -34,7 +34,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSubagentDetail } from "../hooks/useSubagentDetail";
 import {
   listSkills,
@@ -44,8 +44,9 @@ import {
   disableSubagent,
   addSubagentShare,
   removeSubagentShare,
+  ApiError,
 } from "../../lib/api";
-import type { AvailableTools, Skill, SubagentCheck, SubagentSample, SubagentShareEntry } from "../../lib/api";
+import type { AvailableTools, Skill, SubagentCheck, SubagentEvalReport, SubagentSample, SubagentShareEntry } from "../../lib/api";
 import { useSnackbar } from "./ui/Snackbar";
 import { SubagentEditHeader } from "./subagents/SubagentEditHeader";
 import { SubagentEditSkeleton } from "./subagents/SubagentEditSkeleton";
@@ -56,6 +57,8 @@ import { SubagentToolsTab } from "./subagents/SubagentToolsTab";
 import { SubagentContributorsTab } from "./subagents/SubagentContributorsTab";
 import { SubagentMcpTabV3 } from "./subagents/SubagentMcpTabV3";
 import { ChecksEditor } from "./subagents/ChecksEditor";
+import { ChecksEvalPanel } from "./subagents/ChecksEvalPanel";
+import { Button } from "./ui/Button";
 import { Switch } from "./ui/Switch";
 import { Tabs, type TabItem } from "./ui/Tabs";
 
@@ -126,6 +129,9 @@ export function SubagentEditPageV3({
   const [draftChecks, setDraftChecks] = useState<SubagentCheck[]>([]);
   const [checksValid, setChecksValid] = useState(true);
   const [draftSamples, setDraftSamples] = useState<SubagentSample[]>([]);
+  const [evalReport, setEvalReport] = useState<SubagentEvalReport | null>(null);
+  const [gateBlock, setGateBlock] = useState<string | null>(null);
+  const [draftsFor, setDraftsFor] = useState<string | null>(null);
 
   /* ── available skills ──────────────────────────────────────────── */
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
@@ -139,7 +145,8 @@ export function SubagentEditPageV3({
   const [toolsLoading, setToolsLoading] = useState(true);
 
   /* ── UI state ──────────────────────────────────────────────────── */
-  const [activeTab, setActiveTab] = useState<SubagentTopTabId>("persona");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SubagentTopTabId>(searchParams.get("tab") === "checks" ? "checks" : "persona");
   const [saving, setSaving] = useState(false);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [addingShare, setAddingShare] = useState(false);
@@ -161,6 +168,9 @@ export function SubagentEditPageV3({
     setDraftChecks(subagent.checks ?? []);
     setChecksValid(true);
     setDraftSamples(subagent.samples ?? []);
+    setEvalReport(subagent.evalReport ?? null);
+    setGateBlock(null);
+    setDraftsFor(subagent.name);
   }, [subagent?.name]);
 
   /* ── fetch skills ──────────────────────────────────────────────── */
@@ -223,7 +233,7 @@ export function SubagentEditPageV3({
   ]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (force = false) => {
     if (!subagent || saving || !dirty) return;
     if (!checksValid) {
       setActiveTab("checks");
@@ -252,10 +262,17 @@ export function SubagentEditPageV3({
         fast: draftFast,
         checks: draftChecks.length > 0 ? draftChecks : null,
         samples: draftSamples.length > 0 ? draftSamples : null,
+        ...(force ? { force: true } : {}),
       });
+      setGateBlock(null);
       setSubagent(updated);
       showSnackbar({ variant: "success", title: "Subagent saved" });
     } catch (err) {
+      if (err instanceof ApiError && err.code === "EVAL_REGRESSION") {
+        setGateBlock(err.message);
+        setActiveTab("checks");
+        return;
+      }
       showSnackbar({
         variant: "error",
         title: "Failed to save subagent",
@@ -416,7 +433,7 @@ export function SubagentEditPageV3({
         dirty={dirty}
         saving={saving}
         canEdit={canEdit}
-        onSave={handleSave}
+        onSave={() => void handleSave()}
         onToggleEnabled={handleToggleEnabled}
         onBack={() => navigate("/v3/subagents")}
       />
@@ -478,6 +495,14 @@ export function SubagentEditPageV3({
 
           {activeTab === "checks" && (
             <div className="space-y-4">
+              {gateBlock && (
+                <div className="flex items-start justify-between gap-3 rounded-xl border border-xyne-border-error bg-xyne-surface p-3 text-[13px] text-xyne-error-fg" data-id="eval-gate-block">
+                  <span>{gateBlock}</span>
+                  <Button size="sm" variant="destructive" onClick={() => void handleSave(true)} disabled={saving}>
+                    Save anyway
+                  </Button>
+                </div>
+              )}
               <label className="flex items-start gap-3 rounded-xl border border-xyne-border bg-xyne-surface p-3" data-id="fast-subagent-toggle">
                 <Switch checked={draftFast} onChange={setDraftFast} disabled={!canEdit} ariaLabel="Fast subagent" />
                 <span>
@@ -487,7 +512,7 @@ export function SubagentEditPageV3({
                   </span>
                 </span>
               </label>
-              <ChecksEditor
+              {draftsFor === subagent.name && <ChecksEditor
                 key={subagent.name}
                 checks={draftChecks}
                 onChange={(checks, valid) => {
@@ -497,6 +522,15 @@ export function SubagentEditPageV3({
                 samples={draftSamples}
                 onSamplesChange={setDraftSamples}
                 canEdit={canEdit}
+              />}
+              <ChecksEvalPanel
+                subagentName={subagent.name}
+                canEdit={canEdit}
+                sampleCount={(subagent.samples ?? []).length}
+                dirty={dirty}
+                checksVersion={subagent.checksVersion}
+                report={evalReport}
+                onReport={setEvalReport}
               />
             </div>
           )}

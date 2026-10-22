@@ -4542,6 +4542,65 @@ export interface SubagentDef {
   samples?: SubagentSample[];
   model?: string | null;
   budget?: { maxToolCalls?: number };
+  evalReport?: SubagentEvalReport | null;
+}
+
+export interface EvalStats {
+  labelled: number;
+  correct: number;
+  confidentWrong: number;
+  unsure: number;
+  accuracy: number;
+  unsureRate: number;
+}
+
+export interface EvalModelReport {
+  model: string;
+  overall: EvalStats;
+  checks: Array<EvalStats & { id: string; question: string; variantOf?: string }>;
+  meanMs: number;
+  unavailable: number;
+}
+
+export interface SubagentEvalReport {
+  report: { samples: number; models: EvalModelReport[]; ranAt: string };
+  regressions: Array<{ model: string; regressions: Array<{ id: string; question: string; from: number; to: number; confidentWrongFrom: number; confidentWrongTo: number }> }>;
+  markdown: string;
+  checksVersion: number;
+}
+
+export interface SubagentTemplateSummary {
+  id: string;
+  title: string;
+  summary: string;
+  requires: string[];
+  defaultName: string;
+  fast: boolean;
+  tools: string[];
+  checks: number;
+  samples: number;
+  screenshotSamples: boolean;
+}
+
+export async function listSubagentTemplates(): Promise<SubagentTemplateSummary[]> {
+  const data = await request<{ success: boolean; data: SubagentTemplateSummary[] }>(`${AUTH_API_URL}/api/v1/subagents/templates`);
+  return data.data;
+}
+
+export async function cloneSubagentTemplate(id: string, name?: string): Promise<SubagentDef> {
+  const data = await request<{ success: boolean; data: SubagentDef }>(
+    `${AUTH_API_URL}/api/v1/subagents/templates/${encodeURIComponent(id)}/clone`,
+    { method: "POST", body: JSON.stringify(name ? { name } : {}) },
+  );
+  return data.data;
+}
+
+export async function runSubagentEvals(name: string, payload: { compare?: string[]; variants?: Record<string, string[]> }): Promise<SubagentEvalReport> {
+  const data = await request<{ success: boolean; data: SubagentEvalReport }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/checks/eval`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
 }
 
 export type SubagentCheckType = "yesno" | "choice" | "score" | "value";
@@ -4561,6 +4620,7 @@ export type CheckValue = string | number | boolean | null;
 
 export interface SubagentSample {
   input: string;
+  image?: string;
   expected: Record<string, CheckValue>;
   label?: string;
 }
@@ -4600,6 +4660,7 @@ export interface SubagentInputBody {
   fast?: boolean;
   checks?: SubagentCheck[] | null;
   samples?: SubagentSample[] | null;
+  force?: boolean;
 }
 
 export async function listSubagents(): Promise<SubagentDef[]> {

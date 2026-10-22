@@ -6,7 +6,7 @@
  * reads the next time it starts.
  */
 
-import { configPath, resolveConfig } from "./config.js";
+import { configPath, signedInUntil, resolveConfig } from "./config.js";
 import { describeError } from "./errors.js";
 import { startLogin } from "./login.js";
 import { toIST } from "./render.js";
@@ -22,7 +22,11 @@ export async function runLoginCommand(): Promise<number> {
 
 		const session = await attempt.done;
 		console.log(`\nSigned in as user ${session.userId} (workspace ${session.workspaceId}).`);
-		console.log(`Session saved to ${configPath()}, valid until ${toIST(session.expiresAt)} IST.`);
+		console.log(
+			session.refreshToken
+				? `Session saved to ${configPath()}. It renews itself until ${toIST(signedInUntil(session))} IST.`
+				: `Session saved to ${configPath()}, valid until ${toIST(session.expiresAt)} IST.`,
+		);
 		if (sessionSource === "env") {
 			console.log("Note: XYNE_SPACES_COOKIE is set and takes precedence over the saved session; unset it to use this one.");
 		}

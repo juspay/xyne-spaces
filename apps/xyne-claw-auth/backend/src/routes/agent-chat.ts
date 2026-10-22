@@ -58,6 +58,7 @@ import {
 } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { resolveProjectInstructions } from "../lib/project-context.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -2175,6 +2176,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           [
             resolvedContext.promptPrefix || "",
             typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+            // A harness run builds its own context and never reaches
+            // prepareRun, so a project's instructions have to be added here or
+            // they never arrive.
+            await resolveProjectInstructions(
+              conversationId,
+              [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+              agent.orgId,
+            ) ?? "",
             designSelectionInstruction,
           ]
             .filter(Boolean)

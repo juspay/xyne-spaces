@@ -201,6 +201,7 @@ import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExi
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
+import { restoreConversationAttachments, saveConversationAttachments } from "../attachment-carry.js";
 import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
@@ -1829,6 +1830,7 @@ export async function processTask(
     const {
       derivedContextFiles,
       pdfBuffers: pdfBuffersByName,
+      xlsxBuffers: xlsxBuffersByName,
       videoKeyframes,
       videoBuffers: videoBuffersByName,
       imageAttachments,
@@ -1855,6 +1857,11 @@ export async function processTask(
         : []),
     ];
 
+    const carryKey = !requestCwd ? workspaceStoreKey : undefined;
+    const earlierAttachments = carryKey
+      ? await restoreConversationAttachments(carryKey, workspaceDir, log)
+      : { available: [], restored: [] };
+
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1871,6 +1878,23 @@ export async function processTask(
         pdfBuffersByName.map((p) => ({ path: p.fileName, data: p.buf })),
       );
       log(`Raw PDF originals kept: ${writtenBin.length}`);
+    }
+    if (xlsxBuffersByName.length > 0) {
+      const writtenXlsx = await writeWorkspaceBinaryFiles(
+        workspaceDir,
+        xlsxBuffersByName.map((x) => ({ path: x.fileName, data: x.buf })),
+      );
+      log(`Raw XLSX originals kept: ${writtenXlsx.length}`);
+    }
+    const thisTurnAttachmentPaths = [
+      ...derivedContextFiles.map((f) => toWorkspaceContextPath(f.path)),
+      ...pdfBuffersByName.map((p) => toWorkspaceContextPath(p.fileName)),
+      ...xlsxBuffersByName.map((x) => toWorkspaceContextPath(x.fileName)),
+    ];
+    if (carryKey && thisTurnAttachmentPaths.length > 0) {
+      void saveConversationAttachments(carryKey, workspaceDir, thisTurnAttachmentPaths, log)
+        .then((saved) => log(`Attachments kept for later turns: ${saved}/${thisTurnAttachmentPaths.length}`))
+        .catch((err: unknown) => logErr("Saving attachments for later turns failed", err));
     }
     // /record-skill only: retain the raw recording in the ephemeral run
     // workspace until analyze-skill-recording copies it into this
@@ -2330,6 +2354,14 @@ export async function processTask(
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
+    const clonedUiTesterTools: Record<string, ToolDefinition[]> =
+      !fastModeEnabled && uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? Object.fromEntries(
+            (customSubagents ?? [])
+              .filter((c) => (c.tools.custom ?? []).includes("ui-test-variations"))
+              .map((c) => [c.name, buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files"), checks: c.checks })]),
+          )
+        : {};
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
@@ -2372,7 +2404,9 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
+          uiTesterTools.length > 0 || Object.keys(clonedUiTesterTools).length > 0
+            ? { ...(uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : {}), ...clonedUiTesterTools }
+            : undefined,
           customSubagents,
           directPickSuffixes,
           customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
@@ -3898,11 +3932,11 @@ export async function processTask(
         path: toWorkspaceContextPath(a.fileName),
       })),
       ...xlsxAttachments.map((a) => ({
-        label: `${a.fileName} (xlsx, extracted to markdown)`,
+        label: `${a.fileName} (xlsx, extracted to markdown; original workbook at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...pdfAttachments.map((a) => ({
-        label: `${a.fileName} (pdf, text-extracted to markdown)`,
+        label: `${a.fileName} (pdf, text-extracted to markdown; original PDF at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...docxAttachments.map((a) => ({
@@ -3930,6 +3964,18 @@ export async function processTask(
         path: toWorkspaceContextPath(`${recording.fileName}.video.md`),
       })) : []),
     ];
+    const thisTurnPaths = new Set(attachmentEntries.map((e) => e.path));
+    const earlierFiles = earlierAttachments.available
+      .filter((p) => !thisTurnPaths.has(p) && !thisTurnAttachmentPaths.includes(p))
+      .slice(0, 50);
+    if (earlierFiles.length > 0) {
+      const earlierContext = [
+        "## Files From Earlier In This Conversation",
+        ...earlierFiles.map((p) => `- \`${p}\``),
+        "These were attached in earlier turns and are still on disk at these paths.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${earlierContext}` : earlierContext;
+    }
     if (attachmentEntries.length > 0) {
       const attachmentContext = [
         "## Attached Files",

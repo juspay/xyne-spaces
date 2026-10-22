@@ -32,6 +32,7 @@ export interface PageListHeaderProps {
   stats: StatBlock[];
   createLabel: string;
   onCreateClick: () => void;
+  secondaryAction?: ReactNode;
   searchValue: string;
   onSearchChange: (val: string) => void;
   searchPlaceholder: string;
@@ -58,6 +59,7 @@ export function PageListHeader({
   stats,
   createLabel,
   onCreateClick,
+  secondaryAction,
   searchValue,
   onSearchChange,
   searchPlaceholder,
@@ -166,6 +168,7 @@ export function PageListHeader({
               {stats.map((stat, i) => renderStatBlock(stat, i))}
             </div>
 
+            {secondaryAction}
             <button
               onClick={onCreateClick}
               className="flex items-center gap-[6px] bg-xyne-fg-primary text-xyne-fg-inverse px-[16px] py-[9px] rounded-[8px] text-[13px] font-medium hover:opacity-90 transition-opacity flex-shrink-0 border-0 cursor-pointer font-sans"

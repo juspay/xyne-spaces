@@ -56,6 +56,7 @@ export interface SubagentBudget {
 
 export interface SubagentSample {
   input: string;
+  image?: string;
   expected: Record<string, string | number | boolean | null>;
   label?: string;
 }
@@ -260,6 +261,9 @@ function validateMcpInstanceMap(raw: unknown): Record<string, string> {
 
 const MODEL_RE = /^[a-zA-Z0-9._:/-]{1,100}$/;
 const MAX_SAMPLES = 50;
+const MAX_IMAGE_SAMPLES = 20;
+const SAMPLE_IMAGE_MAX_CHARS = 1_400_000;
+const SAMPLE_IMAGE_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const SAMPLE_INPUT_MAX_CHARS = 8_000;
 const MAX_TOOL_CALLS_CAP = 200;
 
@@ -282,12 +286,18 @@ function validateSamples(raw: unknown, checkIds: Set<string> | null): SubagentSa
   if (raw === null || (Array.isArray(raw) && raw.length === 0)) return null;
   if (!Array.isArray(raw)) throw new ValidationError("samples", "must be an array");
   if (raw.length > MAX_SAMPLES) throw new ValidationError("samples", `at most ${MAX_SAMPLES} samples`);
+  let images = 0;
   return raw.map((item, i) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new ValidationError(`samples[${i}]`, "must be an object");
     const o = item as Record<string, unknown>;
     const input = typeof o["input"] === "string" ? o["input"].trim() : "";
-    if (input.length < 1 || input.length > SAMPLE_INPUT_MAX_CHARS) {
-      throw new ValidationError(`samples[${i}].input`, `must be 1–${SAMPLE_INPUT_MAX_CHARS} chars`);
+    const image = typeof o["image"] === "string" && o["image"] ? o["image"] : undefined;
+    if (image !== undefined && (!SAMPLE_IMAGE_RE.test(image) || image.length > SAMPLE_IMAGE_MAX_CHARS)) {
+      throw new ValidationError(`samples[${i}].image`, "must be a base64 png/jpeg/webp data URL under 1 MB");
+    }
+    if (image !== undefined && ++images > MAX_IMAGE_SAMPLES) throw new ValidationError("samples", `at most ${MAX_IMAGE_SAMPLES} screenshot samples`);
+    if ((!image && input.length < 1) || input.length > SAMPLE_INPUT_MAX_CHARS) {
+      throw new ValidationError(`samples[${i}].input`, `must be 1–${SAMPLE_INPUT_MAX_CHARS} chars, or add a screenshot`);
     }
     const rawExpected = o["expected"];
     if (!rawExpected || typeof rawExpected !== "object" || Array.isArray(rawExpected)) {
@@ -302,7 +312,7 @@ function validateSamples(raw: unknown, checkIds: Set<string> | null): SubagentSa
       expected[k] = v as SubagentSample["expected"][string];
     }
     const label = typeof o["label"] === "string" && o["label"].trim() ? o["label"].trim().slice(0, 120) : undefined;
-    return { input, expected, ...(label ? { label } : {}) };
+    return { input, ...(image ? { image } : {}), expected, ...(label ? { label } : {}) };
   });
 }
 
