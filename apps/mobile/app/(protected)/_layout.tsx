@@ -32,6 +32,7 @@ import { RevokedBetaFlagsGate } from '@/src/features/beta-flags';
 import { setRouteSnapshot } from '@/src/features/chat/navigation/routeSnapshot';
 import { ensureQueryCacheStorageReady } from '@/src/machines/queryCacheMachine';
 import { GuideReturnBar } from '@/src/features/user-guide/components/guide-return-bar';
+import { FloatingNavigator } from '@/src/features/xyne-ai/components/FloatingNavigator';
 import { isFlagOn, useFlagGeneration } from '@/src/flags';
 
 const DASHBOARD_WEBVIEW_ROUTE_SEGMENTS = new Set(['canvas', 'rca', 'call', 'channel-canvas']);
@@ -156,6 +157,7 @@ function NativeShell(): ReactElement {
             <OngoingCallBanner />
           </CallBarVisibilityContext.Provider>
           <GuideReturnBar />
+          <FloatingNavigator />
           <IncomingCallSync />
           <UpdatePromptGate />
           <RevokedBetaFlagsGate />

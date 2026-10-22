@@ -28,6 +28,8 @@ export interface XyneAISelection {
   model: string | undefined;
   thinkingLevel: ThinkingLevel | undefined;
   modes: { webSearch: ModeState; deepResearch: ModeState };
+  /** Whether the agent list has loaded or failed, so a chosen agent is known to exist. */
+  isReady: boolean;
   requestOptions: XyneAIRequestOptions;
   selectAgent: (slug: string | undefined) => void;
   selectModel: (model: string | undefined) => void;
@@ -49,7 +51,7 @@ export function useXyneAISelection(): XyneAISelection {
   const [webSearch, setWebSearch] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
 
-  const { data: agents } = useXyneAIAgents();
+  const { data: agents, isPending: isAgentsPending } = useXyneAIAgents();
   const agent = agents?.find(candidate => candidate.slug === storedSlug);
   // An agent removed since it was chosen would fail every message.
   const agentSlug = agents && !agent ? undefined : storedSlug;
@@ -97,6 +99,7 @@ export function useXyneAISelection(): XyneAISelection {
     defaultModelName: catalog?.defaultModelName,
     model,
     thinkingLevel,
+    isReady: !isAgentsPending,
     modes: {
       webSearch: {
         accessible: webSearchAccessible,

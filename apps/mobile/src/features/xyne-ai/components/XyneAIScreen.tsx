@@ -44,7 +44,13 @@ let rememberedChat: { userId: string; conversationId: string; agentSlug: string 
 /** Route params from "Ask AI" on a message, thread or channel: what this chat is about. */
 type AskAIParams = Partial<
   Record<
-    'conversationId' | 'previewText' | 'senderId' | 'attachmentIds' | 'channelId' | 'channelName',
+    | 'conversationId'
+    | 'previewText'
+    | 'senderId'
+    | 'attachmentIds'
+    | 'channelId'
+    | 'channelName'
+    | 'query',
     string
   >
 >;
@@ -86,6 +92,7 @@ export const XyneAIScreen = (): ReactElement => {
     attachmentIds,
     channelId,
     channelName = '',
+    query,
   } = useLocalSearchParams<AskAIParams>();
   const [channel, setChannel] = useState(() =>
     channelId ? channelPick(channelId, channelName) : undefined,
@@ -129,9 +136,10 @@ export const XyneAIScreen = (): ReactElement => {
   const foreground = useCSSVariable('--color-foreground') as string;
   const composerRef = useRef<XyneAIComposerHandle>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  // Plain opens resume the remembered chat; "Ask AI" opens start fresh with their scope.
+  // Plain opens resume the remembered chat; "Ask AI" and navigator questions start fresh.
   const [isRestoring, setIsRestoring] = useState(
-    () => !conversationId && !channelId && !!user && rememberedChat?.userId === user.user_id,
+    () =>
+      !conversationId && !channelId && !query && !!user && rememberedChat?.userId === user.user_id,
   );
   // The turn itself, so an edit still targets it if it leaves the visible path.
   const [editing, setEditing] = useState<ChatTurn>();
@@ -246,6 +254,17 @@ export const XyneAIScreen = (): ReactElement => {
       .finally(() => setIsRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restores once, on mount
   }, []);
+
+  // A question from the floating navigator that the router did not take; sent as asked, never
+  // re-routed, and only once the agent list says which agent will answer it.
+  const sentQuery = useRef<string>(undefined);
+  const { isReady } = selection;
+  useEffect(() => {
+    if (!query || !isReady || query === sentQuery.current) return;
+    sentQuery.current = query;
+    deliver(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sends each new query once
+  }, [query, isReady]);
 
   const { agentSlug } = selection;
   useEffect(() => {
