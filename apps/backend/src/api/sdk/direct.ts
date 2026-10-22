@@ -106,7 +106,7 @@ function clawIdentity(req: Request, authData: AuthData): ScopedClawIdentity {
   };
 }
 
-async function buildAuthData(req: Request): Promise<AuthData> {
+export async function buildAuthData(req: Request): Promise<AuthData> {
   const user = req.user;
   if (!user) {
     throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
