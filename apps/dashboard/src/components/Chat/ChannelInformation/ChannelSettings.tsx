@@ -138,6 +138,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   }, [location.pathname, navigate, searchParams]);
 
   const showTicketsInChat = channel.showTicketsTabTicketsInChat ?? true;
+  const expandEmailsByDefault = channel.expandChannelEmailsByDefault ?? false;
 
   // Admins or the channel owner (creator) can change the ticket-visibility setting.
   const canManageTicketVisibility =
@@ -229,6 +230,24 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
       );
     } catch {
       toast.error('Failed to update setting');
+    }
+  };
+
+  const handleToggleExpandEmails = async (next: boolean): Promise<void> => {
+    if (!canManageTicketVisibility) return;
+
+    const timestamp = Date.now();
+    try {
+      const res = await zero.mutate(
+        mutators.channel.updateExpandChannelEmailsByDefault({
+          channelId: channel.id,
+          expand: next,
+          updatedAt: timestamp,
+        }),
+      ).server;
+      if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to update setting');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update setting');
     }
   };
 
@@ -349,6 +368,24 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   >
                     Manage in Workspace Management
                   </Button>
+                </div>
+              )}
+              {canManageTicketVisibility && emailAlias && (
+                <div className='mt-3 flex items-start justify-between gap-3 border-t border-border pt-3'>
+                  <div className='flex flex-col gap-y-1'>
+                    <p className='text-sm font-medium text-foreground'>Expand emails by default</p>
+                    <p className='text-sm text-muted-foreground'>
+                      Show the full email in chat instead of a collapsed subject line. Members can
+                      still collapse each email.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={expandEmailsByDefault}
+                    onCheckedChange={next => void handleToggleExpandEmails(next)}
+                    aria-label='Expand emails sent to this channel by default'
+                    data-track-category='CHANNEL_SETTINGS'
+                    data-track-name='TOGGLE_EXPAND_CHANNEL_EMAILS'
+                  />
                 </div>
               )}
             </div>

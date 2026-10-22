@@ -534,6 +534,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   context,
   isHighlighted,
   channelId,
+  expandChannelEmailsByDefault = false,
   conversation,
   contentOnly = false,
   disableLinks = false,
@@ -1369,6 +1370,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   body={message.content}
                   emailId={message.messageId}
                   attachments={attachments}
+                  expandByDefault={expandChannelEmailsByDefault}
                 />
               ) : isSharedAgentTranscript ? (
                 <div className='flex flex-col gap-2'>

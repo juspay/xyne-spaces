@@ -242,6 +242,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'channels.setCallSummaryPrompt': { kind: 'mutator', name: 'channel.updateCallSummaryPrompt' },
   'channels.setSelectedBoard': { kind: 'mutator', name: 'channel.updateSelectedBoardId' },
   'channels.setShowTicketsInChat': { kind: 'mutator', name: 'channel.updateShowTicketsTabTicketsInChat' },
+  'channels.setExpandEmailsByDefault': { kind: 'mutator', name: 'channel.updateExpandChannelEmailsByDefault' },
   'channels.getStatsForChannels': { kind: 'query', name: 'channelStatsByIds' },
   'channels.listParticipantsPaginated': { kind: 'query', name: 'channelParticipantsPaginated' },
   'channels.listUserStatuses': { kind: 'query', name: 'getAllChannelsUserStatus' },
