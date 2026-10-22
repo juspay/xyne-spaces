@@ -1211,14 +1211,17 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     excludeCallGeneratedCanvases,
     excludeRecordingGeneratedCanvases,
     includeArchived,
+    includePublicChannelCanvases,
     onlyArchived,
     onlyCallGeneratedCanvases,
     onlyRecordingGeneratedCanvases,
     paginated,
     debouncedSearchQuery,
     searchScope,
+    selectedLabel,
     selectedScopeChannelId,
     selectedSharedByUserId,
+    serverCreatorFilter,
     showStarredOnly,
   ]);
 
@@ -1458,12 +1461,17 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     showStarredOnly,
   ]);
 
+  // Call / recording exclusions still run in the browser after the query, so a
+  // server-filtered tab can lose rows from a page. Keep those tabs on the non-windowed
+  // filtered path (no visible-range cursor moves) while either exclusion is on.
+  const hasBrowserOnlyRowExclusions =
+    excludeCallGeneratedCanvases || excludeRecordingGeneratedCanvases;
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
     onlyRecordingGeneratedCanvases ||
     onlyArchived ||
     showStarredOnly ||
-    (activeFilter !== 'all' && !serverCreatorFilter) ||
+    (activeFilter !== 'all' && (!serverCreatorFilter || hasBrowserOnlyRowExclusions)) ||
     effectiveSearchScope !== 'all' ||
     Boolean(effectiveSelectedScopeChannelId) ||
     Boolean(selectedLabel) ||
@@ -1488,6 +1496,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const shouldShowStarredSection = isStarredSectionVisible;
   const hasClientSideResultFilters =
     effectiveSearchScope === 'direct' ||
+    // "Via channel" with no channel picked comes from the user query and keeps only
+    // channel-linked rows in the browser, so it has to page through the user query.
+    (effectiveSearchScope === 'via_channel' && !isSpecificChannelScope) ||
     (activeFilter !== 'all' && !serverCreatorFilter) ||
     Boolean(selectedLabel) ||
     trimmedSearchQuery.length > 0 ||
@@ -1495,15 +1506,26 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     onlyCallGeneratedCanvases ||
     onlyRecordingGeneratedCanvases;
   const shouldScanFilteredUserPages =
-    hasClientSideResultFilters &&
-    effectiveSearchScope !== 'via_channel' &&
-    hasMore &&
-    Boolean(nextCursor);
+    hasClientSideResultFilters && !isSpecificChannelScope && hasMore && Boolean(nextCursor);
   const shouldScanFilteredChannelSources =
     hasClientSideResultFilters && extraChannelSourceIds.length > 0 && hasMoreChannelSources;
+  // Server-filtered "Created by me" / "Shared" tabs don't scan every page, but browser-only
+  // exclusions can still leave a page with few or no rows (e.g. the newest own canvases
+  // are all call notes). Keep paging until enough rows are visible or the query ends, so
+  // the list never stops on an empty state with no endReached to load more.
+  const shouldFillMinimumFilteredRows =
+    paginated &&
+    Boolean(serverCreatorFilter) &&
+    !hasClientSideResultFilters &&
+    !shouldRenderChannelFolderGroups &&
+    filteredCanvases.length < CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD &&
+    hasMore &&
+    Boolean(nextCursor);
   const isFilteredScanIncomplete =
     !shouldRenderChannelFolderGroups &&
-    (shouldScanFilteredUserPages || shouldScanFilteredChannelSources);
+    (shouldScanFilteredUserPages ||
+      shouldScanFilteredChannelSources ||
+      shouldFillMinimumFilteredRows);
   const shouldLoadMoreOnListEnd =
     shouldAutoPaginate || extraChannelSourceIds.length > 0 || isFilteredScanIncomplete;
   const channelFolderGroups = useMemo(() => {
@@ -1783,13 +1805,19 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     if (
       !paginated ||
       shouldRenderChannelFolderGroups ||
-      !hasClientSideResultFilters ||
+      (!hasClientSideResultFilters && !shouldFillMinimumFilteredRows) ||
       isLoadingNext
     ) {
       return;
     }
 
-    if (!shouldScanFilteredUserPages && !shouldScanFilteredChannelSources) return;
+    if (
+      !shouldScanFilteredUserPages &&
+      !shouldScanFilteredChannelSources &&
+      !shouldFillMinimumFilteredRows
+    ) {
+      return;
+    }
 
     requestNextResults();
   }, [
@@ -1797,6 +1825,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     isLoadingNext,
     paginated,
     requestNextResults,
+    shouldFillMinimumFilteredRows,
     shouldScanFilteredChannelSources,
     shouldScanFilteredUserPages,
     shouldRenderChannelFolderGroups,
