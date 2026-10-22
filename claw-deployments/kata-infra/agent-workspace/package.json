@@ -9,7 +9,7 @@
   "dependencies": {
     "express": "^4.21.0",
     "multer": "^1.4.5-lts.1",
-    "tsx": "^4.19.0"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
