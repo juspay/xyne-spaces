@@ -17,10 +17,13 @@
  * parent's handle column is copied down. Deeper chains (workflow_steps → workflow_executions →
  * workflows → tickets → channels) work hop by hop because each parent is itself stamped on write.
  *
- * The parent is read with one pk lookup per stamped row, on the SAME connection as the write (the
- * interactive-transaction client, or the Zero mutation's db transaction), so a parent created earlier
- * in the same transaction is visible. Parent handles never change once written, so they are also kept
- * in a per-pod LRU and repeat writes under the same parent skip the lookup — see `handleCache`.
+ * The parent is read with one pk lookup, on the SAME connection as the write (the interactive-transaction
+ * client, or the Zero mutation's db transaction), so a parent created earlier in the same transaction is
+ * visible. Two caches cut those lookups:
+ *   - `handleCache`: a per-pod LRU of the handles that never change (`channels.connectId`,
+ *     `canvases.connectId`).
+ *   - `memoized`: per transaction, every parent handle it has already read (one snapshot, one
+ *     connection), so a mutation writing several rows under one parent reads it once.
  *
  * Not covered here (by design): nested relation creates (`parent: { children: { create } }`) and raw
  * SQL — those few sites pass the handle explicitly; `$use` middlewares that write on the raw client copy
@@ -274,25 +277,43 @@ export function setConnectStampBase(client: PrismaClient): void {
 }
 const baseLookup = (): Lookup | null => baseLookupFn;
 
+/**
+ * Per-transaction memo: a lookup that remembers every handle it found for the life of one transaction.
+ * Safe because the transaction reads one consistent snapshot on one connection, and the memo dies with
+ * it. Empty results are not remembered, so a parent created later in the same transaction is still found.
+ */
+function memoized(lookup: Lookup): Lookup {
+  const found = new Map<string, unknown>();
+  return async (table, id, col) => {
+    const key = `${table}.${col}:${id}`;
+    if (found.has(key)) return found.get(key);
+    const handle = await lookup(table, id, col);
+    if (typeof handle === 'string' && handle) found.set(key, handle);
+    return handle;
+  };
+}
+
+/** One memoized lookup per Zero mutation, keyed by its db transaction (released with it). */
+const zeroLookups = new WeakMap<ZeroDb, Lookup>();
+const zeroTxLookup = (db: ZeroDb): Lookup => {
+  let lookup = zeroLookups.get(db);
+  if (!lookup) zeroLookups.set(db, (lookup = memoized(zeroLookup(db))));
+  return lookup;
+};
+
 // ── parent-handle cache ───────────────────────────────────────────────────────────────────────────
 /**
- * Every `table.column` a stamp strategy reads from (channels.connectId, canvases.connectId,
- * conversations.channelConnectId, messages.channelConnectId, tickets.channelConnectId, …), derived
- * from STAMP_TABLES so a new parent is cached automatically.
- *
- * All of them are write-once: a handle is set when the row is created (or filled once by the backfill)
- * and never rewritten — no live flow moves a row to another channel. That is what makes caching them
- * safe. If a flow that rewrites a parent's handle is ever added, it must also handle this cache.
+ * Only the ROOT handles are cached across requests: a channel's and a canvas's own `connectId` are minted
+ * with the row (or filled once by the backfill) and never rewritten. Derived handles
+ * (`conversations.channelConnectId`, `tickets.channelConnectId`, …) are NOT cached: they follow the row's
+ * channel, and a row can move (group-DM "add people with history" re-parents conversations; the Jira
+ * project move re-parents tickets), so a cached copy could go stale on other pods.
  */
-const CACHED_HANDLES = new Set(
-  Object.values(STAMP_TABLES).flatMap((stamps) =>
-    stamps.flatMap((s) => s.strategies.map((st) => `${st.via}.${handleColumn(st)}`)),
-  ),
-);
+const CACHED_HANDLES = new Set(['channels.connectId', 'canvases.connectId']);
 
 // Keys and values are fixed-size ids (~300 B per entry with overhead) → ~15 MB at the cap.
 const HANDLE_CACHE_MAX_ENTRIES = 50_000;
-// The values never change, so the ttl only bounds how long a deleted parent's entry lingers.
+// Root handles never change, so the ttl only bounds how long a deleted parent's entry lingers.
 const HANDLE_CACHE_TTL_MS = 60 * 60 * 1000;
 
 const cacheKey = (table: string, col: string, id: string): string | null =>
@@ -329,6 +350,7 @@ async function parentHandle(lookup: Lookup | null, table: string, id: string, co
     const key = cacheKey(table, col, id);
     if (key) {
       if (lookup === baseLookupFn) return (await handleCache.get(key)) ?? null;
+      // Inside a transaction: read the shared cache, never fill it.
       const cached = handleCache.peek(key);
       getConnectStampCache().add(1, { path: 'tx', result: cached ? 'hit' : 'miss' });
       if (cached) return cached;
@@ -379,6 +401,10 @@ async function stampRow(
     let cleared = false;
     for (const strategy of stamp.strategies) {
       if (strategy.when && !strategy.when(r, isCreate)) continue;
+      // The FK is the row's own primary key (channel_stats, email_channel_preferences): it can never
+      // change, so an update can't change the handle — skip the lookup Zero updates (which always
+      // carry the pk) would otherwise do on every write.
+      if (!isCreate && strategy.field === META_BY_TABLE.get(childTable)?.idField) continue;
       const parentId = parentIdOf(childTable, strategy, r);
       if (parentId === null) {
         cleared = stamp.strategies.length === 1;
@@ -401,7 +427,7 @@ async function stampRow(
 
 /**
  * Stamp one object OR an array of objects (createMany), copy-on-write. Rows go one at a time: inside a
- * transaction every lookup shares the one connection anyway.
+ * transaction every lookup shares the one connection anyway, and rows under the same parent hit the memo.
  */
 async function stampData(
   data: unknown,
@@ -456,7 +482,7 @@ async function runWrite(
  * created earlier in the transaction is visible.
  */
 function wrapTxWithConnectStamp(tx: unknown): unknown {
-  const lookup = prismaLookup(tx);
+  const lookup = memoized(prismaLookup(tx));
   return new Proxy(tx as Record<string, unknown>, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
@@ -552,7 +578,7 @@ export async function stampConnectIdForZero(
   if (!zeroStamps.length) return args;
   const db = (tx as { dbTransaction?: ZeroDb } | undefined)?.dbTransaction;
   if (!db) logger.warn('[CONNECT-STAMP] Zero transaction has no db transaction; looking up on the base client', { table: tableName });
-  return stampRow(args, zeroStamps, tableName, operation !== 'update', db ? zeroLookup(db) : baseLookup());
+  return stampRow(args, zeroStamps, tableName, operation !== 'update', db ? zeroTxLookup(db) : baseLookup());
 }
 
 /** Resolve a channel's connect handle — for the few writers that pass it explicitly (channel already exists). */

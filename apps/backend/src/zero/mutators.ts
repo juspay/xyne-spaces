@@ -176,7 +176,6 @@ import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { channelConnectIdFor } from '@/database/connectStamp';
 import { newConnectId } from '@/database/connectGroup';
 import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -12680,7 +12679,8 @@ export function createMutators(
           await tx.mutate.sdlc_tracks.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            channelConnectId: (await channelConnectIdFor(args.channelId)) ?? undefined,
+            // Read on this mutation's own transaction (no second pool connection).
+            channelConnectId: (await tx.run(zql.channels.where('id', args.channelId).one()))?.connectId ?? undefined,
             name: args.name,
             description: args.description,
             status: 'ACTIVE',

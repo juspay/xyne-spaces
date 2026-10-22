@@ -3,7 +3,6 @@ import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, resolveChannelConnectId, ConnectEntityType } from '@/database/connectGroup';
-import { channelConnectIdFor } from '@/database/connectStamp';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
@@ -265,7 +264,7 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
     const track = await tx.sdlcTrack.create({
       data: {
         workspaceId: actor.workspaceId,
-        channelConnectId: await channelConnectIdFor(channelId),
+        channelConnectId: await resolveChannelConnectId(tx, channelId),
         name: input.name,
         ...(input.description ? { description: input.description } : {}),
         status: 'ACTIVE',
