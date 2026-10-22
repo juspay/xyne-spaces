@@ -23,7 +23,7 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
     label: 'Theme',
     description: 'Classic, Summer Breeze or Midnight',
     keywords: ['dark mode', 'light mode', 'colour', 'color', 'night'],
-    anchors: ['Choose your theme'],
+    anchors: ['Summer Breeze'],
   },
 
   // Notifications
@@ -261,6 +261,7 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
 export interface SettingsSearchResult extends SettingsSearchEntry {
   /** Lower is better. */
   score: number;
+  labelParts: Array<{ text: string; match: boolean }>;
 }
 
 const normalize = (value: string): string =>
@@ -271,11 +272,17 @@ const normalize = (value: string): string =>
     .replace(/[^a-z0-9@/]+/g, ' ')
     .trim();
 
+const startsWord = (text: string, term: string): boolean =>
+  text.startsWith(term) || text.includes(` ${term}`);
+
 /**
  * Rank settings for `query`. Every whitespace-separated term must match somewhere
- * (label, section name, description or keywords). Label hits rank above section-name
- * hits, which rank above description/keyword hits. Settings whose section is absent
- * from `sectionLabels` (hidden on this platform) are never returned.
+ * (label, keywords, section name or description). Label hits rank above keyword hits,
+ * which rank above section-name and description hits. A term matches from the start of a
+ * word, except that four or more letters also match inside a word; section names and
+ * descriptions need at least three letters. Results come grouped by section, the
+ * section with the best hit first. Settings whose section is absent from `sectionLabels`
+ * (hidden on this platform) are never returned.
  */
 export const searchSettings = (
   query: string,
@@ -293,21 +300,44 @@ export const searchSettings = (
 
     const label = normalize(entry.label);
     const section = normalize(sectionLabel);
-    const rest = normalize([entry.description ?? '', ...(entry.keywords ?? [])].join(' '));
+    const keywords = normalize((entry.keywords ?? []).join(' '));
+    const description = normalize(entry.description ?? '');
 
     let score = 0;
     for (const term of terms) {
-      if (label.startsWith(term) || label.includes(` ${term}`)) score += 0;
-      else if (label.includes(term)) score += 1;
-      else if (section.includes(term)) score += 2;
-      else if (rest.includes(term)) score += 3;
+      const inner = term.length >= 4;
+      if (startsWord(label, term)) score += 0;
+      else if (inner && label.includes(term)) score += 1;
+      else if (startsWord(keywords, term)) score += 2;
+      else if (term.length >= 3 && (startsWord(section, term) || startsWord(description, term)))
+        score += 3;
+      else if (inner && (keywords.includes(term) || description.includes(term))) score += 4;
       else return;
     }
+
+    const lower = entry.label.toLowerCase();
+    const hits = new Array<boolean>(lower.length).fill(false);
+    for (const term of terms) {
+      for (let at = lower.indexOf(term); at !== -1; at = lower.indexOf(term, at + 1)) {
+        if (term.length >= 4 || !/[a-z0-9]/.test(lower[at - 1] ?? '')) {
+          hits.fill(true, at, at + term.length);
+        }
+      }
+    }
+    const labelParts: SettingsSearchResult['labelParts'] = [];
+    hits.forEach((match, i) => {
+      const last = labelParts[labelParts.length - 1];
+      if (last?.match === match) last.text += entry.label[i] ?? '';
+      else labelParts.push({ text: entry.label[i] ?? '', match });
+    });
+
     // Stable tie-break on index order (which follows the nav order).
-    results.push({ ...entry, score: score * 1000 + order });
+    results.push({ ...entry, score: score * 1000 + order, labelParts });
   });
 
-  return results.sort((a, b) => a.score - b.score);
+  results.sort((a, b) => a.score - b.score);
+  const sectionOrder = [...new Set(results.map(result => result.section))];
+  return results.sort((a, b) => sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section));
 };
 
 /**
@@ -324,7 +354,8 @@ export const findSettingElement = (
     for (const el of candidates) {
       const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (text.includes(anchor)) {
-        return el.closest<HTMLElement>('.rounded-lg') ?? el;
+        const card = el.closest<HTMLElement>('.rounded-lg');
+        return card && card !== container && container.contains(card) ? card : el;
       }
     }
   }
