@@ -1,5 +1,6 @@
 import Bull from 'bull';
 import { createHash } from 'crypto';
+import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { storageService } from '@/services/storage';
@@ -21,6 +22,18 @@ const WORKER_CONCURRENCY = 1;
 
 /** Bull's stalled-job check must outlast the longest transcode timeout (30 min). */
 const LOCK_DURATION_MS = 35 * 60_000;
+
+/**
+ * A job still WAITING after this long means nothing is consuming the queue
+ * (worker not deployed / crashed). Reported as not-enqueued so the API stops
+ * telling clients to keep polling.
+ */
+export const STALE_WAITING_MS = 30 * 60_000;
+
+/** One job per original, however its path was spelled (gs://bucket/x vs x). */
+export function renditionJobId(storagePath: string): string {
+  return createHash('sha256').update(normalizeStoragePath(storagePath)).digest('hex');
+}
 
 /**
  * Compatible (H.264 SDR) video rendition generation for chat attachments.
@@ -59,21 +72,41 @@ class VideoRenditionQueue {
   }
 
   /**
-   * Queue generation for a video original. Deduplicated by storage path while a
-   * job is waiting or active, so an upload-time enqueue plus many concurrent
-   * first viewers collapse into one transcode. Never throws.
+   * Queue generation for a video original. Deduplicated by the normalized
+   * storage path while a job is waiting or active, so an upload-time enqueue
+   * plus many concurrent first viewers collapse into one transcode.
+   *
+   * Never throws. Returns true only when a job is (or already was) queued and
+   * something is plausibly consuming it: false on Redis/queue errors, and false
+   * when the existing job has been waiting longer than STALE_WAITING_MS.
    */
-  async enqueue(job: VideoRenditionJob): Promise<void> {
+  async enqueue(job: VideoRenditionJob): Promise<boolean> {
     try {
       if (!this.isInitialized) await this.initialize();
-      if (!this.queue) return;
-      const jobId = createHash('sha256').update(job.storagePath).digest('hex');
-      await this.queue.add(JOB_NAME, job, { jobId });
+      if (!this.queue) return false;
+      const queued = await this.queue.add(JOB_NAME, job, {
+        jobId: renditionJobId(job.storagePath),
+      });
+      if (
+        Date.now() - queued.timestamp > STALE_WAITING_MS &&
+        (await queued.getState()) === 'waiting'
+      ) {
+        logger.warn(
+          '[VideoRenditionQueue] Rendition job has been waiting too long; is the worker running?',
+          {
+            jobId: queued.id,
+            waitingMs: Date.now() - queued.timestamp,
+          }
+        );
+        return false;
+      }
+      return true;
     } catch (err) {
       logger.warn('[VideoRenditionQueue] Failed to enqueue rendition job', {
         storagePath: job.storagePath,
         error: err instanceof Error ? err.message : String(err),
       });
+      return false;
     }
   }
 

@@ -54,6 +54,15 @@ export function videoRenditionCacheBase(storagePath: string): string {
   return `${CACHE_PREFIX}/${hash}`;
 }
 
+async function renditionObjectExists(storage: Storage, base: string): Promise<boolean> {
+  try {
+    return await storage.fileExists(compatPath(base));
+  } catch {
+    // Unknown — assume present so a storage blip does not trigger a re-encode.
+    return true;
+  }
+}
+
 async function readStatus(
   storage: Storage,
   base: string
@@ -99,7 +108,18 @@ export async function generateVideoRendition(
 ): Promise<VideoRenditionStatus | 'missing'> {
   const base = videoRenditionCacheBase(storagePath);
   const existing = await readStatus(storage, base);
-  if (existing && isTerminalStatus(existing)) return existing.status;
+  if (existing && isTerminalStatus(existing)) {
+    // `ready` is only true if the rendition object still exists. The read path
+    // reports `pending` (and re-enqueues) when compat.mp4 is gone, e.g. evicted
+    // by a lifecycle rule while status.json survived; trusting the status here
+    // would leave that attachment on 503 forever. Regenerate instead.
+    if (existing.status !== 'ready' || (await renditionObjectExists(storage, base))) {
+      return existing.status;
+    }
+    logger.warn('[VideoRendition] Status is ready but rendition object is missing; regenerating', {
+      base,
+    });
+  }
 
   let sourceBytes: number;
   try {
