@@ -506,7 +506,9 @@ export class AttachmentController {
    *
    * - 404 VARIANT_DISABLED — VIDEO_RENDITION_ENABLED is off; clients keep the original.
    * - 400 NOT_VIDEO / UNSUPPORTED — not a chat video in the default bucket.
-   * - 503 PENDING (+ Retry-After) — not generated yet; a job is enqueued.
+   * - 503 PENDING (+ Retry-After) — not generated yet; a job is enqueued and being consumed.
+   * - 422 FAILED (no Retry-After) — not generated and the job could not be queued
+   *   (Redis down, or no worker draining the queue), so clients stop polling.
    * - 409 NOT_NEEDED — the original is already H.264 SDR; play it.
    * - 422 FAILED / SKIPPED — no rendition will be available; offer download.
    */
@@ -544,14 +546,29 @@ export class AttachmentController {
         cacheManager.set(memoKey, file, COMPAT_RENDITION_TTL_SECONDS);
         return { ok: true, file };
       }
-      case 'pending':
-        void videoRenditionQueue.enqueue({ storagePath: originalPath });
+      case 'pending': {
+        // Only promise "come back later" when a job is really queued and being
+        // consumed. If Redis is down or no worker is draining the queue, a 503 +
+        // Retry-After would keep clients polling forever; 422 makes them stop
+        // and show the original error instead.
+        const queued = await videoRenditionQueue.enqueue({ storagePath: originalPath });
+        if (!queued) {
+          logger.warn('[AttachmentController] Compat rendition could not be queued; answering FAILED', {
+            attachmentId: forLog(attachment.id),
+          });
+          return {
+            ok: false,
+            status: 422,
+            body: { error: 'Compatible video is temporarily unavailable', code: 'FAILED' },
+          };
+        }
         return {
           ok: false,
           status: 503,
           body: { error: 'Compatible video is being prepared', code: 'PENDING' },
           retryAfterSeconds: COMPAT_PENDING_RETRY_AFTER_SECONDS,
         };
+      }
       case 'not_needed':
         return { ok: false, status: 409, body: { error: 'Original video is already compatible', code: 'NOT_NEEDED' } };
       case 'skipped':
