@@ -84,6 +84,10 @@ export async function executeFlatCatalogQuery(
   queryName: string,
 ): Promise<unknown> {
   if (ast.related && ast.related.length > 0) return NOT_FLAT;
+  // `.one()` compiles to `SELECT (row_to_json("zql_root"))::text ... LIMIT 1` with no
+  // json_agg: a single row, so there is nothing to gain, and the wrapper regex below
+  // would not match it. Leave it on Zero's executor without logging.
+  if (format?.singular) return NOT_FLAT;
   if (hasTimestampArrayColumn(ast.table, serverSchema) !== false) return NOT_FLAT;
 
   // @ts-ignore - z2s internal types; same call as handleQueriesZqlToSql
@@ -103,5 +107,5 @@ export async function executeFlatCatalogQuery(
 
   coerceNumberColumns(rows, numberColumnsOf(ast.table), queryName);
 
-  return format?.singular ? rows[0] : rows;
+  return rows;
 }
