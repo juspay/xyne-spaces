@@ -26,6 +26,8 @@ import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { withRetry } from "../retry.js";
+import { redisService } from "../redis.js";
+import { decrypt, encrypt } from "../crypto.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces-db");
@@ -42,8 +44,6 @@ export interface SpacesUserAuth {
 
 interface UserSessionRow {
   id: string;
-  accessToken: string | null;
-  accessTokenExpiry: Date | null;
   refreshTokenExpiry: Date;
   status: string;
   lastActivity: Date;
@@ -64,9 +64,9 @@ export function requestWorkspaceHint(req: Request): string | undefined {
 
 /**
  * Force Spaces to mint a fresh JWT for an existing session and return it.
- * Used when `accessToken` in the DB is missing/expired but the refresh window
- * is still valid — mirrors what Spaces' own auth middleware does on every
- * request with a stale cookie.
+ * `user_sessions.accessToken` holds the Google OAuth access token, not a
+ * Spaces JWT, so it is never used as the Spaces token. The JWT minted here is
+ * cached per session until its own `exp` (see spacesTokenForSession).
  *
  * Spaces' `GET /api/auth/refresh-session`:
  *   - reads `user_session_id` cookie
@@ -123,6 +123,79 @@ async function refreshSpacesAccessToken(sessionId: string, workspaceId: string):
   }
 }
 
+const SPACES_TOKEN_MARGIN_MS = 5 * 60_000;
+const SPACES_TOKEN_PREFIX = "claw:spaces-token:";
+const spacesTokenMemo = new Map<string, { token: string; expMs: number }>();
+const spacesTokenInflight = new Map<string, Promise<string | null>>();
+
+function jwtExpMs(token: string): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { exp?: unknown };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readCachedSpacesToken(sessionId: string): Promise<{ token: string; expMs: number } | null> {
+  const memo = spacesTokenMemo.get(sessionId);
+  if (memo && memo.expMs > Date.now()) return memo;
+  try {
+    const raw = await redisService.getConnection().get(`${SPACES_TOKEN_PREFIX}${sessionId}`);
+    if (!raw) return null;
+    const { ciphertext, iv, authTag } = JSON.parse(raw) as { ciphertext: string; iv: string; authTag: string };
+    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+    const expMs = jwtExpMs(token);
+    if (!expMs || expMs <= Date.now()) return null;
+    const entry = { token, expMs };
+    spacesTokenMemo.set(sessionId, entry);
+    return entry;
+  } catch (err) {
+    log.warn(`[spaces-db] token cache read failed sessionId=${sessionId}: ${errMsg(err)}`);
+    return null;
+  }
+}
+
+async function storeSpacesToken(sessionId: string, token: string): Promise<void> {
+  const expMs = jwtExpMs(token);
+  if (!expMs || expMs <= Date.now()) return;
+  spacesTokenMemo.set(sessionId, { token, expMs });
+  try {
+    await redisService
+      .getConnection()
+      .set(`${SPACES_TOKEN_PREFIX}${sessionId}`, JSON.stringify(encrypt(token, CONFIG.encryptionKey)), "PX", expMs - Date.now());
+  } catch (err) {
+    log.warn(`[spaces-db] token cache write failed sessionId=${sessionId}: ${errMsg(err)}`);
+  }
+}
+
+export function clearSpacesTokenMemo(): void {
+  spacesTokenMemo.clear();
+  spacesTokenInflight.clear();
+}
+
+async function spacesTokenForSession(
+  sessionId: string,
+  workspaceId: string,
+): Promise<{ token: string; source: "cached" | "refreshed" | "cached-after-refresh-failed" } | null> {
+  const cached = await readCachedSpacesToken(sessionId);
+  if (cached && cached.expMs - SPACES_TOKEN_MARGIN_MS > Date.now()) return { token: cached.token, source: "cached" };
+  let pending = spacesTokenInflight.get(sessionId);
+  if (!pending) {
+    pending = refreshSpacesAccessToken(sessionId, workspaceId)
+      .then(async (fresh) => {
+        if (fresh) await storeSpacesToken(sessionId, fresh);
+        return fresh;
+      })
+      .finally(() => spacesTokenInflight.delete(sessionId));
+    spacesTokenInflight.set(sessionId, pending);
+  }
+  const fresh = await pending;
+  if (fresh) return { token: fresh, source: "refreshed" };
+  if (cached && cached.expMs > Date.now()) return { token: cached.token, source: "cached-after-refresh-failed" };
+  return null;
+}
+
 function buildClient() {
   return new PrismaClient({
     datasourceUrl: CONFIG.spacesDbUrl,
@@ -168,7 +241,7 @@ function getClient(): SpacesDbClient | null {
  *   - `SPACES_DB_URL` is unset (feature off)
  *   - the user has no active session row
  *   - the session's refresh-token window has elapsed
- *   - the row is missing essential fields (accessToken / workspaceId)
+ *   - the row has no workspace, or Spaces will not mint a token for it
  *   - any DB error
  *
  * Callers should treat `null` as "fall back to cached credentials" — never
@@ -254,8 +327,6 @@ async function findActiveUserSessionRow(
   const rows = await client.$queryRaw<Array<UserSessionRow>>`
     SELECT
       s.id,
-      s."accessToken",
-      s."accessTokenExpiry",
       s."refreshTokenExpiry",
       s.status::text AS status,
       s."lastActivity",
@@ -325,35 +396,16 @@ export async function getSpacesAuthForUser(
       return null;
     }
 
-    const now = Date.now();
-    const tokenValid = row.accessToken && row.accessTokenExpiry && row.accessTokenExpiry.getTime() > now;
-
-    if (tokenValid) {
-      log.info(`[spaces-db] read userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=hit workspaceId=${row.workspaceId} ms=${elapsed}`);
-      return {
-        token: row.accessToken!,
-        sessionId: row.id,
-        workspaceId: row.workspaceId,
-      };
-    }
-
-    // accessToken missing or expired but the session row itself is still
-    // alive (refreshTokenExpiry > NOW already filtered). Ask Spaces to mint
-    // a fresh JWT for this session — same path Spaces' own middleware uses.
-    const staleReason = !row.accessToken ? "null-token" : "expired-token";
-    log.info(
-      `[spaces-db] read userId=${userId} caller=${caller} result=stale (${staleReason}) ms=${elapsed} → refreshing`,
-    );
-    const freshToken = await refreshSpacesAccessToken(row.id, row.workspaceId);
-    if (!freshToken) {
-      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=refresh-failed`);
+    const resolved = await spacesTokenForSession(row.id, row.workspaceId);
+    if (!resolved) {
+      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=refresh-failed ms=${Date.now() - started}`);
       return null;
     }
     log.info(
-      `[spaces-db] read userId=${userId} caller=${caller} result=refreshed workspaceId=${row.workspaceId} tokenLen=${freshToken.length}`,
+      `[spaces-db] read userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=${resolved.source} workspaceId=${row.workspaceId} ms=${Date.now() - started}`,
     );
     return {
-      token: freshToken,
+      token: resolved.token,
       sessionId: row.id,
       workspaceId: row.workspaceId,
     };
