@@ -495,6 +495,7 @@ import {
   AUTOMATION_RUN_DEDUP_TTL,
 } from "../lib/session-context.js";
 export { setSession, getSession, getSessionByConv, type SessionContext };
+import { listConversationPrBindings, prBindingsContextBlock } from "../lib/pr-binding-context.js";
 import {
   upsertWidgetBinding,
   findPrBindingByUrl,
@@ -1209,6 +1210,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   try {
     const history = await fetchConversationHistory(payload.conversationId, agent.appToken, agent.spacesAppUserId);
+    const prBindingsBlock = payload.conversationId
+      ? prBindingsContextBlock(
+          await listConversationPrBindings(payload.conversationId).catch((err: unknown) => {
+            log.warn("Failed to load PR bindings for run context", { error: errMsg(err) });
+            return [];
+          }),
+          runAgentSlug,
+        )
+      : "";
     const agentRow = await agentRepository.findBySlugWithRelations(agent.slug, agent.orgId ?? undefined);
     const agentSkills = agentRow?.skills?.map((s) => ({
       name: s.skill.name,
@@ -1446,7 +1456,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // "acknowledging the AI provider card" to questions that never asked for it.
     // suggest-providers decides during the run, and its tool result tells the
     // agent exactly what will render.
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock]
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock, prBindingsBlock]
       .filter(Boolean)
       .join("\n\n");
 
