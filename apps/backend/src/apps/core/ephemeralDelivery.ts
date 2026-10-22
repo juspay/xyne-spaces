@@ -12,7 +12,7 @@
  * and in the recipient's browser.
  */
 import crypto from 'node:crypto';
-import { MessageType, validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
+import { MessageType, validateFlowDefinition, formatValidationErrors, flowFallbackLabel } from '@xyne/shared';
 import type { MessageDelivery } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { redisService } from '@/services/redisService';
@@ -84,10 +84,7 @@ function buildFlowContent(
 
   const flowId = flowResult.data.screenId ?? crypto.randomUUID();
   const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, '&quot;');
-  const fbRaw = (flowJSON.data as Record<string, unknown>)['fallbackText'];
-  const flowFallback = encodeHtmlAttr(
-    (typeof fbRaw === 'string' && fbRaw.trim() ? fbRaw : flowJSON.title) || 'Flow JSON',
-  );
+  const flowFallback = encodeHtmlAttr(flowFallbackLabel(flowJSON));
 
   return {
     ok: true,
