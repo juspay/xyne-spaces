@@ -1008,6 +1008,9 @@ const privateCanvasVisibilityArms = (helpers: any, userId: string): any[] => {
 // old per-channel channelCanvasesPaginated fan-out in My Canvas added on top of
 // userCanvasesPaginated. Every arm is still bounded by the viewer's own channel
 // memberships, so the scan stays viewer-driven (one query instead of one per channel).
+// Canvases shared into a channel via `participants.channelId` are already covered by the
+// 4th private arm (participants -> channel -> participants = me), whatever their
+// visibility, so the public arm only needs the canvas's own `channelId`.
 const applyUserAndPublicChannelCanvasFilter = (query: any, userId: string) => {
   const flip = { flip: true };
   const myRegularChannel = (ch: any) =>
@@ -1019,14 +1022,7 @@ const applyUserAndPublicChannelCanvasFilter = (query: any, userId: string) => {
       ...privateCanvasVisibilityArms(helpers, userId),
       helpers.and(
         helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-        helpers.or(
-          helpers.exists('channel', myRegularChannel, flip),
-          helpers.exists(
-            'participants',
-            (p: any) => p.whereExists('channel', myRegularChannel, flip),
-            flip,
-          ),
-        ),
+        helpers.exists('channel', myRegularChannel, flip),
       ),
     ),
   );
@@ -3354,11 +3350,18 @@ export const queries: AnyQueryRegistry = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = args.includePublicChannelCanvases
-        ? applyUserAndPublicChannelCanvasFilter(zql.canvases, ctx.userID)
-        : applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
+      // "Created by me": createdBy = viewer already implies visibility (the createdByUser
+      // arm), so skip the visibility OR and let canvases_createdBy_updatedAt_id_idx drive.
+      let query =
+        args.creatorFilter === 'me'
+          ? zql.canvases.where('createdBy', ctx.userID)
+          : args.includePublicChannelCanvases
+            ? applyUserAndPublicChannelCanvasFilter(zql.canvases, ctx.userID)
+            : applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
 
-      query = applyCanvasCreatorFilter(query, ctx.userID, args);
+      if (args.creatorFilter !== 'me') {
+        query = applyCanvasCreatorFilter(query, ctx.userID, args);
+      }
 
       if (!args.includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);

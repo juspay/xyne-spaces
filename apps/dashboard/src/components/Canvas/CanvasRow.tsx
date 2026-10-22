@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   CopyDefault,
   FileText,
@@ -24,7 +24,7 @@ import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
 import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
-import { getCachedCanvasLabels, loadCanvasLabels } from './useCanvasLabels';
+import { useCanvasLabelsForCanvas } from './useCanvasLabels';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -100,7 +100,10 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [restLabels, setRestLabels] = useState<Canvas['labels'] | undefined>(undefined);
+  // Rows read the shared label store: rows mounted in the same tick share one bulk
+  // request, labels the list already loaded are not requested again, and later refreshes
+  // (e.g. after a label edit) reach the row because the hook subscribes.
+  const restLabels = useCanvasLabelsForCanvas(Array.isArray(canvas.labels) ? undefined : canvas.id);
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
@@ -110,32 +113,6 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const canvasLabels = getCanvasLabels(canvasWithRestLabels);
   const visibleLabels = canvasLabels.slice(0, 2);
   const hiddenLabelCount = Math.max(0, canvasLabels.length - visibleLabels.length);
-
-  useEffect(() => {
-    if (Array.isArray(canvas.labels) || !canvas.id || canvas.id === 'new') {
-      setRestLabels(undefined);
-      return;
-    }
-
-    // Go through the shared label store: rows mounted in the same tick share one bulk
-    // request, and labels the list already loaded are not requested again.
-    const cached = getCachedCanvasLabels(canvas.id);
-    if (cached) {
-      setRestLabels(cached);
-      return;
-    }
-
-    let cancelled = false;
-    void loadCanvasLabels([canvas.id]).then(() => {
-      if (!cancelled) {
-        setRestLabels(getCachedCanvasLabels(canvas.id));
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canvas.id, canvas.labels]);
 
   // The frame uses `file/file-text` for canvas rows. Public canvases keep the
   // globe so the (exceptional) shared state stays legible at a glance.
