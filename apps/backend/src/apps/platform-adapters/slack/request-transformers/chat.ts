@@ -14,6 +14,8 @@ import type {
 	SlackChatUpdateRequest,
 } from "../types";
 import type { FlowDefinition } from "@xyne/shared";
+import { flowFallbackLabel } from "@xyne/shared";
+import { encodeHtmlAttr } from "@/utils/contentUtils";
 
 export interface PostMessageArgs {
 	channelId: string;
@@ -71,7 +73,7 @@ async function processContent(
 		if (flowJSON) {
 			const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, "&quot;");
 			return {
-				content: `<div data-flow-json="${escapedJSON}">Flow JSON</div>`,
+				content: `<div data-flow-json="${escapedJSON}">${encodeHtmlAttr(flowFallbackLabel(flowJSON))}</div>`,
 				isMarkdown: false,
 			};
 		}

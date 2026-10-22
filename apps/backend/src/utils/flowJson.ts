@@ -1,3 +1,5 @@
+import { decodeFlowJsonAttribute, flowCardLabel, flowFallbackLabel } from '@xyne/shared';
+
 /**
  * Shared FlowJSON text extraction helpers.
  *
@@ -72,6 +74,22 @@ export function extractCleanTextFromFlowJson(content: string): string {
 export function getFlowJsonContentForNotification(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractCleanTextFromFlowJson(content) || null;
+}
+
+export function flowMessagePreviewText(content: string): string | null {
+  if (!content.includes('data-flow-json')) return null;
+  const flow = decodeFlowJsonAttribute(content);
+  const label = flow ? flowCardLabel(flow) : null;
+  if (label) return label;
+  return extractCleanTextFromFlowJson(content) || flowFallbackLabel(flow);
+}
+
+export function flowMessageSearchText(content: string): string | null {
+  if (!content.includes('data-flow-json')) return null;
+  const flow = decodeFlowJsonAttribute(content);
+  const label = flow ? flowCardLabel(flow) : null;
+  const body = extractCleanTextFromFlowJson(content);
+  return [label, body].filter(Boolean).join(' — ') || flowFallbackLabel(flow);
 }
 
 /** Returns raw FlowJSON text with tokens intact (for mention scanning). */

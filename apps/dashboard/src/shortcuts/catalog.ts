@@ -300,6 +300,13 @@ export const shortcuts = {
     category: 'SDLC',
     preventDefault: true,
   },
+  'skills.closeCreate': {
+    keys: 'escape',
+    scope: 'global',
+    allowInInputs: true,
+    description: 'Close the empty Create skill page',
+    category: 'SDLC',
+  },
   'files.openInWindow': {
     keys: 'mod+enter',
     scope: 'sdlc-files',

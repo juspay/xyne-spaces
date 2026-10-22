@@ -78,7 +78,7 @@ router.post(
         input.skillId,
       );
     }
-    res.status(204).send();
+    res.json({ linked: Boolean(hub) });
   }),
 );
 

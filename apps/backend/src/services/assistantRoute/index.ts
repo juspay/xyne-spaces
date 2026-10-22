@@ -4,7 +4,8 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
 import { askDecision } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
-import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
+import type { AskFailure } from '@/services/decision/types';
+import { chooseInGroups, type AskChoice, type ChoiceOption } from './choiceInGroups';
 
 export interface AssistantRouteAction {
   id: string;
@@ -168,10 +169,12 @@ export const routeAssistantMessage = async (
   const prompt = PROMPTS[mode];
   const started = Date.now();
   // Never the text or the action descriptions: they are user content.
+  let groups = 1;
   const log = (level: 'info' | 'warn', fields: Record<string, unknown>) =>
     logger[level]('assistant route', {
       ...fields,
       actions: actions.length,
+      ...(groups > 1 ? { groups } : {}),
       latencyMs: Date.now() - started,
     });
   const finish = (result: AssistantRouteResult, chosen?: string, confidence?: number) => {
@@ -193,26 +196,36 @@ export const routeAssistantMessage = async (
   if (!config) return unavailable('config_unavailable');
   if (!config.enabled) return unavailable('disabled');
 
-  // Ordered as the mode wants (see PROMPTS). Built with fromEntries, not `criteria[id] =`: ids come
-  // from the request, and fromEntries defines own keys without going through prototype setters.
-  const criteria: Record<string, string> = Object.fromEntries([
-    ...prompt.order(actions).map((action) => [action.id, action.description]),
-    [NONE_ID, prompt.none],
-  ]);
-  const question: ChoiceQuestion = {
-    type: 'choice',
-    instructions: prompt.instructions,
-    criteria,
-  };
+  // Ordered as the mode wants (see PROMPTS). Criteria are built with fromEntries, not
+  // `criteria[id] =`: ids come from the request, and fromEntries defines own keys without going
+  // through prototype setters.
+  const options: ChoiceOption[] = prompt
+    .order(actions)
+    .map((action) => [action.id, action.description] as const);
+  const offeredIds = new Set(actions.map((action) => action.id));
 
   let failure: AskFailure | undefined;
-  const answers = await askDecision('assistant_route', { text: text.trim() }, { action: question }, TIMEOUT_MS, signal, {
-    onFailure: (f) => {
-      failure = f;
-    },
-  });
-  const answer = answers?.action;
-  if (!answer || answer.type !== 'choice') return unavailable(failureReason(failure, signal));
+  const ask: AskChoice = async (criteria, timeoutMs) => {
+    const answers = await askDecision(
+      'assistant_route',
+      { text: text.trim() },
+      { action: { type: 'choice', instructions: prompt.instructions, criteria } },
+      timeoutMs,
+      signal,
+      {
+        onFailure: (f) => {
+          failure ??= f;
+        },
+      }
+    );
+    const answer = answers?.action;
+    return answer?.type === 'choice' ? answer : null;
+  };
+  // More options than the engine takes in one question (a busy screen) go in groups.
+  const asked = await chooseInGroups(options, [NONE_ID, prompt.none], ask, TIMEOUT_MS);
+  groups = asked.groups;
+  const answer = asked.answer;
+  if (!answer) return unavailable(failureReason(failure, signal));
 
   const pick: JevPick = {
     chosen: answer.choice,
@@ -222,7 +235,7 @@ export const routeAssistantMessage = async (
     return finish({ route: 'ask_ai', reason: 'none', ...pick }, NONE_ID);
 
   const scored = Object.entries(answer.probabilities)
-    .filter(([id]) => id !== NONE_ID && Object.prototype.hasOwnProperty.call(criteria, id))
+    .filter(([id]) => id !== NONE_ID && offeredIds.has(id))
     .sort((a, b) => b[1] - a[1]);
   const confidence =
     scored.length > 0

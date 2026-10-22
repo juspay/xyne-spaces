@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { createRepositoryTx, createChannelTx, addChannelRepositoriesTx, createArtifactFromClawTx, updateArtifactTitleOrLinksTx, writeArtifactContentTx, moveArtifactFromClawTx, createTrackFolderFromClawTx, createTrackTx, unlinkContextTx } from '@/bypassAcl/transactions/SdlcHubService';
+import { createRepositoryTx, createChannelTx, addChannelRepositoriesTx, createArtifactFromClawTx, adoptCanvasAsArtifactTx, moveArtifactToHubKnowledgeTx, updateArtifactTitleOrLinksTx, writeArtifactContentTx, moveArtifactFromClawTx, createTrackFolderFromClawTx, createTrackTx, unlinkContextTx } from '@/bypassAcl/transactions/SdlcHubService';
 
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
@@ -15,6 +15,7 @@ import {
   sdlcRepoIds,
   
   
+  CanvasRole,
   ChannelRole,
   
   ChannelType,
@@ -49,6 +50,7 @@ import { mutateMarkdownSection } from './markdownSection';
 import { requireSdlcProjectAccess } from './sdlcProjectAccess';
 import {
   isRepositoryInChannel,
+  isSdlcHubAdmin,
   isTrackInChannel,
   requireSdlcHubReader,
   trackIdsForChannel,
@@ -501,7 +503,7 @@ export class SdlcHubService implements SdlcHub {
       }
     }
     const folder = await this.prisma.canvasFolder.findFirst({
-      where: { id: input.folderId, channelId },
+      where: { id: input.folderId, channelId, name: { not: SDLC_WIKI_FOLDER } },
       select: { id: true, name: true },
     });
     if (!folder) throw new AppError('Artifact type folder not found', 409);
@@ -510,24 +512,7 @@ export class SdlcHubService implements SdlcHub {
     if (!input.trackId && !hubKnowledge) {
       throw new AppError('Artifacts require a track', 400);
     }
-    if (hubKnowledge) {
-      // Every member's runs read Hub Knowledge.
-      await this.requireChannelRole(actor, channelId, true);
-      const existing = await this.prisma.canvas.findFirst({
-        where: {
-          folderId: folder.id,
-          title: { equals: input.title, mode: 'insensitive' },
-          sdlcArtifact: { is: { artifactStatus: 'ACTIVE' } },
-        },
-        select: { id: true },
-      });
-      if (existing) {
-        throw new AppError(
-          `Hub Knowledge already has "${input.title}" (canvasId ${existing.id}). Update that artifact instead.`,
-          409
-        );
-      }
-    }
+    if (hubKnowledge) await this.requireHubKnowledgeWrite(actor, channelId, folder.id, input.title);
 
     if (input.trackId) {
       const inHub = await isTrackInChannel(this.prisma, input.trackId, channelId);
@@ -581,10 +566,10 @@ export class SdlcHubService implements SdlcHub {
         channelId,
         sdlcArtifact: { isNot: null },
       },
-      select: { id: true, viewAccessId: true, title: true, folder: { select: { name: true } } },
+      select: { id: true, viewAccessId: true, title: true, folder: { select: { name: true } }, sdlcArtifact: { select: { artifactType: true } } },
     });
     if (!existing) throw new AppError('SDLC artifact not found', 404);
-    if (existing.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+    if (existing.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER || existing.sdlcArtifact?.artifactType === 'WIKI') {
       // Same rule as creating one: every member's runs read Hub Knowledge.
       await this.requireChannelRole(actor, channelId, true);
     }
@@ -642,29 +627,151 @@ export class SdlcHubService implements SdlcHub {
     return this.writeArtifactContent(actor, existing.channelId, existing.id, markdown);
   }
 
-  // Within the artifact's own track only, like the hub UI; extend this when items can move between tracks.
+  // Within the artifact's own track, optionally retyped; or out of the track into Hub Knowledge.
   async moveArtifactFromClaw(
     actor: SdlcActor,
     input: MoveSdlcClawArtifactInput
-  ): Promise<{ canvasId: string; parentId: string }> {
-    const { channelId } = await this.requireClawArtifact(actor, input.canvasId);
+  ): Promise<{ canvasId: string; parentId?: string; folderId?: string }> {
+    // A pasted canvas link may carry the view or edit access id instead of the canvas id.
+    const linked = await this.prisma.canvas.findFirst({
+      where: { workspaceId: actor.workspaceId, OR: [{ viewAccessId: input.canvasId }, { editAccessId: input.canvasId }] },
+      select: { id: true },
+    });
+    if (linked) input = { ...input, canvasId: linked.id };
+    const isArtifact = await this.prisma.sdlcArtifact.findUnique({ where: { artifactId: input.canvasId }, select: { artifactId: true } });
+    if (!isArtifact) return this.adoptCanvasFromClaw(actor, input);
+    const existing = await this.requireClawArtifact(actor, input.canvasId);
+    const { channelId } = existing;
+    const folder = input.folderId && input.folderId !== existing.folderId
+      ? await this.requireArtifactTypeFolder(channelId, input.folderId)
+      : null;
+    if (!folder && !input.parentId) throw new AppError('Pass parentId or a different artifactTypeId', 400);
     const trackId = await resolveItemTrackId(this.prisma, 'CANVAS', input.canvasId);
     if (!trackId) throw new AppError('Only artifacts filed in a track can be moved', 409);
-    const toRoot = input.parentId === trackId;
+
+    if (folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+      await this.requireHubKnowledgeWrite(actor, channelId, folder.id, existing.title);
+      await moveArtifactToHubKnowledgeTx(this, actor, channelId, input.canvasId, folder.id);
+      return { canvasId: input.canvasId, folderId: folder.id };
+    }
+
+    // A retype alone keeps the artifact where it is.
+    const parentId = input.parentId ?? (
+      await this.prisma.sdlcEntityLink.findFirst({
+        where: { channelId, relationType: SDLC_CONTAINMENT_RELATION, targetType: 'CANVAS', targetId: input.canvasId },
+        select: { sourceId: true },
+      })
+    )?.sourceId ?? trackId;
+    const toRoot = parentId === trackId;
     if (!toRoot) {
-      const parentTrackId = await resolveFolderTrackId(this.prisma, input.parentId);
+      const parentTrackId = await resolveFolderTrackId(this.prisma, parentId);
       if (!parentTrackId) throw new AppError('Track folder not found', 404);
       if (parentTrackId !== trackId) throw new AppError('An artifact can only be moved within its own track', 409);
     }
-    await moveArtifactFromClawTx(this, actor, channelId, input, toRoot);
-    return { canvasId: input.canvasId, parentId: input.parentId };
+    await moveArtifactFromClawTx(this, actor, channelId, { canvasId: input.canvasId, parentId, folderId: folder?.id }, toRoot);
+    return { canvasId: input.canvasId, parentId, ...(folder ? { folderId: folder.id } : {}) };
+  }
+
+  /** Files the actor's own personal canvas into a track or Hub Knowledge; it becomes readable by every hub member. */
+  private async adoptCanvasFromClaw(
+    actor: SdlcActor,
+    input: MoveSdlcClawArtifactInput
+  ): Promise<{ canvasId: string; parentId?: string; folderId?: string }> {
+    if (!input.folderId) {
+      throw new AppError('This canvas is not an SDLC artifact yet. Pass artifactTypeId to file it into the hub', 400);
+    }
+    if (!input.adoptApproved) {
+      throw new AppError('Filing a personal canvas into a hub shares it with every member, so it needs the owner\'s approval. Ask them to do it from a chat run', 403);
+    }
+    const folder = await this.prisma.canvasFolder.findFirst({
+      where: { id: input.folderId, name: { not: SDLC_WIKI_FOLDER } },
+      select: { id: true, name: true, channelId: true },
+    });
+    if (!folder?.channelId) throw new AppError('Artifact type folder not found', 404);
+    const channelId = folder.channelId;
+    const channel = await this.requireChannelRole(actor, channelId, false);
+    if (!channel.projectId) throw new AppError('SDLC hub not found', 404);
+    const hubKnowledge = folder.name === SDLC_HUB_KNOWLEDGE_FOLDER;
+
+    let trackId: string | undefined;
+    let trackFolderId: string | undefined;
+    if (!hubKnowledge) {
+      if (!input.parentId) throw new AppError('parentId (a track or track folder) is required for this artifact type', 400);
+      trackId = (await resolveFolderTrackId(this.prisma, input.parentId)) ?? input.parentId;
+      if (!(await isTrackInChannel(this.prisma, trackId, channelId))) {
+        throw new AppError('SDLC track not found in this hub', 404);
+      }
+      trackFolderId = trackId === input.parentId ? undefined : input.parentId;
+    }
+
+    const canvas = await this.prisma.canvas.findFirst({
+      where: { id: input.canvasId, workspaceId: actor.workspaceId },
+      select: {
+        id: true,
+        title: true,
+        createdBy: true,
+        channelId: true,
+        projectId: true,
+        connectId: true,
+        docType: true,
+        isTemplate: true,
+        isArchived: true,
+        participants: { where: { userId: actor.userId, role: CanvasRole.OWNER }, select: { id: true } },
+      },
+    });
+    if (!canvas) throw new AppError('Canvas not found', 404);
+    if (canvas.createdBy !== actor.userId && canvas.participants.length === 0) {
+      throw new AppError('Only the canvas owner can file it into an SDLC hub', 403);
+    }
+    if (canvas.channelId || (canvas.projectId && canvas.projectId !== channel.projectId)) {
+      throw new AppError('This canvas already belongs to a channel or project. Only personal canvases can be filed into an SDLC hub', 409);
+    }
+    if (canvas.docType !== 'Canvas' || canvas.isTemplate || canvas.isArchived) {
+      throw new AppError('Only active, non-template canvases can be filed into an SDLC hub', 409);
+    }
+    if (hubKnowledge) await this.requireHubKnowledgeWrite(actor, channelId, folder.id, canvas.title);
+
+    await adoptCanvasAsArtifactTx(this, actor, canvas, channelId, folder.id, channel.projectId, trackId, trackFolderId);
+    this.enqueueCanvasIndexing(canvas.id, actor.workspaceId, actor.userId);
+    return { canvasId: input.canvasId, ...(input.parentId && !hubKnowledge ? { parentId: input.parentId } : {}), folderId: folder.id };
+  }
+
+  private async requireArtifactTypeFolder(channelId: string, folderId: string) {
+    const folder = await this.prisma.canvasFolder.findFirst({
+      where: { id: folderId, channelId, name: { not: SDLC_WIKI_FOLDER } },
+      select: { id: true, name: true },
+    });
+    if (!folder) throw new AppError('Artifact type not found in this hub', 404);
+    return folder;
+  }
+
+  /** Every member's runs read Hub Knowledge, so filing one needs a hub admin and a title not already in use. */
+  private async requireHubKnowledgeWrite(actor: SdlcActor, channelId: string, folderId: string, title: string) {
+    const { participants } = await this.requireChannelRole(actor, channelId, false);
+    if (participants[0]?.role !== ChannelRole.ADMIN) {
+      throw new AppError('Only hub admins can add Hub Knowledge, and there is no personal version', 403);
+    }
+    const existing = await this.prisma.canvas.findFirst({
+      where: {
+        folderId,
+        title: { equals: title, mode: 'insensitive' },
+        sdlcArtifact: { is: { artifactStatus: 'ACTIVE' } },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(
+        `Hub Knowledge already has "${title}" (canvasId ${existing.id}). Update that artifact instead.`,
+        409
+      );
+    }
   }
 
   async archiveArtifactFromClaw(
     actor: SdlcActor,
     input: ArchiveSdlcClawArtifactInput
   ): Promise<{ canvasId: string; archived: boolean }> {
-    await this.requireClawArtifact(actor, input.canvasId);
+    await this.requireClawArtifact(actor, input.canvasId, input);
     await this.prisma.sdlcArtifact.update({
       where: { artifactId: input.canvasId },
       data: { artifactStatus: input.archived ? 'ARCHIVED' : 'ACTIVE' },
@@ -672,16 +779,20 @@ export class SdlcHubService implements SdlcHub {
     return { canvasId: input.canvasId, archived: input.archived };
   }
 
-  private async requireClawArtifact(actor: SdlcActor, canvasId: string) {
+  private async requireClawArtifact(actor: SdlcActor, canvasId: string, generation?: { generationCommit?: string; repoId?: string }) {
     const channelId = await this.hubOf('canvas', canvasId);
     if (!channelId) throw new AppError('SDLC artifact not found', 404);
     await this.requireChannelRole(actor, channelId, false);
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: canvasId, channelId, sdlcArtifact: { isNot: null } },
-      select: { id: true, createdBy: true, content: true, folder: { select: { name: true } } },
+      select: { id: true, title: true, folderId: true, createdBy: true, content: true, folder: { select: { name: true } }, sdlcArtifact: { select: { artifactType: true } } },
     });
     if (!canvas) throw new AppError('SDLC artifact not found', 404);
-    if (canvas.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER) {
+    const wiki = canvas.sdlcArtifact?.artifactType === 'WIKI';
+    if (
+      canvas.folder?.name === SDLC_HUB_KNOWLEDGE_FOLDER
+      || (wiki && !(await sdlcWikiPageStore.isGenerationRun({ channelId, actorUserId: actor.userId, ...generation })))
+    ) {
       // Same rule as creating one: every member's runs read Hub Knowledge.
       await this.requireChannelRole(actor, channelId, true);
     }
@@ -840,12 +951,19 @@ export class SdlcHubService implements SdlcHub {
 
   async listArtifactTypes(actor: SdlcActor, channelId: string) {
     await requireSdlcHubReader(this.prisma, actor, channelId);
-    return this.prisma.canvasFolder.findMany({
-      // Wiki pages are written through the Wiki actions, never as artifacts of a type.
-      where: { channelId, name: { not: SDLC_WIKI_FOLDER } },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true, name: true, createdAt: true },
-    });
+    const [types, isAdmin] = await Promise.all([
+      this.prisma.canvasFolder.findMany({
+        // Wiki pages are written through the Wiki actions, never as artifacts of a type.
+        where: { channelId, name: { not: SDLC_WIKI_FOLDER } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, name: true, createdAt: true },
+      }),
+      isSdlcHubAdmin(this.prisma, actor, channelId),
+    ]);
+    return {
+      artifactTypes: types.map((type) => ({ ...type, canCreate: type.name !== SDLC_HUB_KNOWLEDGE_FOLDER || isAdmin })),
+      canWriteWiki: isAdmin,
+    };
   }
 
   async createArtifactType(actor: SdlcActor, channelId: string, name: string) {

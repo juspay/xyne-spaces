@@ -48,8 +48,8 @@ export const useBulkAssignableUsers = (
 };
 
 /**
- * Ceiling on one bulk action, matching `MAX_TICKETS` in the spaces-create-bulk-tickets
- * MCP tool so both bulk paths bound a batch the same way.
+ * Ceiling on one bulk action, matching `MAX_BULK_TICKETS` in xyne-claw-auth's bulk-ticket
+ * MCP tools so both bulk paths bound a batch the same way.
  *
  * A bulk action fans out one mutation per ticket — two when a stage change rides along
  * with other fields, one per tag for labels — and the table view's grid holds every

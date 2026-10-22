@@ -19,6 +19,9 @@ const MAX_SHEETS = 20;
 const MAX_ROWS_PER_SHEET = 1000;
 const MAX_COLS_PER_SHEET = 50;
 const MAX_CELL_CHARS = 300;
+const MAX_OMITTED_SHEET_NAMES = 100;
+const ORIGINAL_FILE_NOTE =
+  "The original workbook is saved next to this file under the same name without the .md suffix; read the rest from it in pieces (for example with a script in the sandbox).";
 
 export const XLSX_MIME_TYPES = XLSX_ATTACHMENT.mimeTypes;
 export const XLSX_EXTENSIONS = XLSX_ATTACHMENT.extensions;
@@ -74,7 +77,11 @@ export async function xlsxBufferToMarkdown(buf: Buffer, fileName: string): Promi
   const allSheets = wb.worksheets;
   const sheets = allSheets.slice(0, MAX_SHEETS);
   if (allSheets.length > MAX_SHEETS) {
-    out.push(`_(${allSheets.length} sheets total; showing first ${MAX_SHEETS})_`);
+    const omitted = allSheets.slice(MAX_SHEETS).map((ws) => ws.name);
+    const listed = omitted.slice(0, MAX_OMITTED_SHEET_NAMES).join(", ");
+    const more = omitted.length > MAX_OMITTED_SHEET_NAMES ? `, and ${omitted.length - MAX_OMITTED_SHEET_NAMES} more` : "";
+    out.push(`_(${allSheets.length} sheets total; showing the first ${MAX_SHEETS}. Not shown: ${listed}${more}.)_`);
+    out.push(`_${ORIGINAL_FILE_NOTE}_`);
     out.push("");
   }
 
@@ -111,7 +118,7 @@ export async function xlsxBufferToMarkdown(buf: Buffer, fileName: string): Promi
 
     if (totalRows > rowLimit || totalCols > colLimit) {
       out.push("");
-      out.push(`_(truncated to ${rowLimit}×${colLimit} of ${totalRows}×${totalCols})_`);
+      out.push(`_(truncated to ${rowLimit}×${colLimit} of ${totalRows}×${totalCols}. ${ORIGINAL_FILE_NOTE})_`);
     }
     out.push("");
   }

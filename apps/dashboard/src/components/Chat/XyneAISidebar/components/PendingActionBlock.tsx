@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Loader2, Check, X, Shield } from 'lucide-react';
+import { Loader2, Check, CheckCheck, X, Shield } from 'lucide-react';
 import type { PendingAction } from '../utils/XyneAITypes';
 import { humanizeToolName } from './activityShared';
 import {
@@ -12,12 +12,14 @@ interface PendingActionBlockProps {
   actions: PendingAction[];
   onApprove?: (action: PendingAction, index: number) => Promise<void> | void;
   onDecline?: (action: PendingAction, index: number) => Promise<void> | void;
+  onApproveAndContinue?: (action: PendingAction, index: number) => Promise<void> | void;
 }
 
 export function PendingActionBlock({
   actions,
   onApprove,
   onDecline,
+  onApproveAndContinue,
 }: PendingActionBlockProps): ReactElement {
   return (
     <div className='space-y-2'>
@@ -28,6 +30,7 @@ export function PendingActionBlock({
           index={i}
           onApprove={onApprove}
           onDecline={onDecline}
+          onApproveAndContinue={onApproveAndContinue}
         />
       ))}
     </div>
@@ -39,6 +42,9 @@ interface PendingActionItemProps {
   index: number;
   onApprove?: ((action: PendingAction, index: number) => Promise<void> | void) | undefined;
   onDecline?: ((action: PendingAction, index: number) => Promise<void> | void) | undefined;
+  onApproveAndContinue?:
+    | ((action: PendingAction, index: number) => Promise<void> | void)
+    | undefined;
 }
 
 function PendingActionItem({
@@ -46,10 +52,12 @@ function PendingActionItem({
   index,
   onApprove,
   onDecline,
+  onApproveAndContinue,
 }: PendingActionItemProps): ReactElement {
-  const [state, setState] = useState<'idle' | 'running' | 'approved' | 'declined' | 'error'>(
-    action.resolution ?? 'idle',
-  );
+  const [state, setState] = useState<
+    'idle' | 'running' | 'continuing' | 'approved' | 'declined' | 'error'
+  >(action.resolution ?? 'idle');
+  const busy = state === 'running' || state === 'continuing';
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,6 +75,19 @@ function PendingActionItem({
     setError(null);
     try {
       await onApprove(action, index);
+      setState('approved');
+    } catch (err) {
+      setState('error');
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleApproveAndContinue = async (): Promise<void> => {
+    if (!onApproveAndContinue) return;
+    setState('continuing');
+    setError(null);
+    try {
+      await onApproveAndContinue(action, index);
       setState('approved');
     } catch (err) {
       setState('error');
@@ -131,7 +152,7 @@ function PendingActionItem({
         <button
           onClick={() => void handleApprove()}
           data-ph-capture-attribute-track-id='approve_pending_action'
-          disabled={state === 'running'}
+          disabled={busy}
           className='inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50'
           type='button'
           data-track-category='XyneAI'
@@ -145,10 +166,33 @@ function PendingActionItem({
           )}
           Approve
         </button>
+        {onApproveAndContinue && (
+          <button
+            onClick={() => void handleApproveAndContinue()}
+            data-ph-capture-attribute-track-id='approve_continue_pending_action'
+            disabled={busy}
+            className='inline-flex items-center gap-1 rounded border border-emerald-600/40 px-2.5 py-1 text-[10px] font-medium text-emerald-700 transition hover:bg-emerald-600/10 disabled:opacity-50 dark:text-emerald-400'
+            type='button'
+            data-track-category='XyneAI'
+            data-track-name='approve-continue-action'
+            data-track-metadata={JSON.stringify({
+              tool: action.tool,
+              serverType: action.serverType,
+            })}
+            data-testid='approve-continue-action'
+          >
+            {state === 'continuing' ? (
+              <Loader2 size={10} className='animate-spin' />
+            ) : (
+              <CheckCheck size={10} />
+            )}
+            Approve and continue
+          </button>
+        )}
         <button
           onClick={() => void handleDecline()}
           data-ph-capture-attribute-track-id='decline_pending_action'
-          disabled={state === 'running'}
+          disabled={busy}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'
           data-track-category='XyneAI'

@@ -20,6 +20,20 @@ import {
   authorizeSkillFileUpdate,
   buildSkillUpdateApprovalFlow,
 } from "xyne-claw-shared";
+import {
+  parseSkillSourceUrl,
+  resolveSkillSource,
+  listRepoTree,
+  skillFileStats,
+  discoverSkills,
+  readSkill,
+  readSkillFiles,
+  isValidSkillSlug,
+  skillSourceKey,
+  renameSkillContent,
+  searchSkillsSh,
+  topSkillsSh,
+} from "../lib/skill-import.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
@@ -79,6 +93,121 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
     isAdmin: admin && wantAllSkills,
   });
   ok(res, skills);
+}));
+
+// ── Import from public GitHub (skills.sh / `npx skills` layout) ───────────
+// Registered before `/:slug` so `import` is never read as a slug.
+
+router.get("/import/search", asyncHandler(async (req: Request, res: Response) => {
+  const q = String(req.query["q"] ?? "").trim();
+  ok(res, q.length < 2 ? [] : await searchSkillsSh(q));
+}));
+
+router.get("/import/top", asyncHandler(async (_req: Request, res: Response) => {
+  ok(res, await topSkillsSh());
+}));
+
+async function importContext(req: Request) {
+  const requesterId = requireRequester(req, "x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const user = await findUserByAnyId(requesterId);
+  // "Already imported" only counts skills the caller can see: their own and global.
+  const visible = await skillRepository.listVisible({ userId: user ? [requesterId, user.id] : requesterId, orgId });
+  const importedKeys = visible.map((s) => s.source);
+  return {
+    requesterId,
+    orgId,
+    isImported: (key: string) => importedKeys.some((source) => source.startsWith(key)),
+  };
+}
+
+router.post("/import/preview", asyncHandler(async (req: Request, res: Response) => {
+  const { url } = req.body as { url?: string };
+  if (!url) throw badRequest("url is required");
+  const ctx = await importContext(req);
+  const ref = parseSkillSourceUrl(url);
+  const { sha, subpath } = await resolveSkillSource(ref);
+  const tree = await listRepoTree(ref.owner, ref.repo, sha);
+  const found = await discoverSkills(tree, subpath);
+  const taken = await skillRepository.findTakenSlugs(ctx.orgId, found.map((s) => s.name));
+  // Sizes come from the tree: the preview fetches no sibling files.
+  const skills = found.map((s) => {
+    const { fileCount, sizeBytes, error } = skillFileStats(tree, s.path);
+    return {
+      path: s.path,
+      name: s.name,
+      description: s.description,
+      fileCount,
+      sizeBytes,
+      ...(error ? { error } : {}),
+      slugTaken: taken.has(s.name),
+      slugValid: isValidSkillSlug(s.name),
+      alreadyImported: ctx.isImported(skillSourceKey(ref.owner, ref.repo, s.path)),
+    };
+  });
+  ok(res, { owner: ref.owner, repo: ref.repo, sha, skills, ...(ref.skill ? { skill: ref.skill } : {}) });
+}));
+
+router.post("/import", asyncHandler(async (req: Request, res: Response) => {
+  const { url, sha, skills: picks } = req.body as {
+    url?: string;
+    sha?: string;
+    skills?: Array<{ path?: string; slug?: string }>;
+  };
+  if (!url || !sha || !/^[0-9a-f]{40}$/.test(sha)) throw badRequest("url and a 40-character sha are required");
+  if (!Array.isArray(picks) || picks.length === 0 || picks.length > 100) {
+    throw badRequest("skills must list 1 to 100 entries");
+  }
+  const ctx = await importContext(req);
+  const ref = parseSkillSourceUrl(url);
+  // Re-read from GitHub at the previewed commit; the client never sends skill content.
+  const tree = await listRepoTree(ref.owner, ref.repo, sha);
+
+  const imported: unknown[] = [];
+  const failed: Array<{ path: string; error: string }> = [];
+  for (const pick of picks) {
+    const path = String(pick.path ?? "");
+    const fail = (error: string) => failed.push({ path, error });
+    if (path.split("/").includes("..")) { fail("Invalid path"); continue; }
+    const skill = await readSkill(tree, path);
+    if (!skill) { fail("No valid SKILL.md in this folder"); continue; }
+    const slug = (pick.slug ?? skill.name).trim();
+    if (!isValidSkillSlug(slug)) { fail(`"${slug}" is not a valid slug`); continue; }
+    if (ctx.isImported(skillSourceKey(ref.owner, ref.repo, path))) { fail("Already imported"); continue; }
+    const { files, error } = await readSkillFiles(tree, path);
+    if (error) { fail(error); continue; }
+
+    let created;
+    try {
+      created = await skillRepository.create({
+        slug,
+        name: slug.split("-").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" "),
+        description: skill.description,
+        content: slug === skill.name ? skill.content : renameSkillContent(skill.content, slug),
+        source: skillSourceKey(ref.owner, ref.repo, path, sha),
+        scope: "personal",
+        owner: { connect: { id: ctx.requesterId } },
+        org: { connect: { id: ctx.orgId } },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        fail(`A skill with slug "${slug}" already exists`);
+        continue;
+      }
+      throw err;
+    }
+    try {
+      await skillRepository.replaceFiles(created.id, files);
+    } catch (err) {
+      await skillRepository.delete(slug, ctx.orgId);
+      fail(errMsg(err));
+      continue;
+    }
+    imported.push(created);
+  }
+  log.info(`[skills/import] ${ref.owner}/${ref.repo}@${sha} imported=${imported.length} failed=${failed.length} userId=${ctx.requesterId}`);
+  ok(res, { imported, failed });
 }));
 
 // Get a single skill by slug

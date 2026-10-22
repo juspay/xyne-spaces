@@ -1,5 +1,18 @@
+import type { Request } from 'express';
 import { superpositionClient, type SuperpositionContext } from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
+
+/** Superposition context for a request: email, workspaceId, and environment for pre-prod. */
+export function cacContextFromRequest(req: Request): SuperpositionContext {
+  const email = req.user?.email?.trim();
+  const workspaceId = req.user?.workspaceId;
+  const isPlayground = req.get('x-route-env')?.trim().toLowerCase() === 'playground';
+  return {
+    ...(email ? { email } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(isPlayground ? { environment: 'playground' } : {}),
+  };
+}
 
 export class CacConfigService {
   public static async fetch(key: string, context?: SuperpositionContext): Promise<unknown | null> {

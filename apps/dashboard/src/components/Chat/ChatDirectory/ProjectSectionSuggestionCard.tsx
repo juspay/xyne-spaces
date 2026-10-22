@@ -24,7 +24,8 @@ export const ProjectSectionSuggestionCard = ({
         <button
           type='button'
           onClick={onDismiss}
-          aria-label='Dismiss suggestion'
+          aria-label='Dismiss — you can still find this under New section'
+          title='Dismiss — you can still find this under New section'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='DISMISS_SECTION_SUGGESTION'
           className='-mr-1 -mt-1 shrink-0 rounded p-0.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-item-hover hover:text-sidebar-foreground'

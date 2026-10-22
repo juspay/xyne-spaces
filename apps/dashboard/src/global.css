@@ -5897,3 +5897,27 @@ img.inline-emoji,
     will-change: auto;
   }
 }
+
+[data-search-highlight="preview"],
+[data-search-highlight="flash"] {
+  border-radius: 0.5rem;
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+}
+
+[data-search-highlight="preview"] {
+  background-color: hsl(var(--primary) / 0.08);
+  outline-color: hsl(var(--primary) / 0.5);
+}
+
+[data-search-highlight="flash"] {
+  animation: settings-search-flash 2.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes settings-search-flash {
+  0%,
+  45% {
+    background-color: hsl(var(--primary) / 0.08);
+    outline-color: hsl(var(--primary) / 0.5);
+  }
+}

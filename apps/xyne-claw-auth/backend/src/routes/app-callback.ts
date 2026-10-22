@@ -407,6 +407,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           agentSlug: answerAgentSlug,
           orgId: answerOrgId,
           callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
         }),
       });
 

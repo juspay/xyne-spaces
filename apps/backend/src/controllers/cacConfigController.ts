@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CacConfigService } from '@/services/cacConfigService';
+import { CacConfigService, cacContextFromRequest } from '@/services/cacConfigService';
 
 export class CacConfigController {
   getConfig = async (req: Request, res: Response): Promise<void> => {
@@ -9,18 +9,7 @@ export class CacConfigController {
       return;
     }
 
-    const userEmail = req.user?.email?.trim();
-    const workspaceId = req.user?.workspaceId;
-    const isPlayground = req.get('x-route-env')?.trim().toLowerCase() === 'playground';
-    const context = userEmail || workspaceId || isPlayground
-      ? {
-          ...(userEmail ? { email: userEmail } : {}),
-          ...(workspaceId ? { workspaceId } : {}),
-          ...(isPlayground ? { environment: 'playground' } : {}),
-        }
-      : undefined;
-
-    const config = await CacConfigService.fetch(key, context);
+    const config = await CacConfigService.fetch(key, cacContextFromRequest(req));
     res.json({ key, config });
   };
 }

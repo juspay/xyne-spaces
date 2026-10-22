@@ -9,6 +9,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./xyne-spaces-tools.js";
+import { applySpacesCallAuth } from "../spaces-call-auth.js";
 
 const url = process.env["XYNE_SPACES_URL"];
 const token = process.env["XYNE_SPACES_TOKEN"];
@@ -55,7 +56,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
-  const { name, arguments: args } = request.params;
+  const { name, arguments: args, _meta } = request.params;
+  applySpacesCallAuth(_meta);
   const tool = tools.find((t) => t.name === name);
   if (!tool) {
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };

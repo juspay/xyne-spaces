@@ -1,3 +1,4 @@
+import { loopCommandFor, loopModeLog, withLoopKind, type LoopKey } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,6 +64,7 @@ import { loadMcpToolsForUser,
 } from "../mcp.js";
 import {
   buildSdlcRunContextSection,
+  SDLC_CONTEXT_UNAVAILABLE_SECTION,
   packSdlcRunMeta,
   SDLC_DIRECT_TOOL_NAMES,
   SDLC_META_KEYS,
@@ -85,7 +87,7 @@ function judgeCallbackFields(): { judge?: { backend: string; calls: number; fail
   };
 }
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
-import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
+import { ALWAYS_LOADED_TOOL_NAMES, activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -107,6 +109,7 @@ import {
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { generateRoutingCard, type RoutingCardInput } from "../routing-card.js";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -200,6 +203,7 @@ import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExi
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
+import { restoreConversationAttachments, saveConversationAttachments } from "../attachment-carry.js";
 import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
@@ -211,6 +215,7 @@ import {
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
+import { buildXorDecideTool } from "../xor-decide-tool.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -221,8 +226,6 @@ import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from ".
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
-/** Built-in skill bundle for coverage-gated understanding runs. */
-const UNDERSTANDING_SKILL_PATH = "understanding-skills";
 export const PROVIDER_REFUSAL_REPLY =
   "Claude declined to answer in this conversation: its safety filter stopped the reply. Asking again in this thread will be declined the same way, so please start a new thread and rephrase the request.";
 
@@ -327,9 +330,7 @@ export function normalizeExperimentContext(raw: unknown): ExperimentContext | un
     deadlineAt,
     ...(focus ? { focus } : {}),
     ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
-    ...(obj["kind"] === "understanding" || obj["kind"] === "framework" || obj["kind"] === "security" || obj["kind"] === "repo-history"
-      ? { kind: obj["kind"] as "understanding" | "framework" | "security" | "repo-history" }
-      : {}),
+    ...withLoopKind(obj["kind"]),
   };
 }
 
@@ -495,7 +496,7 @@ The inline citation tokens are the only citation mechanism for Claw v3. Never us
 const RESULT_SIFT_GUIDE = `
 
 ## Filtered tool results
-Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
+Tool results are NOT filtered unless you ask. When a call may return a large list, pass "sift": true to get only the items most relevant to this conversation; omit "sift" to get the raw result. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again without "sift".`;
 
 const SPACES_MENTION_GUIDE = `
 
@@ -1737,6 +1738,10 @@ export async function processTask(
     // server-owned here and cannot be changed from the dashboard. Excluded from the
     // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
     const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Answering without a mention (claw-auth agent-proactivity): the run drafts a reply
+    // for the Spaces backend to check, and must never act or show a plan card in the
+    // thread. Read tools stay; every write goes, like the daily brief.
+    const isProactivity = eventType === "proactivity";
     // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
     // `postTodos`, which only hides the Spaces card while the agent still keeps
     // the list: this removes the todo tools AND the primer, so no turn is spent
@@ -1757,7 +1762,8 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
-      !isDailyBrief;
+      !isDailyBrief &&
+      !isProactivity;
     const planGatePreviousReply =
       planGateEligible && isShortFollowUp(task)
         ? readPreviousAgentReply(
@@ -1827,6 +1833,7 @@ export async function processTask(
     const {
       derivedContextFiles,
       pdfBuffers: pdfBuffersByName,
+      xlsxBuffers: xlsxBuffersByName,
       videoKeyframes,
       videoBuffers: videoBuffersByName,
       imageAttachments,
@@ -1853,6 +1860,11 @@ export async function processTask(
         : []),
     ];
 
+    const carryKey = !requestCwd ? workspaceStoreKey : undefined;
+    const earlierAttachments = carryKey
+      ? await restoreConversationAttachments(carryKey, workspaceDir, log)
+      : { available: [], restored: [] };
+
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1869,6 +1881,23 @@ export async function processTask(
         pdfBuffersByName.map((p) => ({ path: p.fileName, data: p.buf })),
       );
       log(`Raw PDF originals kept: ${writtenBin.length}`);
+    }
+    if (xlsxBuffersByName.length > 0) {
+      const writtenXlsx = await writeWorkspaceBinaryFiles(
+        workspaceDir,
+        xlsxBuffersByName.map((x) => ({ path: x.fileName, data: x.buf })),
+      );
+      log(`Raw XLSX originals kept: ${writtenXlsx.length}`);
+    }
+    const thisTurnAttachmentPaths = [
+      ...derivedContextFiles.map((f) => toWorkspaceContextPath(f.path)),
+      ...pdfBuffersByName.map((p) => toWorkspaceContextPath(p.fileName)),
+      ...xlsxBuffersByName.map((x) => toWorkspaceContextPath(x.fileName)),
+    ];
+    if (carryKey && thisTurnAttachmentPaths.length > 0) {
+      void saveConversationAttachments(carryKey, workspaceDir, thisTurnAttachmentPaths, log)
+        .then((saved) => log(`Attachments kept for later turns: ${saved}/${thisTurnAttachmentPaths.length}`))
+        .catch((err: unknown) => logErr("Saving attachments for later turns failed", err));
     }
     // /record-skill only: retain the raw recording in the ephemeral run
     // workspace until analyze-skill-recording copies it into this
@@ -2328,6 +2357,14 @@ export async function processTask(
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
+    const clonedUiTesterTools: Record<string, ToolDefinition[]> =
+      !fastModeEnabled && uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? Object.fromEntries(
+            (customSubagents ?? [])
+              .filter((c) => (c.tools.custom ?? []).includes("ui-test-variations"))
+              .map((c) => [c.name, buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files"), checks: c.checks })]),
+          )
+        : {};
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
@@ -2347,6 +2384,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -2370,9 +2408,12 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
+          uiTesterTools.length > 0 || Object.keys(clonedUiTesterTools).length > 0
+            ? { ...(uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : {}), ...clonedUiTesterTools }
+            : undefined,
           customSubagents,
           directPickSuffixes,
+          customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
         );
 
     const subagentTools = optEnabled("subagent_direct_only")
@@ -2557,6 +2598,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -3051,15 +3093,7 @@ export async function processTask(
       log(
         experiment.mode === "review"
           ? `Experiment CHECKER mode — injected review tools (verifying epoch ${experiment.epoch})`
-          : experiment.kind === "security"
-          ? `Security mode — injected experiment tools (epoch ${experiment.epoch}, observation-gated closes)`
-          : experiment.kind === "framework"
-          ? `Framework mode — injected experiment tools (epoch ${experiment.epoch}, candidate-gated exit)`
-          : experiment.kind === "understanding"
-          ? `Understanding mode — injected experiment tools (epoch ${experiment.epoch}, coverage-gated exit)`
-          : experiment.kind === "repo-history"
-          ? `Repo-history mode — injected experiment tools (epoch ${experiment.epoch}, progress-gated exit at HEAD)`
-          : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
+          : loopModeLog(loopCommandFor(experiment.kind), { epoch: experiment.epoch, remaining: experimentRemaining(experiment.deadlineAt) }),
       );
     }
 
@@ -3328,13 +3362,14 @@ export async function processTask(
       }
     }
 
-    // Read-only routing (sbx-git): scheduled / automation runs are diverted to
+    // Read-only routing (sbx-git): scheduled / automation / proactivity runs are diverted to
     // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
     // so they must not carry mutating sandbox tools. Strip them here as the
     // tool-level half of read-only enforcement (the sbx-git pod also mounts
     // repos read-only). A rare automation that genuinely needs to write/run can
     // opt out with agentConfig.allowWriteInReadOnlyJob.
-    const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    const isReadOnlyJob =
+      eventType === "automation" || eventType === "scheduled" || eventType === "proactivity" || isScheduledRun;
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -3412,6 +3447,18 @@ export async function processTask(
       }
     }
 
+    if (isProactivity) {
+      const RO_PROACTIVE = new Set([
+        "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
+        "sandbox-create", "sandbox-destroy", "write",
+      ]);
+      const beforeProactive = allTools.length;
+      allTools = allTools.filter((t) => !isWriteTool(t, allGroups) && !RO_PROACTIVE.has(t.name));
+      if (allTools.length !== beforeProactive) {
+        log(`Proactivity read-only — stripped ${beforeProactive - allTools.length} write/mutating tool(s)`);
+      }
+    }
+
     allTools = dedupeToolsByName(allTools);
     if (optEnabled("active_tool_cap")) {
       const demotable = new Set(
@@ -3429,7 +3476,9 @@ export async function processTask(
         pinned: new Set([
           PROPOSE_PLAN_TOOL_NAME,
           EMIT_BRIEF_TOOL_NAME,
-          "ask-user-question",
+          // Includes todo-write: the plan primer says the agent MUST call it,
+          // and demoting it to the catalog made that call fail with "not found".
+          ...ALWAYS_LOADED_TOOL_NAMES,
           ...forcedTaskCommandTools,
           ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
         ]),
@@ -3895,11 +3944,11 @@ export async function processTask(
         path: toWorkspaceContextPath(a.fileName),
       })),
       ...xlsxAttachments.map((a) => ({
-        label: `${a.fileName} (xlsx, extracted to markdown)`,
+        label: `${a.fileName} (xlsx, extracted to markdown; original workbook at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...pdfAttachments.map((a) => ({
-        label: `${a.fileName} (pdf, text-extracted to markdown)`,
+        label: `${a.fileName} (pdf, text-extracted to markdown; original PDF at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...docxAttachments.map((a) => ({
@@ -3927,6 +3976,18 @@ export async function processTask(
         path: toWorkspaceContextPath(`${recording.fileName}.video.md`),
       })) : []),
     ];
+    const thisTurnPaths = new Set(attachmentEntries.map((e) => e.path));
+    const earlierFiles = earlierAttachments.available
+      .filter((p) => !thisTurnPaths.has(p) && !thisTurnAttachmentPaths.includes(p))
+      .slice(0, 50);
+    if (earlierFiles.length > 0) {
+      const earlierContext = [
+        "## Files From Earlier In This Conversation",
+        ...earlierFiles.map((p) => `- \`${p}\``),
+        "These were attached in earlier turns and are still on disk at these paths.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${earlierContext}` : earlierContext;
+    }
     if (attachmentEntries.length > 0) {
       const attachmentContext = [
         "## Attached Files",
@@ -4082,13 +4143,13 @@ export async function processTask(
     // configured. Told to the model so it surfaces the gap instead of
     // fabricating results from a tool it never received.
     // Built-in skill bundles loaded for this run: whatever the task command
-    // asks for, plus the understanding bundle whenever this is a coverage-gated
-    // run. UNDERSTANDING_SKILL_PATH teaches the document structure, the inline
+    // asks for, plus the loop command's own skills (an understanding run loads
+    // understanding-skills). That bundle teaches the document structure, the inline
     // SVG diagram rules (no mermaid — the artifact must render with no network
     // and no JS) and the file:line citation discipline the ledger enforces.
     const extraSkillPathNames = [
       ...(taskCommand?.skillPaths ?? []),
-      ...(experiment?.kind === "understanding" ? [UNDERSTANDING_SKILL_PATH] : []),
+      ...(experiment ? loopCommandFor(experiment.kind).skills : []),
     ];
 
     const securityGuide = `\n\n## Security mode\nYou are in a security run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). Keep TWO TIERS apart, because mixing them is what makes a security report untrustworthy.\n\nLEAD (status=conjecture) — you read the code and the defect looks real. Cite file:line. Most findings belong here, and there is no shame in it.\nCONFIRMED (status=proved) — you EXECUTED it and captured the result: the request you sent, the status or output you got back, and where you verified the effect. The ledger refuses a close without an observation, so do not try to word around it. A script that greps source and asserts a vulnerable pattern is present is not a confirmation — it re-proves what you already read.\n\nDEFENDED is a real result. If you try it and a guard stops you, close it refuted and name the guard. Also check whether a SAFE SIBLING already exists — the same operation done correctly elsewhere in the repo. That has been the single most common shape, and it is the cheapest fix to recommend.\n\nDo not promote a lead because it looks obvious. Confirming a wrong finding is expensive: it becomes a ticket someone has to disprove.\n\nThis run is TIME-BOXED: end-experiment refuses until the deadline, because attack surface cannot be exhausted — there is always one more endpoint. When a surface runs dry, move to a different one rather than restating closed findings.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename, extended EVERY epoch (so a run that ends at the deadline still delivers everything found), with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry. The sandbox recycles — if the file is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
@@ -4097,20 +4158,23 @@ export async function processTask(
 
     const repoHistoryGuide = `\n\n## Repo-history mode\nYou are in a PROGRESS-gated repo-history run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "whole repo"}). Your job is to reconstruct the coding SPEC of this repo — the rules and decisions someone would need to REBUILD it — by walking git history OLDEST→NEWEST. The exit is reaching HEAD, not the clock.\n\nCURSOR + BATCHING: the ledger records how far you have walked. Establish the frontier once with \`git log <initial-sha>..HEAD --reverse --oneline\` (oldest first; default initial-sha = the repo's first commit unless a sha was given in focus). Each epoch, take the NEXT BATCH after the cursor — a sensible chunk (~20-50 ordinary commits), but a SQUASH/MERGE commit is its own batch (it is one decision with one big diff and no granular commits, so read its PR discussion for the WHY instead of parsing the whole diff). Advance the cursor to the last sha you distilled and record it. Never re-read batches behind the cursor.\n\nEXTRACT DECISIONS, NOT DIFFS. For each batch, record the coding RULE it establishes — the convention, invariant, or always/never — not a changelog. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. The ledger enforces, for every proved entry, a note containing:\n  Rule: <the durable instruction someone rebuilding the repo would follow>\n  sha: <the commit it derives from>\n  Tag: <your theme tag>\n\nRECONCILE AGAINST HEAD — the correctness bar. History is full of dead ends: a rule set early is often REVERSED or REWRITTEN later, and here that usually arrives as a plain "fix" commit, NOT a git revert. So you cannot trust commit messages — when a later batch's code overturns a rule already in the ledger, AMEND that entry in place; never leave two contradictory rules. A rule HEAD no longer honours moves to the GRAVEYARD with a \`Supersedes:\` line and why it died. The final doc must not contain a single rule the current code contradicts — the running code is the spec; history only supplies the WHY.\n\nThe DELIVERABLE is ONE self-contained .html decision-log — no network requests, no JavaScript, so it renders offline — with a STABLE filename you reuse every epoch (never epoch1.html). Three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced or changed each rule) / GRAVEYARD (tried-and-abandoned, with why); use plain HTML tables so the rules and their shas read cleanly. Author it in the sandbox and send it with sandbox-deliver-files. Extend the same file each epoch; the sandbox recycles, so if it is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT. When the cursor reaches HEAD and the doc is delivered, end.`;
 
+    const loopGuides = (run: NonNullable<typeof experiment>): Record<LoopKey, string> => ({
+      experiment: `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${run.epoch}; deadline ${run.deadlineAt}; focus ${run.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`,
+      understanding: `\n\n## Understanding mode\nYou are in a coverage-gated understanding run (epoch ${run.epoch}; focus ${run.focus ?? "unspecified"}). Your job is to UNDERSTAND every reachable code path in scope, not to accumulate trivially-provable facts. The exit is exhaustion, not the clock: end-experiment unlocks only when the open-conjecture frontier reaches 0 (with at least one path closed). Loop: read the ledger -> if the frontier is empty, enumerate every entrypoint and branch in scope as an open conjecture (experiment-ledger action=record status=conjecture, one per path) -> pick ONE open path, trace it to real behavior, and ADD every new callee or branch you discover as a new open conjecture BEFORE you close the current one (proved/refuted) with file:line evidence and a description of what the code actually does and why. The frontier grows as you explore and shrinks only when a path is genuinely explained — never close a path with a shallow structural restatement. When open reaches 0 the scope is exhausted: deliver the artifact and end.\n\nThe DELIVERABLE is one self-contained .html explanation document, authored in the sandbox and sent with sandbox-deliver-files — not chat prose and not the ledger, which no reader will open. Follow the loaded understanding skills for its structure, its inline-SVG diagrams (no mermaid: the file must render with no network and no JavaScript) and the file:line citation discipline. Build it incrementally as paths close rather than all at once at the end, so a run that hits the safety cap still delivers a document covering what it did explain.\n\nONE CANONICAL DOCUMENT, NOT ONE PER EPOCH. The deliverable has a single STABLE filename you reuse every epoch (e.g. <topic>-explained.html) — never epoch1.html, epoch2.html. Each epoch EXTENDS the same document; do not start a new one. The sandbox is ephemeral and recycles across a long run, so at the START of each epoch, if that file is not on local disk, it means you are in a fresh sandbox: recover the latest version you already delivered — spaces-thread-attachments to find your canonical .html, spaces-fetch-attachment to pull it back — and extend THAT, rather than rebuilding from nothing or emitting a fragment. Re-deliver the same filename after each extension so the newest version always wins.\n\nAn incrementally-built document is in the order you EXPLORED, which is the wrong order to READ: before you deliver, do a consolidation pass that reorganises it into reading order — TL;DR and mental model first, then the end-to-end flows (each with its own diagram), then per-component detail grouped by role, then the exhaustive per-entity reference LAST, then the lookup table. Renumber sections contiguously, merge anything stated twice, and push deep detail down out of the overview. A document whose sections jump out of sequence or open with deep internals was never reorganised.`,
+      framework: frameworkGuide,
+      security: securityGuide,
+      "repo-history": repoHistoryGuide,
+    });
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
-      : experiment?.kind === "security"
-      ? securityGuide
-      : experiment?.kind === "framework"
-      ? frameworkGuide
-      : experiment?.kind === "repo-history"
-      ? repoHistoryGuide
-      : experiment?.kind === "understanding"
-      ? `\n\n## Understanding mode\nYou are in a coverage-gated understanding run (epoch ${experiment.epoch}; focus ${experiment.focus ?? "unspecified"}). Your job is to UNDERSTAND every reachable code path in scope, not to accumulate trivially-provable facts. The exit is exhaustion, not the clock: end-experiment unlocks only when the open-conjecture frontier reaches 0 (with at least one path closed). Loop: read the ledger -> if the frontier is empty, enumerate every entrypoint and branch in scope as an open conjecture (experiment-ledger action=record status=conjecture, one per path) -> pick ONE open path, trace it to real behavior, and ADD every new callee or branch you discover as a new open conjecture BEFORE you close the current one (proved/refuted) with file:line evidence and a description of what the code actually does and why. The frontier grows as you explore and shrinks only when a path is genuinely explained — never close a path with a shallow structural restatement. When open reaches 0 the scope is exhausted: deliver the artifact and end.\n\nThe DELIVERABLE is one self-contained .html explanation document, authored in the sandbox and sent with sandbox-deliver-files — not chat prose and not the ledger, which no reader will open. Follow the loaded understanding skills for its structure, its inline-SVG diagrams (no mermaid: the file must render with no network and no JavaScript) and the file:line citation discipline. Build it incrementally as paths close rather than all at once at the end, so a run that hits the safety cap still delivers a document covering what it did explain.\n\nONE CANONICAL DOCUMENT, NOT ONE PER EPOCH. The deliverable has a single STABLE filename you reuse every epoch (e.g. <topic>-explained.html) — never epoch1.html, epoch2.html. Each epoch EXTENDS the same document; do not start a new one. The sandbox is ephemeral and recycles across a long run, so at the START of each epoch, if that file is not on local disk, it means you are in a fresh sandbox: recover the latest version you already delivered — spaces-thread-attachments to find your canonical .html, spaces-fetch-attachment to pull it back — and extend THAT, rather than rebuilding from nothing or emitting a fragment. Re-deliver the same filename after each extension so the newest version always wins.\n\nAn incrementally-built document is in the order you EXPLORED, which is the wrong order to READ: before you deliver, do a consolidation pass that reorganises it into reading order — TL;DR and mental model first, then the end-to-end flows (each with its own diagram), then per-component detail grouped by role, then the exhaustive per-entity reference LAST, then the lookup table. Renumber sections contiguously, merge anything stated twice, and push deep detail down out of the overview. A document whose sections jump out of sequence or open with deep internals was never reorganised.`
       : experiment
-      ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
+      ? loopGuides(experiment)[loopCommandFor(experiment.kind).key]
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    const authoritativeSdlcContext = trustedSdlcContext
+      ? buildSdlcRunContextSection(trustedSdlcContext)
+      : typeof agentConfig?.["sdlcContextError"] === "string"
+        ? SDLC_CONTEXT_UNAVAILABLE_SECTION
+        : "";
     // R4: when tool-result sifting is on, tell the model up front what it will
     // see and how to get the raw result — not only after the fact per result.
     const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
@@ -4240,6 +4304,7 @@ export async function processTask(
         modelSettings,
         ...(structuredOutputActive ? { structuredOutputRef } : {}),
         ...(isTwinMentionFlow ? { twinDeliverRef } : {}),
+        questionPosted: () => getPendingQuestions().some((q) => q.purpose !== "follow_up_suggestions"),
         // Debug telemetry only — agent.ts emits session_tools/mode_switch events.
         ...(isPlanMode ? { mode: "plan" as const } : mode ? { mode } : {}),
         ...(planContinuation ? { planContinuation: true } : {}),
@@ -5685,6 +5750,36 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     res
       .status(500)
       .json({ success: false, error: "Failed to generate prompt" });
+  }
+});
+
+// ── Routing card for agent proactivity (called by xyne-claw-auth) ────────
+
+router.post("/generate-routing-card", validateS2SKey, async (req, res: Response) => {
+  const { name, description, systemPrompt, tools, skills, asked } = req.body as Partial<RoutingCardInput>;
+  if (typeof name !== "string" || typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+    res.status(400).json({ success: false, error: "name and systemPrompt are required" });
+    return;
+  }
+  try {
+    const card = await generateRoutingCard({
+      name,
+      description: typeof description === "string" ? description : "",
+      systemPrompt,
+      tools: Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [],
+      skills: Array.isArray(skills) ? skills.filter((k): k is string => typeof k === "string") : [],
+      asked: Array.isArray(asked)
+        ? asked.flatMap((a) =>
+            a && typeof a.question === "string"
+              ? [{ question: a.question, ...(typeof a.reply === "string" ? { reply: a.reply } : {}) }]
+              : [],
+          )
+        : [],
+    });
+    res.json({ success: true, data: { card } });
+  } catch (err) {
+    clog.error("[generate-routing-card] Failed:", err);
+    res.status(502).json({ success: false, error: "Failed to generate routing card" });
   }
 });
 

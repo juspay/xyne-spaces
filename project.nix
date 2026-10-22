@@ -8,85 +8,88 @@ let
   inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
   transcriptionEnv = import ./nix/python-agent.nix { inherit pkgs lib flakeInputs; };
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
-  prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
+  prismaEnvironment = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
     PRISMA_SCHEMA_ENGINE_BINARY = "${prismaEngines}/bin/schema-engine";
   };
-in
-{
-  imports = [
-    ./nix/modules/devshell.nix
-    ./nix/modules/playwright-version.nix
+
+  # Packages the dev shell and the dev image both need.
+  corePackages = [
+    pkgs.nodejs_22
+    pkgs.pnpm
+    pkgs.just
+    pkgs.openssl
+    postgres
+    pkgs.process-compose
+  ];
+  # Dev-shell only. Together with corePackages this is exactly the shell's old
+  # package set; the heavy Python agent, Y-Sweet and LiveKit stay out of it (the
+  # bundle reaches them by store path, nothing runs them from a shell).
+  devExtraPackages = with pkgs; [
+    ffmpeg
+    gitleaks
+    trivy
+    kubernetes-helm
+    gauge
+    playwright-driver.browsers
+  ];
+  # Image only: the POSIX userland pnpm's bin shims and the repo's scripts call.
+  imageExtraPackages = [
+    pkgs.bash
+    pkgs.coreutils
+    pkgs.gnused
+    pkgs.gnugrep
+    pkgs.findutils
+    pkgs.gawk
+    pkgs.which
+    pkgs.git
+    pkgs.cacert
+  ];
+  imagePackages = corePackages ++ imageExtraPackages;
+
+  # backend and dashboard run from the checkout with a Node/pnpm toolchain.
+  appPath = lib.makeBinPath [
+    pkgs.nodejs_22
+    pkgs.pnpm
+    pkgs.coreutils
+    pkgs.bash
+    pkgs.git
+    pkgs.openssl
   ];
 
-  packages.transcription-agent-env = transcriptionEnv;
+  # Both bundles expose process-compose's control API on this Unix socket, so the
+  # smoke test can inspect running processes in either mode. It must be a socket,
+  # not TCP: process-compose's default port is 8080, which Y-Sweet needs.
+  serviceSocket = ".logs/process-compose.sock";
 
-  # Development shell configuration
-  devShell = {
-    name = "xyne-spaces-dev";
+  # The dashboard's Vite dev server. The image publishes this port.
+  dashboardPort = 3000;
 
-    packages = with pkgs; [
-      nodejs_22
-      pnpm
-      just
-      openssl
-      ffmpeg
-      gitleaks
-      trivy
-      postgres
-      process-compose
-      kubernetes-helm
-      gauge
-      playwright-driver.browsers
-    ];
+  # Create data directories and cleanup ports before starting processes
+  servicesPreHook = ''
+    # Cleanup ports before starting services
+    echo "🧹 Cleaning up development services..."
 
-    environment = prismaEnvironment // {
-      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
-      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
-    };
+    # Kill all process-compose instances
+    ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
 
-    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
-      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    '';
+    # Kill processes on specific ports
+    PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
+    for port in "''${PORTS[@]}"; do
+      ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+    done
 
-    banner = ''
-      # Xyne Spaces Dev Environment
+    sleep 1
+    echo "✓ All development ports are free"
 
-      Node.js: ${pkgs.nodejs_22.version}
+    # Create necessary directories
+    mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
+  '';
 
-      ## Getting Started
-
-      ```bash
-      # Install, build, generate clients, and create local env files
-      just prepare
-      # Start services (automatically cleans up ports first)
-      nix run .#xyne-space-services  # Or, `just services`
-      # Run backend
-      just backend
-      # Run dashboard
-      just dashboard
-      ```
-
-      ## Cleanup Commands
-
-      ```bash
-      # Cleanup ports and database volumes (like docker-compose down -v)
-      nix run .#cleanup    # Or, `just cleanup`
-      
-      # Quick port cleanup only (no database wipe)
-      just cleanup-ports
-      ```
-
-      ## More info?
-
-      Edit `project.nix` to modify Nix setup.
-      Run `just` to see all available commands.
-    '';
-  };
-
-  # Process-compose configuration for all services
-  process-compose."xyne-space-services" = {
+  # The one definition of the stack. Both `xyne-space-services` (developer, apps
+  # off) and `dev-image-services` (image, apps on) import it, so cli options and
+  # services cannot drift between them. `enableApps` is the only difference.
+  servicesModule = { enableApps }: { config, pkgs, lib, ... }: {
     imports = [
       flakeInputs.services-flake.processComposeModules.default
       ./nix/containers
@@ -94,26 +97,14 @@ in
       ./nix/services/zero-cache.nix
     ];
 
-    # Create data directories and cleanup ports before starting processes
-    cli.preHook = ''
-      # Cleanup ports before starting services
-      echo "🧹 Cleaning up development services..."
-      
-      # Kill all process-compose instances
-      ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
-      
-      # Kill processes on specific ports
-      PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
-      for port in "''${PORTS[@]}"; do
-        ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
-      done
-      
-      sleep 1
-      echo "✓ All development ports are free"
-      
-      # Create necessary directories
-      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
-    '';
+    cli.preHook = servicesPreHook;
+    cli.options = {
+      # services-flake defaults no-server to true. We keep the API instead, but on
+      # a Unix socket (see serviceSocket), so nothing binds TCP 8080.
+      no-server = false;
+      use-uds = true;
+      unix-socket = serviceSocket;
+    };
 
     # Configure log files for all processes
     defaults.processSettings = { name, ... }: {
@@ -174,8 +165,8 @@ in
       availability.restart = "on_failure";
     };
 
-    # Disable TUI for headless operation
-    settings.environment = prismaEnvironment // { PC_DISABLE_TUI = "true"; };
+    # Environment for every process: Prisma's Nix-patched engines.
+    settings.environment = prismaEnvironment;
 
     # PostgreSQL service
     services.postgres."xyne-db" = {
@@ -251,13 +242,13 @@ in
     settings.processes."xyne-livekit".depends_on."xyne-redis".condition = "process_healthy";
     # Read credentials at runtime; local secrets must never enter the Nix store.
     settings.processes."xyne-livekit".command = lib.mkForce (
-      let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
+      let livekit = config.services.livekit."xyne-livekit";
       in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs_22}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
     );
 
     # Load runtime secrets without changing the module's repo-relative working directory.
     settings.processes."xyne-zero".command = lib.mkForce (
-      let zero = config.process-compose."xyne-space-services".services.zero-cache."xyne-zero";
+      let zero = config.services.zero-cache."xyne-zero";
       in "${pkgs.nodejs_22}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
     );
 
@@ -367,8 +358,139 @@ in
       availability.restart = "on_failure";
     };
 
+    # Backend and dashboard. Disabled for the developer bundle; enabled only in
+    # the dev image, which has no Node on the host. The bundle owns their ports.
+    settings.processes.backend = {
+      command = toString (pkgs.writeShellScript "xyne-backend" ''
+        export PATH="${appPath}:$PATH"
+        # Defaults only: `docker run -e CORS_ORIGIN=...` (or FRONTEND_URL) wins,
+        # which is what a browser on another host needs.
+        export CORS_ORIGIN="''${CORS_ORIGIN:-http://localhost:${toString dashboardPort},http://127.0.0.1:${toString dashboardPort}}"
+        export FRONTEND_URL="''${FRONTEND_URL:-http://localhost:${toString dashboardPort}}"
+        cd apps/backend
+        exec pnpm run dev
+      '');
+      depends_on = {
+        db-setup = { condition = "process_completed_successfully"; };
+        xyne-redis = { condition = "process_healthy"; };
+      };
+      readiness_probe = {
+        http_get = {
+          host = "127.0.0.1";
+          port = 3001;
+          path = "/api/health";
+        };
+        initial_delay_seconds = 10;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 30;
+      };
+      namespace = "app.backend";
+      availability.restart = "on_failure";
+      disabled = !enableApps;
+    };
+
+    settings.processes.dashboard = {
+      command = toString (pkgs.writeShellScript "xyne-dashboard" ''
+        export PATH="${appPath}:$PATH"
+        cd apps/dashboard
+        exec pnpm run dev
+      '');
+      # Vite dev server port; the image publishes only this port (plus 3001).
+      environment = { VITE_DEV_PORT = toString dashboardPort; };
+      depends_on.backend = { condition = "process_started"; };
+      readiness_probe = {
+        http_get = {
+          host = "127.0.0.1";
+          port = dashboardPort;
+          path = "/";
+        };
+        initial_delay_seconds = 10;
+        period_seconds = 10;
+        timeout_seconds = 3;
+        success_threshold = 1;
+        failure_threshold = 30;
+      };
+      namespace = "app.dashboard";
+      availability.restart = "on_failure";
+      disabled = !enableApps;
+    };
+
     # Container infrastructure kept for future use (currently empty)
     containers = { };
+  };
+in
+{
+  imports = [
+    ./nix/modules/devshell.nix
+    ./nix/modules/playwright-version.nix
+  ];
+
+  packages.transcription-agent-env = transcriptionEnv;
+
+  # Development shell configuration
+  devShell = {
+    name = "xyne-spaces-dev";
+
+    packages = corePackages ++ devExtraPackages;
+
+    environment = prismaEnvironment // {
+      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+    };
+
+    shellHook = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    '';
+
+    banner = ''
+      # Xyne Spaces Dev Environment
+
+      Node.js: ${pkgs.nodejs_22.version}
+
+      ## Getting Started
+
+      ```bash
+      # Install, build, generate clients, and create local env files
+      just prepare
+      # Start services (automatically cleans up ports first)
+      nix run .#xyne-space-services  # Or, `just services`
+      # Run backend
+      just backend
+      # Run dashboard
+      just dashboard
+      ```
+
+      ## Cleanup Commands
+
+      ```bash
+      # Cleanup ports and database volumes (like docker-compose down -v)
+      nix run .#cleanup    # Or, `just cleanup`
+      
+      # Quick port cleanup only (no database wipe)
+      just cleanup-ports
+      ```
+
+      ## More info?
+
+      Edit `project.nix` to modify Nix setup.
+      Run `just` to see all available commands.
+    '';
+  };
+
+  # Process-compose configuration for all services (backend/dashboard disabled)
+  process-compose."xyne-space-services" = {
+    imports = [ (servicesModule { enableApps = false; }) ];
+  };
+
+  # The dev image runs the same stack with backend and dashboard enabled.
+  process-compose."dev-image-services" = {
+    imports = [ (servicesModule { enableApps = true; }) ];
+    # The image has no TTY. This is the process-compose CLI's own environment,
+    # the only one that disables its TUI (settings.environment is for children).
+    cli.environment.PC_DISABLE_TUI = true;
   };
 
   # Export the exact runtime configuration for the isolated CI smoke check.
@@ -379,9 +501,19 @@ in
     name = "nix-smoke-test";
     runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ];
     text = ''
-      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
+      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} ${serviceSocket} "$@"
     '';
   };
+
+  # One `docker run` for contributors without Nix (Linux only). Built from the
+  # same definitions as the dev shell and the services bundle.
+  packages.dev-image = lib.mkIf pkgs.stdenv.hostPlatform.isLinux (
+    import ./nix/image.nix {
+      inherit pkgs lib imagePackages prismaEnvironment;
+      bundle = config.process-compose."dev-image-services".outputs.package;
+      smokeTest = config.packages.nix-smoke-test;
+    }
+  );
 
   checks = let
     sourceCheck = name: nativeBuildInputs: command: pkgs.runCommand name {

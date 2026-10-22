@@ -475,6 +475,17 @@ export function splitAutoReplies(conversations: ConversationHistory[]): {
 }
 
 /** "Alpha", "Alpha & Beta", "Alpha, Beta +2". */
+export const MAX_STACKED_AGENTS = 3;
+
+export function stackedAgents(
+  slugs: string[],
+  max: number = MAX_STACKED_AGENTS,
+): { shown: string[]; hiddenCount: number } {
+  const unique = [...new Set(slugs)];
+  const shown = unique.slice(0, Math.max(0, max));
+  return { shown, hiddenCount: unique.length - shown.length };
+}
+
 export function agentNamesLabel(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   if (names.length === 2) return `${names[0]} & ${names[1]}`;

@@ -1,4 +1,4 @@
-import { isAbsolute, resolve as resolvePath, relative as relativePath } from "node:path";
+import { basename, isAbsolute, join as joinPath, resolve as resolvePath, relative as relativePath } from "node:path";
 import {
   createReadTool,
   createWriteTool,
@@ -62,6 +62,19 @@ function denyOutside(
   return null;
 }
 
+/**
+ * Added to a "Path not found" error. Spilled tool results live in the session
+ * dir's `.context/tool-results` (tool-output.ts), not under the working dir,
+ * and models were building those paths from the working dir.
+ */
+function notFoundHint(root: string, readRoots: string[]): string {
+  const saved = readRoots.filter((r) => basename(r) === ".context").map((c) => joinPath(c, "tool-results"));
+  return (
+    `Relative paths resolve against your working directory ${root}.` +
+    (saved.length > 0 ? ` Saved tool results are under ${saved.join(" or ")}.` : "")
+  );
+}
+
 function gatePathParam<T extends AgentTool<any, any>>(
   inner: T,
   roots: string[],
@@ -78,7 +91,13 @@ function gatePathParam<T extends AgentTool<any, any>>(
           details: undefined as never,
         };
       }
-      return originalExecute(toolCallId, params, signal, onUpdate);
+      try {
+        return await originalExecute(toolCallId, params, signal, onUpdate);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!/Path not found|ENOENT|no such file/i.test(message)) throw e;
+        throw new Error(`${message}\n${notFoundHint(roots[0]!, roots.slice(1))}`);
+      }
     },
   };
   return wrapped as T;
