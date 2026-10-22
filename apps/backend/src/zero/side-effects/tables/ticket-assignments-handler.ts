@@ -5,6 +5,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
+import { clearTicketOptOut } from '@/utils/ticketActorUtils';
 
 const LEGACY_ACTION_BY_ENUM: Record<string, string> = {
   MANAGER: 'ticket_manager_assigned',
@@ -34,6 +35,10 @@ export class TicketAssignmentsSideEffectHandler extends BaseSideEffectHandler {
 
     if (!assignment) {
       return;
+    }
+
+    if (assignment.userId) {
+      await clearTicketOptOut(assignment.ticketId, assignment.userId);
     }
 
     if (assignment.createdBy === assignment.userId) {
