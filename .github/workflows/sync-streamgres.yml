@@ -1,0 +1,152 @@
+name: Sync streamgres
+
+# Keeps ./streamgres an exact, read-only mirror of juspay/streamgres@main.
+# Pull-based: streamgres (public) needs no workflow, secret or token of its own.
+# Once a night, compare streamgres main's SHA with streamgres/.synced-from;
+# when they differ, mirror the files (replace the folder with `git archive`), push the sync/streamgres
+# branch and open (or update) a PR against BASE_BRANCH. No auto-merge (yet).
+#
+# The PR only ever touches streamgres/ — a guard step fails the run if anything
+# else is in the diff.
+on:
+  schedule:
+    - cron: "30 20 * * *" # 02:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-streamgres
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: juspay/streamgres
+  UPSTREAM_BRANCH: main
+  TARGET_DIR: streamgres
+  SYNC_BRANCH: sync/streamgres
+  BASE_BRANCH: main
+  # Commit/PR titles must carry a ticket (commitlint.config.js).
+  TICKET: XYNE-0
+
+jobs:
+  sync:
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Check upstream for new commits
+        id: check
+        run: |
+          set -euo pipefail
+          new=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          [ -n "$new" ] || { echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"; exit 1; }
+          old=$(cat "${TARGET_DIR}/.synced-from" 2>/dev/null || true)
+          echo "upstream=$new synced=${old:-none}"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          if [ "$new" = "$old" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Mirror streamgres into ${{ env.TARGET_DIR }}/
+        if: steps.check.outputs.changed == 'true'
+        env:
+          NEW: ${{ steps.check.outputs.new }}
+        run: |
+          set -euo pipefail
+          git clone --quiet "https://github.com/${UPSTREAM_REPO}.git" "$RUNNER_TEMP/upstream"
+          git -C "$RUNNER_TEMP/upstream" checkout --quiet "$NEW"
+          # Replace the folder wholesale with the tracked files at $NEW (so files
+          # deleted upstream disappear too). git archive carries only tracked
+          # files — no .git, no build output — and needs no extra tools.
+          rm -rf "$TARGET_DIR"
+          mkdir -p "$TARGET_DIR"
+          git -C "$RUNNER_TEMP/upstream" archive "$NEW" | tar -x -C "$TARGET_DIR"
+          rm -rf "${TARGET_DIR}/.github"
+          echo "$NEW" > "${TARGET_DIR}/.synced-from"
+
+      - name: Commit and push ${{ env.SYNC_BRANCH }}
+        id: push
+        if: steps.check.outputs.changed == 'true'
+        env:
+          NEW: ${{ steps.check.outputs.new }}
+          OLD: ${{ steps.check.outputs.old }}
+        run: |
+          set -euo pipefail
+          short="${NEW::7}"
+          title="chore: ${TICKET} sync streamgres to ${short}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$SYNC_BRANCH"
+          git add -A "$TARGET_DIR"
+          if git diff --cached --quiet; then
+            echo "No file changes after mirroring; nothing to do."
+            exit 0
+          fi
+
+          # Guard: this flow may only ever change files under ${TARGET_DIR}/.
+          outside=$(git diff --cached --name-only | grep -v "^${TARGET_DIR}/" || true)
+          if [ -n "$outside" ]; then
+            echo "::error::Sync would touch files outside ${TARGET_DIR}/:"; echo "$outside"; exit 1
+          fi
+
+          git commit --quiet -m "$title" -m "Mirrors https://github.com/${UPSTREAM_REPO}/commit/${NEW}"
+
+          # Skip the push if the branch already holds this exact state; the PR
+          # step below still runs, so a branch pushed without a PR gets one.
+          if git fetch --quiet origin "$SYNC_BRANCH" 2>/dev/null \
+             && git diff --quiet HEAD "origin/${SYNC_BRANCH}"; then
+            echo "Branch ${SYNC_BRANCH} already has this state."
+          else
+            git push --force origin "$SYNC_BRANCH"
+          fi
+
+          # PR body: upstream commits since the last sync.
+          if [ -n "$OLD" ] && git -C "$RUNNER_TEMP/upstream" cat-file -e "${OLD}^{commit}" 2>/dev/null; then
+            log=$(git -C "$RUNNER_TEMP/upstream" log --no-merges --format='- `%h` %s (%an)' "${OLD}..${NEW}")
+            range="https://github.com/${UPSTREAM_REPO}/compare/${OLD::7}...${short}"
+          else
+            log="- first sync or unknown previous commit"
+            range="https://github.com/${UPSTREAM_REPO}/commit/${NEW}"
+          fi
+          body=$(printf 'Automated mirror of [%s@%s](%s).\n\n%s\n\n`%s/` is read-only: it is overwritten from upstream on every sync. Change streamgres instead.' \
+            "$UPSTREAM_REPO" "$short" "$range" "$log" "$TARGET_DIR")
+
+          {
+            echo "open_pr=true"
+            echo "title=$title"
+            echo "body<<PR_BODY_EOF"
+            echo "$body"
+            echo "PR_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # actions/github-script instead of the gh CLI: the self-hosted runner image
+      # has neither gh nor jq.
+      - name: Open or update PR
+        if: steps.push.outputs.open_pr == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_TITLE: ${{ steps.push.outputs.title }}
+          PR_BODY: ${{ steps.push.outputs.body }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const head = process.env.SYNC_BRANCH;
+            const base = process.env.BASE_BRANCH;
+            const title = process.env.PR_TITLE;
+            const body = process.env.PR_BODY;
+
+            const { data: open } = await github.rest.pulls.list({
+              owner, repo, state: 'open', base, head: `${owner}:${head}`,
+            });
+            if (open.length > 0) {
+              await github.rest.pulls.update({ owner, repo, pull_number: open[0].number, title, body });
+              core.info(`Updated PR #${open[0].number}`);
+            } else {
+              const { data: pr } = await github.rest.pulls.create({ owner, repo, head, base, title, body });
+              core.info(`Opened PR #${pr.number}: ${pr.html_url}`);
+            }
