@@ -212,6 +212,7 @@ import {
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
+import { buildXorDecideTool } from "../xor-decide-tool.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -2374,6 +2375,7 @@ export async function processTask(
           uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
+          customSubagents?.some((c) => (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
         );
 
     const subagentTools = optEnabled("subagent_direct_only")
