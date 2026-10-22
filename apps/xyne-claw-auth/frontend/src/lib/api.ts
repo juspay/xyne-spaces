@@ -3216,11 +3216,88 @@ export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
  * Returns null when the attachment is not a valid summary (422) — the card
  * then says so rather than rendering a half-understood payload.
  */
+// --- Contrast audit (XYNE-66828) -------------------------------------------
+//
+// Render-only mirrors of packages/xyne-claw-shared/src/wcag-contrast.ts. The
+// MATHS is not mirrored and must not be: the server computes every audit with
+// the canonical implementation, which is the only one under test. Re-auditing
+// an edited palette is a round trip (`auditContrastTokens`) for exactly that
+// reason.
+
+export type ContrastSlot =
+  | "background" | "surface" | "body" | "muted"
+  | "primary" | "onPrimary" | "onSurface" | "link";
+
+export interface ContrastRatings {
+  aaNormal: boolean;
+  aaLarge: boolean;
+  aaaNormal: boolean;
+  aaaLarge: boolean;
+}
+
+export interface ContrastSuggestion {
+  hex: string;
+  ratio: number;
+}
+
+/** `missing` means one side has no token, `invalid` that it has one whose value
+ *  is not a flat hex. Neither counts as a failure. */
+export type ContrastPairStatus = "pass" | "fail" | "missing" | "invalid";
+
+export interface ContrastPairResult {
+  id: string;
+  label: string;
+  status: ContrastPairStatus;
+  foreground: ContrastSlot;
+  background: ContrastSlot;
+  foregroundHex: string | null;
+  backgroundHex: string | null;
+  /** The custom property behind each side, without `--`. What Apply rewrites —
+   *  never the hex, since two tokens routinely share one colour. */
+  foregroundToken: string | null;
+  backgroundToken: string | null;
+  ratio: number | null;
+  ratings: ContrastRatings | null;
+  suggestion: ContrastSuggestion | null;
+  unresolved: ContrastSlot[];
+}
+
+export interface ContrastAudit {
+  pairs: ContrastPairResult[];
+  audited: number;
+  failing: number;
+  hasIssues: boolean;
+}
+
+/** What a list response carries: the verdict without the pair detail. The full
+ *  audit is a superset, so `hasIssues` reads the same on both. */
+export interface ContrastAuditCounts {
+  audited: number;
+  failing: number;
+  hasIssues: boolean;
+}
+
+/** Re-audit a palette that is still being edited. Used after a one-click fix:
+ *  the changed token is in more than one pair, so the whole set is remeasured
+ *  rather than the clicked row being marked fixed on its own. */
+export async function auditContrastTokens(input: {
+  tokens: Partial<Record<ContrastSlot, string>>;
+  names?: Partial<Record<ContrastSlot, string>>;
+}): Promise<ContrastAudit> {
+  const result = await request<{ success: true; data: ContrastAudit }>(
+    `${AUTH_API_URL}/api/v1/design-systems/contrast-audit`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return result.data;
+}
+
 export interface BrandSummaryResult {
   summary: BrandSummary;
   /** Set once this brand.json has been saved, so the card stays saved across
    *  a reload instead of offering to create a duplicate. */
   savedDesignSystemId: string | null;
+  /** The WCAG audit of the delivered palette, computed server-side. */
+  contrast: ContrastAudit | null;
 }
 
 export async function fetchBrandSummary(
@@ -3237,9 +3314,14 @@ export async function fetchBrandSummary(
     success: boolean;
     data: BrandSummary;
     savedDesignSystemId?: string | null;
+    contrast?: ContrastAudit | null;
   };
   if (!body.data) return null;
-  return { summary: body.data, savedDesignSystemId: body.savedDesignSystemId ?? null };
+  return {
+    summary: body.data,
+    savedDesignSystemId: body.savedDesignSystemId ?? null,
+    contrast: body.contrast ?? null,
+  };
 }
 
 /** Record the DesignSystem a brand.json was saved as. Returns the id that is
@@ -3281,6 +3363,10 @@ export interface DesignSystemRecord {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** XYNE-66828. The full audit on a single-row response, the counts alone on a
+   *  list — derived from `tokensCss` on every read, never stored, so it cannot
+   *  go stale against an edited palette. */
+  contrast?: ContrastAudit | ContrastAuditCounts;
 }
 
 export interface CreateDesignSystemInput {

@@ -9,7 +9,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
-import { parseBrandSummary } from "xyne-claw-shared";
+import { auditBrandColors, parseBrandSummary } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { chatAttachmentRepository, designSystemRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
@@ -97,7 +97,16 @@ brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request
     // component-only, so after a refresh the button returned and each click
     // created another org-visible DesignSystem. The id is recorded on the
     // attachment, which is the only thing that survives the reload.
-    res.json({ success: true, data: summary, savedDesignSystemId: savedDesignSystemIdOf(att.metadata) });
+    // The WCAG audit rides along with the summary for the same reason the
+    // summary is validated here: the card's frontend has no workspace
+    // dependencies, and a second copy of the contrast maths would drift from
+    // the tested one. XYNE-66828.
+    res.json({
+      success: true,
+      data: summary,
+      savedDesignSystemId: savedDesignSystemIdOf(att.metadata),
+      contrast: auditBrandColors(summary.colors),
+    });
   } catch (err) {
     log.error("[agent-chat] brand summary error:", err);
     if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });

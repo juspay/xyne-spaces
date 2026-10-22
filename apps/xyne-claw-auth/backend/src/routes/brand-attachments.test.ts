@@ -86,6 +86,17 @@ const VALID_SUMMARY = JSON.stringify({
   typeScale: [{ name: "body", sizePx: 16 }],
 });
 
+/** Same contract, unreadable palette: the card has to be able to say so before
+ *  this becomes a standing instruction for every later design run. */
+const PALE_SUMMARY = JSON.stringify({
+  ...JSON.parse(VALID_SUMMARY),
+  name: "Pale",
+  colors: [
+    { hex: "#FFFFFF", token: "brand-background", role: "background" },
+    { hex: "#AAAAAA", token: "brand-text", role: "text" },
+  ],
+});
+
 async function call(
   method: "GET" | "POST",
   url: string,
@@ -121,12 +132,14 @@ beforeEach(() => {
     ["gcs/valid.json", VALID_SUMMARY],
     ["gcs/invalid.json", JSON.stringify({ version: 1, name: "X", source: "url", colors: "nope" })],
     ["gcs/gaps-string.json", JSON.stringify({ ...JSON.parse(VALID_SUMMARY), gaps: "none" })],
+    ["gcs/pale.json", PALE_SUMMARY],
   ]);
   state.attachments = [
     { id: "att-valid", uploaderUserId: OWNER, url: "gcs/valid.json", originalFilename: "brand.json", mimeType: "application/json", size: Buffer.byteLength(VALID_SUMMARY), metadata: null },
     { id: "att-invalid", uploaderUserId: OWNER, url: "gcs/invalid.json", originalFilename: "brand.json", mimeType: "application/json", size: 40, metadata: null },
     { id: "att-gaps", uploaderUserId: OWNER, url: "gcs/gaps-string.json", originalFilename: "brand.json", mimeType: "application/json", size: null, metadata: null },
     { id: "att-huge", uploaderUserId: OWNER, url: "gcs/valid.json", originalFilename: "brand.json", mimeType: "application/json", size: 900_000, metadata: null },
+    { id: "att-pale", uploaderUserId: OWNER, url: "gcs/pale.json", originalFilename: "brand.json", mimeType: "application/json", size: Buffer.byteLength(PALE_SUMMARY), metadata: null },
   ];
   state.admins = new Set([ADMIN]);
   state.updates = [];
@@ -188,6 +201,37 @@ describe("GET /attachments/:id/brand-summary", () => {
     state.attachments[0]!["metadata"] = { savedDesignSystemId: "ds-1" };
     const res = await call("GET", "/attachments/att-valid/brand-summary");
     expect(res.body["savedDesignSystemId"]).toBe("ds-1");
+  });
+
+  // XYNE-66828. Served with the summary rather than computed in the card: the
+  // card's frontend has no workspace dependencies, so a second copy of the
+  // contrast maths would drift from the tested one.
+  it("carries the WCAG audit for every standard pair", async () => {
+    const res = await call("GET", "/attachments/att-valid/brand-summary");
+    expect(res.body["contrast"]["pairs"].map((pair: Record<string, unknown>) => pair["id"])).toEqual([
+      "body-on-background",
+      "muted-on-background",
+      "on-primary-on-primary",
+      "on-surface-on-surface",
+      "link-on-background",
+    ]);
+    // One primary colour and nothing to put on it: unaudited, not failing.
+    expect(res.body["contrast"]["hasIssues"]).toBe(false);
+    expect(res.body["contrast"]["audited"]).toBe(0);
+  });
+
+  it("flags an unreadable palette and names the token to fix", async () => {
+    const res = await call("GET", "/attachments/att-pale/brand-summary");
+    expect(res.status).toBe(200);
+    expect(res.body["contrast"]["hasIssues"]).toBe(true);
+
+    const body = (res.body["contrast"]["pairs"] as Array<Record<string, any>>).find(
+      (pair) => pair["id"] === "body-on-background",
+    );
+    expect(body?.["status"]).toBe("fail");
+    expect(body?.["ratio"]).toBe(2.32);
+    expect(body?.["foregroundToken"]).toBe("brand-text");
+    expect(body?.["suggestion"]["ratio"]).toBeGreaterThanOrEqual(4.5);
   });
 });
 
