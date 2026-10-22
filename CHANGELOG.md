@@ -1,3 +1,10 @@
+## [1.516.0](https://github.com/juspay/xyne-spaces/compare/v1.515.0...v1.516.0) (2026-10-22)
+
+
+### Features
+
+* add mobile CI checks ([#3062](https://github.com/juspay/xyne-spaces/issues/3062)) ([2031f5e](https://github.com/juspay/xyne-spaces/commit/2031f5e57cdb86e73aa824bdcd22c07c7c7a1bf3))
+
 ## [1.515.0](https://github.com/juspay/xyne-spaces/compare/v1.514.0...v1.515.0) (2026-10-21)
 
 
