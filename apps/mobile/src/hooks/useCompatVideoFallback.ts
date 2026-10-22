@@ -59,9 +59,14 @@ export function useCompatVideoFallback(attachmentId: string, active: boolean): C
     handledTokenRef.current = null;
   }, [attachmentId]);
 
-  // A paged-away viewer must not keep polling the server.
+  // A paged-away viewer must not keep polling the server. Both viewers reload
+  // the source when paged back to; forget the handled error so that reload's
+  // 503 schedules a new retry instead of being dropped as a duplicate.
   useEffect(() => {
-    if (!active) clearRetry();
+    if (!active) {
+      clearRetry();
+      handledTokenRef.current = null;
+    }
   }, [active]);
 
   useEffect(() => clearRetry, []);
