@@ -31,19 +31,21 @@ export interface ToolRiskInput {
 const LEVELS: readonly CriticLevel[] = ["low", "medium", "high", "critical"];
 const worst = (a: CriticLevel, b: CriticLevel): CriticLevel => (LEVELS.indexOf(b) > LEVELS.indexOf(a) ? b : a);
 
-const SECRET_PATHS = /(~\/?\.ssh|\.ssh\/|\.aws\/|\.gnupg\/|\.kube\/config|\.docker\/config\.json|\.netrc|\.npmrc|\.pypirc|\.git-credentials|id_(rsa|ed25519|ecdsa)|\.env(\.[a-z]+)?\b|\/proc\/\d+\/environ|credentials\.json|service[-_]account[^"'\s]*\.json)/i;
+const SECRET_PATHS = /(~\/?\.ssh|\.ssh\/|\.aws\/|\.gnupg\/|\.kube\/config|\.docker\/config\.json|\.netrc|\.npmrc|\.pypirc|\.git-credentials|id_(rsa|ed25519|ecdsa)|\.env(\.[a-z]{1,16})?\b|\/proc\/\d{1,10}\/environ|credentials\.json|service[-_]account[^"'\s.]{0,64}\.json)/i;
 const NETWORK = /(^|[\s;&|("'`])(curl|wget|ncat|netcat|ssh|scp|sftp|rsync|telnet|pip3? install|npm (install|i)|apt(-get)? install|git clone)\s|https?:\/\//i;
-const BULK_DELETE = /"(all|ids|items|files|messages|records)"\s*:\s*(true|\[[^\]]{40,}\])|\b(delete_all|deleteMany|purge|truncate|drop (table|database)|rm -rf|--force)\b|"\*"/i;
+// Arguments arrive as compact JSON (`"key":value`); a bounded class after the colon keeps a miss linear.
+const BULK_DELETE = /"(all|ids|items|files|messages|records)":\s{0,8}(true|\[[^\]]{40,400}\])|\b(delete_all|deleteMany|purge|truncate|drop (table|database)|rm -rf|--force)\b|"\*"/i;
 const SERVER_CREATION = /(create|add|register|install|connect)[_-]?(mcp|server|connector|integration)|servers?[._-](create|add)|mcp[._-](create|add)/i;
 const STANDING_WRITE = /^(create-skill|update-skill|propose-skill|write-memory-file|save-memory|update-agent)$/i;
 const DRAFT = /draft/i;
-const ADDRESS = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|https?:\/\/[^\s"'<>]+|\+\d{8,15}/gi;
-const DEST_KEY = /"(to|cc|bcc|recipients?|channel(?:_?id)?|user(?:_?id)?|chat_?id|phone|number|webhook|url|destination|target)"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/gi;
+// Bounded quantifiers only: an unbounded class before a literal is quadratic on a miss (CodeQL polynomial ReDoS).
+const ADDRESS = /[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,253}\.[A-Z]{2,24}|https?:\/\/[^\s"'<>]{1,2048}|\+\d{8,15}/gi;
+const DEST_KEY = /"(to|cc|bcc|recipients?|channel(?:_?id)?|user(?:_?id)?|chat_?id|phone|number|webhook|url|destination|target)":\s{0,8}("(?:[^"\\]|\\.){0,400}"|\[[^\]]{0,400}\])/gi;
 
 /** The string values under destination-like keys, so a channel or user id counts as a recipient too. */
 function destinationValues(argsText: string): string[] {
   const out: string[] = [];
-  for (const m of argsText.matchAll(DEST_KEY)) for (const s of m[2]!.match(/"(?:[^"\\]|\\.)*"/g) ?? []) out.push(s.slice(1, -1));
+  for (const m of argsText.matchAll(DEST_KEY)) for (const s of m[2]!.match(/"(?:[^"\\]|\\.){0,400}"/g) ?? []) out.push(s.slice(1, -1));
   return out;
 }
 
