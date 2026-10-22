@@ -11,7 +11,7 @@ permissions:
 
 # Cancel superseded runs on ordinary feature branches when a new commit is
 # pushed. Do NOT cancel for protected branches (main/master/staging/release*)
-# so their builds always run to completion.
+# so their builds always run to completion. Unchanged from before.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: >-
@@ -27,3 +27,9 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+    concurrency:
+      group: >-
+        ${{ github.event_name == 'merge_group'
+            && format('actor-throttle-{0}', github.ref)
+            || format('actor-throttle-{0}', github.actor) }}
+      cancel-in-progress: false
