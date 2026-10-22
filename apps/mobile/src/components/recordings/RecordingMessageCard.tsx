@@ -1,3 +1,8 @@
+import {
+  getRecordingState,
+  subscribeRecordingStore,
+  sendRecordingAction,
+} from '@/src/stores/recordingStore';
 import { useAuthContextValues } from '@/src/contexts/AuthContext';
 // Shared recording pill from the conversation renderer (PR #339).
 import { memo, useCallback, useEffect, useState, type ReactElement } from 'react';
@@ -22,9 +27,8 @@ export const RecordingMessageCard = memo(function RecordingMessageCard({
   const { userID } = useAuthContextValues();
   const canView = !recording.isActive || (!!userID && recording.createdBy === userID);
   const { embeddedBgUser, embeddedTitleUser, embeddedMutedUser, ambientAccentColor } = tokens;
-  const openRecording = useCallback(async (): Promise<void> => {
+  const openRecording = useCallback((): void => {
     if (!canView) return;
-    const { getRecordingState } = await import('@/src/stores/recordingStore');
     const active = getRecordingState();
     if (
       recording.isActive &&
@@ -96,21 +100,13 @@ function RecordingStopAction({
 }): ReactElement | null {
   const [canStop, setCanStop] = useState(false);
   useEffect(() => {
-    let disposed = false;
-    let unsubscribe: (() => void) | undefined;
-    void import('@/src/stores/recordingStore').then(store => {
-      if (disposed) return;
-      const update = (): void => {
-        const current = store.getRecordingState();
-        setCanStop(current.externalId === callId && current.status === 'recording');
-      };
-      unsubscribe = store.subscribeRecordingStore(update);
-      update();
-    });
-    return (): void => {
-      disposed = true;
-      unsubscribe?.();
+    const update = (): void => {
+      const current = getRecordingState();
+      setCanStop(current.externalId === callId && current.status === 'recording');
     };
+    const unsubscribe = subscribeRecordingStore(update);
+    update();
+    return unsubscribe;
   }, [callId]);
   if (!canStop) return null;
   return (
@@ -118,12 +114,11 @@ function RecordingStopAction({
       accessibilityRole='button'
       accessibilityLabel='Stop recording'
       className='min-h-11 items-center justify-center rounded-lg border border-foreground/15 px-3 active:opacity-70'
-      onPress={async event => {
+      onPress={event => {
         event.stopPropagation();
-        const store = await import('@/src/stores/recordingStore');
-        const current = store.getRecordingState();
+        const current = getRecordingState();
         if (current.externalId !== callId || current.status !== 'recording') return;
-        store.sendRecordingAction({ type: 'stopRecording' });
+        sendRecordingAction({ type: 'stopRecording' });
       }}
     >
       <Text className='text-sm font-semibold' style={{ color }}>

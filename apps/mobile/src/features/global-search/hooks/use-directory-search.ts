@@ -97,23 +97,28 @@ function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePers
 }
 
 /** Includes yourself, so `from:` can filter to your own messages. */
-export function usePeopleSearch(query: string, markSelf = true): readonly SearchPersonItem[] {
+export function usePeopleSearch(
+  query: string | null,
+  markSelf = true,
+): readonly SearchPersonItem[] {
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? '';
   const users = useUsers();
 
   return useMemo(
     () =>
-      peopleSearchFor(users)(query, PEOPLE_LIMIT).map(({ user: match, name, email }) => {
-        const statusEmoji = getActiveUserStatusEmoji(match);
+      query === null
+        ? []
+        : peopleSearchFor(users)(query, PEOPLE_LIMIT).map(({ user: match, name, email }) => {
+            const statusEmoji = getActiveUserStatusEmoji(match);
 
-        return {
-          id: match.id,
-          title: markSelf && match.id === currentUserId ? `${name} (You)` : name,
-          ...(email ? { subtitle: email } : {}),
-          ...(statusEmoji ? { statusEmoji } : {}),
-        };
-      }),
+            return {
+              id: match.id,
+              title: markSelf && match.id === currentUserId ? `${name} (You)` : name,
+              ...(email ? { subtitle: email } : {}),
+              ...(statusEmoji ? { statusEmoji } : {}),
+            };
+          }),
     [currentUserId, query, users, markSelf],
   );
 }
@@ -130,12 +135,14 @@ type SearchableChannel = {
   isStarred?: boolean;
 };
 
-export function useChannelsSearch(query: string): readonly SearchChannelItem[] {
+export function useChannelsSearch(query: string | null): readonly SearchChannelItem[] {
   const allChannels = useAllChannels();
   const visibleChannels = useSelector(stateMachineActor, selectVisibleChannels);
   const statuses = useSelector(stateMachineActor, selectChannelStatuses);
 
+  const enabled = query !== null;
   const channels = useMemo(() => {
+    if (!enabled) return [];
     const byStatus = statusMap(statuses);
     const byId = new Map<string, SearchableChannel>();
 
@@ -177,11 +184,12 @@ export function useChannelsSearch(query: string): readonly SearchChannelItem[] {
     }
 
     return [...byId.values()];
-  }, [allChannels, statuses, visibleChannels]);
+  }, [allChannels, statuses, visibleChannels, enabled]);
 
-  const search = useMemo(() => createNameSearch(channels), [channels]);
+  const search = useMemo(() => (enabled ? createNameSearch(channels) : null), [channels, enabled]);
 
   return useMemo(() => {
+    if (query === null || !search) return [];
     // Users often type Slack-style `#engineering`; match against bare names.
     const normalized = query.trim().replace(/^#/, '');
     const matches = normalized

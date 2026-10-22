@@ -1,4 +1,3 @@
-import { recordingPreviewFromMetadata } from '@/src/utils/recordingMessage';
 import type { ChannelKind, ConversationInput } from './conversationInput';
 import { callPreviewFromMetadata } from './callPreview';
 import { nonParticipantPreviewFromMetadata } from './nonParticipant';
@@ -40,6 +39,20 @@ const callStamp = (input: ConversationInput): string => {
     return '';
   }
   return `${call.callId ?? ''}:${call.title}:${call.operation ?? ''}:${call.durationMs ?? ''}`;
+};
+
+const recordingStamp = (input: ConversationInput): string => {
+  const metadata = input.metadata;
+  if (metadata?.['isRecordingMessage'] !== true) return '';
+  return [
+    metadata['callId'],
+    metadata['operation'],
+    metadata['durationMs'],
+    metadata['isHeadlessRecording'],
+    metadata['createdBy'],
+  ]
+    .map(value => String(value ?? ''))
+    .join(':');
 };
 
 const nonParticipantStamp = (input: ConversationInput): string => {
@@ -118,7 +131,7 @@ export const contentSignature = (
     forwardedStamp(input),
     input.isFlowJson ? '1' : '0',
     callStamp(input),
-    JSON.stringify(recordingPreviewFromMetadata(input.metadata)),
+    recordingStamp(input),
     nonParticipantStamp(input),
     classificationStamp(input),
     input.messageType,

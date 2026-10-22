@@ -1,3 +1,7 @@
+import { useThreadHeaderOverflow } from '@/src/hooks/useThreadHeaderOverflow';
+import { ThreadContextSheet } from '@/src/features/chat/thread-header/thread-context-sheet';
+import { ThreadCallSheet } from '@/src/features/chat/thread-header/thread-call-sheet';
+import { ThreadTagsSheet } from '@/src/features/chat/thread-header/thread-tags-sheet';
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -52,6 +56,8 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
     isOnline,
     canUseMemberActions,
   } = useConversationHeaderData(channelId, { enabled: false });
+
+  const overflow = useThreadHeaderOverflow(channelId, threadId, canUseMemberActions);
 
   const baseConversationSurface: BaseConversationSurface =
     surfaceParam === 'dms' || isDM || channel?.scopeType === ChannelScopeType.GROUP_DM
@@ -177,10 +183,25 @@ const ThreadHeaderV3: React.FC<ThreadHeaderV3Props> = ({ channelId, threadId, on
             </HeaderPill>
           </Pressable>
 
-          <ThreadHeaderOverflowMenu
+          <ThreadHeaderOverflowMenu overflow={overflow} />
+          <ThreadContextSheet
+            threadId={threadId}
+            canEdit={overflow.canEdit}
+            isOpen={overflow.isContextOpen}
+            onClose={overflow.closeContext}
+          />
+          <ThreadCallSheet
             channelId={channelId}
             threadId={threadId}
-            canUseMemberActions={canUseMemberActions}
+            isOpen={overflow.isCallOpen}
+            onClose={overflow.closeCall}
+          />
+          <ThreadTagsSheet
+            channelId={channelId}
+            threadId={threadId}
+            canEdit={overflow.canEdit}
+            isOpen={overflow.isTagsOpen}
+            onClose={overflow.closeTags}
           />
         </View>
       </View>

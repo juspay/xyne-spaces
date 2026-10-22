@@ -226,26 +226,21 @@ export const useConversationHeaderData = (
     }
     if (callPromptOpen.current) return;
     callPromptOpen.current = true;
-    try {
-      // Reuse the globally synced roster, as desktop does; no extra query per header.
-      const active = roomActor
-        .getSnapshot()
-        .context.activeCalls.find(
-          call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
-        );
-      if (active) {
-        callPromptOpen.current = false;
-        router.push({
-          pathname: '/(protected)/native-call',
-          params: { channelId: active.externalId },
-        });
-        return;
-      }
-      setIsCallConfirmationOpen(true);
-    } catch {
+    // Reuse the globally synced roster, as desktop does; no extra query per header.
+    const active = roomActor
+      .getSnapshot()
+      .context.activeCalls.find(
+        call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
+      );
+    if (active) {
       callPromptOpen.current = false;
-      Alert.alert('Could not check active calls', 'Please try again.');
+      router.push({
+        pathname: '/(protected)/native-call',
+        params: { channelId: active.externalId },
+      });
+      return;
     }
+    setIsCallConfirmationOpen(true);
   }, [
     canUseMemberActions,
     channelId,

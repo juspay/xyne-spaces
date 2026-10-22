@@ -1,6 +1,4 @@
-import { ChannelScopeType } from '@xyne/shared';
-import { useChannel } from '@/src/hooks/useChannels';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Alert, Text, View } from 'react-native';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import Avatar from '@/src/components/ui/avatar';
@@ -34,12 +32,9 @@ function ThreadCallSheetBody({
   ...sheet
 }: SheetMountProps & Pick<Props, 'channelId' | 'threadId'>): ReactElement | null {
   const ref = useRef<AppBottomSheetRef>(null);
-  const { onOpenChange, onDismiss } = sheet;
   const starting = useRef(false);
   const { userID } = useAuthContextValues();
   const users = useUsers();
-  const channel = useChannel(channelId);
-  const isDM = channel?.scopeType === ChannelScopeType.DM;
   const [conversation, details] = useQuery(
     queries.getConversationById({ conversationId: threadId }),
   );
@@ -91,34 +86,9 @@ function ThreadCallSheetBody({
       return;
     }
     starting.current = true;
-    void startAudioCall(
-      channelId,
-      threadId,
-      buildThreadCallInvitees(
-        isDM ? (members ?? []).map(member => member.userId) : selected,
-        userID,
-      ),
-    );
-    if (isDM) {
-      onOpenChange(false);
-      onDismiss();
-    } else ref.current?.dismiss();
-  }, [
-    ready,
-    conversation?.callId,
-    channelId,
-    threadId,
-    isDM,
-    members,
-    selected,
-    userID,
-    onOpenChange,
-    onDismiss,
-  ]);
-  useEffect(() => {
-    if (isDM && ready) start();
-  }, [isDM, ready, start]);
-  if (isDM && !conversation?.callId) return null;
+    void startAudioCall(channelId, threadId, buildThreadCallInvitees(selected, userID));
+    ref.current?.dismiss();
+  }, [ready, conversation?.callId, channelId, threadId, selected, userID]);
   return (
     <AppBottomSheet ref={ref} {...sheet} mode='fullscreen' keyboardBehavior='extend'>
       <FilterSheetHeader

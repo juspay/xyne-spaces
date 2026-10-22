@@ -1,13 +1,11 @@
 import React from 'react';
 import { beforeEach, expect, it, jest } from '@jest/globals';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 import { ThreadCallSheet } from '@/src/features/chat/thread-header/thread-call-sheet';
 import { startAudioCall } from '@/src/utils/startAudioCall';
 
 let mockCallId: string | null = null;
-let mockScope = 'DEFAULT';
 jest.mock('@xyne/shared', () => ({ ChannelScopeType: { DM: 'DM' } }));
-jest.mock('@/src/hooks/useChannels', () => ({ useChannel: () => ({ scopeType: mockScope }) }));
 jest.mock('@/src/contexts/AuthContext', () => ({
   useAuthContextValues: () => ({ userID: 'self' }),
 }));
@@ -51,7 +49,6 @@ jest.mock('@/src/features/global-search/components/filters/filter-sheet-header',
 
 beforeEach(() => {
   mockCallId = null;
-  mockScope = 'DEFAULT';
 });
 const props = { channelId: 'channel', threadId: 'thread', isOpen: true, onClose: jest.fn() };
 it('does not offer Start for a thread with a linked call or recording', () => {
@@ -72,13 +69,4 @@ it('starts a group thread with an explicit caller instead of a channel-wide fall
   const view = render(<ThreadCallSheet {...props} />);
   fireEvent.press(view.getByText('Start'));
   expect(startAudioCall).toHaveBeenCalledWith('channel', 'thread', ['self']);
-});
-it('starts a DM thread with the DM members without showing a picker', async () => {
-  mockScope = 'DM';
-  const view = render(<ThreadCallSheet {...props} />);
-  await waitFor(() =>
-    expect(startAudioCall).toHaveBeenCalledWith('channel', 'thread', ['self', 'peer']),
-  );
-  expect(view.queryByText('Start')).toBeNull();
-  expect(startAudioCall).toHaveBeenCalledTimes(1);
 });

@@ -18,7 +18,6 @@ import {
   useMountWhileOpen,
   type SheetMountProps,
 } from '@/src/features/global-search/hooks/use-mount-while-open';
-import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
 import { useQuery } from '@/src/hooks/useQuery';
 import { useZero } from '@/src/hooks/useZero';
 import { apiGet } from '@/src/services/apiClient';
@@ -29,12 +28,12 @@ import { queries } from '@/src/zero/queries';
 function ThreadTagsBody({
   channelId,
   threadId,
+  canEdit: canEditThread,
   ...sheetProps
-}: SheetMountProps & { channelId: string; threadId: string }): ReactElement {
+}: SheetMountProps & { channelId: string; threadId: string; canEdit: boolean }): ReactElement {
   const sheetRef = useRef<AppBottomSheetRef>(null);
   const zero = useZero();
   const { user } = useAuth();
-  const { channel, canUseMemberActions } = useConversationHeaderData(channelId, { enabled: false });
   const [conversation, details] = useQuery(
     queries.getConversationById({ conversationId: threadId }),
   );
@@ -64,11 +63,7 @@ function ThreadTagsBody({
   const canCreate =
     proposed.length > 0 && !rows.some(row => normalizeThreadTypeName(row.name) === proposed);
   const canEdit =
-    !!channel &&
-    !channel.isArchived &&
-    canUseMemberActions &&
-    conversation?.channelId === channelId &&
-    details.type === 'complete';
+    canEditThread && conversation?.channelId === channelId && details.type === 'complete';
   const save = async (): Promise<void> => {
     if (!canEdit || savingRef.current) return;
     if (!Object.keys(edits).length) {
@@ -204,9 +199,11 @@ function ThreadTagsBody({
 export function ThreadTagsSheet({
   isOpen,
   onClose,
+  canEdit,
   channelId,
   threadId,
 }: {
+  canEdit: boolean;
   isOpen: boolean;
   onClose: () => void;
   channelId: string;
@@ -214,6 +211,12 @@ export function ThreadTagsSheet({
 }): ReactElement | null {
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
   return shouldRender ? (
-    <ThreadTagsBody key={threadId} {...sheetProps} channelId={channelId} threadId={threadId} />
+    <ThreadTagsBody
+      canEdit={canEdit}
+      key={threadId}
+      {...sheetProps}
+      channelId={channelId}
+      threadId={threadId}
+    />
   ) : null;
 }

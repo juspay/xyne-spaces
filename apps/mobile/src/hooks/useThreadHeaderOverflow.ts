@@ -1,3 +1,8 @@
+import { ChannelScopeType } from '@xyne/shared';
+import { useAuthContextValues } from '@/src/contexts/AuthContext';
+import { parseDMParticipantIds } from '@/src/utils/channel-utils';
+import { startAudioCall } from '@/src/utils/startAudioCall';
+import { buildThreadCallInvitees } from '@/src/features/chat/thread-header/thread-call-invitees';
 import { showMessageToast } from '@/src/utils/toast';
 import { currentCallConversation } from '@/src/utils/currentCallConversation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -30,6 +35,7 @@ export function useThreadHeaderOverflow(
   canUseMemberActions: boolean,
 ): ThreadHeaderOverflow {
   const zero = useZero();
+  const { userID } = useAuthContextValues();
   // Mobile does not hydrate userPreference into the app state machine.
   const [userPreference] = useQuery(queries.getCurrentUserPreference({}));
   const showThreadTags = userPreference?.showThreadTags ?? false;
@@ -118,13 +124,10 @@ export function useThreadHeaderOverflow(
       }
       const status = getRecordingState().status;
       // Permission prompts yield control; another recording or call may have started.
-      if (
-        (status !== 'idle' && status !== 'error') ||
-        (['initiating', 'joining', 'connecting', 'connected', 'disconnecting'] as const).some(
-          state => roomActor.getSnapshot().matches(state),
-        )
-      )
+      if ((status !== 'idle' && status !== 'error') || !roomActor.getSnapshot().matches('idle')) {
+        Alert.alert('Recording unavailable', 'Please finish your current call or recording first.');
         return;
+      }
       startedRecording.current = true;
       sendRecordingAction({ type: 'clearTranscripts' });
       sendRecordingAction({ type: 'startRecording', channelId, conversationId: threadId });
@@ -161,10 +164,26 @@ export function useThreadHeaderOverflow(
       router.push('/(protected)/native-call');
       return;
     }
+    if (channel?.scopeType === ChannelScopeType.DM) {
+      const status = getRecordingState().status;
+      if (!roomActor.getSnapshot().matches('idle') || (status !== 'idle' && status !== 'error')) {
+        Alert.alert('Call unavailable', 'Please finish your current call or recording first.');
+        return;
+      }
+      if (!userID) return;
+      void startAudioCall(
+        channelId,
+        threadId,
+        buildThreadCallInvitees(parseDMParticipantIds(channel), userID),
+      );
+      return;
+    }
     setIsCallOpen(true);
   }, [
     canEdit,
     hasLinkedCall,
+    channel,
+    userID,
     recordingActive,
     canUseMemberActions,
     channelId,
@@ -244,6 +263,7 @@ export function useThreadHeaderOverflow(
   );
 
   return {
+    canEdit,
     isContextOpen,
     closeContext,
     isCallOpen,

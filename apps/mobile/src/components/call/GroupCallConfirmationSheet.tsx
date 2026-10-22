@@ -1,6 +1,6 @@
 import { useEffect, type ReactElement } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
-import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetView } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import { useMountWhileOpen } from '@/src/features/global-search/hooks/use-mount-while-open';
@@ -34,8 +34,8 @@ export function GroupCallConfirmationSheet({
   if (!shouldRender) return null;
   return (
     <AppBottomSheet {...sheetProps} mode='dynamic'>
-      <BottomSheetScrollView
-        contentContainerStyle={{
+      <BottomSheetView
+        style={{
           paddingHorizontal: 24,
           paddingTop: 12,
           paddingBottom: Math.max(insets.bottom, 16) + 8,
@@ -72,7 +72,7 @@ export function GroupCallConfirmationSheet({
             </Text>
           </Pressable>
         </View>
-      </BottomSheetScrollView>
+      </BottomSheetView>
     </AppBottomSheet>
   );
 }

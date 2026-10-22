@@ -1,6 +1,3 @@
-import { ThreadContextSheet } from '@/src/features/chat/thread-header/thread-context-sheet';
-import { ThreadCallSheet } from '@/src/features/chat/thread-header/thread-call-sheet';
-import { ThreadTagsSheet } from '@/src/features/chat/thread-header/thread-tags-sheet';
 import { Button, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import { disabled } from '@expo/ui/swift-ui/modifiers';
 import { BlurView } from 'expo-blur';
@@ -14,28 +11,13 @@ import { haptics } from '@/src/utils/haptics';
 import { SUPPORTS_LIQUID_GLASS } from '@/src/utils/platform';
 
 import type { ThreadHeaderOverflowMenuProps } from './thread-header-overflow-menu.types';
-import { useThreadHeaderOverflow } from '@/src/hooks/useThreadHeaderOverflow';
 
 const GLASS_INTENSITY = 60;
 
-export function ThreadHeaderOverflowMenu({
-  channelId,
-  threadId,
-  canUseMemberActions,
-}: ThreadHeaderOverflowMenuProps) {
+export function ThreadHeaderOverflowMenu({ overflow }: ThreadHeaderOverflowMenuProps) {
   const { theme } = useUniwind();
   const foregroundColor = useCSSVariable('--color-foreground') as string;
-  const {
-    isContextOpen,
-    closeContext,
-    isCallOpen,
-    closeCall,
-    isTagsOpen,
-    closeTags,
-    actions,
-    isSubscriptionResolving,
-    handleAction,
-  } = useThreadHeaderOverflow(channelId, threadId, canUseMemberActions);
+  const { actions, isSubscriptionResolving, handleAction } = overflow;
 
   const isDark = theme === 'dark';
   const blurTint: 'light' | 'dark' = isDark ? 'dark' : 'light';
@@ -104,24 +86,6 @@ export function ThreadHeaderOverflowMenu({
           })}
         </Menu>
       </Host>
-      <ThreadContextSheet
-        isOpen={isContextOpen}
-        onClose={closeContext}
-        channelId={channelId}
-        threadId={threadId}
-      />
-      <ThreadCallSheet
-        isOpen={isCallOpen}
-        onClose={closeCall}
-        channelId={channelId}
-        threadId={threadId}
-      />
-      <ThreadTagsSheet
-        isOpen={isTagsOpen}
-        onClose={closeTags}
-        channelId={channelId}
-        threadId={threadId}
-      />
     </>
   );
 }

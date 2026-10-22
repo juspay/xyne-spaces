@@ -1,7 +1,7 @@
 import { FilterOptionRow } from '@/src/features/global-search/components/filters/filter-option-row';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { Search, Hash, UserRound, MessageSquare, Ticket, FileText } from 'lucide-react-native';
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { MessageType } from '@xyne/shared';
@@ -19,7 +19,6 @@ import {
 } from '@/src/features/global-search/hooks/use-directory-search';
 import { useSearchResults } from '@/src/features/global-search/hooks/use-search-results';
 import { buildSearchRequest } from '@/src/features/global-search/utils/search-request';
-import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
 import { useZero } from '@/src/hooks/useZero';
 import { awaitMutation } from '@/src/zero/awaitMutation';
 import { mutators } from '@/src/zero/mutators';
@@ -39,14 +38,13 @@ const categoryLabels: Record<Category, string> = {
 };
 const categories: Category[] = ['channels', 'people', 'messages', 'tickets', 'files'];
 function ContextBody({
-  channelId,
+  canEdit,
   threadId,
   ...sheet
-}: SheetMountProps & { channelId: string; threadId: string }): ReactElement {
+}: SheetMountProps & { threadId: string; canEdit: boolean }): ReactElement {
   const { accentText } = useBubbleAccent();
   const ref = useRef<AppBottomSheetRef>(null);
   const zero = useZero();
-  const { channel, canUseMemberActions } = useConversationHeaderData(channelId, { enabled: false });
   const [tab, setTab] = useState<Category>('channels');
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -57,8 +55,8 @@ function ContextBody({
     const timer = setTimeout(() => setDebounced(query), 250);
     return (): void => clearTimeout(timer);
   }, [query]);
-  const channels = useChannelsSearch(query);
-  const people = usePeopleSearch(query, false);
+  const channels = useChannelsSearch(tab === 'channels' ? query : null);
+  const people = usePeopleSearch(tab === 'people' ? query : null, false);
   const remote = useSearchResults(
     tab === 'channels' || tab === 'people'
       ? null
@@ -71,24 +69,27 @@ function ContextBody({
         }),
   );
   const local = tab === 'channels' ? channels : people;
-  const rows =
-    tab === 'channels' || tab === 'people'
-      ? local.flatMap(item => {
-          const value = contextItemFromResult({
-            id: item.id,
-            type: tab === 'channels' ? 'channel' : 'user',
-            title: item.title,
-            subtitle: '',
-            metadata: {},
-            relevanceScore: 0,
-          });
-          return value ? [value] : [];
-        })
-      : remote.data.flatMap(result => {
-          const value = contextItemFromResult(result);
-          return value ? [value] : [];
-        });
-  const canSend = !!channel && !channel.isArchived && canUseMemberActions && !!threadId;
+  const rows = useMemo(
+    () =>
+      tab === 'channels' || tab === 'people'
+        ? local.flatMap(item => {
+            const value = contextItemFromResult({
+              id: item.id,
+              type: tab === 'channels' ? 'channel' : 'user',
+              title: item.title,
+              subtitle: '',
+              metadata: {},
+              relevanceScore: 0,
+            });
+            return value ? [value] : [];
+          })
+        : remote.data.flatMap(result => {
+            const value = contextItemFromResult(result);
+            return value ? [value] : [];
+          }),
+    [tab, local, remote.data],
+  );
+  const canSend = canEdit && !!threadId;
   const send = async (): Promise<void> => {
     if (!canSend || !selected.length || inFlight.current) return;
     inFlight.current = true;
@@ -271,9 +272,9 @@ export function ThreadContextSheet({
   onClose,
   ...ids
 }: {
+  canEdit: boolean;
   isOpen: boolean;
   onClose: () => void;
-  channelId: string;
   threadId: string;
 }): ReactElement | null {
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);

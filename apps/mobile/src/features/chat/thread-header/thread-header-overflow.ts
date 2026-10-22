@@ -9,6 +9,7 @@ export type ThreadHeaderOverflowAction = {
 };
 
 export type ThreadHeaderOverflow = {
+  canEdit: boolean;
   actions: ThreadHeaderOverflowAction[];
   isSubscribed: boolean;
   isSubscriptionResolving: boolean;
