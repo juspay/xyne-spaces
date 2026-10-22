@@ -88,7 +88,13 @@ export async function compare({ feature, liveEngine, state, questions, liveAnswe
 
 /** Comparable across engines: a yes/no at 0.5, a choice by id, a score by level. */
 const answerLabel = (answer: DecisionAnswer): string =>
-  answer.type === 'noul' ? String(answer.noul >= 0.5) : answer.type === 'choice' ? answer.choice : String(answer.level);
+  answer.type === 'noul'
+    ? String(answer.noul >= 0.5)
+    : answer.type === 'choice'
+      ? answer.choice
+      : answer.type === 'value'
+        ? String(answer.value)
+        : String(answer.level);
 
 const comparedAnswer = <T>(task: DecisionTask<T>, run: EngineRun<T>): ComparedAnswer => ({
   engine: run.engine,

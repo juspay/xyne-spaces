@@ -21,8 +21,19 @@ export interface ScoreQuestion {
   criteria: string[];
 }
 
-/** A typed question any engine answers: yes/no, choice, or score. */
-export type DecisionQuestion = YesNoQuestion | ChoiceQuestion | ScoreQuestion;
+/**
+ * One value read out of the state (an order id, an amount), typed by `dtype`. `pattern` is a
+ * regex the value must match; XOR decodes against it, so it must be bounded (`{1,40}`, not `+`).
+ */
+export interface ValueQuestion {
+  type: 'value';
+  instructions: string;
+  dtype: 'string' | 'int' | 'float';
+  pattern?: string;
+}
+
+/** A typed question any engine answers: yes/no, choice, score, or value. */
+export type DecisionQuestion = YesNoQuestion | ChoiceQuestion | ScoreQuestion | ValueQuestion;
 
 /** An engine's answer to a DecisionQuestion, in the same shape whichever engine gave it. */
 export type DecisionAnswer =
@@ -43,6 +54,13 @@ export type DecisionAnswer =
       level: number;
       /** The engine's confidence in `level`, when it gave one. */
       confidence?: number;
+    }
+  | {
+      type: 'value';
+      /** Null when the state does not hold it. */
+      value: string | number | null;
+      /** The engine's confidence in `value`, or in its absence when `value` is null. */
+      confidence?: number;
     };
 
 /** Where a classifier request goes. */
@@ -50,6 +68,8 @@ export interface ClassifierTarget {
   url: string;
   apiKey: string;
   model: string;
+  /** The model asked instead of `model` when a request carries images or value questions; unset, images are not sent. */
+  visionModel?: string;
 }
 
 /** Why an engine came back empty; a caller cancelling it is not a failure. */
@@ -122,6 +142,8 @@ export interface ComparedAnswer {
 export interface TaskQuestion {
   state: string;
   questions: Record<string, DecisionQuestion>;
+  /** Base64 image data URLs read with `state`; see requestClassifierAnswers. */
+  images?: string[];
 }
 
 /** What the evaluation worker rebuilds a task from. It goes through Redis, so plain data only. */

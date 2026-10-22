@@ -353,6 +353,9 @@ const envSchema = Joi.object({
     otherwise: Joi.string().allow('').default(''),
   }),
   XOR_MODEL: Joi.string().default('xor-latest'),
+  // The XOR model that reads images and answers value questions, asked instead of XOR_MODEL when
+  // a request has either (e.g. a desk email's screenshots, an order id). Unset => images are left out.
+  XOR_VISION_MODEL: Joi.string().allow('').default(''),
   // The engine that answers typed decision questions live (services/decision): xor or jev. The
   // LLM is only ever asked to compare: the features gate on probabilities it does not give.
   DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
@@ -1050,6 +1053,7 @@ export const config = {
     apiKey: envVars.XOR_API_KEY,
     url: envVars.XOR_URL,
     model: envVars.XOR_MODEL,
+    visionModel: envVars.XOR_VISION_MODEL,
   },
   decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
   decisionEval: {

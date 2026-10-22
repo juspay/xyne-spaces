@@ -60,6 +60,7 @@ async function runClassifier<T>(engine: ClassifierEngine, task: DecisionTask<T>)
   const answers = await requestClassifierAnswers(task.question.state, task.question.questions, CLASSIFIER_TIMEOUT_MS, undefined, {
     target,
     engine,
+    images: task.question.images,
     onFailure: (f) => {
       failure = f;
     },
@@ -113,6 +114,8 @@ export interface AskOptions {
   /** Leave out an unusable answer instead of failing the whole batch; see requestClassifierAnswers. */
   partial?: boolean;
   onFailure?: (failure: AskFailure) => void;
+  /** Base64 image data URLs read with `state`, by a classifier with a vision model; the LLM never gets them. */
+  images?: string[];
 }
 
 type Ask = (
@@ -127,7 +130,7 @@ type Ask = (
 /** A classifier over the Jev wire format, at `engine`'s endpoint. */
 const askClassifier =
   (engine: ClassifierEngine): Ask =>
-  async (_feature, state, questions, timeoutMs, signal, { partial = false, onFailure } = {}) => {
+  async (_feature, state, questions, timeoutMs, signal, { partial = false, onFailure, images } = {}) => {
     const target = classifierTarget(engine);
     const startedAt = performance.now();
     let failure: AskFailure | undefined;
@@ -135,6 +138,7 @@ const askClassifier =
       partial,
       target,
       engine,
+      images,
       onFailure: (f) => {
         failure = f;
         onFailure?.(f);

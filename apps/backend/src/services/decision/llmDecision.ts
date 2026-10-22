@@ -50,6 +50,8 @@ const readAnswer = (question: DecisionQuestion, raw: unknown): DecisionAnswer | 
     const isOption = typeof value === 'string' && Object.prototype.hasOwnProperty.call(question.criteria, value);
     return isOption ? { type: 'choice', choice: value, probabilities: {} } : null;
   }
+  // Value questions are answered by XOR only.
+  if (question.type === 'value') return null;
   const level = Number(value);
   const top = question.criteria.length - 1;
   return Number.isInteger(level) && level >= 0 && level <= top && top > 0
