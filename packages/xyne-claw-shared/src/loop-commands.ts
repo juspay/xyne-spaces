@@ -17,7 +17,6 @@ export interface LoopCommandDef {
   proofRule: "delivered-artifact" | "file-line-citation";
   closeCheck: LoopCloseCheck | null;
   skills: readonly string[];
-  help: LoopCommandHelp;
   modeLog: string;
   start: {
     title: string;
@@ -25,12 +24,6 @@ export interface LoopCommandDef {
     durationLabel: string;
     seedFrontier: boolean;
   };
-}
-
-export interface LoopCommandHelp {
-  summary: string;
-  argsHint: string;
-  details: readonly string[];
 }
 
 const TIMEBOXED_START = {
@@ -52,15 +45,6 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     proofRule: "delivered-artifact",
     closeCheck: null,
     skills: [],
-    help: {
-      summary: "Explore until a deadline",
-      argsHint: "<duration> [focus]",
-      details: [
-        "Duration is `<number><m|h|d>`, e.g. `/experiment 90m`, `/experiment 8h`, `/experiment 14d`. Omit it for 1h; anything over the 30d cap is clamped to 30d.",
-        "Pin a model with `provider=… model=…`.",
-        "`/experiment status` · `/experiment list` · `/experiment findings [id]` · `/experiment stop` — these work for every loop command",
-      ],
-    },
     modeLog: "Experiment mode — injected experiment tools (epoch {epoch}, remaining {remaining})",
     start: TIMEBOXED_START,
   },
@@ -75,13 +59,6 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     proofRule: "file-line-citation",
     closeCheck: "file-line-explanation",
     skills: ["understanding-skills"],
-    help: {
-      summary: "Explain every path in scope until the frontier is exhausted",
-      argsHint: "[duration] [focus]",
-      details: [
-        "Ends when the code-path frontier is exhausted, not on the clock; the duration is only a safety cap. Delivers one self-contained HTML document.",
-      ],
-    },
     modeLog: "Understanding mode — injected experiment tools (epoch {epoch}, coverage-gated exit)",
     start: {
       title: "**/understanding started**",
@@ -101,13 +78,6 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     proofRule: "delivered-artifact",
     closeCheck: "structural-opportunity",
     skills: [],
-    help: {
-      summary: "Find structural gaps (convention drift, missing paved paths, duplication) until the candidate list is exhausted",
-      argsHint: "[duration cap] [focus]",
-      details: [
-        "Delivers one markdown report grouped by tag, with a tag index.",
-      ],
-    },
     modeLog: "Framework mode — injected experiment tools (epoch {epoch}, candidate-gated exit)",
     start: TIMEBOXED_START,
   },
@@ -122,13 +92,6 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     proofRule: "delivered-artifact",
     closeCheck: "observation",
     skills: [],
-    help: {
-      summary: "Hunt exploitable defects until the deadline, keeping leads and confirmed findings apart",
-      argsHint: "<duration> [focus]",
-      details: [
-        "Time-boxed: uses the whole window. Delivers one markdown report with a reproduction for every confirmed finding.",
-      ],
-    },
     modeLog: "Security mode — injected experiment tools (epoch {epoch}, observation-gated closes)",
     start: TIMEBOXED_START,
   },
@@ -143,13 +106,6 @@ export const LOOP_COMMANDS: readonly LoopCommandDef[] = [
     proofRule: "delivered-artifact",
     closeCheck: "decision-rule",
     skills: [],
-    help: {
-      summary: "Walk git history oldest to newest and write down the coding rules each change established",
-      argsHint: "[focus]",
-      details: [
-        "Ends when the walk reaches HEAD, not on the clock. Delivers one self-contained HTML decision log.",
-      ],
-    },
     modeLog: "Repo-history mode — injected experiment tools (epoch {epoch}, progress-gated exit at HEAD)",
     start: TIMEBOXED_START,
   },

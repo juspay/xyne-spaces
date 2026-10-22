@@ -197,4 +197,4 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 
 export * from "./reply-format/index.js";
-export { LOOP_KINDS, LOOP_COMMANDS, parseLoopKind, withLoopKind, loopCommandFor, loopCommandForWord, loopModeLog, type LoopKind, type LoopKey, type LoopCloseCheck, type LoopCommandDef, type LoopCommandHelp } from "./loop-commands.js";
+export { LOOP_KINDS, LOOP_COMMANDS, parseLoopKind, withLoopKind, loopCommandFor, loopCommandForWord, loopModeLog, type LoopKind, type LoopKey, type LoopCloseCheck, type LoopCommandDef } from "./loop-commands.js";

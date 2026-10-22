@@ -9,7 +9,6 @@ import {
 import { IMMEDIATE_TASK_COMMAND_RE, LOOP_COMMANDS, TASK_COMMAND_NAMES } from "xyne-claw-shared";
 import { parseSlashCommand } from "./parseSlashCommand.js";
 import { buildHelpText } from "./webhook-commands/help.js";
-import { CLAW_COMMANDS, findClawCommand } from "./command-help.js";
 
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
 const { parseExperimentCommand } = await import("./experiment.js");
@@ -65,7 +64,7 @@ describe("command registry", () => {
 
 describe("every webhook command routes, is listed in /help, and has its own help", () => {
   const EXAMPLE_ARGS: Record<string, string> = { goal: "ship the release", eval: "what is 2+2" };
-  for (const def of CLAW_COMMANDS) {
+  for (const def of commandsForSurface("webhook")) {
     const invocation = `/${def.name}${EXAMPLE_ARGS[def.name] ? ` ${EXAMPLE_ARGS[def.name]}` : ""}`;
     it(`/${def.name}`, () => {
       const routed =
@@ -81,18 +80,11 @@ describe("every webhook command routes, is listed in /help, and has its own help
 
   it("lists every loop command and parses it into its own kind", () => {
     for (const loop of LOOP_COMMANDS) {
-      expect(findClawCommand(loop.command)?.section).toBe("autonomy");
+      expect(findCommand(loop.command)?.section).toBe("autonomy");
       const parsed = parseExperimentCommand(`${loop.command} 2h focus area`);
       expect(parsed).toMatchObject({ sub: "start", ...(loop.kind ? { kind: loop.kind } : {}) });
       if (!loop.kind) expect(parsed).not.toHaveProperty("kind");
     }
-  });
-
-  it("includes every webhook command from the shared registry, plus /eval", () => {
-    const names = CLAW_COMMANDS.map((def) => def.name);
-    for (const def of commandsForSurface("webhook")) expect(names).toContain(def.name);
-    expect(names).toContain("eval");
-    expect(new Set(names).size).toBe(names.length);
   });
 
   it("answers an unknown /help topic with the full list", () => {
