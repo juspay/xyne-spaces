@@ -52,7 +52,7 @@
  * Vespa for it, so there's no real search-relevance result to score.
  */
 import { CONFIG } from "../../config.js";
-import { buildYqlFromParams, buildFederatedYqlFromParams, type StructuredQueryParams } from "./vespa-search-areas.js";
+import { buildYqlFromParams, buildFederatedYqlFromParams, DEFAULT_NATIVE_USER_INPUT, type StructuredQueryParams } from "./vespa-search-areas.js";
 import { convertDateLiteralsToMs, defaultNativeInputs, callVespa, transformHit, type SearchResult } from "./vespa-direct.js";
 
 // Exported for the rank-profiles route (vespa-schema-profiles.ts +
@@ -196,6 +196,12 @@ export async function searchEvalVespa(
   // doesn't exist on the queried schema just fails at Vespa (400), surfaced
   // per-query in the eval UI.
   if (params.rankProfile) built.rankProfile = params.rankProfile;
+  // The builder matched against the trimmed default_native fieldset; a custom
+  // profile may score fields outside it (default_fuzzy's _fuzzy fields), so it
+  // gets the full `default` fieldset back.
+  if (params.rankProfile && params.rankProfile !== "default_native" && params.rankProfile !== "unranked") {
+    built.yql = built.yql.replaceAll(DEFAULT_NATIVE_USER_INPUT, "userInput(@query)");
+  }
 
   const datedYql = convertDateLiteralsToMs(built.yql);
   const stageLabel = areas.length === 1 ? areas[0]! : `federated (${areas.join(", ")})`;

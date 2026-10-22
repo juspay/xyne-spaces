@@ -253,3 +253,78 @@ describe("selectPage", () => {
     expect(decodeCursor(Buffer.from("yesterday|chat-1").toString("base64url"))).toBeNull();
   });
 });
+
+describe("project membership on list rows", () => {
+  const entries = conversationEntries([
+    group("chat-filed", "alpha", 0, 10),
+    group("chat-unfiled", "alpha", 20, 30),
+  ]);
+
+  it("carries the project a chat is filed in", () => {
+    const rows = buildConversationList({
+      entries,
+      meta: [],
+      firstUserMessages: [],
+      projectIds: new Map([["chat-filed", "proj-1"]]),
+    });
+    expect(rows.find((r) => r.conversationId === "chat-filed")?.projectId).toBe("proj-1");
+  });
+
+  it("reports an unfiled chat as null rather than omitting the field", () => {
+    const rows = buildConversationList({
+      entries,
+      meta: [],
+      firstUserMessages: [],
+      projectIds: new Map([["chat-filed", "proj-1"]]),
+    });
+    const unfiled = rows.find((r) => r.conversationId === "chat-unfiled");
+    expect(unfiled).toHaveProperty("projectId");
+    expect(unfiled?.projectId).toBeNull();
+  });
+
+  it("renders every row unfiled when projects were not resolved", () => {
+    const rows = buildConversationList({ entries, meta: [], firstUserMessages: [] });
+    expect(rows.every((r) => r.projectId === null)).toBe(true);
+  });
+});
+
+describe("paging a project with more than one page of chats", () => {
+  // 60 chats filed into one project, plus 5 outside it. The route applies the
+  // project filter inside the aggregate, so paging only ever sees the 60.
+  const TOTAL = 60;
+  const filedIds = Array.from({ length: TOTAL }, (_, i) => `p-chat-${String(i).padStart(3, "0")}`);
+  const inProject = conversationEntries(filedIds.map((id, i) => group(id, "alpha", i, i + 1)));
+  const everything = conversationEntries([
+    ...filedIds.map((id, i) => group(id, "alpha", i, i + 1)),
+    ...Array.from({ length: 5 }, (_, i) => group(`other-${i}`, "alpha", 200 + i, 201 + i)),
+  ]);
+
+  it("walks all 60 across pages of 50, exactly once each, newest first", () => {
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page: { items: Array<{ conversationId: string; rowId: string }>; nextCursor: string | null } =
+        selectPage(inProject, {
+          isPinned: () => false,
+          limit: 50,
+          cursor: cursor ? decodeCursor(cursor) : null,
+        });
+      seen.push(...page.items.map((item) => item.conversationId));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor && pages < 10);
+
+    expect(pages).toBe(2);
+    expect(seen).toHaveLength(TOTAL);
+    expect(new Set(seen).size).toBe(TOTAL);
+    // Newest first, and no chat from outside the project leaked in.
+    expect(seen[0]).toBe(`p-chat-${String(TOTAL - 1).padStart(3, "0")}`);
+    expect(seen.some((id) => id.startsWith("other-"))).toBe(false);
+  });
+
+  it("would otherwise page the unfiltered history — which is why the filter is in the query", () => {
+    const unfiltered = selectPage(everything, { isPinned: () => false, limit: 50, cursor: null });
+    expect(unfiltered.items.some((item) => item.conversationId.startsWith("other-"))).toBe(true);
+  });
+});

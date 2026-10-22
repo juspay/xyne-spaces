@@ -68,3 +68,6 @@
 
 # bypassAcl framework — the sole sanctioned location for the ACL-bypass primitives
 /apps/backend/src/bypassAcl/ @juspay/xyne-bypassacl-guardians
+
+# Mobile app
+/apps/mobile/ @juspay/xyne-mobile-guardians

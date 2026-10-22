@@ -31,6 +31,25 @@ export const officeConversionLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Chat-project CRUD. Keyed by user, not IP: these are authenticated routes and
+ * an IP-keyed budget is shared by everyone behind one office NAT, so a busy
+ * office would throttle itself. 60/minute is far above what the sidebar needs
+ * — the project list is cached client-side — while still capping a loop.
+ */
+export const chatProjectsLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many project requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 15,
