@@ -32,7 +32,7 @@ const MAX_VARIATIONS = 30;
 const MAX_DELIVER = 24;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const VISUAL_CONCURRENCY = 8;
-const VISUAL_STATE = "Screenshot of a page in a web application.";
+export const VISUAL_STATE = "Screenshot of a page in a web application.";
 
 type SandboxSession = NonNullable<ReturnType<typeof getSandboxSession>>;
 
