@@ -8,6 +8,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
 import { resolveProjectInstructions } from "./project-context.js";
+import { resolveDesignSystemRef } from "./design-system-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -1065,6 +1066,23 @@ export async function prepareRun(
         ...safeAgentConfig
       } = mergedAgentConfig;
       mergedAgentConfig = safeAgentConfig;
+    }
+
+    // Resolved here rather than taken from the body: whoever supplies this
+    // chooses the text injected into the prompt. Dropped from the merged config
+    // first so a stored or per-request value cannot survive, then set from the
+    // DB. Null leaves the runtime on the legacy `designSystem` text.
+    {
+      const { designSystemRef: _untrustedDesignSystemRef, ...withoutRef } = mergedAgentConfig;
+      mergedAgentConfig = withoutRef;
+      // agent.agentConfig is the agent's own stored config (platform keys
+      // stripped); the merged config carries per-request overrides, which must
+      // not choose the system.
+      const designSystemRef = await resolveDesignSystemRef(
+        { orgId: agent.orgId, config: agent.agentConfig },
+        conversationId ?? null,
+      );
+      if (designSystemRef) mergedAgentConfig = { ...mergedAgentConfig, designSystemRef };
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
     let sdlcContextError: string | undefined;
