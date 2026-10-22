@@ -16,26 +16,18 @@ The gateway carries everything between Spaces and an external app (a provider). 
 ## Steps
 
 1. Add the id to `ProviderId` in `core/types.ts`, e.g. `'slack' | 'teams'`.
-2. Create `providers/<id>/` with the six files below.
-3. Register it in `index.ts`:
-   ```ts
-   const teams = createServices(new TeamsProvider());
-   const teamsMirror = createMirror(teams);
-   gatewayRouter.use('/teams', teamsRoutes(teams, [teamsMirror.handler]));
-   gatewayRouter.use('/teams', teamsMirror.router);
-   // and add teamsMirror.handler to gatewayHooks and jobs.register()
-   ```
+2. Create `providers/<id>/` with the five files below.
+3. Add it to `providers` in `index.ts`: `[new SlackProvider(), new TeamsProvider()]`. The loop builds its services and Mirror, mounts `providerRoutes` and Mirror's routes at `/api/gateway/<id>`, and registers the handler for hooks and jobs.
 4. Point the provider's webhook at `<backend>/api/gateway/<id>/events`.
 5. Add the handler's name (e.g. `teams-mirror`) to `GATEWAY_WORKER_HANDLERS` on the worker that should run its jobs.
 
-## The six files
+## The five files
 
 | File                 | Holds                                                  |
 | -------------------- | ------------------------------------------------------ |
 | `<id>Provider.ts`    | `extends BaseProvider<Credentials>`                    |
 | `<id>Api.ts`         | `extends BaseApi`: the provider's API calls            |
 | `<id>Transformer.ts` | `extends BaseTransformer`: provider text ⇄ Spaces HTML |
-| `<id>Routes.ts`      | The same endpoints as `slackRoutes.ts`, wiring only    |
 | `<id>Utils.ts`       | Pure helpers: signature check, webhook parsing         |
 | `types.ts`           | Credentials zod schema and webhook payload shapes      |
 
