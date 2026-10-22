@@ -290,6 +290,7 @@ function buildParentMessageMd(msg: {
   });
 }
 import { zql } from './builder.js';
+import { resolveBookmarkChannelId } from './bookmarkChannel.js';
 import {
   addReplyToData,
   buildRepliesMdFromMessages,
@@ -7398,6 +7399,7 @@ export const mutators = defineMutators({
         metadata: z.any().optional(),
       }),
       async ({ tx, ctx, args: { entityId, entityType, bookmarkId, timestamp, metadata } }) => {
+        const channelId = await resolveBookmarkChannelId(tx, entityId, entityType);
         const existing = await tx.run(
           // eslint-disable-next-line local-rules/require-is-deleted-filter
           bookmarkByEntityQuery(ctx.userID, entityId, entityType).one(),
@@ -7410,6 +7412,7 @@ export const mutators = defineMutators({
               isDeleted: false,
               isCompleted: false,
               updatedAt: timestamp,
+              ...(channelId && !existing.channelId ? { channelId } : {}),
               // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
               metadata: metadata ?? null,
             });
@@ -7429,6 +7432,7 @@ export const mutators = defineMutators({
           isCompleted: false,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata,
+          channelId,
         });
       },
     ),
