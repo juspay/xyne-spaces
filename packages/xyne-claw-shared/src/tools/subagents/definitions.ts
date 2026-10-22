@@ -55,6 +55,9 @@ export interface SubagentDefinition {
    *  no session_id parameter is exposed to the parent. */
   supportsFollowUp?: boolean;
   delegationPreferred?: boolean;
+  fast?: boolean;
+  model?: string;
+  maxToolCalls?: number;
 }
 
 export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [

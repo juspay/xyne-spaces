@@ -33,6 +33,7 @@ import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import {
   ValidationError,
   validateSubagentInput,
+  nextChecksVersion,
 } from "../lib/subagent-resolver.js";
 import { SUBAGENT_DEFINITIONS } from "xyne-claw-shared";
 
@@ -45,6 +46,24 @@ const router = Router();
 const SUBAGENT_MCP_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const isValidInstanceSlug = (v: unknown): v is string =>
   typeof v === "string" && SUBAGENT_MCP_SLUG_RE.test(v);
+
+const jsonOrNull = (v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull =>
+  v === null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
+
+function fastColumns(
+  v: Awaited<ReturnType<typeof validateSubagentInput>>,
+  existing: { checks: unknown; checksVersion: number } | null,
+) {
+  const checksVersion = nextChecksVersion(existing, v.checks);
+  return {
+    ...(v.fast !== undefined ? { fast: v.fast } : {}),
+    ...(v.checks !== undefined ? { checks: jsonOrNull(v.checks) } : {}),
+    ...(checksVersion !== undefined ? { checksVersion } : {}),
+    ...(v.samples !== undefined ? { samples: jsonOrNull(v.samples) } : {}),
+    ...(v.model !== undefined ? { model: v.model } : {}),
+    ...(v.budget !== undefined ? { budget: jsonOrNull(v.budget) } : {}),
+  };
+}
 
 // ── Response shapes ──────────────────────────────────────────────────────
 
@@ -88,6 +107,12 @@ function dbRowAsListItem(
      *  agent-pinned instances. Editor UI reads this to render per-server
      *  instance dropdowns. */
     mcpInstanceMap: row.mcpInstanceMap ?? {},
+    fast: row.fast,
+    checks: row.checks ?? [],
+    checksVersion: row.checksVersion,
+    samples: row.samples ?? [],
+    model: row.model,
+    budget: row.budget ?? {},
     enabled: row.enabled,
     createdByUserId: row.createdByUserId,
     // Resolved display name/email of the creator (createdByUserId is a bare
@@ -203,6 +228,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     ...(Object.keys(validated.mcpInstanceMap).length > 0
       ? { mcpInstanceMap: validated.mcpInstanceMap as object }
       : {}),
+    ...fastColumns(validated, null),
     createdByUserId: requesterId,
     // Phase-2: stamp the creating org so no null-org subagent is minted (which
     // would block the future NOT-NULL flip).
@@ -267,6 +293,7 @@ router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
     mcpInstanceMap: Object.keys(validated.mcpInstanceMap).length > 0
       ? (validated.mcpInstanceMap as Prisma.InputJsonValue)
       : Prisma.JsonNull,
+    ...fastColumns(validated, existing),
   });
 
   await subagentDefinitionRepository.replaceSkills(updated.id, validated.skillIds);

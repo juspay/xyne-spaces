@@ -90,3 +90,40 @@ describe("custom subagents with xor-decide", () => {
     expect(built.subagentTools.find((t) => t.name === "log-triage")).toBeUndefined();
   });
 });
+
+describe("fast custom subagents", () => {
+  const fastSpec = (extra: Partial<Spec> = {}): Spec => ({ name: "fast-triage", description: "Triage fast", progressLabels: [], systemPrompt: "Classify.", paramName: "request", paramDescription: "", tools: {}, skills: [], fast: true, ...extra });
+
+  it("gets xor-decide without selecting it and is marked as the cheap path", () => {
+    const built = buildSubagentTools([], [], undefined, undefined, undefined, undefined, undefined, [fastSpec()], undefined, [buildXorDecideTool(meta)]);
+    const sub = built.subagentTools.find((t) => t.name === "fast-triage");
+    expect(sub).toBeDefined();
+    expect(String(sub!.description)).toMatch(/^\[Subagent — runs on a cheap model/);
+    expect([...built.directTools, ...built.remainingCustomTools].map((t) => t.name)).not.toContain("xor-decide");
+  });
+
+  it("does not hand xor-decide to a normal subagent that did not pick it", () => {
+    const built = buildSubagentTools([], [], undefined, undefined, undefined, undefined, undefined, [fastSpec({ fast: false })], undefined, [buildXorDecideTool(meta)]);
+    expect(built.subagentTools.find((t) => t.name === "fast-triage")).toBeUndefined();
+  });
+
+  it("stays on the fast LiteLLM model even when the parent runs on another provider, unless the subagent is pinned", async () => {
+    const { resolveProviderForSubagent } = await import("../src/subagent-tools.js");
+    const def = { name: "fast-triage", description: "", progressLabels: [], systemPrompt: "", paramName: "q", paramDescription: "", serverType: "custom-defined:fast-triage", fast: true };
+    const providerConfigs = { codex: { apiKey: "k", model: "gpt-5.5" } };
+    expect(resolveProviderForSubagent(def, { parentProvider: "codex", providerConfigs })).toBeUndefined();
+    expect(resolveProviderForSubagent({ ...def, fast: false }, { parentProvider: "codex", providerConfigs })?.provider).toBe("codex");
+    expect(resolveProviderForSubagent(def, { parentProvider: "spaces", subagentProviders: { "fast-triage": "codex" }, providerConfigs })?.provider).toBe("codex");
+  });
+});
+
+describe("withChecks", () => {
+  it("appends the versioned question bank and leaves prompts without checks alone", async () => {
+    const { withChecks } = await import("../src/subagent-tools.js");
+    expect(withChecks("Base.", undefined, undefined)).toBe("Base.");
+    const out = withChecks("Base.", [{ id: "failure", question: "Real failure?", type: "yesno" }], 3);
+    expect(out.startsWith("Base.\n\n## Checks (question bank v3)")).toBe(true);
+    expect(out).toContain('"id": "failure"');
+    expect(out).toContain("xor-decide");
+  });
+});

@@ -2375,7 +2375,7 @@ export async function processTask(
           uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
           customSubagents,
           directPickSuffixes,
-          customSubagents?.some((c) => (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
+          customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
         );
 
     const subagentTools = optEnabled("subagent_direct_only")
