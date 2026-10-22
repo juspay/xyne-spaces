@@ -65,6 +65,7 @@ import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
+import { suggestStageFormFields } from '@/services/stageFormSuggestions';
 import { AgentsConfig } from '@/agents/config';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
@@ -2006,6 +2007,53 @@ export class TicketController {
     } catch (error) {
       logger.error('Error suggesting ticket fields:', error);
       res.status(500).json({ error: 'Failed to suggest ticket fields' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/:ticketId/stage-form-suggestions { formId }
+   * XOR's suggested values for a stage form, read from the ticket and its thread, while the
+   * agent has the stage form open. Nothing is saved here. Empty when the CAC switch is off.
+   */
+  suggestStageFormFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!(await AgentsConfig.fetch()).stageFormSuggestionsXorEnabled) {
+        res.json({ success: true, data: {} });
+        return;
+      }
+      const { ticketId } = req.params;
+      const { formId } = req.body as { formId: string };
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { id: true, channelId: true, workspaceId: true },
+      });
+      if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      // ACL: private channels require membership; public channels are open.
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel?.visibility === 'PRIVATE' && !(await this.channelParticipantRepository.isParticipant(ticket.channelId, userId))) {
+        res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+        return;
+      }
+
+      // Stop the XOR call when the dashboard drops the request.
+      const controller = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      const data = await suggestStageFormFields(ticket, formId, controller.signal);
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error suggesting stage form fields:', error);
+      res.status(500).json({ error: 'Failed to suggest stage form fields' });
     }
   };
 

@@ -32,3 +32,10 @@ export const ticketFieldSuggestionsSchema = Joi.object({
         )
         .required(),
 });
+
+export const stageFormSuggestionsSchema = Joi.object({
+    formId: Joi.string().trim().required().messages({
+        'string.empty': 'Form ID is required',
+        'any.required': 'Form ID is required',
+    }),
+});

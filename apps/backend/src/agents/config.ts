@@ -47,6 +47,7 @@ const DEFAULT_SUMMARY_TEMPLATE_SELECTION_XOR_ENABLED = false;
 const DEFAULT_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED = false;
 const DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED = false;
+const DEFAULT_STAGE_FORM_SUGGESTIONS_XOR_ENABLED = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_DESK_SUMMARISER_MODEL = 'glm-flash-experimental';
@@ -99,6 +100,7 @@ const CAC_KEYS = {
   classificationXorEnabled: 'classification_xor_enabled',
   priorityClassificationXorEnabled: 'priority_classification_xor_enabled',
   ticketFieldSuggestionsXorEnabled: 'ticket_field_suggestions_xor_enabled',
+  stageFormSuggestionsXorEnabled: 'stage_form_suggestions_xor_enabled',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -161,6 +163,8 @@ export class AgentsConfig {
   /** Desk email priority is scored by XOR; the LLM only on no answer. Default false. */
   public readonly priorityClassificationXorEnabled: boolean;
   public readonly ticketFieldSuggestionsXorEnabled: boolean;
+  /** XOR suggests stage form values from the ticket and its thread when the form opens. Default false. */
+  public readonly stageFormSuggestionsXorEnabled: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
   /** Desk email-thread summary (Support screen); separate from the chat summariser. */
@@ -229,6 +233,7 @@ export class AgentsConfig {
     classificationXorEnabled: boolean,
     priorityClassificationXorEnabled: boolean,
     ticketFieldSuggestionsXorEnabled: boolean,
+    stageFormSuggestionsXorEnabled: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -266,6 +271,7 @@ export class AgentsConfig {
     this.classificationXorEnabled = classificationXorEnabled;
     this.priorityClassificationXorEnabled = priorityClassificationXorEnabled;
     this.ticketFieldSuggestionsXorEnabled = ticketFieldSuggestionsXorEnabled;
+    this.stageFormSuggestionsXorEnabled = stageFormSuggestionsXorEnabled;
   }
 
   /**
@@ -322,6 +328,7 @@ export class AgentsConfig {
       const classificationXorEnabled = getValue<boolean>(CAC_KEYS.classificationXorEnabled, DEFAULT_CLASSIFICATION_XOR_ENABLED);
       const priorityClassificationXorEnabled = getValue<boolean>(CAC_KEYS.priorityClassificationXorEnabled, DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED);
       const ticketFieldSuggestionsXorEnabled = getValue<boolean>(CAC_KEYS.ticketFieldSuggestionsXorEnabled, DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED);
+      const stageFormSuggestionsXorEnabled = getValue<boolean>(CAC_KEYS.stageFormSuggestionsXorEnabled, DEFAULT_STAGE_FORM_SUGGESTIONS_XOR_ENABLED);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
       const deskSummariserModelName = getValue<string>(CAC_KEYS.deskSummariserModel, DEFAULT_DESK_SUMMARISER_MODEL);
@@ -599,6 +606,7 @@ export class AgentsConfig {
         classificationXorEnabled,
         priorityClassificationXorEnabled,
         ticketFieldSuggestionsXorEnabled,
+        stageFormSuggestionsXorEnabled,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -640,6 +648,7 @@ export class AgentsConfig {
         DEFAULT_CLASSIFICATION_XOR_ENABLED,
         DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
         DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED,
+        DEFAULT_STAGE_FORM_SUGGESTIONS_XOR_ENABLED,
       );
     }
   }
@@ -682,6 +691,7 @@ export class AgentsConfig {
       DEFAULT_CLASSIFICATION_XOR_ENABLED,
       DEFAULT_PRIORITY_CLASSIFICATION_XOR_ENABLED,
       DEFAULT_TICKET_FIELD_SUGGESTIONS_XOR_ENABLED,
+      DEFAULT_STAGE_FORM_SUGGESTIONS_XOR_ENABLED,
     );
   }
 }

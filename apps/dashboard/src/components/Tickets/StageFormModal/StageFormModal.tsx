@@ -19,6 +19,7 @@ import {
 } from '../StageFormFields/useStageForm';
 import { StageFormConflictDialog } from '../StageFormInlinePanel/StageFormConflictDialog';
 import { useStageFormConflictFlow } from '../StageFormInlinePanel/useStageFormConflictFlow';
+import { useStageFormSuggestions } from './useStageFormSuggestions';
 
 interface StageFormModalProps {
   isOpen: boolean;
@@ -60,6 +61,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     fields,
     valuesForRender,
     isFieldsLoading,
+    hydrated,
     formData,
     setFormData,
     localDocChanges,
@@ -206,6 +208,15 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
     hasApprovers && existingApproval?.status === TicketStageRequestStatus.SUBMITTED;
   const isDraft = hasApprovers && existingApproval?.status === TicketStageRequestStatus.DRAFT;
   const isFormReadOnly = isApproved || (isSubmitted && !isReviewer);
+  // XOR fills the empty fields from the ticket and its thread; the agent reviews before submitting.
+  const suggestedFieldIds = useStageFormSuggestions({
+    ticketId: ticket.id,
+    formId,
+    hydrated,
+    enabled: isOpen && !isReviewer && !isFormReadOnly,
+    formData,
+    setFormData,
+  });
   const shouldShowPersistedDocValues =
     hasActiveRequestForDocPrefill || existingApproval !== null || showPersistedDocValues;
 
@@ -310,6 +321,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             showPersistedDocValues={shouldShowPersistedDocValues}
             idPrefix='stage-field'
             trackNamePrefix='StageForm'
+            suggestedFieldIds={suggestedFieldIds}
           />
 
           {showReviewButtons && (
