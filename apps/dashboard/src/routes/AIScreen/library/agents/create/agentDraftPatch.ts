@@ -46,18 +46,35 @@ interface Catalogs {
   mcpEntries: readonly McpCatalogEntry[];
 }
 
-function matchTool(name: string, catalogs: Catalogs): ToolMatch {
-  if (catalogs.subagentNames.has(name)) return { kind: 'subagent', name };
-
+function matchExactSlug(name: string, catalogs: Catalogs): ToolMatch | null {
   const builtin = catalogs.builtinTools.find(tool => tool.slug === name);
   if (builtin) return { kind: 'builtin', tool: builtin };
 
   for (const entry of catalogs.mcpEntries) {
-    const tool = entry.tools.find(t => t.slug === name || t.name === name);
+    const tool = entry.tools.find(t => t.slug === name);
+    if (tool) return { kind: 'mcp', entry, tool };
+  }
+  return null;
+}
+
+function matchTool(raw: string, catalogs: Catalogs): ToolMatch {
+  if (catalogs.subagentNames.has(raw)) return { kind: 'subagent', name: raw };
+
+  const exact = matchExactSlug(raw, catalogs);
+  if (exact) return exact;
+
+  const bare = bareToolSlug(raw);
+  if (catalogs.subagentNames.has(bare)) return { kind: 'subagent', name: bare };
+
+  const bareExact = matchExactSlug(bare, catalogs);
+  if (bareExact) return bareExact;
+
+  for (const entry of catalogs.mcpEntries) {
+    const tool = entry.tools.find(t => t.name === bare);
     if (tool) return { kind: 'mcp', entry, tool };
   }
 
-  return { kind: 'unknown', name };
+  return { kind: 'unknown', name: raw };
 }
 
 function keepCallableAgents(
@@ -161,7 +178,7 @@ export function resolveProposedTools(
   const unknown: string[] = [...expandedMcps.unknown];
 
   for (const raw of [...names, ...expandedMcps.tools]) {
-    const match = matchTool(bareToolSlug(raw), catalogs);
+    const match = matchTool(raw, catalogs);
 
     switch (match.kind) {
       case 'subagent':
