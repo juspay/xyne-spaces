@@ -39,7 +39,13 @@ vi.mock("../db.js", () => ({
   },
   governancePrisma: {
     staticContentVersion: {
-      findFirst: vi.fn(async (q: { where: Record<string, unknown> }) => (q.where["approvalStatus"] === "approved" ? (state.versions.find((v) => v["approvalStatus"] === "approved" && v["contentSha256"] !== (q.where["contentSha256"] as { not: string }).not) ?? null) : state.known)),
+      findFirst: vi.fn(async (q: { where: Record<string, unknown> }) =>
+        q.where["approvalStatus"] === "approved"
+          ? (state.versions.find((v) => v["approvalStatus"] === "approved" && v["contentSha256"] !== (q.where["contentSha256"] as { not: string }).not) ?? null)
+          : typeof q.where["contentSha256"] === "string"
+            ? (state.versions.find((v) => v["contentSha256"] === q.where["contentSha256"]) ?? null)
+            : (state.versions[0] ?? state.known)),
+      update: vi.fn(async (q: { where: { id: string }; data: Record<string, unknown> }) => { const row = state.versions.find((v) => v["id"] === q.where.id); if (row) Object.assign(row, q.data); return row; }),
       findMany: vi.fn(async (q: { where: { orgId: { in: string[] } } }) => { if (q.where.orgId.in.includes("boom")) throw new Error("db down"); return state.versions; }),
       findUnique: vi.fn(async (q: { where: { id: string } }) => state.versions.find((v) => v["id"] === q.where.id) ?? null),
     },
@@ -114,6 +120,22 @@ describe("commitSkillVersion", () => {
     expect(await commitSkillVersion(skill, { writtenBy: "person", userId: "u1" })).toBeNull();
   });
 
+  it("uploads once per hash, records a version without its bytes when storage fails, and repairs the row on the next identical write", async () => {
+    const { gcsService } = await import("../services/storageService.js");
+    vi.mocked(gcsService.uploadFile).mockRejectedValueOnce(new Error("gcs down"));
+    const first = await commitSkillVersion(skill, { writtenBy: "person", userId: "u1", approvedVia: "owner" });
+    expect(first).toMatchObject({ status: "approved" });
+    expect(state.commits[0]!["bytesStoragePath"]).toBeUndefined();
+    expect(state.stored.size).toBe(0);
+    state.versions = [version({ id: first!.versionId, contentSha256: first!.sha256, bytesStoragePath: null })];
+    state.known = { id: first!.versionId, contentSha256: first!.sha256 };
+    await commitSkillVersion(skill, { writtenBy: "person", userId: "u1", approvedVia: "owner" });
+    expect(state.stored.size).toBe(1);
+    expect(state.versions[0]).toMatchObject({ bytesStoragePath: `governance/skill-bundles/org-1/${first!.sha256}.json` });
+    await commitSkillVersion(skill, { writtenBy: "person", userId: "u1", approvedVia: "owner" });
+    expect(vi.mocked(gcsService.uploadFile)).toHaveBeenCalledTimes(2);
+  });
+
   it("never throws into the write it follows", async () => {
     state.files = null as never;
     expect(await commitSkillVersion({ ...skill, files: undefined }, { writtenBy: "person" })).toBeNull();
@@ -168,6 +190,10 @@ describe("rollbackSkill and decideSkillVersion", () => {
     state.stored.set(`governance/skill-bundles/org-1/${oldSha}.json`, JSON.stringify(old));
     state.versions = [version({ id: "v1", contentSha256: oldSha, bytesStoragePath: `governance/skill-bundles/org-1/${oldSha}.json` }), version({ id: "v3", contentSha256: "x", approvalStatus: "rejected" })];
     expect(await rollbackSkill(skill, "v3", { userId: "u1", isAdmin: false })).toMatchObject({ ok: false });
+    // A blob that no longer hashes to its version is refused.
+    state.stored.set(`governance/skill-bundles/org-1/${oldSha}.json`, JSON.stringify({ ...old, content: "tampered" }));
+    expect(await rollbackSkill(skill, "v1", { userId: "u1", isAdmin: false })).toMatchObject({ ok: false, error: expect.stringContaining("not in storage") });
+    state.stored.set(`governance/skill-bundles/org-1/${oldSha}.json`, JSON.stringify(old));
     expect(await rollbackSkill(skill, "v1", { userId: "u1", isAdmin: false })).toEqual({ ok: true, sha256: oldSha });
     expect(state.rowWrites[0]).toMatchObject({ skill: { where: { id: "sk1" }, data: { content: "old body" } } });
     expect(state.rowWrites[1]).toMatchObject({ files: { data: [expect.objectContaining({ relativePath: "a.md", skillId: "sk1" })] } });
@@ -180,6 +206,12 @@ describe("rollbackSkill and decideSkillVersion", () => {
     expect(await decideSkillVersion({ ...skill, scope: "global" }, "v5", "approve", { userId: "u1", isAdmin: false })).toMatchObject({ ok: false });
     expect(await decideSkillVersion(skill, "v5", "approve", { userId: "u1", isAdmin: false })).toEqual({ ok: true, status: "approved" });
     expect(state.approvals[0]).toEqual(["v5", expect.objectContaining({ approvalStatus: "approved", approvedVia: "owner", actorUserId: "u1" })]);
+    // A parser-blocked version is released only by an admin's written override.
+    state.versions = [version({ id: "v6", contentSha256: "z", approvalStatus: "rejected", parserVerdict: "injection" })];
+    expect(await decideSkillVersion(skill, "v6", "approve", { userId: "u1", isAdmin: false })).toMatchObject({ ok: false, error: expect.stringContaining("admin override") });
+    expect(await decideSkillVersion(skill, "v6", "approve", { userId: "a1", isAdmin: true })).toMatchObject({ ok: false, error: expect.stringContaining("reason") });
+    expect(await decideSkillVersion(skill, "v6", "approve", { userId: "a1", isAdmin: true }, "false positive: the text quotes a phishing email")).toEqual({ ok: true, status: "approved" });
+    expect(state.approvals.at(-1)).toEqual(["v6", expect.objectContaining({ approvedVia: "admin_override", overrideReason: expect.stringContaining("false positive") })]);
   });
 });
 
