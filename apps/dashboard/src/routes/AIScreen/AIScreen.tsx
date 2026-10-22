@@ -39,6 +39,9 @@ import { isLocalDiffArtifact } from '../../components/AIScreen/Workspace/LocalDi
 import {
   WorkspacePane,
   useConversationArtifacts,
+  DeliveredArtifactsContext,
+  indexDeliveredArtifacts,
+  type DeliveredArtifacts,
   type WorkspaceAppMode,
   type WorkspaceOpenRequest,
 } from '../../components/AIScreen/Workspace';
@@ -712,6 +715,13 @@ const AIScreen = (): ReactElement => {
       requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
     [requestWorkspace],
   );
+  const deliveredArtifacts = useMemo<DeliveredArtifacts>(
+    () => ({
+      ...indexDeliveredArtifacts(conversationArtifacts),
+      open: (artifactId: string) => openWorkspaceTab('artifacts', artifactId),
+    }),
+    [conversationArtifacts, openWorkspaceTab],
+  );
   const autoOpenWorkspace = useCallback(
     (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => {
       if (!workspaceAutoOpenRef.current) return;
@@ -819,24 +829,26 @@ const AIScreen = (): ReactElement => {
                 </div>
               )}
               {showChatView ? (
-                <AIChatThread
-                  ref={chatThreadRef}
-                  key={chatKey}
-                  sessionId={activeSessionId || undefined}
-                  initialQuery={initialQuery}
-                  initialAttachments={initialAttachments}
-                  initialExtras={initialExtras}
-                  initialTrigger={initialTrigger}
-                  onSetMobileSidebarOpen={setMobileSidebarOpen}
-                  onConversationChange={handleConversationChange}
-                  onAppChange={handleAppChange}
-                  onToggleSidebar={handleToggleSidebar}
-                  sidebarCollapsed={sidebarCollapsed}
-                  onAgentChange={handleAgentChange}
-                  onContextChange={handleContextChange}
-                  onInitialQueryConsumed={handleInitialQueryConsumed}
-                  assistant={assistant}
-                />
+                <DeliveredArtifactsContext.Provider value={deliveredArtifacts}>
+                  <AIChatThread
+                    ref={chatThreadRef}
+                    key={chatKey}
+                    sessionId={activeSessionId || undefined}
+                    initialQuery={initialQuery}
+                    initialAttachments={initialAttachments}
+                    initialExtras={initialExtras}
+                    initialTrigger={initialTrigger}
+                    onSetMobileSidebarOpen={setMobileSidebarOpen}
+                    onConversationChange={handleConversationChange}
+                    onAppChange={handleAppChange}
+                    onToggleSidebar={handleToggleSidebar}
+                    sidebarCollapsed={sidebarCollapsed}
+                    onAgentChange={handleAgentChange}
+                    onContextChange={handleContextChange}
+                    onInitialQueryConsumed={handleInitialQueryConsumed}
+                    assistant={assistant}
+                  />
+                </DeliveredArtifactsContext.Provider>
               ) : (
                 /* Landing page – centred greeting + composer. Context rises
                    into the gap between them and a longer message grows the
