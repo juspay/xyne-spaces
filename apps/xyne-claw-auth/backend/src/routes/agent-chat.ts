@@ -50,6 +50,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
+import { brandAttachmentsRouter } from "./brand-attachments.js";
 import {
   chatProjectsRouter,
   prepareProjectMove,
@@ -823,6 +824,8 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
 // `/:slug/...` route below, so `/chat/projects*` is resolved before any
 // slug pattern gets a chance at it.
 router.use(chatProjectsRouter);
+// Brand-extraction attachment routes (routes/brand-attachments.ts).
+router.use(brandAttachmentsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({

@@ -178,6 +178,24 @@ export {
 } from "./task-command-names.js";
 export type { TaskCommandName, LocalSandboxCommandName } from "./task-command-names.js";
 export {
+  BRAND_SUMMARY_FILENAME,
+  BRAND_DESIGN_MD_FILENAME,
+  BRAND_TOKENS_CSS_FILENAME,
+  BRAND_COLOR_ROLES,
+  isBrandSummary,
+  parseBrandSummary,
+} from "./brand-extraction.js";
+export type {
+  BrandSummary,
+  BrandColor,
+  BrandColorRole,
+  BrandFont,
+  BrandTypeStep,
+  BrandScaleValue,
+  BrandAssetRef,
+  BrandAssetKind,
+} from "./brand-extraction.js";
+export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
   INBOUND_ATTACHMENT_FAMILIES,
