@@ -8,6 +8,7 @@ import {
   extractVideoDecoderName,
   extractVideoErrorCode,
   extractVideoUnderlyingErrorCode,
+  stripVideoErrorCodeTags,
   getVideoFileExtension,
   toVideoErrorMessage,
   toVideoTrackFields,
@@ -108,6 +109,19 @@ describe('video playback telemetry', () => {
     });
     assert.equal(fields.errorCode, 'AVFoundationErrorDomain:-11800');
     assert.equal(fields.underlyingErrorCode, 'CoreMediaErrorDomain:-12939');
+  });
+
+  it('strips the patch tags from the message shown to the user', () => {
+    assert.equal(
+      stripVideoErrorCodeTags(
+        'Failed to load the player item: unknown error [AVFoundationErrorDomain:-11800] [underlying NSURLErrorDomain:-1011]',
+      ),
+      'Failed to load the player item: unknown error',
+    );
+    assert.equal(
+      stripVideoErrorCodeTags('Decoder failed: c2.mtk.hevc.decoder'),
+      'Decoder failed: c2.mtk.hevc.decoder',
+    );
   });
 
   it('labels the iOS AVPlayer loopback connect failure as network', () => {

@@ -290,6 +290,7 @@ export async function ensureProxyRunning(
       'Reading proxy status',
     )) as number;
     assertCurrentSession();
+    let restartFailed = false;
     if (currentPort > 0) {
       if (Platform.OS !== 'ios') {
         return currentPort;
@@ -309,12 +310,16 @@ export async function ensureProxyRunning(
       }
       // Restart failed: the old listener is already cancelled, so fall
       // through to the regular start path below.
+      restartFailed = true;
     }
 
     let port: number;
     try {
+      // After a failed restart, retry on an ephemeral port like `restart`
+      // does: the reclaimed socket may still hold the default port, and a
+      // fixed-port bind can sit in `.waiting` until the timeout.
       port = (await withProxyTimeout(
-        MtlsProxy.start(DEFAULT_PROXY_PORT, API_BASE_URL) as Promise<number>,
+        MtlsProxy.start(restartFailed ? 0 : DEFAULT_PROXY_PORT, API_BASE_URL) as Promise<number>,
         'Starting proxy',
       )) as number;
     } catch (err) {
@@ -325,6 +330,10 @@ export async function ensureProxyRunning(
     assertCurrentSession();
     if (Platform.OS === 'ios') {
       installForegroundProxyProbe();
+    }
+    if (restartFailed) {
+      // The capability rotated, so URLs issued for the old listener are dead.
+      bumpProxyEpoch();
     }
     return port;
   });

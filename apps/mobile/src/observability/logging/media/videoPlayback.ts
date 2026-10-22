@@ -176,6 +176,14 @@ export function extractVideoUnderlyingErrorCode(message: string): string | null 
   return ns ? `${ns[1]}:${ns[2]}` : null;
 }
 
+/**
+ * The player message without the `[Domain:code]` tags our expo-video patch
+ * appends. Those are for telemetry; the viewer shows the readable part.
+ */
+export function stripVideoErrorCodeTags(message: string): string {
+  return message.replace(/\s*\[(?:underlying )?[A-Za-z]+ErrorDomain:-?\d+\]/g, '');
+}
+
 export function extractVideoDecoderName(message: string): string | null {
   const match = DECODER_NAME_PATTERN.exec(message);
   return match ? (match[1] ?? null) : null;

@@ -23,6 +23,7 @@ import { GlassSurface } from '@/src/components/ui/glass-surface';
 import type { MessageAttachment } from '../message-attachments.utils';
 import { useMtlsVideoStream } from '@/src/hooks/useMtlsVideoStream';
 import { useVideoPlaybackTelemetry } from '@/src/hooks/useVideoPlaybackTelemetry';
+import { stripVideoErrorCodeTags } from '@/src/observability/logging/media/videoPlayback';
 import { safePlay } from '@/src/utils/safeVideoPlayer';
 
 interface VideoViewerPageProps {
@@ -432,7 +433,9 @@ export const VideoViewerPage = memo(function VideoViewerPage({
         <View style={styles.errorContainer}>
           <Play size={48} color='white' />
           <Text style={styles.errorText}>Failed to load video</Text>
-          <Text style={styles.errorDetails}>{errorMessage.substring(0, 100)}</Text>
+          <Text style={styles.errorDetails}>
+            {stripVideoErrorCodeTags(errorMessage).substring(0, 100)}
+          </Text>
         </View>
       </View>
     );
