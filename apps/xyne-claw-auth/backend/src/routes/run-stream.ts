@@ -1428,11 +1428,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     // Composed here so both the base field and the design/page override use it.
-    // Project instructions ride in on additionalInstructions, appended last so
-    // precedence stays agent prompt -> user instructions -> project -> message.
-    // Folded in here rather than at the dispatch body because aiScreenInstructions
-    // feeds the design/page override and the local-harness block as well, and
-    // adding it in one place would leave the others without it.
+    // Project instructions are NOT added here. This body is forwarded to
+    // /internal/run, and prepareRun injects them after the user's own — adding
+    // them here too would send them twice, ahead of the user's, and double the
+    // per-turn cost. The local-harness path below never reaches prepareRun, so
+    // it does its own injection.
     const projectInstructions = await resolveProjectInstructions(
       convId,
       // Aliases, not the canonical id alone: a chat filed under the caller's
@@ -1440,14 +1440,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
       orgId,
     );
-    const baseInstructions = [
-      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
-      projectInstructions ?? undefined,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
     const aiScreenInstructions = withAiScreenPresentationInstructions(
-      baseInstructions || undefined,
+      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
     );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
@@ -1686,6 +1680,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     const harnessInstructionBlocks = [
       typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+      // A harness run builds its own context and never reaches prepareRun, so
+      // the project's instructions have to be added here or they never arrive.
+      projectInstructions ?? "",
       designSelectionInstruction,
       pageSelectionInstruction,
       openItemsInstruction,
