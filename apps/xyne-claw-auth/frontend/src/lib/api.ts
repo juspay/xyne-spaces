@@ -4781,6 +4781,83 @@ export interface SubagentTemplateSummary {
   screenshotSamples: boolean;
 }
 
+export interface FastSubagentStats {
+  subagentName: string;
+  fast: boolean;
+  models: string[];
+  calls: number;
+  errorRate: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  tokensOffloaded: number;
+  xorCalls: number;
+  xorItems: number;
+  unsureRate: number | null;
+  unavailableRate: number | null;
+  cacheHitRate: number | null;
+  escalations: number;
+  quotaBlocked: number;
+  daily: Array<{ day: string; calls: number; unsureRate: number | null }>;
+  costRows: Array<{ model: string | null; parentModel: string | null; calls: number; xorCalls: number; tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number }>;
+}
+
+export interface FastSubagentRow {
+  subagentName: string;
+  builtin: boolean;
+  calls: number;
+  stats: FastSubagentStats | null;
+  budget: { maxToolCalls?: number; xorItemsPerHour?: number } | null;
+  eval: { accuracy: number | null; confidentWrong: number | null; ranAt: string | null; stale: boolean } | null;
+  reviews: { pending: number; correct: number; wrong: number; wrongRate: number | null };
+}
+
+export interface FastSubagentAlert {
+  id: string;
+  subagentName: string;
+  kind: string;
+  baseline: number;
+  current: number;
+  samples: number;
+  message: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+}
+
+export interface XorReviewItem {
+  id: string;
+  subagentName: string;
+  item: string;
+  questionId: string;
+  question: string;
+  value: string;
+  confidence: number;
+  createdAt: string;
+}
+
+export async function getFastSubagentStats(days: number): Promise<{ days: number; subagents: FastSubagentRow[]; alerts: FastSubagentAlert[] }> {
+  const data = await request<{ success: boolean; data: { days: number; subagents: FastSubagentRow[]; alerts: FastSubagentAlert[] } }>(`${AUTH_API_URL}/api/v1/subagents/fast/stats?days=${days}`);
+  return data.data;
+}
+
+export async function runFastDriftCheck(): Promise<{ created: FastSubagentAlert[] }> {
+  const data = await request<{ success: boolean; data: { created: FastSubagentAlert[] } }>(`${AUTH_API_URL}/api/v1/subagents/fast/drift/check`, { method: "POST" });
+  return data.data;
+}
+
+export async function ackFastSubagentAlert(id: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/subagents/fast/alerts/${encodeURIComponent(id)}/ack`, { method: "POST" });
+}
+
+export async function listXorReviews(subagent?: string): Promise<XorReviewItem[]> {
+  const q = subagent ? `?subagent=${encodeURIComponent(subagent)}` : "";
+  const data = await request<{ success: boolean; data: XorReviewItem[] }>(`${AUTH_API_URL}/api/v1/subagents/fast/reviews${q}`);
+  return data.data;
+}
+
+export async function submitXorReview(id: string, verdict: "correct" | "wrong"): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/subagents/fast/reviews/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ verdict }) });
+}
+
 export async function listSubagentTemplates(): Promise<SubagentTemplateSummary[]> {
   const data = await request<{ success: boolean; data: SubagentTemplateSummary[] }>(`${AUTH_API_URL}/api/v1/subagents/templates`);
   return data.data;

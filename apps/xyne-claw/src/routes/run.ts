@@ -2413,7 +2413,14 @@ export async function processTask(
             : undefined,
           customSubagents,
           directPickSuffixes,
-          customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
+          customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [
+                buildXorDecideTool(meta, {
+                  itemsPerHour: Object.fromEntries(
+                    (customSubagents ?? []).filter((c) => c.id && c.budget?.xorItemsPerHour).map((c) => [c.id!, c.budget!.xorItemsPerHour!]),
+                  ),
+                }),
+              ]
+            : undefined,
         );
 
     const subagentTools = optEnabled("subagent_direct_only")

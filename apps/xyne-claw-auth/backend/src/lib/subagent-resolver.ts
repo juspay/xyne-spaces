@@ -52,6 +52,7 @@ export interface CustomSubagentSpec {
 
 export interface SubagentBudget {
   maxToolCalls?: number;
+  xorItemsPerHour?: number;
 }
 
 export interface SubagentSample {
@@ -266,6 +267,7 @@ const SAMPLE_IMAGE_MAX_CHARS = 1_400_000;
 const SAMPLE_IMAGE_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const SAMPLE_INPUT_MAX_CHARS = 8_000;
 const MAX_TOOL_CALLS_CAP = 200;
+const XOR_ITEMS_PER_HOUR_CAP = 1_000_000;
 
 function validateFast(raw: unknown): boolean | undefined {
   if (raw === undefined) return undefined;
@@ -328,13 +330,20 @@ function validateModel(raw: unknown): string | null | undefined {
 function validateBudget(raw: unknown): SubagentBudget | null | undefined {
   if (raw === undefined) return undefined;
   if (raw === null) return null;
-  if (typeof raw !== "object" || Array.isArray(raw)) throw new ValidationError("budget", "must be an object like { maxToolCalls }");
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new ValidationError("budget", "must be an object like { maxToolCalls, xorItemsPerHour }");
   const max = (raw as Record<string, unknown>)["maxToolCalls"];
-  if (max === undefined || max === null) return null;
-  if (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > MAX_TOOL_CALLS_CAP) {
+  const perHour = (raw as Record<string, unknown>)["xorItemsPerHour"];
+  if (max !== undefined && max !== null && (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > MAX_TOOL_CALLS_CAP)) {
     throw new ValidationError("budget.maxToolCalls", `must be an integer 1–${MAX_TOOL_CALLS_CAP}`);
   }
-  return { maxToolCalls: max };
+  if (perHour !== undefined && perHour !== null && (typeof perHour !== "number" || !Number.isInteger(perHour) || perHour < 1 || perHour > XOR_ITEMS_PER_HOUR_CAP)) {
+    throw new ValidationError("budget.xorItemsPerHour", `must be an integer 1–${XOR_ITEMS_PER_HOUR_CAP}`);
+  }
+  const out: SubagentBudget = {
+    ...(typeof max === "number" ? { maxToolCalls: max } : {}),
+    ...(typeof perHour === "number" ? { xorItemsPerHour: perHour } : {}),
+  };
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export function nextChecksVersion(previous: { checks: unknown; checksVersion: number } | null, checks: DecideQuestion[] | null | undefined): number | undefined {
@@ -451,7 +460,9 @@ function fastFields(row: SubagentDefinition): Pick<CustomSubagentSpec, "fast" | 
   return {
     ...(row.fast ? { fast: true } : {}),
     ...(row.fast && row.model ? { model: row.model } : {}),
-    ...(row.fast && budget?.maxToolCalls ? { budget: { maxToolCalls: budget.maxToolCalls } } : {}),
+    ...(row.fast && (budget?.maxToolCalls || budget?.xorItemsPerHour)
+      ? { budget: { ...(budget.maxToolCalls ? { maxToolCalls: budget.maxToolCalls } : {}), ...(budget.xorItemsPerHour ? { xorItemsPerHour: budget.xorItemsPerHour } : {}) } }
+      : {}),
     ...(checks.length > 0 ? { checks, checksVersion: row.checksVersion } : {}),
   };
 }

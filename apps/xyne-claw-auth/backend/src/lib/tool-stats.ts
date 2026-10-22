@@ -12,6 +12,7 @@
  */
 
 import { Prisma } from "@prisma/client";
+import { fastSubagentCallRows, reviewSampleRows } from "./fast-subagent-ops.js";
 
 /** Upper bounds in ms; a final overflow bucket is implied. */
 export const DURATION_BUCKETS_MS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000] as const;
@@ -334,6 +335,7 @@ export interface RunStatsTarget {
   agentSlug: string;
   completedAt: Date;
   error?: string | null;
+  model?: string | null;
 }
 
 export interface RunStatsItem {
@@ -345,6 +347,7 @@ export interface RunStatsItem {
   toolsUsed?: readonly string[] | null | undefined;
   /** Citation-reflection outcome; undefined or null keeps whatever the row holds. */
   citationOutcome?: string | null | undefined;
+  invocations?: unknown[] | undefined;
 }
 
 /** Tools the run called plus its toolsUsed list; neither alone is complete. */
@@ -447,6 +450,16 @@ export async function persistRunStats(
 
   const toolRows = written.flatMap(toolStatRows);
   if (toolRows.length > 0) await tx.agentRunToolStats.createMany({ data: toolRows });
+  const withInvocations = written.filter((i) => Array.isArray(i.invocations));
+  if (withInvocations.length > 0) {
+    const runIds = withInvocations.map((i) => i.run.id);
+    const callRows = withInvocations.flatMap((i) => fastSubagentCallRows(i.run, i.invocations));
+    const reviewRows = withInvocations.flatMap((i) => reviewSampleRows(i.run, i.invocations));
+    await tx.fastSubagentCall.deleteMany({ where: { runId: { in: runIds } } });
+    if (callRows.length > 0) await tx.fastSubagentCall.createMany({ data: callRows, skipDuplicates: true });
+    await tx.xorReviewSample.deleteMany({ where: { runId: { in: runIds }, verdict: null } });
+    if (reviewRows.length > 0) await tx.xorReviewSample.createMany({ data: reviewRows });
+  }
   return { statsRows: ids.size, toolRows: toolRows.length, errorCalls: written.reduce((n, i) => n + i.summary.errors.length, 0) };
 }
 
