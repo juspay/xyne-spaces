@@ -28,6 +28,7 @@ import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
 import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
 import { DelayStepForm } from './DelayStepForm';
+import { CreateTicketStepForm } from './CreateTicketStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -258,6 +259,15 @@ export function StepCard({
                 />
               ) : step.type === 'APPLY_CONVERSATION_LABEL' ? (
                 <ApplyConversationLabelStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'CREATE_TICKET' ? (
+                <CreateTicketStepForm
+                  schema={schema.configSchema}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}

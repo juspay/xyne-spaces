@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { BaseTicketType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import type { Request, Response } from 'express';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
@@ -27,6 +27,25 @@ const CreateTicketConfigSchema = z.object({
   priority: z.nativeEnum(TicketPriority).optional(),
   status: z.nativeEnum(TicketStatusV2).optional(),
   createdById: variableRef(z.string()).optional(),
+  ticketType: z
+    .nativeEnum(BaseTicketType)
+    .optional()
+    .describe(
+      'Ticket type. Pick Release or Hotfix on a release board to start commit analysis; leave empty for the board default.'
+    ),
+  formFields: z
+    .array(
+      z.object({
+        fieldName: z.string().min(1).describe('Board form field name, e.g. branch, deployedCommitId, newCommitId.'),
+        value: variableRef(z.string().nullable().optional()).describe(
+          'Value to set. Supports {{...}} placeholders.'
+        ),
+      })
+    )
+    .optional()
+    .describe(
+      'Board form field values set at creation time. Release tickets need branch, deployedCommitId and newCommitId here for commit analysis to run.'
+    ),
 });
 
 const CreateTicketOutputSchema = z.object({
@@ -50,6 +69,26 @@ function truncateForTitle(text: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Turns the step's `formFields` list into the `dynamicFields` map the ticket
+ * controller reads. Blank values are dropped so an unresolved placeholder
+ * doesn't overwrite a board default with an empty string; a repeated field
+ * name keeps the last value.
+ */
+export function buildDynamicFields(
+  formFields: Array<{ fieldName: string; value?: unknown }> | undefined
+): Record<string, string> {
+  const dynamicFields: Record<string, string> = {};
+  for (const field of formFields ?? []) {
+    const name = field.fieldName?.trim();
+    if (!name || field.value === undefined || field.value === null) continue;
+    const value = String(field.value).trim();
+    if (!value) continue;
+    dynamicFields[name] = value;
+  }
+  return dynamicFields;
 }
 
 async function generateTitleWithRetry(description: string, userId: string): Promise<string | null> {
@@ -129,6 +168,11 @@ export class CreateTicketStep extends BaseActionStep<
     if (config.userGroupId !== undefined) reqBody.userGroupId = config.userGroupId;
     if (config.priority !== undefined) reqBody.priority = config.priority;
     if (config.status !== undefined) reqBody.statusV2 = config.status;
+    if (config.ticketType !== undefined) reqBody.ticketType = config.ticketType;
+    const dynamicFields = buildDynamicFields(
+      config.formFields as Array<{ fieldName: string; value?: unknown }> | undefined
+    );
+    if (Object.keys(dynamicFields).length > 0) reqBody.dynamicFields = dynamicFields;
 
     const fakeReq = {
       body: reqBody,
@@ -167,7 +211,7 @@ export class CreateTicketStep extends BaseActionStep<
     };
 
     logger.info(
-      `[automations] CREATE_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) created in channel=${reqBody.channelId}, board=${reqBody.boardId}, project=${reqBody.projectId}, conversation=${ticket.conversationId}`
+      `[automations] CREATE_TICKET → ticket ${ticket.id} (xyneId=${ticket.xyneId}) created in channel=${reqBody.channelId}, board=${reqBody.boardId}, type=${reqBody.ticketType ?? 'default'}, formFields=[${Object.keys(dynamicFields).join(',')}], project=${reqBody.projectId}, conversation=${ticket.conversationId}`
     );
 
     return {
