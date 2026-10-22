@@ -1542,7 +1542,7 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
       // flight) carries over from the channel being left.
       key={selected.id}
       title='Channel tabs'
-      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar (pencil icon).'
+      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar: drag tabs to rearrange or hide them, and use + to add.'
       store={store}
       resetLabel='Reset to channel layout'
       publishedAppIds={publishedSet}
