@@ -2245,6 +2245,7 @@ model SubagentDefinition {
   samples          Json?
   model            String?
   budget           Json?
+  evalReport       Json?
   /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).

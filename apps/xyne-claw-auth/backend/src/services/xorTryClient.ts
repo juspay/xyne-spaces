@@ -48,3 +48,54 @@ export async function tryChecksViaClaw(req: {
     return { ok: false, status: 502, error: "xor try failed — claw did not answer" };
   }
 }
+
+export interface EvalModelSummary {
+  model: string;
+  overall: { labelled: number; correct: number; confidentWrong: number; unsure: number; accuracy: number; unsureRate: number };
+  checks: Array<{ id: string; question: string; variantOf?: string; labelled: number; correct: number; confidentWrong: number; unsure: number; accuracy: number; unsureRate: number }>;
+  meanMs: number;
+  unavailable: number;
+}
+
+export interface EvalRegression {
+  id: string;
+  question: string;
+  from: number;
+  to: number;
+  confidentWrongFrom: number;
+  confidentWrongTo: number;
+}
+
+export type XorEvalResult =
+  | { ok: true; report: { samples: number; models: EvalModelSummary[]; ranAt: string }; regressions: Array<{ model: string; regressions: EvalRegression[] }>; markdown: string }
+  | { ok: false; status: number; error: string };
+
+const EVAL_TIMEOUT_MS = 180_000;
+
+export async function evalChecksViaClaw(req: {
+  checks: DecideQuestion[];
+  samples: Array<{ input: string; expected: Record<string, unknown> }>;
+  compare?: string[];
+  variants?: Record<string, string[]>;
+  context?: string;
+}): Promise<XorEvalResult> {
+  if (!CONFIG.xyneClawS2sKey) return { ok: false, status: 503, error: "claw is not reachable from this deployment" };
+  const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/xor-decide/eval`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      body: JSON.stringify(req),
+      signal: AbortSignal.timeout(EVAL_TIMEOUT_MS),
+    });
+    const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string } & Partial<Extract<XorEvalResult, { ok: true }>>;
+    if (!res.ok || !data.success || !data.report) {
+      logger.warn("[xor-try-client] eval non-OK from claw", { status: res.status, error: data.error });
+      return { ok: false, status: res.status >= 400 && res.status < 500 ? res.status : 502, error: data.error ?? "xor eval failed" };
+    }
+    return { ok: true, report: data.report, regressions: data.regressions ?? [], markdown: data.markdown ?? "" };
+  } catch (err) {
+    logger.error("[xor-try-client] eval call failed", { err: errMsg(err) });
+    return { ok: false, status: 502, error: "xor eval failed — claw did not answer" };
+  }
+}
