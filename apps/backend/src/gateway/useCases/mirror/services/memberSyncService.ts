@@ -1,15 +1,14 @@
 import { db, logger, repositories } from '../../../re-exports';
-import type { BaseApi } from '../../../core/base/baseApi';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
 import type { ProviderConfig, SpacesMemberChange } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
-import type { MirrorLink } from '../types';
+import type { MirrorApi, MirrorLink } from '../types';
 
 /** Additions sync both ways in every channel, apps included; removals only when both channels are private. */
 export class MemberSyncService {
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, MirrorApi>,
     private readonly identity: IdentityService
   ) {}
 
@@ -72,7 +71,7 @@ export class MemberSyncService {
     if (userId) await repositories.channelParticipants.removeParticipant(link.spacesId, userId);
   }
 
-  private async isPrivateOnBothSides(api: BaseApi, link: MirrorLink): Promise<boolean> {
+  private async isPrivateOnBothSides(api: MirrorApi, link: MirrorLink): Promise<boolean> {
     const [external, spaces] = await Promise.all([
       api.getChannel(link.externalId),
       db.channel.findUnique({ where: { id: link.spacesId }, select: { visibility: true } }),
@@ -81,7 +80,7 @@ export class MemberSyncService {
   }
 
   private async addMemberToSpaces(
-    api: BaseApi,
+    api: MirrorApi,
     link: MirrorLink,
     externalUserId: string
   ): Promise<void> {

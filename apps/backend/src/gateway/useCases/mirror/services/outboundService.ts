@@ -11,7 +11,6 @@ import {
 } from '../../../re-exports';
 import type { LockHandle } from '../../../re-exports';
 import { gatewayConfig } from '../../../config';
-import type { BaseApi } from '../../../core/base/baseApi';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
 import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
@@ -26,11 +25,11 @@ import type {
 import type { IdentityService } from '../../../core/services/identityService';
 import type { UserApi, UserAuthService } from '../../../core/services/userAuthService';
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
-import { MIRROR_ORIGIN_TYPE, type MirrorLink } from '../types';
+import { MIRROR_ORIGIN_TYPE, type MirrorApi, type MirrorLink } from '../types';
 
 interface OutboundContext {
   link: MirrorLink;
-  api: BaseApi;
+  api: MirrorApi;
   sourceId: string;
   sourceIds: string[];
   job: JobContext;
@@ -81,9 +80,9 @@ export class OutboundService {
   private readonly attachments = new ExternalAttachmentService();
 
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, MirrorApi>,
     private readonly identity: IdentityService,
-    private readonly userAuth: UserAuthService
+    private readonly userAuth: UserAuthService<MirrorApi>
   ) {}
 
   async sendMessageChange(
@@ -137,7 +136,7 @@ export class OutboundService {
   private async asPoster(
     ctx: OutboundContext,
     senderId: string | undefined,
-    fn: (api: BaseApi, asBot: boolean) => Promise<void>
+    fn: (api: MirrorApi, asBot: boolean) => Promise<void>
   ): Promise<void> {
     const sender = senderId ? await this.userAuth.findUserApi(senderId) : null;
     if (sender && (await this.userAuth.callAsUser(sender, (api) => fn(api, false)))) return;
@@ -214,7 +213,7 @@ export class OutboundService {
   private async findEarlierPost(
     ctx: OutboundContext,
     draft: Draft,
-    sender: UserApi | null
+    sender: UserApi<MirrorApi> | null
   ): Promise<string | null> {
     const delivery = ctx.job.getProgress<Delivery>(draft.messageId);
     if (!delivery?.startedAt) return null;
@@ -237,7 +236,7 @@ export class OutboundService {
    */
   private async postAsSender(
     ctx: OutboundContext,
-    sender: UserApi,
+    sender: UserApi<MirrorApi>,
     draft: Draft
   ): Promise<string | null> {
     const posted = await this.userAuth.callAsUser(sender, async (api) => {
@@ -290,7 +289,7 @@ export class OutboundService {
 
   private async uploadFiles(
     ctx: OutboundContext,
-    api: BaseApi,
+    api: MirrorApi,
     poster: string,
     draft: Draft
   ): Promise<{ fileIds: string[]; notes: string[] }> {
@@ -323,7 +322,7 @@ export class OutboundService {
 
   private async publish(
     ctx: OutboundContext,
-    api: BaseApi,
+    api: MirrorApi,
     draft: Draft,
     message: OutboundMessage,
     fileIds: string[]
@@ -344,7 +343,7 @@ export class OutboundService {
 
   private async shareFiles(
     ctx: OutboundContext,
-    api: BaseApi,
+    api: MirrorApi,
     message: OutboundMessage,
     fileIds: string[],
     sharedFileId: string

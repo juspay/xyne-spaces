@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import type { RawBodyRequest } from './re-exports';
+import type { BaseApi } from './core/base/baseApi';
 import type { BaseProvider } from './core/base/baseProvider';
 import { SpacesHooks } from './core/hooks/spacesHooks';
 import { gatewayErrorHandler } from './core/middleware/errorHandler';
@@ -16,7 +17,9 @@ import { createMirror } from './useCases/mirror';
 
 const jobs = new GatewayQueue();
 
-function createServices(provider: BaseProvider): ProviderServices {
+function createServices<TApi extends BaseApi>(
+  provider: BaseProvider<unknown, TApi>
+): ProviderServices<TApi> {
   const config = new ConfigService(provider);
   return {
     provider,

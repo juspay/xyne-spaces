@@ -102,7 +102,16 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 
 ## BaseApi
 
-Implement `postMessage`, `updateMessage`, `deleteMessage`, `uploadFile`, `shareFiles`, `findFileMessage`, `findPostedMessage`, `findThreadParent`, `getChannel`, `listSharedChannels` (channels the user and the bot share), `listMembers`, `inviteMembers`, `removeMember`, `findUser`, `findUserIdByEmail` and `toGatewayError`. Names follow one rule: `find…` may return `null`, `get…` throws when missing, `list…` returns an array.
+`<Id>Api extends BaseApi` implements `toGatewayError` and the groups the provider supports. Its provider declares that type: `class SlackProvider extends BaseProvider<SlackCredentials, SlackApi>`.
+
+| Group          | Methods                                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `MessagingApi` | `postMessage`, `updateMessage`, `deleteMessage`, `findPostedMessage`, `findThreadParent`                                 |
+| `FileApi`      | `uploadFile`, `shareFiles`, `findFileMessage`                                                                            |
+| `ChannelApi`   | `getChannel`, `listSharedChannels` (channels the user and the bot share), `listMembers`, `inviteMembers`, `removeMember` |
+| `DirectoryApi` | `findUser`, `findUserIdByEmail`                                                                                          |
+
+A use case asks for the groups it needs: Mirror takes `ProviderServices<MirrorApi>`, all four, so `createMirror()` on a provider missing one doesn't compile. Never stub a method a provider can't support; leave its group out. Names follow one rule: `find…` may return `null`, `get…` throws when missing, `list…` returns an array.
 
 Run every call through `this.call()`: it maps failures with `toGatewayError()` and retries only `RATE_LIMITED`. Use `this.callIgnoring(fn, codes)` for errors that mean "already done", like already in channel.
 

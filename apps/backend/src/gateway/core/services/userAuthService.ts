@@ -23,8 +23,8 @@ export interface UserAuthStatus {
 }
 
 /** An API acting as one Spaces user. */
-export interface UserApi {
-  api: BaseApi;
+export interface UserApi<TApi extends BaseApi = BaseApi> {
+  api: TApi;
   spacesUserId: string;
   externalUserId: string;
 }
@@ -33,11 +33,11 @@ export interface UserApi {
  * Lets a person sign in with the provider, so what they send from Spaces is posted as them.
  * Tokens belong to the provider's CONNECTION, so every use case on it can use them.
  */
-export class UserAuthService {
+export class UserAuthService<TApi extends BaseApi = BaseApi> {
   private readonly tokens = new UserTokenRepository();
 
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, TApi>,
     private readonly config: ConfigService
   ) {}
 
@@ -87,7 +87,7 @@ export class UserAuthService {
     await this.tokens.deleteByUser(userId, this.tokenProvider);
   }
 
-  async findUserApi(spacesUserId: string): Promise<UserApi | null> {
+  async findUserApi(spacesUserId: string): Promise<UserApi<TApi> | null> {
     const token = await this.tokens.findByUser(spacesUserId, this.tokenProvider);
     if (!token?.providerUserId) return null;
     return {
@@ -99,8 +99,8 @@ export class UserAuthService {
 
   /** Runs a call with a person's token; null means the bot should do it instead. */
   async callAsUser<T>(
-    user: UserApi,
-    fn: (api: BaseApi) => Promise<T>
+    user: UserApi<TApi>,
+    fn: (api: TApi) => Promise<T>
   ): Promise<{ value: T } | null> {
     try {
       return { value: await fn(user.api) };

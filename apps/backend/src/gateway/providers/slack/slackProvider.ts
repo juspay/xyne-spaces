@@ -12,7 +12,7 @@ import { SlackTransformer } from './slackTransformer';
 import { buildSlackUserAuthUrl, parseSlackEvent, verifySlackSignature } from './slackUtils';
 import { SlackCredentialsSchema, type SlackCredentials } from './types';
 
-export class SlackProvider extends BaseProvider<SlackCredentials> {
+export class SlackProvider extends BaseProvider<SlackCredentials, SlackApi> {
   readonly id = 'slack' as const;
   readonly displayName = 'Slack';
   readonly userMetadataKey = 'slackId';

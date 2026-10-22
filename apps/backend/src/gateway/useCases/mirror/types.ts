@@ -1,3 +1,10 @@
+import type {
+  BaseApi,
+  ChannelApi,
+  DirectoryApi,
+  FileApi,
+  MessagingApi,
+} from '../../core/base/baseApi';
 import type { Pair, ProviderChannel, SpacesMessageChange } from '../../core/types';
 import type { InboundService, MessageEvent } from './services/inboundService';
 import type { LinkRequestService } from './services/linkRequestService';
@@ -18,6 +25,8 @@ export interface MirrorServices {
 export const MIRROR_SOURCE_SUFFIX = '-mirror';
 
 export const MIRROR_ORIGIN_TYPE = 'xyne_mirror';
+
+export type MirrorApi = BaseApi & MessagingApi & FileApi & ChannelApi & DirectoryApi;
 
 /** A Mirror link: one provider channel (`externalId`) ⇄ one Spaces channel (`spacesId`). */
 export type MirrorLink = Pair;

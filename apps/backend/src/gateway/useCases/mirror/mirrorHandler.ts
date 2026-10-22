@@ -20,6 +20,7 @@ import {
   inboundJobId,
   outboundJobId,
   type InboundJobPayload,
+  type MirrorApi,
   type MirrorJobType,
   type MirrorLink,
   type MirrorServices,
@@ -36,7 +37,7 @@ export class MirrorHandler implements GatewayHandler {
   private readonly links: PairRepository;
 
   constructor(
-    private readonly core: ProviderServices,
+    private readonly core: ProviderServices<MirrorApi>,
     private readonly mirror: MirrorServices
   ) {
     this.name = `${core.provider.id}${MIRROR_SOURCE_SUFFIX}`;

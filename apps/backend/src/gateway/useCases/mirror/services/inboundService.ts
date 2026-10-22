@@ -12,7 +12,6 @@ import {
   repositories,
 } from '../../../re-exports';
 import { gatewayConfig } from '../../../config';
-import type { BaseApi } from '../../../core/base/baseApi';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
 import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
@@ -26,7 +25,7 @@ import type {
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
-import type { MirrorLink } from '../types';
+import type { MirrorApi, MirrorLink } from '../types';
 
 export type MessageEvent = Extract<
   ProviderEvent,
@@ -42,7 +41,7 @@ const PARENT_LOCK_WAIT_MS = 10_000;
 interface InboundContext {
   link: MirrorLink;
   config: ProviderConfig;
-  api: BaseApi;
+  api: MirrorApi;
   sourceName: string;
   sourceId: string;
   sourceIds: string[];
@@ -56,7 +55,7 @@ export class InboundService {
   private readonly attachments = new ExternalAttachmentService();
 
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, MirrorApi>,
     private readonly identity: IdentityService
   ) {}
 

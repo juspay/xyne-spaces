@@ -48,27 +48,38 @@ export abstract class BaseApi {
   }
 
   protected abstract toGatewayError(error: unknown): GatewayError;
+}
 
+export interface MessagingApi {
   /** Posts a message and returns its provider id. */
-  abstract postMessage(message: OutboundMessage): Promise<string>;
-  abstract updateMessage(channelId: string, messageId: string, text: string): Promise<void>;
-  abstract deleteMessage(channelId: string, messageId: string): Promise<void>;
-  abstract uploadFile(file: OutboundFile): Promise<string>;
-  abstract shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void>;
-  abstract findFileMessage(channelId: string, fileId: string): Promise<string | null>;
-  abstract findPostedMessage(
+  postMessage(message: OutboundMessage): Promise<string>;
+  updateMessage(channelId: string, messageId: string, text: string): Promise<void>;
+  deleteMessage(channelId: string, messageId: string): Promise<void>;
+  findPostedMessage(
     channelId: string,
     threadId: string | undefined,
     since: Date,
     match: PostedMessageMatch
   ): Promise<string | null>;
-  abstract findThreadParent(channelId: string, threadId: string): Promise<ProviderMessage | null>;
-  abstract getChannel(channelId: string): Promise<ProviderChannel>;
+  findThreadParent(channelId: string, threadId: string): Promise<ProviderMessage | null>;
+}
+
+export interface FileApi {
+  uploadFile(file: OutboundFile): Promise<string>;
+  shareFiles(message: OutboundMessage, fileIds: string[]): Promise<void>;
+  findFileMessage(channelId: string, fileId: string): Promise<string | null>;
+}
+
+export interface ChannelApi {
+  getChannel(channelId: string): Promise<ProviderChannel>;
   /** Channels the user and the bot are both in. */
-  abstract listSharedChannels(userId: string): Promise<ProviderChannel[]>;
-  abstract listMembers(channelId: string): Promise<string[]>;
-  abstract inviteMembers(channelId: string, userIds: string[]): Promise<void>;
-  abstract removeMember(channelId: string, userId: string): Promise<void>;
-  abstract findUser(userId: string): Promise<ProviderUser | null>;
-  abstract findUserIdByEmail(email: string): Promise<string | null>;
+  listSharedChannels(userId: string): Promise<ProviderChannel[]>;
+  listMembers(channelId: string): Promise<string[]>;
+  inviteMembers(channelId: string, userIds: string[]): Promise<void>;
+  removeMember(channelId: string, userId: string): Promise<void>;
+}
+
+export interface DirectoryApi {
+  findUser(userId: string): Promise<ProviderUser | null>;
+  findUserIdByEmail(email: string): Promise<string | null>;
 }

@@ -1,7 +1,13 @@
 import { ErrorCode, WebClient } from '@slack/web-api';
 import type { WebAPICallError } from '@slack/web-api';
 import { gatewayConfig } from '../../config';
-import { BaseApi } from '../../core/base/baseApi';
+import {
+  BaseApi,
+  type ChannelApi,
+  type DirectoryApi,
+  type FileApi,
+  type MessagingApi,
+} from '../../core/base/baseApi';
 import { GatewayError } from '../../core/errors';
 import type {
   OutboundFile,
@@ -37,7 +43,7 @@ const HISTORY_LIMIT = 15;
 /** Same synthetic email self-serve migration gives a Slack user without one, so both map to one Spaces user. */
 const fallbackEmail = (slackUserId: string): string => `${slackUserId}@cross-platform.in`;
 
-export class SlackApi extends BaseApi {
+export class SlackApi extends BaseApi implements MessagingApi, FileApi, ChannelApi, DirectoryApi {
   private readonly client: WebClient;
 
   /** `asUser`: a person's own token, so Slack shows their name and photo and nothing is overridden. */

@@ -11,7 +11,7 @@ import type {
 } from '../types';
 
 /** Everything core needs to know about one provider. */
-export abstract class BaseProvider<TCredentials = unknown> {
+export abstract class BaseProvider<TCredentials = unknown, TApi extends BaseApi = BaseApi> {
   abstract readonly id: ProviderId;
   abstract readonly displayName: string;
   abstract readonly userMetadataKey: string;
@@ -24,7 +24,7 @@ export abstract class BaseProvider<TCredentials = unknown> {
 
   abstract parseEvent(body: unknown): ProviderRequest;
 
-  abstract createApi(credentials: TCredentials): BaseApi;
+  abstract createApi(credentials: TCredentials): TApi;
 
   /** Loop guard: true for messages the app itself posted. */
   abstract isOwnMessage(message: ProviderMessage, workspace: ProviderWorkspace): boolean;
@@ -39,7 +39,7 @@ export abstract class BaseProvider<TCredentials = unknown> {
     redirectUri: string
   ): Promise<ProviderUserToken>;
 
-  abstract createUserApi(token: string): BaseApi;
+  abstract createUserApi(token: string): TApi;
 
   get configSourceType(): string {
     return `${this.id}-connection`;

@@ -13,7 +13,12 @@ import {
   type SyncRequestFilters,
 } from '../repositories/syncRequestRepository';
 import type { ConfigService } from '../../../core/services/configService';
-import { type ChannelSyncStatus, type SyncRequest, type SyncRequestView } from '../types';
+import {
+  type ChannelSyncStatus,
+  type MirrorApi,
+  type SyncRequest,
+  type SyncRequestView,
+} from '../types';
 import type { LinkInput, LinkService } from './linkService';
 
 const DECIDE_LOCK_TTL_SECONDS = 60;
@@ -41,7 +46,7 @@ export class LinkRequestService {
   private readonly requests = new SyncRequestRepository();
 
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, MirrorApi>,
     private readonly config: ConfigService,
     private readonly links: LinkService
   ) {}

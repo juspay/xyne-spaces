@@ -1,3 +1,4 @@
+import type { BaseApi } from './base/baseApi';
 import type { BaseProvider } from './base/baseProvider';
 import type { GatewayQueue } from './queue/gatewayQueue';
 import type { ConfigService } from './services/configService';
@@ -150,11 +151,11 @@ export interface SpacesMemberChange {
 }
 
 /** What every use of the gateway shares for one provider; built once in index.ts. */
-export interface ProviderServices {
-  provider: BaseProvider;
+export interface ProviderServices<TApi extends BaseApi = BaseApi> {
+  provider: BaseProvider<unknown, TApi>;
   config: ConfigService;
   identity: IdentityService;
-  userAuth: UserAuthService;
+  userAuth: UserAuthService<TApi>;
   jobs: GatewayQueue;
 }
 

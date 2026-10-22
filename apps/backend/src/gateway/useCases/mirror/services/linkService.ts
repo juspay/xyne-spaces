@@ -15,7 +15,7 @@ import type { ProviderConfig, ProviderChannel } from '../../../core/types';
 import type { ConfigService } from '../../../core/services/configService';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, deskSourceName } from '../messageSources';
-import { MIRROR_SOURCE_SUFFIX, type MirrorLink } from '../types';
+import { MIRROR_SOURCE_SUFFIX, type MirrorApi, type MirrorLink } from '../types';
 import type { MemberSyncService } from './memberSyncService';
 
 // Unique, so there is one link per provider channel; (spacesId, sourceType) keeps one per Spaces channel.
@@ -39,7 +39,7 @@ export class LinkService {
   private readonly sources = new SourceRepository();
 
   constructor(
-    private readonly provider: BaseProvider,
+    private readonly provider: BaseProvider<unknown, MirrorApi>,
     private readonly config: ConfigService,
     private readonly identity: IdentityService,
     private readonly members: MemberSyncService

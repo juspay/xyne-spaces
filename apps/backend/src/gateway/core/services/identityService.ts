@@ -6,7 +6,7 @@ import {
   repositories,
 } from '../../re-exports';
 import { gatewayConfig } from '../../config';
-import type { BaseApi } from '../base/baseApi';
+import type { DirectoryApi } from '../base/baseApi';
 import type { BaseProvider } from '../base/baseProvider';
 import { GatewayError } from '../errors';
 import type { ProviderMessage, ProviderUser } from '../types';
@@ -28,7 +28,7 @@ export class IdentityService {
 
   /** Finds or creates the Spaces user for a provider person or app; null when neither can be made. */
   async findOrCreateSpacesUser(
-    api: BaseApi,
+    api: DirectoryApi,
     workspaceId: string,
     externalUserId: string
   ): Promise<string | null> {
@@ -93,7 +93,7 @@ export class IdentityService {
     }
   }
 
-  async findExternalUserId(api: BaseApi, spacesUserId: string): Promise<string | null> {
+  async findExternalUserId(api: DirectoryApi, spacesUserId: string): Promise<string | null> {
     const user = await repositories.users.findById(spacesUserId);
     if (!user) return null;
 
@@ -113,7 +113,7 @@ export class IdentityService {
   }
 
   /** The Spaces user's own provider profile, when they have one there. */
-  async findExternalUser(api: BaseApi, spacesUserId: string): Promise<ProviderUser | null> {
+  async findExternalUser(api: DirectoryApi, spacesUserId: string): Promise<ProviderUser | null> {
     const externalUserId = await this.findExternalUserId(api, spacesUserId);
     return externalUserId ? await api.findUser(externalUserId) : null;
   }

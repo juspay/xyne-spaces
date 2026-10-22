@@ -7,10 +7,13 @@ import { LinkRequestService } from './services/linkRequestService';
 import { LinkService } from './services/linkService';
 import { MemberSyncService } from './services/memberSyncService';
 import { OutboundService } from './services/outboundService';
-import type { MirrorServices } from './types';
+import type { MirrorApi, MirrorServices } from './types';
 
 /** Builds Mirror on one provider: the handler core calls, and the routes mounted under the provider's path. */
-export function createMirror(core: ProviderServices): { handler: GatewayHandler; router: Router } {
+export function createMirror(core: ProviderServices<MirrorApi>): {
+  handler: GatewayHandler;
+  router: Router;
+} {
   const { provider, config, identity, userAuth } = core;
   const members = new MemberSyncService(provider, identity);
   const links = new LinkService(provider, config, identity, members);
