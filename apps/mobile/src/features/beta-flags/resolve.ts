@@ -62,3 +62,16 @@ export function revokedFlagKeys(allowed: BetaFlagsEnabled, enabled: readonly Fla
 
   return enabled.filter(key => !grants.has(key));
 }
+
+/**
+ * Flags this user may try and has never set, either way.
+ *
+ * Drives the "new beta features" banner: it shows while at least one visible
+ * flag is untouched, and goes away once the user has made a choice on each.
+ */
+export function untouchedBetaFlags(
+  flags: readonly BetaFlag[],
+  isTouched: (key: FlagKey) => boolean,
+): BetaFlag[] {
+  return flags.filter(flag => !isTouched(flag.key));
+}

@@ -4,6 +4,7 @@ export {
   flagSnapshot,
   storedFlag,
   enabledFlagKeys,
+  isFlagTouched,
   setFlag,
   clearFlag,
   resetFlags,
