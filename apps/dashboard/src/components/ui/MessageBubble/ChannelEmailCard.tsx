@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Mail } from 'lucide-react';
 import { EmailBodyRenderer } from '../../xyne-desk/EmailBody/EmailBodyRenderer';
 import { parseFromField } from '../../xyne-desk/EmailComposer/helpers';
-import { useChannel } from '../../../hooks/useChannels';
 
 interface ChannelEmailCardProps {
   subject: string;
@@ -12,8 +11,7 @@ interface ChannelEmailCardProps {
   bcc?: string[];
   body: string;
   emailId: string;
-  /** Channel the email was posted to; its `expandChannelEmailsByDefault` setting decides the initial state. */
-  channelId?: string | undefined;
+  expandByDefault?: boolean;
   attachments?: ReadonlyArray<{
     id: string;
     metadata?: unknown;
@@ -39,10 +37,8 @@ export const ChannelEmailCard: React.FC<ChannelEmailCardProps> = ({
   body,
   emailId,
   attachments = [],
-  channelId,
+  expandByDefault = false,
 }) => {
-  const channel = useChannel(channelId ?? '');
-  const expandByDefault = channel?.expandChannelEmailsByDefault === true;
   const [expanded, setExpanded] = useState(expandByDefault);
 
   // When an admin flips the channel setting, re-apply the new default to cards already on screen.

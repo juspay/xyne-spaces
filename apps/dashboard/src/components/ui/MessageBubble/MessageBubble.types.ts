@@ -66,6 +66,7 @@ export interface MessageBubbleProps {
   variant?: 'default' | 'pinned';
   isHighlighted?: boolean | undefined;
   channelId?: string;
+  expandChannelEmailsByDefault?: boolean;
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread';
   contentOnly?: boolean;

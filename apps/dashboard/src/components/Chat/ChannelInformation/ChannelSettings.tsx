@@ -233,20 +233,21 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
     }
   };
 
-  const handleToggleExpandEmails = (next: boolean): void => {
+  const handleToggleExpandEmails = async (next: boolean): Promise<void> => {
     if (!canManageTicketVisibility) return;
 
     const timestamp = Date.now();
     try {
-      zero.mutate(
+      const res = await zero.mutate(
         mutators.channel.updateExpandChannelEmailsByDefault({
           channelId: channel.id,
           expand: next,
           updatedAt: timestamp,
         }),
-      );
-    } catch {
-      toast.error('Failed to update setting');
+      ).server;
+      if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to update setting');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update setting');
     }
   };
 
@@ -369,7 +370,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   </Button>
                 </div>
               )}
-              {canManageTicketVisibility && (
+              {canManageTicketVisibility && emailAlias && (
                 <div className='mt-3 flex items-start justify-between gap-3 border-t border-border pt-3'>
                   <div className='flex flex-col gap-y-1'>
                     <p className='text-sm font-medium text-foreground'>Expand emails by default</p>
@@ -380,7 +381,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   </div>
                   <Switch
                     checked={expandEmailsByDefault}
-                    onCheckedChange={handleToggleExpandEmails}
+                    onCheckedChange={next => void handleToggleExpandEmails(next)}
                     aria-label='Expand emails sent to this channel by default'
                     data-track-category='CHANNEL_SETTINGS'
                     data-track-name='TOGGLE_EXPAND_CHANNEL_EMAILS'
