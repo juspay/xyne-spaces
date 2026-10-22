@@ -218,8 +218,7 @@ class WorkerService {
         await decisionEvaluationWorker.start();
       }
 
-      // Desk ticket thread summaries feed related-ticket matching. initialize() no-ops when
-      // ENABLE_TICKET_THREAD_SUMMARY is off, on both the producer and this consumer.
+      // Desk ticket thread summaries feed related-ticket matching.
       if (appConfig.ticketThreadSummaryEnabled) {
         logger.info('Starting ticket thread summary worker service...')
         await ticketThreadSummaryQueue.initialize()

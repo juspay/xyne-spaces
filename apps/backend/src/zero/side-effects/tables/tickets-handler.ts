@@ -1,5 +1,5 @@
 import { BaseSideEffectHandler } from '../base-handler';
-import { ActivityClassification, TicketStatusV2 } from '@xyne/shared';
+import { ActivityClassification, TicketStatusV2, isDeskChannelType } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -62,11 +62,6 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
 
     const prev = previousValue as TicketPreviousValue;
     const actorId = this.ctx.userID;
-
-    // Closing is when the fix is final; summarise now rather than after the quiet window.
-    if (args.statusV2 === TicketStatusV2.COMPLETED && prev.statusV2 !== TicketStatusV2.COMPLETED) {
-      void ticketThreadSummaryQueue.enqueue(ticketId, { immediate: true });
-    }
 
     // Detect field changes and build activities
     const activities: TicketActivity[] = [];
@@ -222,12 +217,22 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
         eta: true,
         statusV2: true,
         metadata: true,
+        channel: { select: { type: true } },
       },
     });
 
     if (!ticket) {
       logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found`);
       return;
+    }
+
+    // Closing is when the fix is final; summarise now rather than after the quiet window.
+    if (
+      isDeskChannelType(ticket.channel?.type) &&
+      args.statusV2 === TicketStatusV2.COMPLETED &&
+      prev.statusV2 !== TicketStatusV2.COMPLETED
+    ) {
+      void ticketThreadSummaryQueue.enqueue(ticketId, { immediate: true });
     }
 
     try {

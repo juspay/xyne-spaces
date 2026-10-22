@@ -344,7 +344,7 @@ export interface TicketRelatedJevConfig {
   /** Min probability to link a candidate Jev put in `same_cause`. */
   sameCauseThreshold: number;
   /**
-   * Min probability to link a SOLVED candidate Jev put in `same_symptom_cause_unknown`.
+   * Min probability to link a candidate Jev put in `same_symptom_cause_unknown`.
    * Higher: its resolution may not apply, so only a confident same-problem match is shown.
    */
   sameSymptomThreshold: number;

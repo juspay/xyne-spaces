@@ -3,12 +3,8 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { config } from '@/config/env';
 
-/**
- * Wait for the thread to go quiet this long before summarising, so a burst of emails is
- * one LLM call. Every new email pushes the window back (see enqueue). A ticket's first
- * summary and the one on close skip it (`immediate`): there is no burst to wait for, and
- * related-ticket links should be there by the time an agent opens the ticket.
- */
+// Wait for the thread to go quiet this long, so a burst of replies and notes is one LLM
+// call. Every new event pushes the window back; `immediate` enqueues skip it.
 const DEBOUNCE_MS = Number(process.env['TICKET_THREAD_SUMMARY_DEBOUNCE_MS'] ?? 5_000);
 
 const QUEUE_NAME = 'ticket-thread-summary';
@@ -28,7 +24,8 @@ const followUpJobIdFor = (ticketId: string): string => `${jobIdFor(ticketId)}:ne
 
 /**
  * Off-request desk ticket thread summaries (see ticketThreadSummaryService). Failures are
- * retried twice then dropped — the next email on the ticket queues it again.
+ * retried twice then dropped — the next reply, note or open of the ticket queues it again.
+ * Customer emails on an existing ticket queue nothing; the open-if-stale check covers them.
  */
 class TicketThreadSummaryQueue {
   private queue: Bull.Queue<TicketThreadSummaryJob> | null = null;
@@ -99,14 +96,9 @@ class TicketThreadSummaryQueue {
   }
 
   /**
-   * Queue a summary refresh for a ticket. Fire-and-forget safe; does no database read —
-   * the consumer does all gating (desk channel, archived, has emails).
-   *
-   * Every event before a run starts folds into that run: Bull silently ignores an add
-   * whose jobId already exists, so a waiting job is replaced to push the quiet window
-   * back. Events during a run fold into one follow-up run instead (see queueFollowUp),
-   * since the running one has already read the thread. `immediate` skips the window: a
-   * new ticket, a closed one, or an agent opening a ticket whose summary is missing or stale.
+   * Queue a summary refresh. Fire-and-forget safe, no database read; the consumer re-checks
+   * the ticket. A waiting job is replaced to push the quiet window back (Bull ignores an add
+   * whose jobId exists); an event during a run becomes one follow-up run (queueFollowUp).
    */
   async enqueue(ticketId: string, { immediate = false }: { immediate?: boolean } = {}): Promise<void> {
     if (!ticketId || !this.queue) return;

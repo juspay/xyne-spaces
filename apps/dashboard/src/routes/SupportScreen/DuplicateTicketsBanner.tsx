@@ -183,33 +183,36 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
     const relatedEntries: ReferenceEntry[] = [];
     if (!ticket) return { duplicates: duplicateEntries, related: relatedEntries };
 
-    // Outgoing: this ticket was flagged as a duplicate of an earlier one, or an
-    // earlier ticket was found that could help resolve it.
-    for (const reference of ticket.referencesOut ?? []) {
-      const label = formatReferenceLabel(reference.relationType);
-      const target = reference.targetTicket as RelatedTicket | undefined;
-      if (DUPLICATE_RELATIONS.has(reference.relationType)) {
-        const entry = toEntry(reference, target, label);
-        if (entry) duplicateEntries.push(entry);
-      } else if (reference.relationType === TicketReferenceRelation.RELATED_POSSIBLE) {
-        const entry = toEntry(reference, target, label);
-        if (entry) relatedEntries.push(entry);
-      }
-    }
+    const add = (
+      reference: { id: string; relationType: TicketReferenceRelation },
+      other: RelatedTicket | undefined,
+      label: string,
+    ): void => {
+      const list = DUPLICATE_RELATIONS.has(reference.relationType)
+        ? duplicateEntries
+        : reference.relationType === TicketReferenceRelation.RELATED_POSSIBLE
+          ? relatedEntries
+          : null;
+      const entry = list && toEntry(reference, other, label);
+      // A ticket can be related both ways; list it once.
+      if (entry && !list.some(existing => existing.xyneId === entry.xyneId)) list.push(entry);
+    };
 
-    // Incoming: later tickets were flagged as duplicates of this one, or found it related.
+    // Outgoing: this ticket was flagged as a duplicate of an earlier one, or an earlier
+    // ticket was found that could help resolve it. Incoming: the reverse.
+    for (const reference of ticket.referencesOut ?? []) {
+      add(
+        reference,
+        reference.targetTicket as RelatedTicket | undefined,
+        formatReferenceLabel(reference.relationType),
+      );
+    }
     for (const reference of ticket.referencesIn ?? []) {
-      const label = formatIncomingReferenceLabel(reference.relationType);
-      const source = reference.sourceTicket as RelatedTicket | undefined;
-      if (DUPLICATE_RELATIONS.has(reference.relationType)) {
-        const entry = toEntry(reference, source, label);
-        if (entry) duplicateEntries.push(entry);
-      } else if (reference.relationType === TicketReferenceRelation.RELATED_POSSIBLE) {
-        const entry = toEntry(reference, source, label);
-        if (entry && !relatedEntries.some(existing => existing.xyneId === entry.xyneId)) {
-          relatedEntries.push(entry);
-        }
-      }
+      add(
+        reference,
+        reference.sourceTicket as RelatedTicket | undefined,
+        formatIncomingReferenceLabel(reference.relationType),
+      );
     }
 
     relatedEntries.sort((a, b) => Number(b.solved) - Number(a.solved));

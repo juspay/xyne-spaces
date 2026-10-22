@@ -1660,8 +1660,6 @@ export class EmailService {
         ).catch(error => {
           logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticketRow.id}:`, error);
         });
-
-        void ticketThreadSummaryQueue.enqueue(ticketRow.id);
       }
 
       this.pushVespaJobForMail(email.id, conversation.createdBy, channel?.workspaceId).catch(error => {
@@ -2272,7 +2270,8 @@ export class EmailService {
     // Post-commit so refetched label unread counts see the new emails.
     if (txResult.ticketId) {
       websocketService.broadcastLabelUnreadCountsUpdate(channelId);
-      void ticketThreadSummaryQueue.enqueue(txResult.ticketId, { immediate: txResult.isNew });
+      // A customer email on an existing ticket is summarised when an agent next opens it.
+      if (txResult.isNew) void ticketThreadSummaryQueue.enqueue(txResult.ticketId, { immediate: true });
     }
 
     const insertedIdSet = new Set(txResult.insertedEmailIds);

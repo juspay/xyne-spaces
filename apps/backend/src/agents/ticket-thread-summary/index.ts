@@ -11,7 +11,7 @@ import { NO_DISTINGUISHING_DETAIL, UNKNOWN_CAUSE_KEY } from './summaryText';
 
 const AGENT_NAME = 'TicketThreadSummary';
 
-export const MAX_SUMMARY_LENGTH = 1000;
+const MAX_SUMMARY_LENGTH = 1000;
 
 // Long threads keep their opening (the problem) and their end (the fix).
 const THREAD_HEAD_LENGTH = 8_000;

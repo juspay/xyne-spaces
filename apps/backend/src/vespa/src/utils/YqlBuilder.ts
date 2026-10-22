@@ -54,12 +54,12 @@ const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'):
  * segmentation, which "JP_008" needs to match as phrase("JP","008").
  */
 
-const lexicalClause = (query: string, params: VespaQueryParams): string => {
+const lexicalClause = (query: string, params: VespaQueryParams, field = 'default'): string => {
   // Deduped: bind() reuses one placeholder per (field, value), so a repeated token would
   // otherwise emit the same @placeholder twice and count twice in weakAnd's scoring.
   const tokens = [...new Set(query.trim().split(/\s+/).filter(Boolean))];
   if (tokens.length === 0) return userInputClause();
-  const clauses = tokens.map((token) => `default contains ${params.bind('qtok', token)}`);
+  const clauses = tokens.map((token) => `${field} contains ${params.bind('qtok', token)}`);
   // weakAnd of a single term is just the term; keeps the YQL readable in traces.
   return clauses.length === 1 ? clauses[0] : `weakAnd(${clauses.join(', ')})`;
 };
@@ -395,11 +395,12 @@ export class YqlBuilder {
             ? scopedLexicalClause(query, params, schemas)
             : lexicalClause(query, params);
         if (useSemantic) {
-          // Related-ticket detection also retrieves by the AI thread summary; the field
-          // exists only on the ticket schema, which is all that search selects.
+          // Related-ticket detection also matches the AI thread summary, by keyword (scored by
+          // bm25(ticketSummary) in related_detection) and by vector. Ticket schema only.
           const ticketSummaryClause =
             rankProfile === RankProfile.relatedDetection
-              ? `\n        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(ticket_summary_embeddings, e))`
+              ? `\n        or ${lexicalClause(query, params, 'ticketSummary')}` +
+                `\n        or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(ticket_summary_embeddings, e))`
               : '';
           // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(

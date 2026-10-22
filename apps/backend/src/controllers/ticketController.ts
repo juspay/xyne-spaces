@@ -17,6 +17,7 @@ import { findCallTranscriptAttachment } from '@/services/ozonetel/callTranscript
 import { callTranscriptionService } from '@/services/ozonetel/callTranscriptionService';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
+import { isTerminalStatus } from '@/services/etaManagement';
 import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
@@ -1617,12 +1618,11 @@ export class TicketController {
         }
       }
 
-      // The agent is looking at this ticket now: if its thread summary is missing or older
-      // than its last email, summarise without the quiet window so related-ticket links
-      // land (through Zero) while they are still on it. Nothing to do when it is current.
+      // The agent is on the ticket now: refresh a missing or stale summary without the quiet
+      // window, so related-ticket links land while they are still looking.
       const summaryStale =
         !ticket.threadSummary || ticket.lastEmailAt > ticket.threadSummary.updatedAt;
-      if (isDeskChannelType(ticket.channel?.type) && ticket.statusV2 !== TicketStatusV2.COMPLETED && summaryStale) {
+      if (isDeskChannelType(ticket.channel?.type) && !isTerminalStatus(ticket.statusV2) && summaryStale) {
         void ticketThreadSummaryQueue.enqueue(ticketId, { immediate: true });
       }
 

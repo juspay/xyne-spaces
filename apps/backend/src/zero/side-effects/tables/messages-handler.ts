@@ -40,7 +40,7 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType, parseSlashCommandArtifactMessage, decodeFlowJsonAttribute, flowCardLabel } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage, decodeFlowJsonAttribute, flowCardLabel, isDeskChannelType } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -240,14 +240,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
         // a second lookup.
-        channel: { select: { scopeType: true, agentProactivityMode: true } },
+        channel: { select: { scopeType: true, agentProactivityMode: true, type: true } },
       },
     });
 
-    // A team note on a desk ticket's thread feeds its summary. The queue no-ops when the
-    // feature is off, and the consumer skips non-desk tickets.
+    // A team note on a desk ticket's thread feeds its summary.
     if (
       conversation?.ticketId &&
+      isDeskChannelType(conversation.channel?.type) &&
       conversation.initialMessageId !== message.messageId &&
       (message.msgType ?? MessageType.USER) === MessageType.USER
     ) {

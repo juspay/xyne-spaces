@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
-import { AttachmentEntityType, FormFieldType, MessageType, TicketStatusV2, isDeskChannelType } from '@xyne/shared';
+import { AttachmentEntityType, FormFieldType, MessageType, isDeskChannelType } from '@xyne/shared';
+import { isTerminalStatus } from '@/services/etaManagement';
 import { DatabaseClient } from '@/database/client';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -12,7 +13,7 @@ import { ticketSchema } from '@/vespa/src/types';
 import { stripHtml } from '@/tags/deskEmail';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import { summarizeTicketThread } from '@/agents/ticket-thread-summary';
-import { causeKeyOf } from '@/agents/ticket-thread-summary/summaryText';
+import { causeKeyOf, summaryMatchText } from '@/agents/ticket-thread-summary/summaryText';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 
 const prisma = DatabaseClient.getInstance();
@@ -112,9 +113,8 @@ async function knownCauseKeys(channelId: string): Promise<string[]> {
 }
 
 /**
- * The team's own discussion on the ticket: chat messages on its conversation, which the
- * desk shows in the thread panel and the customer never sees. Often where the diagnosis
- * and the fix are actually written down.
+ * The team's own chat on the ticket's conversation, which the customer never sees. Often
+ * where the diagnosis and the fix are written down.
  */
 async function findInternalNotes(conversationId: string): Promise<Array<{ content: string; createdAt: Date }>> {
   const notes = await prisma.message.findMany({
@@ -168,12 +168,10 @@ async function buildTicketThread(
 }
 
 /**
- * Summarise a desk ticket's whole email thread, store it, and push it to Vespa. While the
- * ticket is open, each summary also runs related-ticket detection with it as the query:
- * later emails add the detail that makes a match, and a Jev outage on one run costs
- * nothing. Links already made and dismissals are excluded by the detection itself, and its
- * maxLinks caps the total. Backfill passes `detectRelated: false` so historical tickets
- * are summarised, not linked.
+ * Summarise a desk ticket's whole thread, store it, and push it to Vespa. While the ticket
+ * is open, a summary whose match text (problem, details, cause key) changed also runs
+ * related-ticket detection; an unchanged one would only repeat the last search. Backfill
+ * passes `detectRelated: false` so historical tickets are summarised, not linked.
  */
 export async function refreshTicketThreadSummary(
   ticketId: string,
@@ -191,6 +189,7 @@ export async function refreshTicketThreadSummary(
       isArchived: true,
       statusV2: true,
       channel: { select: { type: true } },
+      threadSummary: { select: { summary: true } },
     },
   });
   if (!ticket || ticket.isArchived || !isDeskChannelType(ticket.channel?.type)) return;
@@ -223,7 +222,12 @@ export async function refreshTicketThreadSummary(
     });
   }
 
-  if (detectRelated && ticket.statusV2 !== TicketStatusV2.COMPLETED) {
+  const matchTextChanged =
+    !ticket.threadSummary || summaryMatchText(ticket.threadSummary.summary) !== summaryMatchText(summary);
+  if (!matchTextChanged) {
+    logger.info('[TicketThreadSummary] Match text unchanged, skipping related detection', { ticketId });
+  }
+  if (detectRelated && matchTextChanged && !isTerminalStatus(ticket.statusV2)) {
     await ticketDuplicateService.detectRelatedTickets(ticket.id, summary);
   }
 }
