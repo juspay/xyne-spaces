@@ -8617,11 +8617,11 @@ const governanceQuery = (q: GovernanceEventQuery): string => {
   return p.toString();
 };
 export async function getGovernanceEvents(userId: string, q: GovernanceEventQuery): Promise<{ rows: GovernanceEvent[]; total: number }> {
-  const res = await request<{ data: { rows: GovernanceEvent[]; total: number } }>(`${AUTH_API_URL}/admin/governance/events?${governanceQuery(q)}`, { headers: { "x-user-id": userId } });
+  const res = await request<{ data: { rows: GovernanceEvent[]; total: number } }>(`${AUTH_API_URL}/api/v1/admin/governance/events?${governanceQuery(q)}`, { headers: { "x-user-id": userId } });
   return res.data;
 }
 export async function downloadGovernanceCsv(userId: string, q: GovernanceEventQuery): Promise<void> {
-  const res = await fetch(`${AUTH_API_URL}/admin/governance/events.csv?${governanceQuery(q)}`, { credentials: "include", headers: { "x-user-id": userId } });
+  const res = await fetch(`${AUTH_API_URL}/api/v1/admin/governance/events.csv?${governanceQuery(q)}`, { credentials: "include", headers: { "x-user-id": userId } });
   if (!res.ok) throw new ApiError(res.status, `Export failed: ${res.status}`);
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
@@ -8631,17 +8631,17 @@ export async function downloadGovernanceCsv(userId: string, q: GovernanceEventQu
   URL.revokeObjectURL(url);
 }
 export async function getGovernanceStats(userId: string, days: number, orgScope: AdminOrgScope): Promise<GovernanceStats> {
-  const res = await request<{ data: GovernanceStats }>(`${AUTH_API_URL}/admin/governance/stats?days=${days}${orgScope === "all" ? "&orgScope=all" : ""}`, { headers: { "x-user-id": userId } });
+  const res = await request<{ data: GovernanceStats }>(`${AUTH_API_URL}/api/v1/admin/governance/stats?days=${days}${orgScope === "all" ? "&orgScope=all" : ""}`, { headers: { "x-user-id": userId } });
   return res.data;
 }
 export async function listKillSwitches(userId: string, orgScope: AdminOrgScope): Promise<KillSwitchRow[]> {
-  const res = await request<{ data: KillSwitchRow[] }>(`${AUTH_API_URL}/admin/governance/kill-switches${orgScope === "all" ? "?orgScope=all" : ""}`, { headers: { "x-user-id": userId } });
+  const res = await request<{ data: KillSwitchRow[] }>(`${AUTH_API_URL}/api/v1/admin/governance/kill-switches${orgScope === "all" ? "?orgScope=all" : ""}`, { headers: { "x-user-id": userId } });
   return res.data;
 }
 export async function setKillSwitch(userId: string, body: { scopeKind: string; scopeId: string; mode: string; reason: string; expiresInMinutes?: number }): Promise<{ id: string; epoch: number }> {
-  const res = await request<{ data: { id: string; epoch: number } }>(`${AUTH_API_URL}/admin/governance/kill-switches`, { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(body) });
+  const res = await request<{ data: { id: string; epoch: number } }>(`${AUTH_API_URL}/api/v1/admin/governance/kill-switches`, { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(body) });
   return res.data;
 }
 export async function clearKillSwitch(userId: string, id: string, reason: string): Promise<void> {
-  await request<{ data: unknown }>(`${AUTH_API_URL}/admin/governance/kill-switches/${encodeURIComponent(id)}/clear`, { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify({ reason }) });
+  await request<{ data: unknown }>(`${AUTH_API_URL}/api/v1/admin/governance/kill-switches/${encodeURIComponent(id)}/clear`, { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify({ reason }) });
 }
