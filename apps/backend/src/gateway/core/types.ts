@@ -47,14 +47,6 @@ export interface ProviderConfig<TCredentials = unknown> {
   description: string | null;
 }
 
-/** The ExternalSource row that scopes a link's message map. */
-export interface MessageSource {
-  name: string;
-  sourceType: string;
-  displayName: string;
-  credentials: Record<string, string>;
-}
-
 export interface IncomingRequest {
   rawBody: string;
   headers: Record<string, string | string[] | undefined>;
@@ -179,7 +171,7 @@ export interface JobContext {
 export interface GatewayHandler {
   readonly name: string;
   onProviderEvent(config: ProviderConfig, event: ProviderEvent): Promise<void>;
-  onSpacesMessageChanged(change: SpacesMessageChange): Promise<void>;
-  onSpacesMemberChanged(change: SpacesMemberChange): Promise<void>;
+  onSpacesMessageChanged?(change: SpacesMessageChange): Promise<void>;
+  onSpacesMemberChanged?(change: SpacesMemberChange): Promise<void>;
   runJob?(job: GatewayJob, context: JobContext): Promise<void>;
 }

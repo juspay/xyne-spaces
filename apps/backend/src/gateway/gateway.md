@@ -9,8 +9,8 @@ The gateway carries everything between Spaces and an external app (a provider). 
 - Only `re-exports.ts` imports from outside `gateway/`. Need repo code? Re-export it there. npm packages are imported directly.
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
-- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler` (`onProviderEvent`, `onSpacesMessageChanged`, `onSpacesMemberChanged`, and `runJob` only if it queues work) and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
-- `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories over the tables every use case shares stay in `core/repositories/`, and a use case's own stores (Mirror's Redis sync requests) in `useCases/<name>/repositories/`.
+- `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged` and `runJob` only if it needs them and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories every use case shares (connections, pairs, people's tokens) stay in `core/repositories/`, and a use case's own stores in `useCases/<name>/repositories/` (Mirror's message map and Redis sync requests).
 
 ## Steps
 
@@ -81,7 +81,7 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 | `PAIR`       | `<id>-mirror`     | Mirror link (name `mirror-link-<connection id>-<channel id>`)                        | `recordParentId` → its `CONNECTION`, `externalIdentifier` (provider channel), `spacesIdentifier` (Spaces channel), `recordState` (why it stopped, e.g. `CHANNEL_GONE`), `createdBy` |
 
 - PAIR rows go through `PairRepository`, scoped by the use case's sourceType suffix (`-mirror`); the use case builds each pair's unique name.
-- Query the gateway's rows by `recordType` and sourceType. A PAIR also sets `channelId` (the same Spaces channel); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
+- Query the gateway's rows by `recordType` and sourceType. A use case may set `channelId` on its PAIR when the Spaces side is a channel (Mirror does); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
 - One link per provider channel: the unique `name`. One link per Spaces channel: links are made only on approval, one request per channel can be pending, and approval checks again. `(workspaceId, spacesIdentifier)` is indexed, since every Spaces message checks it.
 - The message map stays in `ExternalMessage`, under the channel's self-serve migration source, so a migration and Mirror each skip what the other copied; older migrations' rows are read too. Mirror owns those names per provider in `useCases/mirror/messageSources.ts`, so a provider never knows about them.
 

@@ -31,6 +31,14 @@ export type MirrorApi = BaseApi & MessagingApi & FileApi & ChannelApi & Director
 /** A Mirror link: one provider channel (`externalId`) ⇄ one Spaces channel (`spacesId`). */
 export type MirrorLink = Pair;
 
+/** The ExternalSource row that scopes a link's message map. */
+export interface MessageSource {
+  name: string;
+  sourceType: string;
+  displayName: string;
+  credentials: Record<string, string>;
+}
+
 export type MirrorJobType = 'outbound' | 'inbound';
 
 export interface OutboundJobPayload {

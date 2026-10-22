@@ -11,10 +11,11 @@ export interface CreatePairInput {
   connectionId: string;
   externalId: string;
   spacesId: string;
+  channelId?: string;
   createdBy: string;
 }
 
-// A pair's sourceType is `<provider id>-<use case>`, e.g. `slack-mirror`.
+// A pair's sourceType is `<provider id>-<use case>`.
 const providerOf = (sourceType: string): ProviderId => sourceType.split('-')[0] as ProviderId;
 
 function toPair(row: ExternalSource): Pair {
@@ -35,7 +36,7 @@ function toPair(row: ExternalSource): Pair {
 
 /**
  * PAIR rows in ExternalSource: one external resource ⇄ one Spaces resource. Given a use case's sourceType
- * suffix (Mirror's is `-mirror`), it reads only that use case's pairs; without one, every use case's.
+ * suffix, it reads only that use case's pairs; without one, every use case's.
  */
 export class PairRepository {
   constructor(private readonly sourceTypeSuffix?: string) {}
@@ -85,7 +86,7 @@ export class PairRepository {
         recordParentId: data.connectionId,
         externalIdentifier: data.externalId,
         spacesIdentifier: data.spacesId,
-        channelId: data.spacesId,
+        channelId: data.channelId ?? null,
         createdBy: data.createdBy,
       },
     });

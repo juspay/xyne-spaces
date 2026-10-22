@@ -14,8 +14,6 @@ import {
 import { gatewayConfig } from '../../../config';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
-import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
-import { SourceRepository } from '../../../core/repositories/sourceRepository';
 import type {
   JobContext,
   ProviderConfig,
@@ -25,6 +23,8 @@ import type {
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
+import { MessageMapRepository } from '../repositories/messageMapRepository';
+import { MessageSourceRepository } from '../repositories/messageSourceRepository';
 import type { MirrorApi, MirrorLink } from '../types';
 
 export type MessageEvent = Extract<
@@ -50,7 +50,7 @@ interface InboundContext {
 
 /** Applies provider message events to Spaces. Every write is idempotent through the message map. */
 export class InboundService {
-  private readonly sources = new SourceRepository();
+  private readonly sources = new MessageSourceRepository();
   private readonly messageMap = new MessageMapRepository();
   private readonly attachments = new ExternalAttachmentService();
 

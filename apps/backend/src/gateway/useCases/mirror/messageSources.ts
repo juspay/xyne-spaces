@@ -4,8 +4,8 @@ import {
   buildSlackMigrationSourceName,
 } from '../../re-exports';
 import type { BaseProvider } from '../../core/base/baseProvider';
-import type { MessageSource, ProviderConfig, ProviderId } from '../../core/types';
-import type { MirrorLink } from './types';
+import type { ProviderConfig, ProviderId } from '../../core/types';
+import type { MessageSource, MirrorLink } from './types';
 
 interface ProviderSourceNames {
   messageSource(spacesChannelId: string): Omit<MessageSource, 'credentials'>;

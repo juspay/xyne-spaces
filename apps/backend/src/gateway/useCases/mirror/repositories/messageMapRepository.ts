@@ -1,5 +1,5 @@
 import type { ExternalMessage } from '@prisma/client';
-import { ExternalMessageRepository, MessageDirection, db } from '../../re-exports';
+import { ExternalMessageRepository, MessageDirection, db } from '../../../re-exports';
 
 /** Spaces ⇄ provider message map; reads include older migrations' sources, writes go to the link's own. */
 export class MessageMapRepository {

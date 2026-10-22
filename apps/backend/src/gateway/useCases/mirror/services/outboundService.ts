@@ -13,8 +13,6 @@ import type { LockHandle } from '../../../re-exports';
 import { gatewayConfig } from '../../../config';
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
-import { MessageMapRepository } from '../../../core/repositories/messageMapRepository';
-import { SourceRepository } from '../../../core/repositories/sourceRepository';
 import type {
   JobContext,
   OutboundFile,
@@ -25,6 +23,8 @@ import type {
 import type { IdentityService } from '../../../core/services/identityService';
 import type { UserApi, UserAuthService } from '../../../core/services/userAuthService';
 import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
+import { MessageMapRepository } from '../repositories/messageMapRepository';
+import { MessageSourceRepository } from '../repositories/messageSourceRepository';
 import { MIRROR_ORIGIN_TYPE, type MirrorApi, type MirrorLink } from '../types';
 
 interface OutboundContext {
@@ -75,7 +75,7 @@ const withNotes = (text: string, notes: string[]): string =>
 
 /** Sends Spaces message changes to the provider. Only Mirror's own posts are edited or deleted there. */
 export class OutboundService {
-  private readonly sources = new SourceRepository();
+  private readonly sources = new MessageSourceRepository();
   private readonly messageMap = new MessageMapRepository();
   private readonly attachments = new ExternalAttachmentService();
 

@@ -7,7 +7,7 @@ import { UserTokenRepository } from '../repositories/userTokenRepository';
 import type { ConfigService } from './configService';
 
 const STATE_TTL_SECONDS = 10 * 60;
-const stateKey = (state: string): string => `mirror:user-auth:${state}`;
+const stateKey = (state: string): string => `gateway:user-auth:${state}`;
 
 /** Who started a sign-in, and where the dashboard returns them afterwards. */
 export interface UserAuthSession {

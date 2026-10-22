@@ -9,6 +9,7 @@ import {
 import type { BaseProvider } from '../../../core/base/baseProvider';
 import { GatewayError } from '../../../core/errors';
 import { PairRepository } from '../../../core/repositories/pairRepository';
+import { MessageSourceRepository } from '../repositories/messageSourceRepository';
 import { SyncRequestRepository } from '../repositories/syncRequestRepository';
 import { SourceRepository } from '../../../core/repositories/sourceRepository';
 import type { ProviderConfig, ProviderChannel } from '../../../core/types';
@@ -37,6 +38,7 @@ export class LinkService {
   private readonly pairs = new PairRepository(MIRROR_SOURCE_SUFFIX);
   private readonly requests = new SyncRequestRepository();
   private readonly sources = new SourceRepository();
+  private readonly messageSources = new MessageSourceRepository();
 
   constructor(
     private readonly provider: BaseProvider<unknown, MirrorApi>,
@@ -124,9 +126,10 @@ export class LinkService {
       connectionId: config.sourceId,
       externalId: input.externalChannelId,
       spacesId: input.spacesChannelId,
+      channelId: input.spacesChannelId,
       createdBy: userId,
     });
-    await this.sources.ensureMessageSource(
+    await this.messageSources.ensureMessageSource(
       buildMessageSource(this.provider, link, config),
       link,
       true
@@ -149,7 +152,7 @@ export class LinkService {
     const link = await this.getLinkById(workspaceId, linkId);
     const config = await this.config.getConfigBySource(link.connectionId);
     await this.provider.createApi(config.credentials).getChannel(link.externalId);
-    await this.sources.ensureMessageSource(
+    await this.messageSources.ensureMessageSource(
       buildMessageSource(this.provider, link, config),
       link,
       true
