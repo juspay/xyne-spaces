@@ -16,6 +16,7 @@ import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
+import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -28,6 +29,7 @@ export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
 export interface ClawRunRequest {
   userId: string;
+  approvedAction?: ClawApprovedAction;
   /**
    * Verified Spaces workspace for this raw, workspace-scoped user id. Claw
    * uses it with x-spaces-user-id to resolve the exact surface identity.
@@ -217,6 +219,9 @@ export interface ClawConversationSummary {
   agentSlug: string;
   /** Every agent that answered, in first-use order. */
   agentSlugs: string[];
+  /** The chat project this conversation sits in for this user, null when
+   *  unfiled. Absent on claw-auth builds older than XYNE-66809. */
+  projectId?: string | null;
 }
 
 /** `conversation` = every agent's turns in a direct chat (claw-auth opt-in);
@@ -316,6 +321,8 @@ export interface S2SClawAgent {
   ownerUserId?: string | null;
   /** Set on a user-scoped list: ownerUserId is a Claw id, which Spaces cannot compare. */
   ownedByScopeUser?: boolean;
+  /** What routing reads to pick it for a channel question nobody tagged: the owner's text or the generated card. */
+  proactivity?: { description: string | null } | null;
 }
 
 export interface S2SRunAgentRequest {
@@ -447,6 +454,32 @@ function extractCookieHeader(req: { headers?: { cookie?: string } }): Record<str
   return cookie ? { Cookie: cookie } : {};
 }
 
+/**
+ * Carries claw-auth's status code so a controller can answer 404 as 404.
+ * Without it every upstream failure flattens to 503 and a caller cannot tell
+ * "this project is not yours" from "claw-auth is down".
+ */
+export class ClawRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = 'ClawRequestError';
+  }
+}
+
+/** claw-auth answers `{ success: false, error }`; fall back to null when the
+ *  body is not that shape (a proxy error page, say). */
+function clawErrorMessage(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    return typeof parsed.error === 'string' && parsed.error ? parsed.error : null;
+  } catch {
+    return null;
+  }
+}
+
 function extractUserIdHeader(userId: string, workspaceId?: string): Record<string, string> {
   // `userId` is the raw, workspace-scoped Spaces user id. Keep the legacy
   // x-user-id header for older Claw deployments, and send the explicit source
@@ -506,6 +539,10 @@ function normalizeAttachmentsForRun(
 // "## Additional Instructions" heading and duplicate that block.
 function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
   const parts: string[] = [];
+
+  if (req.approvedAction) {
+    parts.push(approvedActionInstructions(req.approvedAction));
+  }
 
   if (req.researchContext) {
     parts.push(
@@ -1107,6 +1144,25 @@ export async function listAccessibleClawAgents(req: {
  * be sent with — a "litellm" pin silently no-ops for agents without the
  * credential, and vice versa a "spaces" pin would bypass an agent's own key.
  */
+export async function warmClawAgent(
+  req: { headers?: { cookie?: string }; userId: string },
+  agentSlug: string
+): Promise<void> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-warm/${encodeURIComponent(agentSlug)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok && response.status !== 404) {
+    logger.warn(`[ClawAgentService] agent warm-up returned ${response.status}`);
+  }
+}
+
 export async function listClawAgentModels(
   req: { headers?: { cookie?: string }; userId: string },
   agentSlug?: string,
@@ -1222,6 +1278,9 @@ export interface ClawConversationListQuery {
   limit?: string;
   /** `nextCursor` of the previous page. */
   cursor?: string;
+  /** A chat project id to list, or the literal `none` for unfiled chats.
+   *  Filtered inside claw-auth's query, so paging stays correct. */
+  projectId?: string;
   /** One agent's whole list, unpaged — what dashboard builds from before
    *  allAgents=1 expect. Needs `agentSlug`. */
   fullAgentList?: boolean;
@@ -1234,6 +1293,9 @@ export interface ClawConversationListResponse {
   nextCursor?: string | null;
   /** Every agent in the history with its conversation count. */
   agents?: Array<{ slug: string; count: number }>;
+  /** Chats per project for the sidebar, keyed by project id. NOT narrowed by
+   *  `projectId` — every project's total, while one of them is open. */
+  projectCounts?: Record<string, number>;
 }
 
 /** The user's chat history (claw-auth lib/multi-agent-chat.ts). */
@@ -1246,7 +1308,7 @@ export async function listClawConversations(
   if (query.fullAgentList && query.agentSlug) {
     path = `/claw/api/v1/agent-chat/${encodeURIComponent(query.agentSlug)}/conversations`;
   } else {
-    for (const key of ['agentSlug', 'q', 'limit', 'cursor'] as const) {
+    for (const key of ['agentSlug', 'q', 'limit', 'cursor', 'projectId'] as const) {
       const value = query[key];
       if (value) params.set(key, value);
     }
@@ -1261,7 +1323,13 @@ export async function listClawConversations(
   if (!response.ok) {
     const errorText = await response.text();
     logger.error(`[ClawAgentService] listConversations failed: ${response.status} ${errorText}`);
-    throw new Error('Failed to fetch conversations');
+    // Carries the status so an unknown `?projectId=` surfaces as 404 rather
+    // than an outage. A plain Error here made the controller's ClawRequestError
+    // branch unreachable and every failure read as 503.
+    throw new ClawRequestError(
+      clawErrorMessage(errorText) ?? 'Failed to fetch conversations',
+      response.status
+    );
   }
 
   return (await response.json()) as ClawConversationListResponse;
@@ -1583,9 +1651,14 @@ export class ClawNotesError extends Error {
 export async function patchClawConversation(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  patch: { title?: string; pinned?: boolean },
+  // `projectId: null` unfiles the chat and MUST survive serialization, so it is
+  // an explicit null rather than an omitted key.
+  patch: { title?: string; pinned?: boolean; projectId?: string | null },
   agentSlug?: string
-): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
+): Promise<{
+  success: boolean;
+  data: { title: string | null; pinned: boolean; projectId?: string | null };
+}> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
   const response = await fetch(url, {
@@ -1601,15 +1674,155 @@ export async function patchClawConversation(
   if (!response.ok) {
     const errorText = await response.text();
     logger.error(`[ClawAgentService] patchConversation failed: ${response.status} ${errorText}`);
-    throw new Error(
-      response.status === 404 ? 'Conversation not found' : 'Failed to update conversation'
+    // A 404 here is either the conversation or, when moving, the project —
+    // claw-auth deliberately does not distinguish them, so pass its wording
+    // through rather than asserting which one it was.
+    throw new ClawRequestError(
+      response.status === 404
+        ? clawErrorMessage(errorText) ?? 'Conversation not found'
+        : 'Failed to update conversation',
+      response.status
     );
   }
 
   return (await response.json()) as {
     success: boolean;
-    data: { title: string | null; pinned: boolean };
+    data: { title: string | null; pinned: boolean; projectId?: string | null };
   };
+}
+
+// ---------------------------------------------------------------------------
+// Chat projects (claw-auth routes/chat-projects.ts; see
+// apps/xyne-claw-auth/docs/chat-projects-api.md for the contract)
+//
+// Every call forwards the caller's identity headers and cookie exactly as the
+// conversation routes do. claw-auth answers 404 both for "no such project" and
+// "not yours", deliberately — these functions preserve that rather than
+// inventing a 403.
+// ---------------------------------------------------------------------------
+
+export interface ClawChatProject {
+  id: string;
+  ownerUserId: string;
+  orgId: string;
+  name: string;
+  icon: string | null;
+  instructions: string;
+  instructionsEnabled: boolean;
+  spacesProjectId: string | null;
+  defaultAgentSlug: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Present on list, create and get. */
+  chatCount?: number;
+  /** Present on get only. */
+  conversationIds?: string[];
+}
+
+export interface ClawChatProjectInput {
+  name?: string;
+  icon?: string | null;
+  instructions?: string;
+  instructionsEnabled?: boolean;
+  spacesProjectId?: string | null;
+  defaultAgentSlug?: string | null;
+}
+
+const CHAT_PROJECTS_PATH = '/claw/api/v1/agent-chat/chat/projects';
+
+/** One hop to claw-auth, with its status preserved on failure. */
+async function clawProjectRequest<T>(
+  req: { headers?: { cookie?: string }; userId: string },
+  path: string,
+  init: { method: string; body?: unknown },
+  failure: string
+): Promise<T> {
+  const response = await fetch(`${getClawBaseUrl()}${path}`, {
+    method: init.method,
+    headers: {
+      ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] ${failure} failed: ${response.status} ${errorText}`);
+    throw new ClawRequestError(clawErrorMessage(errorText) ?? failure, response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
+export async function listClawChatProjects(req: {
+  headers?: { cookie?: string };
+  userId: string;
+}): Promise<{ success: boolean; data: ClawChatProject[] }> {
+  return clawProjectRequest(req, CHAT_PROJECTS_PATH, { method: 'GET' }, 'Failed to list projects');
+}
+
+export async function createClawChatProject(
+  req: { headers?: { cookie?: string }; userId: string },
+  input: ClawChatProjectInput
+): Promise<{ success: boolean; data: ClawChatProject }> {
+  return clawProjectRequest(
+    req,
+    CHAT_PROJECTS_PATH,
+    { method: 'POST', body: input },
+    'Failed to create project'
+  );
+}
+
+export async function getClawChatProject(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string
+): Promise<{ success: boolean; data: ClawChatProject }> {
+  return clawProjectRequest(
+    req,
+    `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}`,
+    { method: 'GET' },
+    'Failed to fetch project'
+  );
+}
+
+export async function updateClawChatProject(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string,
+  input: ClawChatProjectInput
+): Promise<{ success: boolean; data: ClawChatProject }> {
+  return clawProjectRequest(
+    req,
+    `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}`,
+    { method: 'PATCH', body: input },
+    'Failed to update project'
+  );
+}
+
+export async function deleteClawChatProject(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string
+): Promise<{ success: boolean; data: { id: string; deleted: boolean } }> {
+  return clawProjectRequest(
+    req,
+    `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}`,
+    { method: 'DELETE' },
+    'Failed to delete project'
+  );
+}
+
+export async function reorderClawChatProjects(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectIds: string[]
+): Promise<{ success: boolean; data: { reordered: number } }> {
+  return clawProjectRequest(
+    req,
+    `${CHAT_PROJECTS_PATH}/reorder`,
+    { method: 'PUT', body: { projectIds } },
+    'Failed to reorder projects'
+  );
 }
 
 /**

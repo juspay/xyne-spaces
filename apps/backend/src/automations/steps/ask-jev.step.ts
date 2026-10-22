@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
-import { askJev, type JevAnswer, type JevQuestion } from '@/services/queryIntent/jevClient';
+import { askDecision } from '@/services/decision/ask';
+import type { DecisionAnswer, DecisionQuestion } from '@/services/decision/types';
 import { logger } from '@/utils/logger';
 
 const JEV_TIMEOUT_MS = 10_000;
@@ -131,7 +132,7 @@ const shuffle = <T>(items: T[]): T[] => {
   return copy;
 };
 
-function toJevQuestion(question: QuestionConfig, options: OptionConfig[]): JevQuestion {
+function toDecisionQuestion(question: QuestionConfig, options: OptionConfig[]): DecisionQuestion {
   if (question.type === 'yes_no') return { type: 'noul', instructions: question.question };
   if (question.type === 'score') {
     return { type: 'score', instructions: question.question, criteria: question.levels ?? [] };
@@ -149,7 +150,7 @@ function toJevQuestion(question: QuestionConfig, options: OptionConfig[]): JevQu
 function toOutput(
   question: QuestionConfig,
   options: OptionConfig[],
-  answer: JevAnswer | undefined,
+  answer: DecisionAnswer | undefined,
 ): AnswerOutput {
   if (!answer) return UNANSWERED;
 
@@ -178,7 +179,7 @@ function toOutput(
     };
   }
 
-  // askJev only returns a choice that is one of our keys, so the index is valid.
+  // askDecision only returns a choice that is one of our keys, so the index is valid.
   const option = options[Number(answer.choice.slice(1))]!;
   return {
     ...UNANSWERED,
@@ -204,15 +205,15 @@ export class AskJevStep extends BaseActionStep<typeof AskJevConfigSchema, AskJev
     const questions = config.questions;
     assertQuestionsUsable(questions);
 
-    const asked: Record<string, JevQuestion> = Object.fromEntries(
-      questions.map(question => [question.key, toJevQuestion(question, question.options ?? [])]),
+    const asked: Record<string, DecisionQuestion> = Object.fromEntries(
+      questions.map(question => [question.key, toDecisionQuestion(question, question.options ?? [])]),
     );
 
     const text = config.text.trim();
     const answers =
       text
         ? // Independent questions: an unusable answer to one must not discard the others.
-          await askJev(text, asked, JEV_TIMEOUT_MS, undefined, { partial: true })
+          await askDecision('automation_step', text, asked, JEV_TIMEOUT_MS, undefined, { partial: true })
         : null;
 
     const output: AskJevOutput = {};

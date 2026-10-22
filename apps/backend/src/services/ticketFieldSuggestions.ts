@@ -6,7 +6,9 @@ import {
 } from '@xyne/shared';
 import { BOARD_TASK_INSTRUCTION, buildPrompt } from '@/agents/ticket-board';
 import { TICKET_TYPE_DESCRIPTIONS } from '@/services/agents/prompts';
-import { askJev, isPrivateJevConfigured, type JevAnswer, type JevQuestion } from '@/services/queryIntent/jevClient';
+import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
+import { askDecision } from '@/services/decision/ask';
+import type { DecisionAnswer, DecisionQuestion } from '@/services/decision/types';
 
 const XOR_TIMEOUT_MS = 10_000;
 const XOR_MAX_OPTIONS = 255;
@@ -25,7 +27,7 @@ interface TicketFieldSuggestions {
 }
 
 function confidentChoice(
-  answer: JevAnswer | undefined,
+  answer: DecisionAnswer | undefined,
   minConfidence: number,
 ): { choice: string; confidence: number } | undefined {
   if (answer?.type !== 'choice' || answer.confidence === undefined) return undefined;
@@ -36,11 +38,11 @@ export async function suggestTicketFields(
   { title, description, boards }: TicketFieldSuggestionInput,
   signal?: AbortSignal,
 ): Promise<TicketFieldSuggestions> {
-  if (!isPrivateJevConfigured() || countTicketWords(`${title} ${description}`) < TICKET_FIELD_SUGGESTION_MIN_WORDS) {
+  if (!isPrivateDecisionEngineConfigured() || countTicketWords(`${title} ${description}`) < TICKET_FIELD_SUGGESTION_MIN_WORDS) {
     return {};
   }
 
-  const questions: Record<string, JevQuestion> = {
+  const questions: Record<string, DecisionQuestion> = {
     ticketType: {
       type: 'choice',
       instructions: 'Classify the ticket type.',
@@ -58,7 +60,7 @@ export async function suggestTicketFields(
   }
 
   const state = buildPrompt({ title, description, candidates: boards });
-  const answers = await askJev(state, questions, XOR_TIMEOUT_MS, signal, { partial: true });
+  const answers = await askDecision('ticket_fields', state, questions, XOR_TIMEOUT_MS, signal, { partial: true });
 
   const board = confidentChoice(answers?.board, BOARD_MIN_CONFIDENCE);
   const ticketType = confidentChoice(answers?.ticketType, TICKET_TYPE_MIN_CONFIDENCE);

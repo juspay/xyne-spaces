@@ -178,6 +178,14 @@ export enum ChannelRole {
   MEMBER = 'MEMBER',
 }
 
+/** Whether agents answer channel questions nobody tagged them in. SHADOW decides and posts nothing. */
+// @ts-ignore TS1294
+export enum AgentProactivityMode {
+  OFF = 'OFF',
+  ANSWER = 'ANSWER',
+  SHADOW = 'SHADOW',
+}
+
 // @ts-ignore TS1294
 export enum ChannelVisibility {
   PUBLIC = 'PUBLIC',

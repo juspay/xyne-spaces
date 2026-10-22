@@ -10,6 +10,7 @@ export type OrganisationsSectionKey =
   | 'toolbar'
   | 'slack-mirror-requests'
   | 'slack-mirror-connection'
+  | 'agent-activity'
   | 'user-groups'
   | 'roles'
   | 'all';
@@ -45,6 +46,7 @@ export const organisationsAccess = (
     toolbar: workspace,
     'slack-mirror-requests': workspace,
     'slack-mirror-connection': workspace,
+    'agent-activity': workspace,
     'user-groups': canWrite('USER-GROUPS') || ownsUserGroup,
     roles: isAdmin('ROLES'),
     all: isAdmin('ORGANIZATIONS'),

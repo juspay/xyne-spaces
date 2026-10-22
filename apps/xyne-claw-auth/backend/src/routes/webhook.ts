@@ -23,6 +23,8 @@ import {
   activeGoalRepository,
   experimentRepository,
 } from "../repositories/index.js";
+// Direct import: route tests stub the index with factories lacking this.
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
@@ -125,6 +127,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
+import { isProactivityRun } from "../agent-proactivity/tool-policy.js";
 import { systemNote } from "../lib/notice-format.js";
 import {
   buildWriteApprovalFlow,
@@ -734,6 +737,10 @@ async function pendingActionTargetValidation(
 }
 
 
+
+/** The thread history as a run's context: who said what, and that other agents are not you. */
+export const threadAwarenessContext = (history: string): string =>
+  `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`;
 
 export async function fetchConversationHistory(
   conversationId: string,
@@ -1436,9 +1443,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       runAsTwin
         ? `## You were @mentioned\nYou were @mentioned by **${payload.senderName ?? "someone"}**${payload.channelName ? ` in **#${payload.channelName}**` : ""}. Their message is the Query below — decide how you'd respond to them, there.`
         : "";
-    const threadAwarenessBlock = history
-      ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
-      : "";
+    const threadAwarenessBlock = history ? threadAwarenessContext(history) : "";
     // No provider-card note: the card is no longer predicted before the run.
     // Pre-announcing one the server had inferred is what made agents reply
     // "acknowledging the AI provider card" to questions that never asked for it.
@@ -2810,6 +2815,7 @@ async function forwardResult(
     status?: string;
     error?: string;
     attachments?: OutgoingAttachment[];
+    toolsUsed?: string[];
   },
   result: string,
 ): Promise<void> {
@@ -2887,6 +2893,9 @@ async function forwardResult(
         result: resultField,
         ...(payload.error ? { error: payload.error } : {}),
         ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+        // What the run looked things up with, for an internal caller judging the result
+        // (agent proactivity's check before posting).
+        ...(forwardToInternal && payload.toolsUsed?.length ? { toolsUsed: payload.toolsUsed } : {}),
       }),
     });
     if (!res.ok) {
@@ -3148,6 +3157,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       toolMs?: number;
       lastRetryReason?: string;
     };
+    /** Run-level outcome of the citation-reflection pass. */
+    citationReflection?: {
+      outcome?: string;
+      initialCited?: boolean;
+      sourcesWereCiteable?: boolean;
+      finalCited?: boolean;
+      rounds?: number;
+    };
+    /** Per-LLM-call series, stored verbatim (shape owned by xyne-claw's llm-turn-stats.ts). */
+    llmCalls?: unknown;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     pendingResponses?: Array<{ responseId: string; message: string }>;
     // Set when the worker called the suggest-goal tool. claw-auth renders a
@@ -3437,7 +3456,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // is interrupted again. Defer settlement until the empty-result branch asks
   // recovery whether another bounded attempt will run; otherwise the generic
   // apology can be posted before the resumed answer.
+  // Claw ends the run right after a question card, often before any text.
+  const postedQuestion = (payload as { pendingQuestions?: Array<{ purpose?: string }> }).pendingQuestions?.some(
+    (q) => q.purpose !== "follow_up_suggestions"
+  );
   const emptyCompletedResult =
+    !postedQuestion &&
     payload.status === "completed" &&
     !resultWithCitations.trim() &&
     !payload.attachments?.length &&
@@ -3473,9 +3497,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       toolsUsed: payload.toolsUsed ?? [],
-      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
-      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
-      ...(payload.latency ? { latency: payload.latency } : {}),
+      ...clawMetricsFields(payload),
       ...(payload.fastMode !== undefined ? { fastMode: payload.fastMode === true } : {}),
     }).catch(() => {});
   }
@@ -4636,7 +4658,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !payload.attachments?.length &&
     !payload.pendingResponses?.length &&
     !postedAgentProfileCard &&
-    !draftCardIsTheReply
+    !draftCardIsTheReply &&
+    !postedQuestion
   ) {
     if (deferCompletedRecoveryForEmptyResult) {
       const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {
@@ -6467,6 +6490,19 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   }
 
   if (!sessionId) return;
+
+  // An answer nobody tagged the agent for stays a draft until the Spaces backend posts
+  // it, if at all. Its tool calls are kept for the trace; nothing else it does on the way
+  // (cards, plan, live preview, progress) shows in the thread.
+  if (isProactivityRun((await getSession(sessionId).catch(() => null))?.triggerSource)) {
+    await touchRunRecovery(sessionId).catch(() => {});
+    if (toolInvocation) {
+      agentRunRepository.appendToolInvocation(sessionId, toolInvocation).catch((e) => {
+        clog.warn(`[webhook/progress] appendToolInvocation failed for ${sessionId}:`, e instanceof Error ? e.message : e);
+      });
+    }
+    return;
+  }
 
   const body = req.body as Record<string, unknown>;
   let widget: UiWidget | null = isUiWidget(body["widget"]) ? body["widget"] : null;

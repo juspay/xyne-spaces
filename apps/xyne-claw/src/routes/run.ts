@@ -28,7 +28,11 @@ import {
   type ProgressDest,
   type ProgressEmitter,
   type Attachment,
+  type ToolInvocation,
+  type LatencyMetrics,
+  type TokenUsage,
 } from "../agent.js";
+import { mergeLlmCallSeries, type LlmCallStat } from "../llm-turn-stats.js";
 import { parseReplyFormat,
   frameSseEvent,
   KEEPALIVE_FRAME,
@@ -59,6 +63,7 @@ import { loadMcpToolsForUser,
 } from "../mcp.js";
 import {
   buildSdlcRunContextSection,
+  SDLC_CONTEXT_UNAVAILABLE_SECTION,
   packSdlcRunMeta,
   SDLC_DIRECT_TOOL_NAMES,
   SDLC_META_KEYS,
@@ -66,9 +71,22 @@ import {
 } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
-import { beginJudgeRun } from "../judge-trace.js";
+import { beginJudgeRun, judgeRunSummary } from "../judge-trace.js";
+
+function judgeCallbackFields(): { judge?: { backend: string; calls: number; failed: number; compactionCalls: number } } {
+  const s = judgeRunSummary();
+  if (!s || s.calls === 0) return {};
+  return {
+    judge: {
+      backend: s.backend,
+      calls: s.calls,
+      failed: s.failed,
+      compactionCalls: s.byPurpose["compaction-call"]?.calls ?? 0,
+    },
+  };
+}
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
-import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
+import { ALWAYS_LOADED_TOOL_NAMES, activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -90,6 +108,7 @@ import {
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { generateRoutingCard, type RoutingCardInput } from "../routing-card.js";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -183,11 +202,11 @@ import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExi
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
+import { restoreConversationAttachments, saveConversationAttachments } from "../attachment-carry.js";
 import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
-import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -195,12 +214,14 @@ import {
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
+import { buildXorDecideTool } from "../xor-decide-tool.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -478,7 +499,7 @@ The inline citation tokens are the only citation mechanism for Claw v3. Never us
 const RESULT_SIFT_GUIDE = `
 
 ## Filtered tool results
-Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
+Tool results are NOT filtered unless you ask. When a call may return a large list, pass "sift": true to get only the items most relevant to this conversation; omit "sift" to get the raw result. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again without "sift".`;
 
 const SPACES_MENTION_GUIDE = `
 
@@ -1440,6 +1461,38 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
     : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
+/** Telemetry fields an aborted run's terminal callback carries. */
+export interface AbortTelemetry {
+  toolsUsed?: string[];
+  toolInvocations?: ToolInvocation[];
+  tokenUsage?: TokenUsage;
+  latency?: LatencyMetrics;
+  llmCalls?: LlmCallStat[];
+}
+
+/** Run telemetry for abort-path callbacks. Only RunCancelledError / ProviderStallError carry a snapshot; other errors report nothing. */
+export function abortTelemetry(
+  err: unknown,
+  nested: {
+    toolsUsed?: readonly string[];
+    invocations?: readonly ToolInvocation[];
+    llmCalls?: readonly LlmCallStat[];
+  } = {},
+): AbortTelemetry {
+  if (!(err instanceof RunCancelledError || err instanceof ProviderStallError)) return {};
+  const toolsUsed = [...err.toolsUsed, ...(nested.toolsUsed ?? [])];
+  const toolInvocations = [...err.toolInvocations, ...(nested.invocations ?? [])];
+  const llmCalls = mergeLlmCallSeries(err.llmCalls, nested.llmCalls).calls;
+  return {
+    ...(toolsUsed.length > 0 ? { toolsUsed } : {}),
+    ...(toolInvocations.length > 0 ? { toolInvocations } : {}),
+    tokenUsage: err.tokenUsage,
+    ...judgeCallbackFields(),
+    ...(err.latency ? { latency: err.latency } : {}),
+    ...(llmCalls.length > 0 ? { llmCalls } : {}),
+  };
+}
+
 export async function processTask(
   sessionId: string,
   sessionToken: string,
@@ -1533,9 +1586,12 @@ export async function processTask(
   agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
+  // Answer from Context: retrieve once before the only turn, then answer with no
+  // tools (see answer-context.ts). It replaces prefetch, whose id hints it makes moot.
+  const answerFromContext = answerFromContextEnabled(agentConfig);
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
-  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+  const prefetchSpecPromise = prefetchEnabled(agentConfig) && !answerFromContext
     ? startPrefetchExtraction(task)
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
@@ -1634,6 +1690,15 @@ export async function processTask(
     true,
   );
   const runDebugStartedAt = new Date().toISOString();
+  // Nested-loop sinks live outside the try so the catch can report them (aborted runs land there).
+  // Subagents append inner MCP tool names here so chain `toolsMustInclude`/`toolsMustExclude`
+  // can target nested tools (e.g. Bitbucket__create_pull_request), not just wrapper names.
+  const subagentInnerTools: string[] = [];
+  // Durable sink for subagent tool calls: the live push is fire-and-forget. Finalize dedupes by
+  // toolCallId. A2A callees are not folded in; each has its own run row.
+  const nestedInvocations: ToolInvocation[] = [];
+  // Subagent LLM calls, tagged with the subagent name, merged into the parent's series.
+  const nestedLlmCalls: LlmCallStat[] = [];
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1676,6 +1741,10 @@ export async function processTask(
     // server-owned here and cannot be changed from the dashboard. Excluded from the
     // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
     const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Answering without a mention (claw-auth agent-proactivity): the run drafts a reply
+    // for the Spaces backend to check, and must never act or show a plan card in the
+    // thread. Read tools stay; every write goes, like the daily brief.
+    const isProactivity = eventType === "proactivity";
     // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
     // `postTodos`, which only hides the Spaces card while the agent still keeps
     // the list: this removes the todo tools AND the primer, so no turn is spent
@@ -1696,7 +1765,8 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
-      !isDailyBrief;
+      !isDailyBrief &&
+      !isProactivity;
     const planGatePreviousReply =
       planGateEligible && isShortFollowUp(task)
         ? readPreviousAgentReply(
@@ -1750,6 +1820,8 @@ export async function processTask(
       (att) => pushAttachment(progressUrl, sessionId, att),
       trustedSdlcBindings,
       (serverType) => blockedConnectors.add(serverType),
+      undefined,
+      userId,
     ).then((value) => ({ value }), (error: unknown) => ({ error }));
 
     // All per-type attachment ingestion (filter → decode → convert to a
@@ -1759,16 +1831,12 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const explicitTaskCommand = parseTaskCommand(task);
-    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
-    const taskCommand = routedMode.command;
-    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
-    }
+    const taskCommand = parseTaskCommand(task);
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
       pdfBuffers: pdfBuffersByName,
+      xlsxBuffers: xlsxBuffersByName,
       videoKeyframes,
       videoBuffers: videoBuffersByName,
       imageAttachments,
@@ -1795,6 +1863,11 @@ export async function processTask(
         : []),
     ];
 
+    const carryKey = !requestCwd ? workspaceStoreKey : undefined;
+    const earlierAttachments = carryKey
+      ? await restoreConversationAttachments(carryKey, workspaceDir, log)
+      : { available: [], restored: [] };
+
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,
@@ -1811,6 +1884,23 @@ export async function processTask(
         pdfBuffersByName.map((p) => ({ path: p.fileName, data: p.buf })),
       );
       log(`Raw PDF originals kept: ${writtenBin.length}`);
+    }
+    if (xlsxBuffersByName.length > 0) {
+      const writtenXlsx = await writeWorkspaceBinaryFiles(
+        workspaceDir,
+        xlsxBuffersByName.map((x) => ({ path: x.fileName, data: x.buf })),
+      );
+      log(`Raw XLSX originals kept: ${writtenXlsx.length}`);
+    }
+    const thisTurnAttachmentPaths = [
+      ...derivedContextFiles.map((f) => toWorkspaceContextPath(f.path)),
+      ...pdfBuffersByName.map((p) => toWorkspaceContextPath(p.fileName)),
+      ...xlsxBuffersByName.map((x) => toWorkspaceContextPath(x.fileName)),
+    ];
+    if (carryKey && thisTurnAttachmentPaths.length > 0) {
+      void saveConversationAttachments(carryKey, workspaceDir, thisTurnAttachmentPaths, log)
+        .then((saved) => log(`Attachments kept for later turns: ${saved}/${thisTurnAttachmentPaths.length}`))
+        .catch((err: unknown) => logErr("Saving attachments for later turns failed", err));
     }
     // /record-skill only: retain the raw recording in the ephemeral run
     // workspace until analyze-skill-recording copies it into this
@@ -2202,11 +2292,6 @@ export async function processTask(
       subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
-    // Shared ref: subagents append their inner MCP tool names here so chain
-    // `toolsMustInclude`/`toolsMustExclude` conditions can target specific
-    // nested tools (e.g. Bitbucket__create_pull_request), not just the
-    // subagent wrapper names returned by the parent agent.
-    const subagentInnerTools: string[] = [];
     // NOTE: the "sandbox" subagent was removed (2026-06-14). Sandbox tools now
     // mount directly on the parent (see parentHoistedTools below); playwright
     // browser tools are hoisted alongside them for sandbox-capable agents. The
@@ -2275,6 +2360,14 @@ export async function processTask(
       uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
         ? buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files") })
         : [];
+    const clonedUiTesterTools: Record<string, ToolDefinition[]> =
+      !fastModeEnabled && uiTesterSandboxTools.some((t) => t.name === "sandbox-run")
+        ? Object.fromEntries(
+            (customSubagents ?? [])
+              .filter((c) => (c.tools.custom ?? []).includes("ui-test-variations"))
+              .map((c) => [c.name, buildUiTesterTools(meta, { deliver: uiTesterSandboxTools.find((t) => t.name === "sandbox-deliver-files"), checks: c.checks })]),
+          )
+        : {};
 
     const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
@@ -2294,6 +2387,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -2302,6 +2396,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: subagentInnerTools,
+            parentToolInvocations: nestedInvocations,
+            parentLlmCalls: nestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               ...(agentSlug ? { agentSlug } : {}),
@@ -2315,9 +2411,12 @@ export async function processTask(
             backgroundRegistry: childTaskRegistry,
             parentDebug: parentDebugHandle,
           },
-          uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : undefined,
+          uiTesterTools.length > 0 || Object.keys(clonedUiTesterTools).length > 0
+            ? { ...(uiTesterTools.length > 0 ? { "ui-tester": uiTesterSandboxTools } : {}), ...clonedUiTesterTools }
+            : undefined,
           customSubagents,
           directPickSuffixes,
+          customSubagents?.some((c) => c.fast || (c.tools.custom ?? []).includes("xor-decide")) ? [buildXorDecideTool(meta)] : undefined,
         );
 
     const subagentTools = optEnabled("subagent_direct_only")
@@ -2455,6 +2554,8 @@ export async function processTask(
         // A delegated agent's 401/403 is the same signal as the parent's: the
         // user's own connection is the fix, so it feeds the same connector card.
         (serverType) => blockedConnectors.add(serverType),
+        undefined,
+        userId,
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2483,6 +2584,9 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        // The callee's subagent work belongs on the callee's run row, so it gets its own sinks.
+        const calleeNestedInvocations: ToolInvocation[] = [];
+        const calleeNestedLlmCalls: LlmCallStat[] = [];
         const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
@@ -2497,6 +2601,7 @@ export async function processTask(
           {
             ...(progressUrl ? { progressUrl } : {}),
             parentSessionId: sessionId,
+            parentWorkingDir: workspaceDir,
             ...(conversationId
               ? {
                   parentDebugSessionId:
@@ -2505,6 +2610,8 @@ export async function processTask(
                 }
               : {}),
             parentToolsUsed: calleeInnerTools,
+            parentToolInvocations: calleeNestedInvocations,
+            parentLlmCalls: calleeNestedLlmCalls,
             parentMeta: {
               ...(conversationId ? { conversationId } : {}),
               agentSlug: spec.slug,
@@ -2637,16 +2744,22 @@ export async function processTask(
             },
             { toolCallId },
           );
+          // Reported on the callee's own run row, never folded into the caller's (double count).
+          const calleeLlmCalls = mergeLlmCallSeries(result.llmCalls, calleeNestedLlmCalls).calls;
+          const calleeModel = result.model ?? providerConfig?.model;
           await reportDelegatedRunFinish({
             sessionId: calleeSessionId,
             status: "completed",
             result: result.text,
-            ...(spec.provider ? { provider: spec.provider } : {}),
-            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
-            toolsUsed: result.toolsUsed,
-            toolInvocations: result.toolInvocations,
+            // Resolved values, as a top-level run reports them (unset provider is the platform route).
+            provider: spec.provider ?? "spaces",
+            ...(calleeModel ? { model: calleeModel } : {}),
+            toolsUsed: [...result.toolsUsed, ...calleeInnerTools],
+            toolInvocations: [...result.toolInvocations, ...calleeNestedInvocations],
             tokenUsage: result.tokenUsage,
+            ...judgeCallbackFields(),
             ...(result.latency ? { latency: result.latency } : {}),
+            ...(calleeLlmCalls.length > 0 ? { llmCalls: calleeLlmCalls } : {}),
           });
           return {
             text: result.text,
@@ -2670,7 +2783,13 @@ export async function processTask(
             sessionId: calleeSessionId,
             status: signal?.aborted ? "cancelled" : "failed",
             error: err instanceof Error ? err.message : String(err),
-            ...(spec.provider ? { provider: spec.provider } : {}),
+            provider: spec.provider ?? "spaces",
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            ...abortTelemetry(err, {
+              toolsUsed: calleeInnerTools,
+              invocations: calleeNestedInvocations,
+              llmCalls: calleeNestedLlmCalls,
+            }),
           });
           throw err;
         }
@@ -3254,13 +3373,14 @@ export async function processTask(
       }
     }
 
-    // Read-only routing (sbx-git): scheduled / automation runs are diverted to
+    // Read-only routing (sbx-git): scheduled / automation / proactivity runs are diverted to
     // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
     // so they must not carry mutating sandbox tools. Strip them here as the
     // tool-level half of read-only enforcement (the sbx-git pod also mounts
     // repos read-only). A rare automation that genuinely needs to write/run can
     // opt out with agentConfig.allowWriteInReadOnlyJob.
-    const isReadOnlyJob = eventType === "automation" || eventType === "scheduled" || isScheduledRun;
+    const isReadOnlyJob =
+      eventType === "automation" || eventType === "scheduled" || eventType === "proactivity" || isScheduledRun;
     const allowWriteInReadOnlyJob = agentConfig?.["allowWriteInReadOnlyJob"] === true;
     // forceReadOnlySandbox: per-agent opt-in to the read-only sbx-git path for ALL
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
@@ -3338,6 +3458,18 @@ export async function processTask(
       }
     }
 
+    if (isProactivity) {
+      const RO_PROACTIVE = new Set([
+        "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
+        "sandbox-create", "sandbox-destroy", "write",
+      ]);
+      const beforeProactive = allTools.length;
+      allTools = allTools.filter((t) => !isWriteTool(t, allGroups) && !RO_PROACTIVE.has(t.name));
+      if (allTools.length !== beforeProactive) {
+        log(`Proactivity read-only — stripped ${beforeProactive - allTools.length} write/mutating tool(s)`);
+      }
+    }
+
     allTools = dedupeToolsByName(allTools);
     if (optEnabled("active_tool_cap")) {
       const demotable = new Set(
@@ -3355,7 +3487,9 @@ export async function processTask(
         pinned: new Set([
           PROPOSE_PLAN_TOOL_NAME,
           EMIT_BRIEF_TOOL_NAME,
-          "ask-user-question",
+          // Includes todo-write: the plan primer says the agent MUST call it,
+          // and demoting it to the catalog made that call fail with "not found".
+          ...ALWAYS_LOADED_TOOL_NAMES,
           ...forcedTaskCommandTools,
           ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
         ]),
@@ -3430,7 +3564,7 @@ export async function processTask(
           ...(sessionId && sessionToken
             ? {
                 searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
-                  searchDeploymentTools(sessionId, sessionToken, params),
+                  searchDeploymentTools(sessionId, sessionToken, params, userId),
               }
             : {}),
           openPalette: openPaletteEnabled,
@@ -3821,11 +3955,11 @@ export async function processTask(
         path: toWorkspaceContextPath(a.fileName),
       })),
       ...xlsxAttachments.map((a) => ({
-        label: `${a.fileName} (xlsx, extracted to markdown)`,
+        label: `${a.fileName} (xlsx, extracted to markdown; original workbook at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...pdfAttachments.map((a) => ({
-        label: `${a.fileName} (pdf, text-extracted to markdown)`,
+        label: `${a.fileName} (pdf, text-extracted to markdown; original PDF at \`${toWorkspaceContextPath(a.fileName)}\`)`,
         path: toWorkspaceContextPath(`${a.fileName}.md`),
       })),
       ...docxAttachments.map((a) => ({
@@ -3853,6 +3987,18 @@ export async function processTask(
         path: toWorkspaceContextPath(`${recording.fileName}.video.md`),
       })) : []),
     ];
+    const thisTurnPaths = new Set(attachmentEntries.map((e) => e.path));
+    const earlierFiles = earlierAttachments.available
+      .filter((p) => !thisTurnPaths.has(p) && !thisTurnAttachmentPaths.includes(p))
+      .slice(0, 50);
+    if (earlierFiles.length > 0) {
+      const earlierContext = [
+        "## Files From Earlier In This Conversation",
+        ...earlierFiles.map((p) => `- \`${p}\``),
+        "These were attached in earlier turns and are still on disk at these paths.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${earlierContext}` : earlierContext;
+    }
     if (attachmentEntries.length > 0) {
       const attachmentContext = [
         "## Attached Files",
@@ -3907,6 +4053,23 @@ export async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${idLines.join("\n")}`
         : idLines.join("\n");
+    }
+
+    // Answer from Context: the palette is final, so its search tools can run the
+    // question now — through their own `execute`, so ACL and KB grants apply.
+    if (answerFromContext) {
+      const retrieveStartedAt = Date.now();
+      const scope = answerScopeFrom(agentConfig);
+      const { block, sections } = await buildAnswerContext({
+        query: task,
+        scope,
+        tools: allTools as unknown as ExecutableTool[],
+        askerName: userName,
+        progressUrl,
+        sessionId,
+      });
+      fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+      log(`[answer-context] scope=${scope} sources=${sections.length} chars=${block.length} in ${Date.now() - retrieveStartedAt}ms`);
     }
 
     // Resolve the prefetch spec now that the tool palette is final: the
@@ -4019,7 +4182,11 @@ export async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    const authoritativeSdlcContext = trustedSdlcContext
+      ? buildSdlcRunContextSection(trustedSdlcContext)
+      : typeof agentConfig?.["sdlcContextError"] === "string"
+        ? SDLC_CONTEXT_UNAVAILABLE_SECTION
+        : "";
     // R4: when tool-result sifting is on, tell the model up front what it will
     // see and how to get the raw result — not only after the fact per result.
     const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
@@ -4149,6 +4316,7 @@ export async function processTask(
         modelSettings,
         ...(structuredOutputActive ? { structuredOutputRef } : {}),
         ...(isTwinMentionFlow ? { twinDeliverRef } : {}),
+        questionPosted: () => getPendingQuestions().some((q) => q.purpose !== "follow_up_suggestions"),
         // Debug telemetry only — agent.ts emits session_tools/mode_switch events.
         ...(isPlanMode ? { mode: "plan" as const } : mode ? { mode } : {}),
         ...(planContinuation ? { planContinuation: true } : {}),
@@ -4162,7 +4330,8 @@ export async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
-        customTools: tools,
+        // Answer from Context answers in one turn from the retrieved block: no tools.
+        customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -4203,7 +4372,7 @@ export async function processTask(
         ...(verifyResponses && !isCopilot
           ? { verifyResponsesRef: evidenceRef }
           : {}),
-        citationReflection,
+        citationReflection: answerFromContext ? false : citationReflection,
         replyFormat,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
@@ -4519,6 +4688,10 @@ export async function processTask(
     // on specific inner tools (Bitbucket__create_pull_request) in addition to
     // subagent wrappers (bitbucket).
     const combinedToolsUsed = [...result.toolsUsed, ...subagentInnerTools];
+    if (nestedInvocations.length > 0) {
+      result.toolInvocations.push(...nestedInvocations);
+    }
+    const llmCallSeries = mergeLlmCallSeries(result.llmCalls, nestedLlmCalls).calls;
 
     const lat = result.latency;
     const latencyStr = lat
@@ -4686,7 +4859,10 @@ export async function processTask(
         }),
         toolsUsed: combinedToolsUsed,
         tokenUsage: result.tokenUsage,
+        ...judgeCallbackFields(),
         ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        ...(result.latency ? { latency: result.latency } : {}),
+        ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
         provider: completedProvider,
         model: completedModel,
       });
@@ -4808,6 +4984,7 @@ export async function processTask(
       ...(twinDelivery !== undefined ? { twinDelivery } : {}),
       toolsUsed: combinedToolsUsed,
       tokenUsage: result.tokenUsage,
+      ...judgeCallbackFields(),
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
         : {}),
@@ -4821,6 +4998,8 @@ export async function processTask(
           }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
+      ...(result.citationReflection ? { citationReflection: result.citationReflection } : {}),
+      ...(llmCallSeries.length > 0 ? { llmCalls: llmCallSeries } : {}),
       ...(result.toolInvocations.length > 0
         ? { toolInvocations: result.toolInvocations }
         : {}),
@@ -4993,6 +5172,11 @@ export async function processTask(
     // "Query aborted by user." in the UI. When the user cancelled, fall through
     // to the cancelled branch below instead.
     const isUserCancel = activeRuns.get(sessionId)?.userCancelled === true;
+    const abortFields = abortTelemetry(err, {
+      toolsUsed: subagentInnerTools,
+      invocations: nestedInvocations,
+      llmCalls: nestedLlmCalls,
+    });
     if (
       pendingResponsesAtError.length > 0 &&
       !isUserCancel &&
@@ -5057,9 +5241,7 @@ export async function processTask(
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         ...(llmCitationsAtError && llmCitationsAtError.length > 0 ? { llmCitations: llmCitationsAtError } : {}),
         provider: callbackProvider,
         model: callbackModel,
@@ -5088,9 +5270,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingPlan: proposePlanRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5118,9 +5298,7 @@ export async function processTask(
         status: "completed",
         result: "",
         pendingAgentCard: proposeAgentRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5148,9 +5326,7 @@ export async function processTask(
         status: "completed",
         result: "",
         dailyBrief: emitBriefRef.value,
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5169,9 +5345,7 @@ export async function processTask(
         fastMode: fastModeForCallback,
         status: "completed",
         result: partialResult || "Experiment complete — report recorded.",
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0 ? { toolsUsed: err.toolsUsed } : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0 ? { toolInvocations: err.toolInvocations } : {}),
-        ...(err instanceof RunCancelledError ? { tokenUsage: err.tokenUsage } : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5192,15 +5366,7 @@ export async function processTask(
           fastMode: fastModeForCallback,
           status: "completed",
           result: interruptSummary,
-          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-            ? { toolsUsed: err.toolsUsed }
-            : {}),
-          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-            ? { toolInvocations: err.toolInvocations }
-            : {}),
-          ...(err instanceof RunCancelledError
-            ? { tokenUsage: err.tokenUsage }
-            : {}),
+          ...abortFields,
           provider: callbackProvider,
           model: callbackModel,
         });
@@ -5217,15 +5383,7 @@ export async function processTask(
         ...(err instanceof RunCancelledError && err.partialText
           ? { result: err.partialText }
           : {}),
-        ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof RunCancelledError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5299,15 +5457,7 @@ export async function processTask(
           : { status: "completed" as const, result: "" }),
         emptyReason: "provider_capacity" as const,
         ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
-        ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
-          ? { toolsUsed: err.toolsUsed }
-          : {}),
-        ...(err instanceof ProviderStallError && err.toolInvocations.length > 0
-          ? { toolInvocations: err.toolInvocations }
-          : {}),
-        ...(err instanceof ProviderStallError
-          ? { tokenUsage: err.tokenUsage }
-          : {}),
+        ...abortFields,
         provider: callbackProvider,
         model: callbackModel,
       });
@@ -5612,6 +5762,36 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     res
       .status(500)
       .json({ success: false, error: "Failed to generate prompt" });
+  }
+});
+
+// ── Routing card for agent proactivity (called by xyne-claw-auth) ────────
+
+router.post("/generate-routing-card", validateS2SKey, async (req, res: Response) => {
+  const { name, description, systemPrompt, tools, skills, asked } = req.body as Partial<RoutingCardInput>;
+  if (typeof name !== "string" || typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+    res.status(400).json({ success: false, error: "name and systemPrompt are required" });
+    return;
+  }
+  try {
+    const card = await generateRoutingCard({
+      name,
+      description: typeof description === "string" ? description : "",
+      systemPrompt,
+      tools: Array.isArray(tools) ? tools.filter((t): t is string => typeof t === "string") : [],
+      skills: Array.isArray(skills) ? skills.filter((k): k is string => typeof k === "string") : [],
+      asked: Array.isArray(asked)
+        ? asked.flatMap((a) =>
+            a && typeof a.question === "string"
+              ? [{ question: a.question, ...(typeof a.reply === "string" ? { reply: a.reply } : {}) }]
+              : [],
+          )
+        : [],
+    });
+    res.json({ success: true, data: { card } });
+  } catch (err) {
+    clog.error("[generate-routing-card] Failed:", err);
+    res.status(502).json({ success: false, error: "Failed to generate routing card" });
   }
 });
 

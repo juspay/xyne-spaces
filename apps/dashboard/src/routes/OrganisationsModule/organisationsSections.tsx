@@ -9,7 +9,7 @@ import {
   UserShield,
   UserThree,
 } from '@xyne/icons';
-import { Mail, Plug, RefreshCw, UserCheck } from 'lucide-react';
+import { Bot, Mail, Plug, RefreshCw, UserCheck } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useUserGroups } from '../../hooks/useUserGroup';
@@ -51,6 +51,8 @@ const SyncIcon: PikaIcon = ({ size, className }) => (
 );
 const PlugIcon: PikaIcon = ({ size, className }) => (
   <Plug size={typeof size === 'number' ? size : 16} className={className} />
+const AgentIcon: PikaIcon = ({ size, className }) => (
+  <Bot size={typeof size === 'number' ? size : 16} className={className} />
 );
 
 // Sidebar order. Workspace holds the workspace settings (formerly Workspace
@@ -112,6 +114,12 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
         label: 'Toolbar',
         description: 'Pages shown in the sidebar',
         icon: LayoutGridTwoVertical,
+      },
+      {
+        key: 'agent-activity',
+        label: 'Agent activity',
+        description: 'What agents decided when nobody tagged them',
+        icon: AgentIcon,
       },
     ],
   },

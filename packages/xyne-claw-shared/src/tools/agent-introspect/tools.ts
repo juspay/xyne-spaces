@@ -101,7 +101,9 @@ export const getAgentRunsTool: ToolDefinition = {
     "LATENCY. `aggregates` carries p50/p95 wall-clock plus the median split between model time " +
     "(`p50LlmMs`) and tool time (`p50ToolMs`) — that split says whether a slow agent is waiting on the " +
     "model or on its own tool loop. `perDay` gives the same p50/p95 per calendar day over the window, " +
-    "so drift is visible instead of averaged away. Pass `days` to size the window.",
+    "so drift is visible instead of averaged away. Pass `days` to size the window.\n\n" +
+    "For per-tool reliability, LLM-call latency, token usage with sample sizes, or the sessions behind a " +
+    "figure, use get_agent_metrics and find_metric_sessions.",
   source: "custom:agent-introspect",
   inputSchema: {
     type: "object",
@@ -197,7 +199,8 @@ export const getFleetStatsTool: ToolDefinition = {
     "affected agents, first/last seen and example session ids; the most-used tools (runs using each, and " +
     "which agents); and per provider/model failure %, retries, time to first token " +
     "and tokens/sec. Use it for daily fleet reports and \"which agents are failing or slow and why\". " +
-    "Restricted to claw admins. Read-only.",
+    "Restricted to claw admins. Read-only. For one tool's failure classes, per-LLM-call latency or " +
+    "the sessions behind a figure, use get_agent_metrics and find_metric_sessions.",
   source: "custom:agent-introspect",
   inputSchema: {
     type: "object",
@@ -247,6 +250,101 @@ export const getAgentDiagnosticsTool: ToolDefinition = {
   execute: AUTH_EXECUTED_STUB,
 };
 
+/**
+ * The first sentence of each description is what the lazy tool catalog lists. Names must
+ * classify as `read` under classifyToolRisk (no "set", "star", "cancel", "add", "post", "drop"...).
+ */
+export const GET_AGENT_METRICS_VIEWS = ["overview", "tools", "tool_failures", "llm", "coverage"] as const;
+export const GET_AGENT_METRICS_SORTS = ["errors", "errorRate", "calls", "p95", "recoveryRate", "contextBytes"] as const;
+export const FIND_METRIC_SESSIONS_KINDS = ["tool_errored", "tool_recovered", "tool_dropped", "tool_called", "run_failed", "run_slow"] as const;
+export const METRICS_TOOL_DAYS = [1, 7, 30] as const;
+
+export const getAgentMetricsTool: ToolDefinition = {
+  slug: "get_agent_metrics",
+  name: "get_agent_metrics",
+  description:
+    "Run, tool and LLM-call performance metrics for agents in this organization, computed from the run " +
+    "ledger over a recent window. Use for \"how is agent X doing this week\", \"which tool fails most and " +
+    "why\", \"p95 latency / token usage / success rate\", \"which granted tools are never called\". " +
+    "Admins get the whole org; everyone else gets their own runs only (the response says " +
+    "which in `scope`). Every figure carries its sample size `n`; a null figure means too few samples or " +
+    "nothing to divide by, not zero. Read `coverage` and `caveats` before quoting a number. For the " +
+    "sessions behind a figure call find_metric_sessions (the response's `next` gives the exact call). Read-only.",
+  source: "custom:agent-introspect",
+  inputSchema: {
+    type: "object",
+    properties: {
+      view: {
+        type: "string",
+        enum: [...GET_AGENT_METRICS_VIEWS],
+        description:
+          "overview = runs, success rate, latency, tokens, worst tools (default). tools = per-tool " +
+          "calls/errors/recovered/p95, ranked. tool_failures = failure classes for ONE tool (needs `tool`). " +
+          "llm = per-LLM-call first-token wait, throughput, cache hit, retries by model. coverage = " +
+          "granted-but-never-called tools per agent.",
+      },
+      agentSlug: {
+        type: "string",
+        description: "One agent's slug. Omit for the whole org (admin) or all your runs.",
+      },
+      days: { type: "number", enum: [...METRICS_TOOL_DAYS], description: "Window in days ending now. Default 7." },
+      tool: {
+        type: "string",
+        description: "Exact tool name as the metrics report it, e.g. 'webfetch'. Required for tool_failures; narrows coverage.",
+      },
+      sortBy: {
+        type: "string",
+        enum: [...GET_AGENT_METRICS_SORTS],
+        description: "tools view only. Default errors.",
+      },
+      limit: { type: "number", description: "Top-N rows for ranked lists. Default 8, max 25." },
+      includeSubagents: {
+        type: "boolean",
+        description: "llm view: include subagent LLM calls. Default false (parent calls only).",
+      },
+    },
+    required: [],
+  },
+  execute: AUTH_EXECUTED_STUB,
+};
+
+export const findMetricSessionsTool: ToolDefinition = {
+  slug: "find_metric_sessions",
+  name: "find_metric_sessions",
+  description:
+    "List the sessions (runs) behind a metric, newest first (slowest first for run_slow), paginated. Use " +
+    "after get_agent_metrics: \"show sessions where webfetch errored\", \"which sessions recovered a failed " +
+    "tool call\", \"slowest runs this week\", \"failed runs of agent X\". Same scope as get_agent_metrics: " +
+    "admins see the org's runs, everyone else their own. Task and error text appear only for your own runs " +
+    "and scheduled or automation runs; other rows show figures only. Pass the returned `page.cursor` to get " +
+    "the next page. Read-only.",
+  source: "custom:agent-introspect",
+  inputSchema: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        enum: [...FIND_METRIC_SESSIONS_KINDS],
+        description:
+          "tool_errored = a call to `tool` returned an error. tool_recovered = an error was followed by a " +
+          "later success of the same tool in that run. tool_dropped = the tool's end event was lost (result " +
+          "unknown). tool_called = any call to `tool`. run_failed = run status failed or cancelled. " +
+          "run_slow = slowest completed runs by end-to-end time.",
+      },
+      tool: { type: "string", description: "Exact tool name. Required for the tool_* kinds." },
+      agentSlug: { type: "string", description: "Restrict to one agent." },
+      days: { type: "number", enum: [...METRICS_TOOL_DAYS], description: "Window in days ending now. Default 7." },
+      limit: { type: "number", description: "Page size. Default 10, max 25." },
+      cursor: {
+        type: "string",
+        description: "Opaque `page.cursor` from the previous page, to continue the same list. Omit for page 1.",
+      },
+    },
+    required: ["kind"],
+  },
+  execute: AUTH_EXECUTED_STUB,
+};
+
 export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   listAgentsTool,
   getAgentConfigTool,
@@ -255,4 +353,6 @@ export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   findAgentsTool,
   getFleetStatsTool,
   getAgentDiagnosticsTool,
+  getAgentMetricsTool,
+  findMetricSessionsTool,
 ];

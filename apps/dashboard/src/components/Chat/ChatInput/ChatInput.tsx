@@ -7,6 +7,7 @@ import React, {
   forwardRef,
   useRef,
   useImperativeHandle,
+  useReducer,
 } from 'react';
 import { withProfilerRef } from '../../../utils/withProfiler';
 import { useZeroWithFallback as useZero } from '../../../hooks/useZeroWithFallback';
@@ -42,6 +43,8 @@ import {
   processMessageForSending,
   containsSpecialBroadcastMention,
   discussionOpeningHtml,
+  DISCUSSION_TITLE_MAX,
+  liftableLineOf,
 } from './ChatInput.utils';
 import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -101,6 +104,9 @@ import {
 } from '../SlashCommandArtifacts';
 import { useSlashCommandArtifactSideEffects } from '../SlashCommandArtifactSideEffects';
 import { useRelatedContext } from '../../../hooks/useRelatedContext';
+import { useDiscussionTitleOffer } from '../../../hooks/useDiscussionTitleOffer';
+import { ShortcutHint } from '../../ui/ShortcutHint';
+import { Heading } from '@xyne/icons';
 import { useUserPreference } from '../../../machines/userPreferencesMachine';
 import { RelatedContextStrip } from './RelatedContextStrip';
 import { RelatedContextDialog } from './RelatedContextDialog';
@@ -110,6 +116,14 @@ import { SlackSyncComposerRow } from '../../SlackSync/SlackSyncComposerRow';
 import type { RelatedItem } from '../../../types/search';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
+
+interface TitleDraft {
+  open: boolean;
+  title: string;
+}
+
+const CLOSED_TITLE: TitleDraft = { open: false, title: '' };
+const titleDrafts = new Map<string, TitleDraft>();
 
 function draftTextToHtml(text: string): string {
   const escape = (value: string): string =>
@@ -196,30 +210,44 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Where conversations are shown as discussions, a new one starts with a title,
     // sent as its opening message's first line. Replies, edits and threads are
     // messages as ever.
-    const [discussionTitle, setDiscussionTitle] = useState('');
+    const [, refreshTitleDraft] = useReducer((count: number) => count + 1, 0);
+    const titleDraft = titleDrafts.get(channelId) ?? CLOSED_TITLE;
+    const discussionTitle = titleDraft.title;
+    const setTitleDraft = useCallback(
+      (next: TitleDraft): void => {
+        if (next.open || next.title) titleDrafts.set(channelId, next);
+        else titleDrafts.delete(channelId);
+        refreshTitleDraft();
+      },
+      [channelId],
+    );
+    const [liftableLine, setLiftableLine] = useState('');
     const discussionTitleRef = useRef<HTMLInputElement>(null);
+    const titleRowRef = useRef<HTMLDivElement>(null);
     // Not on a phone: the editor keeps its header, where the title field sits, off
     // mobile, so a title there could never be given.
     const { isMobile: onMobilePlatform } = usePlatform();
-    const startsDiscussion =
-      discussionList !== null &&
-      !onMobilePlatform &&
-      !messageId &&
-      !conversation?.conversationId &&
-      !twinEdit;
-    /** The html to send, titled when it opens a discussion; null when the title is missing. */
+    // Registry command id of the artifact currently being drafted, if any.
+    const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
+    const canTitle = !onMobilePlatform && !messageId && !conversation?.conversationId && !twinEdit;
+    const startsDiscussion = discussionList !== null && canTitle;
+    const offersTitle = discussionList === null && canTitle;
+    const titleShown =
+      startsDiscussion || (offersTitle && titleDraft.open && !activeArtifactCommand);
+    /** The html to send, titled when it has one; null when a discussion's title is missing. */
     const withDiscussionTitle = useCallback(
       (html: string): string | null => {
-        if (!startsDiscussion) return html;
+        if (!titleShown) return html;
         const title = discussionTitle.trim();
         if (!title) {
+          if (!startsDiscussion) return html;
           toast.warning('Give the discussion a title');
           discussionTitleRef.current?.focus();
           return null;
         }
         return discussionOpeningHtml(title, html);
       },
-      [discussionTitle, startsDiscussion],
+      [discussionTitle, startsDiscussion, titleShown],
     );
 
     useImperativeHandle(
@@ -277,8 +305,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [conversationId, openArtifacts],
     );
 
-    // Registry command id of the artifact currently being drafted, if any.
-    const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
 
     // Threads, tickets, canvases and calls the draft relates to. Opt-in per device
@@ -436,12 +462,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     }, [channelId, conversationId]);
     const agentProgressConversationId = conversationId ?? pendingConversationId ?? undefined;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
-    // Every edit, as it happens: typing indicator, and the related-context lookup
-    // dropped the moment the draft it was for changes.
-    const handleComposerTyping = useCallback((): void => {
-      handleTyping();
-      interruptRelated();
-    }, [handleTyping, interruptRelated]);
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -479,6 +499,116 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // SDLC channels are hidden from the chat directory, so "also send to
     // channel" has no destination a user could ever see — hide the toggle.
     const isSdlcChannel = channel?.type === ChannelType.SDLC;
+
+    const {
+      offered: titleOffered,
+      interrupt: interruptTitleOffer,
+      onDraftChange: onTitleOfferDraftChange,
+      withdraw: withdrawTitleOffer,
+      noteSent: noteTitleSent,
+    } = useDiscussionTitleOffer({
+      enabled:
+        offersTitle &&
+        !titleDraft.open &&
+        !activeArtifactCommand &&
+        channel?.scopeType !== ChannelScopeType.DM,
+      draftKey: channelId,
+      userId: user?.id,
+      debounceMs: relatedDebounceMs,
+    });
+
+    // Every edit, as it happens: typing indicator, and the related-context lookup and
+    // title offer dropped the moment the draft they were for changes.
+    const handleComposerTyping = useCallback((): void => {
+      handleTyping();
+      interruptRelated();
+      interruptTitleOffer();
+    }, [handleTyping, interruptRelated, interruptTitleOffer]);
+
+    const openTitle = useCallback((): void => {
+      withdrawTitleOffer();
+      const body = new DOMParser().parseFromString(
+        inputBoxRef.current?.getHtml?.() ?? '',
+        'text/html',
+      ).body;
+      setLiftableLine(liftableLineOf(body));
+      setTitleDraft({ open: true, title: titleDrafts.get(channelId)?.title ?? '' });
+      requestAnimationFrame(() => discussionTitleRef.current?.focus());
+    }, [channelId, setTitleDraft, withdrawTitleOffer]);
+
+    const closeTitle = useCallback((): void => {
+      const box = inputBoxRef.current;
+      const title = (titleDrafts.get(channelId)?.title ?? '').trim();
+      setTitleDraft(CLOSED_TITLE);
+      setLiftableLine('');
+      if (box && title) {
+        const body = new DOMParser().parseFromString(box.getHtml?.() ?? '', 'text/html').body;
+        if (body.innerHTML === '<p></p>') body.replaceChildren();
+        const line = document.createElement('p');
+        line.textContent = title;
+        body.prepend(line);
+        box.clearTextOnly();
+        box.insertContent(body.innerHTML);
+      }
+      box?.focus();
+    }, [channelId, setTitleDraft]);
+
+    const toggleTitle = titleDraft.open ? closeTitle : openTitle;
+
+    const liftFirstLine = (): void => {
+      const box = inputBoxRef.current;
+      const editorLine = titleRowRef.current?.parentElement?.querySelector('.ProseMirror > *');
+      const body = new DOMParser().parseFromString(box?.getHtml?.() ?? '', 'text/html').body;
+      const line = liftableLineOf(body);
+      setLiftableLine(line);
+      if (!box || !line) return;
+      const from = editorLine?.getBoundingClientRect();
+      const fromFont = editorLine ? getComputedStyle(editorLine).font : '';
+      body.firstElementChild?.remove();
+      box.clearTextOnly();
+      box.insertContent(body.innerHTML);
+      setTitleDraft({ open: true, title: line });
+      setLiftableLine('');
+      const input = discussionTitleRef.current;
+      input?.focus();
+      if (!from || !input || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+      }
+      input.style.color = 'transparent';
+      const to = input.getBoundingClientRect();
+      const inputStyle = getComputedStyle(input);
+      const fly = document.createElement('span');
+      fly.textContent = line;
+      fly.className = 'pointer-events-none fixed z-50 whitespace-nowrap text-foreground';
+      Object.assign(fly.style, { left: `${from.left}px`, top: `${from.top}px`, font: fromFont });
+      document.body.appendChild(fly);
+      const dx = to.left + parseFloat(inputStyle.paddingLeft) - from.left;
+      const dy = to.top + parseFloat(inputStyle.paddingTop) - from.top;
+      const flight = fly.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          {
+            transform: `translate(${dx}px, ${dy}px)`,
+            fontSize: inputStyle.fontSize,
+            fontWeight: inputStyle.fontWeight,
+            lineHeight: inputStyle.lineHeight,
+          },
+        ],
+        { duration: 320, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
+      );
+      flight.onfinish = (): void => {
+        input.style.removeProperty('color');
+        fly.remove();
+      };
+    };
+
+    useShortcutById('composer.discussionTitle', toggleTitle, {
+      enabled: offersTitle && !activeArtifactCommand,
+      when: event =>
+        event.target instanceof Node &&
+        Boolean(titleRowRef.current?.parentElement?.contains(event.target)),
+    });
+
     const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
 
     const bannerScheduledFor = upcomingScheduledInContext ?? recentScheduledFor;
@@ -727,6 +857,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const handleContentChange = useCallback(
       (html: string, text: string): void => {
         onRelatedDraftChange(text);
+        onTitleOfferDraftChange(text);
+        if (titleDraft.open) {
+          setLiftableLine(liftableLineOf(new DOMParser().parseFromString(html, 'text/html').body));
+        }
         try {
           const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
           if (messageId || twinEdit) return;
@@ -740,7 +874,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           // Unable to save draft
         }
       },
-      [lookupId, messageId, twinEdit, onRelatedDraftChange],
+      [
+        lookupId,
+        messageId,
+        twinEdit,
+        onRelatedDraftChange,
+        onTitleOfferDraftChange,
+        titleDraft.open,
+      ],
     );
 
     const handleSendMessage = useCallback(
@@ -1076,7 +1217,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             });
 
             saveDraft(lookupId, '', '');
-            setDiscussionTitle('');
+            noteTitleSent(processedHtml !== composedHtml);
+            if (titleShown) setTitleDraft(CLOSED_TITLE);
             if (artifactDraft) setActiveArtifactCommand(null);
             dispatchChatMessageSentEvent(channelId);
             // Called directly, unlike the two zero.mutate paths which classify from
@@ -1133,6 +1275,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         openArtifactCommandsInThread,
         onRelatedDraftChange,
         withDiscussionTitle,
+        noteTitleSent,
+        titleShown,
+        setTitleDraft,
       ],
     );
 
@@ -1204,7 +1349,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           );
           // Clear draft after scheduling
           saveDraft(lookupId, '', '');
-          setDiscussionTitle('');
+          noteTitleSent(processedHtml !== composedHtml);
+          if (titleShown) setTitleDraft(CLOSED_TITLE);
           if (artifactDraft) setActiveArtifactCommand(null);
           toast.success('Message scheduled', {
             description: `Will be sent at ${new Date(scheduledFor).toLocaleString()}`,
@@ -1229,8 +1375,59 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         activeArtifactCommand,
         openArtifactCommandsInThread,
         withDiscussionTitle,
+        noteTitleSent,
+        titleShown,
+        setTitleDraft,
       ],
     );
+
+    const titleButton =
+      offersTitle && !activeArtifactCommand ? (
+        <Tooltip
+          content={
+            <span className='flex items-center gap-2'>
+              {titleDraft.open ? 'Remove title' : 'Add title'}
+              <ShortcutHint shortcut='composer.discussionTitle' />
+            </span>
+          }
+          side='top'
+          delayDuration={1000}
+          skipDelayDuration={1000}
+        >
+          <button
+            type='button'
+            onMouseDown={event => event.preventDefault()}
+            onClick={toggleTitle}
+            data-offered={titleOffered}
+            data-track-category='CHAT_INPUT'
+            data-track-name={
+              titleOffered ? 'ACCEPT_DISCUSSION_TITLE_OFFER' : 'TOGGLE_DISCUSSION_TITLE'
+            }
+            aria-label={titleDraft.open ? 'Remove title' : 'Add title'}
+            aria-pressed={titleDraft.open}
+            className={`xyne-title-offer flex items-center rounded p-1.5 transition-[background-color,color,box-shadow] duration-200 ease-in-out ${
+              titleOffered
+                ? 'bg-[#fff6ee] text-[#b34700] shadow-[0_0_0_1px_rgba(255,137,4,0.38),0_2px_12px_rgba(255,79,0,0.14)]'
+                : titleDraft.open
+                  ? 'bg-accent text-foreground'
+                  : 'text-muted-foreground hover:bg-accent'
+            }`}
+          >
+            <Heading className='h-4 w-4 shrink-0' />
+            <span
+              className={`grid transition-[grid-template-columns] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+                titleOffered ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'
+              }`}
+            >
+              <span className='min-w-0 overflow-hidden'>
+                <span className='xyne-title-offer-label block whitespace-nowrap pl-1.5 pr-0.5 text-xs font-medium'>
+                  Add title
+                </span>
+              </span>
+            </span>
+          </button>
+        </Tooltip>
+      ) : null;
 
     return (
       <>
@@ -1319,7 +1516,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               hasAgentActivity={agentActive}
               agentSlot={
                 <AgentProgressIndicator
-                  sessionId={agentProgressConversationId ?? currentSessionId}
+                  sessionId={agentProgressConversationId}
                   conversationId={agentProgressConversationId}
                   onActiveChange={setAgentActive}
                 />
@@ -1341,24 +1538,70 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               {...(relatedEnabled && { borderActivity: relatedContext.loading })}
               headerSlot={
                 <>
-                  {startsDiscussion && (
-                    <input
-                      ref={discussionTitleRef}
-                      value={discussionTitle}
-                      onChange={event => setDiscussionTitle(event.target.value)}
-                      onKeyDown={event => {
-                        // Enter moves on to the opening message rather than sending.
-                        if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
-                        event.preventDefault();
-                        inputBoxRef.current?.focus();
-                      }}
-                      maxLength={200}
-                      placeholder='Discussion title'
-                      aria-label='Discussion title'
-                      data-track-category='CHAT_INPUT'
-                      data-track-name='DISCUSSION_TITLE'
-                      className='w-full bg-transparent px-3 pb-0.5 pt-2.5 text-[14px] font-semibold text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/70'
-                    />
+                  {canTitle && (
+                    <div
+                      ref={titleRowRef}
+                      inert={!titleShown}
+                      className={`grid transition-[grid-template-rows,margin] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+                        titleShown ? '-mb-2 grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                      }`}
+                    >
+                      <div className='flex min-h-0 items-center overflow-hidden'>
+                        <input
+                          ref={discussionTitleRef}
+                          value={discussionTitle}
+                          onChange={event =>
+                            setTitleDraft({ open: true, title: event.target.value })
+                          }
+                          onKeyDown={event => {
+                            if (event.nativeEvent.isComposing) return;
+                            // Enter moves on to the opening message rather than sending.
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              inputBoxRef.current?.focus();
+                              return;
+                            }
+                            if (startsDiscussion) return;
+                            if (
+                              event.key === 'Tab' &&
+                              !event.shiftKey &&
+                              liftableLine &&
+                              !discussionTitle
+                            ) {
+                              event.preventDefault();
+                              liftFirstLine();
+                              return;
+                            }
+                            if (
+                              event.key === 'Escape' ||
+                              (event.key === 'Backspace' && !discussionTitle && !event.repeat)
+                            ) {
+                              event.preventDefault();
+                              if (discussionTitle) inputBoxRef.current?.focus();
+                              else closeTitle();
+                            }
+                          }}
+                          maxLength={startsDiscussion ? 200 : DISCUSSION_TITLE_MAX}
+                          placeholder={liftableLine || 'Discussion title'}
+                          aria-label='Discussion title'
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='DISCUSSION_TITLE'
+                          className={`w-full bg-transparent px-3 pb-0.5 pt-2.5 text-[14px] font-semibold text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/70 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+                            titleShown
+                              ? 'translate-y-0 opacity-100 blur-0 delay-[40ms]'
+                              : 'translate-y-1 opacity-0 blur-[2px]'
+                          }`}
+                        />
+                        {liftableLine && !discussionTitle && (
+                          <span className='flex shrink-0 items-center gap-1.5 pr-3 pt-2.5 text-xs text-muted-foreground'>
+                            <kbd className='rounded border border-border px-1 font-sans text-[11px] leading-4'>
+                              Tab
+                            </kbd>
+                            use first line
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   )}
                   <RelatedContextStrip
                     items={relatedContext.items}
@@ -1453,21 +1696,24 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               })}
               onScheduleSend={handleScheduleSend}
               showSchedulePresets={!!isDM && !conversationId}
-              {...(globalShortcuts.length > 0 && {
+              {...((titleButton || globalShortcuts.length > 0) && {
                 bottomLeftSlot: (
                   <>
-                    <Tooltip content='Shortcuts' side='top'>
-                      <button
-                        type='button'
-                        onClick={() => setShortcutModalOpen(true)}
-                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
-                        aria-label='Open shortcuts'
-                        data-track-category='CHAT_INPUT'
-                        data-track-name='open-global-shortcuts'
-                      >
-                        <Zap className='h-4 w-4 text-muted-foreground' />
-                      </button>
-                    </Tooltip>
+                    {titleButton}
+                    {globalShortcuts.length > 0 && (
+                      <Tooltip content='Shortcuts' side='top'>
+                        <button
+                          type='button'
+                          onClick={() => setShortcutModalOpen(true)}
+                          className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
+                          aria-label='Open shortcuts'
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='open-global-shortcuts'
+                        >
+                          <Zap className='h-4 w-4 text-muted-foreground' />
+                        </button>
+                      </Tooltip>
+                    )}
                     {shortcutModalOpen && (
                       <ShortcutPickerModal
                         open={shortcutModalOpen}

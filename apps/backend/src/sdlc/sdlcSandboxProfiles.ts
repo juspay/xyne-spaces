@@ -18,6 +18,7 @@ import {
   type ClawSandboxProfile,
 } from '@/services/clawSandboxProfilesService';
 import { canonicalizeRepositoryUrl } from './canonicalizeRepositoryUrl';
+import { notifySdlcResourceChanged } from './sdlcResourceChanged';
 import type { SdlcActor } from './types';
 
 export interface SandboxProfileRoles {
@@ -186,6 +187,7 @@ export async function createSandboxProfile(
     actorUserId: actor.userId,
     create: true,
   });
+  notifySdlcResourceChanged('environments', { workspaceId: actor.workspaceId });
 }
 
 export async function updateSandboxProfile(
@@ -202,6 +204,7 @@ export async function updateSandboxProfile(
     actorUserId: actor.userId,
     create: false,
   });
+  notifySdlcResourceChanged('environments', { workspaceId: actor.workspaceId });
 }
 
 export async function setSandboxProfileEnabled(
@@ -216,6 +219,7 @@ export async function setSandboxProfileEnabled(
     workspaceId: actor.workspaceId,
     actorUserId: actor.userId,
   });
+  notifySdlcResourceChanged('environments', { workspaceId: actor.workspaceId });
 }
 
 /** Built-ins only (so claw admins only): back to the code version. */
@@ -227,4 +231,5 @@ export async function resetSandboxProfile(
   const profile = await editableProfile(db, actor, key);
   if (!profile.builtIn) throw new AppError('Only a built-in sandbox profile can be reset', 400);
   await resetClawSandboxProfile(key, actor.userId);
+  notifySdlcResourceChanged('environments', { workspaceId: actor.workspaceId });
 }

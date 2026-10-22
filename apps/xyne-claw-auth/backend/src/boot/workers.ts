@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { extension } from "../http/extension.js";
 import { initEvalSweeper, closeEvalSweeper } from "../queue/eval-sweeper.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { runner as errorPipelineRunner } from "../error-pipeline/runner/runner.js";
@@ -39,6 +40,8 @@ import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDailyCron.js";
+import { startMcpRestartListener } from "../lib/mcp-restart-signal.js";
+import { initRoutingCardCron } from "../agent-proactivity/card-cron.js";
 import {
   startBitbucketStatsBackgroundRefresh,
   stopBitbucketStatsBackgroundRefresh,
@@ -82,6 +85,7 @@ const WORKERS: WorkerEntry[] = [
   // and the messenger before the shared connection goes away.
   { name: "messaging-account-manager", init: initMessagingAccountManager, close: closeMessagingAccountManager },
   { name: "digital-twin-daily", init: initDigitalTwinDaily },
+  { name: "agent-proactivity-card-cron", init: initRoutingCardCron },
   // Daily Brief: bounded worker (caps concurrent LLM runs) + leader-locked
   // enqueue cron (fans out opted-in users once/day). See services/dailyBrief*.
   { name: "daily-brief-worker", init: initDailyBriefWorker, close: closeDailyBriefWorker },
@@ -171,6 +175,8 @@ export function bootWorkers(): void {
     worker.init?.();
   }
 
+  startMcpRestartListener();
+
   void ensureTickScheduler().catch((err) =>
     log.error("[boot] awakening tick scheduler registration failed:", err),
   );
@@ -184,6 +190,7 @@ export function bootWorkers(): void {
   // Warm the Bitbucket-author stats cache (PR/commit counts for xyne-doctor)
   // so the admin dashboard's stat cards never serve a cold fetch.
   startBitbucketStatsBackgroundRefresh();
+  extension?.start?.();
 }
 
 export async function shutdownWorkers(): Promise<void> {
@@ -192,6 +199,7 @@ export async function shutdownWorkers(): Promise<void> {
     return;
   }
 
+  await extension?.stop?.().catch(() => {});
   // API pod: drain the background fleet (none of it ran on the runner pod).
   for (const name of SHUTDOWN_SEQUENCE) {
     const worker = WORKERS.find((entry) => entry.name === name);

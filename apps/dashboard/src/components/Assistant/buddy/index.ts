@@ -13,13 +13,14 @@ import {
 import { controlKey, looping, normalise, remember, tried, turnOf, type Turn } from './history';
 import type { JevResult } from './decide';
 import { readScreen, topDocument, type Control } from './screen';
-import { runSteps, type Option, type Used, type WalkEnv } from './walk';
+import { runSteps, type Option, type Used, type UseHow, type WalkEnv } from './walk';
+import { distinctNames, scopeAsked } from './scope';
 
 const choiceOf = (option: Option<Control>): Choice =>
   'opener' in option ? { id: option.id, text: option.text, el: option.opener.el } : option;
 
-const use = (option: Option<Control>, signal: AbortSignal): Promise<Used> =>
-  'opener' in option ? openHidden(option, signal) : actOn(option, signal);
+const use = (option: Option<Control>, signal: AbortSignal, how?: UseHow): Promise<Used> =>
+  'opener' in option ? openHidden(option, signal, how) : actOn(option, signal, how);
 
 /** Asks Jev whether the control is what was asked: 'same', 'leads' or 'other'. */
 const check = (request: string, label: string, signal: AbortSignal): Promise<JevResult> =>
@@ -45,6 +46,7 @@ const liveScreen = (
   doing: Doing,
   triedHere: ReadonlySet<string>,
   askedAbout: ReadonlySet<string>,
+  started: number,
 ): WalkEnv<Control> => ({
   readScreen,
   peek,
@@ -52,16 +54,24 @@ const liveScreen = (
   route: (request, options) => routeWithJev(request, options, signal, 'screen'),
   check: (request, label) => check(request, label, signal),
   here: currentPage,
-  use: async (option): Promise<Used> => {
-    const used = await use(option, signal);
+  use: async (option, how): Promise<Used> => {
+    const used = await use(option, signal, how);
     if (used.acted) doing.used = option;
     return used;
   },
   ask: (options): Promise<string> => {
     doing.offered = options;
-    return Promise.resolve(ask(options.map(choiceOf), signal));
+    // Two that read the same ("Canvas or Canvas?") are told apart by what or where each is.
+    const names = distinctNames(options);
+    const choices = options.map((option, i) => ({
+      ...choiceOf(option),
+      text: names[i] ?? option.text,
+    }));
+    return Promise.resolve(ask(choices, signal));
   },
-  log,
+  // Each step with the time since the request, so a slow one shows where the time went.
+  log: (step, detail = '', data) =>
+    log(step, `${detail} · +${Math.round(performance.now() - started)}ms`, data),
   aborted: () => signal.aborted,
   settle: () => settle(TIMING.lateQuietMs, signal),
   tried: triedHere,
@@ -102,6 +112,10 @@ async function pickedFromAsk(
   const [only] = options.length === 1 ? options : [];
   const match = ANSWER_TO_ASK.exec(request);
   if (match) return options[match[1] ? 0 : 1];
+  // "This channel's", "my canvas": the one option in the scope the reply names.
+  const scope = scopeAsked(request);
+  const inScope = scope ? options.filter(option => option.scope === scope) : [];
+  if (inScope.length === 1) return inScope[0];
   const step = normalise(steps[0] ?? '');
   if (only && step && normalise(request.replace(ASKS_FOR_A_WAY, '')) === step) return only;
   if (NEW_COMMAND.test(request) || ASKS_A_QUESTION.test(request)) return undefined;
@@ -128,7 +142,7 @@ async function walkFrom(request: string, signal: AbortSignal): Promise<string | 
   // A question about the option ("what does it do?") is not a yes to it.
   const sayingAgain = !picked && !ASKS_A_QUESTION.test(request);
   const askedAbout = new Set(sayingAgain ? (question?.options.map(controlKey) ?? []) : []);
-  const screen = liveScreen(signal, doing, tries, askedAbout);
+  const screen = liveScreen(signal, doing, tries, askedAbout, performance.now());
   const { reply, why, left } = picked
     ? await runSteps(request, screen, { confirmed: picked, steps: question.steps })
     : await runSteps(request, screen);

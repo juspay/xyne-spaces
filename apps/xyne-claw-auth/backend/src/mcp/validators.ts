@@ -1,6 +1,7 @@
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
 import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { MAX_BULK_TICKETS } from "./servers/bulk-tickets.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");
@@ -469,7 +470,8 @@ register("xyne-spaces", "spaces-create-bulk-tickets", async (params, credentials
   // field and a cheerful success line. Validated against each distinct board
   // the batch touches, which is almost always exactly one.
   const tickets = Array.isArray(params["tickets"]) ? (params["tickets"] as Array<Record<string, unknown>>) : [];
-  if (tickets.length === 0) return "tickets must contain at least one ticket";
+  const sizeError = bulkTicketCountError(tickets.length);
+  if (sizeError) return sizeError;
   const defaultBoardId = (params["boardId"] as string | undefined)?.trim();
   const asMap = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -496,6 +498,22 @@ register("xyne-spaces", "spaces-create-bulk-tickets", async (params, credentials
   }
   return null;
 });
+
+register("xyne-spaces", "spaces-update-bulk-tickets", async (params) => {
+  const tickets = Array.isArray(params["tickets"]) ? params["tickets"] : [];
+  return bulkTicketCountError(tickets.length);
+});
+
+// The bulk handlers refuse more than MAX_BULK_TICKETS, but they run only after
+// approval — so without this the user approves a card that is bound to fail.
+// Rejecting at queue time hands the agent the limit to re-plan into batches.
+function bulkTicketCountError(count: number): string | null {
+  if (count === 0) return "tickets must contain at least one ticket";
+  if (count > MAX_BULK_TICKETS) {
+    return `too many tickets (${count} > ${MAX_BULK_TICKETS}); split them into calls of ${MAX_BULK_TICKETS} or fewer, one approval each`;
+  }
+  return null;
+}
 
 register("xyne-spaces", "spaces-schedule-call", async (params) => {
   const title = (params["title"] as string | undefined)?.trim();
@@ -762,7 +780,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
     replace_section: ["canvasId", "heading", "markdown"],
     insert_section: ["canvasId", "heading", "markdown"],
     remove_section: ["canvasId", "heading"],
-    move: wiki ? ["canvasId", "folderPath"] : ["canvasId", "parentId"],
+    move: wiki ? ["canvasId", "folderPath"] : ["canvasId"],
   };
   const keys = required[action];
   if (!keys) return `action must be one of ${Object.keys(required).join(", ")}`;
@@ -770,10 +788,19 @@ register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
   const missing = keys.find((key) => key !== "folderPath" && !has(key));
   if (missing) return `${missing} is required for ${action}`;
   if (action === "move" && wiki && typeof params["folderPath"] !== "string") return "folderPath is required for move";
+  if (action === "move" && !wiki && !has("parentId") && !has("artifactTypeId")) return "move needs parentId or artifactTypeId";
   if (action === "update" && !wiki && !has("markdown") && !has("title") && !(params["relatedCanvasIds"] as unknown[] | undefined)?.length) {
     return "update needs markdown, title or relatedCanvasIds";
   }
   if (has("trackFolderId") && !has("trackId")) return "trackFolderId needs the trackId it sits in";
+  return null;
+});
+
+register("xyne-spaces", SDLC_TOOL_NAMES.createArtifactType, async (params) => {
+  for (const key of ["channelId", "name"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (String(params["name"]).trim().length > 80) return "name must be at most 80 characters";
   return null;
 });
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, type ReactElement, type ReactNode } from 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessagesSquare,
-  Mic,
+  AudioLines,
   Ticket,
   Search,
   Bot,
@@ -1394,7 +1394,7 @@ function recordingsScenes(): SceneConfig[] {
                     className={`flex items-center gap-1.5 p-1.5 rounded border border-border/60 ${i === 0 ? 'bg-muted/30' : ''}`}
                   >
                     <div className='h-6 w-6 rounded-md bg-primary/10 text-primary flex items-center justify-center'>
-                      <Mic size={10} />
+                      <AudioLines size={10} />
                     </div>
                     <div className='flex-1'>
                       <p className='text-[10px] font-medium text-foreground'>{r.title}</p>

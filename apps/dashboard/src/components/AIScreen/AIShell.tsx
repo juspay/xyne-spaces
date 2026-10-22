@@ -130,7 +130,7 @@ export interface WorkspacePanelControls {
 
 interface AIShellProps {
   activeSessionId?: string | undefined;
-  onCreateChat: () => void;
+  onCreateChat: (projectId?: string) => void;
   onSelectSession: (sessionId: string) => void;
   onAccount?: (() => void) | undefined;
   mobileOpen?: boolean | undefined;

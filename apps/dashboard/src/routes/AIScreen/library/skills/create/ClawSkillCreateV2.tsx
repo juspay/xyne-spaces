@@ -1,9 +1,10 @@
 import { useCallback, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AtMark, PencilEditLine } from '@xyne/icons';
+import { AtMark, ChevronBigLeft, PencilEditLine } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
 import { useCreateClawSkill } from '@/hooks/useCreateClawSkill';
+import { useShortcutById } from '@/shortcuts';
 import type { PendingSkillFile } from '@/services/claw/clawSkillFileUtils';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { slugify } from '../../../../ClawAgentsScreen/create/wizardState';
@@ -14,7 +15,7 @@ const LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foregrou
 
 const ClawSkillCreateV2 = (props: {
   /** Shown inside a hub page: the skill is linked there, and both buttons hand the page back. */
-  hub?: { channelId: string; onClose: () => void };
+  hub?: { channelId: string; backLabel: string; onClose: () => void };
 }): ReactElement => {
   const { hub } = props;
   const navigate = useNavigate();
@@ -34,6 +35,14 @@ const ClawSkillCreateV2 = (props: {
   const [tried, setTried] = useState(false);
 
   const effectiveSlug = slugManual ? slug : slugify(name);
+  const clean = !name && !slug && !description && !content && files.length === 0;
+
+  // Inside a hub, Esc goes back as the back button does, but only while nothing is typed.
+  // A Radix menu or dialog closing on the same Esc marks it defaultPrevented.
+  useShortcutById('skills.closeCreate', () => hub?.onClose(), {
+    enabled: Boolean(hub) && clean,
+    when: event => !event.defaultPrevented,
+  });
   const canCreate = effectiveSlug.length > 0 && content.trim().length > 0;
 
   const handlePick = useCallback(
@@ -75,12 +84,27 @@ const ClawSkillCreateV2 = (props: {
       data-component='ClawSkillCreateV2'
     >
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
+        {hub && (
+          <button
+            type='button'
+            onClick={hub.onClose}
+            data-track-category='Claw Agents'
+            data-track-name='Create skill v2: back'
+            className='-mb-2 flex h-7 shrink-0 items-center self-start rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+          >
+            <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
+              <ChevronBigLeft className='size-4' aria-hidden />
+            </span>
+            <span className='text-sm font-medium text-foreground'>{hub.backLabel}</span>
+          </button>
+        )}
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
           Create skill
         </h1>
         {hub && (
           <p className='-mt-4 text-sm text-muted-foreground'>
-            It is linked to this hub once created.
+            Once created it is linked to this hub and sent to a claw admin for approval. Agents here
+            can use it after approval.
           </p>
         )}
 
@@ -182,9 +206,9 @@ const ClawSkillCreateV2 = (props: {
 
         <div className='flex w-full items-center justify-end gap-3'>
           <Button
-            variant='ghost'
+            variant={hub ? 'outline' : 'ghost'}
             onClick={() => (hub ? hub.onClose() : void navigate(libraryPath))}
-            className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
+            className={hub ? undefined : 'h-auto rounded-xl px-3 py-2.5 text-[15px]'}
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: cancel'
           >
@@ -193,7 +217,11 @@ const ClawSkillCreateV2 = (props: {
           <Button
             onClick={handleCreate}
             loading={create.isPending}
-            className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
+            className={
+              hub
+                ? undefined
+                : 'h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
+            }
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: create'
           >

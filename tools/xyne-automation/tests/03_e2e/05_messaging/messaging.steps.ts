@@ -80,7 +80,11 @@ export default class MessagingSteps {
     assert.ok(dm?.url, `Baseline DM URL not found for user "${userAlias}".`);
     const page = testContext.activePage;
     await page.goto(dm.url);
-    await page.locator("[data-testid='message-input']").first().waitFor({ state: 'visible' });
+    // A full page load boots the whole app again, which can pass 30s under parallel load.
+    await page
+      .locator("[data-testid='message-input']")
+      .first()
+      .waitFor({ state: 'visible', timeout: 60000 });
     await page
       .locator("[data-testid='chat-list-loading']")
       .first()

@@ -1,698 +1,255 @@
-# Nixification Plan for xyne-spaces
-
-This document outlines the plan to nixify the xyne-spaces repository, modeled after the Nammayatri repository's approach.
-
-## Current State Analysis
-
-### Repository Structure
-```
-xyne-spaces/
-├── backend/          # Node.js/TypeScript backend (Express, Prisma, Bull)
-├── dashboard/        # React/Vite frontend (TypeScript, TailwindCSS)
-├── framework/        # Shared TypeScript library
-├── docker/           # Docker configuration files
-├── scripts/          # Shell scripts (start-services.sh, cleanup-storage.sh)
-├── Makefile          # Docker image builds
-├── docker-compose.dev.yml  # Infrastructure services
-└── package.json      # Root package with scripts
-```
-
-### Current Development Workflow
-1. **Services**: `npm run services` → runs docker-compose (postgres, redis, livekit, zero-cache)
-2. **Backend**: `cd backend && npm i && npm run dev` → runs Express server on port 3001
-3. **Frontend**: `cd dashboard && npm i && npm run dev` → runs Vite dev server
-
-### Infrastructure Services (docker-compose.dev.yml)
-- **PostgreSQL 16** (port 5433) - Main database
-  - Requires WAL level = logical for Zero (CDC)
-  - Requires max_replication_slots = 10
-  - Init script: `docker/init-db.sh`
-- **Redis 7** (port 6379) - Caching and job queues
-- **LiveKit** (ports 7880-7882) - Real-time video/audio service
-- **Zero Cache** (ports 4848-4849) - Real-time sync service (connects to postgres)
-
-### Key Dependencies
-- **Node.js**: v22 (backend and dashboard both require >=18)
-- **npm**: >=8.0.0
-- **Python**: Python 3 (for backend scripts: art_processor.py, generate_prompt.py)
-- **Backend**: TypeScript, Express, Prisma, Bull, Socket.io, Livekit SDK
-- **Dashboard**: React 19, Vite, TailwindCSS, Zero client
-- **Framework**: Shared TypeScript library (built first, referenced by backend)
-
-### Backend Scripts (need Nix wrappers)
-- **seed-acl.ts**: Creates ACL resources and default user groups (ADMIN, DEVELOPER, etc.)
-- **assign-user-group.ts**: Assigns a user to DEVELOPER group (run during first setup)
-- **seed.ts**: Database seeding
-- **verify-users.ts**: User verification
-- **test-notifications.ts**: Notification testing
-- **encrypt-credentials.cjs**: Credential encryption
-- **setup-external-source.cjs**: External source setup
-- **art_processor.py**: Art processing (Python)
-- **generate_prompt.py**: Prompt generation (Python)
-- **process_art_resp.py**: Art response processing (Python)
-
-### Shell Scripts (to be nixified)
-- **scripts/start-services.sh**:
-  - Detects docker/podman
-  - Stops local PostgreSQL if running
-  - Starts docker-compose services (postgres, redis, livekit)
-  - Waits for services to be healthy
-  - Runs Prisma migrations
-  - Seeds ACL system
-  - Creates developer user
-  - Starts zero-cache
-- **scripts/cleanup-storage.sh**:
-  - Detects docker/podman
-  - Stops all containers
-  - Removes all containers, images
-  - Prunes system
-  - Resets podman machine (if applicable)
-- **docker/init-db.sh**:
-  - Sets PostgreSQL WAL level to logical
-  - Sets max_replication_slots = 10
-  - Sets max_wal_senders = 10
-
-## Nammayatri's Nix Architecture (Reference)
-
-### Structure
-```
-nammayatri/
-├── flake.nix                    # Main flake entry point
-├── Backend/default.nix          # Backend module
-├── Frontend/default.nix         # Frontend module
-└── Backend/nix/
-    ├── services/                # Custom service modules
-    ├── run-mobility-stack.nix   # process-compose configuration
-    ├── arion-configuration.nix  # Docker services (monitoring)
-    ├── scripts.nix              # Dev scripts
-    ├── docker.nix               # Docker image builds
-    └── pre-commit.nix           # Pre-commit hooks
-
-common/ (separate repo)
-├── flake.nix                    # Common infrastructure
-└── flake-module.nix             # Shared flake-parts modules
-```
-
-### Key Nix Technologies Used
-- **flake-parts**: Modular flake organization
-- **services-flake**: Managing services (postgres, redis, etc.)
-- **process-compose-flake**: Running multiple processes together
-- **arion**: Docker-based services (for LiveKit, Zero Cache)
-
-## Nixification Plan
-
-The plan is organized incrementally - each phase replaces one existing workflow while keeping others working.
-
-**Status Legend:**
-- ✅ **DONE** - Completed and tested
-- 🔲 **PLANNED** - Not yet started
-
----
-
-### Phase 1: Foundation Setup ✅ **DONE**
-
-**Goal**: Basic Nix infrastructure without changing existing workflows
-
-#### 1.1 Create minimal flake.nix
-- **Location**: `/flake.nix`
-- **Purpose**: Minimal entry point
-- **Key sections**:
-  ```nix
-  {
-    inputs = {
-      nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-      flake-parts.url = "github:hercules-ci/flake-parts";
-      systems.url = "github:nix-systems/default";
-    };
-    outputs = inputs:
-      inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-        systems = import inputs.systems;
-        perSystem = { pkgs, ... }: {
-          devShells.default = pkgs.mkShell {
-            name = "xyne-spaces";
-            packages = with pkgs; [
-              nodejs_22
-              jq
-            ];
-          };
-        };
-      };
-  }
-  ```
-
-#### 1.2 Create .envrc
-- **Content**: `use flake`
-- **Test**: `direnv allow` and verify shell loads
-
-#### 1.3 Test ✅
-- ✅ `nix develop` works
-- ✅ Existing workflows (`npm run services`, `cd backend && npm run dev`) still work
-- ✅ Node.js 22.21.1 available
-- ✅ All files staged in git
-
-**Files created:**
-- `flake.nix` - Minimal flake with basic devShell
-- `flake.lock` - Generated lock file
-- `.envrc` - Direnv integration
-- `.gitignore` - Updated with Nix artifacts
-
----
-
-### Phase 2: Nixify Services (Replace `npm run services`) ✅ **DONE**
-
-**Goal**: Replace `npm run services` with Nix-managed services
-
-**Status**: Completed - All services configured with reproducible Docker images
-
-#### 2.1 Add services-flake input
-- Update `flake.nix` to add `services-flake` input
-  ```nix
-  inputs = {
-    # ... existing inputs
-    services-flake.url = "github:juspay/services-flake";
-  };
-  ```
-
-#### 2.2 Configure PostgreSQL service
-- Create `nix/services.nix`:
-  ```nix
-  { inputs, ... }: {
-    perSystem = { config, pkgs, ... }: {
-      services.postgres."xyne-db" = {
-        enable = true;
-        port = 5433;
-        initialDatabases = [
-          {
-            name = "xyne_dev_db";
-          }
-        ];
-        initialScript.before = ''
-          CREATE USER xyne WITH PASSWORD 'xyne123';
-        '';
-        initialScript.after = ''
-          -- Configure for Zero (CDC)
-          ALTER SYSTEM SET wal_level = logical;
-          ALTER SYSTEM SET max_replication_slots = 10;
-          ALTER SYSTEM SET max_wal_senders = 10;
-          SELECT pg_reload_conf();
-        '';
-      };
-    };
-  }
-  ```
-
-#### 2.3 Configure Redis service
-- Add to `nix/services.nix`:
-  ```nix
-  services.redis."xyne-redis" = {
-    enable = true;
-    port = 6379;
-  };
-  ```
-
-#### 2.4 Add arion for Docker services
-- Add `arion` input to flake.nix
-- Create `nix/arion-services.nix` for LiveKit and Zero Cache:
-  ```nix
-  { ... }: {
-    perSystem = { pkgs, ... }: {
-      arionProjectConfiguration = { ... }: {
-        project.name = "xyne-services";
-        services = {
-          livekit.service = {
-            image = "livekit/livekit-server:latest";
-            command = "--config /etc/livekit.yaml --dev";
-            ports = [ "7880:7880" "7881:7881" "7882:7882/udp" ];
-            volumes = [ "${../docker/livekit.yaml}:/etc/livekit.yaml" ];
-          };
-          zero-cache.service = {
-            image = "rocicorp/zero:latest";
-            environment = {
-              ZERO_UPSTREAM_DB = "postgresql://xyne:xyne123@host.containers.internal:5433/xyne_dev_db";
-              # ... other env vars
-            };
-            ports = [ "4848:4848" "4849:4849" ];
-            depends_on = [ "postgres" ];
-          };
-        };
-      };
-    };
-  }
-  ```
-
-#### 2.5 Create process-compose for services
-- Add `process-compose-flake` input
-- Create `nix/run-services.nix`:
-  ```nix
-  { ... }: {
-    perSystem = { config, pkgs, ... }: {
-      process-compose."services" = {
-        imports = [
-          inputs.services-flake.processComposeModules.default
-        ];
-        settings.processes = {
-          # postgres and redis handled by services-flake
-          # livekit and zero-cache via arion or direct docker-compose
-        };
-      };
-    };
-  }
-  ```
-
-#### 2.6 Test ✅
-- ✅ All services configured in `flake.nix`
-- ✅ PostgreSQL (port 5433) with WAL configuration for Zero CDC
-- ✅ Redis (port 6379)
-- ✅ LiveKit Docker image pinned via `dockerTools.pullImage`
-- ✅ Zero Cache Docker image pinned via `dockerTools.pullImage`
-- ✅ `nix build .#services` builds successfully
-- ✅ `nix flake show` displays all expected outputs
-
-**Implemented:**
-- All infrastructure services inline in `flake.nix` (no separate nix/ directory)
-- Reproducible Docker images using pinned digests and hashes:
-  - LiveKit: `sha256:9e34...` → `sha256-wdwHQ3M2...`
-  - Zero Cache: `sha256:c7e0...` → `sha256-i4WEwuXClm...`
-- Docker images loaded from Nix store into Podman at runtime
-- Process dependencies configured (zero-cache depends on postgres)
-- PostgreSQL configured with logical WAL level for Zero's Change Data Capture
-
-**Files modified:**
-- `flake.nix` - Added services-flake, process-compose, pinned Docker images
-- `flake.lock` - Updated with new inputs
-
-**Usage:**
-```bash
-# Start all services (in terminal with TUI)
-nix run .#services
-
-# Or use the old way (still works)
-npm run services
-```
-
----
-
-### Phase 3: Nixify Backend Dev Workflow 🔲 **PLANNED**
-
-**Goal**: Replace `cd backend && npm run dev` with Nix-managed backend
-
-#### 3.1 Create backend dev process
-- Create `nix/run-backend.nix`:
-  ```nix
-  { ... }: {
-    perSystem = { pkgs, ... }: {
-      apps.backend-dev = {
-        type = "app";
-        program = pkgs.writeShellScript "backend-dev" ''
-          cd backend
-          npm install
-          npm run dev
-        '';
-      };
-    };
-  }
-  ```
-
-#### 3.2 Add database scripts
-- Create flake apps for:
-  - `db-migrate`: Run Prisma migrations
-  - `db-seed-acl`: Seed ACL system
-  - `create-dev-user`: Create developer user
-  - `db-studio`: Open Prisma Studio
-
-#### 3.3 Test
-- `nix run .#backend-dev` starts backend
-- Database scripts work via `nix run .#db-migrate` etc.
-
----
-
-### Phase 4: Nixify Dashboard Dev Workflow 🔲 **PLANNED**
-
-**Goal**: Replace `cd dashboard && npm run dev` with Nix-managed dashboard
-
-#### 4.1 Create dashboard dev process
-- Create `nix/run-dashboard.nix`:
-  ```nix
-  { ... }: {
-    perSystem = { pkgs, ... }: {
-      apps.dashboard-dev = {
-        type = "app";
-        program = pkgs.writeShellScript "dashboard-dev" ''
-          cd dashboard
-          npm install
-          npm run dev
-        '';
-      };
-    };
-  }
-  ```
-
-#### 4.2 Test
-- `nix run .#dashboard-dev` starts dashboard
-- Full stack works: services + backend + dashboard
-
----
-
-### Phase 5: Full Dev Stack Integration 🔲 **PLANNED**
-
-**Goal**: Run everything together with one command
-
-#### 5.1 Create integrated process-compose
-- Create `nix/run-dev-stack.nix`:
-  ```nix
-  { ... }: {
-    perSystem = { config, pkgs, ... }: {
-      process-compose."dev-stack" = {
-        settings.processes = {
-          # Import services
-          postgres = { /* from services-flake */ };
-          redis = { /* from services-flake */ };
-
-          # Backend
-          backend = {
-            command = "cd backend && npm run dev";
-            depends_on.postgres.condition = "process_healthy";
-            depends_on.redis.condition = "process_healthy";
-          };
-
-          # Dashboard
-          dashboard = {
-            command = "cd dashboard && npm run dev";
-            depends_on.backend.condition = "process_started";
-          };
-        };
-      };
-    };
-  }
-  ```
-
-#### 5.2 Test
-- `nix run .#dev-stack` starts everything
-- Or via individual commands for development
-
----
-
-### Phase 6: Docker Image Builds 🔲 **PLANNED**
-
-**Goal**: Replace Makefile Docker builds with Nix
-
-#### 6.1 Create Docker images
-- Create `nix/docker.nix`:
-  ```nix
-  { ... }: {
-    perSystem = { pkgs, ... }: {
-      packages = {
-        dockerImage-backend = pkgs.dockerTools.buildLayeredImage {
-          name = "xyne-spaces-backend";
-          tag = "latest";
-          # ... image config
-        };
-        dockerImage-dashboard = pkgs.dockerTools.buildLayeredImage {
-          name = "xyne-spaces-dashboard";
-          tag = "latest";
-          # ... image config
-        };
-      };
-    };
-  }
-  ```
-
-#### 6.2 Test
-- `nix build .#dockerImage-backend`
-- `nix build .#dockerImage-dashboard`
-- **Remove Makefile** once verified
-
----
-
-### Phase 7: Justfile Integration 🔲 **PLANNED**
-
-#### 7.1 Create justfile
-- **Purpose**: Convenient command runner (like Makefile, but simpler)
-- **Location**: `/justfile`
-- **Example recipes**:
-  ```justfile
-  # Default recipe - show available commands
-  default:
-    @just --list
-
-  # Development workflows
-  dev-all: services backend dashboard
-
-  services:
-    nix run .#run-services
-
-  backend:
-    nix run .#run-backend-dev
-
-  dashboard:
-    nix run .#run-dashboard-dev
-
-  # Database commands
-  db-migrate:
-    nix run .#db-migrate
-
-  db-seed:
-    nix run .#db-seed
-
-  db-seed-acl:
-    nix run .#db-seed-acl
-
-  db-reset:
-    nix run .#db-reset
-
-  db-studio:
-    nix run .#db-studio
-
-  # Create developer user
-  create-dev-user EMAIL:
-    nix run .#create-dev-user -- {{EMAIL}}
-
-  # Cleanup
-  cleanup:
-    nix run .#cleanup-storage
-
-  # Build Docker images
-  build-backend:
-    nix build .#dockerImage-backend
-
-  build-dashboard:
-    nix build .#dockerImage-dashboard
-
-  build-all: build-backend build-dashboard
-
-  # Lint and format (using npm/package.json scripts)
-  lint:
-    cd backend && npm run lint
-    cd dashboard && npm run lint
-
-  # Type check
-  check:
-    nix flake check
-  ```
-
----
-
-### Phase 8: Documentation & Cleanup 🔲 **PLANNED**
-
-#### 8.1 Update README.md
-- Add Nix installation instructions
-- Document new development workflow:
-  ```bash
-  # Enter development shell
-  nix develop
-
-  # Or use direnv (automatic)
-  direnv allow
-
-  # Start all services
-  just services
-
-  # Start backend
-  just backend
-
-  # Start dashboard
-  just dashboard
-
-  # Run everything together
-  just dev-all
-  # or: nix run .#run-dev-stack
-
-  # Database operations
-  just db-migrate
-  just db-seed-acl
-  just create-dev-user your.email@example.com
-
-  # Build Docker images
-  just build-all
-  ```
-
-#### 8.2 Create DEVELOPMENT.md
-- Detailed Nix development guide
-- Available commands (justfile recipes)
-- Service management
-- Troubleshooting
-
-#### 8.3 Cleanup old files
-- **Remove**: `scripts/` directory
-- **Remove**: `Makefile`
-- **Remove**: `docker-compose.dev.yml`
-- **Remove**: `package.json` root scripts (optional, if not needed)
-
-## Directory Structure (Target)
-
-```
-xyne-spaces/
-├── flake.nix                    # Main flake entry point
-├── flake.lock                   # Flake lock file
-├── justfile                     # Command runner (replaces Makefile, scripts/)
-├── .envrc                       # Direnv integration (single file)
-├── backend/
-│   ├── default.nix              # Backend flake module
-│   ├── scripts/                 # TypeScript/Python scripts (kept as is)
-│   │   ├── seed-acl.ts
-│   │   ├── assign-user-group.ts
-│   │   ├── seed.ts
-│   │   ├── verify-users.ts
-│   │   ├── test-notifications.ts
-│   │   ├── encrypt-credentials.cjs
-│   │   ├── setup-external-source.cjs
-│   │   ├── art_processor.py
-│   │   ├── generate_prompt.py
-│   │   └── process_art_resp.py
-│   └── nix/
-│       ├── services.nix         # services-flake configuration
-│       ├── run-dev-stack.nix    # process-compose configuration
-│       ├── scripts.nix          # Flake apps (wraps scripts/)
-│       ├── docker.nix           # Docker image builds
-│       ├── nodejs.nix           # Node.js package builds
-│       └── arion-configuration.nix  # Docker services (livekit, zero-cache)
-├── dashboard/
-│   ├── default.nix              # Frontend flake module
-│   └── nix/
-│       ├── scripts.nix          # Frontend scripts
-│       └── docker.nix           # Dashboard Docker image
-├── framework/
-│   └── (keep as is - npm package, optionally add nix/default.nix later)
-├── docker/                      # Docker configs for arion (livekit.yaml, etc.)
-│   └── livekit.yaml             # LiveKit configuration
-├── scripts/                     # REMOVED - all functionality in Nix
-├── Makefile                     # REMOVED - replaced by justfile + Nix
-├── docker-compose.dev.yml       # REMOVED - replaced by services-flake
-└── .plan/
-    └── nixify.md                # This file
-```
-
-**Key changes**:
-- `scripts/` directory **REMOVED** - all shell scripts replaced by Nix
-- `backend/scripts/` **KEPT** - TypeScript/Python scripts wrapped by Nix
-- `Makefile` **REMOVED** - replaced by `justfile` + Nix flake apps
-- `docker-compose.dev.yml` **REMOVED** - replaced by services-flake + arion
-- `justfile` **ADDED** - convenient command runner for Nix operations
-
-## Migration Strategy
-
-### Approach: Incremental, Non-Breaking Migration
-
-Each phase replaces one workflow while keeping others intact:
-
-1. **Phase 1**: Add Nix foundation - existing workflows untouched
-2. **Phase 2**: Replace `npm run services` - can still use old way if needed
-3. **Phase 3**: Replace backend dev - services already nixified
-4. **Phase 4**: Replace dashboard dev - backend already nixified
-5. **Phase 5**: Integrated stack - individual pieces already work
-6. **Phase 6**: Replace Docker builds - dev workflows already nixified
-7. **Phase 7**: Add justfile convenience layer
-8. **Phase 8**: Documentation and remove old files
-
-### Testing at Each Phase
-
-- **Phase 1**: `nix develop` works, doesn't break npm workflows
-- **Phase 2**: Services start via Nix, backend/dashboard can connect
-- **Phase 3**: Backend runs via Nix, connects to Nix services
-- **Phase 4**: Dashboard runs via Nix, connects to Nix backend
-- **Phase 5**: Everything runs together with dependencies
-- **Phase 6**: Docker images build and work same as before
-- **Phase 7**: Justfile commands work
-- **Phase 8**: Old files removed, docs updated
-
-### Rollback Strategy
-
-Each phase can be rolled back independently:
-- Git commits per phase
-- Old files kept until Phase 8
-- Can fall back to `npm run services` etc. at any time
-
-## Key Differences from Nammayatri
-
-1. **No separate common repo**: All Nix code lives in xyne-spaces repo
-   - Nammayatri has a separate `common` flake
-   - xyne-spaces will have all flake-parts modules inline
-   - Simpler, no external dependencies
-
-2. **Simpler architecture**: Nammayatri may be overengineered for our needs
-   - xyne-spaces can be simpler
-   - Fewer abstraction layers
-   - More straightforward Nix modules
-
-3. **Language**: Nammayatri uses Haskell, xyne-spaces uses Node.js/TypeScript
-   - Skip haskell-flake
-   - Use buildNpmPackage or simple npm scripts instead
-
-4. **Services**: xyne-spaces has different services
-   - LiveKit (video/audio) - not in Nammayatri
-   - Zero Cache (real-time sync) - not in Nammayatri
-   - No Kafka, ClickHouse (simpler stack)
-
-5. **Monorepo**: xyne-spaces has framework dependency
-   - Need to build framework first
-   - Backend depends on framework build
-
-6. **Development tools**: xyne-spaces uses justfile
-   - Nammayatri uses mission-control
-   - justfile is simpler and more widely used
-
-## Open Questions / Decisions Needed
-
-1. **Zero Cache**: Docker or native? (Recommend Docker via arion)
-2. **LiveKit**: Docker or native? (Recommend Docker via arion)
-3. **Framework**: Build as Nix package or just npm? (Recommend npm for now, Nix later)
-4. **CI/CD**: Migrate Jenkinsfile immediately or later? (Recommend later)
-5. **Backwards compat**: Keep Makefile during migration? (Recommend remove once Nix works)
-6. **Mission-control vs justfile**: Use mission-control or justfile? (Recommend justfile - simpler)
-
-## Success Criteria
-
-- [x] `nix develop` drops into working dev shell ✅ **Phase 1**
-- [x] `nix run .#services` starts all infrastructure services ✅ **Phase 2**
-- [ ] `just backend` starts backend (Phase 3)
-- [ ] `just dashboard` starts dashboard (Phase 4)
-- [ ] `just dev-all` starts everything together (Phase 5)
-- [ ] `just build-backend` builds backend Docker image (Phase 6)
-- [ ] `just build-dashboard` builds dashboard Docker image (Phase 6)
-- [ ] All existing functionality preserved (Phase 8)
-- [ ] Documentation updated (Phase 8)
-- [ ] Team trained on new workflow (Phase 8)
-
-## Timeline Estimate
-
-- ✅ **Phase 1** (Foundation): 1 day - **COMPLETED**
-- ✅ **Phase 2** (Services - replace `npm run services`): 1 day - **COMPLETED**
-- 🔲 **Phase 3** (Backend dev workflow): 1-2 days
-- 🔲 **Phase 4** (Dashboard dev workflow): 1 day
-- 🔲 **Phase 5** (Integrated dev stack): 1-2 days
-- 🔲 **Phase 6** (Docker builds): 2 days
-- 🔲 **Phase 7** (Justfile): 1 day
-- 🔲 **Phase 8** (Docs & cleanup): 1-2 days
-
-**Total**: ~1.5-2 weeks (working solo, full-time)
-
-**Progress**: 2/8 phases complete (25%)
-
-**Note**: Each phase is independently testable and doesn't break existing workflows
-
-## Next Steps
-
-1. Review this plan with team
-2. Answer open questions
-3. Start with Phase 1 (Foundation)
-4. Iterate on plan as we learn
+# Nix for Xyne Spaces
+
+**One dev stack, for humans and agents.** Today Xyne Spaces has two: Nix and Docker
+Compose, and they drift.[^drift] This plan moves everything to Nix, one piece at a time,
+until `direnv allow` is the only setup step and every Compose file is gone.
+
+Production deployment is out of scope.[^scope]
+
+## At a glance
+
+Two tracks run side by side. The main track is what developers touch. The CI track
+waits on runners that can install Nix, so it shouldn't hold up the main track.
+
+**Main track**
+
+| Phase | What changes | Status |
+| --- | --- | --- |
+| **0** | Nix stack becomes reproducible; Compose leftovers removed | ✅ [#2597] |
+| **1** | One `docker run` for contributors without Nix | ✅ [#3220] (built and tested; publish waits on CI 1) |
+| **2** | Dev services move to Nix; dev Compose deleted | |
+| **3** | Docs and agents default to Nix | |
+| **4** | Multi-sandbox runs on Nix; sandbox Compose deleted | |
+
+**CI track**
+
+| Step | What changes | Status |
+| --- | --- | --- |
+| **CI 1** | Nix CI runs on PRs again | Blocked on runners |
+| **CI 2** | Main CI runs in the Nix dev shell | |
+| **CI 3** | End-to-end tests run on Nix; test Compose deleted | |
+
+Compose is gone when both tracks finish. One link crosses the tracks: Phase 1 needs
+CI 1 to build and test its image.
+
+## The one rule
+
+**Delete Compose as we go, never at the end.** Whatever a PR moves to Nix, that same PR
+deletes from Compose. A CI gate keeps us honest: it lists every remaining Compose
+reference, and the list may only shrink.[^gate]
+
+## Phase 0: make the Nix stack trustworthy ✅
+
+*Nothing downloads at startup anymore, and the toolchain is pinned.*
+
+- Y-Sweet is built from Juspay's fork, not curled at runtime[^ysweet]
+- Transcription runs from a locked Python environment, not `pip install`[^python]
+- Zero runs from the workspace and reads its secret at runtime[^zero]
+- Node 22, pnpm 10.15.0, Postgres 17 pinned; the shell has every tool CI needs[^toolchain]
+- `nix flake check` guards paths, tests, Compose references and lockfiles[^checks]
+- Dead Compose paths deleted[^phase0-deletes]
+
+## Phase 1: a way in without Nix
+
+*Contributors who can't install Nix get one `docker run`, built from the same Nix
+definitions.*
+
+- One image runs the services, backend and dashboard[^image]
+- CI runs the smoke test inside it, so it can't drift from the Nix stack
+- Built and tested; publishing it waits on CI 1
+
+Nothing leaves Compose until this ships, so nobody loses access.
+
+## Phase 2: move the dev services
+
+*`pnpm run services` gradually becomes `nix run .#xyne-space-services`.*
+
+Each feature is one PR: add it to Nix, delete it from `docker-compose.dev.yml`.[^slice]
+
+1. **Core**: Postgres, Redis, Zero, Y-Sweet, fake GCS (already in Nix)[^core]
+2. **Storage**: rustfs[^storage]
+3. **Calls**: LiveKit and transcription (already in Nix), egress[^containers]
+4. **Search**: Vespa[^containers]
+5. **Observability**: or drop it, if nobody uses it locally[^observability]
+6. **Feature flags**: Superposition, or drop it[^containers]
+
+When the last service leaves, `docker-compose.dev.yml` and its scripts are deleted.[^phase2-end]
+
+## Phase 3: Nix is the default
+
+*A new developer or agent reads the README and ends up on Nix.*
+
+- README and setup docs lead with Nix[^docs]
+- A root `AGENTS.md` that agents load and that points them at Nix[^agents]
+- Git hooks and MCP servers work on a fresh checkout[^fresh]
+
+Can start once the Phase 2 Core slice lands.
+
+## Phase 4: multi-sandbox on Nix
+
+*The sandbox stack stops needing Compose.*
+
+- `scripts/sandbox.sh` runs each sandbox on Nix, with its own ports and state[^sandbox]
+- `docker-compose.sandbox.yml` deleted
+
+## CI track
+
+*If it passes locally, it passes in CI.* Starts as soon as runners can install Nix.[^runners]
+
+- **CI 1:** `nix-ci.yml` runs on PRs again, so flake checks and the smoke test gate
+  every change[^ci1]
+- **CI 2:** one `just` recipe per CI job; CI runs `nix develop -c just <recipe>`, and the
+  hand-rolled setup steps (setup-node, curl installs, OS switches) go[^ci]
+- **CI 3:** tests run against the Nix services, with backend and dashboard on the
+  host.[^e2e] Both paths run in CI until Nix is green for two weeks, then
+  `docker-compose.test.yml` is deleted[^ci3-deletes]
+
+CI 3 needs CI 2 first, so Nix is proven on cheap CI jobs before expensive ones.
+
+## Beyond this plan
+
+The plan ends when Compose is gone. Two follow-ups could come after, decided then:
+
+- **Build the apps with Nix.** `nix flake check` could become the whole CI, but at a
+  real cost.[^build-apps]
+- **Build production images with Nix.** Same images, same registry, built by Nix
+  instead of Dockerfiles. Helm and ArgoCD don't change.[^build-images]
+
+## Open questions
+
+1. **CI runners:** they block the sudo Nix needs. Bake Nix into the runner image, or
+   stay on GitHub-hosted runners? This unblocks the CI track and Phase 1.[^runners]
+2. **Unused features:** which of observability, feature flags and call recording does
+   anyone run locally? Drop rather than port.
+3. **macOS containers:** are Vespa, Superposition and egress acceptable through
+   podman in a VM, or should they be served remotely? The Search slice answers this.
+4. **Jenkins:** does anything still consume `test:push` report branches? If not,
+   delete that machinery in Phase 3.
+
+## Done when
+
+- `direnv allow` is the only setup step, on every supported platform
+- Nothing downloads at runtime
+- Every dev feature runs on Nix, and every CI job runs in the dev shell
+- e2e is green on Nix, and the Compose list is empty with the gate still on
+- The root `AGENTS.md` and `.mcp.json` work on a fresh checkout
+
+[#2597]: https://github.com/juspay/xyne-spaces/pull/2597
+[#3220]: https://github.com/juspay/xyne-spaces/pull/3220
+
+[^drift]: Examples: Postgres is 16 in Compose and 17 in Nix. `services:stop` used to
+    stop `docker-compose.local.yml` while `pnpm run services` started
+    `docker-compose.dev.yml`.
+
+[^scope]: `deployment/`, `helm-charts/`, `claw-deployments/` are untouched. Image builds
+    (`Makefile` targets, `build-images.yml`, `publish-images.yml`) stay as they are.
+
+[^gate]: `nix/scripts/check-compose-refs.sh` fails on any `docker compose` /
+    `docker-compose` reference outside `deployment/` and `helm-charts/` that isn't in
+    `nix/compose-refs.allowlist`. `docker-compose.test.yml` is standalone (no `dev.yml`
+    layering), so `dev.yml` can shrink without breaking e2e.
+
+[^ysweet]: `nix/packages.nix` builds `github:juspay/y-sweet` at `221d5af` with
+    `pkgs.rustPlatform`. `.nix-cache/` stays ignored for existing checkouts.
+
+[^python]: uv2nix builds a Python 3.11 environment from `apps/backend/python-agent/uv.lock`.
+    Docker's `requirements.txt` is exported from the same lock. Diarization stays a
+    separate Docker opt-in.
+
+[^zero]: The module's `nodeModulesPath` points at `apps/backend/node_modules`; no `npx`.
+    Pure evaluation was producing `ZERO_AUTH_SECRET=''`, so `.env.local` is now read at
+    runtime.
+
+[^toolchain]: `nodejs_22`; pnpm pinned to 10.15.0 by an overlay in `flake.nix` to match
+    `packageManager` (the pnpm 12 migration is a separate PR). Postgres 17 keeps existing
+    developer data directories. The shell adds ffmpeg, gitleaks, trivy, process-compose,
+    helm, gauge, and Playwright browsers matched to the npm pins (1.63.0).
+
+[^checks]: `referenced-paths`, `script-tests`, `compose-refs`, `playwright-version`,
+    `python-agent-lock`. Guards that need git history (schema, SQL, enum, tenant) stay
+    outside. Until CI 1, run `nix flake check` locally.
+
+[^phase0-deletes]: `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`,
+    `docker/dev-infra/`, `docker/Dockerfile.call-services`, `docker/entrypoint.sh`,
+    `setup.sh`, `clone-and-setup.sh`, `just setup`. Windows docs offer WSL2 with
+    either Nix or Docker; native `services:win` stays until Phase 2 ends.
+    `services:stop` runs `start-services.sh --stop`: Compose `down` if that stack is
+    running, otherwise Nix port cleanup.
+
+[^image]: Usage: `docker run -v "$PWD":/src -p 3000:3000 -p 3001:3001
+    ghcr.io/juspay/xyne-spaces-dev`. Built with `dockerTools` from the same definitions.
+    It runs backend and dashboard too, since these users have no Node on the host. The
+    services stay on loopback and the dashboard uses the Vite dev proxy, so the host
+    browser needs only the dashboard port — no `0.0.0.0` change. It runs as a non-root
+    `dev` user (uid 1000); `node_modules` live inside the mount. x86_64 and arm64
+    images published to GHCR. Calls (LiveKit UDP) are out of scope, as are search,
+    call recording and feature flags (they're containers themselves).
+
+[^slice]: Each slice also adds the service to the smoke test, removes the feature from
+    `select-services.mjs`, and shrinks the allowlist. Along the way: one source of truth
+    for ports, and bundles (`core`, `+calls`, `+search`, …) replace the interactive picker.
+
+[^core]: Also: move the `apps/backend` Y-Sweet scripts and `watch-transcription-agent.sh`
+    to process-compose, and settle on one Postgres major for dev (16 vs 17).
+
+[^storage]: Compose's `minio` service already runs the `rustfs/rustfs` image, and rustfs
+    is in nixpkgs. The backend only uses it when `S3_ENDPOINT` is set.
+
+[^containers]: Not in nixpkgs (only `vespa-cli` is), so these run through
+    `nix/containers` (podman). Vespa needs a spike on Linux and macOS first. Egress
+    could also be built from source.
+
+[^observability]: otel-collector, victoriametrics, victorialogs, fluent-bit and grafana are
+    all in nixpkgs. Grafana provisioning comes from `docker/`.
+
+[^phase2-end]: Deleted: `docker-compose.dev.yml`, `start-services.sh`,
+    `start-services-win.sh` and `services:win`, `select-services.mjs`,
+    the Compose branches in `reset-local.sh`, unused `docker/` files, the Vespa dev
+    compose file and `deploy-dev.sh`, and doc references (`docs/setup/services.md`,
+    `troubleshooting.md`, `apps/backend/docs/METRICS.md`, …).
+
+[^docs]: Drop OrbStack, Docker Desktop and apt lists; non-Nix setups point to the
+    Phase 1 image. `pnpm run up` becomes `just up`; `xyne-doctor` keeps its diagnostics
+    but drops container-runtime checks. Claw's `sandbox-repo-setup` is updated too.
+
+[^agents]: Today the only one is `guidelines/AGENTS.md`. Agents don't pick it up from
+    there, its paths predate the `apps/` restructure (`backend/`, `dashboard/`), and it
+    says "Docker compose: `npm run services`".
+
+[^fresh]: Husky hooks run through `direnv exec` (no brew hint). `just prepare` builds the two
+    MCP packages that `.mcp.json` needs.
+
+[^sandbox]: Per-sandbox port offset and state directory (needs Phase 2's single source of
+    ports). Shared infra and monitoring become their own bundle; Traefik becomes a Nix
+    process or is replaced.
+
+[^runners]: `nix-ci.yml` targets `ubuntu-latest`, but its PR and push triggers have been
+    commented out since #3047: the installer needs sudo, which the self-hosted
+    `ci-cluster-github-runners*` pods block (`allowPrivilegeEscalation: false`).
+
+[^ci1]: Uncomment the `pull_request` and `push` triggers in `nix-ci.yml` once a runner can
+    install Nix. It already runs `nix flake check`, the builds, `just prepare`, the
+    script tests and the smoke test.
+
+[^ci]: Covers `ci.yml`, `schema-migration-check.yml`, `helm-charts-ci.yml`, using the
+    installer and cache steps from `nix-ci.yml`. `Dockerfile.ci` is replaced or deleted.
+
+[^e2e]: The runner runs via `nix develop`. Ports: `tools/xyne-automation/scripts/runner/index.ts`,
+    `collect-ci-artifacts.sh`, `download-visual-regression-assets.sh`,
+    `run-cucumber-local.sh`. Fallback if needed: `dockerTools` test images without Compose.
+
+[^ci3-deletes]: Also both `Dockerfile.test`, the runner's Compose path,
+    `tools/xyne-automation-old` (or migrate it), and references in both `.env.test` files
+    and `tests/03_e2e/08_calls/01_channel-calls.spec`.
+
+[^build-apps]: `packages.backend` / `packages.dashboard` via `pnpm.fetchDeps`, with typecheck
+    and lint as flake checks. Costs: a hash bump on every lockfile change across 25
+    workspace members, `--ignore-scripts` for gauge and Playwright, 8 GB heap builds in
+    the sandbox.
+
+[^build-images]: Needs the apps built with Nix first. `dockerTools.buildLayeredImage` per
+    app, published with `skopeo` from `publish-images.yml` under the same tags. Start
+    with `Docker.runner`, which already ships Nix: swap its curl installer, rustup and
+    nine-minute `diesel_cli` compile for nixpkgs packages. Python images reuse the
+    Phase 0 uv2nix environment. Dockerfiles and `Makefile` build targets retire one at
+    a time.
