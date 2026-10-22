@@ -299,6 +299,19 @@ function SessionTitle({ title }: { title: string }): ReactElement {
   );
 }
 
+/**
+ * Whether a chat can be filed into a project.
+ *
+ * Mirrors isDirectChatConversation in claw-auth, which the conversation PATCH
+ * uses to answer 400 "Only direct chats can be moved into a project". A Spaces
+ * thread lists one row per agent while membership is keyed by conversation
+ * alone, so it cannot be filed — offering the option on those rows only ever
+ * produced "Could not move chat".
+ */
+function canFileSession(session: ConversationHistoryType): boolean {
+  return session.sessionId.startsWith('chat-');
+}
+
 interface SessionHistoryProps {
   sessions: ConversationHistoryType[];
   activeSessionId?: string | undefined;
@@ -522,44 +535,46 @@ function SessionHistory({
                         )}
                         <span className='flex-1'>{session.isStarred ? 'Unpin' : 'Pin'}</span>
                       </DropdownMenuItem>
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className='gap-2'>
-                          <FolderArrowRight size={14} className='shrink-0' aria-hidden />
-                          <span className='flex-1'>Move to project</span>
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent>
-                          {projects.length === 0 ? (
-                            <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
-                          ) : (
-                            projects.map(project => (
-                              <DropdownMenuItem
-                                key={project.id}
-                                className='gap-2'
-                                onClick={() => void onMoveToProject(session, project.id)}
-                                data-track-category='XyneAI'
-                                data-track-name='MOVE_TO_PROJECT'
-                                data-track-metadata={JSON.stringify({
-                                  surface: 'page',
-                                  projectId: project.id,
-                                })}
-                              >
-                                <span className='shrink-0' aria-hidden>
-                                  {renderEmoji(
-                                    project.icon ?? DEFAULT_PROJECT_ICON,
-                                    'w-4 h-4',
-                                    'text-sm',
+                      {canFileSession(session) && (
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className='gap-2'>
+                            <FolderArrowRight size={14} className='shrink-0' aria-hidden />
+                            <span className='flex-1'>Move to project</span>
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent>
+                            {projects.length === 0 ? (
+                              <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
+                            ) : (
+                              projects.map(project => (
+                                <DropdownMenuItem
+                                  key={project.id}
+                                  className='gap-2'
+                                  onClick={() => void onMoveToProject(session, project.id)}
+                                  data-track-category='XyneAI'
+                                  data-track-name='MOVE_TO_PROJECT'
+                                  data-track-metadata={JSON.stringify({
+                                    surface: 'page',
+                                    projectId: project.id,
+                                  })}
+                                >
+                                  <span className='shrink-0' aria-hidden>
+                                    {renderEmoji(
+                                      project.icon ?? DEFAULT_PROJECT_ICON,
+                                      'w-4 h-4',
+                                      'text-sm',
+                                    )}
+                                  </span>
+                                  <span className='flex-1 truncate'>{project.name}</span>
+                                  {session.projectId === project.id && (
+                                    <CheckTickSingle size={14} className='shrink-0' aria-hidden />
                                   )}
-                                </span>
-                                <span className='flex-1 truncate'>{project.name}</span>
-                                {session.projectId === project.id && (
-                                  <CheckTickSingle size={14} className='shrink-0' aria-hidden />
-                                )}
-                              </DropdownMenuItem>
-                            ))
-                          )}
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
-                      {session.projectId && (
+                                </DropdownMenuItem>
+                              ))
+                            )}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      )}
+                      {canFileSession(session) && session.projectId && (
                         <DropdownMenuItem
                           className='gap-2'
                           onClick={() => void onMoveToProject(session, null)}

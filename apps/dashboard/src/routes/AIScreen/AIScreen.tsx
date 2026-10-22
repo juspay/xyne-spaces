@@ -282,6 +282,11 @@ const AIScreen = (): ReactElement => {
     // Keep the other direction's ref in step, so this externally-driven change
     // is not then re-announced as a state change.
     lastPushedSession.current = sessionFromUrl;
+    // Back, Forward or a pasted link opens a chat the user did not start from a
+    // project row. Without this, the project they picked earlier would still be
+    // pending and the next conversation id to arrive — this existing chat —
+    // would be filed into it.
+    setPendingProjectId(null);
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
