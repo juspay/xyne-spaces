@@ -314,6 +314,7 @@ export async function prepareAgentDraftCard(
         userId: id.userId,
         conversationId: id.conversationId,
         ...(id.channelId ? { channelId: id.channelId } : {}),
+        ...(spec.commit ? { commit: true } : {}),
       },
     ),
     id.spacesAppId,

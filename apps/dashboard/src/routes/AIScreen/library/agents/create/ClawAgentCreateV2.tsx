@@ -18,7 +18,11 @@ import { Popover } from '@/components/ui/Popover';
 import { AgentColorRow } from './AgentColorRow';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
-import { AgentConfigAttachError, useCreateClawAgent } from '@/hooks/useCreateClawAgent';
+import {
+  AgentConfigAttachError,
+  useCreateClawAgent,
+  type WizardSubmission,
+} from '@/hooks/useCreateClawAgent';
 import {
   INITIAL_WIZARD_STATE,
   effectiveSlug,
@@ -79,6 +83,24 @@ function comparable(state: WizardState): string {
   ]);
 }
 
+function submissionFrom(state: WizardState): WizardSubmission {
+  return {
+    slug: effectiveSlug(state),
+    name: state.name.trim(),
+    description: state.description.trim(),
+    systemPrompt: state.systemPrompt.trim(),
+    color: state.color,
+    kbScope: state.selectedKbScope,
+    knowledgeBase: state.selectedKbResources,
+    tools: state.tools,
+    skillIds: state.selectedSkillIds,
+    research: {
+      productId: state.researchAgentProductId,
+      repositoryId: state.researchAgentRepositoryId,
+    },
+  };
+}
+
 function grantedCount(state: WizardState): number {
   const { subagents, direct, custom, gateway, callableAgents } = state.tools;
   return (
@@ -109,6 +131,7 @@ interface ClawAgentCreateV2Props {
   created?: boolean;
   onCreated?: (slug: string) => void;
   registerSave?: (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => void;
+  registerCommit?: (commit: (() => Promise<void>) | null) => void;
 }
 
 const ClawAgentCreateV2 = ({
@@ -123,6 +146,7 @@ const ClawAgentCreateV2 = ({
   created = false,
   onCreated,
   registerSave,
+  registerCommit,
 }: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
@@ -244,7 +268,48 @@ const ClawAgentCreateV2 = ({
     return (): void => registerSave(null);
   }, [registerSave, saveFromForm]);
 
+  const { mutateAsync: createAgent, isPending: creating } = createMutation;
+  const committingRef = useRef(false);
+  const commitFromForm = useCallback(async (): Promise<void> => {
+    if (committingRef.current || creating || saveMutation.saving) return;
+    const { state: current, errors: currentErrors } = liveRef.current;
+    if (Object.keys(currentErrors).length > 0) {
+      setShowErrors(true);
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      throw new Error(
+        isCreated
+          ? 'Fix the highlighted fields before saving this agent.'
+          : 'Fix the highlighted fields before creating this agent.',
+      );
+    }
+    setShowErrors(false);
+    committingRef.current = true;
+    try {
+      if (isEdit) {
+        await saveAgent(current);
+        return;
+      }
+      if (isCreated) {
+        throw new Error('This agent is still loading after being created — try saving again.');
+      }
+      const createdAgent = await createAgent(submissionFrom(current));
+      onCreated?.(createdAgent.slug);
+    } catch (err) {
+      if (err instanceof AgentConfigAttachError) onCreated?.(err.slug);
+      throw err;
+    } finally {
+      committingRef.current = false;
+    }
+  }, [createAgent, creating, isCreated, isEdit, onCreated, saveAgent, saveMutation.saving]);
+
+  useEffect(() => {
+    if (!registerCommit) return;
+    registerCommit(commitFromForm);
+    return (): void => registerCommit(null);
+  }, [registerCommit, commitFromForm]);
+
   const handleSubmit = (): void => {
+    if (committingRef.current) return;
     if (Object.keys(errors).length > 0) {
       setShowErrors(true);
       scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -256,21 +321,7 @@ const ClawAgentCreateV2 = ({
       return;
     }
     createMutation.mutate(
-      {
-        slug,
-        name: state.name.trim(),
-        description: state.description.trim(),
-        systemPrompt: state.systemPrompt.trim(),
-        color: state.color,
-        kbScope: state.selectedKbScope,
-        knowledgeBase: state.selectedKbResources,
-        tools: state.tools,
-        skillIds: state.selectedSkillIds,
-        research: {
-          productId: state.researchAgentProductId,
-          repositoryId: state.researchAgentRepositoryId,
-        },
-      },
+      submissionFrom(state),
       onCreated
         ? {
             onSuccess: (created: Agent) => onCreated(created.slug),

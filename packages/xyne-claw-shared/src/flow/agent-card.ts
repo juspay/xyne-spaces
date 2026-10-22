@@ -165,6 +165,9 @@ export interface AgentCardData {
   targetSlug?: string;
   /** The ONLY user allowed to act on this card (fail-closed in flow-action). */
   userId: string;
+  /** The user approved committing this setup as it stands. Read by interactive
+   *  builders that own their own create/save; the card itself is unaffected. */
+  commit?: boolean;
   conversationId?: string;
   channelId?: string;
 }
@@ -336,6 +339,7 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
       userId: data.userId,
       ...(data.conversationId ? { conversationId: data.conversationId } : {}),
       ...(data.channelId ? { channelId: data.channelId } : {}),
+      ...(data.commit ? { commit: true } : {}),
     })
     .build();
 }

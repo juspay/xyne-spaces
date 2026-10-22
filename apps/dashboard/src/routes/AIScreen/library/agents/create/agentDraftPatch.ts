@@ -29,6 +29,10 @@ function grantedNames(tools: ToolSelection): string[] {
   return [...tools.subagents, ...tools.direct, ...tools.custom, ...tools.gateway];
 }
 
+export function wantsCommit(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
 export function bareToolSlug(raw: string): string {
   const withoutServer = raw.includes('__') ? raw.split('__').slice(1).join('__') : raw;
   return withoutServer.split(':').pop() ?? withoutServer;

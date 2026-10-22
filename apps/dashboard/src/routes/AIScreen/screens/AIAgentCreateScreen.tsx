@@ -52,6 +52,15 @@ const AIAgentCreateScreen = (): ReactElement => {
     await saveRef.current();
   }, []);
 
+  const commitRef = useRef<(() => Promise<void>) | null>(null);
+  const registerCommit = useCallback((commit: (() => Promise<void>) | null) => {
+    commitRef.current = commit;
+  }, []);
+  const requestCommit = useCallback(async (): Promise<void> => {
+    if (!commitRef.current) throw new Error('The setup form is not ready yet.');
+    await commitRef.current();
+  }, []);
+
   const handleCreated = useCallback(
     (slug: string): void => {
       setCreatedSlug(slug);
@@ -92,6 +101,7 @@ const AIAgentCreateScreen = (): ReactElement => {
           createdSlug={createdSlug}
           savedAgent={createdAgent}
           onRequestSave={requestSave}
+          onRequestCommit={requestCommit}
         />
       }
     >
@@ -126,6 +136,7 @@ const AIAgentCreateScreen = (): ReactElement => {
           created={createdSlug !== null}
           onCreated={handleCreated}
           registerSave={registerSave}
+          registerCommit={registerCommit}
           {...(createdAgent ? { agent: createdAgent } : {})}
         />
       </main>

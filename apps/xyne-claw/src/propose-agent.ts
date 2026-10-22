@@ -64,6 +64,10 @@ export interface ProposedAgentSpec {
    *  show WHAT was drafted; this is where the agent says why it made the calls it
    *  did. Optional — claw-auth falls back to a neutral line. */
   summary?: string;
+  /** The user approved committing this setup as it stands. Surfaces on the card
+   *  data so an interactive builder can create or save it without a second
+   *  click; absent means the setup stays a draft. */
+  commit?: boolean;
 }
 
 /**
@@ -241,6 +245,13 @@ export function buildProposeAgentTool(
           description:
             "One or two sentences you say in the thread next to the card — what you built and WHY you made the key calls (which tools you granted and what you left out). Do NOT restate the name, description or tool list: the card already shows those. Write it as yourself, to the user.",
         },
+        commit: {
+          type: "boolean",
+          description:
+            "Set true ONLY when the user's latest message plainly approves creating the setup as it already stands — 'create it', 'yes, go ahead', 'looks good, make it'. " +
+            "A request to add, remove or change anything is NOT approval, however enthusiastic. When unsure, omit this and ask. " +
+            "Omit it and the setup simply stays a draft for the user to review.",
+        },
       },
       required: ["name", "description", "systemPrompt"],
     }),
@@ -348,6 +359,7 @@ export function buildProposeAgentTool(
       const modelId = typeof p["modelId"] === "string" ? p["modelId"].trim().slice(0, 120) : "";
       const color = typeof p["color"] === "string" ? p["color"].trim().slice(0, 32) : "";
       const summary = typeof p["summary"] === "string" ? p["summary"].trim().slice(0, MAX_SUMMARY) : "";
+      const commit = p["commit"] === true || p["commit"] === "true";
 
       ref.value = {
         variant: "draft",
@@ -366,6 +378,7 @@ export function buildProposeAgentTool(
           ...(modelId ? { modelId } : {}),
           ...(color ? { color } : {}),
           ...(summary ? { summary } : {}),
+          ...(commit ? { commit } : {}),
         },
       };
       log.info(

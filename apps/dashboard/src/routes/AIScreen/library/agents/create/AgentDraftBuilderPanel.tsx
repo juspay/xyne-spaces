@@ -12,7 +12,12 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { wizardStateFromAgent } from './agentDraft';
 import { buildHiddenContext } from './agentBuilderPrompt';
-import { bareToolSlug, paramsToDraftPatch, type DraftPatchContext } from './agentDraftPatch';
+import {
+  bareToolSlug,
+  paramsToDraftPatch,
+  wantsCommit,
+  type DraftPatchContext,
+} from './agentDraftPatch';
 import { BUILDER_DRIVER_SLUG } from '../detail/AgentBuilderPanel';
 
 const KICKOFF_QUERY = 'Help me set up an agent';
@@ -77,6 +82,7 @@ interface AgentDraftBuilderPanelProps {
   createdSlug?: string | null;
   savedAgent?: Agent | undefined;
   onRequestSave?: () => Promise<void>;
+  onRequestCommit?: () => Promise<void>;
 }
 
 export function AgentDraftBuilderPanel({
@@ -87,6 +93,7 @@ export function AgentDraftBuilderPanel({
   createdSlug,
   savedAgent,
   onRequestSave,
+  onRequestCommit,
 }: AgentDraftBuilderPanelProps): ReactElement {
   const { data: catalog, isPending: catalogPending } = useClawAvailableTools();
   const { data: skills } = useClawSkills();
@@ -155,6 +162,18 @@ export function AgentDraftBuilderPanel({
     [onApplyPatch],
   );
 
+  const commitIfApproved = useCallback(
+    (approved: boolean): void => {
+      if (!approved || !onRequestCommit) return;
+      void Promise.resolve()
+        .then(() => onRequestCommit())
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : 'Could not apply that to the agent');
+        });
+    },
+    [onRequestCommit],
+  );
+
   const onInterceptPendingAction = useCallback(
     (action: PendingAction, approved: boolean): boolean => {
       const tool = bareToolSlug(action.tool);
@@ -181,6 +200,7 @@ export function AgentDraftBuilderPanel({
         const cardParams = agentCardParams(flow);
         if (cardParams) {
           applyProposal(cardParams);
+          commitIfApproved(wantsCommit((flow.data ?? {})['commit']));
           return;
         }
 
@@ -188,7 +208,9 @@ export function AgentDraftBuilderPanel({
         const tool = typeof data['tool'] === 'string' ? bareToolSlug(data['tool']) : '';
         if (!DRAFT_TOOLS.has(tool)) return;
         const params = parseFlowParams(data['params']);
-        if (params) applyProposal(params, patchContextFor(tool, savedStateRef.current));
+        if (!params) return;
+        applyProposal(params, patchContextFor(tool, savedStateRef.current));
+        commitIfApproved(wantsCommit(params['commit']));
       },
       valuesForSubmit: (flow: FlowDefinition, actionId: string): Record<string, unknown> | null => {
         if (actionId !== AGENT_CARD_APPROVE || agentCardParams(flow) === null) return null;
@@ -222,7 +244,7 @@ export function AgentDraftBuilderPanel({
         });
       },
     }),
-    [applyProposal, onAgentCreated, onRequestSave],
+    [applyProposal, commitIfApproved, onAgentCreated, onRequestSave],
   );
 
   return (
