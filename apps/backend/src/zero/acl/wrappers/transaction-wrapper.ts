@@ -23,6 +23,7 @@ import {
   type AuditOperation,
 } from '../../audit';
 import { logger } from '@/utils/logger';
+import { bumpChannelListVersion } from '../../channel-list-cache-version';
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
@@ -159,6 +160,12 @@ function wrapMutateWithACL(
 
             // 5. Execute original mutation (if ACL passes)
             const result = await (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+
+            if (tableName === 'channels') {
+              // Invalidate the userAllChannels backend cache (re-bumped later, so a
+              // rebuild that ran before this transaction committed is discarded too).
+              bumpChannelListVersion(ctx.workspaceId);
+            }
 
             // 5. Collect jobs only after the mutation succeeds.
             if (['insert', 'update', 'upsert', 'delete'].includes(vespaOperation)) {

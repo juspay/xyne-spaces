@@ -6,6 +6,7 @@ import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { encryptionExtension } from '@/database/prisma-encryption-extension';
 import { auditExtension } from '@/database/audit-extension';
+import { channelListCacheExtension } from './channel-list-cache-extension';
 import { getEncryptionProvider } from '@/services/encryption/provider';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
@@ -93,6 +94,7 @@ export class DatabaseClient {
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
+      DatabaseClient.instance = DatabaseClient.instance.$extends(channelListCacheExtension) as unknown as PrismaClient;
       DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
