@@ -45,7 +45,7 @@ import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
-import { dispatchExperimentEpoch, dispatchExperimentChecker } from "../lib/experiment.js";
+import { continueExperimentAfterResult } from "../loop-graph/specs/experiment.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -585,77 +585,6 @@ type PendingProviderSuggestions = {
 
 
 
-
-async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
-  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
-  if (!active) return false;
-  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
-
-  const now = Date.now();
-  if (active.status === "finishing") {
-    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
-    return false;
-  }
-
-  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
-  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
-  // dispatch loop. Measured against the session's own startedAt (not the
-  // experiment row's updatedAt, which ledger writes also bump). Deferring
-  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
-  // its window, turning a hot loop into ~1 retry/10min.
-  const MIN_EPOCH_MS = 30_000;
-  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
-  if (epochRanMs < MIN_EPOCH_MS) {
-    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
-    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
-    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
-  }
-
-  // Check the epoch that just ended, in parallel with the next one starting.
-  // Deliberately not awaited: the checker is advisory, and a slow or failing
-  // verification pass must never delay or block the experiment's own progress.
-  // Its verdicts land in the ledger and reach whichever epoch starts after.
-  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
-    clog.warn("[experiment] checker dispatch threw", {
-      experimentId: active.id,
-      epoch: active.epoch,
-      error: errMsg(err),
-    });
-  });
-
-  // repo-history is COMMIT-bound, not time-bound: every commit from the initial
-  // sha to HEAD must be walked, so the deadline is NOT its stop condition — it
-  // keeps chaining epochs until the agent ends the run at HEAD (end-experiment,
-  // which flips the row out of "active" so this function returns early next
-  // time). The only backstop is an epoch-count cap, since a walk that never
-  // advances the cursor would otherwise loop forever — a time deadline would
-  // defeat the whole point. Other kinds keep the deadline as their safety cap.
-  const MAX_REPO_HISTORY_EPOCHS = 1000;
-  const keepGoing =
-    active.kind === "repo-history"
-      ? active.epoch < MAX_REPO_HISTORY_EPOCHS
-      : now < active.deadlineAt.getTime();
-  if (keepGoing) {
-    const next = await experimentRepository.update(active.id, {
-      epoch: { increment: 1 },
-      lastEpochEndedAt: new Date(),
-    });
-    await dispatchExperimentEpoch(next);
-    return true;
-  }
-  if (active.kind === "repo-history") {
-    clog.warn(`[experiment] repo-history ${active.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
-  }
-
-  const finishing = await experimentRepository.update(active.id, {
-    status: "finishing",
-    epoch: { increment: 1 },
-    lastEpochEndedAt: new Date(),
-  });
-  await dispatchExperimentEpoch(finishing);
-  return true;
-}
 
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -3506,7 +3435,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return;
     }
     if (ctx?.conversationId && ctx.agentSlug) {
-      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+      experimentContinues = await continueExperimentAfterResult(ctx.conversationId, sessionId).catch((err) => {
         clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
         return false;
       });
