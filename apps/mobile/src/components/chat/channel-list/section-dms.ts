@@ -29,6 +29,10 @@ type DmStatus = {
 export const isDmScope = (scopeType: ChannelScopeType): boolean =>
   scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
 
+/** An open DM or group DM — the rule both selectors below apply. */
+const isOpenDm = (channel: DmCandidate, status: DmStatus | undefined): boolean =>
+  channel.type !== ChannelType.EMAIL && isDmScope(channel.scopeType) && status?.isClosed !== true;
+
 const byRecency = <T extends DmCandidate>(a: T, b: T): number =>
   (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0);
 
@@ -46,10 +50,7 @@ export function selectSectionableDms<T extends DmCandidate>(
   const result: T[] = [];
 
   for (const channel of channels) {
-    if (channel.type === ChannelType.EMAIL) continue;
-    if (!isDmScope(channel.scopeType)) continue;
-    if (statusById.get(channel.id)?.isClosed === true) continue;
-    result.push(channel);
+    if (isOpenDm(channel, statusById.get(channel.id))) result.push(channel);
   }
 
   return result.sort(byRecency);
@@ -69,9 +70,16 @@ export function selectSectionedDms<T extends DmCandidate>(
   if (sections.length === 0) return [];
   const sectionIds = new Set(sections.map(section => section.id));
   const statusById = new Map(statuses.map(status => [status.channelId, status] as const));
+  const result: T[] = [];
 
-  return selectSectionableDms(channels, statuses).filter(channel => {
-    const sectionId = statusById.get(channel.id)?.sectionId;
-    return typeof sectionId === 'string' && sectionIds.has(sectionId);
-  });
+  // Narrowed to a live section before sorting, so only the few sectioned DMs
+  // are sorted rather than every open one.
+  for (const channel of channels) {
+    const status = statusById.get(channel.id);
+    if (!isOpenDm(channel, status)) continue;
+    const sectionId = status?.sectionId;
+    if (typeof sectionId === 'string' && sectionIds.has(sectionId)) result.push(channel);
+  }
+
+  return result.sort(byRecency);
 }

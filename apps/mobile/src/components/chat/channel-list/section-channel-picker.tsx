@@ -4,7 +4,7 @@ import { Check, Hash, Lock, MessageCircle } from 'lucide-react-native';
 import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
 import { useCSSVariable } from 'uniwind';
 import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
-import { useUsers } from '@/src/hooks/useUsers';
+import { useUsersById } from '@xyne/shared/hooks';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { getChannelDisplayName } from '@/src/utils/channel-utils';
 import { selectSectionableDms } from './section-dms';
@@ -33,7 +33,7 @@ export type PickerChannel = {
 export function useSectionableChannels(): PickerChannel[] {
   const visibleChannels = useAllVisibleChannels();
   const userChannelStatuses = useUserChannelStatuses();
-  const users = useUsers();
+  const usersById = useUsersById();
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? '';
 
@@ -53,7 +53,6 @@ export function useSectionableChannels(): PickerChannel[] {
     const dms = selectSectionableDms(visibleChannels, userChannelStatuses);
     if (dms.length === 0) return channels;
 
-    const usersById = new Map(users.map(entry => [entry.id, entry] as const));
     return [
       ...channels,
       ...dms.map(channel => ({
@@ -63,7 +62,7 @@ export function useSectionableChannels(): PickerChannel[] {
         isDm: true,
       })),
     ];
-  }, [currentUserId, userChannelStatuses, users, visibleChannels]);
+  }, [currentUserId, userChannelStatuses, usersById, visibleChannels]);
 }
 
 /**

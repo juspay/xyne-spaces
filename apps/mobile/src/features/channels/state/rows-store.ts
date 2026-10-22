@@ -53,6 +53,8 @@ function sameList<T>(a: readonly T[], b: readonly T[], same: (x: T, y: T) => boo
 
 const sameString = (a: string, b: string): boolean => a === b;
 
+const NO_IDS: readonly string[] = [];
+
 function sameGroup(a: ChannelGroup, b: ChannelGroup): boolean {
   return (
     a.id === b.id &&
@@ -104,7 +106,19 @@ export function syncChannelRows(
       present.add(channel.id);
       const node$ = channelRow$(channel.id);
       const current = node$.peek();
-      if (current === undefined || !sameRow(current, channel)) node$.set(channel);
+      if (current === undefined) {
+        node$.set(channel);
+      } else if (!sameRow(current, channel)) {
+        // Keep the avatar ids' reference while they are unchanged, so a DM's
+        // unread change does not hand its avatar a fresh array.
+        node$.set(
+          current.avatarUserIds !== undefined &&
+            channel.avatarUserIds !== undefined &&
+            sameList(current.avatarUserIds, channel.avatarUserIds, sameString)
+            ? { ...channel, avatarUserIds: current.avatarUserIds }
+            : channel,
+        );
+      }
     }
 
     for (const id of Object.keys(channelRows$.byId.peek())) {
@@ -147,6 +161,6 @@ function sameRow(a: ChannelRowData, b: ChannelRowData): boolean {
     a.sectionId === b.sectionId &&
     a.sectionPosition === b.sectionPosition &&
     a.isDm === b.isDm &&
-    (a.avatarUserIds ?? []).join(',') === (b.avatarUserIds ?? []).join(',')
+    sameList(a.avatarUserIds ?? NO_IDS, b.avatarUserIds ?? NO_IDS, sameString)
   );
 }

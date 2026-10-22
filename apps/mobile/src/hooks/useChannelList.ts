@@ -37,13 +37,20 @@ import {
 } from '@/src/components/chat/channel-list/section-utils';
 import { selectSectionedDms } from '@/src/components/chat/channel-list/section-dms';
 import { getChannelDisplayName, getDmAvatarUserIds } from '@/src/utils/channel-utils';
-import { useUsers } from './useUsers';
+import { useUsersById } from '@xyne/shared/hooks';
 
 const getLatestChannelActivityAt = (channels: readonly VisibleChannel[]): number =>
   channels.reduce(
     (latest, channel) => Math.max(latest, channel.channelStats?.lastActivityAt ?? 0),
     0,
   );
+
+type SectionedDms = {
+  channels: VisibleChannel[];
+  avatarIdsById: ReadonlyMap<string, string[]>;
+};
+
+const NO_SECTIONED_DMS: SectionedDms = { channels: [], avatarIdsById: new Map() };
 
 type UseChannelListResult = {
   rows: ChannelListRow[];
@@ -102,20 +109,21 @@ export function useChannelList(
    * alphabetical section order all read `name`. The avatar ids are derived
    * from the original before the rename.
    */
-  const users = useUsers();
-  const sectionedDms = useMemo(() => {
+  const usersById = useUsersById();
+  const sectionedDms = useMemo<SectionedDms>(() => {
     const dms = selectSectionedDms(visibleChannels, userChannelStatuses, sections);
-    const avatarIdsById = new Map<string, string[]>();
-    if (dms.length === 0) return { channels: [] as VisibleChannel[], avatarIdsById };
+    // The shared empty value keeps `rows` memoised for the common user with no
+    // sectioned DMs, whatever else moved.
+    if (dms.length === 0) return NO_SECTIONED_DMS;
 
     const viewerId = currentUserId ?? '';
-    const usersById = new Map(users.map(entry => [entry.id, entry] as const));
+    const avatarIdsById = new Map<string, string[]>();
     const channels = dms.map(channel => {
       avatarIdsById.set(channel.id, getDmAvatarUserIds(channel, viewerId));
       return { ...channel, name: getChannelDisplayName(channel, viewerId, usersById) };
     });
     return { channels, avatarIdsById };
-  }, [currentUserId, sections, userChannelStatuses, users, visibleChannels]);
+  }, [currentUserId, sections, userChannelStatuses, usersById, visibleChannels]);
 
   const { consumeIfNewer: consumeForegroundSyncIfNewer } = useForegroundListSyncProbe({
     enabled: highlightQuery.length === 0 && currentUserId !== null,

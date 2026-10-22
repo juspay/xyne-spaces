@@ -18,7 +18,7 @@ import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferenc
 import { useChannelSections } from '@/src/hooks/useChannelSections';
 import { groupWorkspaceChannels } from '@/src/hooks/useChannelList';
 import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
-import { useUsers } from '@/src/hooks/useUsers';
+import { useUsersById } from '@xyne/shared/hooks';
 import { selectSectionableDms } from '@/src/components/chat/channel-list/section-dms';
 import { getChannelDisplayName, getDmAvatarUserIds } from '@/src/utils/channel-utils';
 
@@ -51,7 +51,7 @@ export function useChannelRows(): ChannelListMeta {
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? null;
   const currentUserId = user?.user_id ?? '';
-  const users = useUsers();
+  const usersById = useUsersById();
 
   const visibleChannels = useAllVisibleChannels();
   const userChannelStatuses = useUserChannelStatuses();
@@ -60,8 +60,19 @@ export function useChannelRows(): ChannelListMeta {
   const { isChannelsCollapsed } = useChannelGroupCollapse();
   const { channels: channelsPreference } = useChannelGroupPreferences();
 
-  const channels = useMemo<ChannelRowData[]>(() => {
-    const statusById = new Map(userChannelStatuses.map(status => [status.channelId, status]));
+  const statusById = useMemo(
+    () => new Map(userChannelStatuses.map(status => [status.channelId, status] as const)),
+    [userChannelStatuses],
+  );
+
+  // The sidebar's wider Mentions set, which a group's Mentions filter reads —
+  // for channels and DMs alike.
+  const groupMentioned = useMemo(
+    () => getGroupMentionChannelIds(unreadActivities),
+    [unreadActivities],
+  );
+
+  const channelRows = useMemo<ChannelRowData[]>(() => {
     const unreadCounts = getUnreadChannelActivityCounts(unreadActivities, statusById);
 
     const mentioned = new Set<string>();
@@ -73,22 +84,58 @@ export function useChannelRows(): ChannelListMeta {
       if (!isUnreadChannelActivity(activity, statusById.get(channelId)?.lastViewedAt)) continue;
       mentioned.add(channelId);
     }
-    const groupMentioned = getGroupMentionChannelIds(unreadActivities);
 
     const { starred, channels: rest } = groupWorkspaceChannels(
       visibleChannels,
       userChannelStatuses,
     );
 
-    /**
-     * Open DMs ride along so a section can show the ones filed into it and the
-     * section pickers can offer them, as web does. The layout keeps them out
-     * of every other group and out of the filter counts. They use the DMs
-     * tab's unread rule: the message counter, unread only when non-zero.
-     */
-    const usersById = new Map(users.map(entry => [entry.id, entry] as const));
-    const dmRows: ChannelRowData[] = selectSectionableDms(visibleChannels, userChannelStatuses).map(
-      channel => {
+    return (
+      [...starred, ...rest]
+        // Only plain channels, as on the dashboard. Email, support, Slack and
+        // the other system-managed types live in Desks, not here.
+        .filter(channel => channel.type === ChannelType.DEFAULT)
+        .map(channel => {
+          const status = statusById.get(channel.id);
+          const unreadCount = unreadCounts.get(channel.id) ?? 0;
+          const lastActivityAtMs = channel.channelStats?.lastActivityAt ?? 0;
+          const isMentioned = mentioned.has(channel.id);
+          return {
+            id: channel.id,
+            name: channel.name,
+            isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+            unreadCount,
+            messageUnreadCount: status?.unreadCount ?? 0,
+            // The same test the classic list bolds a row on, plus an unread
+            // mention, which the activity feed knows about before the counter.
+            hasUnread:
+              isMentioned || hasNewActivity(unreadCount, status?.lastViewedAt, lastActivityAtMs),
+            isMentioned,
+            hasGroupMention: groupMentioned.has(channel.id),
+            isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
+            isStarred: status?.isStarred === true,
+            lastActivityAtMs,
+            lastViewedAt: status?.lastViewedAt ?? undefined,
+            lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
+            sectionId: status?.sectionId ?? null,
+            sectionPosition: status?.sectionPosition ?? '',
+          };
+        })
+    );
+  }, [groupMentioned, statusById, unreadActivities, userChannelStatuses, visibleChannels]);
+
+  /**
+   * Open DMs ride along so a section can show the ones filed into it and the
+   * section pickers can offer them, as web does. The layout keeps them out
+   * of every other group and out of the filter counts. They use the DMs
+   * tab's unread rule: the message counter, unread only when non-zero.
+   *
+   * A memo of their own: DM names read the users list, and a users update
+   * must not re-derive every channel row.
+   */
+  const dmRows = useMemo<ChannelRowData[]>(
+    () =>
+      selectSectionableDms(visibleChannels, userChannelStatuses).map(channel => {
         const status = statusById.get(channel.id);
         const messageUnreadCount = status?.unreadCount ?? 0;
         return {
@@ -111,42 +158,14 @@ export function useChannelRows(): ChannelListMeta {
           isDm: true,
           avatarUserIds: getDmAvatarUserIds(channel, currentUserId),
         };
-      },
-    );
+      }),
+    [currentUserId, groupMentioned, statusById, userChannelStatuses, usersById, visibleChannels],
+  );
 
-    const channelRows: ChannelRowData[] = [...starred, ...rest]
-      // Only plain channels, as on the dashboard. Email, support, Slack and
-      // the other system-managed types live in Desks, not here.
-      .filter(channel => channel.type === ChannelType.DEFAULT)
-      .map(channel => {
-        const status = statusById.get(channel.id);
-        const unreadCount = unreadCounts.get(channel.id) ?? 0;
-        const lastActivityAtMs = channel.channelStats?.lastActivityAt ?? 0;
-        const isMentioned = mentioned.has(channel.id);
-        return {
-          id: channel.id,
-          name: channel.name,
-          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-          unreadCount,
-          messageUnreadCount: status?.unreadCount ?? 0,
-          // The same test the classic list bolds a row on, plus an unread
-          // mention, which the activity feed knows about before the counter.
-          hasUnread:
-            isMentioned || hasNewActivity(unreadCount, status?.lastViewedAt, lastActivityAtMs),
-          isMentioned,
-          hasGroupMention: groupMentioned.has(channel.id),
-          isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
-          isStarred: status?.isStarred === true,
-          lastActivityAtMs,
-          lastViewedAt: status?.lastViewedAt ?? undefined,
-          lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
-          sectionId: status?.sectionId ?? null,
-          sectionPosition: status?.sectionPosition ?? '',
-        };
-      });
-
-    return [...channelRows, ...dmRows];
-  }, [currentUserId, unreadActivities, userChannelStatuses, users, visibleChannels]);
+  const channels = useMemo(
+    () => (dmRows.length === 0 ? channelRows : [...channelRows, ...dmRows]),
+    [channelRows, dmRows],
+  );
 
   const sectionData = useMemo<ChannelSectionData[]>(
     () =>
@@ -184,15 +203,12 @@ export function useChannelRows(): ChannelListMeta {
   }, [layout.counts]);
 
   // Empty means nothing to draw: no channels, and no DM sitting in a section.
-  const isEmpty = useMemo(
-    () =>
-      !channels.some(
-        channel =>
-          channel.isDm !== true ||
-          (channel.sectionId !== null && sectionData.some(s => s.id === channel.sectionId)),
-      ),
-    [channels, sectionData],
-  );
+  const isEmpty = useMemo(() => {
+    if (channelRows.length > 0) return false;
+    if (dmRows.length === 0 || sectionData.length === 0) return true;
+    const sectionIds = new Set(sectionData.map(section => section.id));
+    return !dmRows.some(dm => dm.sectionId !== null && sectionIds.has(dm.sectionId));
+  }, [channelRows.length, dmRows, sectionData]);
 
   return {
     isEmpty,

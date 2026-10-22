@@ -172,7 +172,7 @@ function ManageSectionSheetContent({
           withDivider
           leading='close'
           onLeadingPress={dismissSheet}
-          title='Manage channels & DMs'
+          title='Manage Channels & DMs'
           subtitle={subtitle}
           actionLabel='Save'
           onActionPress={handleSave}

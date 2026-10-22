@@ -17,7 +17,7 @@ const ICON_SIZE = 22;
 export const SECTIONS_VIEW = 'sections';
 
 /**
- * "Move #channel to": the sections as a single choice, plus the two ways out
+ * "Move #channel to" (or "Move <person> to" for a DM): the sections as a single choice, plus the two ways out
  * of that list — no section at all, or a new one.
  *
  * Choosing closes the tray, because the choice is the whole task. New section
@@ -33,6 +33,7 @@ export function SectionPickerView(): ReactElement {
 
   const channelId = useValue(sectionPicker$.channelId);
   const name = useValue(() => (channelId ? channelRow$(channelId).name.get() : ''));
+  const isDm = useValue(() => (channelId ? channelRow$(channelId).isDm.get() === true : false));
   const currentSectionId = useValue(() =>
     channelId ? (channelRow$(channelId).sectionId.get() ?? null) : null,
   );
@@ -47,7 +48,8 @@ export function SectionPickerView(): ReactElement {
 
   return (
     <View className='px-3 pt-5 pb-2' style={{ flexShrink: 1 }}>
-      <TrayTitle>{`Move #${name ?? ''} to`}</TrayTitle>
+      {/* A DM is named for its people, so it takes no channel `#`. */}
+      <TrayTitle>{`Move ${isDm ? '' : '#'}${name ?? ''} to`}</TrayTitle>
 
       <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
         {sections.map(section => (
