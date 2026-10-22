@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { recordJudgeExchange } from "./judge-trace.js";
@@ -144,8 +143,20 @@ const CACHE_TTL_MS = Number(process.env["XOR_CACHE_TTL_MS"] ?? 600_000);
 const CACHE_MAX = 2_000;
 const cache = new Map<string, { at: number; answers: Record<string, XorAnswer> }>();
 
-function cacheKey(url: string, model: string | undefined, state: string, questions: Record<string, XorQuestion>, images: string[]): string {
-  return createHash("sha256").update(JSON.stringify([url, model ?? "", state, questions, images])).digest("hex");
+const FNV_SEEDS = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b];
+
+function fnv1a128(text: string): string {
+  const h = [...FNV_SEEDS];
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    for (let k = 0; k < 4; k++) h[k] = Math.imul(h[k]! ^ (c + k), 0x01000193) >>> 0;
+  }
+  return h.map((x) => x.toString(36)).join(".");
+}
+
+export function cacheKey(url: string, model: string | undefined, state: string, questions: Record<string, XorQuestion>, images: string[]): string {
+  const text = JSON.stringify([url, model ?? "", state, questions, images]);
+  return `${text.length}:${fnv1a128(text)}`;
 }
 
 function cacheGet(key: string): Record<string, XorAnswer> | null {
