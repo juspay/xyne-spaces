@@ -1725,6 +1725,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     () => chatTitleOf(savedChatTitle, transcriptMessages),
     [savedChatTitle, transcriptMessages],
   );
+  const lastUserMessage = useMemo(
+    () => [...transcriptMessages].reverse().find(message => message.type === 'user')?.content,
+    [transcriptMessages],
+  );
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
     const session = v2Sessions.find(s => s.sessionId === conversationId);
@@ -2785,6 +2789,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               voiceStageHost={voiceStageHost}
               voiceMessages={transcriptMessages}
               voiceChatTitle={voiceChatTitle}
+              lastUserMessage={lastUserMessage}
             />
           </div>
         </div>
