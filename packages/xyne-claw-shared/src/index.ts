@@ -196,3 +196,4 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 
 export * from "./reply-format/index.js";
+export * from "./flow/write-batch-flow.js";
