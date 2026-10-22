@@ -14,6 +14,8 @@ import {
 import type { LoopCommandBody, LoopCommandRow, LoopCommandVersionInfo, LoopSequenceStep, LoopTemplateCatalogue, LoopTemplateInfo, SubagentDef } from "../../lib/api";
 import { Button } from "./ui/Button";
 import { LoopCommandsDashboard } from "./LoopCommandsDashboard";
+import { LoopDiagram } from "./loops/LoopDiagram";
+import { useNavigate } from "react-router-dom";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
 import { TextField } from "./ui/TextField";
@@ -122,6 +124,7 @@ function Chips({ options, selected, onToggle }: { options: Array<{ id: string; l
 }
 
 export function LoopCommandsPage() {
+  const navigate = useNavigate();
   const { show: showSnackbar } = useSnackbar();
   const [catalogue, setCatalogue] = useState<LoopTemplateCatalogue | null>(null);
   const [rows, setRows] = useState<LoopCommandRow[] | null>(null);
@@ -234,9 +237,12 @@ export function LoopCommandsPage() {
             Build your own slash command from a loop template. It runs pass after pass in a thread, like /experiment, until its finish rule is met.
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => { setError(null); setDraft({ ...EMPTY }); }} leadingIcon={<PlusIcon size={14} />}>
-          New loop command
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => navigate("/v3/loop-commands/editor")}>Build a sequence visually</Button>
+          <Button variant="primary" size="sm" onClick={() => { setError(null); setDraft({ ...EMPTY }); }} leadingIcon={<PlusIcon size={14} />}>
+            New loop command
+          </Button>
+        </div>
       </div>
 
       <div className="flex shrink-0 gap-4 border-b border-xyne-border px-6">
@@ -310,6 +316,7 @@ export function LoopCommandsPage() {
                   <td className="px-3 py-2">
                     {r.mine && catalogue && (
                       <div className="flex justify-end gap-1.5">
+                        {isSequence(r) && <Button size="sm" variant="ghost" onClick={() => navigate(`/v3/loop-commands/editor?id=${r.id}`)}>Open in editor</Button>}
                         <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft(draftFrom(r, catalogue.templates)); }}>Edit</Button>
                         <Button size="sm" variant="ghost" onClick={() => void publish(r, !r.published)}>{r.published ? "Unpublish" : "Publish"}</Button>
                         <button type="button" aria-label={`Delete ${r.command}`} onClick={() => void remove(r)} className="px-1 text-xyne-fg-muted hover:text-xyne-error-fg">
@@ -375,6 +382,12 @@ export function LoopCommandsPage() {
               />
               <TextField label="Description" hint="One line, shown in /help" value={draft.description} placeholder="Hunt performance regressions" onChange={(e) => u({ description: e.target.value })} />
             </div>
+            {!t.composite && (
+              <details className="rounded-xl border border-xyne-border" open={!draft.id}>
+                <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-xyne-fg-secondary">How this loop runs</summary>
+                <div className="px-2 pb-2"><LoopDiagram template={t} height={300} /></div>
+              </details>
+            )}
             {t.composite && (
               <div className="space-y-2" data-id="loop-steps">
                 <p className="text-[12px] font-medium text-xyne-fg-secondary">
