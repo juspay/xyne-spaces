@@ -3,6 +3,7 @@ import { agentRunRepository, experimentRepository } from "../../repositories/ind
 import { dispatchExperimentChecker, dispatchExperimentEpoch, postExperimentNotice } from "../../lib/experiment.js";
 import { errMsg } from "../../lib/errors.js";
 import { createLogger } from "../../logger.js";
+import { LOOP_COMMANDS, loopCommandFor, type LoopCommandDef, type LoopKey } from "xyne-claw-shared";
 import { advanceLoop, passesExhausted, pastDeadline, pastHardStop, type LoopSpec } from "../engine.js";
 
 const log = createLogger("experiment");
@@ -23,8 +24,6 @@ export interface ExperimentCtx {
 }
 
 type ExperimentSpec = LoopSpec<ExperimentLedger, ExperimentCtx, boolean>;
-
-const progressGated = (ledger: ExperimentLedger) => ledger.run.kind === "repo-history";
 
 async function epochLivedMs(sessionId: string | undefined, now: number): Promise<number> {
   if (!sessionId) return Number.POSITIVE_INFINITY;
@@ -57,124 +56,136 @@ async function finalEpoch(ledger: ExperimentLedger) {
   return { ledger: { run: finishing }, output: true };
 }
 
-export const experimentLoop: ExperimentSpec = {
-  id: "experiment",
-  policy: {
-    deadline: (ledger) => ledger.run.deadlineAt,
-    graceAfterDeadlineMs: FORCE_DONE_AFTER_MS,
-    maxPasses: (ledger) => (progressGated(ledger) ? MAX_REPO_HISTORY_EPOCHS : null),
-    passes: (ledger) => ledger.run.epoch,
-    minPassMs: MIN_EPOCH_MS,
-    staleAfterMs: STALE_MS,
-    onTimeout: "report",
-  },
-  nodes: {
-    pass: { kind: "pass", run: nextEpoch },
-    checker: {
-      kind: "checker",
-      run: async (ledger) => {
-        await dispatchExperimentChecker(ledger.run, ledger.run.epoch).catch((err) => {
-          log.warn(`[experiment] checker dispatch threw id=${ledger.run.id} epoch=${ledger.run.epoch}: ${errMsg(err)}`);
-        });
+function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
+  const progressGated = def.graph === "progress";
+  const spec: ExperimentSpec = {
+    id: def.key,
+    policy: {
+      deadline: (ledger) => ledger.run.deadlineAt,
+      graceAfterDeadlineMs: FORCE_DONE_AFTER_MS,
+      maxPasses: () => (progressGated ? MAX_REPO_HISTORY_EPOCHS : null),
+      passes: (ledger) => ledger.run.epoch,
+      minPassMs: MIN_EPOCH_MS,
+      staleAfterMs: STALE_MS,
+      onTimeout: "report",
+    },
+    nodes: {
+      pass: { kind: "pass", run: nextEpoch },
+      checker: {
+        kind: "checker",
+        run: async (ledger) => {
+          await dispatchExperimentChecker(ledger.run, ledger.run.epoch).catch((err) => {
+            log.warn(`[experiment] checker dispatch threw id=${ledger.run.id} epoch=${ledger.run.epoch}: ${errMsg(err)}`);
+          });
+        },
       },
-    },
-    report: {
-      kind: "report",
-      run: async (ledger) => {
-        if (progressGated(ledger)) {
-          log.warn(`[experiment] repo-history ${ledger.run.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
-        }
-        return finalEpoch(ledger);
+      report: {
+        kind: "report",
+        run: async (ledger) => {
+          if (progressGated) {
+            log.warn(`[experiment] ${def.command.slice(1)} ${ledger.run.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
+          }
+          return finalEpoch(ledger);
+        },
       },
-    },
-    rescuePass: { kind: "pass", run: nextEpoch },
-    rescueReport: { kind: "report", run: finalEpoch },
-    brake: {
-      kind: "wait",
-      run: async (ledger) => {
-        log.warn(`[experiment] epoch for ${ledger.run.id} ended within ${MIN_EPOCH_MS / 1000}s of starting — deferring next epoch to supervisor (rapid-fail brake)`);
-        await experimentRepository.update(ledger.run.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
-        return { output: true };
+      rescuePass: { kind: "pass", run: nextEpoch },
+      rescueReport: { kind: "report", run: finalEpoch },
+      brake: {
+        kind: "wait",
+        run: async (ledger) => {
+          log.warn(`[experiment] epoch for ${ledger.run.id} ended within ${MIN_EPOCH_MS / 1000}s of starting — deferring next epoch to supervisor (rapid-fail brake)`);
+          await experimentRepository.update(ledger.run.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
+          return { output: true };
+        },
       },
-    },
-    done: {
-      kind: "end",
-      run: async (ledger) => {
-        await experimentRepository.update(ledger.run.id, { status: "done", lastEpochEndedAt: new Date() });
-        return { output: false };
+      done: {
+        kind: "end",
+        run: async (ledger) => {
+          await experimentRepository.update(ledger.run.id, { status: "done", lastEpochEndedAt: new Date() });
+          return { output: false };
+        },
       },
-    },
-    forceDone: {
-      kind: "end",
-      run: async (ledger) => {
-        const finalReport = ledger.run.finalReport ?? NO_FINAL_REPORT;
-        await experimentRepository.update(ledger.run.id, { status: "done", finalReport });
-        await postExperimentNotice({ ...ledger.run, finalReport }).catch((err) => {
-          log.warn(`[experiment] force-done notice failed id=${ledger.run.id}: ${errMsg(err)}`);
-        });
+      forceDone: {
+        kind: "end",
+        run: async (ledger) => {
+          const finalReport = ledger.run.finalReport ?? NO_FINAL_REPORT;
+          await experimentRepository.update(ledger.run.id, { status: "done", finalReport });
+          await postExperimentNotice({ ...ledger.run, finalReport }).catch((err) => {
+            log.warn(`[experiment] force-done notice failed id=${ledger.run.id}: ${errMsg(err)}`);
+          });
+        },
       },
+      idle: { kind: "wait" },
     },
-    idle: { kind: "wait" },
-  },
-  edges: [
-    { from: "report", on: "result", to: "done", label: "final report delivered" },
-    {
-      from: "pass",
-      on: "result",
-      to: "brake",
-      label: "epoch died too fast",
-      when: async (_ledger, ctx) => (await epochLivedMs(ctx.sessionId, ctx.now)) < (experimentLoop.policy.minPassMs ?? 0),
-    },
-    { from: "pass", on: "result", to: "checker", label: "epoch finished" },
-    {
-      from: "checker",
-      on: "done",
-      to: "pass",
-      label: "keep going",
-      when: (ledger, ctx) =>
-        progressGated(ledger)
-          ? !passesExhausted(experimentLoop.policy, ledger)
-          : !pastDeadline(experimentLoop.policy, ledger, ctx.now),
-    },
-    { from: "checker", on: "done", to: "report", label: "deadline or backstop reached" },
+    edges: [
+      { from: "report", on: "result", to: "done", label: "final report delivered" },
+      {
+        from: "pass",
+        on: "result",
+        to: "brake",
+        label: "epoch died too fast",
+        when: async (_ledger, ctx) => (await epochLivedMs(ctx.sessionId, ctx.now)) < (spec.policy.minPassMs ?? 0),
+      },
+      { from: "pass", on: "result", to: "checker", label: "epoch finished" },
+      {
+        from: "checker",
+        on: "done",
+        to: "pass",
+        label: "keep going",
+        when: (ledger, ctx) =>
+          progressGated
+            ? !passesExhausted(spec.policy, ledger)
+            : !pastDeadline(spec.policy, ledger, ctx.now),
+      },
+      { from: "checker", on: "done", to: "report", label: "deadline or backstop reached" },
 
-    {
-      from: "*",
-      on: "tick",
-      to: "forceDone",
-      label: "past deadline grace",
-      when: (ledger, ctx) => pastHardStop(experimentLoop.policy, ledger, ctx.now),
-    },
-    {
-      from: "*",
-      on: "tick",
-      to: "idle",
-      label: "epoch session still running",
-      when: (ledger) => sessionIsActive(ledger.run.currentSessionId),
-    },
-    {
-      from: "*",
-      on: "tick",
-      to: "idle",
-      label: "recently touched",
-      when: (ledger, ctx) => ctx.now - ledger.run.updatedAt.getTime() <= (experimentLoop.policy.staleAfterMs ?? 0),
-    },
-    {
-      from: "*",
-      on: "tick",
-      to: "rescuePass",
-      label: "stalled before deadline",
-      when: (ledger, ctx) => ledger.run.status === "running" && !pastDeadline(experimentLoop.policy, ledger, ctx.now),
-    },
-    {
-      from: "*",
-      on: "tick",
-      to: "rescueReport",
-      label: "stalled after deadline",
-      when: (ledger) => ledger.run.status === "running",
-    },
-  ],
-};
+      {
+        from: "*",
+        on: "tick",
+        to: "forceDone",
+        label: "past deadline grace",
+        when: (ledger, ctx) => pastHardStop(spec.policy, ledger, ctx.now),
+      },
+      {
+        from: "*",
+        on: "tick",
+        to: "idle",
+        label: "epoch session still running",
+        when: (ledger) => sessionIsActive(ledger.run.currentSessionId),
+      },
+      {
+        from: "*",
+        on: "tick",
+        to: "idle",
+        label: "recently touched",
+        when: (ledger, ctx) => ctx.now - ledger.run.updatedAt.getTime() <= (spec.policy.staleAfterMs ?? 0),
+      },
+      {
+        from: "*",
+        on: "tick",
+        to: "rescuePass",
+        label: "stalled before deadline",
+        when: (ledger, ctx) => ledger.run.status === "running" && !pastDeadline(spec.policy, ledger, ctx.now),
+      },
+      {
+        from: "*",
+        on: "tick",
+        to: "rescueReport",
+        label: "stalled after deadline",
+        when: (ledger) => ledger.run.status === "running",
+      },
+    ],
+  };
+  return spec;
+}
+
+export const EPOCH_LOOPS = Object.fromEntries(LOOP_COMMANDS.map((def) => [def.key, buildEpochLoop(def)])) as Record<LoopKey, ExperimentSpec>;
+
+export const experimentLoop = EPOCH_LOOPS.experiment;
+
+export function epochLoopFor(kind: unknown): ExperimentSpec {
+  return EPOCH_LOOPS[loopCommandFor(kind).key];
+}
 
 function currentNode(run: ExperimentRun): string {
   return run.status === "finishing" ? "report" : "pass";
@@ -184,7 +195,7 @@ export async function continueExperimentAfterResult(conversationId: string, sess
   const active = await experimentRepository.findActiveByConversation(conversationId);
   if (!active) return false;
   if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
-  const step = await advanceLoop(experimentLoop, {
+  const step = await advanceLoop(epochLoopFor(active.kind), {
     from: currentNode(active),
     on: "result",
     ledger: { run: active },
@@ -194,5 +205,5 @@ export async function continueExperimentAfterResult(conversationId: string, sess
 }
 
 export async function superviseExperiment(run: ExperimentRun, now = Date.now()): Promise<void> {
-  await advanceLoop(experimentLoop, { from: currentNode(run), on: "tick", ledger: { run }, ctx: { now } });
+  await advanceLoop(epochLoopFor(run.kind), { from: currentNode(run), on: "tick", ledger: { run }, ctx: { now } });
 }
