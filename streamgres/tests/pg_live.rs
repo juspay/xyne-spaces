@@ -19,6 +19,7 @@ use streamgres::ivm::{Delta, Engine, Fetch, MultiTableIVM, QueryPart};
 use streamgres::model::*;
 use streamgres::client::ddl_triggers::trigger_stack_sql;
 use streamgres::sync::pg::ddl::DdlSource;
+use streamgres::sync::pg::estimate_cache::EstimateCache;
 use streamgres::sync::pg::{PgStorage, PgStream};
 use streamgres::sync::{
     CatalogHandle, Command, Event, Lsn, Runtime, Service, Sources, Storage, SubId, Transaction,
@@ -784,6 +785,158 @@ fn a_count_stops_at_the_cap_on_the_snapshot() {
             1,
             "an inner edge no leaf names is conjoined"
         );
+        cleanup(&dsn, &client, &names).await;
+    });
+}
+
+/// An estimate executes nothing and sizes a tree as the count does: two
+/// thousand tickets, a third of them `OPEN`, spread over fifty users, the
+/// tables analyzed. Alone, narrowed by an `EXISTS` and with the `EXISTS`
+/// under an `OR`, the estimate lands within half again of the count; the
+/// `OR` shape, which PostgreSQL's own estimate of the counted SQL puts at
+/// half the table, comes out near the tickets it holds; and no estimate
+/// passes the cap.
+#[test]
+fn an_estimate_sizes_a_tree_without_counting_it() {
+    let Some(dsn) = dsn() else { return };
+    block_on(async {
+        let names = Names::new("estimate");
+        let client = prepare(&dsn, &names).await;
+        client
+            .batch_execute(&format!(
+                "INSERT INTO {u} SELECT g, 'u' || g FROM generate_series(9, 60) g;
+                 INSERT INTO {t} SELECT g, CASE WHEN g % 3 = 0 THEN 'OPEN' ELSE 'DONE' END,
+                     7 + g % 50, g % 7 FROM generate_series(4, 2000) g;
+                 ANALYZE {t}; ANALYZE {u};",
+                t = names.tickets,
+                u = names.users,
+            ))
+            .await
+            .expect("seed");
+        let catalog = Arc::new(names.catalog());
+        let mut stream = PgStream::open(&dsn, &names.slot, &names.publication, catalog.clone())
+            .await
+            .expect("open stream");
+        let storage = PgStorage::connect(&dsn, catalog.clone())
+            .await
+            .expect("connect");
+        let mut runtime = Runtime::new(MultiTableIVM::new());
+        catch_up(&mut runtime, &mut stream, &[&storage]).await;
+
+        let tickets = |filter: Where| SingleTableReadQuery {
+            filter,
+            ..names.spec().main_table
+        };
+        let under = |filter: Where| {
+            MultiTableReadQuery::new(
+                tickets(filter),
+                vec![Join::inner(
+                    MultiTableReadQuery::single(SingleTableReadQuery::new(
+                        names.users.as_str(),
+                        Where::condition("name", ComparisonOperator::EQ, "u17"),
+                        OrderBy::new("id", Order::ASC),
+                        u32::MAX,
+                    )),
+                    "assigned_to",
+                    "id",
+                )],
+            )
+        };
+        let open = Where::condition("status", ComparisonOperator::EQ, "OPEN");
+        let shapes = [
+            ("alone", MultiTableReadQuery::single(tickets(open.clone()))),
+            (
+                "narrowed",
+                under(Where::AND(vec![open, Where::exists("assigned_to", 0)])),
+            ),
+            (
+                "under an OR",
+                under(Where::OR(vec![
+                    Where::condition("points", ComparisonOperator::EQ, 3),
+                    Where::exists("assigned_to", 0),
+                ])),
+            ),
+        ];
+        for (shape, query) in &shapes {
+            let counted = storage.count(query, 100_000).await.expect("count") as f64;
+            let estimated = storage.estimate(query, 100_000).await.expect("estimate") as f64;
+            let ratio = estimated.max(1.0) / counted.max(1.0);
+            assert!(
+                (1.0 / 1.5..=1.5).contains(&ratio),
+                "{shape}: estimated {estimated} against {counted} counted"
+            );
+        }
+        assert!(
+            storage.estimate(&shapes[2].1, 100_000).await.expect("estimate") < 600,
+            "not half the table"
+        );
+        assert_eq!(
+            storage.estimate(&shapes[0].1, 10).await.expect("estimate"),
+            10,
+            "capped"
+        );
+        cleanup(&dsn, &client, &names).await;
+    });
+}
+
+/// An estimate is remembered by its statement until its table's
+/// statistics move: twenty thousand tickets added without an `ANALYZE`
+/// (which a fresh `EXPLAIN` would scale its estimate by, the table having
+/// grown) leave the remembered estimate as it was; the `ANALYZE` moves the
+/// table's size, its answers are forgotten, and the estimate follows the
+/// table.
+#[test]
+fn an_estimate_is_remembered_until_its_table_moves() {
+    let Some(dsn) = dsn() else { return };
+    block_on(async {
+        let names = Names::new("estcache");
+        let client = prepare(&dsn, &names).await;
+        client
+            .batch_execute(&format!(
+                "ALTER TABLE {t} SET (autovacuum_enabled = false);
+                 INSERT INTO {t} SELECT g, CASE WHEN g % 3 = 0 THEN 'OPEN' ELSE 'DONE' END,
+                     NULL, g % 7 FROM generate_series(4, 2000) g;
+                 ANALYZE {t};",
+                t = names.tickets,
+            ))
+            .await
+            .expect("seed");
+        let catalog = Arc::new(names.catalog());
+        let storage = PgStorage::connect(&dsn, catalog.clone())
+            .await
+            .expect("connect")
+            .with_estimate_cache(
+                EstimateCache::new(Duration::from_secs(3600), 1_000)
+                    .with_sizes_every(Duration::ZERO),
+            );
+        let open = MultiTableReadQuery::single(SingleTableReadQuery {
+            filter: Where::condition("status", ComparisonOperator::EQ, "OPEN"),
+            ..names.spec().main_table
+        });
+        let first = storage.estimate(&open, 100_000).await.expect("estimate");
+        assert!((400..1_000).contains(&first), "{first} of 666 open");
+        let kept = storage.estimate_cache().len();
+        assert_eq!(kept, 2, "the whole table and the filter");
+        client
+            .batch_execute(&format!(
+                "INSERT INTO {t} SELECT g, CASE WHEN g % 3 = 0 THEN 'OPEN' ELSE 'DONE' END,
+                     NULL, g % 7 FROM generate_series(2001, 22000) g;",
+                t = names.tickets,
+            ))
+            .await
+            .expect("grow");
+        assert_eq!(
+            storage.estimate(&open, 100_000).await.expect("estimate"),
+            first,
+            "remembered: the table's statistics have not moved"
+        );
+        assert_eq!(storage.estimate_cache().len(), kept);
+        client
+            .batch_execute(&format!("ANALYZE {};", names.tickets))
+            .await
+            .expect("analyze");
+        let after = storage.estimate(&open, 100_000).await.expect("estimate");
+        assert!(after > 5 * first, "analyzed: {after} against {first} before");
         cleanup(&dsn, &client, &names).await;
     });
 }

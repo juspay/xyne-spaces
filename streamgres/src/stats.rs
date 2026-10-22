@@ -229,6 +229,8 @@ static GLOBAL: OnceLock<Arc<Stats>> = OnceLock::new();
 /// - `plan`: translating and planning one query on the connection task
 ///   (a cache hit is microseconds; a miss counts on the reads pool).
 /// - `count_io`: one planner count on PostgreSQL.
+/// - `estimate_io`: one planner estimate on PostgreSQL (its `EXPLAIN`s
+///   and statistics in one round trip).
 /// - `hydrate_cold` / `hydrate_warm`: from a query's registration being
 ///   sent to the engine to its first rows all present, per query; cold
 ///   when the registration issued storage reads, warm when the frames
@@ -276,6 +278,7 @@ pub struct Stats {
     pub transform: Histogram,
     pub plan: Histogram,
     pub count_io: Histogram,
+    pub estimate_io: Histogram,
     pub hydrate_cold: Histogram,
     pub hydrate_warm: Histogram,
     pub register_step: Histogram,
@@ -307,6 +310,12 @@ pub struct Stats {
     pub refused_other: AtomicU64,
     pub pages_short: AtomicU64,
     pub plans_page_driven: AtomicU64,
+    /// Planner estimates' statements (`EXPLAIN`s and join columns'
+    /// statistics) answered from the estimate cache, waited for while
+    /// another batch asked them, and asked of PostgreSQL.
+    pub estimate_hits: AtomicU64,
+    pub estimate_shared: AtomicU64,
+    pub estimate_misses: AtomicU64,
     pub pushes_ok: AtomicU64,
     pub pushes_failed: AtomicU64,
     /// Pushes that found their connection's queue full, so the reader
@@ -356,6 +365,8 @@ pub struct Stats {
     pub clients: AtomicU64,
     pub engine_inbox: AtomicU64,
     pub plan_cache_entries: AtomicU64,
+    /// Planner estimates' answers remembered.
+    pub estimate_cache_entries: AtomicU64,
     pub transform_cache_entries: AtomicU64,
     pub warm_shapes: AtomicU64,
     pub feed_lsn: AtomicU64,
@@ -452,6 +463,7 @@ impl Stats {
             transform: Histogram::new(),
             plan: Histogram::new(),
             count_io: Histogram::new(),
+            estimate_io: Histogram::new(),
             hydrate_cold: Histogram::new(),
             hydrate_warm: Histogram::new(),
             register_step: Histogram::new(),
@@ -483,6 +495,9 @@ impl Stats {
             refused_other: AtomicU64::new(0),
             pages_short: AtomicU64::new(0),
             plans_page_driven: AtomicU64::new(0),
+            estimate_hits: AtomicU64::new(0),
+            estimate_shared: AtomicU64::new(0),
+            estimate_misses: AtomicU64::new(0),
             pushes_ok: AtomicU64::new(0),
             pushes_failed: AtomicU64::new(0),
             push_queue_full: AtomicU64::new(0),
@@ -512,6 +527,7 @@ impl Stats {
             clients: AtomicU64::new(0),
             engine_inbox: AtomicU64::new(0),
             plan_cache_entries: AtomicU64::new(0),
+            estimate_cache_entries: AtomicU64::new(0),
             transform_cache_entries: AtomicU64::new(0),
             warm_shapes: AtomicU64::new(0),
             feed_lsn: AtomicU64::new(0),
@@ -747,6 +763,7 @@ impl Stats {
             ("transform", &self.transform),
             ("plan", &self.plan),
             ("count_io", &self.count_io),
+            ("estimate_io", &self.estimate_io),
             ("hydrate_cold", &self.hydrate_cold),
             ("hydrate_warm", &self.hydrate_warm),
             ("register_step", &self.register_step),
@@ -785,6 +802,9 @@ impl Stats {
             ("refused_read_timeout", load(&self.refused_read_timeout)),
             ("refused_other", load(&self.refused_other)),
             ("plans_page_driven", load(&self.plans_page_driven)),
+            ("estimate_hits", load(&self.estimate_hits)),
+            ("estimate_shared", load(&self.estimate_shared)),
+            ("estimate_misses", load(&self.estimate_misses)),
             ("pages_short", load(&self.pages_short)),
             ("pushes_ok", load(&self.pushes_ok)),
             ("pushes_failed", load(&self.pushes_failed)),
@@ -837,6 +857,7 @@ impl Stats {
             ("clients", load(&self.clients)),
             ("engine_inbox", load(&self.engine_inbox)),
             ("plan_cache_entries", load(&self.plan_cache_entries)),
+            ("estimate_cache_entries", load(&self.estimate_cache_entries)),
             (
                 "transform_cache_entries",
                 load(&self.transform_cache_entries),
@@ -1593,6 +1614,7 @@ fn metric_of(stage: &str) -> &'static str {
         "transform" => "transform_seconds",
         "plan" => "plan_seconds",
         "count_io" => "count_seconds",
+        "estimate_io" => "estimate_seconds",
         "hydrate_cold" | "hydrate_warm" => "hydrate_seconds",
         "read_io" => "read_seconds",
         "push_queue" => "push_queue_seconds",
@@ -1641,6 +1663,7 @@ fn stage_help(stage: &str) -> &'static str {
         "transform" => "one round trip to the application server for ASTs",
         "plan" => "translating and planning one query",
         "count_io" => "one planner count on PostgreSQL",
+        "estimate_io" => "one planner estimate on PostgreSQL",
         "hydrate_cold" | "hydrate_warm" => "a query's registration to its rows present",
         "read_io" => "a storage read from issue to its rows back on the engine thread",
         "read_rows" => "rows per storage read",
@@ -1668,6 +1691,9 @@ fn counter_name(name: &str, prefix: &str) -> (String, Vec<(&'static str, String)
         "refused_other" => ("queries_refused", &[("reason", "other")]),
         "pages_short" => ("queries_short", &[("reason", "page_capped")]),
         "plans_page_driven" => ("plans", &[("kind", "page_drives")]),
+        "estimate_hits" => ("estimate_statements", &[("result", "hit")]),
+        "estimate_shared" => ("estimate_statements", &[("result", "shared")]),
+        "estimate_misses" => ("estimate_statements", &[("result", "miss")]),
         "pushes_ok" => ("pushes", &[("result", "ok")]),
         "pushes_failed" => ("pushes", &[("result", "failed")]),
         "push_queue_full" => ("push_queue_full", &[]),
@@ -1732,6 +1758,9 @@ fn measure_help(name: &str) -> &'static str {
         | "refused_other" => "queries refused, by class of reason",
         "pages_short" => "pages served short of their limit",
         "plans_page_driven" => "plans in which a page drives its own join",
+        "estimate_hits" | "estimate_shared" | "estimate_misses" => {
+            "planner estimates' statements by outcome: answered from the cache, waited for while another plan asked, asked of PostgreSQL"
+        }
         "pushes_ok" | "pushes_failed" => "pushes forwarded to the application server, by outcome",
         "push_queue_full" => "pushes that waited for room in their connection's queue",
         "mutation_results" => {
@@ -1760,6 +1789,7 @@ fn measure_help(name: &str) -> &'static str {
         "clients" => "clients connected across those groups",
         "engine_inbox" => "commands waiting for the engine thread",
         "plan_cache_entries" => "join plans remembered",
+        "estimate_cache_entries" => "planner estimates' answers remembered",
         "transform_cache_entries" => "query transforms remembered",
         "warm_shapes" => "query shapes kept for a warm start",
         "feed_lsn" => "the feed's position in PostgreSQL's log",

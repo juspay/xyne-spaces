@@ -272,8 +272,8 @@ depend on what the defaults happen to be:
 | `STREAMGRES_BACKEND_TIMEOUT_MS` | `30000` | longest a call to the application server may take. `0` means no limit |
 | `STREAMGRES_PG_KEEPALIVE_IDLE_MS`, `_INTERVAL_MS`, `_RETRIES` | `30000`, `10000`, `3` | TCP keepalive on database connections. `0` idle time turns it off |
 | `STREAMGRES_JOIN_PREFERRED_SIDE` | `parent` | which side drives a join when both plans cost the same |
-| `STREAMGRES_PLAN_QUERY_TTL_MS` | `86400000` | how long one plan is reused for every query of the same name and join shape. `0` plans every query separately |
-| `STREAMGRES_PLAN_TTL_MS`, `STREAMGRES_PLAN_CACHE` | `600000`, `10000` | how long refused plans are remembered, and how many plans are kept |
+| `STREAMGRES_PLAN_TTL_MS`, `STREAMGRES_PLAN_CACHE` | `600000`, `10000` | how long each query tree's plan (or refusal) is remembered before it is sized again, and how many are kept. A tree is sized from PostgreSQL's estimates (`EXPLAIN` and `pg_stats`, nothing executed; a page without its cursor), and a side that cannot be estimated is counted |
+| `STREAMGRES_ESTIMATE_TTL_MS`, `STREAMGRES_ESTIMATE_CACHE` | `86400000`, `300000` | how long the planner's estimates (each `EXPLAIN` by its text, each join column's statistics) are remembered, and how many. A table's estimates are also dropped when its `reltuples`/`relpages` change (an `ANALYZE` or `VACUUM`, read every 5 minutes) and on a schema change; `0` keeps none, but a statement already being asked is still shared |
 | `STREAMGRES_TRANSFORM_TTL_MS`, `STREAMGRES_TRANSFORM_CACHE` | `60000`, `20000` | how long query ASTs from the application server are cached per user, and how many |
 | `STREAMGRES_WARM_START_MS` | `20000` | most time spent re-planning saved query shapes at startup |
 | `STREAMGRES_PING_INTERVAL_MS`, `STREAMGRES_CLIENT_TIMEOUT_MS`, `STREAMGRES_PONG_INTERVAL_MS` | `30000`, `45000`, `3000` | connection liveness |
