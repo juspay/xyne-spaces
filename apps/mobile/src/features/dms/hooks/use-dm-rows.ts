@@ -11,6 +11,7 @@ export type DmListMeta = {
   loadMore: () => void;
   hasMore: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
   hasLoadError: boolean;
   isEmpty: boolean;
   isFiltering: boolean;
@@ -44,6 +45,7 @@ export function useDmRows(): DmListMeta {
     loadMore,
     hasMore,
     isLoading,
+    isLoadingMore,
     hasLoadError,
     isEmpty,
     isFiltering,
@@ -66,6 +68,7 @@ export function useDmRows(): DmListMeta {
     loadMore,
     hasMore,
     isLoading,
+    isLoadingMore,
     hasLoadError,
     isEmpty,
     isFiltering,
