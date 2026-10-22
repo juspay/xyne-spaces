@@ -61,7 +61,11 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
-import { loadRecentLabels, saveRecentLabels } from '../../../utils/recentLabels';
+import {
+  loadRecentLabels,
+  PROJECT_TAGS_FETCH_CAP,
+  saveRecentLabels,
+} from '../../../utils/recentLabels';
 import {
   useDuplicateTicketCheck,
   type DuplicateSuggestion,
@@ -104,7 +108,6 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
@@ -844,14 +847,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
       : undefined;
 
-  // Project-level tags — lazy-loaded when the label dropdown is first opened
+  // Project-level tags — lazy-loaded when the label dropdown is first opened. The
+  // whole list comes down once and the picker filters it as the user types.
   const [tagsQueried, setTagsQueried] = useState(false);
-  const [tagSearch, setTagSearch] = useState('');
-  const debouncedTagSearch = useDebouncedValue(tagSearch.trim(), 200);
   const [projectTags] = useCachedQuery(
     queries.projectTagsByProjectId({
       projectId: selectedBoard?.projectId ?? '',
-      search: debouncedTagSearch,
+      limit: PROJECT_TAGS_FETCH_CAP,
     }),
     { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
@@ -3157,10 +3159,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       setNewTags(prev => [...prev, value]);
                       field.handleChange([...field.state.value, value]);
                     }}
-                    onSearchChange={setTagSearch}
                     onOpenChange={open => {
                       if (open && !tagsQueried) setTagsQueried(true);
-                      if (!open) setTagSearch('');
                     }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'

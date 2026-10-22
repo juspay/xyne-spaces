@@ -3,6 +3,11 @@ import { logger, Event as LogEvent } from './logger';
 const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
 const RECENT_LABELS_LIMIT = 20;
 
+// Label pickers load a project's whole tag list and filter it in the browser: a
+// server-side search is an ILIKE the sync engine can't serve. The largest projects
+// hold a little over 1k tags. With several projects it caps the combined list.
+export const PROJECT_TAGS_FETCH_CAP = 2000;
+
 const readBoardRecentLabels = (userId: string, boardId: string): string[] => {
   try {
     return JSON.parse(

@@ -83,7 +83,6 @@ import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
 import { useChannel, useAllChannels, useChannelParticipation } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import {
@@ -142,7 +141,12 @@ import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../ut
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
-import { loadRecentLabels, saveRecentLabels, sortByRecency } from '../../../utils/recentLabels';
+import {
+  loadRecentLabels,
+  PROJECT_TAGS_FETCH_CAP,
+  saveRecentLabels,
+  sortByRecency,
+} from '../../../utils/recentLabels';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -1240,12 +1244,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [projectTicketNextOffset, setProjectTicketNextOffset] = useState(0);
   const projectTicketsRequestIdRef = useRef(0);
 
-  const debouncedTagSearch = useDebouncedValue(tagSearchQuery.trim(), 200);
-  // Project-level tags — lazy-loaded when tag dropdown is opened
+  // Project-level tags — lazy-loaded when tag dropdown is opened. The whole list
+  // comes down once; filteredTags below narrows it as the user types.
   const [projectTags] = useCachedQuery(
     queries.projectTagsByProjectId({
       projectId: ticket?.projectId ?? '',
-      search: debouncedTagSearch,
+      limit: PROJECT_TAGS_FETCH_CAP,
     }),
     { enabled: !!ticket?.projectId && showTagDropdown },
   );

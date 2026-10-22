@@ -216,6 +216,7 @@ import {
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { PROJECT_TAGS_FETCH_CAP } from '../../utils/recentLabels';
 import { useUsers } from '../../hooks/useUsers';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
@@ -2239,21 +2240,18 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
     isMyTicketsView || isWorkspaceView || tagsProjectIds.length > 1;
   const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
 
-  // State for tag search query
-  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
-
-  // Pagination state for Zero query tags
+  // Tags come down whole (up to PROJECT_TAGS_FETCH_CAP) and are searched here, in
+  // the browser: a server-side search is an ILIKE the sync engine can't serve. The
+  // pickers still page through the matches, so a project with thousands of tags
+  // doesn't render them all at once.
   const TAGS_PAGE_SIZE = 20;
-  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
-  const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
-  const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
+  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
+  const [visibleTagsCount, setVisibleTagsCount] = useState<number>(TAGS_PAGE_SIZE);
 
-  // Reset pagination when project IDs change or search starts
+  // Start from the first page again when project IDs change or the search does
   const tagsProjectIdsKey = tagsProjectIds.join(',');
   useEffect(() => {
-    setTagsCursor(null);
-    setAccumulatedTags([]);
-    setHasMoreZeroTags(true);
+    setVisibleTagsCount(TAGS_PAGE_SIZE);
   }, [tagsProjectIdsKey, tagsSearchQuery]);
 
   // Fetch tags via Zero query for single project
@@ -2261,9 +2259,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
     queries.projectTagsByProjectId({
       projectId: tagsProjectIds[0] || '',
-      limit: TAGS_PAGE_SIZE,
-      start: tagsCursor,
-      search: tagsSearchQuery.trim(),
+      limit: PROJECT_TAGS_FETCH_CAP,
     }),
     { enabled: shouldUseSingleProjectQuery },
   );
@@ -2273,59 +2269,35 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
     queries.projectTagsByProjectIds({
       projectIds: tagsProjectIds,
-      limit: TAGS_PAGE_SIZE,
-      start: tagsCursor,
-      search: tagsSearchQuery.trim(),
+      limit: PROJECT_TAGS_FETCH_CAP,
     }),
     { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 },
   );
 
   // Combine Zero query results
-  const currentPageTags = shouldUseSingleProjectQuery ? singleProjectTags : multiProjectTags;
+  const projectTags: ReadonlyArray<{ id: string; name: string }> = shouldUseSingleProjectQuery
+    ? singleProjectTags
+    : multiProjectTags;
   const projectTagsDetails = shouldUseSingleProjectQuery
     ? singleProjectTagsDetails
     : multiProjectTagsDetails;
 
-  // Accumulate tags from pagination
-  const isTagsPageComplete = projectTagsDetails.type === 'complete';
-  useEffect(() => {
-    if (!currentPageTags || currentPageTags.length === 0) {
-      if (tagsCursor !== null && isTagsPageComplete) {
-        // No more results from this page
-        setHasMoreZeroTags(false);
-      }
-      return;
-    }
-
-    // Check if we got less than page size (no more pages)
-    if (currentPageTags.length < TAGS_PAGE_SIZE && isTagsPageComplete) {
-      setHasMoreZeroTags(false);
-    }
-
-    // Append new tags, avoiding duplicates
-    setAccumulatedTags(prev => {
-      const existingIds = new Set(prev.map(t => t.id));
-      const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
-      return [...prev, ...newTags];
-    });
-  }, [currentPageTags, tagsCursor, isTagsPageComplete]);
-
-  // Combine accumulated tags for display
-  const projectTags = accumulatedTags;
+  // Unique tag names matching the search, sorted
+  const matchingTagNames = useMemo(() => {
+    const names = Array.from(new Set(projectTags.map(tag => tag.name))).sort();
+    const query = tagsSearchQuery.trim().toLowerCase();
+    return query ? names.filter(name => name.toLowerCase().includes(query)) : names;
+  }, [projectTags, tagsSearchQuery]);
+  const hasMoreZeroTags = matchingTagNames.length > visibleTagsCount;
 
   // Handle load more tags (pagination)
   const handleLoadMoreTags = useCallback(() => {
-    if (!hasMoreZeroTags || !isTagsPageComplete) return;
-    const lastTag = accumulatedTags[accumulatedTags.length - 1];
-    if (lastTag) {
-      setTagsCursor({ name: lastTag.name, id: lastTag.id });
-    }
-  }, [hasMoreZeroTags, isTagsPageComplete, accumulatedTags]);
+    setVisibleTagsCount(count => count + TAGS_PAGE_SIZE);
+  }, []);
 
   // Handle tag search callback
   const handleSearchTags = useCallback((query: string) => {
     setTagsSearchQuery(query);
-    setTagsCursor(null);
   }, []);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
@@ -3622,12 +3594,9 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
   const availableTags = useMemo(() => {
-    const zeroTags =
-      projectTags && projectTags.length > 0
-        ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
-        : [];
-    return zeroTags.length > 0 ? zeroTags : undefined;
-  }, [projectTags]);
+    const visibleTags = matchingTagNames.slice(0, visibleTagsCount);
+    return visibleTags.length > 0 ? visibleTags : undefined;
+  }, [matchingTagNames, visibleTagsCount]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
