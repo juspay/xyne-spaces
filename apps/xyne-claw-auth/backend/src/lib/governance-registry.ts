@@ -4,7 +4,7 @@
  * per-kind adapters arrive with PR-6; the judge and detonator jobs update the other verdict columns.
  */
 import { Prisma, type StaticContentVersion } from "@prisma/client";
-import { hashPromptText, scanText, type StaticContentKind, type Verdict } from "xyne-claw-shared/governance";
+import { hashPromptText, scanText, type StaticContentKind, type Verdict, allRules } from "xyne-claw-shared/governance";
 import { contentScanFindingRepository, staticContentVersionRepository as versions } from "../repositories/governanceRepository.js";
 import { queueGovernanceEvent, type ActorKind } from "./governance-audit.js";
 
@@ -78,6 +78,7 @@ export async function commitStaticContentVersion(input: CommitInput): Promise<{ 
   let findingIds: string[] = [];
   let reasonCode: string | undefined;
   let parserMs: number | undefined;
+  let detail = "stored without a text scan";
   if (text !== undefined) {
     const t0 = performance.now();
     const scan = scanText({ text, kind: contentKind });
@@ -86,6 +87,9 @@ export async function commitStaticContentVersion(input: CommitInput): Promise<{ 
     scannerVersion = scan.scannerVersion;
     matchedRuleIds = [...new Set(scan.findings.map((f) => f.ruleId))];
     reasonCode = scan.findings[0]?.reasonCode;
+    // What ran, so the record answers "which checks passed": the parser's rules for this kind; the judge and the detonator come later.
+    const checked = allRules().filter((r) => (r.kinds === undefined || r.kinds.includes(contentKind)) && !(r.excludeKinds?.includes(contentKind) ?? false) && !r.outboundOnly).length;
+    detail = `parser ${scan.scannerVersion}: ${verdict}; ${checked} rules checked over ${text.length} chars in ${parserMs} ms, ${scan.findings.length} finding(s)${matchedRuleIds.length > 0 ? ` (${matchedRuleIds.slice(0, 12).join(", ")})` : ""}${scan.signals.length > 0 ? `, ${scan.signals.length} weak signal(s)` : ""}${scan.truncated ? ", text truncated at the size cap" : ""}${scan.budgetExceeded ? ", time budget exceeded" : ""}; judge and detonator not run (later phases)`.slice(0, 1_900);
     const rows = scan.findings.map((f) => ({
       orgId,
       foundIn: "static_version",
@@ -116,7 +120,7 @@ export async function commitStaticContentVersion(input: CommitInput): Promise<{ 
     conversationId: input.writtenInConversationId ?? null,
     decision: verdict === "injection" ? "block" : verdict === "clean" || verdict === undefined ? "allow" : "ask",
     reasonCode: reasonCode ?? null,
-    reasonText: verdict ? `parser verdict ${verdict}` : "stored without a text scan",
+    reasonText: detail,
     scannerVersion: scannerVersion ?? null,
     matchedRuleIds,
     findingIds,
