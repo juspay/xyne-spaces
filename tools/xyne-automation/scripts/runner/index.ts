@@ -10,6 +10,7 @@ import {
   copyReports,
   dockerBuild,
   dockerDown,
+  dockerPull,
   dockerUp,
   runTests,
 } from '@/scripts/runner/docker';
@@ -466,7 +467,14 @@ async function main(): Promise<void> {
 
   if (phase !== 'test') {
     renderer.startStep(stepIndex++, 'Build Docker images');
+    // Pull the prebuilt service images alongside the build; they are otherwise pulled
+    // serially by `up` (minutes for the larger ones).
+    const pull = dockerPull(dockerOpts, artifactDir, renderer);
     await runStep(() => dockerBuild(dockerOpts, artifactDir, renderer));
+    const pullResult = await pull;
+    if (pullResult.status === 'failed') {
+      renderer.log('Image pre-pull failed; `up` will pull the remaining images.');
+    }
   }
 
   if (phase !== 'test' && !failed) {
