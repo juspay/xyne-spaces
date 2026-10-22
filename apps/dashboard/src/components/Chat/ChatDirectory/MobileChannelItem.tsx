@@ -14,6 +14,7 @@ import { cn } from '../../../utils/classNames';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { ChannelScopeType } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
@@ -115,6 +116,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             )}
           >
             <span className='truncate'>{displayName}</span>
+            {is1on1DM && <GuestLabel role={dmUser?.role} />}
             {hasSlashCommandArtifactSideEffect && (
               <span className='relative flex size-2 shrink-0' aria-label='Active incident'>
                 <span className='absolute inline-flex size-full animate-ping rounded-full bg-orange-500 opacity-70' />

@@ -5,6 +5,7 @@ import Avatar from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import { UserHoverWrapperProps } from './types';
 import { useAuth } from '../../../hooks/useAuth';
+import { GuestLabel } from '../GuestLabel';
 import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
@@ -208,6 +209,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
               >
                 {getUserDisplayName(user)}
               </div>
+              <GuestLabel role={user.role} />
               {isUserDeactivated(user) && (
                 <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground shrink-0'>
                   Deactivated

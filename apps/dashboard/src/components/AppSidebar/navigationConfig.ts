@@ -442,6 +442,17 @@ export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
   },
 ];
 
+// Workspace-wide modules a GUEST never sees — guests are invited to specific
+// channels/canvases only. Routes are also wrapped in GuestBlockedRoute.
+export const GUEST_HIDDEN_PATHS: ReadonlySet<string> = new Set([
+  '/automations',
+  '/migrations',
+  '/migration/confluence',
+  '/knowledge-base',
+  '/apps',
+  '/releaseManager',
+]);
+
 // Paths shown in the toolbar by default (before any user customization).
 export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/ai',

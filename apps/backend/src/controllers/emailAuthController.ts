@@ -849,6 +849,8 @@ export class EmailAuthController {
             email: normalizedEmail,
             acceptedAt: null,
             expiredAt: { gt: new Date() },
+            // Pending admin approval (false) can't be signed up against yet.
+            OR: [{ isOrgApproved: null }, { isOrgApproved: true }],
           },
           include: {
             workspace: {
@@ -1087,6 +1089,8 @@ export class EmailAuthController {
             email: normalizedEmail,
             acceptedAt: null,
             expiredAt: { gt: new Date() },
+            // Pending admin approval (false) can't be signed up against yet.
+            OR: [{ isOrgApproved: null }, { isOrgApproved: true }],
           },
           include: {
             workspace: {

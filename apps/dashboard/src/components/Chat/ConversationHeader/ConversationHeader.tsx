@@ -52,6 +52,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
@@ -513,6 +514,7 @@ const ConversationHeader = ({
                 <ChannelIcon channel={channel} />
               </span>
               <span className='visual-regression-hide truncate'>{displayName}</span>
+              {isDM && <GuestLabel role={dmUser?.role} />}
               {isDM && (
                 <StatusIndicator
                   statusEmoji={dmUser?.statusEmoji}

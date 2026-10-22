@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { User } from '@xyne/shared';
+import { User, WorkspaceRole } from '@xyne/shared';
 import Avatar from '../Avatar/Avatar';
+import { GuestLabel } from '../GuestLabel';
 import Input from '../Input/Input';
 import { Badge } from '../Badge';
 import { cn } from '../../../utils/classNames';
@@ -29,6 +30,8 @@ interface SearchUserProps {
   autoFocus?: boolean;
   /** When set, only users whose id is in this set are shown (e.g. project members for share collection) */
   allowedUserIds?: Set<string> | null;
+  /** Hide workspace GUEST users — their access is granted per channel/canvas by invitation only. */
+  excludeGuests?: boolean;
 }
 
 export const SearchUser: React.FC<SearchUserProps> = ({
@@ -43,6 +46,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   channelId,
   autoFocus = false,
   allowedUserIds,
+  excludeGuests = false,
 }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -82,6 +86,10 @@ export const SearchUser: React.FC<SearchUserProps> = ({
         return false;
       }
 
+      if (excludeGuests && user.role === WorkspaceRole.GUEST) {
+        return false;
+      }
+
       // Exclude users that are already selected or in the exclude list
       const isExcluded =
         excludeUserIds?.includes(user.id) ||
@@ -89,7 +97,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
       return !isExcluded;
     });
-  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds, allowedUserIds]);
+  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds, allowedUserIds, excludeGuests]);
 
   // Get filtered users (limit to 10)
   const filteredUsers = availableUsers.slice(0, 10);
@@ -314,6 +322,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                             </span>
                           )}
                         </span>
+                        <GuestLabel role={user.role} />
                         {isUserDeactivated(user) && (
                           <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
                             Deactivated

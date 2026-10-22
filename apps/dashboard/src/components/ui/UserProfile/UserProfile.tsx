@@ -33,6 +33,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { channelService } from '../../../services/Chat/channelService';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { useAuth } from '../../../hooks/useAuth';
+import { GuestLabel } from '../GuestLabel';
 import { toast } from 'sonner';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { useZero } from '../../../hooks/useZero';
@@ -406,6 +407,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             >
               {user?.name || 'Unknown User'}
             </h2>
+            <GuestLabel role={user?.role} />
             {isUserDeactivated(user) && (
               <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground shrink-0'>
                 Deactivated

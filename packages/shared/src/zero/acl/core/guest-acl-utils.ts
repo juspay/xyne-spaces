@@ -100,4 +100,10 @@ export const guestVisibleUserWhere = (ctx: Context): GuestPredicate => ({
         channel.where('workspaceId', '=', ctx.workspaceId).where(guestChannelAccessWhere(ctx)),
       ),
     ),
+
+    exists('canvasParticipations', (canvasParticipation: any) =>
+      canvasParticipation.whereExists('canvas', (canvas: any) =>
+        canvas.where('workspaceId', '=', ctx.workspaceId).where(guestCanvasAccessWhere(ctx)),
+      ),
+    ),
   );

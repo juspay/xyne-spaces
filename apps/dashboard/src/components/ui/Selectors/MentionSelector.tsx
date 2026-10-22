@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import Avatar from '../Avatar/Avatar';
+import { GuestLabel } from '../GuestLabel';
 import { Hash, Lock } from 'lucide-react';
 import { PluginKey } from '@tiptap/pm/state';
 import { UserStatus, type MentionResult } from '@xyne/shared';
@@ -32,6 +33,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
           >
             {item.name}
           </span>
+          <GuestLabel role={user?.role} />
           {hasValidStatus && !isDeactivated && (
             <span className='inline-flex flex-shrink-0'>{renderEmoji(status.emoji)}</span>
           )}

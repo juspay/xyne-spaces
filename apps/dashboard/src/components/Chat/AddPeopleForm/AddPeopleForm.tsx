@@ -293,6 +293,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
       <div>
         <SearchUser
           excludeUserIds={existingUserIds}
+          excludeGuests
           selectedUsers={selectedUsers}
           onUsersChange={setSelectedUsers}
           placeholder='Search users to add to channel...'

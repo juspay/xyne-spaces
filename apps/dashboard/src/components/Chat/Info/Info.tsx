@@ -1,5 +1,6 @@
 import React, { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { queries } from '../../../zero/queries';
 import {
   ChannelVisibility,
@@ -648,6 +649,7 @@ const ParticipantListItem = ({
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2'>
             <span className='text-sm truncate text-foreground'>{getUserDisplayName(user)}</span>
+            <GuestLabel role={user?.role} />
             {hasValidStatus && (
               <Tooltip
                 content={`${user?.statusContent || 'Status'}`}
