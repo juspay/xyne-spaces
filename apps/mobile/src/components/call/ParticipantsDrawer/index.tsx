@@ -13,8 +13,8 @@ import { useZero } from '@/src/hooks/useZero';
 import { queries } from '@/src/zero/queries';
 import { mutators } from '@/src/zero/mutators';
 import { callService } from '@/src/services/Call/callService';
-import { InvitationResponse } from '@xyne/shared';
-import { getInvitedRowLabel, isBroadcastChannelCall, toRingStatus } from '../callRoster.utils';
+import { InvitationResponse, isSilentChannelCall } from '@xyne/shared';
+import { getInvitedRowLabel, toRingStatus } from '../callRoster.utils';
 import { getAvatarColors } from '../callStage.utils';
 import { CallSheetBackdrop } from '../CallSheetBackdrop';
 import { callColors } from '../callTheme';
@@ -129,7 +129,7 @@ export function ParticipantsDrawer({
     const call = currentCall as
       { channelId?: string | null; callOrigin?: string | null } | undefined;
     const channel = call?.channelId ? allChannels.find(c => c.id === call.channelId) : undefined;
-    return isBroadcastChannelCall(channel, call?.callOrigin);
+    return isSilentChannelCall(channel, call?.callOrigin);
   }, [allChannels, currentCall]);
 
   const internalCallId = (currentCall as unknown as { id?: string } | undefined)?.id;

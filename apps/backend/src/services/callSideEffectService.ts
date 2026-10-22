@@ -14,21 +14,10 @@ import {
   MessageType,
   InvitationResponse,
   NotificationType,
-  ChannelScopeType,
-  ChannelType,
   CallType,
   CallOrigin,
+  isSilentChannelCall,
 } from '@xyne/shared';
-
-// Whole-channel calls in a DEFAULT channel ring nobody (channels can be huge);
-// SDLC hubs are the exception and always ring.
-const isSilentChannelCall = (
-    channel: { scopeType: string; type: string } | null,
-    callOrigin: string | null
-): boolean =>
-    channel?.scopeType === ChannelScopeType.DEFAULT &&
-    channel.type !== ChannelType.SDLC &&
-    callOrigin === CallOrigin.CHANNEL;
 
 class CallSideEffectService {
     private logger = logger.child({ module: 'CallSideEffectService' });

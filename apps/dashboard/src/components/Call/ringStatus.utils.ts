@@ -1,9 +1,8 @@
 import {
-  CallOrigin,
   ChannelScopeType,
-  ChannelType,
   InvitationResponse,
   RingStatus,
+  isSilentChannelCall,
 } from '@xyne/shared';
 import { useChannel } from '../../hooks/useChannels';
 
@@ -71,11 +70,7 @@ export function useIsBroadcastChannelCall(
   callOrigin: string | null | undefined,
 ): boolean {
   const channel = useChannel(channelId ?? '');
-  return (
-    channel?.scopeType === ChannelScopeType.DEFAULT &&
-    channel.type !== ChannelType.SDLC &&
-    callOrigin === CallOrigin.CHANNEL
-  );
+  return isSilentChannelCall(channel, callOrigin);
 }
 
 // True only for a one-on-one DM call, not a group DM or a channel call.
