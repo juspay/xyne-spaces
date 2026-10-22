@@ -1,6 +1,7 @@
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
 import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { MAX_BULK_TICKETS } from "./servers/bulk-tickets.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");
@@ -469,7 +470,8 @@ register("xyne-spaces", "spaces-create-bulk-tickets", async (params, credentials
   // field and a cheerful success line. Validated against each distinct board
   // the batch touches, which is almost always exactly one.
   const tickets = Array.isArray(params["tickets"]) ? (params["tickets"] as Array<Record<string, unknown>>) : [];
-  if (tickets.length === 0) return "tickets must contain at least one ticket";
+  const sizeError = bulkTicketCountError(tickets.length);
+  if (sizeError) return sizeError;
   const defaultBoardId = (params["boardId"] as string | undefined)?.trim();
   const asMap = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -496,6 +498,22 @@ register("xyne-spaces", "spaces-create-bulk-tickets", async (params, credentials
   }
   return null;
 });
+
+register("xyne-spaces", "spaces-update-bulk-tickets", async (params) => {
+  const tickets = Array.isArray(params["tickets"]) ? params["tickets"] : [];
+  return bulkTicketCountError(tickets.length);
+});
+
+// The bulk handlers refuse more than MAX_BULK_TICKETS, but they run only after
+// approval — so without this the user approves a card that is bound to fail.
+// Rejecting at queue time hands the agent the limit to re-plan into batches.
+function bulkTicketCountError(count: number): string | null {
+  if (count === 0) return "tickets must contain at least one ticket";
+  if (count > MAX_BULK_TICKETS) {
+    return `too many tickets (${count} > ${MAX_BULK_TICKETS}); split them into calls of ${MAX_BULK_TICKETS} or fewer, one approval each`;
+  }
+  return null;
+}
 
 register("xyne-spaces", "spaces-schedule-call", async (params) => {
   const title = (params["title"] as string | undefined)?.trim();
