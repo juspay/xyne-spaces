@@ -21,6 +21,7 @@ import {
 import { BottomSheet } from '@/src/components/ui/bottom-sheet';
 import { SheetOverlayPortalContext } from '@/src/components/ui/app-bottom-sheet';
 import { useDraftAttachments } from '@/src/hooks/useDraftAttachments';
+import { Event, logger } from '@/src/utils/logger';
 import { ATTACHMENT_PICKER_FILE_TYPES } from './utils/attachments';
 import { ingestComposerAttachments } from './utils/pasteComposerAttachments';
 import {
@@ -212,6 +213,10 @@ const OpenAttachmentsSheet = ({ isOpen }: { isOpen: boolean }): ReactElement => 
       const picked = await picker([...ATTACHMENT_PICKER_FILE_TYPES], remainingAttachmentSlots);
       await handleAttachmentsAdded(picked);
     } catch (error) {
+      logger.logError(Event.FRONTEND_ERROR, error, {
+        context: 'attachment_picker',
+        source: 'composer',
+      });
       const message = error instanceof Error ? error.message : 'Unable to add attachment';
       Alert.alert('Attachment unavailable', message);
     } finally {

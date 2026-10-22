@@ -1,3 +1,4 @@
+import { useValue } from '@legendapp/state/react';
 import { memo, useMemo, type ReactElement } from 'react';
 import { View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,6 +15,9 @@ import {
 } from '@/src/components/conversation-composer/utils/htmlToMD';
 import { buildComposerMarkdownStyle } from '@/src/components/conversation-composer/utils/markdownStyle';
 import { RichInlineText } from '@/src/components/conversation-composer/rich-inline-text';
+import { MessageAttachmentsGrid } from '@/src/components/chat/all-threads-list/message-attachments-grid';
+import { appliedActivityPreferences$ } from '@/src/features/activity/state/preferences-store';
+import type { MessageAttachment } from '@/src/hooks/useThreadConversationPreview';
 import type { ActivityWithRelated } from '@/src/types/activity';
 import { useActivityRenderContext } from './activity-v2/activity-render-context';
 
@@ -35,7 +39,7 @@ const CompactPreviewSkeleton = (): ReactElement => (
   </View>
 );
 
-const ActivityV2MessageContentInner = ({
+const MessagePreview = ({
   message,
   currentUser,
   maxLines = 2,
@@ -129,6 +133,50 @@ const ActivityV2MessageContentInner = ({
         pointerEvents='none'
       />
     </View>
+  );
+};
+
+const NO_ATTACHMENTS: readonly MessageAttachment[] = [];
+
+/**
+ * The message's attachments, in the grid the Threads screen and the Spaces
+ * Activity screen use — drawn only in the Detailed view.
+ */
+const MessageAttachments = ({
+  message,
+}: {
+  message: NonNullable<ActivityWithRelated['message']>;
+}): ReactElement | null => {
+  const raw = message.attachments;
+  const attachments = useMemo<readonly MessageAttachment[]>(
+    () =>
+      raw && raw.length > 0
+        ? raw.map(a => ({
+            id: a.id,
+            mimetype: a.mimetype ?? 'application/octet-stream',
+            ...(a.originalFilename ? { originalFilename: a.originalFilename } : {}),
+            ...(a.size !== null && a.size !== undefined ? { size: a.size } : {}),
+            ...(a.metadata ? { metadata: a.metadata as { duration?: number } } : {}),
+          }))
+        : NO_ATTACHMENTS,
+    [raw],
+  );
+
+  const conversationId = message.conversation?.conversationId;
+  if (attachments.length === 0 || conversationId === undefined) return null;
+  return <MessageAttachmentsGrid attachments={attachments} conversationId={conversationId} />;
+};
+
+const ActivityV2MessageContentInner = (props: Props): ReactElement => {
+  // Condensed leaves attachments out, as on the Spaces Activity screen.
+  const showsAttachments = useValue(appliedActivityPreferences$.viewMode) === 'detailed';
+
+  return (
+    <>
+      <MessagePreview {...props} />
+      {/* Outside the preview, which takes no touches, so a tap opens the viewer. */}
+      {showsAttachments ? <MessageAttachments message={props.message} /> : null}
+    </>
   );
 };
 

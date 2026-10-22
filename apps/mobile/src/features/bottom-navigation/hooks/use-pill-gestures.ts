@@ -45,7 +45,6 @@ type PillGestures = {
 
 export function usePillGestures(
   { hoveredTab, commitTab, releaseHover }: ActiveTab,
-  searchProgress: SharedValue<number>,
   menuProgress: SharedValue<number>,
   toggleMenu: () => void,
   hoveredMenuItem: SharedValue<number>,
@@ -93,7 +92,7 @@ export function usePillGestures(
         touchY.set(event.y);
         pillPressed.set(withTiming(1, { duration: 80 }));
         glowProgress.set(1);
-        if (searchProgress.get() < 0.5) hoveredTab.set(detectAnyTab(event.x));
+        hoveredTab.set(detectAnyTab(event.x));
       })
       .onFinalize(settle);
 
@@ -118,8 +117,6 @@ export function usePillGestures(
           event.y < 0 ? event.y : event.y > PILL_HEIGHT ? event.y - PILL_HEIGHT : 0;
         overflowX.set(nextOverflowX);
         overflowY.set(nextOverflowY);
-
-        if (searchProgress.get() >= 0.5) return;
 
         if (
           nextOverflowY < MENU_DRAG_THRESHOLD &&
@@ -171,7 +168,7 @@ export function usePillGestures(
           return;
         }
 
-        if (menuTriggeredByDrag.get() || searchProgress.get() >= 0.5) return;
+        if (menuTriggeredByDrag.get()) return;
 
         const target = hoveredTab.get();
         if (target >= 0 && target <= MAX_SWITCHABLE_TAB) {
@@ -198,7 +195,6 @@ export function usePillGestures(
     overflowY,
     pillPressed,
     releaseHover,
-    searchProgress,
     toggleMenu,
     touchX,
     touchY,

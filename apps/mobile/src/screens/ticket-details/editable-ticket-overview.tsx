@@ -42,6 +42,8 @@ import {
   buildUserGroupOptions,
 } from './picker-options';
 import { runTicketMutation } from './run-ticket-mutation';
+import { TicketCustomFieldsSection } from '@/src/features/xyne-desks/detail/custom-fields';
+
 import { OverviewTab } from './tabs/OverviewTab';
 import { TicketDetailsPickers } from './ticket-details-pickers';
 import { mapAppliedLabels } from './ticket-labels';
@@ -338,6 +340,14 @@ export function EditableTicketOverview({
         onSaveTitle={handleSaveTitle}
         onSaveDescription={handleSaveDescription}
         contentPaddingTop={contentPaddingTop}
+        customFields={
+          <TicketCustomFieldsSection
+            ticketId={ticketId}
+            boardId={selectedBoardId}
+            workspaceId={ticket.workspaceId ?? null}
+            isArchived={Boolean((ticket as { isArchived?: boolean | null }).isArchived)}
+          />
+        }
       />
 
       <TicketDetailsPickers

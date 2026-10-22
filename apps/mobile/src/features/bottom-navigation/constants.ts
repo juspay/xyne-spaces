@@ -5,28 +5,14 @@ import { useUniwind } from 'uniwind';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 /**
- * Inset of the resting bar from the screen edges, and the gap between the pill
- * and the search button. These two are what make the pill read as compact.
+ * Inset of the bar from the screen edges, and the gap between the pill and the
+ * Ask AI button. These two are what make the pill read as compact.
  */
 export const TAB_BAR_HORIZONTAL_PADDING = 26;
 export const TAB_BAR_GAP = 18;
 
-/**
- * The same two measurements once the field is out.
- *
- * Tighter on purpose: the search input wants every point of width it can get,
- * and the bar is no longer a floating pill at that moment — it spans the
- * screen, so a wide inset reads as wasted space rather than as breathing room.
- * Kept separate from the resting pair so widening the field cannot loosen the
- * pill, which is what happened when one constant served both.
- */
-export const TAB_BAR_SEARCH_HORIZONTAL_PADDING = 12;
-export const TAB_BAR_SEARCH_GAP = 10;
-
 export const PILL_HEIGHT = 56;
-export const SEARCH_ACTIVE_HEIGHT = 46;
 export const PILL_BORDER_RADIUS = PILL_HEIGHT / 2;
-export const SEARCH_ACTIVE_RADIUS = SEARCH_ACTIVE_HEIGHT / 2;
 
 export const ICON_SIZE = 26;
 
@@ -56,13 +42,15 @@ export const ICON_PADDING = 4;
 /** Vertical inset of a tab's highlight inside the pill. */
 export const INDICATOR_INSET = 4;
 
-export const SEARCH_BUTTON_SIZE = 56;
-export const SEARCH_BAR_RADIUS = PILL_BORDER_RADIUS;
+/**
+ * The round button beside the pill (Ask AI). The list FABs and the Activity
+ * filter button take the same size and radius, so they line up with it.
+ */
+export const ACTION_BUTTON_SIZE = 56;
+export const ACTION_BUTTON_RADIUS = PILL_BORDER_RADIUS;
 
 export const TOTAL_WIDTH = SCREEN_WIDTH - 2 * TAB_BAR_HORIZONTAL_PADDING;
-export const PILL_WIDTH = TOTAL_WIDTH - TAB_BAR_GAP - SEARCH_BUTTON_SIZE;
-export const CLOSE_BUTTON_SIZE = SEARCH_BUTTON_SIZE;
-export const SEARCH_BAR_WIDTH = TOTAL_WIDTH - TAB_BAR_GAP - CLOSE_BUTTON_SIZE;
+export const PILL_WIDTH = TOTAL_WIDTH - TAB_BAR_GAP - ACTION_BUTTON_SIZE;
 
 export const TAB_BAR_BOTTOM_PADDING = 8;
 /** Extra space between the pill and the bottom edge, above the safe-area padding. */
@@ -185,23 +173,6 @@ export function useTabBarPalette(): TabBarPalette {
     menuHighlight: ACTIVE_TAB_INDICATOR,
   };
 }
-
-export const COLORS = {
-  background: '#0A0A0A',
-  surface: 'rgba(255, 255, 255, 0.06)',
-  surfaceHover: 'rgba(255, 255, 255, 0.12)',
-  textPrimary: 'rgba(255, 255, 255, 0.9)',
-  textSecondary: 'rgba(255, 255, 255, 0.4)',
-  border: 'rgba(255, 255, 255, 0.12)',
-  glassGradientTop: 'rgba(255, 255, 255, 0.11)',
-  glassGradientBottom: 'rgba(255, 255, 255, 0.05)',
-  accentBlue: '#3B82F6',
-  iconDefault: 'rgba(255, 255, 255, 0.9)',
-  iconActive: 'rgba(255, 255, 255, 0.9)',
-  borderGradientBright: 'rgba(255, 255, 255, 0.15)',
-  borderGradientDim: 'rgba(255, 255, 255, 0.01)',
-  borderGradientMedium: 'rgba(255, 255, 255, 0.06)',
-} as const;
 
 /** Cross-fade when the active highlight moves from one tab to another. */
 export const INDICATOR_FADE = { duration: 180, easing: Easing.out(Easing.cubic) } as const;

@@ -20,6 +20,12 @@ import { flowActionValuesFor } from './flowActionValues';
 
 const HOLD_UNTIL_SYNC_MS = 12_000;
 
+/** What a flow card needs to know about the message that carries it. */
+export type FlowHost = Pick<
+  MessageRowModel,
+  'conversationId' | 'messageId' | 'messageType' | 'viewerId'
+>;
+
 type UseFlowMessageActionResult = {
   activeFlow: FlowDefinitionLike;
   isSubmitting: boolean;
@@ -31,7 +37,8 @@ type UseFlowMessageActionResult = {
 /** v3-native version of v2's flow action hook; target comes from the row model. */
 export const useFlowMessageAction = (
   flow: FlowDefinitionLike,
-  model: MessageRowModel,
+  model: FlowHost,
+  onClose?: () => void,
 ): UseFlowMessageActionResult => {
   const [overrideFlow, setOverrideFlow] = useRecyclingState<FlowDefinitionLike | null>(
     model.conversationId,
@@ -152,6 +159,7 @@ export const useFlowMessageAction = (
           setOverrideFlow(next.flow);
           return;
         }
+        if (response.type === 'close_screen') onClose?.();
         if (response.type === 'close_screen' || response.type === 'ack') {
           holdUntilSyncRef.current = true;
           holdTimerRef.current = setTimeout(releaseSubmit, HOLD_UNTIL_SYNC_MS);
@@ -165,6 +173,7 @@ export const useFlowMessageAction = (
     },
     [
       isForwarded,
+      onClose,
       releaseSubmit,
       setOverrideFlow,
       setIsSubmitting,

@@ -12,6 +12,7 @@ import { haptics } from '@/src/utils/haptics';
 import { showMessageToast } from '@/src/utils/toast';
 import { mutators } from '@/src/zero/mutators';
 import { useChannelById } from '@/src/hooks/useChannels';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 
 import { removeTicketsFromPaintCache } from '../../tickets/utils';
 import { TICKET_DETAIL_TABS_HEIGHT } from '../constants';
@@ -206,10 +207,25 @@ export default function TicketDetailScreen() {
     [detail?.xyneId, xyneId],
   );
 
+  const conversationId = detail?.conversationId;
+  // Same scope as the dashboard's ticket Ask AI: the ticket's channel and conversation.
+  const handleAskAI = useCallback((): void => {
+    if (!conversationId) return;
+    router.push({
+      pathname: '/xyne-ai',
+      params: {
+        ...channelScopeParams(deskChannel),
+        conversationId,
+        previewText: detail?.title || 'Ticket conversation',
+      },
+    });
+  }, [conversationId, deskChannel, detail?.title, router]);
+
   return (
     <View className='flex-1 bg-neutral-100 dark:bg-tabs-screen'>
       <TicketDetailHeader
         onBack={handleHeaderBack}
+        onAskAI={conversationId ? handleAskAI : undefined}
         canSummarize={emailSummary.canSummarize}
         isSummarizeLoading={emailSummary.state === 'loading'}
         onSummarize={emailSummary.openSummary}

@@ -5,6 +5,7 @@ import { usePreventRemove } from 'expo-router/react-navigation';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { FormFieldType, TicketPriority } from '@xyne/shared';
 
+import { JoinChannelCard } from '@/src/components/chat/join-channel-card';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { getDeskChannelKind } from '@/src/features/xyne-desks/detail/utils/desk-channel-kind';
 import { useChannelById } from '@/src/hooks/useChannels';
@@ -873,6 +874,10 @@ export default function TicketsListScreen() {
         isLoadingMore={isLoadingMore}
         onLoadMore={loadMore}
       />
+
+      {!isMember && channelId ? (
+        <JoinChannelCard channelId={channelId} channelTitle={channel?.name} />
+      ) : null}
 
       <TicketsListHeader
         channelName={channelName}

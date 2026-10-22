@@ -18,7 +18,8 @@ import {
 } from '@/src/components/ui/header-icon-button';
 import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData';
 import { haptics } from '@/src/utils/haptics';
-import { CallIcon } from '@/src/components/icons';
+import { CallIcon, XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { ChannelScopeType } from '@xyne/shared';
 
 import { ChatHeaderV3Props } from './chat-header-v3.types';
@@ -138,6 +139,10 @@ const ChatHeaderV3: React.FC<ChatHeaderV3Props> = ({
     router.push({ pathname: '/(protected)/chat/[channelId]/info', params: { channelId } });
   }, [router, channelId]);
 
+  const handleAskAI = useCallback(() => {
+    router.push({ pathname: '/xyne-ai', params: channelScopeParams(channel) });
+  }, [channel, router]);
+
   return (
     <View
       className='absolute left-0 right-0'
@@ -239,6 +244,10 @@ const ChatHeaderV3: React.FC<ChatHeaderV3Props> = ({
               )}
             </HeaderPill>
           </Pressable>
+
+          <HeaderIconButton liquidGlass accessibilityLabel='Ask AI' onPress={handleAskAI}>
+            <XyneAIStarIcon />
+          </HeaderIconButton>
 
           <HeaderIconButton
             liquidGlass

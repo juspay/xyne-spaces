@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Pencil } from 'lucide-react-native';
 
 import { DASHBOARD_ORIGIN } from '@/src/config';
+import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
 import type { Integration } from '@/src/services/claw/clawToolsTypes';
 import {
   connectedProviderCount,
@@ -228,7 +229,9 @@ export const AgentPreviewMain = ({
             <Pressable
               accessibilityRole='link'
               onPress={() => {
-                void WebBrowser.openBrowserAsync(`${DASHBOARD_ORIGIN}/ai/settings`).catch(() => {});
+                void WebBrowser.openBrowserAsync(
+                  `${DASHBOARD_ORIGIN}/${getActiveWorkspaceId()}/ai/settings`,
+                ).catch(() => {});
               }}
             >
               <Text className='text-xs text-flow-card-header-title'>

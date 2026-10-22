@@ -3,9 +3,12 @@ import { Mic, Phone } from 'lucide-react-native';
 
 import type { TabName } from '@/src/navigation/routes';
 
+import { LayersIcon } from '@/src/features/bottom-navigation/icons';
+import { HashIcon } from '@/src/ui/icons';
 import { ContactCardIcon } from '../icons';
 
-export type QuickActionId = 'create-dm' | 'instant-call' | 'record-note';
+export type QuickActionId =
+  'create-dm' | 'create-channel' | 'create-section' | 'instant-call' | 'record-note';
 
 /**
  * The shape a lucide icon and one of ours both satisfy, so an action can
@@ -36,6 +39,8 @@ export type QuickAction = {
 export const QUICK_ACTIONS = [
   { id: 'instant-call', label: 'Start instant Call', icon: Phone },
   { id: 'create-dm', label: 'New Message', icon: ContactCardIcon },
+  { id: 'create-channel', label: 'Create channel', icon: HashIcon },
+  { id: 'create-section', label: 'Create section', icon: LayersIcon },
   { id: 'record-note', label: 'Record Note', icon: Mic },
 ] as const satisfies readonly QuickAction[];
 
@@ -57,7 +62,9 @@ const SHARED_ACTIONS: readonly QuickActionId[] = ['instant-call', 'record-note']
  */
 const TAB_ACTIONS = {
   dms: ['create-dm'],
-  // channels: ['create-channel'], ← lands with the channels redesign
+  channels: ['create-channel', 'create-section'],
+  // Nothing of its own: the shared actions are the whole menu here.
+  activity: [],
 } as const satisfies Partial<Record<TabName, readonly QuickActionId[]>>;
 
 type TabWithActions = keyof typeof TAB_ACTIONS;

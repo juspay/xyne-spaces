@@ -5,10 +5,14 @@ import { useZero } from '@/src/hooks/useZero';
 import { queries } from '@/src/zero/queries';
 import { mutators } from '@/src/zero/mutators';
 import { keyBetween } from '@/src/components/chat/channel-list/section-utils';
-import type { ChannelSection } from '@xyne/shared';
+import type { ChannelFilterMode, ChannelSortOrder, ChannelSection } from '@xyne/shared';
 
 export type UseChannelSectionsResult = {
   sections: readonly ChannelSection[];
+  updatePreference: (
+    id: string,
+    patch: { filterMode?: ChannelFilterMode; sortOrder?: ChannelSortOrder | null },
+  ) => void;
   existingNames: string[];
   createSection: (name: string) => string;
   renameSection: (id: string, name: string, emoji?: string | null) => void;
@@ -121,7 +125,18 @@ export function useChannelSections(): UseChannelSectionsResult {
     [zero],
   );
 
+  const updatePreference = useCallback(
+    (
+      id: string,
+      patch: { filterMode?: ChannelFilterMode; sortOrder?: ChannelSortOrder | null },
+    ) => {
+      void zero.mutate(mutators.channelSection.update({ id, ...patch, timestamp: Date.now() }));
+    },
+    [zero],
+  );
+
   return {
+    updatePreference,
     sections,
     existingNames,
     createSection,

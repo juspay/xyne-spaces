@@ -8,7 +8,10 @@ import { Alert, Keyboard } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSelector } from '@xstate/react';
 
+import { isDeskChannelType } from '@xyne/shared';
+
 import { useAuth } from '@/src/contexts/AuthContext';
+import { getChannelById } from '@/src/hooks/useChannels';
 import { stateMachineActor } from '@/src/machines/appStateMachine';
 import { ChannelService } from '@/src/services/ChannelService';
 import type { DisplaySearchResult } from '@/src/types/search';
@@ -103,6 +106,12 @@ export function useSearchNavigation(onLeave: () => void): SearchNavigation {
 
   const openChannel = useCallback(
     (item: SearchChannelItem) => {
+      if (isDeskChannelType(getChannelById(item.id)?.type)) {
+        leaveSearch(() => {
+          router.push(`/xyne-desks/${item.id}`);
+        });
+        return;
+      }
       leaveSearch(() => openBaseChatRoute(router, item.id, { surface: 'channels' }));
     },
     [leaveSearch, router],

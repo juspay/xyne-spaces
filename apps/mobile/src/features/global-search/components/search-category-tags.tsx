@@ -22,7 +22,8 @@ const CONTENT_CONTAINER_STYLE = {
   paddingBottom: 0,
 };
 
-const STYLE = {
+/** ScrollView `style` only — child layout props like alignItems belong in contentContainerStyle. */
+const TABS_STYLE = {
   height: SEARCH_CATEGORY_ROW_HEIGHT,
   marginTop: SEARCH_CATEGORY_ROW_TOP_GAP,
   // ScrollView's own base style sets flexShrink: 1, so inside the toolbar's
@@ -50,7 +51,7 @@ export function SearchCategoryTags({ tab, onTabChange }: SearchCategoryTagsProps
       // No haptic here — ChatFilterTabs fires a selection one on change.
       onTabChange={onTabChange}
       keyboardShouldPersistTaps='always'
-      style={STYLE}
+      style={TABS_STYLE}
       contentContainerStyle={CONTENT_CONTAINER_STYLE}
     />
   );

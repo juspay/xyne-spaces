@@ -18,6 +18,8 @@ import { useCSSVariable } from 'uniwind';
 import { ChatThread } from '@/src/features/chat/v2/components/chat/chat-thread';
 import { parseAssigneeRef } from '@/src/features/channel-tickets/utils/parse-assignee-ref';
 import { HeaderBackButton, HeaderIconButton } from '@/src/components/ui/header-icon-button';
+import { XyneAIStarIcon } from '@/src/components/icons';
+import { channelScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { UnreadCountBadge } from '@/src/components/ui/unread-count-badge';
 import { useBoards } from '@/src/hooks/useBoards';
 import { useCachedQuery } from '@/src/hooks/useCachedQuery';
@@ -59,6 +61,7 @@ import { firstNonEmptyId, resolveEffectiveTicketId } from './ticket-details/reso
 import { runTicketMutation } from './ticket-details/run-ticket-mutation';
 import { isChatV3Enabled } from '@/src/features/chat/v3/flag';
 import { TicketThreadPane } from '@/src/features/chat/v3/screens/TicketThreadPane';
+import { TicketCustomFieldsSection } from '@/src/features/xyne-desks/detail/custom-fields';
 import { OverviewTab } from './ticket-details/tabs/OverviewTab';
 import { TicketDetailsPickers } from './ticket-details/ticket-details-pickers';
 import { mapAppliedLabels } from './ticket-details/ticket-labels';
@@ -392,6 +395,15 @@ export function TicketDetailsScreen({
     });
   }, [activeTab, channelId, conversationId, effectiveTicketId]);
 
+  // Same scope as the dashboard's ticket Ask AI: the ticket's channel and conversation.
+  const handleAskAI = useCallback((): void => {
+    if (!conversationId) return;
+    router.push({
+      pathname: '/xyne-ai',
+      params: { ...channelScopeParams(channel), conversationId, previewText: title },
+    });
+  }, [channel, conversationId, router, title]);
+
   const handleCopyTicketLink = useCallback((): void => {
     if (!ticketShareLink) {
       showMessageToast('This ticket does not have a link yet.', 'warning');
@@ -480,6 +492,14 @@ export function TicketDetailsScreen({
           >
             <Copy size={20} color={foregroundColor} />
           </HeaderIconButton>
+          <HeaderIconButton
+            liquidGlass
+            accessibilityLabel='Ask AI'
+            disabled={!conversationId}
+            onPress={handleAskAI}
+          >
+            <XyneAIStarIcon />
+          </HeaderIconButton>
         </View>
 
         <View className='border-b border-ticket-header-accessory'>
@@ -537,6 +557,19 @@ export function TicketDetailsScreen({
               metaRows={metaRows}
               onSaveTitle={handleSaveTitle}
               onSaveDescription={handleSaveDescription}
+              customFields={
+                <TicketCustomFieldsSection
+                  ticketId={effectiveTicketId}
+                  boardId={selectedBoardId}
+                  workspaceId={
+                    (ticket as { workspaceId?: string | null } | undefined)?.workspaceId ??
+                    getActiveWorkspaceId()
+                  }
+                  isArchived={Boolean(
+                    (ticket as { isArchived?: boolean | null } | undefined)?.isArchived,
+                  )}
+                />
+              }
             />
           }
           thread={

@@ -56,7 +56,7 @@ function ContextBody({
     return (): void => clearTimeout(timer);
   }, [query]);
   const channels = useChannelsSearch(tab === 'channels' ? query : null);
-  const people = usePeopleSearch(tab === 'people' ? query : null, false);
+  const people = usePeopleSearch(tab === 'people' ? query : null);
   const remote = useSearchResults(
     tab === 'channels' || tab === 'people'
       ? null
@@ -65,6 +65,8 @@ function ContextBody({
           query: debounced,
           chips: [],
           onlyMyChannels: false,
+          includeBotMessages: false,
+          exactMatch: false,
           scope: null,
         }),
   );
@@ -76,7 +78,7 @@ function ContextBody({
             const value = contextItemFromResult({
               id: item.id,
               type: tab === 'channels' ? 'channel' : 'user',
-              title: item.title,
+              title: tab === 'people' ? (item.name ?? item.title) : item.title,
               subtitle: '',
               metadata: {},
               relevanceScore: 0,

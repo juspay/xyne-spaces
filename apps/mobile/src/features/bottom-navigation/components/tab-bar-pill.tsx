@@ -16,7 +16,7 @@ import type { TabEntry } from '../model/catalog';
 
 import { GlassMaterial } from './glass-material';
 import { MenuPanel } from './menu-panel';
-import { GlowOverlay } from './search-field';
+import { GlowOverlay } from './glow-overlay';
 import { TabIcon } from './tab-icon';
 import {
   ICON_PADDING,
@@ -45,7 +45,6 @@ export type TabBarPillProps = {
   activeIndex: number;
   /** Unread badge text per pill index, aligned with `icons`. */
   badgeLabels: readonly (string | null)[];
-  searchProgress: SharedValue<number>;
   menuProgress: SharedValue<number>;
   pillAnimatedStyle: AnimatedStyle<ViewStyle>;
   pillPressed: SharedValue<number>;
@@ -74,7 +73,6 @@ export const TabBarPill = memo(function TabBarPill({
   labels,
   activeIndex,
   badgeLabels,
-  searchProgress,
   menuProgress,
   pillAnimatedStyle,
   pillPressed,
@@ -137,7 +135,6 @@ export const TabBarPill = memo(function TabBarPill({
                   isActive={activeIndex === index}
                   badgeLabel={badgeLabels[index] ?? null}
                   menuDestinationIcon={index === MENU_TAB_INDEX ? menuDestinationIcon : null}
-                  searchProgress={searchProgress}
                   menuProgress={menuProgress}
                   pillPressed={pillPressed}
                   touchX={touchX}

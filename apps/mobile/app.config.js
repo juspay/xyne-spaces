@@ -53,6 +53,8 @@ module.exports = ({ config }) => {
           'Allow Xyne Spaces to use your camera for calls, attachments, and device enrollment.',
         NSMicrophoneUsageDescription:
           'Allow Xyne Spaces to use your microphone for calls and voice features.',
+        NSSpeechRecognitionUsageDescription:
+          'Allow Xyne Spaces to turn what you say into text for Xyne AI.',
         NSLocationWhenInUseUsageDescription: 'Allow Xyne Spaces to access your location.',
         UIBackgroundModes: ['voip', 'remote-notification', 'fetch', 'audio'],
         AppGroupIdentifier: iosAppGroupIdentifier(v),
@@ -111,8 +113,10 @@ module.exports = ({ config }) => {
     },
     plugins: [
       'expo-asset',
+      'expo-speech-recognition',
       '@react-native-community/datetimepicker',
       './plugins/withAppStartupTimingsIOS.cjs',
+      './plugins/withSceneDelegateIOS.cjs',
       './plugins/withFirebaseModularHeaders.cjs',
       './plugins/withEnrichedMarkdownNoMath.cjs',
       './plugins/withAndroidAppConfig.cjs',

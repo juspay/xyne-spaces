@@ -7,6 +7,8 @@
 export type SearchPersonItem = {
   id: string;
   title: string;
+  /** The plain name, without the display decorations in `title`. */
+  name: string;
   subtitle?: string;
   statusEmoji?: string;
 };
@@ -15,6 +17,8 @@ export type SearchPersonItem = {
 export type SearchChannelItem = {
   id: string;
   title: string;
+  /** The plain name, without the display decorations in `title`. */
+  name: string;
   visibility?: string;
   unreadCount?: number;
   isStarred?: boolean;

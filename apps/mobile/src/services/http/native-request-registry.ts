@@ -1,6 +1,8 @@
 import { NativeModules } from 'react-native';
 import { v4 as uuidv4 } from 'uuid';
 
+import { RequestAbortedError } from './request-errors';
+
 /**
  * Bridges a JS `AbortSignal` to a native in-flight request.
  *
@@ -17,20 +19,6 @@ type CancellableCertificateModule = {
 
 const CertificateModule = NativeModules['CertificateModule'] as
   CancellableCertificateModule | undefined;
-
-export class RequestAbortedError extends Error {
-  constructor(message = 'Request aborted') {
-    super(message);
-    this.name = 'RequestAbortedError';
-  }
-}
-
-export class RequestTimeoutError extends Error {
-  constructor(message = 'Request timed out') {
-    super(message);
-    this.name = 'RequestTimeoutError';
-  }
-}
 
 /** Native reject codes that mean "we cancelled this on purpose", not "it failed". */
 const CANCELLED_CODES = new Set(['MTLS_CANCELLED', 'ERR_CANCELED']);

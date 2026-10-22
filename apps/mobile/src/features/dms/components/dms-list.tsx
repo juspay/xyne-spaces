@@ -3,9 +3,12 @@ import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { type LegendListRef } from '@legendapp/list/react-native';
 import { useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
-import { useSpacesTabBarHeight } from '@/src/features/bottom-navigation';
+import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
+
+import { useFabClearance } from '@/src/features/quick-actions';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
 import {
@@ -50,6 +53,13 @@ export function DmsList({ onChannelSelect }: DmsListProps = {}): ReactElement {
 
   const listRef = useRef<LegendListRef>(null);
 
+  // Written by the list on the UI thread; only the button reads it.
+  const scrollOffset = useSharedValue(0);
+  const sharedValues = useMemo(() => ({ scrollOffset }), [scrollOffset]);
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
+  }, []);
+
   /**
    * A new filter is a new list, so it starts at the top.
    *
@@ -69,7 +79,7 @@ e
   useReportTabReady('dms', !(isLoading && isEmpty));
 
   const { theme } = useUniwind();
-  const bottomInset = useSpacesTabBarHeight();
+  const bottomInset = useFabClearance();
 
   const renderItem = useCallback(
     ({ item }: { item: string }) => (
@@ -146,35 +156,39 @@ e
   }, [hasLoadError, isEmpty, isFiltering, isLoading]);
 
   return (
-    <AnimatedLegendList
-      ref={listRef}
-      data={order}
-      renderItem={renderItem}
-      keyExtractor={keyExtractor}
-      getItemType={getItemType}
-      // Fixed, so the list never measures a row and never corrects a scroll
-      // position after one lands.
-      estimatedItemSize={DM_ROW_HEIGHT}
-      getFixedItemSize={getFixedItemSize}
-      recycleItems
-      drawDistance={700}
-      // Recycled rows keep their component instance, so a theme switch would
-      // otherwise leave resolved colors from the old theme on screen.
-      extraData={theme}
-      ListHeaderComponent={<DmsFilterBar />}
-      ListEmptyComponent={empty}
-      onEndReached={loadMore}
-      onEndReachedThreshold={END_REACHED_THRESHOLD}
-      keyboardDismissMode='on-drag'
-      keyboardShouldPersistTaps='handled'
-      showsVerticalScrollIndicator={false}
-      style={{ flex: 1 }}
-      contentContainerStyle={{
-        paddingBottom: bottomInset + 24,
-        flexGrow: order.length === 0 ? 1 : undefined,
-        paddingBlock: 12,
-      }}
-      className='bg-spaces-background'
-    />
+    <View className='flex-1'>
+      <AnimatedLegendList
+        ref={listRef}
+        sharedValues={sharedValues}
+        data={order}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        getItemType={getItemType}
+        // Fixed, so the list never measures a row and never corrects a scroll
+        // position after one lands.
+        estimatedItemSize={DM_ROW_HEIGHT}
+        getFixedItemSize={getFixedItemSize}
+        recycleItems
+        drawDistance={700}
+        // Recycled rows keep their component instance, so a theme switch would
+        // otherwise leave resolved colors from the old theme on screen.
+        extraData={theme}
+        ListHeaderComponent={<DmsFilterBar />}
+        ListEmptyComponent={empty}
+        onEndReached={loadMore}
+        onEndReachedThreshold={END_REACHED_THRESHOLD}
+        keyboardDismissMode='on-drag'
+        keyboardShouldPersistTaps='handled'
+        showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingBottom: bottomInset,
+          flexGrow: order.length === 0 ? 1 : undefined,
+          paddingBlock: 12,
+        }}
+        className='bg-spaces-background'
+      />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+    </View>
   );
 }

@@ -10,13 +10,11 @@ import {
 import { StyleSheet, View } from 'react-native';
 import { Tabs, useRouter, type Href } from 'expo-router';
 import { ChevronsIcon } from '../icons';
-import { searchField$, writeSearchQuery } from '@/src/features/global-search/search-field-bridge';
 
 import { SPACES_INITIAL_TAB } from '@/src/navigation/routes';
 
 import { entryHref, tabEntries, tabEntryForRoute } from '../model/catalog';
 import { shouldLeaveHiddenTab } from '../model/hidden-tab-redirect';
-import type { SearchFieldBinding } from './search-field';
 import { tabLayout$ } from '../state/layout-store';
 import { MIN_VISIBLE_TABS } from '../model/layout';
 import { useTabBadgeCounts } from '../hooks/use-badge-counts';
@@ -36,7 +34,6 @@ export enum TabScreens {
   Dms = 'dms',
   Calls = 'calls',
   Activity = 'activity',
-  Search = 'search',
   Threads = 'threads',
   MorningBrief = 'morning-brief',
   Bookmarks = 'bookmarks',
@@ -64,22 +61,12 @@ export function AppTabBar({
   const router = useRouter();
   const currentRoute = state.routes[state.index];
   const routeName = currentRoute?.name ?? '';
-  const isSearchRoute = routeName === TabScreens.Search;
 
   // The pill's gestures are memoised against their callbacks. Reading the route
   // through a ref keeps this identity stable, so a re-render mid-touch cannot
   // rebuild them and drop the `onFinalize` that releases the press state.
   const routeNameRef = useRef(routeName);
   routeNameRef.current = routeName;
-
-  // Where closing search returns to, and which category it opens on. Search is
-  // a destination like any other tab, so without this the close button would
-  // have to guess, and `backBehavior: 'firstRoute'` would land on DMs whatever
-  // the user was actually looking at.
-  const lastNonSearchRouteRef = useRef<string>(TabScreens.Dms);
-  if (routeName !== '' && !isSearchRoute) {
-    lastNonSearchRouteRef.current = routeName;
-  }
 
   /**
    * Everything the bar shows comes from here: the pills are the first three
@@ -121,16 +108,11 @@ export function AppTabBar({
 
   /**
    * Mounted ahead of the first tap so a switch costs a visibility flip rather
-   * than a mount. Search joins the pills because the field that drives it lives
-   * in the bar, and a mount between a keystroke and its results would be the
-   * one stall the user cannot miss. The menu destinations stay lazy — they are
-   * reached rarely and would cost startup memory for nothing.
+   * than a mount. The menu destinations stay lazy — they are reached rarely and
+   * would cost startup memory for nothing.
    */
   const preloadedRoutes = useMemo(
-    () => [
-      ...pillEntries.flatMap(entry => (entry.routeName ? [entry.routeName as string] : [])),
-      TabScreens.Search as string,
-    ],
+    () => pillEntries.flatMap(entry => (entry.routeName ? [entry.routeName as string] : [])),
     [pillEntries],
   );
   usePreloadTabs(navigation, preloadedRoutes);
@@ -212,8 +194,6 @@ export function AppTabBar({
     const previousVisible = previousVisibleRef.current;
     previousVisibleRef.current = visible;
 
-    if (isSearchRoute) return;
-
     const shouldLeave = shouldLeaveHiddenTab({
       activeId: activeEntry?.id ?? '',
       routeName,
@@ -225,39 +205,12 @@ export function AppTabBar({
 
     const fallback = pillEntries[0]?.routeName;
     if (fallback) navigation.navigate(fallback);
-  }, [activeEntry?.id, isSearchRoute, navigation, pillEntries, routeName, visible]);
+  }, [activeEntry?.id, navigation, pillEntries, routeName, visible]);
 
-  const handleSearchOpen = useCallback(() => {
-    // Part 1b seeds `globalSearchStore` here with the category the current tab
-    // implies, and begins the search critical window, before navigating.
-    navigation.navigate(TabScreens.Search);
-  }, [navigation]);
-
-  /**
-   * Binds the bar's field to the search screen's query.
-   *
-   * Only while that screen is actually hosting — otherwise the pill would morph
-   * into a field with nothing behind it, which is what made it look like an
-   * input and behave like a button.
-   */
-  const searchHosted = useValue(searchField$.hosted);
-  const searchQuery = useValue(searchField$.query);
-  const searchPlaceholder = useValue(searchField$.placeholder);
-  const searchBinding = useMemo<SearchFieldBinding | undefined>(
-    () =>
-      searchHosted
-        ? {
-            value: searchQuery,
-            placeholder: searchPlaceholder,
-            onChangeText: writeSearchQuery,
-          }
-        : undefined,
-    [searchHosted, searchPlaceholder, searchQuery],
-  );
-
-  const handleSearchClose = useCallback(() => {
-    navigation.navigate(lastNonSearchRouteRef.current);
-  }, [navigation]);
+  /** Xyne AI is a pushed screen, as from the classic header's Ask AI button. */
+  const handleAskAi = useCallback(() => {
+    router.push('/xyne-ai');
+  }, [router]);
 
   return (
     <View pointerEvents='box-none' style={StyleSheet.absoluteFill}>
@@ -271,12 +224,9 @@ export function AppTabBar({
         menuBadgeLabels={menuBadgeLabels}
         menuDestinationIcon={pillIndex === -1 ? (activeEntry?.icon ?? null) : null}
         activeMenuId={activeEntry?.id ?? null}
-        isSearchRoute={isSearchRoute}
-        searchBinding={searchBinding}
         onTabChange={handleTabChange}
         onMenuSelect={handleMenuSelect}
-        onSearchOpen={handleSearchOpen}
-        onSearchClose={handleSearchClose}
+        onAskAi={handleAskAi}
         onCustomize={onCustomize}
       />
     </View>

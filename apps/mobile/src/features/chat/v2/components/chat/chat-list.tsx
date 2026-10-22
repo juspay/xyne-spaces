@@ -21,6 +21,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { ChannelScopeType, type User } from '@xyne/shared';
 
+import { isChannelQueryMember } from '@/src/hooks/useJoinableChannel';
+import { useChannelById, useGetChannelUserStatus } from '@/src/hooks/useChannels';
 import { haptics } from '@/src/utils/haptics';
 import { DatePill, formatDatePill } from '@/src/components/chat/date-pill';
 import {
@@ -513,9 +515,15 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   const livePresentationEnabled =
     !!isNotificationOpen || hasAnchorOpen || (liveHydrationEnabled ?? true);
   const messageCycleKey = `${channelId}:${linkOpts?.linkedConversationId ?? 'recent'}:${linkOpts?.linkedCreatedAt ?? 'latest'}`;
+  const channelForMembership = useChannelById(channelId);
+  const channelMembership = useGetChannelUserStatus(channelId);
   const channelRef = useMemo(
-    () => ({ kind: 'channel' as const, channelId, isMember: true }),
-    [channelId],
+    () => ({
+      kind: 'channel' as const,
+      channelId,
+      isMember: isChannelQueryMember(channelForMembership, channelMembership),
+    }),
+    [channelForMembership, channelId, channelMembership],
   );
   const [cachedMessageRevision, setCachedMessageRevision] = useState(0);
   const cachedMessageSnapshotRef = useRef<{

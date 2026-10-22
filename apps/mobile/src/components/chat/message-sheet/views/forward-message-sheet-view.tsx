@@ -1,5 +1,5 @@
 import { LegendList } from '@legendapp/list/react-native';
-import { Check, Hash, Image as ImageIcon, Lock, Play, Video, X } from 'lucide-react-native';
+import { Check, Hash, Image as ImageIcon, Lock, Play, Users, Video, X } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useRef, type ReactElement } from 'react';
 import {
   ActivityIndicator,
@@ -37,6 +37,7 @@ import {
   type ForwardMessageSheetTarget,
   type ForwardMessagePreviewAttachment,
 } from './forward-message-view-model';
+import { MAX_FORWARD_RECIPIENTS } from './forward-targets';
 import InputV2 from '@/src/components/ui/input-v2';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 
@@ -241,6 +242,8 @@ const ForwardTargetRow = memo(function ForwardTargetRow({
             <Hash size={15} color={foreground} />
           )}
         </View>
+      ) : item.type === 'group_dm' ? (
+        <Avatar userIds={item.memberIds ?? []} size={32} />
       ) : (
         <Avatar userIds={[item.id]} size={32} />
       )}
@@ -618,7 +621,9 @@ export const ForwardMessageSheetView = ({
   const { closeTargetsPopover, handleSelectItem, inputRef } = vm;
 
   const showList =
-    vm.isInputFocused && (vm.searchQuery.trim().length > 0 || vm.selectionMode === 'none');
+    vm.canAddMoreTargets &&
+    vm.isInputFocused &&
+    (vm.searchQuery.trim().length > 0 || vm.selectionMode === 'none');
 
   const handleSelectTarget = useCallback(
     (item: ForwardSearchListItem) => {
@@ -661,6 +666,7 @@ export const ForwardMessageSheetView = ({
               className='flex-row items-center gap-1.5 rounded-full bg-bottomsheet-container-bg-secondary px-3 py-1.5'
             >
               {t.type === 'channel' ? <Hash size={14} color={containerTextSecondary} /> : null}
+              {t.type === 'group_dm' ? <Users size={14} color={containerTextSecondary} /> : null}
               <Text className='text-sm font-medium text-bottomsheet-container-text-secondary'>
                 {t.name}
               </Text>
@@ -677,33 +683,45 @@ export const ForwardMessageSheetView = ({
         </View>
       ) : null}
 
-      <ForwardTargetsPopover
-        isOpen={showList}
-        items={vm.filteredItems}
-        foreground={foreground}
-        onSelect={handleSelectTarget}
-        onOpenChange={handleTargetsPopoverOpenChange}
-        onInteractionStart={vm.deferTargetsPopoverClose}
-      >
-        <InputV2
-          variant='bottomsheet'
-          inputRef={vm.inputRef}
-          value={vm.searchQuery}
-          onChangeText={vm.setSearchQuery}
-          onFocus={vm.handleInputFocus}
-          onBlur={vm.handleInputBlur}
-          placeholder={
-            vm.selectionMode === 'channel'
-              ? 'Search channels…'
-              : vm.selectionMode === 'users'
+      {vm.canAddMoreTargets ? (
+        <ForwardTargetsPopover
+          isOpen={showList}
+          items={vm.filteredItems}
+          foreground={foreground}
+          onSelect={handleSelectTarget}
+          onOpenChange={handleTargetsPopoverOpenChange}
+          onInteractionStart={vm.deferTargetsPopoverClose}
+        >
+          <InputV2
+            variant='bottomsheet'
+            inputRef={vm.inputRef}
+            value={vm.searchQuery}
+            onChangeText={vm.setSearchQuery}
+            onFocus={vm.handleInputFocus}
+            onBlur={vm.handleInputBlur}
+            placeholder={
+              vm.selectionMode === 'users' || vm.selectionMode === 'group_dm'
                 ? 'Add more users…'
-                : 'Forward to…'
-          }
-          placeholderTextColor={containerTextSecondary}
-          withContainer={false}
-          inputClassName='border-b-[0.5px] border-border px-3 py-3 text-base text-bottomsheet-container-foreground'
-        />
-      </ForwardTargetsPopover>
+                : 'Search channels, groups or users…'
+            }
+            placeholderTextColor={containerTextSecondary}
+            withContainer={false}
+            inputClassName='border-b-[0.5px] border-border px-3 py-3 text-base text-bottomsheet-container-foreground'
+          />
+        </ForwardTargetsPopover>
+      ) : null}
+
+      {vm.selectionMode === 'channel' ? (
+        <Text className='mx-3 text-xs text-bottomsheet-container-text-secondary'>
+          Message will be forwarded to the selected channel
+        </Text>
+      ) : null}
+      {(vm.selectionMode === 'users' || vm.selectionMode === 'group_dm') &&
+      !vm.canAddMoreTargets ? (
+        <Text className='mx-3 text-xs text-bottomsheet-container-text-secondary'>
+          Maximum {MAX_FORWARD_RECIPIENTS} recipients reached. Remove someone to add another.
+        </Text>
+      ) : null}
 
       <InputV2
         variant='bottomsheet'

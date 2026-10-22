@@ -2,6 +2,7 @@ import { type ReactElement, type ReactNode } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
+import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { implicitActionsForComponent, parseFlowAction } from '@/src/utils/flowAction';
 import { createAgentCardViewModel } from '@/src/utils/flowAgentUtils';
 import { codeComponentToMarkdown } from '@/src/utils/flowCodeUtils';
@@ -16,7 +17,6 @@ import {
   type FlowTextNormalizationOptions,
 } from '@/src/utils/flowJsonMarkdown';
 
-import type { MessageRowModel } from '../../model/chatRow.types';
 import { renderFlowActionButton } from './FlowActionButtonRenderer';
 import { FlowAgentCard } from './FlowAgentCard';
 import { FlowCallScheduleCard } from './FlowCallScheduleCard';
@@ -28,6 +28,7 @@ import { FlowMcpSuggestCard } from './FlowMcpSuggestCard';
 import { FlowPlanCard } from './FlowPlanCard';
 import { FlowPrCard } from './FlowPrCard';
 import { FlowUserQuestionCard } from './FlowUserQuestionCard';
+import type { FlowHost } from './useFlowMessageAction';
 import type { FlowActionContext, RenderMarkdown } from './FlowRendererTypes';
 import { getStringProp, isDisabled, stripMarkdownSyntax } from './flowState';
 
@@ -36,7 +37,7 @@ type SpecializedComponentContext = FlowActionContext & {
   componentKey: string;
   componentType: string;
   activeFlow: FlowDefinitionLike;
-  model: MessageRowModel;
+  model: FlowHost;
   normalizationOptions: FlowTextNormalizationOptions;
   markdownStyle: MarkdownStyle;
   inheritedContainerStyle: StyleProp<ViewStyle>;
@@ -123,6 +124,20 @@ export const renderFlowSpecializedComponent = (
         />
       </View>
     ) : null;
+  }
+
+  if (componentType === 'ticket') {
+    // FlowTicketCard returns null for a malformed ticket (no title).
+    return (
+      <View key={componentKey} style={[CARD_WRAPPER_STYLE, renderStyle]}>
+        <FlowTicketCard
+          component={component}
+          recyclingKey={`${model.conversationId}:${componentKey}`}
+          containerStyle={inheritedContainerStyle}
+          actions={context}
+        />
+      </View>
+    );
   }
 
   if (componentType === 'plan') {

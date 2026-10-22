@@ -49,6 +49,19 @@ export const FormFieldType = {
   TICKET: 'TICKET',
 } as const;
 
+export const FormContextType = {
+  BOARD: 'BOARD',
+  RELEASE_CHANGE: 'RELEASE_CHANGE',
+  STAGE: 'STAGE',
+} as const;
+
+export const FormEntityType = {
+  TICKET: 'TICKET',
+  SUB_TICKET: 'SUB_TICKET',
+  RELEASE_MIGRATION_FORM: 'RELEASE_MIGRATION_FORM',
+  RELEASE_ENV_FORM: 'RELEASE_ENV_FORM',
+} as const;
+
 export const BaseTicketType = {
   Fix: 'Fix',
   Feature: 'Feature',

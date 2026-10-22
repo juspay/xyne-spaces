@@ -3,25 +3,14 @@ import {
   memo,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
-import { useConnectionState } from '@rocicorp/zero/react';
 
 import { useWorkspaceDrawer, WorkspaceAvatar } from '@/src/components/workspace-drawer';
-import { stateMachineActor } from '@xyne/shared/machines';
 import Avatar from '@/src/components/ui/avatar';
 import { PresenceDot } from '@/src/components/ui/presence-dot';
 import { haptics } from '@/src/utils/haptics';
@@ -29,12 +18,14 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useWorkspaces } from '@/src/hooks/useWorkspaces';
 import { cn } from '@/src/utils/cn';
-import { useRouter, type Href } from 'expo-router';
-import { CircleQuestionMark, House, RefreshCw, type LucideIcon } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { House, type LucideIcon } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
+import { XyneAIStarIcon } from '@/src/components/icons';
 import { ConnectionStatusSheet } from '@/src/components/connection-status-sheet';
-import { describeConnectionState } from '@/src/components/connection-status-sheet/connection-status-copy';
+import { ConnectingSpinner } from '@/src/components/connection-status-sheet/connecting-spinner';
+import { useLiveSyncStatus } from '@/src/components/connection-status-sheet/use-live-sync-status';
 import { tabRoute } from '@/src/navigation/routes';
 
 const HEADER_AVATAR_SIZE = 32;
@@ -169,7 +160,6 @@ const WorkspaceSwitcher = memo(function AppHeaderWorkspaceSwitcher() {
   );
 });
 
-const USER_GUIDE_HREF = '/(protected)/guide' as Href;
 const HOME_HREF = tabRoute('dms');
 
 type RoundButtonProps = {
@@ -214,19 +204,24 @@ const RoundButton = ({
   );
 };
 
-/**
- * Help entry point, placed to the left of the avatar on every screen that
- * shows one. Opens the in-app User Guide hub.
- */
-const UserGuide = memo(function AppHeaderUserGuide() {
+/** Opens Xyne AI, like the dashboard's Ask AI button: the gradient star on its own. */
+const XyneAI = memo(function AppHeaderXyneAI() {
   const router = useRouter();
   return (
-    <RoundButton
-      icon={CircleQuestionMark}
-      accessibilityLabel='User guide'
-      accessibilityHint='Opens short guides for the app'
-      onPress={() => router.push(USER_GUIDE_HREF)}
-    />
+    <Pressable
+      accessibilityRole='button'
+      accessibilityLabel='Ask AI'
+      accessibilityHint='Ask anything about your workspace'
+      hitSlop={8}
+      className='items-center justify-center active:opacity-60'
+      style={{ width: HEADER_AVATAR_SIZE, height: HEADER_AVATAR_SIZE }}
+      onPress={() => {
+        void haptics.buttonTap();
+        router.push('/xyne-ai');
+      }}
+    >
+      <XyneAIStarIcon size={24} />
+    </Pressable>
   );
 });
 
@@ -261,39 +256,12 @@ const Home = memo(function AppHeaderHome() {
  * the state machine to reconnect, exactly as the dashboard does).
  */
 const ConnectionStatus = memo(function AppHeaderConnectionStatus() {
-  const connection = useConnectionState();
-  const state = connection.name;
-  const reason =
-    'reason' in connection && typeof connection.reason === 'string' ? connection.reason : undefined;
+  const { stateName, current, reason, refresh } = useLiveSyncStatus();
   const foregroundColor = useCSSVariable('--color-foreground') as string;
-  const isConnecting = state === 'connecting';
-  const isConnected = state === 'connected';
+  const isConnecting = stateName === 'connecting';
+  const isConnected = stateName === 'connected';
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-
-  const rotation = useSharedValue(0);
-  useEffect(() => {
-    if (isConnecting) {
-      rotation.value = withRepeat(
-        withTiming(360, { duration: 900, easing: Easing.linear }),
-        -1,
-        false,
-      );
-    } else {
-      cancelAnimation(rotation);
-      rotation.value = 0;
-    }
-    return (): void => cancelAnimation(rotation);
-  }, [isConnecting, rotation]);
-
-  const spinnerStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  const { dotColor, label } = describeConnectionState(state);
-
-  const refreshConnection = useCallback(() => {
-    stateMachineActor.send({ type: 'REFRESH_ZERO' });
-  }, []);
+  const { dotColor, label } = current;
 
   const openSheet = useCallback(() => {
     void haptics.buttonTap();
@@ -321,18 +289,14 @@ const ConnectionStatus = memo(function AppHeaderConnectionStatus() {
             {label}
           </Text>
         ) : null}
-        {isConnecting ? (
-          <Animated.View style={spinnerStyle}>
-            <RefreshCw size={12} color={foregroundColor} strokeWidth={2.5} />
-          </Animated.View>
-        ) : null}
+        {isConnecting ? <ConnectingSpinner color={foregroundColor} /> : null}
       </Pressable>
       <ConnectionStatusSheet
         isOpen={isSheetOpen}
         onOpenChange={setIsSheetOpen}
-        stateName={state}
+        stateName={stateName}
         reason={reason}
-        onRefresh={refreshConnection}
+        onRefresh={refresh}
       />
     </>
   );
@@ -342,7 +306,7 @@ export const AppHeader = Object.assign(AppHeaderRoot, {
   Host: AppHeaderHost,
   Title,
   UserProfile,
-  UserGuide,
+  XyneAI,
   Home,
   WorkspaceSwitcher,
   ConnectionStatus,

@@ -1,6 +1,7 @@
 import { type ReactElement } from 'react';
 import { useValue } from '@legendapp/state/react';
 
+import { CreateChannelDrawer } from '@/src/components/chat/create-channel-drawer';
 import { CreateDmDrawer } from '@/src/components/chat/create-dm-drawer';
 import { InstantCallSheet } from '@/src/components/call/instant-call-sheet';
 
@@ -29,12 +30,20 @@ export function QuickActionSheets(): ReactElement {
   // Selectors, so each reads as a boolean and re-renders only when that
   // boolean flips — not whenever the set is appended to.
   const hasCreateDm = useValue(() => isQuickActionSheetMounted('create-dm'));
+  const hasCreateChannel = useValue(() => isQuickActionSheetMounted('create-channel'));
   const hasInstantCall = useValue(() => isQuickActionSheetMounted('instant-call'));
 
   return (
     <>
       {hasCreateDm ? (
         <CreateDmDrawer isOpen={current === 'create-dm'} onClose={closeQuickActionSheet} />
+      ) : null}
+
+      {hasCreateChannel ? (
+        <CreateChannelDrawer
+          isOpen={current === 'create-channel'}
+          onClose={closeQuickActionSheet}
+        />
       ) : null}
 
       {hasInstantCall ? (

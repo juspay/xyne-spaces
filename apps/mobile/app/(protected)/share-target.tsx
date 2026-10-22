@@ -38,6 +38,7 @@ import {
   ShareTargetNative,
   normalizeIncomingSharePayload,
   sanitizeIncomingSharePayload,
+  waitForAttachmentsUploaded,
 } from '@/src/features/share-target';
 import { useAllUnreadCount, getChannelDisplayName } from '@/src/hooks/useChannels';
 import { useDmList } from '@/src/hooks/useDmList';
@@ -552,6 +553,10 @@ function ShareTargetScreen(): ReactElement {
         if (failed) {
           throw new Error(failed.error || 'Attachment upload failed');
         }
+        await waitForAttachmentsUploaded(
+          zero,
+          attachments.map(a => a.attachmentId),
+        );
       }
 
       const pendingAttachments = attachments.map(a => ({

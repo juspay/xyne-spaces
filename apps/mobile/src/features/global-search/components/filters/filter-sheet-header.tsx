@@ -5,10 +5,10 @@ import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 
 type FilterSheetHeaderProps = {
   title: string;
+  applyLabel?: string;
   /** Omit for tap-to-select sheets, which have nothing to cancel or commit. */
   onCancel?: () => void;
   onApply?: () => void;
-  applyLabel?: string;
 };
 
 /**
@@ -18,9 +18,9 @@ type FilterSheetHeaderProps = {
  */
 export function FilterSheetHeader({
   title,
+  applyLabel = 'Apply',
   onCancel,
   onApply,
-  applyLabel = 'Apply',
 }: FilterSheetHeaderProps): ReactElement {
   const { accentText } = useBubbleAccent();
   const hasActions = Boolean(onCancel || onApply);

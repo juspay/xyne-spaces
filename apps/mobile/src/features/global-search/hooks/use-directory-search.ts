@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
 
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useAllChannels } from '@/src/hooks/useChannels';
+import { useHydrateWorkspaceChannels } from '@/src/hooks/useHydrateWorkspaceChannels';
 import { useUsers } from '@/src/hooks/useUsers';
 import { stateMachineActor } from '@/src/machines/appStateMachine';
 import {
@@ -99,7 +100,7 @@ function peopleSearchFor(users: readonly DirectoryUser[]): Search<SearchablePers
 /** Includes yourself, so `from:` can filter to your own messages. */
 export function usePeopleSearch(
   query: string | null,
-  markSelf = true,
+  limit = PEOPLE_LIMIT,
 ): readonly SearchPersonItem[] {
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? '';
@@ -109,17 +110,18 @@ export function usePeopleSearch(
     () =>
       query === null
         ? []
-        : peopleSearchFor(users)(query, PEOPLE_LIMIT).map(({ user: match, name, email }) => {
+        : peopleSearchFor(users)(query, limit).map(({ user: match, name, email }) => {
             const statusEmoji = getActiveUserStatusEmoji(match);
 
             return {
               id: match.id,
-              title: markSelf && match.id === currentUserId ? `${name} (You)` : name,
+              title: match.id === currentUserId ? `${name} (You)` : name,
+              name,
               ...(email ? { subtitle: email } : {}),
               ...(statusEmoji ? { statusEmoji } : {}),
             };
           }),
-    [currentUserId, query, users, markSelf],
+    [currentUserId, limit, query, users],
   );
 }
 
@@ -135,10 +137,14 @@ type SearchableChannel = {
   isStarred?: boolean;
 };
 
-export function useChannelsSearch(query: string | null): readonly SearchChannelItem[] {
+export function useChannelsSearch(
+  query: string | null,
+  limit = CHANNELS_LIMIT,
+): readonly SearchChannelItem[] {
   const allChannels = useAllChannels();
   const visibleChannels = useSelector(stateMachineActor, selectVisibleChannels);
   const statuses = useSelector(stateMachineActor, selectChannelStatuses);
+  useHydrateWorkspaceChannels(query !== null);
 
   const enabled = query !== null;
   const channels = useMemo(() => {
@@ -154,7 +160,12 @@ export function useChannelsSearch(query: string | null): readonly SearchChannelI
         visibility?: unknown;
         isArchived?: boolean;
       };
-      if (record.type !== ChannelType.DEFAULT) continue;
+      if (
+        record.type !== ChannelType.DEFAULT &&
+        !isDeskChannelType(record.type as string | undefined)
+      ) {
+        continue;
+      }
       if (record.scopeType !== ChannelScopeType.DEFAULT) continue;
       if (record.visibility !== ChannelVisibility.PUBLIC) continue;
       if (record.isArchived) continue;
@@ -192,20 +203,19 @@ export function useChannelsSearch(query: string | null): readonly SearchChannelI
     if (query === null || !search) return [];
     // Users often type Slack-style `#engineering`; match against bare names.
     const normalized = query.trim().replace(/^#/, '');
-    const matches = normalized
-      ? search(normalized, CHANNELS_LIMIT)
-      : starredFirst(channels, CHANNELS_LIMIT);
+    const matches = normalized ? search(normalized, limit) : starredFirst(channels, limit);
 
     return matches.map((channel): SearchChannelItem => ({
       id: channel.id,
       title: channel.name.startsWith('#') ? channel.name : `#${channel.name}`,
+      name: channel.name.replace(/^#/, ''),
       ...(channel.visibility ? { visibility: channel.visibility } : {}),
       ...(channel.unreadCount && channel.unreadCount > 0
         ? { unreadCount: channel.unreadCount }
         : {}),
       ...(channel.isStarred ? { isStarred: true } : {}),
     }));
-  }, [channels, query, search]);
+  }, [channels, limit, query, search]);
 }
 
 // ---------------------------------------------------------------------------

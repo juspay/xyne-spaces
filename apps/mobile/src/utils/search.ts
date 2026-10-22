@@ -111,6 +111,10 @@ export function buildVespaSearchParams(filters: VespaSearchFilters): Record<stri
     params['rankProfile'] = filters.rankProfile;
   }
 
+  if (filters.orderBy) {
+    params['orderBy'] = filters.orderBy;
+  }
+
   if (filters.projectId) {
     params['projectId'] = filters.projectId;
   }
@@ -185,6 +189,38 @@ export function buildVespaSearchParams(filters: VespaSearchFilters): Record<stri
 
   if (filters.onlyMyChannels !== undefined) {
     params['onlyMyChannels'] = filters.onlyMyChannels.toString();
+  }
+
+  if (filters.includeBotMessages !== undefined) {
+    params['includeBotMessages'] = filters.includeBotMessages.toString();
+  }
+
+  if (filters.mentions) {
+    params['mentions'] = filters.mentions;
+  }
+
+  if (filters.channelMentions) {
+    params['channelMentions'] = filters.channelMentions;
+  }
+
+  if (filters.groupMentions) {
+    params['groupMentions'] = filters.groupMentions;
+  }
+
+  if (filters.fromEmail) {
+    params['fromEmail'] = filters.fromEmail;
+  }
+
+  if (filters.toEmail) {
+    params['toEmail'] = filters.toEmail;
+  }
+
+  if (filters.entity) {
+    params['entity'] = filters.entity;
+  }
+
+  if (filters.excludeArchived !== undefined) {
+    params['excludeArchived'] = filters.excludeArchived.toString();
   }
 
   return params;

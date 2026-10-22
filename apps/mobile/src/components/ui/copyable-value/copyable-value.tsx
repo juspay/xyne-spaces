@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, type ReactElement } from 'react';
+import { memo, useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { Alert, Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Check, Copy } from 'lucide-react-native';
@@ -23,6 +23,8 @@ export type CopyableValueProps = {
   disabled?: boolean;
   showCopiedLabel?: boolean;
   richEmailCopy?: boolean;
+  /** Row variant only: extra action(s) rendered after the copy button (e.g. a dial button). */
+  trailingActions?: ReactNode;
 };
 
 export const CopyableValue = memo(function CopyableValue({
@@ -38,6 +40,7 @@ export const CopyableValue = memo(function CopyableValue({
   disabled = false,
   showCopiedLabel = true,
   richEmailCopy = false,
+  trailingActions,
 }: CopyableValueProps): ReactElement | null {
   const [copied, setCopied] = useState(false);
   const mutedColor = useCSSVariable('--color-secondary-foreground') as string;
@@ -113,6 +116,7 @@ export const CopyableValue = memo(function CopyableValue({
           {trimmedValue}
         </Text>
         {!disabled ? copyButton : null}
+        {trailingActions}
       </View>
     );
   }

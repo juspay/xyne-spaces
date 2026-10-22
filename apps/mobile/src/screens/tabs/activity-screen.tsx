@@ -1,4 +1,14 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useValue } from '@legendapp/state/react';
+import { useUniwind } from 'uniwind';
 import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { LegendListRef } from '@legendapp/list/react-native';
 import {
@@ -10,18 +20,21 @@ import {
   Platform,
 } from 'react-native';
 import {
+  ActivityFiltersFloatingButton,
+  ActivityFiltersSheet,
   ActivityLoadingSkeleton,
-  ActivityUnreadsFloatingButton,
   ActivityV2,
 } from '@/src/components/activity';
 import { useActivities } from '@/src/hooks/useActivities';
 import { ActivityWithRelated, ActivityTab, TABS, actionableValues } from '@/src/types/activity';
 import { ChatFilterTabs, type ChatFilterTabOption } from '@/src/components/chat/chat-filter-tabs';
-import {
-  ListEmptyState,
-  EMPTY_STATE_BOTTOM_INSET,
-  type EmptyIllustrationName,
-} from '@/src/components/ui/empty-state';
+import { ListEmptyState, EMPTY_STATE_BOTTOM_INSET } from '@/src/components/ui/empty-state';
+import { getActivityEmptyContent } from '@/src/features/activity/presentation/activityEmptyContent';
+import { getActorFilterKey } from '@/src/features/activity/domain/activityActorFilter';
+import { actorFilterFrom } from '@/src/features/activity/model/preferences';
+import { appliedActivityPreferences$ } from '@/src/features/activity/state/preferences-store';
+import { mentionedYouColors } from '@/src/features/activity/model/mentioned-you-colors';
+import { MentionPaletteOverrideContext } from '@/src/components/conversation-composer/rich-inline-text';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop';
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
@@ -89,68 +102,6 @@ const getActivityItemType = (item: ActivityWithRelated): ActivityListItemType =>
   }
 };
 
-type ActivityEmptyContent = {
-  illustration: EmptyIllustrationName;
-  title: string;
-  subtitle: string;
-};
-
-/** Per-tab artwork and copy. The unread toggle keeps the tab's illustration and
- *  swaps only the wording, so switching it on doesn't change the picture. */
-function getActivityEmptyContent(activeTab: ActivityTab): ActivityEmptyContent {
-  switch (activeTab) {
-    case 'your_mentions':
-      return {
-        illustration: 'activityMentions',
-        title: 'No mentions',
-        subtitle: 'Messages that mention you directly will appear here.',
-      };
-    case 'replies':
-      return {
-        illustration: 'activityReplies',
-        title: 'No replies',
-        subtitle: 'Replies to your messages will appear here.',
-      };
-    case 'reactions':
-      return {
-        illustration: 'activityReactions',
-        title: 'No reactions',
-        subtitle: 'Reactions to your messages will appear here.',
-      };
-    case 'tickets':
-      return {
-        illustration: 'activityTickets',
-        title: 'No ticket updates',
-        subtitle: 'Activity on your tickets will appear here.',
-      };
-    case 'group_mentions':
-      return {
-        illustration: 'activityGroupMentions',
-        title: 'No group mentions',
-        subtitle: 'Channel-wide and group mentions will appear here.',
-      };
-    case 'actionable':
-      return {
-        illustration: 'activityActionable',
-        title: 'Nothing to action',
-        subtitle: 'Activities that need a response from you will appear here.',
-      };
-    case 'fyi':
-      return {
-        illustration: 'activityFyi',
-        title: 'Nothing for your info',
-        subtitle: 'Updates worth knowing about will appear here.',
-      };
-    case 'all':
-    default:
-      return {
-        illustration: 'activityAll',
-        title: 'No activities yet',
-        subtitle: 'Mentions, replies and updates will appear here.',
-      };
-  }
-}
-
 const ActivityEmptyState = ({
   activeTab,
   showUnreadOnly,
@@ -190,6 +141,8 @@ const ActivityScreen = (): ReactElement => {
   const [scrollOffsetY, setScrollOffsetY] = useState(0);
   const headerTitleScrollY = useTabHeaderScrollY();
   const listRef = useRef<LegendListRef>(null);
+  const { theme } = useUniwind();
+  const mentionPalette = useMemo(() => mentionedYouColors(theme), [theme]);
   const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollOffsetYRef = useRef(0);
   const scrollListToTop = useCallback((animated = false) => {
@@ -199,6 +152,20 @@ const ActivityScreen = (): ReactElement => {
   }, []);
   const scrollToTop = useCallback(() => scrollListToTop(true), [scrollListToTop]);
   useRegisterTabScrollToTop('activity', scrollToTop);
+
+  // The filters sheet edits a draft; the feed follows what has been applied —
+  // the same stores the Spaces design's filter tray uses.
+  const unreadOnly = useValue(appliedActivityPreferences$.unreadOnly);
+  const actorKind = useValue(appliedActivityPreferences$.actorKind);
+  const actorUserId = useValue(appliedActivityPreferences$.actorUserId);
+  const actionable = useValue(appliedActivityPreferences$.actionable);
+  const actor = useMemo(
+    () => actorFilterFrom({ actorKind, actorUserId }),
+    [actorKind, actorUserId],
+  );
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const openFilters = useCallback(() => setIsFiltersOpen(true), []);
+  const closeFilters = useCallback(() => setIsFiltersOpen(false), []);
 
   const {
     activities,
@@ -211,19 +178,32 @@ const ActivityScreen = (): ReactElement => {
     showUnreadOnly,
     setShowUnreadOnly,
     activityCounts,
-  } = useActivities({ screenReady: hasFirstLayout && isFocused });
+    markAsRead,
+  } = useActivities({ screenReady: hasFirstLayout && isFocused, actor });
 
   useReportTabReady('activity', !isLoading);
 
-  const handleActivateUnreadsFilter = useCallback(() => {
-    setShowUnreadOnly(true);
-    scrollListToTop(false);
-  }, [scrollListToTop, setShowUnreadOnly]);
+  // Layout timing, so the model asks for the narrowed slice before the frame
+  // that would show the old one.
+  useLayoutEffect(() => {
+    setShowUnreadOnly(unreadOnly);
+  }, [setShowUnreadOnly, unreadOnly]);
 
-  const handleDeactivateUnreadsFilter = useCallback(() => {
-    setShowUnreadOnly(false);
+  // Actionable swaps the chips; a chip that is not in the new set falls back to All.
+  useLayoutEffect(() => {
+    if (activeTab !== 'all' && actionableValues.has(activeTab) !== actionable) {
+      setActiveTab('all');
+    }
+  }, [actionable, activeTab, setActiveTab]);
+
+  // A narrower or wider feed starts from its top.
+  const filtersKey = `${unreadOnly}:${actionable}:${getActorFilterKey(actor)}`;
+  const appliedFiltersKey = useRef(filtersKey);
+  useEffect(() => {
+    if (appliedFiltersKey.current === filtersKey) return;
+    appliedFiltersKey.current = filtersKey;
     scrollListToTop(false);
-  }, [scrollListToTop, setShowUnreadOnly]);
+  }, [filtersKey, scrollListToTop]);
 
   const handleTabChange = useCallback(
     (tab: ActivityTab) => {
@@ -382,12 +362,14 @@ const ActivityScreen = (): ReactElement => {
 
   const activityFilterTabs: ChatFilterTabOption<ActivityTab>[] = useMemo(
     () =>
-      TABS.filter(tab => tab.value === 'all' || !actionableValues.has(tab.value)).map(tab => ({
-        value: tab.value,
-        label: tab.label,
-        ...(tab.value === 'all' ? { count: activityCounts.all } : {}),
-      })),
-    [activityCounts],
+      TABS.filter(tab => tab.value === 'all' || actionableValues.has(tab.value) === actionable).map(
+        tab => ({
+          value: tab.value,
+          label: tab.label,
+          ...(tab.value === 'all' ? { count: activityCounts.all } : {}),
+        }),
+      ),
+    [actionable, activityCounts],
   );
 
   const activityToolbar = useMemo(
@@ -433,48 +415,51 @@ const ActivityScreen = (): ReactElement => {
 
   return (
     <View className='flex-1 bg-tabs-screen' onLayout={handleLayout}>
-      <View className='flex-1 overflow-hidden bg-tabs-screen'>
-        <AnimatedLegendList
-          ref={listRef}
-          data={activities}
-          keyExtractor={keyExtractor}
-          estimatedItemSize={ACTIVITY_DEFAULT_ESTIMATED_ROW_SIZE}
-          getItemType={getActivityItemType}
-          estimatedListSize={ACTIVITY_ESTIMATED_LIST_SIZE}
-          drawDistance={ACTIVITY_DRAW_DISTANCE}
-          recycleItems
-          ListHeaderComponent={activityToolbar}
-          ListEmptyComponent={listEmptyComponent}
-          ListFooterComponent={listFooterComponent}
-          contentContainerStyle={{
-            paddingTop: listPaddingTop,
-            // The tuned inset clears the floating unreads button over real rows;
-            // with none, fall back to the shared reserve so the empty state sits
-            // at the same height as the other tabs.
-            paddingBottom: activities.length === 0 ? EMPTY_STATE_BOTTOM_INSET : listPaddingBottom,
-            flexGrow: 1,
-          }}
-          style={{ flex: 1, minHeight: 0 }}
-          onScroll={handleScroll}
-          sharedValues={{ scrollOffset: headerTitleScrollY }}
-          onContentSizeChange={(_, height) => setContentHeight(height)}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-          onEndReached={loadMore}
-          onEndReachedThreshold={ACTIVITY_END_REACHED_THRESHOLD}
-          onMomentumScrollBegin={handleMomentumScrollBegin}
-          onMomentumScrollEnd={handleMomentumScrollEnd}
-          onScrollBeginDrag={handleScrollBeginDrag}
-          onScrollEndDrag={handleScrollEndDrag}
-          renderItem={renderItem}
-        />
-      </View>
+      {/* A mention of you takes the default chat bubble's colours, as on the new screen. */}
+      <MentionPaletteOverrideContext.Provider value={mentionPalette}>
+        <View className='flex-1 overflow-hidden bg-tabs-screen'>
+          <AnimatedLegendList
+            ref={listRef}
+            data={activities}
+            keyExtractor={keyExtractor}
+            estimatedItemSize={ACTIVITY_DEFAULT_ESTIMATED_ROW_SIZE}
+            getItemType={getActivityItemType}
+            estimatedListSize={ACTIVITY_ESTIMATED_LIST_SIZE}
+            drawDistance={ACTIVITY_DRAW_DISTANCE}
+            recycleItems
+            ListHeaderComponent={activityToolbar}
+            ListEmptyComponent={listEmptyComponent}
+            ListFooterComponent={listFooterComponent}
+            contentContainerStyle={{
+              paddingTop: listPaddingTop,
+              // The tuned inset clears the floating filters button over real rows;
+              // with none, fall back to the shared reserve so the empty state sits
+              // at the same height as the other tabs.
+              paddingBottom: activities.length === 0 ? EMPTY_STATE_BOTTOM_INSET : listPaddingBottom,
+              flexGrow: 1,
+            }}
+            style={{ flex: 1, minHeight: 0 }}
+            onScroll={handleScroll}
+            sharedValues={{ scrollOffset: headerTitleScrollY }}
+            onContentSizeChange={(_, height) => setContentHeight(height)}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            onEndReached={loadMore}
+            onEndReachedThreshold={ACTIVITY_END_REACHED_THRESHOLD}
+            onMomentumScrollBegin={handleMomentumScrollBegin}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            onScrollEndDrag={handleScrollEndDrag}
+            renderItem={renderItem}
+          />
+        </View>
+      </MentionPaletteOverrideContext.Provider>
 
-      <ActivityUnreadsFloatingButton
-        isActive={showUnreadOnly}
-        count={activityCounts.all}
-        onActivate={handleActivateUnreadsFilter}
-        onDeactivate={handleDeactivateUnreadsFilter}
+      <ActivityFiltersFloatingButton onPress={openFilters} />
+      <ActivityFiltersSheet
+        isOpen={isFiltersOpen}
+        onClose={closeFilters}
+        onMarkAsRead={markAsRead}
       />
     </View>
   );

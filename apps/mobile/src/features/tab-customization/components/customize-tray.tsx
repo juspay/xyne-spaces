@@ -28,18 +28,24 @@ const ROW_FILL_LIFTED = { light: '#E3E3E8', dark: '#3A3A3E' } as const;
 
 const VIEW_ID = 'customize';
 
-const HEADER_HEIGHT = 48;
+/**
+ * Taller than the button it holds by the top padding, which is what keeps the
+ * close button off the card's rounded corner — Morphlet's card has no inner
+ * padding of its own, so the corner would otherwise clip the circle.
+ */
+const HEADER_TOP_PADDING = 16;
+const HEADER_HEIGHT = HEADER_TOP_PADDING + 36 + 12;
 const FOOTER_BUTTON_HEIGHT = 48;
 const FOOTER_PADDING = 16;
 /** Header, plus the button and the even gap above and below it. */
 const CHROME_HEIGHT = HEADER_HEIGHT + FOOTER_BUTTON_HEIGHT + FOOTER_PADDING * 2;
 
 /**
- * Customize, as a tray view.
+ * Customize, as the tray's content: header, view, pinned footer.
  *
- * Exports the view rather than its own `<Tray>`: the shell owns the tray so the
- * bar's menu button can open it, and so this feature never has to import the
- * navigation feature that imports it back.
+ * Exports the content rather than its own `<Tray.Root>`: the shell owns the
+ * tray so the bar's menu button can open it, and so this feature never has to
+ * import the navigation feature that imports it back.
  */
 export function CustomizeTrayView(): ReactElement {
   const { close } = useTray();
@@ -94,20 +100,8 @@ export function CustomizeTrayView(): ReactElement {
   }, [close, order]);
 
   return (
-    <Tray.View
-      id={VIEW_ID}
-      footer={
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Save'
-          onPress={save}
-          style={[styles.save, { backgroundColor: accent }]}
-        >
-          <Text style={[styles.saveLabel, { color: accentForeground }]}>Save</Text>
-        </Pressable>
-      }
-    >
-      <View style={styles.header}>
+    <>
+      <Tray.Header style={styles.header}>
         <Pressable
           accessibilityRole='button'
           accessibilityLabel='Cancel'
@@ -120,12 +114,27 @@ export function CustomizeTrayView(): ReactElement {
         <Text style={[styles.title, { color: foreground }]}>Customize</Text>
         {/* Balances the close button so the title stays optically centred. */}
         <View style={styles.close} />
-      </View>
+      </Tray.Header>
 
-      <View style={{ height: listHeight }}>
-        <CustomizeList order={order} palette={palette} />
-      </View>
-    </Tray.View>
+      <Tray.Body>
+        <Tray.View name={VIEW_ID}>
+          <View style={{ height: listHeight }}>
+            <CustomizeList order={order} palette={palette} />
+          </View>
+        </Tray.View>
+      </Tray.Body>
+
+      <Tray.Footer>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel='Save'
+          onPress={save}
+          style={[styles.save, { backgroundColor: accent }]}
+        >
+          <Text style={[styles.saveLabel, { color: accentForeground }]}>Save</Text>
+        </Pressable>
+      </Tray.Footer>
+    </>
   );
 }
 
@@ -137,7 +146,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
+    paddingTop: HEADER_TOP_PADDING,
     paddingBottom: 12,
   },
   close: {

@@ -12,6 +12,8 @@ export const MENU_ITEM_HEIGHT = 48;
 export const MENU_ITEM_PADDING_X = 18;
 export const MENU_ITEM_TEXT_SIZE = 16;
 export const MENU_ICON_SIZE = 24;
+/** The disclosure chevron after an item's value. */
+export const MENU_CHEVRON_SIZE = 18;
 /** Text sits 43 past the padding, so the icon column is 24 wide plus this. */
 export const MENU_ICON_GAP = 19;
 

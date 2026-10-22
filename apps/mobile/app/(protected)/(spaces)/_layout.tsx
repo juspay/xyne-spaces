@@ -22,9 +22,9 @@ export const unstable_settings = { initialRouteName: SPACES_INITIAL_TAB } as con
 
 /**
  * Menu destinations are reached rarely, so their trees suspend on blur. The
- * three pill tabs and search are left unfrozen on purpose: they are the hot
- * path, and unfreezing re-renders the whole subtree inside the commit that
- * switches the tab — the very stall preloading exists to remove.
+ * three pill tabs are left unfrozen on purpose: they are the hot path, and
+ * unfreezing re-renders the whole subtree inside the commit that switches the
+ * tab — the very stall preloading exists to remove.
  */
 const MENU_SCREEN_OPTIONS = { freezeOnBlur: Platform.OS === 'android' } as const;
 
@@ -33,7 +33,7 @@ type SpacesTabsProps = {
 };
 
 /**
- * The navigator, inside `<Tray>` so the bar can open it.
+ * The navigator, inside `<Tray.Root>` so the bar can open it.
  *
  * Customize is a tray view now rather than a pushed route, and the thing that
  * opens it is a button in the bar — so the opener has to come from above the
@@ -41,8 +41,8 @@ type SpacesTabsProps = {
  * importing the customization feature that already imports it back.
  */
 function SpacesTabs({ screenOptions }: SpacesTabsProps): ReactElement {
-  const { open } = useTray();
-  const openCustomize = useCallback(() => open('customize'), [open]);
+  const { setOpen } = useTray();
+  const openCustomize = useCallback(() => setOpen(true), [setOpen]);
 
   /**
    * States the bar's height for anything positioning itself above it.
@@ -65,7 +65,6 @@ function SpacesTabs({ screenOptions }: SpacesTabsProps): ReactElement {
         <Tabs.Screen name={TabScreens.Channels} />
         <Tabs.Screen name={TabScreens.Dms} />
         <Tabs.Screen name={TabScreens.Activity} />
-        <Tabs.Screen name={TabScreens.Search} />
         <Tabs.Screen name={TabScreens.Calls} options={MENU_SCREEN_OPTIONS} />
         <Tabs.Screen name={TabScreens.Threads} options={MENU_SCREEN_OPTIONS} />
         <Tabs.Screen name={TabScreens.MorningBrief} options={MENU_SCREEN_OPTIONS} />
@@ -117,13 +116,13 @@ export default function SpacesLayout(): ReactElement {
       */}
       <View style={shellStyle}>
         <SpacesHeaderProvider>
-          <Tray defaultView='customize'>
+          <Tray.Root defaultView='customize'>
             <SpacesTabs screenOptions={screenOptions} />
             {/*
               List FABs and their dim render through this host so they can cover
               the header and the bar, which they cannot do from inside a scene.
-              After <Tabs> so it paints above the bar — and inside <Tray>, before
-              the sheet, so the sheet still covers the FABs.
+              After <Tabs> so it paints above the bar. The tray below is a native
+              presentation, so it covers the FABs on its own.
             */}
             <PortalHost name={TAB_OVERLAY_PORTAL_HOST} />
             {/*
@@ -131,10 +130,16 @@ export default function SpacesLayout(): ReactElement {
               shell, not one per tab — see `QuickActionSheets`.
             */}
             <QuickActionSheets />
-            <Tray.Content>
+            {/*
+              Not draggable. Morphlet's card pans as one native gesture, which
+              wins over the list's own press-and-hold reorder, so holding a row
+              moved the tray instead. Dismissal is the close button, Save and
+              the backdrop.
+            */}
+            <Tray.Content draggable={false}>
               <CustomizeTrayView />
             </Tray.Content>
-          </Tray>
+          </Tray.Root>
         </SpacesHeaderProvider>
       </View>
     </WorkspaceDrawer>

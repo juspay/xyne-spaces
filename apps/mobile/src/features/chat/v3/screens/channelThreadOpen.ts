@@ -5,7 +5,7 @@ export type ChannelThreadOpen =
       pathname: '/ticket/[ticketId]';
       params: {
         ticketId: string;
-        selectedTab: 'thread';
+        selectedTab: 'overview' | 'thread';
         channelId: string;
         threadId: string;
         from: 'channel_thread';
@@ -24,10 +24,8 @@ export type ChannelThreadOpen =
     };
 
 /**
- * v2 `handleMessagePress`: a replies tap opens the thread, it does not jump
- * to the parent `messageId`. Only a show-in-channel parent preview passes a
- * message id. Tickets go straight to Ticket Details so the first tap is not
- * a thread hunt that fails, then a redirect.
+ * Row press open target. Parent preview jumps into that thread (+ messageId).
+ * Tickets: overview when there are no replies, thread tab when there are.
  */
 export const channelThreadOpen = (
   model: MessageRowModel,
@@ -39,11 +37,12 @@ export const channelThreadOpen = (
   const ticketId = parentThreadId ? undefined : model.ticketPreview?.ticketId;
   const openStartedAtMs = String(now);
   if (ticketId) {
+    const replyCount = model.replyPreview?.count ?? 0;
     return {
       pathname: '/ticket/[ticketId]',
       params: {
         ticketId,
-        selectedTab: 'thread',
+        selectedTab: replyCount > 0 ? 'thread' : 'overview',
         channelId,
         threadId,
         from: 'channel_thread',

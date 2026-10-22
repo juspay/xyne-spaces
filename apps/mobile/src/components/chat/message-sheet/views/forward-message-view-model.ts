@@ -14,13 +14,7 @@ import { useRouter } from 'expo-router';
 import type { Zero } from '@rocicorp/zero';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDistanceToNow } from 'date-fns';
-import {
-  ChannelScopeType,
-  ChannelVisibility,
-  MessageType,
-  parseForwardedMessageXml,
-  type MessageAttachment,
-} from '@xyne/shared';
+import { MessageType, parseForwardedMessageXml, type MessageAttachment } from '@xyne/shared';
 
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useAllVisibleChannels } from '@/src/hooks/useChannels';
@@ -36,13 +30,19 @@ import type { MessageForRender } from '../../message/message.types';
 import type { AttachmentsViewerItem } from '@/src/machines/attachmentsMachine';
 import { HTML_TAG_OR_EMPTY, stripHtmlTags } from '@/src/utils/htmlText';
 
-export type ForwardTarget = {
-  type: 'channel' | 'user';
-  id: string;
-  name: string;
-};
+import {
+  applyForwardSelection,
+  buildForwardTargetItems,
+  canAddMoreTargets,
+  getForwardRecipientIds,
+  getSelectionMode,
+  getTotalRecipientCount,
+  type ForwardSearchListItem,
+  type ForwardTarget,
+  type SelectionMode,
+} from './forward-targets';
 
-export type SelectionMode = 'none' | 'channel' | 'users';
+export type { ForwardSearchListItem, ForwardTarget, SelectionMode } from './forward-targets';
 
 export type ForwardMessageSheetTarget = MessageForRender & {
   channelId: string;
@@ -54,15 +54,6 @@ const stripForwardedPreviewHtml = (html: string): string =>
   stripHtmlTags(html.replace(/<br\s*\/?>/gi, '\n'), HTML_TAG_OR_EMPTY)
     .replace(/&nbsp;/gi, ' ')
     .trim();
-
-export type ForwardSearchListItem = {
-  id: string;
-  type: 'channel' | 'user';
-  name: string;
-  description?: string;
-  isPrivate?: boolean;
-  picture?: string;
-};
 
 type UseForwardMessageViewModelArgs = {
   target: ForwardMessageSheetTarget;
@@ -83,6 +74,10 @@ export type ForwardMessageViewModel = {
   setOptionalMessage: Dispatch<SetStateAction<string>>;
   selectedTargets: ForwardTarget[];
   selectionMode: SelectionMode;
+  /** Group DM members plus selected users, counted against the 9-recipient cap. */
+  totalRecipientCount: number;
+  /** False once a channel is picked or the recipient cap is reached. */
+  canAddMoreTargets: boolean;
   filteredItems: ForwardSearchListItem[];
   sender: ForwardMessageSheetUser | undefined;
   previewText: string;
@@ -123,101 +118,30 @@ export function useForwardMessageViewModel({
   const allVisibleChannels = useAllVisibleChannels();
   const allUsers = useUsers();
 
-  const selectionMode: SelectionMode = useMemo(() => {
-    if (selectedTargets.length === 0) return 'none';
-    const firstTarget = selectedTargets[0];
-    if (firstTarget && firstTarget.type === 'channel') return 'channel';
-    return 'users';
-  }, [selectedTargets]);
+  const selectionMode: SelectionMode = useMemo(
+    () => getSelectionMode(selectedTargets),
+    [selectedTargets],
+  );
+  const totalRecipientCount = useMemo(
+    () => getTotalRecipientCount(selectedTargets),
+    [selectedTargets],
+  );
+  const canAddMore = useMemo(() => canAddMoreTargets(selectedTargets), [selectedTargets]);
 
-  const selectedUserIds = useMemo(() => {
-    return new Set(selectedTargets.filter(t => t.type === 'user').map(t => t.id));
-  }, [selectedTargets]);
-
-  const searchItems = useMemo((): ForwardSearchListItem[] => {
-    const items: ForwardSearchListItem[] = [];
-
-    // A public channel may be readable without membership. Forwarding creates
-    // content, so its target set must match the joined-channel feed rather
-    // than the public directory.
-    allVisibleChannels
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .forEach(channel => {
-        const item: ForwardSearchListItem = {
-          id: channel.id,
-          type: 'channel',
-          name: channel.name,
-          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        };
-        if (channel.description) {
-          item.description = channel.description;
-        }
-        items.push(item);
-      });
-
-    allUsers.forEach(user => {
-      if (user.id !== currentUser?.user_id) {
-        const item: ForwardSearchListItem = {
-          id: user.id,
-          type: 'user',
-          name: user.name,
-          description: user.email,
-        };
-        if (user.picture) {
-          item.picture = user.picture;
-        }
-        items.push(item);
-      }
-    });
-
-    return items;
-  }, [allVisibleChannels, allUsers, currentUser?.user_id]);
-
-  const filteredItems = useMemo((): ForwardSearchListItem[] => {
-    const query = searchQuery.toLowerCase().trim();
-
-    let items = searchItems;
-
-    if (selectionMode === 'channel') {
-      items = items.filter(item => item.type === 'channel');
-    } else if (selectionMode === 'users') {
-      items = items.filter(item => item.type === 'user' && !selectedUserIds.has(item.id));
-    }
-
-    if (query) {
-      items = items.filter(
-        item =>
-          item.name.toLowerCase().includes(query) ||
-          (item.description?.toLowerCase().includes(query) ?? false),
-      );
-    }
-
-    if (selectionMode === 'none' && !query) {
-      const recentChannels = allVisibleChannels
-        .filter(c => c.scopeType === ChannelScopeType.DEFAULT)
-        .sort(
-          (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
-        )
-        .slice(0, 5)
-        .map(c => c.id);
-
-      items.sort((a, b) => {
-        const aIsRecent = a.type === 'channel' && recentChannels.includes(a.id);
-        const bIsRecent = b.type === 'channel' && recentChannels.includes(b.id);
-        if (aIsRecent && !bIsRecent) return -1;
-        if (!aIsRecent && bIsRecent) return 1;
-
-        if (a.type === 'user' && b.type === 'channel') return -1;
-        if (a.type === 'channel' && b.type === 'user') return 1;
-
-        return a.name.localeCompare(b.name);
-      });
-    } else {
-      items.sort((a, b) => a.name.localeCompare(b.name));
-    }
-
-    return items.slice(0, 20);
-  }, [searchItems, searchQuery, selectionMode, selectedUserIds, allVisibleChannels]);
+  // A public channel may be readable without membership. Forwarding creates
+  // content, so the target set comes from the joined-channel feed (which also
+  // carries the user's DMs and group DMs) rather than the public directory.
+  const filteredItems = useMemo(
+    (): ForwardSearchListItem[] =>
+      buildForwardTargetItems({
+        channels: allVisibleChannels,
+        users: allUsers,
+        currentUserId: currentUser?.user_id ?? '',
+        query: searchQuery,
+        selectedTargets,
+      }),
+    [allVisibleChannels, allUsers, currentUser?.user_id, searchQuery, selectedTargets],
+  );
 
   const clearBlurTimeout = useCallback(() => {
     if (blurTimeoutRef.current !== null) {
@@ -283,24 +207,10 @@ export function useForwardMessageViewModel({
     };
   }, [clearBlurTimeout, clearDeferBlurClose]);
 
-  const handleSelectItem = useCallback(
-    (item: ForwardSearchListItem) => {
-      const selectedTarget: ForwardTarget = {
-        type: item.type,
-        id: item.id,
-        name: item.name,
-      };
-
-      if (item.type === 'channel') {
-        setSelectedTargets([selectedTarget]);
-      } else if (!selectedUserIds.has(item.id)) {
-        setSelectedTargets(prev => [...prev, selectedTarget]);
-      }
-
-      setSearchQuery('');
-    },
-    [selectedUserIds],
-  );
+  const handleSelectItem = useCallback((item: ForwardSearchListItem) => {
+    setSelectedTargets(prev => applyForwardSelection(prev, item));
+    setSearchQuery('');
+  }, []);
 
   const handleRemoveTarget = useCallback((targetId: string) => {
     setSelectedTargets(prev => prev.filter(t => t.id !== targetId));
@@ -409,7 +319,9 @@ export function useForwardMessageViewModel({
 
         closeThenNavigate(firstTarget.id, 'channels');
       } else {
-        const userIds = selectedTargets.map(t => t.id);
+        // A group DM is re-resolved from its members (+ any extra users) so the
+        // backend reuses the group DM with exactly that member set — same as web.
+        const userIds = getForwardRecipientIds(selectedTargets);
 
         const { ChannelService } = await import('@/src/services/ChannelService');
         const channelService = new ChannelService();
@@ -450,6 +362,8 @@ export function useForwardMessageViewModel({
     setOptionalMessage,
     selectedTargets,
     selectionMode,
+    totalRecipientCount,
+    canAddMoreTargets: canAddMore,
     filteredItems,
     sender,
     previewText,

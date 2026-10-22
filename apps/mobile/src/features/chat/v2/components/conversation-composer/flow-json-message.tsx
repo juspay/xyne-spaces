@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
+import { FlowTicketCard } from '@/src/components/chat/flow-ticket-card';
 import { Button, normalizeButtonVariant } from '@/src/components/ui/button';
 import { DASHBOARD_ORIGIN } from '@/src/config';
+import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
 
 import { useCustomEmojis } from '@/src/hooks/useCustomEmojis';
 import { ORDERED_EMOJIS } from '@/src/components/emoji-picker/emoji-picker.data';
@@ -62,6 +64,7 @@ import { createChartViewModel } from '@/src/utils/flowChartUtils';
 import { codeComponentToMarkdown } from '@/src/utils/flowCodeUtils';
 import { createMcpSuggestViewModel } from '@/src/utils/flowMcpSuggestUtils';
 import { createPrCardViewModel } from '@/src/utils/flowPrUtils';
+import { createTicketCardViewModel } from '@/src/utils/flowTicketUtils';
 import { createUserQuestionViewModel } from '@/src/utils/flowUserQuestionUtils';
 import { showMessageToast } from '@/src/utils/toast';
 import { useFlowMessageAction } from './utils/useFlowMessageAction';
@@ -570,6 +573,21 @@ const FlowJsonMessageBodyComponent = ({
       );
     }
 
+    if (type === 'ticket') {
+      if (!createTicketCardViewModel(component)) return null;
+
+      return (
+        <View key={key} style={[{ alignSelf: 'stretch', minWidth: 0, width: '100%' }, renderStyle]}>
+          <FlowTicketCard
+            component={component}
+            recyclingKey={`${String(activeFlow.screenId ?? 'flow')}:${key}`}
+            containerStyle={inheritedContainerStyle}
+            actions={{ canPressButtons, isSubmitting, executeAction }}
+          />
+        </View>
+      );
+    }
+
     if (type === 'chart') {
       const viewModel = createChartViewModel(component);
       if (!viewModel) return null;
@@ -700,7 +718,7 @@ const FlowJsonMessageBodyComponent = ({
               accessibilityLabel={`View ${entry.name}`}
               onPress={() => {
                 void WebBrowser.openBrowserAsync(
-                  `${DASHBOARD_ORIGIN}${agentLibraryPath(entry.slug)}`,
+                  `${DASHBOARD_ORIGIN}/${getActiveWorkspaceId()}${agentLibraryPath(entry.slug)}`,
                 ).catch(() => {});
               }}
               style={{ gap: 2, minWidth: 0 }}

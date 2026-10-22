@@ -57,7 +57,7 @@ import { findZeroDraftForComposer } from '@/src/components/input-composer/utils/
 import { getZeroDraftFlushContent } from '@/src/components/input-composer/utils/flushComposerDraft';
 import { composerDraftLookupId } from '@/src/features/drafts-sent/drafts-sent-utils';
 import type { MessageItem } from '@/src/components/message-composer';
-import { useJoinableChannel } from '@/src/hooks/useJoinableChannel';
+import { isChannelQueryMember, useJoinableChannel } from '@/src/hooks/useJoinableChannel';
 import { useSelf } from '@/src/hooks/useUsers';
 import { useZero } from '@/src/hooks/useZero';
 import { stateMachineActor } from '@/src/machines/stateMachine';
@@ -350,7 +350,8 @@ function ChatThreadInner({
   const existingZeroDraftContentRef = useRef('');
   existingZeroDraftContentRef.current =
     findZeroDraftForComposer(zeroDrafts ?? [], channelId ?? '', threadId)?.content ?? '';
-  const { channel, shouldShowJoinChannel } = useJoinableChannel(channelId);
+  const { channel, channelUserStatus, shouldShowJoinChannel } = useJoinableChannel(channelId);
+  const isChannelMember = isChannelQueryMember(channel, channelUserStatus);
   const composerHeightResetKey = `${channelId}:${threadId}:${hideHeader ? 'embedded' : 'full'}:${composerInsetMode}`;
   const listRef = useRef<LegendListRef>(null);
   // Freezes keyboard-driven list layout while a bottom sheet is open or a send
@@ -493,9 +494,9 @@ function ChatThreadInner({
       kind: 'thread' as const,
       channelId,
       conversationId: threadId ?? '',
-      isMember: true,
+      isMember: isChannelMember,
     }),
-    [channelId, threadId],
+    [channelId, isChannelMember, threadId],
   );
   const openingThreadMessages = useMemo(() => {
     const snapshot = getThreadSnapshot(threadRef);
@@ -600,7 +601,7 @@ function ChatThreadInner({
     queries.threadConversationV2({
       conversationId: threadId ?? '',
       channelId,
-      isMember: true,
+      isMember: isChannelMember,
     }),
     { enabled: Boolean(threadId) },
   );

@@ -48,6 +48,9 @@ type InFilterSheetProps = {
   selected: readonly SearchFilterChip[];
   /** Receives the whole selection; empty clears the filter. */
   onApply: (chips: readonly SearchFilterChip[]) => void;
+  /** Mention channel picks cannot be DMs (dashboard `excludeDMs`). */
+  excludeDMs?: boolean;
+  title?: string | undefined;
 };
 
 export function InFilterSheet({
@@ -55,11 +58,21 @@ export function InFilterSheet({
   onClose,
   selected,
   onApply,
+  excludeDMs = false,
+  title = 'In',
 }: InFilterSheetProps): ReactElement | null {
   const { shouldRender, sheetProps } = useMountWhileOpen(isOpen, onClose);
   if (!shouldRender) return null;
 
-  return <InFilterSheetBody {...sheetProps} selected={selected} onApply={onApply} />;
+  return (
+    <InFilterSheetBody
+      {...sheetProps}
+      selected={selected}
+      onApply={onApply}
+      excludeDMs={excludeDMs}
+      title={title ?? 'In'}
+    />
+  );
 }
 
 function InFilterSheetBody({
@@ -68,7 +81,14 @@ function InFilterSheetBody({
   onDismiss,
   selected,
   onApply,
-}: SheetMountProps & Pick<InFilterSheetProps, 'selected' | 'onApply'>): ReactElement {
+  excludeDMs,
+  title,
+}: SheetMountProps & {
+  selected: readonly SearchFilterChip[];
+  onApply: (chips: readonly SearchFilterChip[]) => void;
+  excludeDMs: boolean;
+  title: string;
+}): ReactElement {
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<SearchFilterChip[]>(() => [...selected]);
   const draftIds = useMemo(() => new Set(draft.map(chip => chip.id)), [draft]);
@@ -82,8 +102,11 @@ function InFilterSheetBody({
     const hasQuery = query.trim().length > 0;
 
     let ordered: readonly SearchInTargetItem[] = targets;
+    if (excludeDMs) {
+      ordered = ordered.filter(target => target.kind === 'channel');
+    }
     if (!hasQuery) {
-      const listed = new Set(targets.map(target => target.id));
+      const listed = new Set(ordered.map(target => target.id));
       const missing: SearchInTargetItem[] = draft
         .filter(chip => !listed.has(chip.id))
         .map(chip => ({
@@ -91,12 +114,13 @@ function InFilterSheetBody({
           title: chip.label,
           kind: chip.targetKind ?? 'channel',
           ...(chip.visibility ? { visibility: chip.visibility } : {}),
-        }));
-      ordered = selectionFirst(targets, draftIds, missing);
+        }))
+        .filter(item => !excludeDMs || item.kind === 'channel');
+      ordered = selectionFirst(ordered, draftIds, missing);
     }
 
     const channels = ordered.filter(target => target.kind === 'channel');
-    const dms = ordered.filter(target => target.kind === 'dm');
+    const dms = excludeDMs ? [] : ordered.filter(target => target.kind === 'dm');
     const next: ListRow[] = [];
 
     if (channels.length > 0) {
@@ -110,7 +134,7 @@ function InFilterSheetBody({
     }
 
     return next;
-  }, [draft, draftIds, query, targets]);
+  }, [draft, draftIds, excludeDMs, query, targets]);
 
   const toggle = useCallback((target: SearchInTargetItem) => {
     setDraft(prev =>
@@ -146,8 +170,8 @@ function InFilterSheetBody({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       onDismiss={onDismiss}
-      title='In'
-      searchPlaceholder='Search channels and DMs'
+      title={title}
+      searchPlaceholder={excludeDMs ? 'Search channels' : 'Search channels and DMs'}
       query={query}
       onQueryChange={setQuery}
       selectionCount={draft.length}

@@ -36,6 +36,7 @@ import {
 } from '@/src/services/EnrollmentStatusService';
 import { logger, initializeLogger } from '@/src/utils/logger';
 import { crashReporter } from '@/src/utils/crashReporter';
+import { getInitialLinkingURL } from '@/src/utils/initialLinkingUrl';
 import { CrashErrorBoundary } from '@/src/components/CrashErrorBoundary';
 import type { EventType } from '@xyne/shared/logger';
 import { verifyMtlsHealthWithRetry } from '@/src/services/MtlsApiService';
@@ -59,6 +60,7 @@ import {
 import { useAppActivityTracking } from '@/src/hooks/useAppActivityTracking';
 import { useScreenDwellTracker } from '@/src/hooks/useScreenDwellTracker';
 import { ensureForegroundListSyncProbeListener } from '@/src/hooks/useForegroundListSyncProbe';
+import { MtlsExpiryWarningGate } from '@/src/features/mtls-expiry';
 import { startupTimings } from '@/src/utils/startupTimings';
 import { markTelemetryReady } from '@/src/services/metrics/metricsQueue';
 import { StartupPhaseProvider, useStartupPhase } from '@/src/providers/StartupPhaseProvider';
@@ -739,7 +741,7 @@ function RootLayoutNav(): ReactElement {
     const handleInitialURL = async (): Promise<void> => {
       if (didReadInitialDeepLinkRef.current) return;
       didReadInitialDeepLinkRef.current = true;
-      const initialUrl = await Linking.getInitialURL();
+      const initialUrl = await getInitialLinkingURL();
       if (initialUrl && !hasReceivedRuntimeDeepLinkRef.current) {
         if (isHandledDeepLinkUrl(initialUrl)) {
           enqueueDeepLinkRef.current(initialUrl);
@@ -806,6 +808,8 @@ function RootLayoutNav(): ReactElement {
         <WorkspaceSwitchOverlay workspaceName={switchingToWorkspaceName} />
       ) : null}
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+      {/* Soft mTLS expiry warning — same bottom-sheet pattern as app-update / Airborne */}
+      <MtlsExpiryWarningGate />
     </>
   );
 }

@@ -78,7 +78,15 @@ export function placeholderForTab(tab: GlobalSearchTab): string {
 }
 
 export const IN_CHIP_EMPTY_LABEL = 'In';
-export const ONLY_MY_CHANNELS_CHIP_LABEL = 'Only my channels';
+/** Bar pill — dashboard `@Ch` (only my channels). */
+export const ONLY_MY_CHANNELS_CHIP_LABEL = '@Ch';
+export const ONLY_MY_CHANNELS_CHIP_A11Y_LABEL = 'Only my channels';
+/** Short pill label — include automation messages (Messages tab). Dashboard: "Include automations". */
+export const BOT_CHIP_LABEL = 'Bot';
+export const BOT_CHIP_A11Y_LABEL = 'Include automations';
+/** Short pill label — exact phrase match (quotes folded into `q`). */
+export const EXACT_CHIP_LABEL = '"ab"';
+export const EXACT_CHIP_A11Y_LABEL = 'Exact message match';
 
 /**
  * What to call the From filter on a given category. Reads the SEARCH_TABS table

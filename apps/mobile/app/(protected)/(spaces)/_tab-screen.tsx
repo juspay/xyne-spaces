@@ -30,7 +30,7 @@ function SpacesHeader({ title }: { title: string }): ReactElement {
       </TabsScreenHeader.Leading>
       <TabsScreenHeader.Trailing>
         <AppHeader.ConnectionStatus />
-        <AppHeader.UserGuide />
+        <AppHeader.XyneAI />
         <AppHeader.UserProfile />
       </TabsScreenHeader.Trailing>
     </TabsScreenHeader>

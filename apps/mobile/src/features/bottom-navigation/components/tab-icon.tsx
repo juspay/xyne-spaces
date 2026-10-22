@@ -68,7 +68,6 @@ export type TabIconProps = {
    */
   badgeLabel: string | null;
   menuDestinationIcon: NavIcon | null;
-  searchProgress: SharedValue<number>;
   menuProgress: SharedValue<number>;
   pillPressed: SharedValue<number>;
   touchX: SharedValue<number>;
@@ -88,7 +87,6 @@ export const TabIcon = memo(function TabIcon({
   isActive,
   badgeLabel,
   menuDestinationIcon,
-  searchProgress,
   menuProgress,
   pillPressed,
   touchX,
@@ -118,7 +116,7 @@ export const TabIcon = memo(function TabIcon({
           pillPressed.set(withTiming(1, { duration: 80 }));
           cancelAnimation(glowProgress);
           glowProgress.set(1);
-          if (searchProgress.get() < 0.5) hoveredTab.set(index);
+          hoveredTab.set(index);
         })
         // The pill's own gesture cancels this tap the moment it activates, so
         // the press has to be acted on here rather than in `onEnd`.
@@ -141,7 +139,6 @@ export const TabIcon = memo(function TabIcon({
       isMenuTab,
       onMenuPress,
       pillPressed,
-      searchProgress,
       touchX,
       touchY,
       triggerHaptic,
@@ -149,7 +146,6 @@ export const TabIcon = memo(function TabIcon({
   );
 
   const iconAnimatedStyle = useAnimatedStyle(() => {
-    const search = searchProgress.get();
     const menu = menuProgress.get();
 
     if (menu > 0.01) {
@@ -166,22 +162,12 @@ export const TabIcon = memo(function TabIcon({
       };
     }
 
-    if (index === 0) {
-      return {
-        opacity: 1,
-        flex: 1,
-        width: undefined,
-        overflow: 'hidden' as const,
-        transform: [{ translateX: 0 }, { scale: 1 }],
-      };
-    }
-
     return {
-      opacity: interpolate(search, [0, 0.3], [1, 0], 'clamp'),
-      flex: interpolate(search, [0, 0.3], [1, 0], 'clamp'),
+      opacity: 1,
+      flex: 1,
       width: undefined,
       overflow: 'hidden' as const,
-      transform: [{ translateX: 0 }, { scale: interpolate(search, [0, 0.3], [1, 0.5], 'clamp') }],
+      transform: [{ translateX: 0 }, { scale: 1 }],
     };
   });
 
@@ -337,7 +323,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   // Inside the icon wrapper so it inherits the icon's fade and travel when the
-  // pill turns into the menu or the search field.
+  // pill turns into the menu.
   //
   // Width is left to the content: one digit renders a circle, and two or three
   // grow it leftwards from the same anchor rather than pushing past the tab.

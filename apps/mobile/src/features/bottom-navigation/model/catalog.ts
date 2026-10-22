@@ -1,4 +1,4 @@
-import { CircleAlert } from 'lucide-react-native';
+import { CircleAlert, CircleQuestionMark } from 'lucide-react-native';
 
 import {
   BellIcon,
@@ -127,6 +127,12 @@ export const TAB_CATALOG: readonly TabEntry[] = [
     label: 'Desks',
     icon: navIcon(LayersIcon),
     routeName: 'xyne-desks',
+  },
+  {
+    id: 'user-guide',
+    label: 'Help',
+    icon: CircleQuestionMark,
+    externalHref: '/(protected)/guide' as Href,
   },
   {
     id: 'report-issue',
