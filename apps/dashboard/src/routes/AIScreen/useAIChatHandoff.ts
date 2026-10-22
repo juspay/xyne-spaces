@@ -3,18 +3,28 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 export function useAIChatHandoff(): {
-  onCreateChat: () => void;
+  onCreateChat: (projectId?: string) => void;
   onSelectSession: (sessionId: string) => void;
 } {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const chatPath = workspaceId ? `/${workspaceId}/ai/chat/new` : '/ai/chat/new';
 
-  const onCreateChat = useCallback((): void => {
-    sessionStorage.removeItem(AI_ACTIVE_SESSION_KEY);
-    sessionStorage.setItem(AI_SHOW_CHAT_VIEW_KEY, '0');
-    void navigate(chatPath);
-  }, [navigate, chatPath]);
+  // projectId rides in the URL because the chat screen is a different route:
+  // its pendingProjectId is component state the sidebar sets directly, and a
+  // screen handing off to it has no way to reach that. Without this, the
+  // sidebar's "new chat in project" silently filed the chat nowhere whenever
+  // the user happened to be on one of these screens rather than the chat.
+  const onCreateChat = useCallback(
+    (projectId?: string): void => {
+      sessionStorage.removeItem(AI_ACTIVE_SESSION_KEY);
+      sessionStorage.setItem(AI_SHOW_CHAT_VIEW_KEY, '0');
+      void navigate(
+        projectId ? `${chatPath}?projectId=${encodeURIComponent(projectId)}` : chatPath,
+      );
+    },
+    [navigate, chatPath],
+  );
 
   const onSelectSession = useCallback(
     (sessionId: string): void => {

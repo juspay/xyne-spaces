@@ -1741,6 +1741,26 @@ export interface ClawChatProjectInput {
   defaultAgentSlug?: string | null;
 }
 
+export interface ClawChatProjectKnowledge {
+  id: string;
+  projectId: string;
+  type: 'file' | 'kb_collection' | 'channel' | 'ticket' | 'canvas';
+  refId: string;
+  title: string;
+  /** `file` only. */
+  mimeType: string | null;
+  size: number | null;
+  createdAt: string;
+}
+
+/** Shaped by claw-auth's parseKnowledgeBody; forwarded as-is so the two do not
+ *  drift. `file` resolves its own storagePath there, never from this body. */
+export interface ClawChatProjectKnowledgeInput {
+  type: string;
+  refId: string;
+  title?: string;
+}
+
 const CHAT_PROJECTS_PATH = '/claw/api/v1/agent-chat/chat/projects';
 
 /** One hop to claw-auth, with its status preserved on failure. */
@@ -1891,6 +1911,49 @@ export async function revokeClawDesignShare(
     `${DESIGN_SHARES_PATH}/${encodeURIComponent(shareId)}`,
     { method: 'DELETE' },
     'Failed to revoke design share'
+  );
+}
+
+function knowledgePath(projectId: string, knowledgeId?: string): string {
+  const base = `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}/knowledge`;
+  return knowledgeId === undefined ? base : `${base}/${encodeURIComponent(knowledgeId)}`;
+}
+
+export async function listClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string
+): Promise<{ success: boolean; data: ClawChatProjectKnowledge[] }> {
+  return clawProjectRequest(
+    req,
+    knowledgePath(projectId),
+    { method: 'GET' },
+    'Failed to list project knowledge'
+  );
+}
+
+export async function addClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string,
+  input: ClawChatProjectKnowledgeInput
+): Promise<{ success: boolean; data: ClawChatProjectKnowledge }> {
+  return clawProjectRequest(
+    req,
+    knowledgePath(projectId),
+    { method: 'POST', body: input },
+    'Failed to attach project knowledge'
+  );
+}
+
+export async function deleteClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string,
+  knowledgeId: string
+): Promise<{ success: boolean; data: { id: string; deleted: boolean } }> {
+  return clawProjectRequest(
+    req,
+    knowledgePath(projectId, knowledgeId),
+    { method: 'DELETE' },
+    'Failed to detach project knowledge'
   );
 }
 

@@ -289,14 +289,33 @@ const AIScreen = (): ReactElement => {
     // project row. Without this, the project they picked earlier would still be
     // pending and the next conversation id to arrive — this existing chat —
     // would be filed into it.
-    setPendingProjectId(null);
+    //
+    // The exception is `?projectId=`, which the project home page sets on its
+    // "New chat" action. That arrives as a navigation rather than through
+    // handleCreateChat, so clearing unconditionally would drop the one thing
+    // the user asked for and file the chat nowhere.
+    setPendingProjectId(new URLSearchParams(location.search).get('projectId'));
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
     setInitialAttachments(undefined);
     setChatKey(prev => prev + 1);
     resetAssistant();
-  }, [sessionFromUrl, activeSessionId, resetAssistant]);
+  }, [sessionFromUrl, activeSessionId, location.search, resetAssistant]);
+
+  // Consume `?projectId=` once. The state→URL effect carries location.search
+  // onto every later navigation, so leaving it there would re-arm the filing
+  // on Back and on the next chat started from this screen.
+  useEffect(() => {
+    if (!workspaceId) return;
+    const params = new URLSearchParams(location.search);
+    if (!params.has('projectId')) return;
+    params.delete('projectId');
+    const query = params.toString();
+    void navigate(`/${workspaceId}/ai/chat/${routeSessionId ?? 'new'}${query ? `?${query}` : ''}`, {
+      replace: true,
+    });
+  }, [location.search, workspaceId, routeSessionId, navigate]);
 
   useEffect(() => {
     if (activeSessionId) {
