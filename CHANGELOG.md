@@ -1,3 +1,11 @@
+## [1.517.0-release-20261022.2](https://github.com/juspay/xyne-spaces/compare/v1.517.0-release-20261022.1...v1.517.0-release-20261022.2) (2026-10-22)
+
+
+### Features
+
+* agents answer channel questions nobody tagged them on ([#3304](https://github.com/juspay/xyne-spaces/issues/3304)) ([#3382](https://github.com/juspay/xyne-spaces/issues/3382)) ([4bdb3c5](https://github.com/juspay/xyne-spaces/commit/4bdb3c5d45c725df29ee6718ca58cb1b7e434878))
+* decision engine evals: record XOR and Jev token usage ([#3387](https://github.com/juspay/xyne-spaces/issues/3387)) ([e0cb6d1](https://github.com/juspay/xyne-spaces/commit/e0cb6d1ed74c654040e7856d29fbef894963a2d4))
+
 ## [1.517.0-release-20261022.1](https://github.com/juspay/xyne-spaces/compare/v1.516.0...v1.517.0-release-20261022.1) (2026-10-22)
 
 
