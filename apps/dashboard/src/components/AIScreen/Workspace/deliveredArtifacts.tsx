@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactElement } from 'react';
 import { Download } from 'lucide-react';
 import { downloadFile } from '../../../services/clients/fileFetchService';
 import type { ConversationArtifact } from '../../../services/XyneAI/XyneAIArtifactsService';
+import { previewerFor } from '../../FilePreview/registry';
 import { artifactKindIcon, artifactKindLabel } from './artifactKinds';
 
 const DELIVERED_KINDS = new Set<ConversationArtifact['kind']>([
@@ -55,7 +56,7 @@ export function splitDeliveredAttachments<A extends { id?: string | undefined }>
   index: DeliveredArtifactIndex | null,
 ): { artifacts: ConversationArtifact[]; attachments: A[] } {
   if (!index) return { artifacts: [], attachments: [...attachments] };
-  const artifacts = [...(index.byMessageId.get(messageId) ?? [])];
+  const artifacts = attachments.length === 0 ? [...(index.byMessageId.get(messageId) ?? [])] : [];
   const plain: A[] = [];
   for (const attachment of attachments) {
     const artifact = attachment.id ? index.byAttachmentId.get(attachment.id) : undefined;
@@ -73,6 +74,10 @@ export function DeliveredArtifactChip({
   onOpen: (artifactId: string) => void;
 }): ReactElement {
   const attachmentId = deliveredAttachmentId(artifact);
+  const typeLabel =
+    (artifact.kind === 'FILE'
+      ? previewerFor({ name: artifact.title, mimetype: artifact.mimeType ?? '' })?.label
+      : undefined) ?? artifactKindLabel(artifact.kind);
   return (
     <div className='group flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-3 py-2.5 transition-colors hover:bg-muted'>
       <button
@@ -84,9 +89,11 @@ export function DeliveredArtifactChip({
         data-track-name='DeliveredArtifactOpen'
       >
         {artifactKindIcon(artifact.kind, 'h-4 w-4 shrink-0 text-muted-foreground')}
-        <span className='truncate text-sm font-medium text-foreground'>{artifact.title}</span>
-        <span className='shrink-0 text-[13px] text-muted-foreground'>
-          {artifactKindLabel(artifact.kind)} · Open in workspace
+        <span className='min-w-[3rem] truncate text-sm font-medium text-foreground'>
+          {artifact.title}
+        </span>
+        <span className='min-w-0 shrink truncate text-[13px] text-muted-foreground'>
+          {typeLabel} · Open in workspace
         </span>
       </button>
       {attachmentId && (

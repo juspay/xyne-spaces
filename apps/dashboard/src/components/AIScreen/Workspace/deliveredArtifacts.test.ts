@@ -37,7 +37,13 @@ describe('delivered artifacts', () => {
 
   it('turns a delivered attachment into its artifact and leaves the rest as attachments', () => {
     const split = splitDeliveredAttachments('msg-1', [{ id: 'att-1' }, { id: 'other' }], index);
-    expect(split.artifacts.map(a => a.id)).toEqual(['art-1', 'art-2']);
+    expect(split.artifacts.map(a => a.id)).toEqual(['art-1']);
+    expect(split.attachments).toEqual([{ id: 'other' }]);
+  });
+
+  it('does not add message-level rows to a message that already carries attachments', () => {
+    const split = splitDeliveredAttachments('msg-1', [{ id: 'other' }], index);
+    expect(split.artifacts).toEqual([]);
     expect(split.attachments).toEqual([{ id: 'other' }]);
   });
 

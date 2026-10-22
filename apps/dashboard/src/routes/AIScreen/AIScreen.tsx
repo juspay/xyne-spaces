@@ -715,12 +715,17 @@ const AIScreen = (): ReactElement => {
       requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
     [requestWorkspace],
   );
+  const deliveredIndex = useMemo(
+    () => indexDeliveredArtifacts(conversationArtifacts),
+    [conversationArtifacts],
+  );
+  const openDeliveredArtifact = useCallback(
+    (artifactId: string) => openWorkspaceTab('artifacts', artifactId),
+    [openWorkspaceTab],
+  );
   const deliveredArtifacts = useMemo<DeliveredArtifacts>(
-    () => ({
-      ...indexDeliveredArtifacts(conversationArtifacts),
-      open: (artifactId: string) => openWorkspaceTab('artifacts', artifactId),
-    }),
-    [conversationArtifacts, openWorkspaceTab],
+    () => ({ ...deliveredIndex, open: openDeliveredArtifact }),
+    [deliveredIndex, openDeliveredArtifact],
   );
   const autoOpenWorkspace = useCallback(
     (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => {
