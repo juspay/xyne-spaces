@@ -67,9 +67,19 @@ services:
   backend:
     host: xyne-backend
     port: 80
+  # The /zero/ client endpoint is served by xyne-sync (streamgres), which
+  # replaced the Zero view-syncer on this deployment. Zero keeps a 40GB local
+  # SQLite replica and died repeatedly on heap exhaustion; streamgres follows a
+  # Postgres logical replication slot instead and holds no replica. It
+  # impersonates Zero on purpose (APP_ID zero, shard 0, BASE_PATH /zero, port
+  # 4848) so no client change was needed.
+  #
+  # rewrite false because streamgres is mounted at /zero and must receive the
+  # prefix. Point host back at xyne-zero and set rewrite true to roll back.
   zero:
-    host: xyne-zero
+    host: xyne-sync
     port: 80
+    rewrite: false
   ysweet:
     host: xyne-ysweet
     port: 8080

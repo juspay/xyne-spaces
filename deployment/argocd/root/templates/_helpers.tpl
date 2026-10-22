@@ -297,6 +297,7 @@ REDIS_TLS: {{ ternary "true" "false" ($r.tls | default false) | quote }}
 FRONTEND_URL: {{ $url | quote }}
 BACKEND_URL: {{ $url | quote }}
 CORS_ORIGIN: {{ $url | quote }}
+TRUSTED_ORIGINAL_HOST_DOMAINS: {{ .root.Values.global.domain | quote }}
 {{- end }}
 
 {{- define "xyne-root.otelEnv" -}}
@@ -375,6 +376,7 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- if (index $root.Values.apps "xyne-claw-auth").enabled }}
 {{- $_ := set $env "XYNE_CLAW_AUTH_URL" "http://xyne-claw-auth:3003" }}
 {{- $_ := set $env "XYNE_CLAW_AUTH_INTERNAL_URL" "http://xyne-claw-auth:3003" }}
+{{- $_ := set $env "INTERNAL_APP_HOST_MAP" (dict $root.Values.global.domain "http://xyne-claw-auth:3003" | toJson) }}
 {{- end }}
 {{- if (index $root.Values.apps "xyne-lighton-ocr").enabled }}
 {{- $_ := set $env "DOCLING_SERVICE_URL" "http://xyne-lighton-ocr:80" }}
@@ -546,6 +548,7 @@ pdb:
 {{- $_ := set $v "serviceAccount" (mergeOverwrite ($v.serviceAccount | default dict) (dict "automount" true)) }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
+{{- $_ := set $v "secretEnv" (include "xyne-root.storageSecretEnv" (dict "root" $root "secret" "xyne-claw-secrets") | fromYaml) }}
 {{- toYaml $v }}
 {{- end }}
 
@@ -556,7 +559,9 @@ pdb:
 {{- $env = mergeOverwrite $env (include "xyne-root.redisEnv" (dict "root" $root) | fromYaml) }}
 {{- $env = mergeOverwrite $env (include "xyne-root.storageEnv" (dict "root" $root "mainBucket" "claw") | fromYaml) }}
 {{- $env = mergeOverwrite $env (include "xyne-root.otelEnv" (dict "root" $root) | fromYaml) }}
+{{- $env = mergeOverwrite $env (include "xyne-root.hindsightEnv" (dict "root" $root) | fromYaml) }}
 {{- $_ := set $v "env" $env }}
+{{- $_ := set $v "secretEnv" (include "xyne-root.storageSecretEnv" (dict "root" $root "secret" "xyne-claw-auth-secrets") | fromYaml) }}
 {{- toYaml $v }}
 {{- end }}
 

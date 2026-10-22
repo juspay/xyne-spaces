@@ -78,6 +78,10 @@ resources:
 
 podSecurityContext:
   fsGroup: 101
+  # Lets non-root nginx (uid 101) bind port 80.
+  sysctls:
+    - name: net.ipv4.ip_unprivileged_port_start
+      value: "0"
 securityContext:
   runAsNonRoot: true
   runAsUser: 101

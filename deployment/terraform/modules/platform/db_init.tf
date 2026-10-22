@@ -1,7 +1,14 @@
 locals {
   db_init_enabled = var.postgres.mode == "managed"
 
-  db_init_grant = var.cluster.cloud == "aws" ? "GRANT rds_replication TO CURRENT_USER;" : "ALTER ROLE CURRENT_USER WITH REPLICATION;"
+  # onprem emits nothing: ALTER ROLE ... WITH REPLICATION needs superuser, and the
+  # connecting role is not one. Grant REPLICATION and CREATEDB to it out of band.
+  db_init_grant = {
+    aws    = "GRANT rds_replication TO CURRENT_USER;"
+    gcp    = "ALTER ROLE CURRENT_USER WITH REPLICATION;"
+    azure  = "ALTER ROLE CURRENT_USER WITH REPLICATION;"
+    onprem = ""
+  }[var.cluster.cloud]
 
   db_init_databases = distinct(compact([
     var.postgres.databases.common,
