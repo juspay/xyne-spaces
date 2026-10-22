@@ -27,6 +27,8 @@ export type ActivityRowVM = {
 };
 
 export type ActivityNavigationTarget =
+  | { kind: 'recording'; recordingId: string }
+  | { kind: 'call-detail'; callId: string }
   | {
       kind: 'ticket';
       ticketId: string;
@@ -52,6 +54,19 @@ export type ActivityNavigationTarget =
     };
 
 export const navigateToActivityTarget = (target: ActivityNavigationTarget): void => {
+  if (target.kind === 'recording') {
+    router.push({
+      pathname: '/recording/[recordingId]',
+      params: { recordingId: target.recordingId },
+    });
+    return;
+  }
+
+  if (target.kind === 'call-detail') {
+    router.push({ pathname: '/call-detail/[callId]', params: { callId: target.callId } });
+    return;
+  }
+
   if (target.kind === 'none') {
     return;
   }

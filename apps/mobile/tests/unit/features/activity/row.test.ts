@@ -166,3 +166,78 @@ describe('buildActivityRows', () => {
     );
   });
 });
+
+describe('recording summary activity', () => {
+  const summaryActivity = (overrides: Record<string, unknown> = {}) =>
+    activity({
+      actorAction: 'recording_summary_ready',
+      actionSource: 'call',
+      classification: 'FYI',
+      callId: 'internal-call',
+      channelId: null,
+      message: null,
+      call: {
+        id: 'internal-call',
+        externalId: 'external-recording',
+        callType: 'HEADLESS',
+        title: 'Planning',
+      },
+      ...overrides,
+    });
+
+  it('renders a summary without a message or channel and opens the external recording ID', () => {
+    const row = buildActivityRow(summaryActivity(), ctx);
+    assert.ok(row);
+    assert.equal(row.actorName, 'Recording summary');
+    assert.equal(row.verb, '· "Planning"');
+    assert.equal(row.badge, 'summary');
+    assert.equal(row.subject, null);
+    assert.deepEqual(row.body, { kind: 'text', text: 'Summary is ready to view' });
+    assert.deepEqual(row.target, { kind: 'recording', recordingId: 'external-recording' });
+    assert.equal(row.isUnread, true);
+    assert.equal(row.timeMs, 2_000);
+  });
+
+  it('opens regular call summaries using the internal call ID', () => {
+    for (const callType of ['AUDIO', 'VIDEO']) {
+      const row = buildActivityRow(
+        summaryActivity({
+          isRead: true,
+          call: { id: 'internal-call', externalId: 'external-call', callType, title: null },
+        }),
+        ctx,
+      );
+      assert.ok(row);
+      assert.equal(row.actorName, 'Call summary');
+      assert.equal(row.verb, '· "Untitled"');
+      assert.deepEqual(row.target, { kind: 'call-detail', callId: 'internal-call' });
+      assert.equal(row.isUnread, false);
+    }
+  });
+
+  it('waits for the call relation and then includes the synced summary alongside existing rows', () => {
+    const cache = new WeakMap<ActivityWithRelated, ActivityRowData | null>();
+    const pending = summaryActivity({ call: undefined });
+    assert.deepEqual(buildActivityRows([pending], ctx, cache), []);
+    const rows = buildActivityRows([activity(), summaryActivity({ id: 'summary' })], ctx, cache);
+    assert.deepEqual(
+      rows.map(row => row.id),
+      ['a1', 'summary'],
+    );
+    assert.equal(rows[0]?.badge, 'mention');
+    assert.equal(rows[1]?.badge, 'summary');
+  });
+
+  it('does not create broken destinations for missing call IDs or recording external IDs', () => {
+    assert.equal(buildActivityRow(summaryActivity({ callId: null }), ctx), null);
+    assert.equal(
+      buildActivityRow(
+        summaryActivity({
+          call: { id: 'internal-call', externalId: '', callType: 'HEADLESS' },
+        }),
+        ctx,
+      ),
+      null,
+    );
+  });
+});
