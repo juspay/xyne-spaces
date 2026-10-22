@@ -627,13 +627,24 @@ const PARENT_PARALLELISM_PREAMBLE = [
   "",
 ].join("\n");
 
-function buildUserDetails(userId: string, userName?: string, userEmail?: string): string {
+export function buildUserDetails(
+  userId: string,
+  userName?: string,
+  userEmail?: string,
+  spaces?: { userId?: string | undefined; workspaceId?: string | undefined },
+): string {
   const lines = [
     "## Current User",
     `- **Name:** ${userName ?? "unknown"}`,
   ];
   if (userEmail) lines.push(`- **Email:** ${userEmail}`);
-  lines.push("", "To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the `spaces-whoami` tool first.");
+  if (spaces?.userId) {
+    lines.push(`- **Spaces user ID:** ${spaces.userId}`);
+    if (spaces.workspaceId) lines.push(`- **Spaces workspace ID:** ${spaces.workspaceId}`);
+    lines.push("", "Use this Spaces user ID directly for filtering tools (assignedTo, from, createdBy, participants). You do not need to call `spaces-whoami` to look it up.");
+  } else {
+    lines.push("", "To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the `spaces-whoami` tool first.");
+  }
   return lines.join("\n");
 }
 
@@ -1829,6 +1840,8 @@ export interface RunTaskOptions {
   context?: string | undefined;
   userName?: string | undefined;
   userEmail?: string | undefined;
+  spacesUserId?: string | undefined;
+  spacesWorkspaceId?: string | undefined;
   customTools?: ToolDefinition[] | undefined;
   systemPromptOverride?: string | undefined;
   cwd?: string | undefined;
@@ -2051,6 +2064,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     context,
     userName,
     userEmail,
+    spacesUserId,
+    spacesWorkspaceId,
     customTools,
     systemPromptOverride,
     cwd,
@@ -2328,7 +2343,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // tool_use per turn, and 4 sequential subagent calls cost 4× wall-clock.
   const personaSuffix = twinPersona ? `\n\n${twinPersona}` : "";
   const personaSystemPrompt = systemPromptOverride
-    ? `${PARENT_PARALLELISM_PREAMBLE}${systemPromptOverride}${personaSuffix}\n\n${buildUserDetails(userId, userName, userEmail)}`
+    ? `${PARENT_PARALLELISM_PREAMBLE}${systemPromptOverride}${personaSuffix}\n\n${buildUserDetails(userId, userName, userEmail, { userId: spacesUserId, workspaceId: spacesWorkspaceId })}`
     : undefined;
 
   // Pi v0.75: DefaultResourceLoaderOptions.agentDir is now REQUIRED (with
@@ -3765,7 +3780,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           log.info(`[agent] Copilot resume repaired ${repaired} dangling respond-to-user tool_use block(s) before prompting`);
         }
       }
-      const userDetails = buildUserDetails(userId, userName, userEmail);
+      const userDetails = buildUserDetails(userId, userName, userEmail, { userId: spacesUserId, workspaceId: spacesWorkspaceId });
       const followUp = `${userDetails}${contextBlock}\n\n## User Reply\n${task}`;
       recordPrompt(followUp, "resume", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(followUp, images?.length ? { images } : undefined));
