@@ -22,6 +22,7 @@ const h = vi.hoisted(() => {
     fetchCalls: [] as Array<{ url: string; body: Record<string, unknown> }>,
     agentToolOutcome: { ok: true, message: "Agent updated" } as Record<string, unknown>,
     skillOutcome: { status: "created", id: "s1", slug: "skill", name: "Skill", message: "Skill created" } as Record<string, unknown>,
+    redis: new Map<string, string>(),
   };
   return { state };
 });
@@ -44,7 +45,24 @@ vi.mock("../db.js", () => ({
   },
 }));
 vi.mock("../crypto.js", () => ({ decrypt: vi.fn(() => "app-token") }));
-vi.mock("../redis.js", () => ({ redisService: { setNX: vi.fn(async () => true), get: vi.fn(), set: vi.fn(), del: vi.fn() } }));
+vi.mock("../redis.js", () => {
+  const store = h.state.redis;
+  const conn = {
+    set: vi.fn(async (key: string, value: string, ...args: unknown[]) => {
+      if (args.includes("NX") && store.has(key)) return null;
+      store.set(key, value);
+      return "OK";
+    }),
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    mget: vi.fn(async (...keys: string[]) => keys.map((k) => store.get(k) ?? null)),
+    eval: vi.fn(async (_script: string, _n: number, key: string, expected: string, next: string) => {
+      if (store.get(key) !== expected) return 0;
+      store.set(key, next);
+      return 1;
+    }),
+  };
+  return { redisService: { getConnection: () => conn } };
+});
 vi.mock("../repositories/index.js", () => ({
   agentRunRepository: {},
   chatMessageRepository: { resolvePendingAction: vi.fn(async () => undefined) },
@@ -130,6 +148,7 @@ vi.mock("../lib/flow-card-delivery.js", () => ({ replaceFlowCardOnRow: vi.fn(asy
 vi.mock("./webhook.js", () => ({ setSession: vi.fn(async () => undefined) }));
 
 const { flowActionRouter } = await import("./flow-action.js");
+const { buildWriteBatchApprovalFlow } = await import("xyne-claw-shared");
 
 type Handler = (req: unknown, res: unknown) => Promise<void>;
 const routeLayer = (flowActionRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: Handler }> } }> }).stack.find(
@@ -200,6 +219,7 @@ beforeEach(() => {
   h.state.callTool.mockResolvedValue({ content: "Created ticket XYNE-1" });
   h.state.harnessHandled = false;
   h.state.fetchCalls = [];
+  h.state.redis.clear();
   h.state.agentToolOutcome = { ok: true, message: "Agent updated" };
   h.state.skillOutcome = { status: "created", id: "s1", slug: "skill", name: "Skill", message: "Skill created" };
   vi.stubGlobal(
@@ -321,5 +341,142 @@ describe("write approval: non-MCP tools", () => {
     const out = await click("approve-write", writeCard({ serverType: "agent-tools", tool: "create-skill" }));
     expect(out.body).toEqual({ type: "close_screen", finalMessage: "Skill already exists" });
     expect(String(cardUpdates()[0]!.body["markdownText"])).toContain("Skill already exists");
+  });
+});
+
+function batchCard(count = 3, signatures?: string[]) {
+  const rows = Array.from({ length: count }, (_, i) => ({
+    description: `Create issue ${i}`,
+    status: "pending" as const,
+    action: {
+      serverType: "jira",
+      tool: `jira-create-issue-${i}`,
+      params: { summary: `Bug ${i}` },
+      userId: "user-1",
+      signature: signatures?.[i] ?? `sig-${i}`,
+      agentSlug: "doctor",
+      channelId: "ch-1",
+      conversationId: "conv-1",
+    },
+  }));
+  return buildWriteBatchApprovalFlow({ batchId: "b1", rows, spacesAppId: "app-1" }) as unknown as ReturnType<typeof writeCard>;
+}
+
+async function settle() {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+function lastBatchCard(): string {
+  const updates = cardUpdates();
+  return JSON.stringify(updates.at(-1)?.body["flowJSON"] ?? {});
+}
+
+function toolsRun(): string[] {
+  return h.state.callTool.mock.calls.map((c) => String(c[3]));
+}
+
+describe("approvals card with several writes", () => {
+  it("approving one row runs only that row and leaves the rest waiting", async () => {
+    const out = await click("approve-row:1", batchCard());
+    await settle();
+    expect(out.body).toEqual({ type: "ack", message: "Running 1 action…" });
+    expect(toolsRun()).toEqual(["jira-create-issue-1"]);
+    const card = lastBatchCard();
+    expect(card).toContain("approve-row:0");
+    expect(card).not.toContain("approve-row:1");
+    expect(card).toContain("approve-row:2");
+    expect(card).toContain("✅ Done");
+  });
+
+  it("Approve all runs every waiting row once, in order, then reports everything handled", async () => {
+    await click("approve-all", batchCard());
+    await settle();
+    expect(toolsRun()).toEqual(["jira-create-issue-0", "jira-create-issue-1", "jira-create-issue-2"]);
+    expect(lastBatchCard()).not.toContain("approve-all");
+
+    const again = await click("approve-all", batchCard());
+    await settle();
+    expect(again.body).toEqual({ type: "ack", message: "Already handled." });
+    expect(toolsRun()).toHaveLength(3);
+  });
+
+  it("a double click on the same row runs it once", async () => {
+    await click("approve-row:0", batchCard());
+    const second = await click("approve-row:0", batchCard());
+    await settle();
+    expect(second.body).toEqual({ type: "ack", message: "Already handled." });
+    expect(toolsRun()).toEqual(["jira-create-issue-0"]);
+  });
+
+  it("a failed row can be retried, a finished one cannot be re-run", async () => {
+    h.state.callTool.mockRejectedValueOnce(new Error("boom"));
+    await click("approve-row:0", batchCard());
+    await settle();
+    expect(lastBatchCard()).toContain("❌ Failed");
+    expect(lastBatchCard()).toContain("approve-row:0");
+
+    await click("approve-row:0", batchCard());
+    await settle();
+    expect(toolsRun()).toEqual(["jira-create-issue-0", "jira-create-issue-0"]);
+    expect(lastBatchCard()).toContain("✅ Done");
+
+    const rerun = await click("approve-row:0", batchCard());
+    await settle();
+    expect(rerun.body).toEqual({ type: "ack", message: "Already handled." });
+    expect(toolsRun()).toHaveLength(2);
+  });
+
+  it("someone other than the card's user changes nothing", async () => {
+    const out = await click("approve-all", batchCard(), "user-2");
+    await settle();
+    expect(out.status).toBe(403);
+    expect(toolsRun()).toEqual([]);
+    expect(cardUpdates()).toHaveLength(0);
+    expect(h.state.redis.size).toBe(0);
+  });
+
+  it("one row with a bad signature refuses the whole click before anything runs", async () => {
+    const verify = (await import("./mcp.js")).verifyActionSignatureAny as unknown as ReturnType<typeof vi.fn>;
+    verify.mockImplementation((payloads: Array<Record<string, unknown>>) =>
+      payloads.some((p) => !("automation" in p) && "agentSlug" in p && p["tool"] !== "jira-create-issue-2"),
+    );
+    try {
+      const out = await click("approve-all", batchCard());
+      await settle();
+      expect((out.body as { code?: string }).code).toBe("INTEGRITY_FAILED");
+      expect(toolsRun()).toEqual([]);
+      expect(h.state.redis.size).toBe(0);
+    } finally {
+      verify.mockReset();
+      verify.mockImplementation((payloads: Array<Record<string, unknown>>) => {
+        if (!h.state.signatureOk) return false;
+        return payloads.some((p) => {
+          if (p["automation"] === true) return h.state.automationCard;
+          if (!("agentSlug" in p)) return h.state.legacyCard;
+          return !h.state.automationCard && !h.state.legacyCard;
+        });
+      });
+    }
+  });
+
+  it("Decline all runs nothing and marks every row declined", async () => {
+    const out = await click("decline-all", batchCard());
+    await settle();
+    expect(out.body).toEqual({ type: "ack", message: "Declined 3." });
+    expect(toolsRun()).toEqual([]);
+    const card = lastBatchCard();
+    expect(card.match(/⛔ Declined/g)).toHaveLength(3);
+    expect(card).not.toContain("approve-row");
+  });
+
+  it("Approve all & continue starts one continuation carrying every result", async () => {
+    h.state.callTool.mockImplementation(async (...args: unknown[]) => ({ content: `ok ${String(args[3])}` }));
+    await click("approve-all-continue", batchCard(2));
+    await settle();
+    const runs = continuationRuns();
+    expect(runs).toHaveLength(1);
+    expect(String(runs[0]!.body["task"])).toContain("2 actions");
+    expect(String(runs[0]!.body["context"])).toContain("ok jira-create-issue-0");
+    expect(String(runs[0]!.body["context"])).toContain("ok jira-create-issue-1");
   });
 });
