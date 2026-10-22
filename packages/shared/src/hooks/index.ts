@@ -13,6 +13,10 @@ export { useAffinityCallback } from "./useAffinityCallback.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
 export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";
+export {
+  useCmdkDefaultRankProfiles,
+  useCmdkFlatAllRankProfiles,
+} from "./useCmdkSearchConfig.js";
 
 export { useChannelRecentSenders } from "./useChannelRecentSenders.js";
 export { useDmAffinityRank } from "./useDmAffinityRank.js";
