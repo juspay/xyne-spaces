@@ -1,4 +1,4 @@
-import { FC, ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FC, ReactElement, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   Palette,
@@ -112,6 +112,9 @@ import { MessageBarPreview } from './MessageBarPreview';
 import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarActions';
 import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
+import { searchSettings, findSettingElement, type SettingsSearchEntry } from './settingsSearch';
+import { SettingsSearchInput } from './SettingsSearchInput';
+import { SettingsSearchResults } from './SettingsSearchResults';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -1607,9 +1610,64 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
 
   const { setIsAssignmentModalOpen, setIsVoiceModalOpen } = state;
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pendingFocus, setPendingFocus] = useState<SettingsSearchEntry | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sectionLabels = useMemo(
+    () => Object.fromEntries(navItems.map(item => [item.id, item.label])),
+    [navItems],
+  );
+  const searchResults = useMemo(
+    () => searchSettings(searchQuery, sectionLabels),
+    [searchQuery, sectionLabels],
+  );
+  const isSearching = searchQuery.trim().length > 0;
+
+  const selectSearchResult = (entry: SettingsSearchEntry): void => {
+    setSearchQuery('');
+    setActiveSection(entry.section);
+    setPendingFocus(entry);
+  };
+
+  // After jumping to a result, scroll its row into view and flash a highlight once the
+  // section has rendered. Sections render synchronously, so one frame is enough.
+  // The highlight timer lives in a ref: clearing `pendingFocus` re-runs this effect, and
+  // an effect-scoped timer would be cancelled by that cleanup and leave the ring stuck.
+  const highlightRef = useRef<{ el: HTMLElement; timer: ReturnType<typeof setTimeout> } | null>(
+    null,
+  );
+  const clearHighlight = (): void => {
+    const current = highlightRef.current;
+    if (!current) return;
+    clearTimeout(current.timer);
+    current.el.classList.remove('ring-2', 'ring-primary');
+    current.el.removeAttribute('data-search-highlight');
+    highlightRef.current = null;
+  };
+
+  useEffect(() => {
+    if (!pendingFocus || activeSection !== pendingFocus.section) return;
+    const frame = requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      const target = panel ? findSettingElement(panel, pendingFocus) : null;
+      setPendingFocus(null);
+      if (!target) return;
+      clearHighlight();
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target.classList.add('ring-2', 'ring-primary');
+      target.setAttribute('data-search-highlight', 'true');
+      highlightRef.current = { el: target, timer: setTimeout(clearHighlight, 1800) };
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingFocus, activeSection]);
+
+  useEffect(() => clearHighlight, []);
+
   useEffect(() => {
     if (open) {
       setActiveSection(initialSection ?? defaultSection);
+      setSearchQuery('');
+      setPendingFocus(null);
       setIsAssignmentModalOpen(false);
       setIsVoiceModalOpen(false);
     }
@@ -1639,6 +1697,13 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
         // Don't let focus land on the destructive close (X) — the first focusable element — when
         // opened by keyboard (e.g. via the `/goto` command); keep it on the dialog itself.
         onOpenAutoFocus={e => e.preventDefault()}
+        // Esc first clears an active settings search; a second Esc closes the dialog.
+        onEscapeKeyDown={e => {
+          if (searchQuery) {
+            e.preventDefault();
+            setSearchQuery('');
+          }
+        }}
       >
         {isMobile ? (
           /* Mobile: list → detail drill-down */
@@ -1673,26 +1738,44 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
 
             {activeSection === null ? (
               <nav className='flex flex-col py-2'>
-                {navItems.map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveSection(item.id)}
-                    className='flex items-center gap-3 px-6 py-3 hover:bg-muted transition-colors text-left w-full'
-                    data-track-category='PREFERENCES'
-                    data-track-name={`Open_${item.id}`}
-                  >
-                    <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
-                      {item.icon}
-                    </div>
-                    <div className='flex-1 min-w-0'>
-                      <p className='text-sm font-medium text-foreground'>{item.label}</p>
-                    </div>
-                    <ChevronRight className='size-4 text-muted-foreground flex-shrink-0' />
-                  </button>
-                ))}
+                <SettingsSearchInput
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onSubmit={() => searchResults[0] && selectSearchResult(searchResults[0])}
+                  className='px-4 pb-2'
+                />
+                {isSearching ? (
+                  <div className='px-4'>
+                    <SettingsSearchResults
+                      query={searchQuery}
+                      results={searchResults}
+                      navItems={navItems}
+                      onSelect={selectSearchResult}
+                      itemClassName='py-3'
+                    />
+                  </div>
+                ) : (
+                  navItems.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveSection(item.id)}
+                      className='flex items-center gap-3 px-6 py-3 hover:bg-muted transition-colors text-left w-full'
+                      data-track-category='PREFERENCES'
+                      data-track-name={`Open_${item.id}`}
+                    >
+                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
+                        {item.icon}
+                      </div>
+                      <div className='flex-1 min-w-0'>
+                        <p className='text-sm font-medium text-foreground'>{item.label}</p>
+                      </div>
+                      <ChevronRight className='size-4 text-muted-foreground flex-shrink-0' />
+                    </button>
+                  ))
+                )}
               </nav>
             ) : (
-              <div className='p-6'>
+              <div ref={panelRef} className='p-6'>
                 <ActiveSection state={state} />
               </div>
             )}
@@ -1717,33 +1800,48 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
               <div
                 role='tablist'
                 aria-label='Preference sections'
-                className='w-52 shrink-0 border-r border-border flex flex-col p-2 gap-0.5'
+                className='w-52 shrink-0 border-r border-border flex flex-col p-2 gap-0.5 overflow-y-auto'
               >
-                {navItems.map(item => {
-                  const isActive = activeSection === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      role='tab'
-                      aria-selected={isActive}
-                      onClick={() => setActiveSection(item.id)}
-                      className={cn(
-                        'flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors text-left w-full',
-                        isActive
-                          ? 'bg-accent text-accent-foreground font-medium'
-                          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                      )}
-                      data-track-category='PREFERENCES'
-                      data-track-name={`Open_${item.id}`}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </button>
-                  );
-                })}
+                <SettingsSearchInput
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onSubmit={() => searchResults[0] && selectSearchResult(searchResults[0])}
+                  className='mb-1.5'
+                />
+                {isSearching ? (
+                  <SettingsSearchResults
+                    query={searchQuery}
+                    results={searchResults}
+                    navItems={navItems}
+                    onSelect={selectSearchResult}
+                  />
+                ) : (
+                  navItems.map(item => {
+                    const isActive = activeSection === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        role='tab'
+                        aria-selected={isActive}
+                        onClick={() => setActiveSection(item.id)}
+                        className={cn(
+                          'flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors text-left w-full',
+                          isActive
+                            ? 'bg-accent text-accent-foreground font-medium'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                        )}
+                        data-track-category='PREFERENCES'
+                        data-track-name={`Open_${item.id}`}
+                      >
+                        {item.icon}
+                        {item.label}
+                      </button>
+                    );
+                  })
+                )}
               </div>
 
-              <div role='tabpanel' className='flex-1 overflow-y-auto px-6 py-5'>
+              <div ref={panelRef} role='tabpanel' className='flex-1 overflow-y-auto px-6 py-5'>
                 <ActiveSection state={state} />
               </div>
             </div>
