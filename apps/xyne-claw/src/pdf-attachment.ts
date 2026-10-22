@@ -61,6 +61,7 @@ export async function pdfBufferToMarkdown(buf: Buffer, fileName: string): Promis
     let totalChars = 0;
     let truncatedDueToTotal = false;
     let truncatedAnyPage = false;
+    let pagesShown = 0;
 
     for (let i = 0; i < pagesToInclude; i++) {
       const pageText = text[i] ?? "";
@@ -77,11 +78,15 @@ export async function pdfBufferToMarkdown(buf: Buffer, fileName: string): Promis
       lines.push(out.length > 0 ? out : "_(no extractable text on this page)_");
       lines.push("");
       totalChars += out.length;
+      pagesShown = i + 1;
     }
 
     const footers: string[] = [];
-    if (totalPages > pagesToInclude) {
-      footers.push(`_Truncated: ${totalPages - pagesToInclude} more page(s) not shown (cap: ${MAX_PAGES})._`);
+    if (pagesShown < totalPages) {
+      footers.push(
+        `_Truncated: pages ${pagesShown + 1}–${totalPages} are not shown (caps: ${MAX_PAGES} pages, ${MAX_TOTAL_CHARS} chars). ` +
+          "The original PDF is saved next to this file under the same name without the .md suffix; read the remaining pages from it._",
+      );
     }
     if (truncatedDueToTotal) {
       footers.push(`_Truncated: total extracted text exceeded ${MAX_TOTAL_CHARS} chars._`);
