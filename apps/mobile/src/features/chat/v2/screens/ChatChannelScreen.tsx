@@ -19,6 +19,7 @@ import type { SharedValue } from 'react-native-reanimated';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { ChannelScopeType, parseTicketMd, type User } from '@xyne/shared';
+import { stateMachineActor } from '@xyne/shared/machines';
 
 import { ChatHeaderV3, getChatHeaderCollapsedHeight } from '@/src/components/chat/chat-header-v3';
 import {
@@ -737,6 +738,14 @@ const ChatChannelScreen = (): ReactElement => {
       }
       const leaveTimestamp = Date.now();
       logMarkViewedOnLeave('mark_attempted', leaveTimestamp);
+      // The list reads statuses from the cached query, which takes Zero's write
+      // only once the query is complete again — ~20s after a resume. Show the
+      // channel as read now so the row and the next open agree with the server.
+      stateMachineActor.send({
+        type: 'UPDATE_USER_CHANNEL_STATUS',
+        channelId,
+        updates: { lastViewedAt: leaveTimestamp, unreadCount: 0 },
+      });
       zeroRef.current.mutate(
         mutators.channel.markChannelAsViewed({
           channelId,

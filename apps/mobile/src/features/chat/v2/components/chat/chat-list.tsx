@@ -182,6 +182,8 @@ const INITIAL_LIST_LOAD_FALLBACK_MS = 1500;
 type ChatOpenCycleState = {
   identityKey: string;
   initialScrollMode: ChatInitialScrollMode | null;
+  // Landed at the tail only because the unread hold ran out; the divider may still arrive.
+  awaitsLateUnreadDivider: boolean;
   didLogFinalLivePaint: boolean;
   initialSeedRows: number | null;
   lastOpenStateSignature: string | null;
@@ -231,6 +233,7 @@ const createChatOpenCycleState = (
 ): ChatOpenCycleState => ({
   identityKey,
   initialScrollMode: null,
+  awaitsLateUnreadDivider: false,
   didLogFinalLivePaint: false,
   initialSeedRows: null,
   lastOpenStateSignature: null,
@@ -1123,7 +1126,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     }
     return false;
   }, [displayRows, shouldAnchorToUnreadBoundary, unreadLastActivityAt]);
-  const unreadPlacement = resolveUnreadPlacement({
+  const unreadPlacementInput = {
     shouldAnchorToUnreadBoundary,
     isInitialLoadComplete,
     isLiveFresh: openPhase === 'liveFresh',
@@ -1131,7 +1134,15 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     hasBoundaryCoverage: hasUnreadBoundaryCoverage,
     isCacheCurrent: isUnreadCacheCurrent,
     hasInitialLoadError: initialLoadError !== null,
+  };
+  const unreadPlacement = resolveUnreadPlacement({
+    ...unreadPlacementInput,
     hasHoldExpired: hasUnreadHoldExpired,
+  });
+  // The placement the open would reach without the hold's time limit.
+  const lateUnreadPlacement = resolveUnreadPlacement({
+    ...unreadPlacementInput,
+    hasHoldExpired: false,
   });
   const routeAnchorExpansionPasses =
     missingRouteAnchorExpansionRef.current.key === openIdentityKey
@@ -1171,6 +1182,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   });
   if (openCycleState.initialScrollMode === null && openingScrollMode !== null) {
     openCycleState.initialScrollMode = openingScrollMode;
+    openCycleState.awaitsLateUnreadDivider =
+      openingScrollMode === 'tail' &&
+      unreadPlacement === 'none' &&
+      lateUnreadPlacement === 'pending';
   }
   const initialScrollMode = openCycleState.initialScrollMode ?? openingScrollMode;
   const isRouteAnchorAtTail = hasRequestedAnchor && initialScrollMode === 'tail';
@@ -1197,6 +1212,30 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     setShouldMaintainTail(false);
     setLocalSendOwnsTail(false);
   }, [initialScrollMode, openIdentityKey, shouldAnchorToUnreadBoundary]);
+  // New messages that arrive after a timed-out hold bring the divider late:
+  // move to it once, unless the user has scrolled or sent since. An open that
+  // settles without a divider stops waiting, so later live messages never jump.
+  useLayoutEffect(() => {
+    if (!openCycleState.awaitsLateUnreadDivider) return;
+    if (lateUnreadPlacement === 'none') {
+      openCycleState.awaitsLateUnreadDivider = false;
+      return;
+    }
+    if (lateUnreadPlacement !== 'divider' || !didListInitialLoadComplete) return;
+    openCycleState.awaitsLateUnreadDivider = false;
+    if (scrollStateRef.current.didUserScroll || localSendOwnsTailRef.current) return;
+    scrollStateRef.current.didUserScroll = true;
+    setDidUserScroll(true);
+    shouldMaintainTailRef.current = false;
+    localSendOwnsTailRef.current = false;
+    setShouldMaintainTail(false);
+    setLocalSendOwnsTail(false);
+    void listRef.current?.scrollToIndex({
+      index: unreadDividerRowIndex,
+      viewOffset: UNREAD_DIVIDER_TOP_OFFSET,
+      animated: false,
+    });
+  }, [didListInitialLoadComplete, lateUnreadPlacement, openCycleState, unreadDividerRowIndex]);
   const initialScrollIndex = useMemo(() => {
     if (displayRows.length === 0) return undefined;
     if (listInstanceLoadedRef.current) return undefined;
