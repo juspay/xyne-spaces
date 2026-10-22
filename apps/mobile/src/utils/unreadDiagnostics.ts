@@ -1,6 +1,9 @@
-// TEMPORARY (TestFlight diagnostics, never commit): explains why an unread
+// TEMPORARY (TestFlight diagnostics, revert before merging): explains why an unread
 // channel opened without a "New messages" divider. Every log uses
-// LOTUS_CHAT_OPEN_TIMING with an `unread_diag_*` milestone.
+// LOTUS_CHAT_OPEN_TIMING with one of three `unread_diag_*` milestones:
+//   unread_diag_route                  one per tap/route, with the tapped row's badge
+//   unread_diag_list_summary           one per open, on leave or app background
+//   unread_diag_mark_viewed_on_leave   the read-marking on leaving a chat
 import type { ChatRow } from '@/src/features/chat/v2/components/chat/chat-list-rows';
 import { Event, logger } from '@/src/utils/logger';
 
@@ -21,13 +24,25 @@ type UnreadDiagOpenRecord = {
   rowLastViewedAt: number | undefined;
   unreadOpen: string | undefined;
   unreadOpenOffReason: string | undefined;
+  rowReadStaleByMs?: number | undefined;
 };
 
 const ROW_PRESS_MATCH_MS = 2_000;
 const lastRowPressByChannel = new Map<
   string,
-  { atMs: number; looksUnread: boolean; lastViewedAt: number | undefined }
+  {
+    atMs: number;
+    looksUnread: boolean;
+    lastViewedAt: number | undefined;
+    badge: Record<string, unknown>;
+  }
 >();
+const markedViewedAtByChannel = new Map<string, number>();
+
+/** The leave flush's timestamp, so a later open can tell a stale row from a fresh one. */
+export const noteUnreadDiagChannelMarkedViewed = (channelId: string, timestamp: number): void => {
+  markedViewedAtByChannel.set(channelId, timestamp);
+};
 const openRecordByChannel = new Map<string, UnreadDiagOpenRecord>();
 
 const readNumber = (row: Record<string, unknown>, key: string): number | undefined => {
@@ -53,7 +68,7 @@ const doesRowLookUnread = (row: Record<string, unknown>): boolean => {
 
 /** What the tapped row showed: only the unread/badge fields, never names. */
 export const logUnreadDiagRowPress = (
-  source: string,
+  _source: string,
   channelId: string,
   row: object | null | undefined,
 ): void => {
@@ -70,13 +85,7 @@ export const logUnreadDiagRowPress = (
     atMs: Date.now(),
     looksUnread,
     lastViewedAt: readNumber(fields, 'lastViewedAt'),
-  });
-  logUnreadDiag('unread_diag_row_press', {
-    source,
-    channelId,
-    rowFound: !!row,
-    rowLooksUnread: looksUnread,
-    ...badge,
+    badge,
   });
 };
 
@@ -92,16 +101,31 @@ export const logUnreadDiagRoute = (
   const press = lastRowPressByChannel.get(fields.channelId);
   const matchedPress =
     press && fields.openStartedAtMs - press.atMs <= ROW_PRESS_MATCH_MS ? press : undefined;
+  const markedAt = markedViewedAtByChannel.get(fields.channelId);
+  const inputLastViewedAt = fields['inputLastViewedAt'];
+  const inputLastActivityAt = fields['inputLastActivityAt'];
+  const rowReadStaleByMs =
+    markedAt !== undefined &&
+    typeof inputLastViewedAt === 'number' &&
+    Number.isFinite(inputLastViewedAt) &&
+    inputLastViewedAt < markedAt &&
+    (inputLastActivityAt === undefined ||
+      (typeof inputLastActivityAt === 'number' && inputLastActivityAt <= markedAt))
+      ? markedAt - inputLastViewedAt
+      : undefined;
   openRecordByChannel.set(fields.channelId, {
     openStartedAtMs: fields.openStartedAtMs,
     rowLooksUnread: matchedPress ? matchedPress.looksUnread : null,
     rowLastViewedAt: matchedPress?.lastViewedAt,
     unreadOpen: fields.unreadOpen,
     unreadOpenOffReason: fields.unreadOpenOffReason,
+    rowReadStaleByMs,
   });
   logUnreadDiag('unread_diag_route', {
     ...fields,
+    ...matchedPress?.badge,
     rowLooksUnread: matchedPress ? matchedPress.looksUnread : null,
+    rowReadStaleByMs,
   });
 };
 
@@ -123,7 +147,9 @@ export type UnreadDiagVerdict =
   | 'NO_NEW_MESSAGES_LOADED'
   | 'BUG_NEW_MESSAGES_NO_DIVIDER'
   | 'BUG_DIVIDER_NEVER_ON_SCREEN'
-  | 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW';
+  | 'BUG_DIVIDER_NOT_DRAWN'
+  | 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW'
+  | 'BUG_STALE_READ_STATE';
 
 /**
  * One answer per open. `isFailure` means the user had reason to expect a
@@ -137,8 +163,11 @@ export const resolveUnreadDiagVerdict = ({
   dividerEverPresent,
   dividerEverOnScreen,
   dividerShownWithoutMessageBelow,
+  dividerDrawChecks,
+  dividerEverDrawn,
   rowsAfterBoundary,
   rowsAfterBoundaryEligible,
+  rowReadStaleByMs,
 }: {
   rowLooksUnread: boolean | null;
   isUnreadOpen: boolean;
@@ -146,8 +175,11 @@ export const resolveUnreadDiagVerdict = ({
   dividerEverPresent: boolean;
   dividerEverOnScreen: boolean;
   dividerShownWithoutMessageBelow: boolean;
+  dividerDrawChecks: number;
+  dividerEverDrawn: boolean;
   rowsAfterBoundary: number;
   rowsAfterBoundaryEligible: number;
+  rowReadStaleByMs: number | undefined;
 }): { verdict: UnreadDiagVerdict; expectedDivider: boolean; isFailure: boolean } => {
   const expectedDivider = rowLooksUnread === true || isUnreadOpen;
   const result = (
@@ -157,9 +189,15 @@ export const resolveUnreadDiagVerdict = ({
     expectedDivider,
     isFailure:
       verdict === 'BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW' ||
+      verdict === 'BUG_STALE_READ_STATE' ||
       (expectedDivider && verdict !== 'DIVIDER_SHOWN'),
   });
+  if (isUnreadOpen && (rowReadStaleByMs ?? 0) > 0) return result('BUG_STALE_READ_STATE');
   if (dividerShownWithoutMessageBelow) return result('BUG_DIVIDER_SHOWN_WITHOUT_MESSAGE_BELOW');
+  // The list put the divider in view, but iOS never drew it there.
+  if (dividerEverOnScreen && dividerDrawChecks > 0 && !dividerEverDrawn) {
+    return result('BUG_DIVIDER_NOT_DRAWN');
+  }
   if (dividerEverOnScreen) return result('DIVIDER_SHOWN');
   if (!isUnreadOpen) {
     if (rowsAfterBoundaryEligible > 0) return result('BUG_NEW_MESSAGES_BUT_NOT_UNREAD_OPEN');

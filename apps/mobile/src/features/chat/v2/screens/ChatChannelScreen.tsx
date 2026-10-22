@@ -57,8 +57,8 @@ import {
   useMessageActions,
 } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { sendMessage } from '@xyne/shared/messages';
-import { useChannelDisplayName, useGetChannelUserStatus } from '@/src/hooks/useChannels';
-import { logUnreadDiag } from '@/src/utils/unreadDiagnostics';
+import { useChannelDisplayName } from '@/src/hooks/useChannels';
+import { logUnreadDiag, noteUnreadDiagChannelMarkedViewed } from '@/src/utils/unreadDiagnostics';
 import { useJoinableChannel } from '@/src/hooks/useJoinableChannel';
 import { useSelf } from '@/src/hooks/useUsers';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -554,8 +554,7 @@ const ChatChannelScreen = (): ReactElement => {
   const frozenUnreadCount = isUnreadOpen
     ? (requestedUnreadCount ?? channelUserStatus?.unreadCount ?? undefined)
     : undefined;
-  // TEMPORARY unread diagnostics (never commit).
-  const machineChannelUserStatus = useGetChannelUserStatus(channelId ?? '');
+  // TEMPORARY unread diagnostics (revert before merging).
   const leaveLogContextRef = useRef<Record<string, unknown>>({});
   leaveLogContextRef.current = {
     isUnreadOpen,
@@ -566,77 +565,6 @@ const ChatChannelScreen = (): ReactElement => {
     frozenUnreadBoundaryLastViewedAt,
     zeroQueryResultType: zeroChannelUserStatusDetails.type,
   };
-  const unreadStatusLogRef = useRef<{
-    key: string;
-    startedAtMs: number;
-    bothAbsent: boolean;
-    lateLogged: boolean;
-  } | null>(null);
-  useEffect(() => {
-    if (!channelId) return;
-    const machinePresent = Boolean(machineChannelUserStatus);
-    const zeroPresent = Boolean(zeroChannelUserStatus);
-    const logState = unreadStatusLogRef.current;
-    const isFirstLog = logState?.key !== screenOpenIdentityKey;
-    if (!isFirstLog && (logState.lateLogged || !logState.bothAbsent)) return;
-    if (!isFirstLog && !machinePresent && !zeroPresent) return;
-    const nowMs = Date.now();
-    logUnreadDiag(isFirstLog ? 'unread_diag_screen_status' : 'unread_diag_screen_status_late', {
-      channelId,
-      openStartedAtMs,
-      ...(isFirstLog ? {} : { lateByMs: nowMs - logState.startedAtMs }),
-      chatOpenSource,
-      entryPoint: chatOpenEntryPoint,
-      isNotificationOpen,
-      routeConversationId: conversationId,
-      isUnreadOpen,
-      paramUnreadCount: requestedUnreadCount,
-      paramLastViewedAt: requestedUnreadLastViewedAt,
-      paramLastViewedConversationId: unreadLastViewedConversationIdParam,
-      machineStatusPresent: machinePresent,
-      machineLastViewedAt: machineChannelUserStatus?.lastViewedAt,
-      machineUnreadCount: machineChannelUserStatus?.unreadCount,
-      machineLastViewedConversationId: machineChannelUserStatus?.lastViewedConversationId,
-      zeroStatusPresent: zeroPresent,
-      zeroLastViewedAt: zeroChannelUserStatus?.lastViewedAt,
-      zeroUnreadCount: zeroChannelUserStatus?.unreadCount,
-      zeroLastViewedConversationId: zeroChannelUserStatus?.lastViewedConversationId,
-      zeroQueryResultType: zeroChannelUserStatusDetails.type,
-      channelLastActivityAt,
-      hasUnreadMessages,
-      frozenUnreadBoundaryLastViewedAt,
-      frozenUnreadBoundaryLastViewedConversationId,
-      frozenUnreadCount,
-    });
-    unreadStatusLogRef.current = isFirstLog
-      ? {
-          key: screenOpenIdentityKey,
-          startedAtMs: nowMs,
-          bothAbsent: !machinePresent && !zeroPresent,
-          lateLogged: false,
-        }
-      : { ...logState, lateLogged: true };
-  }, [
-    channelId,
-    channelLastActivityAt,
-    chatOpenEntryPoint,
-    chatOpenSource,
-    conversationId,
-    frozenUnreadBoundaryLastViewedAt,
-    frozenUnreadBoundaryLastViewedConversationId,
-    frozenUnreadCount,
-    hasUnreadMessages,
-    isNotificationOpen,
-    isUnreadOpen,
-    machineChannelUserStatus,
-    openStartedAtMs,
-    requestedUnreadCount,
-    requestedUnreadLastViewedAt,
-    screenOpenIdentityKey,
-    unreadLastViewedConversationIdParam,
-    zeroChannelUserStatus,
-    zeroChannelUserStatusDetails.type,
-  ]);
   const isOpenRevealReady = postPaintReady && listInitialLoadComplete && keyboardShellReady;
   // The list is the only writer of shimmer visibility. Do not reset this to
   // true in a parent layout effect — that runs after the list reports "no
@@ -738,6 +666,7 @@ const ChatChannelScreen = (): ReactElement => {
       }
       const leaveTimestamp = Date.now();
       logMarkViewedOnLeave('mark_attempted', leaveTimestamp);
+      noteUnreadDiagChannelMarkedViewed(channelId, leaveTimestamp);
       // The list reads statuses from the cached query, which takes Zero's write
       // only once the query is complete again — ~20s after a resume. Show the
       // channel as read now so the row and the next open agree with the server.
