@@ -7,7 +7,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { resolveProjectInstructions } from "./project-context.js";
+import { resolveProjectInstructions, resolveProjectKnowledge } from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -892,6 +892,29 @@ export async function prepareRun(
     // run-scalars, but the agent also needs to be told IN PROSE what it is looking at.
     const attachedWorkflowId = readAgentConfigString("SPACES_WORKFLOW_ID");
     const attachedWorkflowExecutionId = readAgentConfigString("SPACES_WORKFLOW_EXECUTION_ID");
+    const bodyMode = (body as { mode?: string }).mode;
+    // Every id this user's rows may be keyed under. A chat filed under their
+    // workspace-scoped Spaces id is still theirs, and matching the canonical
+    // id alone would silently skip the project's context.
+    const projectLookupIds = conversationId
+      ? [
+          ...new Set(
+            [
+              resolved.userId,
+              await spacesUserIdForClawUser(resolved.userId).catch(() => null),
+            ].filter((id): id is string => Boolean(id)),
+          ),
+        ]
+      : [];
+    // Resolved before attachedContext because the project's own channels,
+    // tickets and canvases join that array and are resolved with it. Skipped
+    // for daily_brief for the same reason the instructions are: a brief can
+    // execute on a shared agent, where a project's knowledge has no business.
+    const projectKnowledge =
+      conversationId && bodyMode !== "daily_brief"
+        ? await resolveProjectKnowledge(conversationId, projectLookupIds, agent.orgId)
+        : null;
+
     let resolvedAttachedContext:
       | { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string }
       | undefined;
@@ -900,6 +923,23 @@ export async function prepareRun(
       const normalized = normalizeAttachedContext(attachedContext);
       if (normalized.error) log.warn(`[run] attachedContext ignored: ${normalized.error}`);
       normalizedAttached = normalized.items;
+    }
+    if (projectKnowledge?.entities.length) {
+      // Through the same resolver as the user's own attachments, so each item
+      // is fetched under the caller's Spaces access: a channel they can no
+      // longer read resolves to nothing instead of leaking into the prompt.
+      // Items the turn already carries are not added twice.
+      const alreadyAttached = new Set(normalizedAttached.map((item) => `${item.type}:${item.id}`));
+      const fromProject = projectKnowledge.entities.filter(
+        (entity) => !alreadyAttached.has(`${entity.type}:${entity.id}`),
+      );
+      if (fromProject.length > 0) {
+        const normalized = normalizeAttachedContext(fromProject);
+        if (normalized.error) {
+          log.warn(`[run] project knowledge attachedContext ignored: ${normalized.error}`);
+        }
+        normalizedAttached = [...normalizedAttached, ...normalized.items];
+      }
     }
     if (
       normalizedAttached.length > 0 ||
@@ -938,6 +978,20 @@ export async function prepareRun(
     // Forward to xyne-claw (returns sessionId immediately)
     // Include resolved attached context (contextFiles + promptPrefix) if available
     const mergedContextFiles = [...(contextFiles ?? []), ...(resolvedAttachedContext?.contextFiles ?? [])];
+    // Project knowledge leads, the turn's own uploads follow: claw writes the
+    // set into its workspace in order, so a file the user just attached
+    // overwrites a project file of the same name rather than losing to it.
+    // Only a reference is forwarded — claw fetches the bytes from the same
+    // object store it already uses for `gcsRef` attachments.
+    const mergedAttachments = [
+      ...(projectKnowledge?.files ?? []).map((file) => ({
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        gcsRef: file.storagePath,
+        sizeBytes: file.sizeBytes,
+      })),
+      ...(attachments ?? []),
+    ];
 
     let additionalInstructions =
       (body as { additionalInstructions?: string }).additionalInstructions ?? "";
@@ -954,7 +1008,6 @@ export async function prepareRun(
     // logical "daily-brief" slug and passed EXPLICITLY in the dispatch body — so we
     // must NOT also inject the executing agent's own instructions here (that would
     // leak e.g. the user's Ask AI chat prefs into the brief and vice-versa).
-    const bodyMode = (body as { mode?: string }).mode;
     if (bodyMode !== "daily_brief") {
       const instructionAgentSlug = agentSlug ?? CONFIG.defaultAgentSlug;
       try {
@@ -983,19 +1036,6 @@ export async function prepareRun(
       // Inside the daily_brief guard for the same reason: a brief can execute
       // on a shared agent, and a project's instructions have no business
       // reaching it.
-      // Every id this user's rows may be keyed under. A chat filed under their
-      // workspace-scoped Spaces id is still theirs, and matching the canonical
-      // id alone would silently skip the project's instructions.
-      const projectLookupIds = conversationId
-        ? [
-            ...new Set(
-              [
-                resolved.userId,
-                await spacesUserIdForClawUser(resolved.userId).catch(() => null),
-              ].filter((id): id is string => Boolean(id)),
-            ),
-          ]
-        : [];
       const projectInstructions = conversationId
         ? await resolveProjectInstructions(conversationId, projectLookupIds, agent.orgId)
         : null;
@@ -1003,6 +1043,13 @@ export async function prepareRun(
         additionalInstructions = additionalInstructions
           ? `${additionalInstructions}\n\n${projectInstructions}`
           : projectInstructions;
+      }
+      // After the instructions, so the owner's own wording leads and the
+      // manifest reads as the inventory it is.
+      if (projectKnowledge) {
+        additionalInstructions = additionalInstructions
+          ? `${additionalInstructions}\n\n${projectKnowledge.manifest}`
+          : projectKnowledge.manifest;
       }
     }
 
@@ -1610,7 +1657,7 @@ export async function prepareRun(
       ...(mergedSkills.length > 0 ? { skills: mergedSkills } : {}),
       ...(awakeningBlock ? { awakening: awakeningBlock } : {}),
       ...(progressUrl ? { progressUrl } : {}),
-      ...(attachments?.length ? { attachments } : {}),
+      ...(mergedAttachments.length ? { attachments: mergedAttachments } : {}),
       ...(normalizedRecordingRefs.length ? { recordingRefs: normalizedRecordingRefs } : {}),
       ...(mergedContextFiles.length > 0 ? { contextFiles: mergedContextFiles } : {}),
       ...(attachedContext?.length ? { attachedContext } : {}),

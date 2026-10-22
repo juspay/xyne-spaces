@@ -8,7 +8,7 @@ import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } 
 import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
-import { resolveProjectInstructions } from "../lib/project-context.js";
+import { resolveProjectInstructions, resolveProjectKnowledge } from "../lib/project-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -1440,6 +1440,21 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
       orgId,
     );
+    // Same split as the instructions above: the forwarded body reaches
+    // prepareRun, which attaches the project's files and resolves its Spaces
+    // items itself, so nothing is added to that body here. Only the harness
+    // envelope below — which never reaches prepareRun — gets the manifest.
+    //
+    // Gated on the feature flag, not on harness eligibility: that is decided
+    // further down, after this envelope is built. Where local harness is off
+    // the lookup costs nothing.
+    const harnessProjectKnowledge = CONFIG.localHarnessEnabled
+      ? await resolveProjectKnowledge(
+          convId,
+          [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+          orgId,
+        )
+      : null;
     const aiScreenInstructions = withAiScreenPresentationInstructions(
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
     );
@@ -1683,6 +1698,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       // A harness run builds its own context and never reaches prepareRun, so
       // the project's instructions have to be added here or they never arrive.
       projectInstructions ?? "",
+      // The file-less wording: a harness run fetches attachments from the
+      // device bridge by id, which project knowledge has no row for, so the
+      // agent is told these items exist without being told it has them.
+      harnessProjectKnowledge?.manifestFilesUnavailable ?? "",
       designSelectionInstruction,
       pageSelectionInstruction,
       openItemsInstruction,
