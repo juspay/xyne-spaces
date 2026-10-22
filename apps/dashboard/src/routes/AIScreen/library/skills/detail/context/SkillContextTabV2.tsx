@@ -1,8 +1,12 @@
-import { useRef, type ChangeEvent, type ReactElement } from 'react';
-import { FileText, Loader2, Upload } from 'lucide-react';
+import { useRef, useState, type ChangeEvent, type ReactElement } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronRight, FileText, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawSkillFiles } from '@/hooks/useClawSkills';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { getSkillFile } from '@/services/claw/clawSkillsService';
 import type { Skill } from '@/services/claw/clawSkillsTypes';
 import { ProseBox } from '../../../shared/primitives/ProseBox';
 import {
@@ -73,6 +77,42 @@ function UploadButton({
   );
 }
 
+/** One open file's body, fetched only while it is open. Reading needs no edit rights. */
+function SkillFileBody({ slug, fileId }: { slug: string; fileId: string }): ReactElement | null {
+  const file = useQuery({
+    queryKey: ['claw-skill-file', slug, fileId],
+    queryFn: () => getSkillFile(slug, fileId),
+  });
+  // A fast load shows nothing until the content; only a slow one gets a placeholder.
+  const showSkeleton = useDebouncedValue(file.isLoading, 300) && file.isLoading;
+  if (file.isLoading) return showSkeleton ? <Skeleton className='mx-4 mb-4 h-24' /> : null;
+  if (file.isError) {
+    return (
+      <div className='mx-4 mb-4 flex items-center gap-3 text-sm text-destructive'>
+        Could not load this file. Try again.
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          onClick={() => void file.refetch()}
+          data-track-category='Claw Agents'
+          data-track-name='Skill detail v2: retry file'
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+  if (file.data?.contentType === 'application/octet-stream') {
+    return <p className='mx-4 mb-4 text-sm text-muted-foreground'>Binary file, not shown.</p>;
+  }
+  return (
+    <pre className='mx-4 mb-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl border-[0.8px] border-border bg-muted/30 p-4 font-mono text-xs'>
+      {file.data?.content}
+    </pre>
+  );
+}
+
 export function SkillContextTabV2({
   skill,
   actions,
@@ -82,6 +122,8 @@ export function SkillContextTabV2({
 }): ReactElement {
   const files = useClawSkillFiles(skill.slug);
   const { canEdit, busy } = actions;
+  // One file open at a time.
+  const [openFileId, setOpenFileId] = useState<string | null>(null);
 
   const readAll = async (list: FileList): Promise<void> => {
     const entries = await Promise.all(
@@ -146,25 +188,39 @@ export function SkillContextTabV2({
               description='Scripts, examples and data that ship alongside this skill show up here.'
             />
           ) : (
-            (files.data ?? []).map(file => (
-              <div
-                key={file.id}
-                className='flex w-full items-center gap-3 border-b border-border p-4 last:border-b-0'
-              >
-                <span
-                  className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground'
-                  aria-hidden
-                >
-                  <FileText className='size-4' />
-                </span>
-                <span className='min-w-0 flex-1 truncate text-sm font-medium leading-[22px] text-foreground'>
-                  {file.relativePath}
-                </span>
-                <span className='shrink-0 whitespace-nowrap text-xs leading-4 text-muted-foreground'>
-                  {formatSize(file.sizeBytes)}
-                </span>
-              </div>
-            ))
+            (files.data ?? []).map(file => {
+              const open = openFileId === file.id;
+              return (
+                <div key={file.id} className='w-full border-b border-border last:border-b-0'>
+                  <button
+                    type='button'
+                    aria-expanded={open}
+                    onClick={() => setOpenFileId(open ? null : file.id)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Skill detail v2: toggle file'
+                    className='flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
+                  >
+                    <span
+                      className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground'
+                      aria-hidden
+                    >
+                      <FileText className='size-4' />
+                    </span>
+                    <span className='min-w-0 flex-1 truncate text-sm font-medium leading-[22px] text-foreground'>
+                      {file.relativePath}
+                    </span>
+                    <span className='shrink-0 whitespace-nowrap text-xs leading-4 text-muted-foreground'>
+                      {formatSize(file.sizeBytes)}
+                    </span>
+                    <ChevronRight
+                      className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
+                      aria-hidden
+                    />
+                  </button>
+                  {open && <SkillFileBody slug={skill.slug} fileId={file.id} />}
+                </div>
+              );
+            })
           )}
         </DetailCard>
       </DetailSection>

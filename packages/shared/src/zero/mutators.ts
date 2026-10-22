@@ -1,6 +1,7 @@
 import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
 import {
   ChannelRole,
+  AgentProactivityMode,
   ChannelType,
   ChannelVisibility,
   MessageType,
@@ -997,6 +998,32 @@ export const mutators = defineMutators({
         await tx.mutate.channel_published_tabs.delete({ id: row.id });
       },
     ),
+    updateAgentProactivityMode: defineMutator(
+      z.object({
+        channelId: z.string(),
+        mode: z.nativeEnum(AgentProactivityMode),
+      }),
+      async ({ tx, ctx, args: { channelId, mode } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Never DMs: an unprompted answer lands where everyone in the room reads it.
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only update this setting for default channels');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (channel.createdBy !== ctx.userID && (!participant || participant.role !== ChannelRole.ADMIN)) {
+          throw new Error('Only channel admins or the owner can change how agents answer');
+        }
+
+        await tx.mutate.channels.update({ id: channelId, agentProactivityMode: mode });
+      },
+    ),
     updateShowTicketsTabTicketsInChat: defineMutator(
       z.object({
         channelId: z.string(),
@@ -1498,6 +1525,56 @@ export const mutators = defineMutators({
           ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
+      },
+    ),
+    moveManyToSection: defineMutator(
+      z.object({
+        sectionId: z.string().nullable(),
+        items: z
+          .array(z.object({ channelId: z.string(), position: z.string() }))
+          .min(1)
+          .max(200),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { sectionId, items, timestamp } }) => {
+        if (sectionId) {
+          const section = await tx.run(
+            zql.channel_sections
+              .where('id', sectionId)
+              .where('userId', ctx.userID)
+              .where('isDeleted', false)
+              .one(),
+          );
+          if (!section) {
+            throw new Error('Section not found');
+          }
+        }
+
+        const statuses = await tx.run(
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .where(h =>
+              h.cmp(
+                'channelId',
+                'IN',
+                items.map(item => item.channelId),
+              ),
+            ),
+        );
+        const statusByChannelId = new Map(statuses.map(status => [status.channelId, status]));
+
+        for (const item of items) {
+          const userStatus = statusByChannelId.get(item.channelId);
+          if (!userStatus) continue;
+          await tx.mutate.channel_user_status.update({
+            id: userStatus.id,
+            sectionId,
+            sectionPosition: sectionId ? item.position : null,
+            ...(sectionId ? { isStarred: false } : {}),
+            updatedAt: timestamp,
+          });
+        }
       },
     ),
     // Link boards to a channel (channel_board_mappings). Additive only: this never
@@ -10776,6 +10853,7 @@ export const mutators = defineMutators({
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
         metricsGuestVisibility: z.string().optional().nullable(),
+        metricsMinAccess: z.nativeEnum(AccessType).optional().nullable(),
         appWebhookDeliveryEnabled: z.boolean().optional(),
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
@@ -10807,6 +10885,7 @@ export const mutators = defineMutators({
           metricsEnabled,
           frtStageNames,
           metricsGuestVisibility,
+          metricsMinAccess,
           appWebhookDeliveryEnabled,
           deskReportEnabled,
           deskReportAgentSlug,
@@ -10832,6 +10911,7 @@ export const mutators = defineMutators({
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
             ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
+            ...(metricsMinAccess !== undefined ? { metricsMinAccess } : {}),
             ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
@@ -10866,6 +10946,7 @@ export const mutators = defineMutators({
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
             metricsGuestVisibility: metricsGuestVisibility ?? null,
+            metricsMinAccess: metricsMinAccess ?? null,
             appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,

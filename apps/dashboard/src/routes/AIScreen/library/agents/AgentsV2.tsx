@@ -68,6 +68,8 @@ const AgentsV2 = ({
         )
       ).data,
     enabled: Boolean(hubId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const agents = useMemo(() => {
     if (!hubId) return data ?? [];

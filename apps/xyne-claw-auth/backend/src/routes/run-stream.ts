@@ -5,9 +5,10 @@ import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
-import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveProjectInstructions } from "../lib/project-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -707,10 +708,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...lines,
         'When they say "this page", "this doc" or "what is open", they mean that one.',
         channelId && folderId
-          ? `Anything you create for them belongs here too: pass channelId="${channelId}" and ` +
-            `sdlcFolderId="${folderId}" to spaces-create-canvas so it is filed in this folder ` +
-            "rather than left unfiled. For an SDLC artifact (PRD, Tech Doc, ...) pass the same id as trackFolderId " +
-            "to spaces-sdlc-write-artifact create, with that folder's trackId."
+          ? `Anything you create for them belongs here too: create it with spaces-sdlc-write-artifact create, ` +
+            `channelId="${channelId}", trackFolderId="${folderId}" and that folder's trackId, never spaces-create-canvas.`
           : "",
       ]
         .filter(Boolean)
@@ -1429,6 +1428,18 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     // Composed here so both the base field and the design/page override use it.
+    // Project instructions are NOT added here. This body is forwarded to
+    // /internal/run, and prepareRun injects them after the user's own — adding
+    // them here too would send them twice, ahead of the user's, and double the
+    // per-turn cost. The local-harness path below never reaches prepareRun, so
+    // it does its own injection.
+    const projectInstructions = await resolveProjectInstructions(
+      convId,
+      // Aliases, not the canonical id alone: a chat filed under the caller's
+      // raw Spaces id is still theirs, and a single-id lookup would miss it.
+      [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+      orgId,
+    );
     const aiScreenInstructions = withAiScreenPresentationInstructions(
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
     );
@@ -1669,6 +1680,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     const harnessInstructionBlocks = [
       typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+      // A harness run builds its own context and never reaches prepareRun, so
+      // the project's instructions have to be added here or they never arrive.
+      projectInstructions ?? "",
       designSelectionInstruction,
       pageSelectionInstruction,
       openItemsInstruction,

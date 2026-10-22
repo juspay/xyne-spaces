@@ -215,7 +215,7 @@ export function loadCustomTools(
     if (ct.source === "custom:google" || ct.source === "custom:microsoft") return false;
     // Auth-executed System Tools are surfaced via /mcp/tools with selectionKey
     // gating; loading them in-process would create duplicate tool names.
-    if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") return false;
+    if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch" || ct.source === "custom:xor") return false;
 
     // Selection gates: a miss means "this agent was not granted it", which the
     // open palette is allowed to reconsider.

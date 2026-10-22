@@ -450,6 +450,14 @@ async def entrypoint(ctx: JobContext):
                 if config.stt_provider != "chutes":
                     logger.info(f"[STT Selection] User selected: {stt_model_override}")
 
+            # Per-workspace NeuroLink base URL from backend feature flags (only set when NeuroLink runs)
+            multi_user_transcriber.set_neurolink_base_url(room_metadata.get("neurolinkUrl"))
+            stt_shadow_model = room_metadata.get("sttShadowModel")
+
+            # STT run in parallel for evaluation only (backend CAC `call_stt_eval_enabled`)
+            if stt_shadow_model:
+                multi_user_transcriber.set_stt_shadow_model(stt_shadow_model)
+
             if config.diarization_enabled:
                 # Fetch voiceprints at runtime from backend (avoids 64 KB LiveKit metadata limit
                 # and always reflects the latest enrollments for large orgs).
@@ -559,6 +567,8 @@ async def entrypoint(ctx: JobContext):
     
     # Update cleanup manager with stt_tasks reference (empty for MultiUserTranscriber)
     cleanup_manager.stt_tasks = room_lifecycle.get_stt_tasks()
+    # Cleanup waits for the transcriber's last speech and final eval batch before it flushes
+    cleanup_manager.transcriber_drain = multi_user_transcriber.drain
     
     # Register all room event handlers
     room_lifecycle.register_handlers()

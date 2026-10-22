@@ -149,11 +149,20 @@ export function checkJudgeAnswer(state: JudgeBatchState, items: readonly JudgeAn
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
+/** The body of the first closed ``` fence (after its language tag), else the whole text; found by index, so a missing fence costs nothing. */
+function unfence(text: string): string {
+  const open = text.indexOf("```");
+  if (open < 0) return text;
+  let start = open + 3;
+  while (start < text.length && /[a-zA-Z]/.test(text[start]!)) start++;
+  const close = text.indexOf("```", start);
+  return close < 0 ? text : text.slice(start, close);
+}
+
 export function parseJudgeAnswer(text: string): JudgeAnswerItem[] | null {
-  const fenced = /```[a-zA-Z]*([\s\S]*?)```/.exec(text);
   let parsed: unknown;
   try {
-    parsed = JSON.parse((fenced?.[1] ?? text).trim());
+    parsed = JSON.parse(unfence(text).trim());
   } catch {
     return null;
   }

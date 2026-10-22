@@ -22,6 +22,7 @@ import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
+import { PER_CALL_AUTH_SERVER_TYPES, spacesCallAuthMeta } from "./spaces-call-auth.js";
 const log = createLogger("runner");
 
 /**
@@ -82,6 +83,7 @@ interface McpSession {
    *  the cached child's env, and evict on mismatch. xyne-spaces uses this
    *  on every call; other server types currently only spawn once. */
   spawnedToken?: string;
+  spawnedIdentity?: string;
   /** Wall-clock ms of the last getOrCreateSession() hit. Drives idle eviction
    *  so the cache (and its spawned child processes) doesn't grow unbounded —
    *  the leak that OOM'd claw-auth. Stamped on every create AND reuse. */
@@ -97,6 +99,16 @@ const sessions = new Map<string, McpSession>();
 // plus un-cleaned-up failed connects grew claw-auth to ~100 node children /
 // 44 GiB → kubelet eviction (2026-06-14).
 const inflight = new Map<string, Promise<Client>>();
+
+interface ResolvedSession {
+  client: Client;
+  credentials: Record<string, unknown>;
+}
+
+function spawnIdentity(credentials: Record<string, unknown>): string {
+  const { sessionId: _sessionId, ...rest } = credentials;
+  return credentialFingerprint(rest);
+}
 
 /**
  * Global per-call timeout for MCP requests (10 minutes). Applied around
@@ -237,7 +249,7 @@ async function getOrCreateSession(
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
-): Promise<Client> {
+): Promise<ResolvedSession> {
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -331,20 +343,25 @@ async function getOrCreateSession(
           ? (credentials["apiKey"] as string)
           : undefined;
 
+  const perCallAuth = PER_CALL_AUTH_SERVER_TYPES.has(serverType);
+  const identity = perCallAuth ? spawnIdentity(credentials) : undefined;
   const existing = sessions.get(key);
   if (existing) {
     // For xyne-spaces, the token rotates frequently (refresh-flow) so the
     // child must be respawned with the new env every time the token changes.
     // For other server types, creds rarely change between calls — but if they
     // do (e.g. user re-enters Bitbucket token), the same eviction kicks in.
-    if (incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken) {
-      log.info(`[mcp/runner] evicting stale cached session for ${key} (token rotated)`);
+    const stale = perCallAuth
+      ? existing.spawnedIdentity !== identity
+      : Boolean(incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken);
+    if (stale) {
+      log.info(`[mcp/runner] evicting stale cached session for ${key} (${perCallAuth ? "identity changed" : "token rotated"})`);
       sessions.delete(key);
       await existing.transport.close().catch(() => {});
     } else {
       log.info(`[mcp/runner] reusing cached session for ${key}`);
       existing.lastUsedAt = Date.now(); // keep alive — only idle sessions are swept
-      return existing.client;
+      return { client: existing.client, credentials };
     }
   }
 
@@ -353,13 +370,13 @@ async function getOrCreateSession(
   const pending = inflight.get(key);
   if (pending) {
     log.info(`[mcp/runner] awaiting in-flight spawn for ${key}`);
-    return pending;
+    return { client: await pending, credentials };
   }
 
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, identity)
     .finally(() => inflight.delete(key));
   inflight.set(key, spawnPromise);
-  return spawnPromise;
+  return { client: await spawnPromise, credentials };
 }
 
 /** Spawn + connect a fresh MCP session. Always reaps the child on connect
@@ -370,6 +387,7 @@ async function spawnSession(
   serverType: string,
   credentials: Record<string, unknown>,
   incomingToken: string | undefined,
+  identity: string | undefined,
 ): Promise<Client> {
   const definition = await resolveConnectorDefinition(serverType);
   if (!definition) {
@@ -422,7 +440,10 @@ async function spawnSession(
 
   const client = new Client(
     { name: "xyne-claw-auth", version: "0.1.0" },
-    { jsonSchemaValidator: passThroughSchemaValidator },
+    {
+      jsonSchemaValidator: passThroughSchemaValidator,
+      capabilities: { tasks: {} },
+    },
   );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0], {
@@ -446,6 +467,7 @@ async function spawnSession(
     transport,
     lastUsedAt: Date.now(),
     ...(incomingToken ? { spawnedToken: incomingToken } : {}),
+    ...(identity !== undefined ? { spawnedIdentity: identity } : {}),
   });
   return client;
 }
@@ -473,11 +495,16 @@ const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 const userToolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const userToolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 
+const MCP_LIST_TOOLS_CUTOFF_MS = Number(process.env["MCP_LIST_TOOLS_CUTOFF_MS"] ?? 8_000);
+const MCP_LIST_TOOLS_BACKOFF_MS = Number(process.env["MCP_LIST_TOOLS_BACKOFF_MS"] ?? 300_000);
+const toolListSkipUntil = new Map<string, number>();
+
 export function clearToolListCache(): void {
   toolListCache.clear();
   toolListInflight.clear();
   userToolListCache.clear();
   userToolListInflight.clear();
+  toolListSkipUntil.clear();
 }
 
 const ROTATING_CREDENTIAL_FIELD = /token|secret|password|expires|refresh|cookie/i;
@@ -493,6 +520,7 @@ function credentialFingerprint(credentials: Record<string, unknown>): string {
 function dropUserToolLists(matches: (key: string) => boolean): void {
   for (const key of [...userToolListCache.keys()]) if (matches(key)) userToolListCache.delete(key);
   for (const key of [...userToolListInflight.keys()]) if (matches(key)) userToolListInflight.delete(key);
+  for (const key of [...toolListSkipUntil.keys()]) if (matches(key)) toolListSkipUntil.delete(key);
 }
 
 type ToolListCache = Map<string, { tools: McpToolInfo[]; at: number }>;
@@ -557,14 +585,20 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
-  options: { fresh?: boolean; lane?: SessionLane } = {},
+  options: { fresh?: boolean; lane?: SessionLane; cutoff?: boolean } = {},
 ): Promise<McpServerTools> {
   const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
-  const tools = options.fresh
-    ? await fetchTools()
-    : SHARED_TOOL_LIST_SERVER_TYPES.has(serverType)
-      ? await sharedToolList(serverType, fetchTools)
-      : await userToolList(`${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`, fetchTools);
+  let tools: McpToolInfo[];
+  if (options.fresh) {
+    tools = await fetchTools();
+  } else {
+    const shared = SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+    const key = shared
+      ? serverType
+      : `${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`;
+    const list = () => (shared ? sharedToolList(key, fetchTools) : userToolList(key, fetchTools));
+    tools = options.cutoff ? await withListCutoff(serverType, key, list) : await list();
+  }
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
@@ -574,6 +608,42 @@ export async function listToolsForUser(
   return { serverType, serverName, tools, writeTools };
 }
 
+export class McpToolListUnavailableError extends Error {}
+
+function cachedListFor(key: string): McpToolInfo[] | undefined {
+  return (toolListCache.get(key) ?? userToolListCache.get(key))?.tools;
+}
+
+async function withListCutoff(
+  serverType: string,
+  key: string,
+  list: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const cached = cachedListFor(key);
+  if (cached) return cached;
+  const skipUntil = toolListSkipUntil.get(key);
+  if (skipUntil && skipUntil > Date.now()) {
+    throw new McpToolListUnavailableError(`${serverType} skipped: tool listing failed or timed out recently`);
+  }
+  const listing = list();
+  listing.then(
+    () => toolListSkipUntil.delete(key),
+    () => toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS);
+      reject(new McpToolListUnavailableError(`${serverType} tool listing exceeded ${MCP_LIST_TOOLS_CUTOFF_MS}ms; continuing without it`));
+    }, MCP_LIST_TOOLS_CUTOFF_MS);
+  });
+  try {
+    return await Promise.race([listing, cutoff]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchToolsFromServer(
   userId: string,
   serverType: string,
@@ -581,7 +651,7 @@ async function fetchToolsFromServer(
   agentSlug?: string,
   lane?: SessionLane,
 ): Promise<McpToolInfo[]> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
+  const { client } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -700,6 +770,38 @@ function extractAttachments(
   return out;
 }
 
+type McpToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
+
+async function invokeToolCall(
+  client: Client,
+  serverType: string,
+  args: Parameters<Client["callTool"]>[0],
+): Promise<McpToolCallResult> {
+  const options = { timeout: MCP_REQUEST_TIMEOUT_MS, signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) };
+  const serverTasks = Boolean(client.getServerCapabilities()?.tasks?.requests?.tools?.call);
+  if (!serverTasks) return client.callTool(args, undefined, options);
+
+  let taskId: string | undefined;
+  try {
+    for await (const message of client.experimental.tasks.callToolStream(args, undefined, options)) {
+      if (message.type === "taskCreated") {
+        taskId = message.task.taskId;
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} created task=${taskId} status=${message.task.status}`);
+      } else if (message.type === "taskStatus") {
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} task=${message.task.taskId} status=${message.task.status}`);
+      } else if (message.type === "result") {
+        return message.result;
+      } else if (message.type === "error") {
+        throw message.error;
+      }
+    }
+    throw new Error(`MCP task for ${serverType}/${args.name} ended without a result`);
+  } catch (err) {
+    if (taskId) await client.experimental.tasks.cancelTask(taskId).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function callTool(
   userId: string,
   serverType: string,
@@ -713,15 +815,16 @@ export async function callTool(
   // Server and tool kill switches apply to every lane, artifact apps and health checks included.
   const killed = killSwitchForTool(serverType, tool);
   if (killed && componentMode("kill") === "enforce") throw new Error(`Blocked by policy (GOV-KILL-${killed.mode.toUpperCase()}): ${serverType}/${tool} is switched off.`);
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const { client, credentials: resolved } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const callMeta = PER_CALL_AUTH_SERVER_TYPES.has(serverType) ? spacesCallAuthMeta(resolved) : undefined;
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
-  const result = await client
-    .callTool({ name: tool, arguments: params }, undefined, {
-      timeout: MCP_REQUEST_TIMEOUT_MS,
-      signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-    })
+  const result = await invokeToolCall(
+    client,
+    serverType,
+    { name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) },
+  )
     .catch((err: unknown) => {
       if (MISSING_TOOL_ERROR.test(err instanceof Error ? err.message : String(err))) {
         forgetToolList(userId, serverType, agentSlug, credentials, lane);
@@ -845,6 +948,8 @@ export async function restartMcpServers(serverType?: string): Promise<{ sessions
   }
   for (const key of [...userToolListCache.keys()]) if (matches(key)) toolLists++;
   dropUserToolLists(matches);
+  if (serverType) toolListSkipUntil.delete(serverType);
+  else toolListSkipUntil.clear();
   if (!serverType) toolListInflight.clear();
   const closing: Promise<void>[] = [];
   for (const [key, session] of sessions) {

@@ -79,7 +79,8 @@ export type QuestionFeature =
   | 'radar_dedup'
   | 'automation_step'
   | 'summary_template'
-  | 'ticket_fields';
+  | 'ticket_fields'
+  | 'agent_proactivity';
 
 export type DecisionFeature = TaskFeature | QuestionFeature;
 

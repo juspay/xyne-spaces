@@ -169,9 +169,7 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     healthCheck: adapter.healthCheck,
     writeTools: adapter.writeTools ?? [],
     staticTools: adapter.staticTools ?? [],
-    // Code-defined adapters don't forward files (none return binary today). Add
-    // a flag to StdioMcpAdapter if one ever needs it.
-    forwardFiles: false,
+    forwardFiles: adapter.forwardFiles ?? false,
     buildStdioCommand(credentials): StdioLaunchConfig {
       if (adapter.transport !== "stdio") return { cmd: "", args: [], env: {} };
       const cmd = adapter.buildCommand(credentials);
