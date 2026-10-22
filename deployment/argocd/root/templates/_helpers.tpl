@@ -292,6 +292,14 @@ REDIS_TLS: {{ ternary "true" "false" ($r.tls | default false) | quote }}
 {{- printf "https://%s" .Values.global.domain }}
 {{- end }}
 
+{{- define "xyne-root.sandboxPreviewHost" -}}
+{{- .Values.addons.sandbox.previewHost | default (printf "sandbox.%s" .Values.global.domain) }}
+{{- end }}
+
+{{- define "xyne-root.sandboxPreviewUrl" -}}
+{{- printf "https://%s" (include "xyne-root.sandboxPreviewHost" .) }}
+{{- end }}
+
 {{- define "xyne-root.urls" -}}
 {{- $url := include "xyne-root.publicUrl" .root }}
 FRONTEND_URL: {{ $url | quote }}
@@ -540,7 +548,7 @@ pdb:
 {{- $_ := set $env "KATA_ROUTER_URL" "http://xyne-sandbox-router:8080" }}
 {{- $_ := set $env "KATA_NAMESPACE" $root.Values.global.namespace }}
 {{- $_ := set $env "KATA_TEMPLATE" $sb.template.name }}
-{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" (include "xyne-root.publicUrl" $root) }}
+{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" (include "xyne-root.sandboxPreviewUrl" $root) }}
 {{- else }}
 {{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" "" }}
 {{- $_ := set $v "serviceAccount" (mergeOverwrite ($v.serviceAccount | default dict) (dict "automount" true)) }}

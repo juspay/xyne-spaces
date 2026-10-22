@@ -155,10 +155,27 @@ lookup in a sandbox hangs.
 ## Live preview
 
 claw posts a link to watch, and drive, the agent's browser:
-`https://<domain>/claw-preview/<sandbox>/`. The gateway routes `/claw-preview/` to the sandbox
-router, which forwards to the sandbox's noVNC on 6080 (`SANDBOX_PREVIEW_BASE_URL` on claw is the
-public URL). The route has no authentication of its own: anyone with a sandbox's name can drive
-its browser. The editor link claw also posts, `/claw-code/<sandbox>`, is not routed yet.
+`https://sandbox.<domain>/claw-preview/<sandbox>/`. That host is the sandbox router: everything on
+it goes there, and it forwards `/claw-preview/` to the sandbox's noVNC on 6080. The root chart
+sets `SANDBOX_PREVIEW_BASE_URL` on claw to `https://sandbox.<domain>`; override the name with
+`addons.sandbox.previewHost`. claw has no default — an environment that does not set the variable
+posts no preview link at all, rather than one pointing at a host that may not exist.
+`/claw-preview/` on the main host 302s to the new one, for links already posted in channels.
+
+**Previews must keep a host of their own.** The dashboard frames them with `allow-same-origin`,
+which they need for storage and their own WebSocket, and a sandbox serves those bytes and runs
+agent-written code — so on the dashboard's origin that frame could act as the signed-in user. The
+dashboard enforces this rather than trusting configuration: a preview URL on its own origin is
+refused rather than framed (`workspaceItems/previewFrame.ts`).
+
+The route still has no authentication: anyone with a sandbox's name can drive its browser.
+`resolveSandboxAccess` in claw-auth answers who may, but nothing calls it on this path. Note the
+Spaces session cookie cannot become that gate — `sandbox.<domain>` and the dashboard share a
+registrable domain, so they are the same *site* and only the cookies being host-only keeps the
+session out. The gate needs a signed token in the URL exchanged for a cookie scoped to this host,
+and the router must stop relaying `Cookie` inward and `Set-Cookie` outward.
+
+The editor link, `/claw-code/<sandbox>`, is routed separately — see XYNE-66337.
 
 ## Kata runtime settings
 

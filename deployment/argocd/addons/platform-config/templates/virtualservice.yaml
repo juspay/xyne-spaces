@@ -93,15 +93,13 @@ spec:
               number: {{ $s.clawAuthFrontend.port }}
     {{- end }}
     {{- if .Values.routes.clawPreview }}
-    - name: claw-preview
+    - name: claw-preview-moved
       match:
         - uri:
             prefix: /claw-preview/
-      route:
-        - destination:
-            host: {{ $s.sandboxRouter.host }}
-            port:
-              number: {{ $s.sandboxRouter.port }}
+      redirect:
+        authority: {{ include "platform-config.sandboxPreviewHost" . }}
+        redirectCode: 302
     {{- end }}
     - name: dashboard
       match:
@@ -112,3 +110,36 @@ spec:
             host: {{ $s.dashboard.host }}
             port:
               number: {{ $s.dashboard.port }}
+{{- if .Values.routes.clawPreview }}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: xyne-sandbox-preview
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ include "platform-config.sandboxPreviewHost" . }}
+  gateways:
+    - {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
+  http:
+    {{- if .Values.routes.health }}
+    - name: health
+      match:
+        - uri:
+            exact: {{ .Values.routes.healthPath }}
+      directResponse:
+        status: 200
+        body:
+          string: "ok"
+    {{- end }}
+    - name: sandbox-preview
+      route:
+        - destination:
+            host: {{ $s.sandboxRouter.host }}
+            port:
+              number: {{ $s.sandboxRouter.port }}
+      timeout: 0s
+{{- end }}
