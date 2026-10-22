@@ -788,7 +788,7 @@ export class YqlBuilder {
     }
 
     // Chat/Ticket attachments and transcripts: owner/channelPermissions/isPrivate check
-    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"`;
+    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser}${publicAccess}`;
     if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
         `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (${channelAccess}))`

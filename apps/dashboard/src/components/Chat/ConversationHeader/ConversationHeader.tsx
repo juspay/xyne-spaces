@@ -52,6 +52,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 // Disabled (Claw)
 // import { xyneAIActor } from '../../../machines/xyneAIMachine';
 // Disabled (Claw)
@@ -518,6 +519,7 @@ const ConversationHeader = ({
                 <ChannelIcon channel={channel} />
               </span>
               <span className='visual-regression-hide truncate'>{displayName}</span>
+              {isDM && <GuestLabel role={dmUser?.role} />}
               {isDM && (
                 <StatusIndicator
                   statusEmoji={dmUser?.statusEmoji}

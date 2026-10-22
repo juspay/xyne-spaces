@@ -8,6 +8,7 @@ import {
   ChannelRole,
   ChannelAddUserPolicy,
   Channel,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';

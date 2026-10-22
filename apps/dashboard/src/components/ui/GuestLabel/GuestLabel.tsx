@@ -8,15 +8,19 @@ interface GuestLabelProps {
   className?: string;
 }
 
-/** Muted "Guest" pill shown after a guest user's name. Renders nothing for anyone else. */
+/** Muted "· guest" text shown after a guest user's name. Renders nothing for anyone else. */
 export const GuestLabel = ({ role, className }: GuestLabelProps): ReactElement | null =>
   role === WorkspaceRole.GUEST ? (
     <span
       className={cn(
-        'shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground',
+        'shrink-0 whitespace-nowrap text-sm font-normal text-muted-foreground',
         className,
       )}
     >
-      Guest
+      · guest
     </span>
   ) : null;
+
+/** The same marker for plain-text slots (e.g. a combobox description): ' · guest' or ''. */
+export const guestSuffix = (role: string | null | undefined): string =>
+  role === WorkspaceRole.GUEST ? ' · guest' : '';
