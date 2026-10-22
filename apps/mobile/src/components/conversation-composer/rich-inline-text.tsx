@@ -1,4 +1,12 @@
-import { Fragment, memo, useMemo, type ReactElement, type ReactNode } from 'react';
+import {
+  createContext,
+  Fragment,
+  memo,
+  useContext,
+  useMemo,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { Text, type TextStyle, type ViewStyle } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 import type { LinkPressEvent, MarkdownStyle } from 'react-native-enriched-markdown';
@@ -50,6 +58,13 @@ const FALLBACK_MENTION_PALETTE: MentionPalette = {
   currentSelfBg: '#d6a21f',
   currentSelfText: '#251700',
 };
+
+/**
+ * Mention colours one surface draws differently from chat, for every inline
+ * body beneath it — the Activity screen's mention of you, say. Unset, the
+ * shared tokens apply, as in chat.
+ */
+export const MentionPaletteOverrideContext = createContext<Partial<MentionPalette> | null>(null);
 
 const isResolvedColor = (value: string | undefined): value is string =>
   typeof value === 'string' && value.trim().length > 0 && !value.startsWith('var(');
@@ -258,6 +273,7 @@ const RichInlineTextComponent = ({
   ) as string;
   const currentSelfBg = useCSSVariable('--color-chat-mention-inline-current-self-bg') as string;
   const currentSelfText = useCSSVariable('--color-chat-mention-inline-current-self-text') as string;
+  const paletteOverride = useContext(MentionPaletteOverrideContext);
   const palette = useMemo<MentionPalette>(
     () => ({
       otherBg: resolveTokenColor(otherBg, FALLBACK_MENTION_PALETTE.otherBg),
@@ -274,8 +290,10 @@ const RichInlineTextComponent = ({
       ),
       currentSelfBg: resolveTokenColor(currentSelfBg, FALLBACK_MENTION_PALETTE.currentSelfBg),
       currentSelfText: resolveTokenColor(currentSelfText, FALLBACK_MENTION_PALETTE.currentSelfText),
+      ...paletteOverride,
     }),
     [
+      paletteOverride,
       otherBg,
       otherText,
       currentOtherBg,

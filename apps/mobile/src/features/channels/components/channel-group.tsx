@@ -17,7 +17,7 @@ import {
 } from '../constants';
 import { useChannelActions } from '../hooks/use-channel-actions';
 import type { ChannelGroup } from '../model/layout';
-import { openSectionOptions } from '../state/section-picker-store';
+import { openChannelsGroupOptions, openSectionOptions } from '../state/section-picker-store';
 import { ChannelRow } from './channel-row';
 
 const TOGGLE = { duration: SECTION_TOGGLE_MS, easing: Easing.out(Easing.cubic) } as const;
@@ -57,44 +57,52 @@ function Header({ group }: { group: ChannelGroup }): ReactElement {
     transform: [{ rotate: withTiming(isCollapsed ? '-90deg' : '0deg', TOGGLE) }],
   }));
 
+  const title = (
+    <Text
+      numberOfLines={1}
+      style={{ fontSize: SECTION_TITLE_SIZE, fontWeight: '500' }}
+      className='shrink text-spaces-muted'
+    >
+      {group.title}
+    </Text>
+  );
+
   return (
     <View
       className='flex-row items-center'
       style={{ height: SECTION_HEADER_HEIGHT, paddingHorizontal: CHANNEL_ROW_PADDING_X }}
     >
-      <Pressable
-        accessibilityRole='button'
-        accessibilityState={{ expanded: !group.isCollapsed }}
-        accessibilityLabel={group.title}
-        onPress={() => toggleGroup(group)}
-        className='h-full flex-1 flex-row items-center gap-1.5'
-      >
-        <Text
-          numberOfLines={1}
-          style={{ fontSize: SECTION_TITLE_SIZE, fontWeight: '500' }}
-          className='shrink text-spaces-muted'
-        >
-          {group.title}
-        </Text>
-        <Animated.View style={chevronStyle}>
-          <ChevronDown size={SECTION_CHEVRON_SIZE} color={muted} strokeWidth={2.2} />
-        </Animated.View>
-      </Pressable>
-      {/* Only a section has settings; Channels is the catch-all and has none. */}
-      {group.kind === 'section' ? (
+      {group.isCollapsible ? (
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel={`${group.title} options`}
-          hitSlop={8}
-          onPress={() => {
-            void haptics.selection();
-            openSectionOptions(group.id);
-          }}
-          className='h-full items-center justify-center pl-3'
+          accessibilityState={{ expanded: !group.isCollapsed }}
+          accessibilityLabel={group.title}
+          onPress={() => toggleGroup(group)}
+          className='h-full flex-1 flex-row items-center gap-1.5'
         >
-          <Ellipsis size={SECTION_MORE_ICON_SIZE} color={muted} strokeWidth={2.2} />
+          {title}
+          <Animated.View style={chevronStyle}>
+            <ChevronDown size={SECTION_CHEVRON_SIZE} color={muted} strokeWidth={2.2} />
+          </Animated.View>
         </Pressable>
-      ) : null}
+      ) : (
+        <View accessibilityRole='header' className='h-full flex-1 flex-row items-center'>
+          {title}
+        </View>
+      )}
+      <Pressable
+        accessibilityRole='button'
+        accessibilityLabel={`${group.title} options`}
+        hitSlop={8}
+        onPress={() => {
+          void haptics.selection();
+          if (group.kind === 'section') openSectionOptions(group.id);
+          else openChannelsGroupOptions();
+        }}
+        className='h-full items-center justify-center pl-3'
+      >
+        <Ellipsis size={SECTION_MORE_ICON_SIZE} color={muted} strokeWidth={2.2} />
+      </Pressable>
     </View>
   );
 }
@@ -127,7 +135,7 @@ function Body({ group }: { group: ChannelGroup }): ReactElement {
 
 /**
  * One group: a header and the rows beneath it. `flat` is the headerless list
- * shown when there are no sections, so it is plain rows with nothing to fold.
+ * shown under a filter chip, so it is plain rows with nothing to fold.
  */
 export const ChannelGroupView = memo(function ChannelGroupView({
   group,

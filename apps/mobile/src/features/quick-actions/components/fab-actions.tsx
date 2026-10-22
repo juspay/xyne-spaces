@@ -10,7 +10,7 @@ import Animated, {
 
 import {
   ICON_SIZE,
-  SEARCH_BUTTON_SIZE,
+  ACTION_BUTTON_SIZE,
   TAB_BAR_HORIZONTAL_PADDING,
   TAB_BAR_SHADOW,
 } from '@/src/features/bottom-navigation/constants';
@@ -124,7 +124,7 @@ export function FabActions({ isOpen, actions, onSelect }: FabActionsProps): Reac
         {
           position: 'absolute',
           right: TAB_BAR_HORIZONTAL_PADDING,
-          bottom: barHeight + FAB_GAP + SEARCH_BUTTON_SIZE + FAB_ACTIONS_GAP,
+          bottom: barHeight + FAB_GAP + ACTION_BUTTON_SIZE + FAB_ACTIONS_GAP,
           alignItems: 'flex-end',
           gap: FAB_ACTION_SPACING,
         },

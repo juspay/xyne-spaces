@@ -19,15 +19,18 @@ import {
   DELETE_SECTION_VIEW,
   MANAGE_CHANNELS_VIEW,
   RENAME_SECTION_VIEW,
+  SECTION_FILTER_VIEW,
   SECTION_OPTIONS_VIEW,
+  SECTION_SORT_VIEW,
   SectionOptionsView,
 } from './section-options-view';
+import { SectionFilterView, SectionSortView } from './section-preference-views';
 import { SECTIONS_VIEW, SectionPickerView } from './section-picker-view';
 
 /**
  * The one tray the screen owns. A channel's Section action opens it on the
- * section picker; the Create section action opens it on the name view; a long
- * press on a section's header opens it on that section's options — and each of
+ * section picker; the Create section action opens it on the name view; a
+ * group header's more button opens it on that group's options — and each of
  * those pushes its next step into the same card.
  *
  * Controlled by `sectionPicker$` so a menu item inside any row, or the
@@ -74,6 +77,12 @@ export function SectionTray(): ReactElement {
           </Tray.View>
           <Tray.View name={DELETE_SECTION_VIEW} style={{ flexShrink: 1 }}>
             <DeleteSectionView />
+          </Tray.View>
+          <Tray.View name={SECTION_FILTER_VIEW} style={{ flexShrink: 1 }}>
+            <SectionFilterView />
+          </Tray.View>
+          <Tray.View name={SECTION_SORT_VIEW} style={{ flexShrink: 1 }}>
+            <SectionSortView />
           </Tray.View>
         </Tray.Body>
       </Tray.Content>

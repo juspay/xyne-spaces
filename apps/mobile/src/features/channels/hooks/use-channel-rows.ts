@@ -1,15 +1,20 @@
 import { useValue } from '@legendapp/state/react';
 import { useLayoutEffect, useMemo } from 'react';
-import { ChannelType, ChannelVisibility } from '@xyne/shared';
+import { ChannelType, ChannelVisibility, NotificationLevel } from '@xyne/shared';
 
 import {
   getUnreadChannelActivityCounts,
   isUnreadChannelActivity,
 } from '@/src/features/activity/domain/activitySelectors';
+import {
+  DEFAULT_CHANNEL_FILTER,
+  getGroupMentionChannelIds,
+} from '@/src/components/chat/channel-list/channel-group-preferences';
 import { hasNewActivity } from '@/src/components/chat/channel-list/channel-list.utils';
 import { useActivityBadgeModel } from '@/src/features/activity/hooks/useActivityBadgeModel';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useChannelGroupCollapse } from '@/src/hooks/useChannelGroupCollapse';
+import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferences';
 import { useChannelSections } from '@/src/hooks/useChannelSections';
 import { groupWorkspaceChannels } from '@/src/hooks/useChannelList';
 import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
@@ -48,6 +53,7 @@ export function useChannelRows(): ChannelListMeta {
   const { unreadActivities } = useActivityBadgeModel();
   const { sections } = useChannelSections();
   const { isChannelsCollapsed } = useChannelGroupCollapse();
+  const { channels: channelsPreference } = useChannelGroupPreferences();
 
   const channels = useMemo<ChannelRowData[]>(() => {
     const statusById = new Map(userChannelStatuses.map(status => [status.channelId, status]));
@@ -62,6 +68,7 @@ export function useChannelRows(): ChannelListMeta {
       if (!isUnreadChannelActivity(activity, statusById.get(channelId)?.lastViewedAt)) continue;
       mentioned.add(channelId);
     }
+    const groupMentioned = getGroupMentionChannelIds(unreadActivities);
 
     const { starred, channels: rest } = groupWorkspaceChannels(
       visibleChannels,
@@ -89,6 +96,8 @@ export function useChannelRows(): ChannelListMeta {
             hasUnread:
               isMentioned || hasNewActivity(unreadCount, status?.lastViewedAt, lastActivityAtMs),
             isMentioned,
+            hasGroupMention: groupMentioned.has(channel.id),
+            isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
             isStarred: status?.isStarred === true,
             lastActivityAtMs,
             lastViewedAt: status?.lastViewedAt ?? undefined,
@@ -106,13 +115,23 @@ export function useChannelRows(): ChannelListMeta {
         id: section.id,
         name: section.name,
         isCollapsed: section.isCollapsed,
+        filterMode: section.filterMode ?? DEFAULT_CHANNEL_FILTER,
+        sortOrder: section.sortOrder ?? null,
       })),
     [sections],
   );
 
   const layout = useMemo(
-    () => buildChannelLayout({ channels, sections: sectionData, filter, isChannelsCollapsed }),
-    [channels, filter, isChannelsCollapsed, sectionData],
+    () =>
+      buildChannelLayout({
+        channels,
+        sections: sectionData,
+        filter,
+        isChannelsCollapsed,
+        channelsPreference,
+        now: Date.now(),
+      }),
+    [channels, channelsPreference, filter, isChannelsCollapsed, sectionData],
   );
 
   useLayoutEffect(() => {

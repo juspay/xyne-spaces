@@ -85,7 +85,8 @@ export default function BetaSettingsScreen(): ReactElement {
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 28 }}
       >
         <Text className='px-1 pb-2 pt-6 text-[13px]' style={{ color: description }}>
-          Unfinished work, off by default. Turning one on restarts the app screen.
+          Unfinished work, off by default. Changing {FLAGS['ui.shell'].label} restarts the app
+          screen; the others apply in place.
         </Text>
 
         {flags.length === 0 ? (

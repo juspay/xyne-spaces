@@ -21,6 +21,11 @@ export type FlagDefinition = {
    * storage holds. Checked against the registry in the flags test.
    */
   readonly requires?: string;
+  /**
+   * Changing it changes the route tree, so applying it remounts the protected
+   * shell. Everything else is read where it renders and swaps in place.
+   */
+  readonly remountsShell?: true;
 };
 
 export const FLAGS = {
@@ -29,6 +34,8 @@ export const FLAGS = {
     description: 'The new bottom bar in place of the swipeable pager.',
     default: false,
     removeBy: '2026-12-31',
+    // Picks the (tabs) or (spaces) navigator.
+    remountsShell: true,
   },
   'chat.v3': {
     label: 'Chat v3',
@@ -85,4 +92,9 @@ export function isFlagKey(value: string): value is FlagKey {
 export function parentFlag(key: FlagKey): FlagKey | undefined {
   const parent = (FLAGS[key] as FlagDefinition).requires;
   return parent !== undefined && isFlagKey(parent) ? parent : undefined;
+}
+
+/** Whether applying a change to this flag remounts the protected shell. */
+export function remountsShell(key: FlagKey): boolean {
+  return (FLAGS[key] as FlagDefinition).remountsShell === true;
 }

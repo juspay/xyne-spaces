@@ -22,9 +22,9 @@ export const unstable_settings = { initialRouteName: SPACES_INITIAL_TAB } as con
 
 /**
  * Menu destinations are reached rarely, so their trees suspend on blur. The
- * three pill tabs and search are left unfrozen on purpose: they are the hot
- * path, and unfreezing re-renders the whole subtree inside the commit that
- * switches the tab — the very stall preloading exists to remove.
+ * three pill tabs are left unfrozen on purpose: they are the hot path, and
+ * unfreezing re-renders the whole subtree inside the commit that switches the
+ * tab — the very stall preloading exists to remove.
  */
 const MENU_SCREEN_OPTIONS = { freezeOnBlur: Platform.OS === 'android' } as const;
 
@@ -65,7 +65,6 @@ function SpacesTabs({ screenOptions }: SpacesTabsProps): ReactElement {
         <Tabs.Screen name={TabScreens.Channels} />
         <Tabs.Screen name={TabScreens.Dms} />
         <Tabs.Screen name={TabScreens.Activity} />
-        <Tabs.Screen name={TabScreens.Search} />
         <Tabs.Screen name={TabScreens.Calls} options={MENU_SCREEN_OPTIONS} />
         <Tabs.Screen name={TabScreens.Threads} options={MENU_SCREEN_OPTIONS} />
         <Tabs.Screen name={TabScreens.MorningBrief} options={MENU_SCREEN_OPTIONS} />
