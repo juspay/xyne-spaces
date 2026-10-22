@@ -130,6 +130,26 @@ export const designSystemRepository = {
   },
 
   /**
+   * The system pinned to a conversation, or null when it inherits the agent's
+   * default. Scoped by org as well as conversation so a pin written under one
+   * org is never read under another.
+   *
+   * resolveForAgent answers the same question for the dispatch path, but does
+   * not say WHICH rung it landed on. A caller showing the user whether this
+   * chat overrides its agent needs the pin itself.
+   */
+  findConversationPin: async (
+    conversationId: string,
+    orgId: string,
+  ): Promise<DesignSystem | null> => {
+    const pin = await prisma.chatConversationDesignSystem.findFirst({
+      where: { conversationId, orgId },
+      include: { designSystem: true },
+    });
+    return pin?.designSystem ?? null;
+  },
+
+  /**
    * The one resolution order every caller must share: a conversation's own pin
    * beats the agent's default, which beats the pre-migration
    * `agent.config.designSystem` text. Returns null when the agent has no system
