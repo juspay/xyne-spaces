@@ -11,6 +11,7 @@ import {
   Github,
   KeyRound,
   Loader2,
+  MessageCircle,
   Plane,
   Plug,
   Settings,
@@ -66,6 +67,7 @@ import type {
   ReasoningEffort,
 } from '@/services/claw/clawSettingsTypes';
 import LocalHarnessSection from './LocalHarnessSection';
+import { MessagingChannelsSection } from './messaging/MessagingChannelsSection';
 
 const PROVIDER_META: Record<ProviderId, { name: string; description: string; icon: typeof Plane }> =
   {
@@ -1439,7 +1441,8 @@ const ClawSettingsScreen = (): ReactElement => {
       <div className='mb-6 flex flex-col gap-1'>
         <h1 className='text-lg font-semibold text-foreground'>Settings</h1>
         <p className='text-sm text-muted-foreground'>
-          Connect this machine, configure AI providers, and assign agent models.
+          Connect this machine, configure AI providers, assign agent models, and link messaging
+          channels.
         </p>
       </div>
 
@@ -1469,6 +1472,14 @@ const ClawSettingsScreen = (): ReactElement => {
           onMutate={invalidateSettings}
           onSaving={setSaving}
         />
+        <section>
+          <SectionHeader
+            icon={MessageCircle}
+            title='Messaging Channels'
+            description='Talk to your agents from WhatsApp and Teams.'
+          />
+          <MessagingChannelsSection />
+        </section>
         <AdvancedSettingsSection />
       </div>
     </div>
