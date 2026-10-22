@@ -4,6 +4,7 @@
  * imported — and the commands that need an id (/new) have no business
  * standing that up.
  */
+import { createHash } from "node:crypto";
 import { ACCOUNT_KEY_PREFIX } from "./const.js";
 import { MESSAGING_CHANNEL_KEYS, type MessagingChannelKey } from "./plugin.js";
 import { sanitizeId } from "./schema.js";
@@ -19,7 +20,22 @@ export function channelConversationId(
   agentSlug: string,
   chatId: string,
 ): string {
-  return `${channel}-${sanitizeId(accountKey)}-${sanitizeId(agentSlug)}-${sanitizeId(chatId)}`;
+  return `${channel}-${sanitizeId(accountKey)}-${sanitizeId(agentSlug)}-${chatKey(chatId)}`;
+}
+
+/** Longest chat id kept verbatim in a conversation id. WhatsApp's JIDs are
+ *  well under it, so their ids are unchanged; a Teams conversation id ("a:…",
+ *  "19:…@thread.tacv2;messageid=…") can run past 100 characters, which would
+ *  break claw's 128-character session-id limit once channel, account and
+ *  agent are prepended. */
+const MAX_VERBATIM_CHAT_CHARS = 48;
+
+/** The chat's part of a conversation id: sanitized, or — past the limit — a
+ *  hash of the RAW id, so two ids that sanitize alike still differ. */
+function chatKey(chatId: string): string {
+  const clean = sanitizeId(chatId);
+  if (clean.length <= MAX_VERBATIM_CHAT_CHARS) return clean;
+  return `h${createHash("sha256").update(chatId).digest("hex").slice(0, 32)}`;
 }
 
 /**

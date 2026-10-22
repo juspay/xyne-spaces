@@ -362,7 +362,12 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       return;
     }
     if (await shouldTellUnlinked(account.id, msg.senderId)) {
-      await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: NOT_LINKED_TEXT, quoted: msg.ref });
+      await enqueueOutbound(account.id, {
+        kind: "text",
+        chatId: msg.chatId,
+        text: plugin.unlinkedText ?? NOT_LINKED_TEXT,
+        quoted: msg.ref,
+      });
     }
     return;
   }
@@ -380,7 +385,7 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     // Anyone may use the agent; they just have to say who they are first.
     // Told once an hour per sender, so a group does not fill up with it.
     if (!(await shouldTellUnlinked(account.id, msg.senderId))) return;
-    await reply(NOT_LINKED_TEXT);
+    await reply(plugin.unlinkedText ?? NOT_LINKED_TEXT);
     return;
   }
 
