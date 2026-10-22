@@ -213,9 +213,12 @@ jobs:
       # Gauge workers; forwarded into the automation container by the runner.
       PARALLEL: 5
     steps:
+      # TEMPORARY (testing): check out the PR head itself, not the PR+main merge ref,
+      # so main's Playwright 1.63.0 bump doesn't leak in while the runner image is on
+      # 1.59.1. Remove once the image/main versions are aligned.
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: pnpm/action-setup@v4
 
