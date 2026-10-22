@@ -9,6 +9,10 @@
  *   writes the session to the file. Running MCP servers pick it up from there.
  * - `getSpacesMcpStatus` reads the file and asks Spaces (`GET /api/sdk/v1/me`)
  *   whether the session still works.
+ * - `signOutSpacesMcp` ends the sign-in on Spaces and removes it from the file.
+ *
+ * Writes to the file take `spaces.json.lock`, the lock the MCP renews under, so
+ * a renewal finishing late cannot overwrite what was just written.
  *
  * The page passes nothing in — no path, no address, no token — and gets back
  * only an outcome, never the session: the address is worked out here, so a page
@@ -48,7 +52,21 @@ export type SpacesMcpSignInResult =
   | { ok: true; status: SpacesMcpStatus }
   | { ok: false; message: string };
 
+export type SpacesMcpSignOutResult =
+  | { ok: true; status: SpacesMcpStatus; notice?: string }
+  | { ok: false; message: string };
+
 const REQUEST_TIMEOUT_MS = 15_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Longest a sign-in or sign-out waits for Spaces to end the sign-in it replaces. */
+const SIGN_OUT_WAIT_MS = 5_000;
+
+/** As the MCP's lock: how long to wait for it, and when a left-over one is stale. */
+const LOCK_WAIT_MS = 10_000;
+const STALE_LOCK_MS = 30_000;
+const LOCK_RETRY_MS = 100;
 
 /** Polls after approving, in case the decision is not visible to the first one. */
 const POLL_ATTEMPTS = 5;
@@ -174,18 +192,66 @@ async function readStoredConfig(): Promise<Record<string, unknown>> {
 }
 
 /**
- * Save the session, keeping the rest of the file. Owner-only, as the MCP writes
- * it, and replaced in one step (temporary file, then rename) so a running
- * server never reads half a file.
+ * Write the file. Owner-only, as the MCP writes it, and replaced in one step
+ * (temporary file, then rename) so a running server never reads half a file.
  */
-async function saveSession(session: StoredSession, baseUrl: string): Promise<void> {
+async function writeStoredConfig(stored: Record<string, unknown>): Promise<void> {
   const file = configPath();
-  const { apiKey: _dropped, ...stored } = await readStoredConfig();
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify({ ...stored, baseUrl, session }, null, 2)}\n`, { mode: 0o600 });
+  await fs.writeFile(temporary, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
   await fs.chmod(temporary, 0o600);
   await fs.rename(temporary, file);
+}
+
+/**
+ * Run `fn` holding `spaces.json.lock`, the MCP's lock, taken the same way:
+ * created exclusively, stale after 30s, and given up on after 10s.
+ */
+async function withSessionLock<T>(fn: () => Promise<T>): Promise<T> {
+  const lock = `${configPath()}.lock`;
+  await fs.mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let held = false;
+  while (!held) {
+    try {
+      await (await fs.open(lock, 'wx', 0o600)).close();
+      held = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') break;
+      const age = await fs.stat(lock).then((s) => Date.now() - s.mtimeMs, () => 0);
+      if (age > STALE_LOCK_MS) {
+        await fs.unlink(lock).catch(() => {});
+        continue;
+      }
+      if (Date.now() >= deadline) break;
+      await sleep(LOCK_RETRY_MS);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    if (held) await fs.unlink(lock).catch(() => {});
+  }
+}
+
+/**
+ * End a sign-in on Spaces by its refresh token. Bounded and best effort: true
+ * if Spaces confirmed it, false if it could not be reached in time.
+ */
+async function endSignIn(baseUrl: string, refreshToken: string): Promise<boolean> {
+  const ended = request('POST', `${baseUrl}/api/sdk/auth/sso/logout`, { body: { refreshToken } }).then(
+    (response) => response.status === 204,
+    () => false,
+  );
+  return Promise.race([ended, sleep(SIGN_OUT_WAIT_MS).then(() => false)]);
+}
+
+/** Where a saved session's sign-in lives: the file's own address, else this deployment's. */
+function savedBaseUrl(stored: Record<string, unknown>): string {
+  return typeof stored.baseUrl === 'string' && /^https?:\/\//.test(stored.baseUrl)
+    ? stored.baseUrl.replace(/\/+$/, '')
+    : spacesMcpBaseUrl();
 }
 
 /** The session in an approved poll response, in the shape the MCP saves. */
@@ -216,8 +282,6 @@ function toStoredSession(body: unknown): StoredSession | undefined {
   };
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * Sign the Spaces MCP in as the user signed in to the app: start a Xyne SSO
  * request, approve it with the app's login, collect the session and save it.
@@ -225,7 +289,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 export async function signInSpacesMcp(): Promise<SpacesMcpSignInResult> {
   const baseUrl = spacesMcpBaseUrl();
   try {
-    const init = await request('POST', `${baseUrl}/api/sdk/auth/sso/init`, { body: {} });
+    // The MCP that reads the file renews sessions, so ask for a refresh token.
+    const init = await request('POST', `${baseUrl}/api/sdk/auth/sso/init`, { body: { refresh: true } });
     const deviceCode = field(init.body, 'device_code');
     const userCode = field(init.body, 'user_code');
     if (init.status !== 200 || typeof deviceCode !== 'string' || typeof userCode !== 'string') {
@@ -248,7 +313,15 @@ export async function signInSpacesMcp(): Promise<SpacesMcpSignInResult> {
       if (poll.status === 200) {
         const session = toStoredSession(poll.body);
         if (!session) return { ok: false, message: 'Spaces returned an unexpected sign-in response.' };
-        await saveSession(session, baseUrl);
+        await withSessionLock(async () => {
+          const { apiKey: _dropped, ...stored } = await readStoredConfig();
+          const replaced = stored.session;
+          await writeStoredConfig({ ...stored, baseUrl, session });
+          // End the sign-in this one replaces, so it does not stay live unused
+          if (isStoredSession(replaced) && replaced.refreshToken && replaced.refreshToken !== session.refreshToken) {
+            await endSignIn(savedBaseUrl(stored), replaced.refreshToken);
+          }
+        });
         return { ok: true, status: await getSpacesMcpStatus() };
       }
       if (field(poll.body, 'error') !== 'authorization_pending') {
@@ -315,5 +388,29 @@ export async function getSpacesMcpStatus(): Promise<SpacesMcpStatus> {
     return { state: 'unreachable', message: messageOf(me.body, `Spaces answered ${me.status}.`) };
   } catch (error) {
     return { state: 'unreachable', message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Sign the Spaces MCP out on this computer: end the sign-in on Spaces when it
+ * can be (a session with a refresh token), and remove the session from the
+ * file either way, keeping the rest of it. A cookie already issued stays valid
+ * on Spaces until it expires; nothing here holds it any more.
+ */
+export async function signOutSpacesMcp(): Promise<SpacesMcpSignOutResult> {
+  try {
+    const notice = await withSessionLock(async () => {
+      const { session, ...rest } = await readStoredConfig();
+      if (!isStoredSession(session)) return undefined;
+      const ended = session.refreshToken ? await endSignIn(savedBaseUrl(rest), session.refreshToken) : true;
+      await writeStoredConfig(rest);
+      return ended
+        ? undefined
+        : 'Signed out on this computer, but Spaces could not be reached to end the sign-in there.';
+    });
+    return { ok: true, status: { state: 'signed_out' }, ...(notice ? { notice } : {}) };
+  } catch (error) {
+    errorLogger.warn('[spaces-mcp] Sign-out failed', { error: error instanceof Error ? error.message : String(error) });
+    return { ok: false, message: `Could not update ${configPath()}: ${error instanceof Error ? error.message : String(error)}` };
   }
 }

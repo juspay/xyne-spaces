@@ -14,7 +14,7 @@
  * prompt to refresh the list, and picking up a new sign-in, wait for a restart.
  */
 
-import { mkdirSync, watch } from "node:fs";
+import { mkdirSync, readFileSync, watch } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { SsoSession } from "@xyne/spaces-sdk";
 import { configPath, loadSavedSession, resolveWrites } from "./config.js";
@@ -26,6 +26,21 @@ export interface SharedConfigState {
 	writes: boolean;
 	/** The session saved in the file, if any. */
 	session: SsoSession | undefined;
+	/**
+	 * The file holds no session: it was signed out, or deleted. False when it
+	 * could not be read, e.g. caught mid-write, which says nothing either way.
+	 */
+	signedOut: boolean;
+}
+
+/** Whether the file reads cleanly and has no `session`, or is gone. */
+function isSignedOut(path: string): boolean {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+		return !!parsed && typeof parsed === "object" && !("session" in parsed);
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT";
+	}
 }
 
 /** Call `onChange` with the file's current state whenever it changes. */
@@ -37,7 +52,10 @@ export function watchSharedConfig(onChange: (state: SharedConfigState) => void):
 	let timer: NodeJS.Timeout | undefined;
 	const settle = (): void => {
 		clearTimeout(timer);
-		timer = setTimeout(() => onChange({ writes: resolveWrites().enabled, session: loadSavedSession() }), SETTLE_MS);
+		timer = setTimeout(
+			() => onChange({ writes: resolveWrites().enabled, session: loadSavedSession(), signedOut: isSignedOut(path) }),
+			SETTLE_MS,
+		);
 	};
 
 	try {
