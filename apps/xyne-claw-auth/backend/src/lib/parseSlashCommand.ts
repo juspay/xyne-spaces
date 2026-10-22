@@ -33,8 +33,8 @@ export type SlashCommand =
   // `/queue clear` — drop the messages waiting behind the active run (does NOT
   // stop the current run — that's `/stop`). Short-circuits.
   | { kind: "queueClear" }
-  // `/help` — list the available slash commands.
-  | { kind: "help" }
+  // `/help` — list the available slash commands; `/help <command>` explains one.
+  | { kind: "help"; command?: string }
   | { kind: "status" }
   // `/eval <question>` — run the question once on every configured provider,
   // each answering in this thread, then attach a timing comparison.
@@ -126,6 +126,10 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
 
   if (lower === "/help") {
     return { kind: "help" };
+  }
+  if (lower.startsWith("/help ")) {
+    const command = trimmed.slice("/help ".length).trim().split(/\s+/)[0] ?? "";
+    return /^\/?[a-z][\w-]*$/i.test(command) ? { kind: "help", command: command.replace(/^\//, "") } : { kind: "help" };
   }
   if (lower === "/status") {
     return { kind: "status" };

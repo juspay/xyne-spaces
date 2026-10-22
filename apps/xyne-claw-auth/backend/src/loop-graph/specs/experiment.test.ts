@@ -30,7 +30,7 @@ vi.mock("../../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const { continueExperimentAfterResult, superviseExperiment, experimentLoop } = await import("./experiment.js");
+const { continueExperimentAfterResult, superviseExperiment, experimentLoop, EPOCH_LOOPS, epochLoopFor } = await import("./experiment.js");
 const { validateLoopSpec } = await import("../engine.js");
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
@@ -67,6 +67,15 @@ beforeEach(() => {
 describe("experiment loop spec", () => {
   it("is a valid graph", () => {
     expect(validateLoopSpec(experimentLoop as never)).toEqual([]);
+  });
+
+  it("has one valid spec per loop command, picked by the run's kind", () => {
+    for (const spec of Object.values(EPOCH_LOOPS)) expect(validateLoopSpec(spec as never)).toEqual([]);
+    expect(Object.keys(EPOCH_LOOPS).sort()).toEqual(["experiment", "framework", "repo-history", "security", "understanding"]);
+    expect(epochLoopFor("security").id).toBe("security");
+    expect(epochLoopFor(null).id).toBe("experiment");
+    expect(epochLoopFor("repo-history").policy.maxPasses?.({} as never)).toBe(1000);
+    expect(epochLoopFor("framework").policy.maxPasses?.({} as never)).toBeNull();
   });
 });
 

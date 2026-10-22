@@ -6,6 +6,7 @@ import { setSession, type SessionContext } from "./session-context.js";
 import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
+import { loopCommandFor, loopCommandForWord, withLoopKind, type LoopKey, type LoopKind } from "xyne-claw-shared";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
 
 const log = createLogger("experiment");
@@ -16,7 +17,7 @@ const MAX_DURATION_MS = Number(
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
-  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: "understanding" | "framework" | "security" | "repo-history"; droppedFocus?: string }
+  | { sub: "start"; durationMs: number; focus?: string; provider?: string; model?: string; invalidProvider?: string; kind?: LoopKind; droppedFocus?: string }
   | { sub: "status" }
   | { sub: "stop" }
   | { sub: "findings"; id?: string }
@@ -38,24 +39,10 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
   // and subcommands, but the run is tagged so end-experiment stays locked until
   // the open-conjecture frontier is exhausted (the epoch runtime keys off the
   // dispatch payload's `kind`). Everything below is shared parsing.
-  const commandWord = lower.startsWith("/understanding")
-    ? "/understanding"
-    : lower.startsWith("/framework")
-      ? "/framework"
-      : lower.startsWith("/security-scan")
-        ? "/security-scan"
-        : lower.startsWith("/repo-history")
-          ? "/repo-history"
-          : lower.startsWith("/experiment")
-            ? "/experiment"
-            : null;
-  if (!commandWord) return null;
-  const kind =
-    commandWord === "/understanding" ? ("understanding" as const) :
-    commandWord === "/framework" ? ("framework" as const) :
-    commandWord === "/security-scan" ? ("security" as const) :
-    commandWord === "/repo-history" ? ("repo-history" as const) :
-    undefined;
+  const loop = loopCommandForWord(lower);
+  if (!loop) return null;
+  const commandWord = loop.command;
+  const kind = loop.kind ?? undefined;
   const rest = trimmed.slice(commandWord.length).trim();
   if (!rest) return { sub: "start", durationMs: DEFAULT_DURATION_MS, ...(kind ? { kind } : {}) };
   const [first, ...tail] = rest.split(/\s+/);
@@ -317,6 +304,45 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
   }, appToken);
 }
 
+const EPOCH_EXIT: Record<LoopKey, string> = {
+  experiment: `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`,
+  understanding: `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`,
+  framework: `EXIT: this is a framework run — it ends when the candidate list is EXHAUSTED, not on the clock. Enumerate the STRUCTURAL candidates in scope as open conjectures (convention drift, missing paved paths, change-amplification, boilerplate, duplication — not just copy-paste), then close each (proved = a real, tagged opportunity with evidence and a named consequence; refuted = it is incidental or taste). When ZERO remain open and the markdown report is delivered, call end-experiment. Do NOT keep looping to the safety cap re-describing opportunities you already closed.`,
+  security: `EXIT: this run is TIME-BOXED — end-experiment refuses until the deadline. Attack surface cannot be exhausted the way a code-path frontier can: there is always one more endpoint, so "I have checked everything" would be a false claim of completeness. Use the whole window. When you run out of leads in one area, move to a different surface rather than restating findings you already closed, and keep the report current every epoch so a run that ends at the deadline still delivers everything it found.`,
+  "repo-history": `EXIT: this is a repo-history run — it is PROGRESS-gated: it ends when the commit walk reaches HEAD, not on the clock. The frontier is the commits from the initial sha to HEAD, walked OLDEST→NEWEST in batches. Each epoch advances the cursor forward and records the coding DECISIONS each batch establishes. You are done only when the newest batch you distilled ends at HEAD (record HEAD's sha in the ledger) AND the .html decision-log is delivered — then call end-experiment. Do NOT stop early with commits still ahead of the cursor, and do NOT loop re-reading batches already behind it. This run is COMMIT-bound, NOT time-bound: it keeps chaining epochs until the walk reaches HEAD, so the deadline shown below does NOT end it — only reaching HEAD does. Every commit must be checked.`,
+};
+
+const EPOCH_INSTRUCTIONS: Record<LoopKey, string> = {
+  experiment: `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
+  understanding: `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
+  framework: `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: STRUCTURAL gaps that make this codebase harder to extend safely than it should be — convention drift (one concept done several inconsistent ways), missing paved paths (a common need solved ad-hoc everywhere), change-amplification (adding one feature touches N files for lack of a seam), boilerplate, and plain duplication. Duplication is only one shape — do NOT reduce this to finding copy-paste. Pick or advance ONE candidate per epoch.
+
+TAG every opportunity with your OWN word for its shape (kebab-case), reusing a tag already in the ledger if it fits. A candidate is only proved when its note carries: a \`Tag:\` line; at least one \`file.ext:LINE\` where the gap lives; and a \`Prevents:\` line naming the concrete bug, drift, or change-amplification the framework would have stopped. The ledger enforces all three. The \`Prevents:\` line is the real bar — if you cannot name what it prevents, it is taste; refute it. A VARYING pattern (five different auth checks) is a valid convention-drift opportunity even though the code is not identical — do not refute it for that.
+
+Refuting is real progress: a wrong extraction is more expensive than the duplication it replaces.
+
+Deliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. The report MUST also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch rather than starting a new one.`,
+  security: `Read the ledger below before doing anything. You are hunting exploitable defects, and there are TWO tiers — keep them apart or the report is worthless.
+
+LEAD (status=conjecture): you read the code and the defect looks real. Cite file:line. This is where most findings belong.
+CONFIRMED (status=proved): you EXECUTED it and captured what came back — the request you sent, the status code or output you observed, and where you verified the effect (a row that changed, a document returned, a measured timing). A script that greps source and asserts a pattern is present is NOT a confirmation; it proves the code says what you already read.
+
+Before proposing a fix, check whether a CORRECT implementation already exists nearby — the same call done safely elsewhere in the repo. Across earlier runs that was the single most common shape: the safe sibling existed and was simply not used. Name it, because it is also the cheapest fix.
+
+DEFENDED is a first-class result. If you try it and a guard stops you, close it as refuted with what stopped you. A finding you cannot execute stays a conjecture — never promote it because it looks obvious.
+
+Deliver ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry.`,
+  "repo-history": `Read the ledger below before doing anything. You are reconstructing the coding SPEC of this repo — the rules and decisions someone would need to rebuild it — by walking git history OLDEST→NEWEST.
+
+CURSOR: the ledger records how far you have walked. Establish the frontier with \`git log <initial-sha>..HEAD --reverse --oneline\` (oldest first). Each epoch, take the NEXT BATCH of commits after the cursor (a sensible chunk — ~20-50 ordinary commits, or a SINGLE squash/merge commit on its own since it is one decision), read their diffs, and advance the cursor. A squash-merge is one big diff with no granular commits — pull the PR discussion for its WHY rather than parsing the whole diff blind.
+
+EXTRACT DECISIONS, NOT DIFFS. For each batch record the coding RULE it establishes (the convention, invariant, or "always/never do X"), not a changelog of what changed. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. An entry is only proved when its note carries: a \`Rule:\` line (the durable instruction); the \`sha\` it derives from; and its theme \`Tag:\`.
+
+RECONCILE AGAINST HEAD — this is the correctness bar. History is full of dead ends: a rule set at an early commit is often REVERSED or REWRITTEN later (a "fix" commit, not always a revert). When a later batch overturns a rule already in the ledger, AMEND the existing entry — do not append a second contradictory one. Superseded rules move to a GRAVEYARD section with a \`Supersedes:\`/why-it-died line; only rules still live in the current code stay in Current Rules. The final doc must not contain a rule that HEAD contradicts.
+
+Deliver ONE self-contained .html decision-log (no network, no JavaScript — it must render offline) with a STABLE filename, extended every epoch, three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced/changed each) / GRAVEYARD (tried-and-abandoned, with why). Send it with sandbox-deliver-files.`,
+};
+
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
   const remaining = formatRemaining(run.deadlineAt);
   const sandboxId = /(?:^|\s)sandboxId=([^\s]+)/.exec(run.sandboxNote ?? "")?.[1];
@@ -341,15 +367,8 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
   // understanding run whose frontier had closed kept looping to the safety cap
   // instead of ending. The agent was obeying the prompt, not being refused —
   // observed live over 8 wasted epochs with 0 open conjectures and 60 closed.
-  const exitInstruction = run.kind === "security"
-    ? `EXIT: this run is TIME-BOXED — end-experiment refuses until the deadline. Attack surface cannot be exhausted the way a code-path frontier can: there is always one more endpoint, so "I have checked everything" would be a false claim of completeness. Use the whole window. When you run out of leads in one area, move to a different surface rather than restating findings you already closed, and keep the report current every epoch so a run that ends at the deadline still delivers everything it found.`
-    : run.kind === "framework"
-    ? `EXIT: this is a framework run — it ends when the candidate list is EXHAUSTED, not on the clock. Enumerate the STRUCTURAL candidates in scope as open conjectures (convention drift, missing paved paths, change-amplification, boilerplate, duplication — not just copy-paste), then close each (proved = a real, tagged opportunity with evidence and a named consequence; refuted = it is incidental or taste). When ZERO remain open and the markdown report is delivered, call end-experiment. Do NOT keep looping to the safety cap re-describing opportunities you already closed.`
-    : run.kind === "understanding"
-    ? `EXIT: this is an understanding run — it ends when the code-path frontier is EXHAUSTED, not on the clock. The moment the ledger shows ZERO open conjectures (with the scope genuinely enumerated and the .html delivered), call end-experiment with your final report. Do NOT keep looping to the safety cap: re-verifying already-closed paths adds nothing. The deadline below is only a hard cap in case the frontier never closes.`
-    : run.kind === "repo-history"
-    ? `EXIT: this is a repo-history run — it is PROGRESS-gated: it ends when the commit walk reaches HEAD, not on the clock. The frontier is the commits from the initial sha to HEAD, walked OLDEST→NEWEST in batches. Each epoch advances the cursor forward and records the coding DECISIONS each batch establishes. You are done only when the newest batch you distilled ends at HEAD (record HEAD's sha in the ledger) AND the .html decision-log is delivered — then call end-experiment. Do NOT stop early with commits still ahead of the cursor, and do NOT loop re-reading batches already behind it. This run is COMMIT-bound, NOT time-bound: it keeps chaining epochs until the walk reaches HEAD, so the deadline shown below does NOT end it — only reaching HEAD does. Every commit must be checked.`
-    : `You cannot end before the deadline - end-experiment will refuse until the deadline has been reached.`;
+  const loop = loopCommandFor(run.kind);
+  const exitInstruction = EPOCH_EXIT[loop.key];
   return [
     `You are in /experiment mode, epoch ${run.epoch}.`,
     sandboxInstruction,
@@ -365,36 +384,7 @@ export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): stri
     // testing, because a script asserting that a vulnerable PATTERN exists in
     // source was being recorded as proof. So this prompt separates the two
     // tiers explicitly and the ledger refuses `proved` without an observation.
-    run.kind === "security"
-      ? `Read the ledger below before doing anything. You are hunting exploitable defects, and there are TWO tiers — keep them apart or the report is worthless.
-
-LEAD (status=conjecture): you read the code and the defect looks real. Cite file:line. This is where most findings belong.
-CONFIRMED (status=proved): you EXECUTED it and captured what came back — the request you sent, the status code or output you observed, and where you verified the effect (a row that changed, a document returned, a measured timing). A script that greps source and asserts a pattern is present is NOT a confirmation; it proves the code says what you already read.
-
-Before proposing a fix, check whether a CORRECT implementation already exists nearby — the same call done safely elsewhere in the repo. Across earlier runs that was the single most common shape: the safe sibling existed and was simply not used. Name it, because it is also the cheapest fix.
-
-DEFENDED is a first-class result. If you try it and a guard stops you, close it as refuted with what stopped you. A finding you cannot execute stays a conjecture — never promote it because it looks obvious.
-
-Deliver ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry.`
-      : run.kind === "framework"
-      ? `Read the ledger below before doing anything. You are looking for FRAMEWORK OPPORTUNITIES: STRUCTURAL gaps that make this codebase harder to extend safely than it should be — convention drift (one concept done several inconsistent ways), missing paved paths (a common need solved ad-hoc everywhere), change-amplification (adding one feature touches N files for lack of a seam), boilerplate, and plain duplication. Duplication is only one shape — do NOT reduce this to finding copy-paste. Pick or advance ONE candidate per epoch.
-
-TAG every opportunity with your OWN word for its shape (kebab-case), reusing a tag already in the ledger if it fits. A candidate is only proved when its note carries: a \`Tag:\` line; at least one \`file.ext:LINE\` where the gap lives; and a \`Prevents:\` line naming the concrete bug, drift, or change-amplification the framework would have stopped. The ledger enforces all three. The \`Prevents:\` line is the real bar — if you cannot name what it prevents, it is taste; refute it. A VARYING pattern (five different auth checks) is a valid convention-drift opportunity even though the code is not identical — do not refute it for that.
-
-Refuting is real progress: a wrong extraction is more expensive than the duplication it replaces.
-
-Deliver ONE markdown report, GROUPED BY TAG: each opportunity with its file:line evidence, the proposed abstraction, its Prevents, and the migration cost. The report MUST also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch rather than starting a new one.`
-      : run.kind === "repo-history"
-      ? `Read the ledger below before doing anything. You are reconstructing the coding SPEC of this repo — the rules and decisions someone would need to rebuild it — by walking git history OLDEST→NEWEST.
-
-CURSOR: the ledger records how far you have walked. Establish the frontier with \`git log <initial-sha>..HEAD --reverse --oneline\` (oldest first). Each epoch, take the NEXT BATCH of commits after the cursor (a sensible chunk — ~20-50 ordinary commits, or a SINGLE squash/merge commit on its own since it is one decision), read their diffs, and advance the cursor. A squash-merge is one big diff with no granular commits — pull the PR discussion for its WHY rather than parsing the whole diff blind.
-
-EXTRACT DECISIONS, NOT DIFFS. For each batch record the coding RULE it establishes (the convention, invariant, or "always/never do X"), not a changelog of what changed. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. An entry is only proved when its note carries: a \`Rule:\` line (the durable instruction); the \`sha\` it derives from; and its theme \`Tag:\`.
-
-RECONCILE AGAINST HEAD — this is the correctness bar. History is full of dead ends: a rule set at an early commit is often REVERSED or REWRITTEN later (a "fix" commit, not always a revert). When a later batch overturns a rule already in the ledger, AMEND the existing entry — do not append a second contradictory one. Superseded rules move to a GRAVEYARD section with a \`Supersedes:\`/why-it-died line; only rules still live in the current code stay in Current Rules. The final doc must not contain a rule that HEAD contradicts.
-
-Deliver ONE self-contained .html decision-log (no network, no JavaScript — it must render offline) with a STABLE filename, extended every epoch, three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced/changed each) / GRAVEYARD (tried-and-abandoned, with why). Send it with sandbox-deliver-files.`
-      : `Read the ledger below before doing anything. Do NOT re-test refuted hypotheses. Pick or advance ONE hypothesis. Use your sandbox tools to gather PROOF: a failing test, benchmark, profile, trace, log, or other concrete artifact. Record every conjecture/proof/refutation via the experiment-ledger tool.`,
+    EPOCH_INSTRUCTIONS[loop.key],
     `PROOF DURABILITY: the sandbox is temporary. Any artifact that exists only inside the sandbox is LOST when it recycles. In the SAME epoch you create a proof artifact you MUST call sandbox-deliver-files to attach it to the thread, and record the DELIVERED filename in the ledger's proofArtifactPath. A finding whose proof was never delivered does not count as proved.`,
     `RECOVERY: previously delivered proof attachments can be restored instead of rebuilt: use spaces-thread-attachments to find them, then spaces-fetch-attachment to fetch them into a fresh workspace/sandbox.`,
     deliveredLine,
@@ -450,9 +440,7 @@ async function dispatchExperimentRun(
       ...(opts.mode ? { mode: opts.mode } : {}),
       // Understanding runs advertise their coverage-gated intent to the epoch
       // runtime, which keeps end-experiment locked until the frontier empties.
-      ...(run.kind === "understanding" || run.kind === "framework" || run.kind === "security" || run.kind === "repo-history"
-        ? { kind: run.kind as "understanding" | "framework" | "security" | "repo-history" }
-        : {}),
+      ...withLoopKind(run.kind),
     },
   };
 
