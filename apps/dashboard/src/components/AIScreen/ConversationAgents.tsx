@@ -7,6 +7,7 @@ import {
   agentNamesLabel,
   conversationAgents,
   isAutoReplyConversation,
+  stackedAgents,
   type AgentIdentity,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
@@ -14,6 +15,7 @@ import type { AgentConversationCount } from '../../services/XyneAI/XyneAISession
 import { cn } from '../../utils/classNames';
 import { formatRelativeTime } from '../../utils/dateUtils';
 import { Popover } from '../ui/Popover';
+import { Tooltip } from '../ui/Tooltip';
 import { AgentGlyph } from './AIAgentSelector';
 
 /**
@@ -65,42 +67,51 @@ function IdentityGlyph({
   );
 }
 
-interface ConversationAgentsAvatarProps {
-  slugs: string[];
-  /** Ring that separates stacked avatars — match the row's background. */
-  ringClassName?: string;
+function ConversationAgentsAvatar({ slug }: { slug: string }): ReactElement {
+  const directory = useAgentDirectory();
+  return (
+    <span className='flex size-5 shrink-0 items-center justify-center' aria-hidden>
+      <IdentityGlyph identity={agentIdentity(directory, slug)} size={20} />
+    </span>
+  );
 }
 
-/**
- * The leading avatar of a history row: the agent's avatar, or — for a chat
- * that switched agents — the first two stacked diagonally in the same 20px
- * box, so every row's title starts at the same x.
- */
-function ConversationAgentsAvatar({
+interface ConversationAgentStackProps {
+  slugs: string[];
+  ringClassName: string;
+}
+
+function ConversationAgentStack({
   slugs,
-  ringClassName = 'ring-background',
-}: ConversationAgentsAvatarProps): ReactElement {
+  ringClassName,
+}: ConversationAgentStackProps): ReactElement {
   const directory = useAgentDirectory();
-  const [first, second] = slugs.slice(0, 2).map(slug => agentIdentity(directory, slug));
-  if (!first) {
-    return <span aria-hidden className='size-5 shrink-0 rounded-sm bg-muted' />;
-  }
-  if (!second) {
-    return (
-      <span className='flex size-5 shrink-0 items-center justify-center' aria-hidden>
-        <IdentityGlyph identity={first} size={20} />
-      </span>
-    );
-  }
+  const { shown, hiddenCount } = stackedAgents(slugs);
+  const names = [...new Set(slugs)].map(slug => agentIdentity(directory, slug).name).join(', ');
   return (
-    <span className='relative size-5 shrink-0' aria-hidden data-testid='conversation-agents'>
-      <span className='absolute left-0 top-0 flex'>
-        <IdentityGlyph identity={first} size={13} />
+    <Tooltip content={names} side='top' delayDuration={200} sideOffset={4}>
+      <span
+        className='flex shrink-0 items-center'
+        aria-label={`Agents: ${names}`}
+        data-testid='conversation-agents'
+      >
+        <span className='flex items-center -space-x-1'>
+          {shown.map(slug => (
+            <span key={slug} className={cn('flex rounded-full ring-[1.5px]', ringClassName)}>
+              <IdentityGlyph identity={agentIdentity(directory, slug)} size={14} rounded />
+            </span>
+          ))}
+        </span>
+        {hiddenCount > 0 && (
+          <span
+            className='ml-1 rounded-full bg-muted px-1 text-[10px] font-medium leading-[14px] text-muted-foreground'
+            data-testid='conversation-agents-more'
+          >
+            +{hiddenCount}
+          </span>
+        )}
       </span>
-      <span className={cn('absolute bottom-0 right-0 flex rounded-sm ring-[1.5px]', ringClassName)}>
-        <IdentityGlyph identity={second} size={13} />
-      </span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -124,17 +135,17 @@ export function ConversationRowContent({
   conversation,
   title,
   trailing,
-  ringClassName,
+  ringClassName = 'ring-background',
 }: ConversationRowContentProps): ReactElement {
   const directory = useAgentDirectory();
   const slugs = conversationAgents(conversation);
+  const [firstSlug] = slugs;
+  const multiAgent = new Set(slugs).size > 1;
   const names = agentNamesLabel(slugs.map(slug => agentIdentity(directory, slug).name));
   const when = formatRelativeTime(conversation.lastUpdated);
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2.5'>
-      {slugs.length > 0 && (
-        <ConversationAgentsAvatar slugs={slugs} {...(ringClassName ? { ringClassName } : {})} />
-      )}
+      {firstSlug && <ConversationAgentsAvatar slug={firstSlug} />}
       <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
         <span className='flex min-w-0 items-center gap-1.5'>
           {title}
@@ -150,8 +161,9 @@ export function ConversationRowContent({
               Auto
             </span>
           )}
+          {multiAgent && <ConversationAgentStack slugs={slugs} ringClassName={ringClassName} />}
           <span className='truncate text-xs font-normal leading-4 text-muted-foreground'>
-            {names ? `${names} · ${when}` : when}
+            {multiAgent ? when : names ? `${names} · ${when}` : when}
           </span>
         </span>
       </span>

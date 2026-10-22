@@ -208,6 +208,12 @@ export interface ToolInvocation {
  */
 export type PendingActionResolution = 'approved' | 'declined';
 
+export interface ApprovedActionPayload {
+  tool: string;
+  result?: string;
+  error?: string;
+}
+
 export interface PendingAction {
   id: string;
   serverType: string;

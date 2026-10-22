@@ -16,6 +16,7 @@ import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
+import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -28,6 +29,7 @@ export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
 export interface ClawRunRequest {
   userId: string;
+  approvedAction?: ClawApprovedAction;
   /**
    * Verified Spaces workspace for this raw, workspace-scoped user id. Claw
    * uses it with x-spaces-user-id to resolve the exact surface identity.
@@ -537,6 +539,10 @@ function normalizeAttachmentsForRun(
 // "## Additional Instructions" heading and duplicate that block.
 function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
   const parts: string[] = [];
+
+  if (req.approvedAction) {
+    parts.push(approvedActionInstructions(req.approvedAction));
+  }
 
   if (req.researchContext) {
     parts.push(

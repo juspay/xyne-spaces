@@ -29,6 +29,7 @@ import {
 } from '../../components/Chat/XyneAISidebar/utils/XyneAIUtils';
 import { generateToolInputStatus } from '../../components/Chat/XyneAISidebar/utils/toolInputStatus';
 import type {
+  ApprovedActionPayload,
   Message,
   MessageAttachment,
   Participant,
@@ -151,6 +152,7 @@ export interface StreamRequest {
   draftMode?: boolean | undefined;
   version?: 'v1' | 'v2' | undefined;
   disableTools?: boolean | undefined;
+  approvedAction?: ApprovedActionPayload | undefined;
   agentSlug?: string | undefined;
   /** Per-run model pin from the composer's model picker. Undefined = the
    *  agent's own default. Only meaningful on v2 (v1 resolves its model from
@@ -1274,6 +1276,7 @@ class XyneAIStreamManager {
           instant: request.instant ?? false,
           ...(request.tab && { tab: request.tab }),
           ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+          ...(request.approvedAction ? { approvedAction: request.approvedAction } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {

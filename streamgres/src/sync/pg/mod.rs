@@ -50,6 +50,8 @@
 
 pub mod catalog;
 pub mod ddl;
+pub mod estimate;
+pub mod estimate_cache;
 pub mod replication;
 pub mod sql;
 pub mod stream;
@@ -393,9 +395,12 @@ struct Pool {
 /// - `pool`: what the reads share (cloned into every read task).
 /// - `delay`: a test hook: hold every snapshot open this long before
 ///   reading, so writes can be committed behind it deliberately.
+/// - `estimates`: the planner's estimates already answered
+///   ([`estimate_cache`]).
 pub struct PgStorage {
     pool: Arc<Pool>,
     delay: Option<Duration>,
+    estimates: Arc<estimate_cache::EstimateCache>,
 }
 
 impl Drop for PgStorage {
@@ -464,7 +469,11 @@ impl PgStorage {
         pool.first.store(first.lsn.0, Ordering::Relaxed);
         pool.lock_aliases().waiting.push_back(first);
         rotate(pool.clone());
-        Ok(PgStorage { pool, delay: None })
+        Ok(PgStorage {
+            pool,
+            delay: None,
+            estimates: Arc::new(estimate_cache::EstimateCache::from_env()),
+        })
     }
 
     /// Refuse a read past `limit` rows instead of the environment's budget
@@ -499,8 +508,13 @@ impl PgStorage {
         });
         rotate(pool.clone());
         let delay = self.delay;
+        let estimates = self.estimates.clone();
         drop(self);
-        PgStorage { pool, delay }
+        PgStorage {
+            pool,
+            delay,
+            estimates,
+        }
     }
 
     /// Keep at most `limit` read connections idle for reuse; excess idle
@@ -517,6 +531,18 @@ impl PgStorage {
         let millis = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
         self.pool.timeout.store(millis, Ordering::Relaxed);
         self
+    }
+
+    /// Keep the planner's estimates as `cache` says instead of as the
+    /// environment does.
+    pub fn with_estimate_cache(mut self, cache: estimate_cache::EstimateCache) -> Self {
+        self.estimates = Arc::new(cache);
+        self
+    }
+
+    /// The planner's estimates already answered.
+    pub fn estimate_cache(&self) -> &estimate_cache::EstimateCache {
+        &self.estimates
     }
 
     /// Mint a fresh alias every `every`.
@@ -647,15 +673,48 @@ impl Storage for PgStorage {
         .await
     }
 
+    /// PostgreSQL's estimate of the count ([`estimate::Estimation`]): the
+    /// `EXPLAIN`s of the tree's nodes and the statistics of its join
+    /// columns, each from the estimate cache when an earlier tree asked
+    /// it, waited for when one is asking it, and otherwise asked in one
+    /// batch, on no snapshot (estimates read no rows), the catalog the
+    /// current reads describe tables by. The tables' sizes are read first
+    /// when they are due, to forget the tables whose statistics moved.
+    async fn estimate(&self, query: &MultiTableReadQuery, cap: u64) -> Result<u64, StorageError> {
+        let pool = self.pool.clone();
+        let cache = self.estimates.clone();
+        let query = query.clone();
+        run_on(&self.pool.runtime, async move {
+            let catalog = pool.lock_aliases().catalog.clone();
+            let estimation =
+                estimate::Estimation::new(&query, &catalog).map_err(StorageError)?;
+            if cache.sizes_due() {
+                match pool.run("reading the tables' sizes", estimate_cache::SIZES_SQL).await {
+                    Ok(rows) => cache.sizes(rows.iter().map(|row| {
+                        let field = |index: usize| row.get(index).unwrap_or_default().to_owned();
+                        (field(0), field(1), field(2))
+                    })),
+                    Err(error) => log_warn!("reading the tables' sizes failed: {error}"),
+                }
+            }
+            let what = format!("estimating the rows of `{}`", query.main_table.table);
+            let rows = estimated(&pool, &cache, &estimation, &what).await?;
+            Ok(estimate::capped(rows, cap))
+        })
+        .await
+    }
+
     /// Flip to the newest minted alias the stream has passed.
     fn advance(&self, feed: Lsn) {
         self.pool.lock_aliases().advance(feed);
     }
 
     /// Reads on the alias that first reaches `at`, and every later one,
-    /// describe their tables by `catalog`.
+    /// describe their tables by `catalog`; the estimates answered so far
+    /// are forgotten, a table having perhaps changed shape.
     fn follow(&self, at: Lsn, catalog: Arc<Catalog>) {
         self.pool.lock_aliases().upcoming.push_back((at, catalog));
+        self.estimates.clear();
     }
 
     /// [`PgStorage::mint_now`].
@@ -667,6 +726,117 @@ impl Storage for PgStorage {
     fn floor(&self) -> Lsn {
         self.alias_position().unwrap_or_default()
     }
+}
+
+/// The rows `estimation` puts its tree at, every statement and join
+/// column answered from `cache` where it can be: the rest asked of `pool`
+/// in one batch (`what` naming it in a refusal) and handed to the cache,
+/// those another batch is asking waited for. A key whose asker went away
+/// or failed is asked again once; a batch that fails is the error, its
+/// failure handed to those waiting on it.
+async fn estimated(
+    pool: &Pool,
+    cache: &estimate_cache::EstimateCache,
+    estimation: &estimate::Estimation,
+    what: &str,
+) -> Result<f64, StorageError> {
+    use estimate_cache::{Answer, Key, Lookup};
+    let statements = estimation.statements();
+    let columns = estimation.columns();
+    let keys: Vec<(&str, Key)> = statements
+        .iter()
+        .map(|(table, sql)| (table.as_str(), Key::statement(sql)))
+        .chain(
+            columns
+                .iter()
+                .map(|(table, column)| (table.as_str(), Key::column(table, column))),
+        )
+        .collect();
+    let mut answers: Vec<Option<Answer>> = vec![None; keys.len()];
+    let mut failure = None;
+    for _ in 0..2 {
+        let missing: Vec<usize> = (0..keys.len()).filter(|&at| answers[at].is_none()).collect();
+        if missing.is_empty() {
+            break;
+        }
+        let wanted: Vec<(&str, Key)> = missing.iter().map(|&at| keys[at]).collect();
+        let mut asking = Vec::new();
+        let mut waiting = Vec::new();
+        for (&at, found) in missing.iter().zip(cache.lookup(&wanted)) {
+            match found {
+                Lookup::Known(answer) => answers[at] = Some(answer),
+                Lookup::Wait(answer) => waiting.push((at, answer)),
+                Lookup::Ask(ask) => asking.push((at, ask)),
+            }
+        }
+        if !asking.is_empty() {
+            let asked: Vec<&str> = asking
+                .iter()
+                .filter(|(at, _)| *at < statements.len())
+                .map(|(at, _)| statements[*at].1.as_str())
+                .collect();
+            let stats_of: Vec<(&str, &str)> = asking
+                .iter()
+                .filter(|(at, _)| *at >= statements.len())
+                .map(|(at, _)| {
+                    let (table, column) = &columns[at - statements.len()];
+                    (table.as_str(), column.as_str())
+                })
+                .collect();
+            let batch = estimate::batch(&asked, &stats_of);
+            let parsed = match pool.run_messages(what, &batch).await {
+                Ok(messages) => estimate::parse(messages, asked.len(), !stats_of.is_empty())
+                    .map_err(StorageError),
+                Err(error) => Err(error),
+            };
+            let (rows, stats) = match parsed {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    for (_, ask) in asking {
+                        cache.answer(ask, Err(error.to_string()));
+                    }
+                    return Err(error);
+                }
+            };
+            let mut rows = rows.into_iter();
+            for (at, ask) in asking {
+                let answer = match at.checked_sub(statements.len()) {
+                    None => Answer::Rows(rows.next().unwrap_or_default()),
+                    Some(column) => Answer::Stats(stats.get(&columns[column]).copied()),
+                };
+                answers[at] = Some(answer);
+                cache.answer(ask, Ok(answer));
+            }
+        }
+        for (at, mut answer) in waiting {
+            let seen = match answer.wait_for(Option::is_some).await {
+                Ok(seen) => seen.clone(),
+                Err(_) => None,
+            };
+            match seen {
+                Some(Ok(seen)) => answers[at] = Some(seen),
+                Some(Err(error)) => failure = Some(error),
+                None => {}
+            }
+        }
+    }
+    let mut explained = Vec::with_capacity(statements.len());
+    let mut stats = std::collections::HashMap::new();
+    for (at, answer) in answers.into_iter().enumerate() {
+        match answer {
+            Some(Answer::Rows(rows)) => explained.push(rows),
+            Some(Answer::Stats(Some(found))) => {
+                stats.insert(columns[at - statements.len()].clone(), found);
+            }
+            Some(Answer::Stats(None)) => {}
+            None => {
+                return Err(StorageError(failure.unwrap_or_else(|| {
+                    format!("{what}: an estimate was not answered")
+                })));
+            }
+        }
+    }
+    estimation.evaluate(&explained, &stats).map_err(StorageError)
 }
 
 impl Pool {
@@ -752,6 +922,16 @@ impl Pool {
     /// `what` names the work in the refusal of a batch that did not
     /// finish in time: PostgreSQL cancelled it, or the wait ended first.
     async fn run(&self, what: &str, batch: &str) -> Result<Vec<SimpleQueryRow>, StorageError> {
+        self.run_messages(what, batch).await.map(rows_of)
+    }
+
+    /// [`Pool::run`], every message of the batch returned: the results of
+    /// each of its statements.
+    async fn run_messages(
+        &self,
+        what: &str,
+        batch: &str,
+    ) -> Result<Vec<SimpleQueryMessage>, StorageError> {
         let _permit = self.permit().await?;
         let limit = self.timeout();
         let work = async {
@@ -759,7 +939,7 @@ impl Pool {
             match client.simple_query(batch).await {
                 Ok(messages) => {
                     self.release(client);
-                    Ok(rows_of(messages))
+                    Ok(messages)
                 }
                 Err(error) => match limit {
                     Some(limit) if error.code() == Some(&SqlState::QUERY_CANCELED) => {

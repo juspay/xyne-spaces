@@ -51,7 +51,7 @@ import {
 import { compactionExtension } from "./compaction-extension.js";
 import { installMidTurnCompaction } from "./mid-turn-compaction.js";
 import { createScopedToolMap } from "./scoped-tools.js";
-import type { ClawStreamMeta } from "xyne-claw-shared";
+import type { ClawStreamMeta, DecideQuestion } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
@@ -546,11 +546,12 @@ export interface SubagentProviderResolution {
  * (e.g. for testing). User can still explicitly pin a subagent via
  * subagentProviders[def.name] regardless of this gate.
  */
-function resolveProviderForSubagent(
+export function resolveProviderForSubagent(
   def: SubagentDefinition,
   resolution: SubagentProviderResolution | undefined,
 ): { provider: string; config: CopilotConfig | ClaudeConfig | CodexConfig } | undefined {
   const explicit = resolution?.subagentProviders?.[def.name];
+  if (def.fast && !explicit) return undefined;
   const followParent = process.env["XYNE_SUBAGENT_FOLLOW_PARENT"] === "1";
   const parentIsAnthropicOAuth =
     resolution?.parentProvider === "claude"
@@ -812,12 +813,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       const childStartedIso = new Date(execStartedAt).toISOString();
       const litellmPick = resolvedProvider
         ? undefined
-        : pickSubagentLitellmModel({
-            key: progressCtx?.parentSessionId,
-            fastModel: LITELLM.subagentFastModel,
-            standardModel: LITELLM.model,
-            fastPercent: LITELLM.subagentFastModelPercent,
-          });
+        : def.fast
+          ? { model: def.model || LITELLM.subagentFastModel, arm: "fast" as const }
+          : pickSubagentLitellmModel({
+              key: progressCtx?.parentSessionId,
+              fastModel: LITELLM.subagentFastModel,
+              standardModel: LITELLM.model,
+              fastPercent: LITELLM.subagentFastModelPercent,
+            });
       const childProvider = resolvedProvider?.provider ?? "litellm";
       const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
@@ -1185,6 +1188,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         toolBudget = installToolBudget(session.agent, {
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
+          ...(def.maxToolCalls ? { maxCalls: def.maxToolCalls } : {}),
         });
 
         // Mid-turn compaction + the assistant-tail resume guard (mirrors agent.ts).
@@ -1748,6 +1752,24 @@ export interface CustomSubagentSpec {
   paramDescription: string;
   tools: { direct?: string[]; custom?: string[] };
   skills: Array<{ slug: string; name: string; description: string; content: string }>;
+  fast?: boolean;
+  model?: string;
+  budget?: { maxToolCalls?: number };
+  checks?: DecideQuestion[];
+  checksVersion?: number;
+}
+
+export function withChecks(systemPrompt: string, checks: DecideQuestion[] | undefined, version: number | undefined): string {
+  if (!checks || checks.length === 0) return systemPrompt;
+  return [
+    systemPrompt,
+    "",
+    `## Checks (question bank v${version ?? 1})`,
+    "Judge items with xor-decide. Pass these as its `questions` unchanged, dropping any that do not apply to this task. Add a question only when none of these covers what was asked. Report unsure answers as unsure; never turn them into pass or fail yourself.",
+    "```json",
+    JSON.stringify(checks, null, 2),
+    "```",
+  ].join("\n");
 }
 
 /**
@@ -1824,6 +1846,7 @@ export function buildSubagentTools(
   // accessible inside the subagent palette, so delegating still works. Empty
   // / undefined = legacy behavior (everything stays inside the wrapper).
   directPickSuffixes?: string[],
+  subagentOnlyTools?: ToolDefinition[],
 ): {
   subagentTools: ToolDefinition[];
   directTools: ToolDefinition[];
@@ -1950,7 +1973,11 @@ export function buildSubagentTools(
         log.warn(`[buildSubagentTools] Ignoring custom subagent "${spec.name}" — name collides with a built-in (built-in wins)`);
         continue;
       }
-      const palette = resolveCustomSubagentTools(spec.tools, groups, customTools);
+      const ownTools = subagentOnlyTools ?? [];
+      const toolsConfig = spec.fast && ownTools.length > 0
+        ? { ...spec.tools, custom: [...new Set([...(spec.tools.custom ?? []), ...ownTools.map((t) => t.name)])] }
+        : spec.tools;
+      const palette = resolveCustomSubagentTools(toolsConfig, groups, [...(customTools ?? []), ...ownTools]);
       if (palette.length === 0) {
         const referenced = (spec.tools.direct?.length ?? 0) + (spec.tools.custom?.length ?? 0);
         if (referenced > 0) {
@@ -1975,13 +2002,25 @@ export function buildSubagentTools(
         name: spec.name,
         description: spec.description,
         progressLabels: spec.progressLabels,
-        systemPrompt: spec.systemPrompt,
+        systemPrompt:
+          palette.some((t) => t.name === "xor-decide") && !(bonusToolsBySubagent?.[spec.name] ?? []).some((t) => t.name === "ui-test-variations")
+            ? withChecks(spec.systemPrompt, spec.checks, spec.checksVersion)
+            : spec.systemPrompt,
         paramName: spec.paramName,
         paramDescription: spec.paramDescription,
         // Synthetic serverType — never matched against an MCP group. Kept
         // distinct from any real serverType so the "find by serverType"
         // loops above don't accidentally re-process this entry.
         serverType: `custom-defined:${spec.name}`,
+        ...(spec.fast || palette.some((t) => ownTools.includes(t)) ? { delegationPreferred: true } : {}),
+        ...(spec.fast
+          ? {
+              fast: true,
+              thinkingLevel: "low" as const,
+              ...(spec.model ? { model: spec.model } : {}),
+              ...(spec.budget?.maxToolCalls ? { maxToolCalls: spec.budget.maxToolCalls } : {}),
+            }
+          : {}),
       };
       const bonus = bonusToolsBySubagent?.[spec.name] ?? [];
       subagentTools.push(

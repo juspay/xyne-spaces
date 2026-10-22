@@ -1753,6 +1753,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     metricsGuestVisibility: string().optional(),
+    metricsMinAccess: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),

@@ -149,17 +149,12 @@ pub struct Config {
     /// default) or `child` (the subquery, Zero's `whereExists` as
     /// translated).
     pub join_preferred_side: Side,
-    /// `STREAMGRES_PLAN_TTL_MS`: how long a join plan is remembered before
-    /// the query is counted again (600000).
+    /// `STREAMGRES_PLAN_TTL_MS`: how long a join plan is remembered for
+    /// its tree before the tree is sized again (600000).
     pub plan_ttl: Duration,
     /// `STREAMGRES_PLAN_CACHE`: how many join plans are remembered at most
-    /// (10000), by tree and, apart, by query name.
+    /// (10000), one per tree.
     pub plan_cache: usize,
-    /// `STREAMGRES_PLAN_QUERY_TTL_MS`: how long a plan made for a query is
-    /// laid onto every later query of the same name (and join skeleton),
-    /// whatever its arguments, before the name is counted again (86400000,
-    /// a day; 0 plans every tree on its own).
-    pub plan_query_ttl: Duration,
     /// `STREAMGRES_TRANSFORM_TTL_MS`: how long the application server's
     /// transform of a query is kept per identity (60000; zero-cache keeps
     /// its own for 5000; 0 keeps none).
@@ -409,7 +404,6 @@ impl Config {
                     .map_err(|_| format!("STREAMGRES_PLAN_CACHE must be a number, got `{text}`"))?,
                 None => 10_000,
             },
-            plan_query_ttl: millis("STREAMGRES_PLAN_QUERY_TTL_MS", 86_400_000)?,
             transform_ttl: millis("STREAMGRES_TRANSFORM_TTL_MS", 60_000)?,
             transform_cache: match first(&["STREAMGRES_TRANSFORM_CACHE"]) {
                 Some(text) => text.parse().map_err(|_| {

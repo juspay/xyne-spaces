@@ -14,6 +14,10 @@ import {
 } from '@/services/claw/behaviourConfig';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import {
+  MAX_DELEGATIONS_PER_RUN_BOUNDS,
+  delegationBudgetOptions,
+} from '@/services/claw/delegationBudget';
+import {
   DetailCard,
   DetailLockedNote,
   DetailSection,
@@ -56,6 +60,7 @@ export function AgentBehaviourTabV2({
   const [saving, setSaving] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
+  const [planPromptOpen, setPlanPromptOpen] = useState(false);
 
   const { data: repos } = useSandboxRepos();
   const research = useClawResearchAgentOptions();
@@ -106,6 +111,11 @@ export function AgentBehaviourTabV2({
   const badge = canEdit ? {} : { trailing: <ReadOnlyBadge /> };
   const editable = canEdit;
   const busy = saving;
+
+  const delegationOptions = delegationBudgetOptions(behaviour.maxDelegationsPerRun).map(n => ({
+    value: String(n),
+    label: n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? `${n} (default)` : String(n),
+  }));
 
   const repoOptions = [
     { value: NONE, label: 'None (agent chooses)' },
@@ -322,6 +332,97 @@ export function AgentBehaviourTabV2({
       </DetailSection>
 
       <DetailSection
+        label='Planning'
+        info='Whether the agent plans first, keeps a checklist, and how far one run may go'
+        {...badge}
+      >
+        <DetailCard>
+          {lockNote}
+          <BehaviourRow
+            title='Plan mode'
+            hint='For multi-step requests, propose a plan and wait for approval before doing the work. One-step asks still run straight away.'
+          >
+            {editable && behaviour.planMode && (
+              <BehaviourEditButton
+                label='Edit plan-mode prompt'
+                trackName='Agent detail v2: edit plan mode prompt'
+                disabled={busy}
+                onClick={() => setPlanPromptOpen(true)}
+              />
+            )}
+            <BehaviourToggle
+              checked={behaviour.planMode}
+              editable={editable}
+              disabled={busy}
+              label='Plan mode'
+              trackName='Agent detail v2: toggle plan mode'
+              onChange={next => setBehaviour({ planMode: next }, 'Planning updated')}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Plan tracking'
+            hint='Give the agent checklist tools and have it plan before it starts. Turn off for agents that answer in a single message.'
+          >
+            <BehaviourToggle
+              checked={behaviour.planTracking}
+              editable={editable}
+              disabled={busy}
+              label='Plan tracking'
+              trackName='Agent detail v2: toggle plan tracking'
+              onChange={next => setBehaviour({ planTracking: next }, 'Planning updated')}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Post TODOs to Spaces'
+            hint="Show the agent's checklist as a live card in the thread while it works. Off hides the card; the agent still tracks its steps."
+          >
+            <BehaviourToggle
+              checked={behaviour.postTodos}
+              editable={editable}
+              disabled={busy}
+              label='Post TODOs to Spaces'
+              trackName='Agent detail v2: toggle post todos'
+              onChange={next => setBehaviour({ postTodos: next }, 'Planning updated')}
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Delegation budget'
+            hint='How many other agents this agent may hand work to in one run. Raise it for orchestrators that fan out.'
+          >
+            <BehaviourSelect
+              value={String(behaviour.maxDelegationsPerRun)}
+              options={delegationOptions}
+              editable={editable}
+              disabled={busy}
+              label='Delegation budget'
+              trackName='Agent detail v2: set delegation budget'
+              onChange={next =>
+                setBehaviour({ maxDelegationsPerRun: Number(next) }, 'Delegation budget updated')
+              }
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
+            title='Prefetch context'
+            hint='Look up the channels, projects and people named in a question before the first turn, so the agent does not spend turns finding them.'
+            last
+          >
+            <BehaviourToggle
+              checked={behaviour.prefetchContext}
+              editable={editable}
+              disabled={busy}
+              label='Prefetch context'
+              trackName='Agent detail v2: toggle prefetch context'
+              onChange={next => setBehaviour({ prefetchContext: next }, 'Planning updated')}
+            />
+          </BehaviourRow>
+        </DetailCard>
+      </DetailSection>
+
+      <DetailSection
         label='Agent building'
         info='Whether this agent can draft and change agents'
         {...badge}
@@ -476,6 +577,24 @@ export function AgentBehaviourTabV2({
               if (ok) setCriteriaOpen(false);
             },
           );
+        }}
+      />
+
+      <BehaviourTextDialog
+        open={planPromptOpen}
+        onOpenChange={setPlanPromptOpen}
+        title='Plan-mode prompt'
+        description='How the agent scopes a plan. The propose-then-approve step always applies, whatever this says.'
+        label='Prompt'
+        placeholder='Describe how the agent should plan.'
+        hint='Leave it as the default to use the built-in prompt.'
+        testId='plan-mode-prompt-dialog'
+        value={behaviour.planModePrompt}
+        saving={busy}
+        onSave={next => {
+          void saveBehaviour({ planModePrompt: next }, 'Plan-mode prompt updated').then(ok => {
+            if (ok) setPlanPromptOpen(false);
+          });
         }}
       />
 

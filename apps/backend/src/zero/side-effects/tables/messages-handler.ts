@@ -39,7 +39,7 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType, parseSlashCommandArtifactMessage } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage, decodeFlowJsonAttribute, flowCardLabel } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -54,11 +54,10 @@ import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import {
   cleanNotificationText,
-  getFlowJsonContentForNotification,
+  flowMessagePreviewText,
+  flowMessageSearchText,
   getFlowJsonRawTextForMentions,
 } from '@/utils/flowJson';
-// Re-exported so existing importers (e.g. vespa-injection mapper) keep working.
-export { getFlowJsonContentForNotification };
 import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -98,76 +97,8 @@ function getFlowCardNotificationLabel(content: string): string | null {
     return body ? `${label}: ${body}` : `${label} slash command posted`;
   }
 
-  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
-  if (!attrMatch) return null;
-  try {
-    const json = attrMatch[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
-    const flow = JSON.parse(json) as {
-      components?: Array<{ type?: string; props?: Record<string, unknown> }>;
-    };
-    const plan = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'plan')
-      : undefined;
-    if (plan) {
-      const rawTitle = plan.props?.['title'];
-      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-      const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
-      return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
-    }
-    const diff = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'diff')
-      : undefined;
-    if (diff) {
-      const rawPath = diff.props?.['path'];
-      const path = typeof rawPath === 'string' ? rawPath.trim() : '';
-      return path ? `📝 Shared a diff: ${path}` : '📝 Shared a diff';
-    }
-    const code = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'code')
-      : undefined;
-    if (code) {
-      const rawLanguage = code.props?.['language'];
-      const language = typeof rawLanguage === 'string' ? rawLanguage.trim() : '';
-      return language ? `💻 Shared ${language} code` : '💻 Shared a code snippet';
-    }
-    const ticket = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'ticket')
-      : undefined;
-    if (ticket) {
-      const rawXyneId = ticket.props?.['xyneId'];
-      const rawTitle = ticket.props?.['title'];
-      const xyneId = typeof rawXyneId === 'string' ? rawXyneId.trim() : '';
-      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-      if (xyneId && title) return `🎫 Filed ${xyneId}: ${title}`;
-      return xyneId ? `🎫 Filed ${xyneId}` : '🎫 Filed a ticket';
-    }
-    const chart = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'chart')
-      : undefined;
-    if (chart) {
-      const rawCaption = chart.props?.['caption'];
-      const caption = typeof rawCaption === 'string' ? rawCaption.trim() : '';
-      return caption ? `📊 ${caption}` : '📊 Shared a chart';
-    }
-    const questionSet = Array.isArray(flow.components)
-      ? flow.components.find((c) => c?.type === 'user_question')
-      : undefined;
-    if (!questionSet) return null;
-    const questions = questionSet.props?.['questions'];
-    const count = Array.isArray(questions) ? questions.length : 0;
-    const phase = questionSet.props?.['phase'];
-    if (phase === 'answered') return `✅ Answered ${count || 'agent'} question${count === 1 ? '' : 's'}`;
-    if (phase === 'declined') return 'Question request declined';
-    return count > 1 ? `💬 Agent wants to ask you ${count} questions` : '💬 Agent wants to ask you a question';
-  } catch {
-    return null;
-  }
+  const flow = decodeFlowJsonAttribute(content);
+  return flow ? flowCardLabel(flow) : null;
 }
 
 function getNotificationPreviewContent(content: string, msgType: string, hasAttachment: boolean): string {
@@ -200,8 +131,7 @@ function getNotificationPreviewContent(content: string, msgType: string, hasAtta
     } else {
       // For flow JSON messages, extract text from the component tree instead of
       // parsing HTML (which only sees the literal "Flow JSON" text node).
-      const flowText = getFlowJsonContentForNotification(content);
-      cleanContent = flowText ?? getPlainTextNotificationContent(content);
+      cleanContent = flowMessagePreviewText(content) ?? getPlainTextNotificationContent(content);
     }
   }
 
@@ -220,8 +150,7 @@ function getPlainTextNotificationContent(content: string): string {
  * Plain text to scan for keyword notifications.
  */
 function getKeywordScanText(content: string): string {
-  const flowText = getFlowJsonContentForNotification(content);
-  return flowText ?? getPlainTextNotificationContent(content);
+  return flowMessageSearchText(content) ?? getPlainTextNotificationContent(content);
 }
 
 export function formatDmChannelName(names: string[], maxVisible: number = 2): string {

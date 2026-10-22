@@ -24,9 +24,9 @@ export interface ToolContext {
  * A tool: its name, the description that decides whether a model reaches for it,
  * its JSON Schema, and the handler.
  *
- * `write: true` marks a tool that changes something. `XYNE_SPACES_READONLY` uses
- * it to drop those from `tools/list` entirely, so an agent attached to a
- * production workspace cannot pick one by accident.
+ * `write: true` marks a tool that changes something. Unless writes are turned
+ * on (`resolveWrites`), those are dropped from `tools/list` entirely, so an
+ * agent attached to a production workspace cannot pick one by accident.
  *
  * Every call goes through `@xyne/spaces-sdk`, so a method name or argument this
  * package gets wrong is a compile error rather than a runtime one.
