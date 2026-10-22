@@ -114,7 +114,12 @@ export interface OutboundMessage {
   text: string;
   senderName?: string;
   senderAvatarUrl?: string;
-  originId?: string;
+  origin?: MessageOrigin;
+}
+
+export interface MessageOrigin {
+  type: string;
+  id: string;
 }
 
 export interface OutboundFile {
@@ -125,7 +130,7 @@ export interface OutboundFile {
 }
 
 export interface PostedMessageMatch {
-  originId: string;
+  origin: MessageOrigin;
   authorId?: string;
   text: string;
 }

@@ -25,6 +25,7 @@ import type {
   ProviderMessage,
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
+import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
 import type { MirrorLink } from '../types';
 
 export type MessageEvent = Extract<
@@ -65,12 +66,8 @@ export class InboundService {
     event: MessageEvent,
     job: JobContext
   ): Promise<void> {
-    const source = this.provider.buildMessageSource(
-      link.externalId,
-      link.spacesId,
-      config.credentials
-    );
-    const legacyNames = this.provider.legacyMessageSourceNames(link.externalId, link.spacesId);
+    const source = buildMessageSource(this.provider, link, config);
+    const legacyNames = legacyMessageSourceNames(this.provider.id, link);
     const { sourceId, sourceIds } = await this.sources.findMessageScopes(source, legacyNames, link);
     const ctx: InboundContext = {
       link,

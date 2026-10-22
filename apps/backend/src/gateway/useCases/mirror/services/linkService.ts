@@ -14,6 +14,7 @@ import { SourceRepository } from '../../../core/repositories/sourceRepository';
 import type { ProviderConfig, ProviderChannel } from '../../../core/types';
 import type { ConfigService } from '../../../core/services/configService';
 import type { IdentityService } from '../../../core/services/identityService';
+import { buildMessageSource, deskSourceName } from '../messageSources';
 import { MIRROR_SOURCE_SUFFIX, type MirrorLink } from '../types';
 import type { MemberSyncService } from './memberSyncService';
 
@@ -89,10 +90,10 @@ export class LinkService {
       (channel) => !linked.has(channel.id) && !requested.has(channel.id)
     );
     const deskNames = free
-      .map((channel) => this.provider.deskSourceName(channel.id))
+      .map((channel) => deskSourceName(this.provider.id, channel.id))
       .filter((name): name is string => !!name);
     const desks = await this.sources.findActiveNames(deskNames);
-    return free.filter((channel) => !desks.has(this.provider.deskSourceName(channel.id) ?? ''));
+    return free.filter((channel) => !desks.has(deskSourceName(this.provider.id, channel.id) ?? ''));
   }
 
   /**
@@ -125,7 +126,11 @@ export class LinkService {
       spacesId: input.spacesChannelId,
       createdBy: userId,
     });
-    await this.sources.ensureMessageSource(this.buildMessageSource(link, config), link, true);
+    await this.sources.ensureMessageSource(
+      buildMessageSource(this.provider, link, config),
+      link,
+      true
+    );
 
     // Seeding acts for the whole channel, not just the caller, and runs after the response.
     void withWorkspaceScope(() => this.members.seedMembers(link, config)).catch((error) =>
@@ -144,7 +149,11 @@ export class LinkService {
     const link = await this.getLinkById(workspaceId, linkId);
     const config = await this.config.getConfigBySource(link.connectionId);
     await this.provider.createApi(config.credentials).getChannel(link.externalId);
-    await this.sources.ensureMessageSource(this.buildMessageSource(link, config), link, true);
+    await this.sources.ensureMessageSource(
+      buildMessageSource(this.provider, link, config),
+      link,
+      true
+    );
     return await this.pairs.setStatus(link.id, 'ACTIVE');
   }
 
@@ -199,7 +208,7 @@ export class LinkService {
         `That ${this.provider.displayName} channel is already linked`
       );
 
-    const deskName = this.provider.deskSourceName(input.externalChannelId);
+    const deskName = deskSourceName(this.provider.id, input.externalChannelId);
     if (deskName && (await this.sources.findActiveNames([deskName])).size > 0) {
       throw new GatewayError(
         'CHANNEL_TAKEN',
@@ -253,10 +262,5 @@ export class LinkService {
     } catch {
       return null;
     }
-  }
-
-  /** The message-map row shared with self-serve migration; Mirror's credentials go on it for file downloads. */
-  private buildMessageSource(link: MirrorLink, config: ProviderConfig) {
-    return this.provider.buildMessageSource(link.externalId, link.spacesId, config.credentials);
   }
 }

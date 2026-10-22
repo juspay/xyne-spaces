@@ -82,13 +82,12 @@ export class SlackApi extends BaseApi {
         ...(!this.options.asUser && {
           username: message.senderName,
           icon_url: message.senderAvatarUrl,
-          metadata: {
-            event_type: 'xyne_mirror',
-            event_payload: {
-              origin: 'xyne',
-              ...(message.originId && { spaces_message_id: message.originId }),
+          ...(message.origin && {
+            metadata: {
+              event_type: message.origin.type,
+              event_payload: { id: message.origin.id },
             },
-          },
+          }),
         }),
       })
     );
@@ -194,8 +193,9 @@ export class SlackApi extends BaseApi {
       : await this.call(() => this.client.conversations.history(window));
     const found = messages?.find(
       (message) =>
-        (message.metadata?.event_payload as Record<string, unknown> | undefined)
-          ?.spaces_message_id === match.originId ||
+        (message.metadata?.event_type === match.origin.type &&
+          (message.metadata.event_payload as Record<string, unknown> | undefined)?.id ===
+            match.origin.id) ||
         (!!match.authorId && message.user === match.authorId && message.text === match.text)
     );
     return found?.ts ?? null;

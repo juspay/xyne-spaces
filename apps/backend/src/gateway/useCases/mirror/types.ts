@@ -17,6 +17,8 @@ export interface MirrorServices {
 /** Mirror's links are PAIR rows with sourceType `<provider id><suffix>`, e.g. `slack-mirror`. */
 export const MIRROR_SOURCE_SUFFIX = '-mirror';
 
+export const MIRROR_ORIGIN_TYPE = 'xyne_mirror';
+
 /** A Mirror link: one provider channel (`externalId`) ⇄ one Spaces channel (`spacesId`). */
 export type MirrorLink = Pair;
 

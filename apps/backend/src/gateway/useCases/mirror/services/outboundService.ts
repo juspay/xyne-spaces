@@ -25,7 +25,8 @@ import type {
 } from '../../../core/types';
 import type { IdentityService } from '../../../core/services/identityService';
 import type { UserApi, UserAuthService } from '../../../core/services/userAuthService';
-import type { MirrorLink } from '../types';
+import { buildMessageSource, legacyMessageSourceNames } from '../messageSources';
+import { MIRROR_ORIGIN_TYPE, type MirrorLink } from '../types';
 
 interface OutboundContext {
   link: MirrorLink;
@@ -91,12 +92,8 @@ export class OutboundService {
     change: SpacesMessageChange,
     job: JobContext
   ): Promise<void> {
-    const source = this.provider.buildMessageSource(
-      link.externalId,
-      link.spacesId,
-      config.credentials
-    );
-    const legacyNames = this.provider.legacyMessageSourceNames(link.externalId, link.spacesId);
+    const source = buildMessageSource(this.provider, link, config);
+    const legacyNames = legacyMessageSourceNames(this.provider.id, link);
     const { sourceId, sourceIds } = await this.sources.findMessageScopes(source, legacyNames, link);
     const ctx: OutboundContext = {
       link,
@@ -193,7 +190,7 @@ export class OutboundService {
           channelId: ctx.link.externalId,
           threadId: threadId ?? undefined,
           text,
-          originId: messageId,
+          origin: { type: MIRROR_ORIGIN_TYPE, id: messageId },
         },
         files,
         notes: skipped.map(couldNotCopy),
@@ -227,7 +224,7 @@ export class OutboundService {
       draft.message.threadId,
       new Date(delivery.startedAt - CLOCK_SKEW_MS),
       {
-        originId: draft.messageId,
+        origin: { type: MIRROR_ORIGIN_TYPE, id: draft.messageId },
         text: withNotes(draft.message.text, draft.notes),
         ...(sender && { authorId: sender.externalUserId }),
       }

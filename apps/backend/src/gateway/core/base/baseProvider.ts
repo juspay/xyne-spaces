@@ -3,7 +3,6 @@ import type { BaseApi } from './baseApi';
 import type { BaseTransformer } from './baseTransformer';
 import type {
   IncomingRequest,
-  MessageSource,
   ProviderId,
   ProviderMessage,
   ProviderRequest,
@@ -30,14 +29,7 @@ export abstract class BaseProvider<TCredentials = unknown> {
   /** Loop guard: true for messages the app itself posted. */
   abstract isOwnMessage(message: ProviderMessage, workspace: ProviderWorkspace): boolean;
 
-  abstract buildMessageSource(
-    externalChannelId: string,
-    spacesChannelId: string,
-    credentials: TCredentials
-  ): MessageSource;
-
-  /** Name of the desk source that already owns this channel, if desks can use the provider. */
-  abstract deskSourceName(externalChannelId: string): string | null;
+  abstract fileDownloadCredentials(credentials: TCredentials): Record<string, string>;
 
   abstract buildUserAuthUrl(credentials: TCredentials, state: string, redirectUri: string): string;
 
@@ -48,11 +40,6 @@ export abstract class BaseProvider<TCredentials = unknown> {
   ): Promise<ProviderUserToken>;
 
   abstract createUserApi(token: string): BaseApi;
-
-  /** Names older migrations gave this pair's history; Mirror reads them so no thread is copied twice. */
-  legacyMessageSourceNames(_externalChannelId: string, _spacesChannelId: string): string[] {
-    return [];
-  }
 
   get configSourceType(): string {
     return `${this.id}-connection`;

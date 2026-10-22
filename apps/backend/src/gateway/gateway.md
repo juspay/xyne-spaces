@@ -40,22 +40,20 @@ The gateway carries everything between Spaces and an external app (a provider). 
 
 ## BaseProvider
 
-| Member                             | Does                                                                                                                                                                        |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`, `displayName`, `transformer` | Identity and the transformer instance                                                                                                                                       |
-| `userMetadataKey`                  | Key on Spaces user metadata holding the provider user id, e.g. `slackId`                                                                                                    |
-| `credentialsSchema`                | What an admin saves with `PUT /config`                                                                                                                                      |
-| `validateCredentials()`            | Calls the provider; returns workspace id, name, bot user id, app id. Throws `VALIDATION_ERROR` if rejected                                                                  |
-| `verifyRequest()`                  | Checks the webhook signature on the raw body; throws `INVALID_SIGNATURE`                                                                                                    |
-| `parseEvent()`                     | `challenge` for setup handshakes, else `event` with the provider workspace id and a `ProviderEvent` (`null` to ignore)                                                      |
-| `createApi()`                      | An `<Id>Api` for these credentials                                                                                                                                          |
-| `isOwnMessage()`                   | True for Mirror's own posts (loop guard)                                                                                                                                    |
-| `buildMessageSource()`             | Name, `sourceType` and credentials of the `ExternalSource` row that scopes the link's message map. `sourceType` picks the file-download auth in `ExternalAttachmentService` |
-| `deskSourceName()`                 | The desk source that owns a channel, or `null` if the provider has no desk                                                                                                  |
-| `legacyMessageSourceNames()`       | Optional: names older migrations gave a pair's history, so Mirror finds it too. Defaults to none                                                                            |
-| `buildUserAuthUrl()`               | The provider's sign-in page for a person's own token                                                                                                                        |
-| `exchangeUserAuthCode()`           | Trades the sign-in code for the token, the person's provider id and their provider workspace                                                                                |
-| `createUserApi()`                  | An `<Id>Api` acting as that person; their name and photo are never overridden                                                                                               |
+| Member                             | Does                                                                                                                   |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`, `displayName`, `transformer` | Identity and the transformer instance                                                                                  |
+| `userMetadataKey`                  | Key on Spaces user metadata holding the provider user id, e.g. `slackId`                                               |
+| `credentialsSchema`                | What an admin saves with `PUT /config`                                                                                 |
+| `validateCredentials()`            | Calls the provider; returns workspace id, name, bot user id, app id. Throws `VALIDATION_ERROR` if rejected             |
+| `verifyRequest()`                  | Checks the webhook signature on the raw body; throws `INVALID_SIGNATURE`                                               |
+| `parseEvent()`                     | `challenge` for setup handshakes, else `event` with the provider workspace id and a `ProviderEvent` (`null` to ignore) |
+| `createApi()`                      | An `<Id>Api` for these credentials                                                                                     |
+| `isOwnMessage()`                   | True for the app's own posts (loop guard)                                                                              |
+| `fileDownloadCredentials()`        | What `ExternalAttachmentService` needs to download the provider's files, e.g. `{ botToken }`                           |
+| `buildUserAuthUrl()`               | The provider's sign-in page for a person's own token                                                                   |
+| `exchangeUserAuthCode()`           | Trades the sign-in code for the token, the person's provider id and their provider workspace                           |
+| `createUserApi()`                  | An `<Id>Api` acting as that person; their name and photo are never overridden                                          |
 
 ## Posting as a person
 
@@ -85,7 +83,7 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 - PAIR rows go through `PairRepository`, scoped by the use case's sourceType suffix (`-mirror`); the use case builds each pair's unique name.
 - Query the gateway's rows by `recordType` and sourceType. A PAIR also sets `channelId` (the same Spaces channel); every older lookup by `channelId` also filters by sourceType or name, so none of them match it. Never set `ownerUserId` or `boardId`.
 - One link per provider channel: the unique `name`. One link per Spaces channel: links are made only on approval, one request per channel can be pending, and approval checks again. `(workspaceId, spacesIdentifier)` is indexed, since every Spaces message checks it.
-- The message map stays in `ExternalMessage`, under the channel's self-serve migration source (`buildMessageSource()`), so a migration and Mirror each skip what the other copied. Older migrations' rows (`legacyMessageSourceNames()`) are read too.
+- The message map stays in `ExternalMessage`, under the channel's self-serve migration source, so a migration and Mirror each skip what the other copied; older migrations' rows are read too. Mirror owns those names per provider in `useCases/mirror/messageSources.ts`, so a provider never knows about them.
 
 ## Jobs
 
@@ -95,7 +93,7 @@ The gateway stores its rows in `ExternalSource`, with `recordType` set. Every ol
 - An edit, delete or reply whose message is still queued is queued too, and waits for it.
 - Retries: 3 s, 1 min, 5 min, 2 h, 6 h, 12 h for `RATE_LIMITED`, `LOCK_HELD`, `PROVIDER_ERROR` and unexpected errors. Other gateway errors fail at once.
 - A job is removed when it succeeds. One that fails every retry is kept 7 days: `GET /jobs`, `POST /jobs/:handler/:id/retry`, `DELETE /jobs/:handler/:id` (workspace admins).
-- No double posts: a job saves its progress before posting. A retry first looks for the earlier post: `findFileMessage()` for files, `findPostedMessage()` otherwise (our metadata id, or author and text for a person's token).
+- No double posts: a job saves its progress before posting. A retry first looks for the earlier post: `findFileMessage()` for files, `findPostedMessage()` otherwise (the caller's `origin` tag in the post's metadata, e.g. Mirror's `xyne_mirror`, or author and text for a person's token).
 - Files go one at a time, each uploaded file id is saved, and on the last try a file that still fails becomes a "📎 name (couldn't copy)" line.
 
 ## Events

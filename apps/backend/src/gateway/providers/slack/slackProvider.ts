@@ -1,13 +1,7 @@
-import {
-  buildSlackChannelSourceName,
-  buildSlackDeskSourceName,
-  buildSlackMigrationSourceName,
-} from '../../re-exports';
 import { BaseProvider } from '../../core/base/baseProvider';
 import { GatewayError } from '../../core/errors';
 import type {
   IncomingRequest,
-  MessageSource,
   ProviderMessage,
   ProviderRequest,
   ProviderUserToken,
@@ -54,22 +48,8 @@ export class SlackProvider extends BaseProvider<SlackCredentials> {
     return message.appId === workspace.appId || message.authorId === workspace.botUserId;
   }
 
-  /** The channel's shared Slack source, so a migration and Mirror each skip the other's messages. */
-  buildMessageSource(
-    _externalChannelId: string,
-    spacesChannelId: string,
-    credentials: SlackCredentials
-  ): MessageSource {
-    return {
-      name: buildSlackChannelSourceName(spacesChannelId),
-      sourceType: 'slack',
-      displayName: 'Slack Mirror',
-      credentials: { botToken: credentials.botToken },
-    };
-  }
-
-  deskSourceName(externalChannelId: string): string {
-    return buildSlackDeskSourceName(externalChannelId);
+  fileDownloadCredentials(credentials: SlackCredentials): Record<string, string> {
+    return { botToken: credentials.botToken };
   }
 
   buildUserAuthUrl(credentials: SlackCredentials, state: string, redirectUri: string): string {
@@ -91,13 +71,5 @@ export class SlackProvider extends BaseProvider<SlackCredentials> {
 
   createUserApi(token: string): SlackApi {
     return new SlackApi(token, { asUser: true });
-  }
-
-  /** Channels migrated before self-serve (the `/sync` flow) keep their history under these names. */
-  legacyMessageSourceNames(externalChannelId: string, spacesChannelId: string): string[] {
-    return [
-      buildSlackMigrationSourceName(externalChannelId, spacesChannelId),
-      buildSlackMigrationSourceName(externalChannelId),
-    ];
   }
 }
