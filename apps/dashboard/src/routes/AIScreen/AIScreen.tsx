@@ -25,6 +25,7 @@ import {
   type AIComposerHandle,
   type AIComposerAttachment,
 } from '../../components/AIScreen/AIComposer';
+import { NEW_CHAT_DRAFT_SCOPE } from '../../utils/aiComposerDraft';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
 import { CitationDocsProvider, useCitationDocs } from '../../components/AIScreen/citationDocs';
@@ -881,6 +882,7 @@ const AIScreen = (): ReactElement => {
                         anchor='top'
                         hideDisclaimer
                         voiceStageHost={landingVoiceHost}
+                        draftScope={NEW_CHAT_DRAFT_SCOPE}
                       />
                     </LandingComposerSlot>
                   </div>

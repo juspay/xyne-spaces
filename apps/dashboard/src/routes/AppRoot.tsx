@@ -611,6 +611,7 @@ const AppRoot = (): ReactElement => {
       content: (
         <XyneAISidebarZIndexShell>
           <XyneAISidebar
+            persistDraft
             channelId={xyneAIChannelId}
             threadInfo={xyneAIThreadInfo}
             startFreshChat={xyneAIStartFreshChat}
@@ -842,6 +843,7 @@ const AppRoot = (): ReactElement => {
                                 >
                                   <XyneAISidebarZIndexShell>
                                     <XyneAISidebar
+                                      persistDraft
                                       channelId={xyneAIChannelId}
                                       threadInfo={xyneAIThreadInfo}
                                       startFreshChat={xyneAIStartFreshChat}
@@ -1043,6 +1045,7 @@ const AppRoot = (): ReactElement => {
                             description='Ask questions about your channel'
                           >
                             <XyneAISidebar
+                              persistDraft
                               channelId={xyneAIChannelId}
                               threadInfo={xyneAIThreadInfo}
                               startFreshChat={xyneAIStartFreshChat}

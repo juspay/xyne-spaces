@@ -29,6 +29,12 @@ import {
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { Message, UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
+import { useAIComposerDraft } from '../../hooks/useAIComposerDraft';
+import {
+  applyDraftContext,
+  hasPickedDraftContext,
+  toDraftContext,
+} from '../../utils/aiComposerDraft';
 import { SANDBOX_MODE_OPTIONS, useSandboxMode } from './SandboxModeSwitch';
 import { useDesignStudio } from './Workspace/design/designStudioContext';
 import { usePageSelection } from './Workspace/pageSelectionContext';
@@ -125,6 +131,12 @@ interface AIComposerProps {
   voiceMessages?: readonly Message[] | undefined;
   voiceChatTitle?: string | undefined;
   lastUserMessage?: string | undefined;
+  /** Draft key scope (XYNE-67287): the conversation id, or `new` for a chat
+   *  without one. Undefined turns draft saving off for this composer. */
+  draftScope?: string | null | undefined;
+  /** False skips restoring a saved draft on mount (e.g. a chat opened with an
+   *  automatic first query). Saving still happens. Defaults to true. */
+  restoreDraft?: boolean;
 }
 
 interface XyneAIConfigResponse {
@@ -174,11 +186,23 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     voiceMessages,
     voiceChatTitle,
     lastUserMessage,
+    draftScope,
+    restoreDraft = true,
   },
   ref,
 ): ReactElement {
-  const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
-  const [value, setValue] = useState('');
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
+  // Draft persistence (XYNE-67287): text + picked context survive navigation.
+  const draftStore = useAIComposerDraft({ scope: draftScope });
+  const [restoredDraft] = useState(() =>
+    restoreDraft && draftScope ? draftStore.initialDraft : null,
+  );
+  const seed = restoredDraft
+    ? applyDraftContext(initialExtras ?? EMPTY_COMPOSER_CONTEXT, restoredDraft, selectedAgentSlug)
+    : (initialExtras ?? EMPTY_COMPOSER_CONTEXT);
+  /** A restored draft's context wins over the chat's last-turn context. */
+  const draftOwnsContextRef = useRef(hasPickedDraftContext(restoredDraft?.context));
+  const [value, setValue] = useState(() => restoredDraft?.text ?? '');
   // The walk is awaited, so it must compare against the latest input, not the render that started it.
   const valueRef = useRef(value);
   valueRef.current = value;
@@ -226,7 +250,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const pageSelection = usePageSelection();
   const pageSelectionValue = pageSelection?.selection ?? null;
 
-  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { isAuto, setAuto } = useAskAIAuto();
   const isAutoOn = isAuto && assistant !== undefined && selectedAgentSlug === null;
   // Beta: Auto acts on screen only once turned on in Preferences → Developer.
@@ -369,6 +392,48 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   useEffect(() => {
     onContextChangeRef.current?.(buildContext());
   }, [buildContext]);
+
+  // ── Draft persistence (XYNE-67287) ─────────────────────────────────────────
+  // Save text + picked context whenever they change. State the composer was
+  // given rather than typed — its mount state, or a chat's last-turn context
+  // set through setContext — is not saved until the user changes something,
+  // so opening a chat never writes (or deletes) a draft by itself.
+  const skipDraftSnapshotRef = useRef<string | null>(null);
+  const programmaticContextRef = useRef(false);
+  const draftMountedRef = useRef(false);
+  useEffect(() => {
+    if (!draftScope) return;
+    const context = toDraftContext(buildContext());
+    const snapshot = JSON.stringify([value, hasPickedDraftContext(context) ? context : null]);
+    if (!draftMountedRef.current || programmaticContextRef.current) {
+      draftMountedRef.current = true;
+      programmaticContextRef.current = false;
+      skipDraftSnapshotRef.current = snapshot;
+      return;
+    }
+    if (snapshot === skipDraftSnapshotRef.current) return;
+    skipDraftSnapshotRef.current = null;
+    draftStore.save({
+      text: value,
+      context,
+      agentSlug: selectedAgentSlug,
+      attachmentCount: attachments.length,
+    });
+  }, [draftScope, value, buildContext, selectedAgentSlug, attachments.length, draftStore]);
+
+  // Attachments are in-memory files and can't be kept with a draft.
+  useEffect(() => {
+    const lost = restoredDraft?.attachmentCount ?? 0;
+    if (lost > 0) {
+      toast(
+        lost === 1
+          ? "Your draft is back, but its attachment wasn't kept. Add it again before sending."
+          : `Your draft is back, but its ${lost} attachments weren't kept. Add them again before sending.`,
+        { duration: 5000 },
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the restored draft
+  }, []);
 
   /** Context handed to a fresh chat for another agent — without this agent's model pin. */
   const contextForAgentSwitch = (): ComposerContext => ({
@@ -529,12 +594,16 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setAttachments([]);
     setDismissedStudioIntent(null);
     clearPicked();
+    draftStore.clear();
   }
 
   const routedSubmit = useRoutedSubmit<'button' | 'enter'>({
     assistant,
     value,
-    clear: () => setValue(''),
+    clear: () => {
+      setValue('');
+      draftStore.clear();
+    },
     submit: send,
   });
 
@@ -544,8 +613,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       const outcome = await tryBuddy(text);
       // An edit made during the walk is the user's, so it is neither cleared nor sent.
       if (valueRef.current.trim() !== text) return;
-      if (outcome === 'done') setValue('');
-      else if (outcome === 'missed' && !routedSubmit.route(trigger)) send(trigger);
+      if (outcome === 'done') {
+        setValue('');
+        draftStore.clear();
+      } else if (outcome === 'missed' && !routedSubmit.route(trigger)) send(trigger);
     } finally {
       setBuddyWorking(false);
     }
@@ -590,6 +661,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       clearContent: (): void => {
         setValue('');
         setAttachments([]);
+        draftStore.clear();
       },
       focus: (): void => composerRef.current?.focus(),
       setPrompt: (nextValue: string): void => {
@@ -604,7 +676,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         return true;
       },
       setContext: (items: AttachedContextItem[]): void => {
+        // A restored draft already carries the context the user picked for it.
+        if (draftOwnsContextRef.current) return;
         const next = attachedContextToSelections(items);
+        skipDraftSnapshotRef.current = null;
+        programmaticContextRef.current = true;
         setSelections({
           channels: next.channels,
           tickets: next.tickets,
@@ -622,7 +698,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setFolderScopes(next.folderScopes);
       },
     }),
-    [handleFilesAdded, pending, onSubmit, buildContext],
+    [handleFilesAdded, pending, onSubmit, buildContext, draftStore],
   );
 
   // ── Voice mode ─────────────────────────────────────────────────────────────

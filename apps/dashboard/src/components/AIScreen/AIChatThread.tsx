@@ -57,6 +57,7 @@ import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { NEW_CHAT_DRAFT_SCOPE } from '../../utils/aiComposerDraft';
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
@@ -2843,6 +2844,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               showAgentSelector={isV2}
               initialExtras={composerSeed}
               onContextChange={onContextChange}
+              draftScope={sessionId ?? (conversationId || NEW_CHAT_DRAFT_SCOPE)}
+              // A chat opened with an automatic first query starts empty.
+              restoreDraft={!initialQuery}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
