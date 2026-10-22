@@ -136,6 +136,7 @@ export interface ClawRunRequest {
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  speed?: 'fast' | 'standard';
   studioMode?: 'design';
   sandboxMode?: 'local' | 'remote' | 'container';
   designArtifactAttachmentId?: string;
@@ -644,6 +645,7 @@ export async function runClawAgentStream(
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
+    ...(request.speed && { speed: request.speed }),
     ...(request.studioMode && { studioMode: request.studioMode }),
     ...(request.sandboxMode && { sandboxMode: request.sandboxMode }),
     ...(request.designArtifactAttachmentId && {

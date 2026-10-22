@@ -41,6 +41,7 @@ import {
   AgentPicker,
   AgentsSubmenu,
   ContextTray,
+  FastModeToggle,
   ModeChips,
   ModelMenu,
   PlusMenu,
@@ -176,6 +177,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     plus,
     agent,
     model,
+    fast,
     onEnterVoiceMode,
     hideToolbar = false,
     anchor = 'bottom',
@@ -799,6 +801,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <ModeChips plus={plus} compact={compact} />
               </div>
               <div className='flex shrink-0 items-center gap-1.5'>
+                {fast && <FastModeToggle fast={fast} />}
                 {model && <ModelMenu model={model} returnFocus={returnFocus} side={menuSide} />}
                 <ToolbarIconButton
                   label={
