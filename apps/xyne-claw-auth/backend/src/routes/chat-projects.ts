@@ -23,6 +23,7 @@ import { prisma } from "../db.js";
 import {
   chatProjectRepository,
   chatProjectKnowledgeRepository,
+  chatAttachmentRepository,
   isChatProjectKnowledgeType,
   DuplicateKnowledgeError,
 } from "../repositories/index.js";
@@ -343,22 +344,29 @@ chatProjectsRouter.put("/chat/projects/reorder", async (req: Request, res: Respo
   }
 });
 
-// GET /agent-chat/chat/projects/:projectId — owner-only
-// Knowledge routes are declared BEFORE `/chat/projects/:projectId` for the same
-// reason `reorder` is: a later `/:projectId` pattern would otherwise swallow
-// `/:projectId/knowledge`.
-
 const KNOWLEDGE_TITLE_MAX_CHARS = 200;
+const KNOWLEDGE_REF_MAX_CHARS = 256;
+/** A run injects a handful of items; past ~20 normalizeAttachedContext starts
+ *  dropping them, so a project holding hundreds helps nobody. */
+const MAX_KNOWLEDGE_ITEMS_PER_PROJECT = 50;
 
 interface ParsedKnowledge {
   type: string;
   refId: string;
   title: string;
-  storagePath: string | null;
-  mimeType: string | null;
-  size: number | null;
 }
 
+/**
+ * Only `type`, `refId` and `title` are read from the request.
+ *
+ * `storagePath`, `mimeType` and `size` are deliberately NOT accepted: a client
+ * that can name its own storage path can name anyone's. The bucket also holds
+ * local-harness session logs under a guessable
+ * `local-harness-sessions/<userId>/<conversationId>/<provider>.jsonl`, so a
+ * path taken on trust would let a user attach another user's run transcript and
+ * have XYNE-66810 read it out with claw-auth's own credentials. For a file the
+ * server resolves those three fields from the attachment row instead.
+ */
 function parseKnowledgeBody(body: unknown): { value: ParsedKnowledge } | { error: string } {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { error: "Request body must be an object" };
@@ -370,6 +378,9 @@ function parseKnowledgeBody(body: unknown): { value: ParsedKnowledge } | { error
   }
   const refId = typeof raw["refId"] === "string" ? raw["refId"].trim() : "";
   if (!refId) return { error: "refId is required" };
+  if (refId.length > KNOWLEDGE_REF_MAX_CHARS) {
+    return { error: `refId must be ${KNOWLEDGE_REF_MAX_CHARS} characters or less` };
+  }
 
   const title = typeof raw["title"] === "string" ? raw["title"].trim() : "";
   if (!title) return { error: "title is required" };
@@ -377,24 +388,11 @@ function parseKnowledgeBody(body: unknown): { value: ParsedKnowledge } | { error
     return { error: `title must be ${KNOWLEDGE_TITLE_MAX_CHARS} characters or less` };
   }
 
-  const storagePath = typeof raw["storagePath"] === "string" ? raw["storagePath"].trim() : "";
-  // A file is only durable if its GCS path is recorded: the ChatAttachment row
-  // it came from cascades away with its chat message.
-  if (raw["type"] === "file" && !storagePath) {
-    return { error: "storagePath is required for a file" };
-  }
-
-  const size = typeof raw["size"] === "number" && Number.isFinite(raw["size"]) ? raw["size"] : null;
-  const mimeType = typeof raw["mimeType"] === "string" ? raw["mimeType"].trim() : "";
-
   return {
     value: {
       type: raw["type"],
       refId,
       title,
-      storagePath: storagePath || null,
-      mimeType: mimeType || null,
-      size,
     },
   };
 }
@@ -450,12 +448,44 @@ chatProjectsRouter.post(
         return;
       }
 
+      const existing = await chatProjectKnowledgeRepository.listForProject(
+        project.id,
+        project.orgId,
+      );
+      if (existing.length >= MAX_KNOWLEDGE_ITEMS_PER_PROJECT) {
+        res.status(400).json({
+          success: false,
+          error: `A project can hold at most ${MAX_KNOWLEDGE_ITEMS_PER_PROJECT} knowledge items`,
+        });
+        return;
+      }
+
+      // For a file every storage detail comes from the attachment row, found
+      // only under the caller's own ids. An id they do not own is a 404, so a
+      // path they chose can never be stored.
+      let fileFields: { storagePath: string; mimeType: string; size: number } | undefined;
+      if (parsed.value.type === "file") {
+        const attachment = await chatAttachmentRepository.findOwnedById(
+          parsed.value.refId,
+          caller.aliases,
+        );
+        if (!attachment) {
+          res.status(404).json({ success: false, error: "Attachment not found" });
+          return;
+        }
+        fileFields = {
+          storagePath: attachment.url,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+        };
+      }
+
       const created = await chatProjectKnowledgeRepository.create(
         project.id,
         // The parent row's org, never the request's.
         project.orgId,
         caller.primaryUserId,
-        { ...parsed.value, type: parsed.value.type as never },
+        { ...parsed.value, type: parsed.value.type as never, ...fileFields },
       );
       res.status(201).json({ success: true, data: created });
     } catch (err) {
@@ -507,6 +537,7 @@ chatProjectsRouter.delete(
   },
 );
 
+// GET /agent-chat/chat/projects/:projectId — owner-only
 chatProjectsRouter.get(
   "/chat/projects/:projectId",
   async (req: Request<{ projectId: string }>, res: Response): Promise<void> => {

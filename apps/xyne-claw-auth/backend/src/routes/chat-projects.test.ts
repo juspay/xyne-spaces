@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   messages: [] as Array<Record<string, any>>,
   users: [] as Array<Record<string, any>>,
   knowledge: [] as Array<Record<string, any>>,
+  attachments: [] as Array<Record<string, any>>,
 }));
 
 const matches = (filter: unknown, value: string): boolean => {
@@ -168,6 +169,17 @@ vi.mock("../db.js", () => ({
         return { count: hits.length };
       }),
     },
+    chatAttachment: {
+      findFirst: vi.fn(async (args: any) => {
+        const where = args?.where ?? {};
+        const owners = where["uploaderUserId"]?.in ?? [where["uploaderUserId"]];
+        return (
+          state.attachments.find(
+            (row) => row["id"] === where["id"] && owners.includes(row["uploaderUserId"]),
+          ) ?? null
+        );
+      }),
+    },
     chatMessage: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     $transaction: vi.fn(async (ops: Array<Promise<unknown>>) => Promise.all(ops)),
   },
@@ -183,6 +195,11 @@ vi.mock("../repositories/index.js", async () => {
   return {
     chatProjectRepository: actual.chatProjectRepository,
     chatProjectKnowledgeRepository: knowledge.chatProjectKnowledgeRepository,
+    chatAttachmentRepository: (
+      await vi.importActual<typeof import("../repositories/chatAttachmentRepository.js")>(
+        "../repositories/chatAttachmentRepository.js",
+      )
+    ).chatAttachmentRepository,
     isChatProjectKnowledgeType: knowledge.isChatProjectKnowledgeType,
     DuplicateKnowledgeError: knowledge.DuplicateKnowledgeError,
   };
@@ -271,6 +288,10 @@ describe("chat project routes", () => {
     ];
     state.users = [{ id: CANONICAL, orgId: ORG }];
     state.knowledge = [];
+    state.attachments = [
+      { id: "att-1", uploaderUserId: CANONICAL, url: "chat-attachments/org-1/att-1.pdf", mimeType: "application/pdf", size: 2048, originalFilename: "Spec.pdf" },
+      { id: "att-theirs", uploaderUserId: "user-other", url: "chat-attachments/org-1/att-theirs.pdf", mimeType: "application/pdf", size: 99, originalFilename: "Theirs.pdf" },
+    ];
     vi.clearAllMocks();
   });
 
@@ -290,14 +311,7 @@ describe("chat project routes", () => {
       });
     };
 
-    const FILE_ITEM = {
-      type: "file",
-      refId: "att-1",
-      title: "Spec.pdf",
-      storagePath: "chat-attachments/org-1/att-1.pdf",
-      mimeType: "application/pdf",
-      size: 2048,
-    };
+    const FILE_ITEM = { type: "file", refId: "att-1", title: "Spec.pdf" };
 
     it("attaches, lists and detaches an item", async () => {
       addProject();
@@ -348,15 +362,63 @@ describe("chat project routes", () => {
       expect(state.knowledge).toHaveLength(1);
     });
 
-    it("requires a storagePath for a file, so the reference survives its chat message", async () => {
+    it("resolves a file's storage path from the attachment row, ignoring the request", async () => {
+      addProject();
+
+      const created = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: {
+          ...FILE_ITEM,
+          storagePath: "local-harness-sessions/user-other/conv-9/claude.jsonl",
+          mimeType: "text/evil",
+          size: -1,
+        },
+      });
+
+      expect(created.status).toBe(201);
+      expect(created.body["data"]).toMatchObject({
+        storagePath: "chat-attachments/org-1/att-1.pdf",
+        mimeType: "application/pdf",
+        size: 2048,
+      });
+    });
+
+    it("answers 404 for a file the caller does not own", async () => {
       addProject();
 
       const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
-        body: { type: "file", refId: "att-2", title: "No path" },
+        body: { type: "file", refId: "att-theirs", title: "Theirs" },
+      });
+
+      expect(got.status).toBe(404);
+      expect(state.knowledge).toHaveLength(0);
+    });
+
+    it("answers 404 for a file id that does not exist", async () => {
+      addProject();
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "file", refId: "att-nope", title: "Ghost" },
+      });
+
+      expect(got.status).toBe(404);
+    });
+
+    it("refuses more than the per-project item cap", async () => {
+      addProject();
+      state.knowledge = Array.from({ length: 50 }, (_, i) => ({
+        id: `know-${i}`,
+        projectId: "proj-mine",
+        orgId: ORG,
+        type: "channel",
+        refId: `chan-${i}`,
+      }));
+
+      const got = await requestJson("POST", "/chat/projects/proj-mine/knowledge", {
+        body: { type: "channel", refId: "chan-extra", title: "One too many" },
       });
 
       expect(got.status).toBe(400);
-      expect(got.body["error"]).toMatch(/storagePath/);
+      expect(got.body["error"]).toMatch(/at most 50/);
     });
 
     it("rejects an unknown type", async () => {
