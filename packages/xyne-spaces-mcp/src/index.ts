@@ -27,10 +27,9 @@ import { runLoginCommand } from "./login-command.js";
 import { watchSharedConfig } from "./watch.js";
 import { runWritesCommand } from "./writes-command.js";
 import { asObject, err } from "./render.js";
-import { useSession } from "./tools/login.js";
+import { dropSession, useSession } from "./tools/login.js";
 import type { ToolContext, ToolDef } from "./tools/shared.js";
 import { allTools } from "./tools/index.js";
-import { useSession } from "./tools/login.js";
 
 if (process.argv[2] === "login") {
 	process.exit(await runLoginCommand());
@@ -83,7 +82,7 @@ const instructions = [
 ].join(" ");
 
 const server = new Server(
-	{ name: "xyne-spaces-mcp", version: "0.1.1" },
+	{ name: "xyne-spaces-mcp", version: "0.1.2" },
 	{ capabilities: { tools: { listChanged: true } }, instructions },
 );
 
@@ -141,14 +140,17 @@ await server.connect(transport);
 // outside: `writes on|off`, a sign-in from another client or the desktop app.
 // Follow it so those take effect here without a restart.
 let writesListed = resolveWrites().enabled;
-watchSharedConfig(({ writes, session }) => {
+watchSharedConfig(({ writes, session, signedOut }) => {
 	if (writes !== writesListed) {
 		writesListed = writes;
 		void server.sendToolListChanged().catch(() => {});
 	}
-	const current = config.session;
-	if (session && config.sessionSource !== "env" && session.cookie.value !== current?.cookie.value) {
-		useSession(ctx, session);
+	if (config.sessionSource !== "env") {
+		if (signedOut) {
+			if (config.session) dropSession(ctx);
+		} else if (session && isSessionUsable(session) && session.cookie.value !== config.session?.cookie.value) {
+			useSession(ctx, session);
+		}
 	}
 });
 

@@ -20,6 +20,13 @@ export function useSession(ctx: ToolContext, session: SsoSession): void {
 	ctx.sdk.setSession(session);
 }
 
+/** Take the session off the running server, after it was signed out elsewhere. */
+export function dropSession(ctx: ToolContext): void {
+	ctx.config.session = undefined;
+	ctx.config.sessionSource = undefined;
+	ctx.sdk.clearSession();
+}
+
 const login: ToolDef = {
 	name: "spaces_login",
 	description:

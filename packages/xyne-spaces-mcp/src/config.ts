@@ -196,12 +196,6 @@ export function resolveWrites(): WritesSetting {
 	return { enabled: loadStoredConfig().writes === true, source: "file" };
 }
 
-/** The session saved in `spaces.json`, read fresh: another process may have written it. */
-export function loadSavedSession(): SsoSession | undefined {
-	const { session } = loadStoredConfig();
-	return isStoredSession(session) ? session : undefined;
-}
-
 /** env → `~/.xyne/agent/spaces.json` → default. */
 export function resolveConfig(): SpacesConfig {
 	const stored = loadStoredConfig();
