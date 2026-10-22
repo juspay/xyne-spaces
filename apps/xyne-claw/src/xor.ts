@@ -144,18 +144,21 @@ const CACHE_MAX = 2_000;
 const cache = new Map<string, { at: number; answers: Record<string, XorAnswer> }>();
 
 const FNV_SEEDS = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b];
+const MAX_KEY_CHARS = 12_000_000;
 
 function fnv1a128(text: string): string {
   const h = [...FNV_SEEDS];
-  for (let i = 0; i < text.length; i++) {
+  const n = Math.min(text.length, MAX_KEY_CHARS);
+  for (let i = 0; i < n; i++) {
     const c = text.charCodeAt(i);
     for (let k = 0; k < 4; k++) h[k] = Math.imul(h[k]! ^ (c + k), 0x01000193) >>> 0;
   }
   return h.map((x) => x.toString(36)).join(".");
 }
 
-export function cacheKey(url: string, model: string | undefined, state: string, questions: Record<string, XorQuestion>, images: string[]): string {
+export function cacheKey(url: string, model: string | undefined, state: string, questions: Record<string, XorQuestion>, images: string[]): string | null {
   const text = JSON.stringify([url, model ?? "", state, questions, images]);
+  if (text.length > MAX_KEY_CHARS) return null;
   return `${text.length}:${fnv1a128(text)}`;
 }
 
