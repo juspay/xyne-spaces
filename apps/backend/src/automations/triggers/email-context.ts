@@ -93,6 +93,8 @@ function loadEmailAttachments(emailId: string): Promise<TriggerAttachment[]> {
       logger.warn(`[automations] failed to hydrate attachments for email=${emailId}`, error);
       return [];
     });
+}
+
 /** Flat, source-agnostic origin fields; null where the source has no such notion. */
 export const EmailOriginSchema = z.object({
   sourceType: z.string().nullable(),
