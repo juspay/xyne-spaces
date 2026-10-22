@@ -893,11 +893,12 @@ async function extractMessageContent(msg: any, isBotContext: boolean = false, bo
       ? await resolveHuddleRoom(msg.room, botToken)
       : undefined;
 
-    return blockKitParser.parse({
+    const html = blockKitParser.parse({
       text: resolvedText,
       attachments: resolvedAttachments,
       ...(isHuddle && { subtype: msg.subtype, room }),
     });
+    return resolveRawMentionTags(html, token, workspaceId); // forwarded messages carry rich-text blocks too
   }
 
   // Bot context: blocks primary, text fallback, attachments always resolved
@@ -913,11 +914,27 @@ async function extractMessageContent(msg: any, isBotContext: boolean = false, bo
     ? await deepResolveMentions(msg.attachments, token, workspaceId)
     : undefined;
 
-  return blockKitParser.parse({
+  const html = blockKitParser.parse({
     text: resolvedText,
     blocks: resolvedBlocks,
     attachments: resolvedAttachments,
   });
+  return resolveRawMentionTags(html, token, workspaceId);
+}
+
+// Tags the parser itself emits for rich-text user/usergroup/broadcast elements.
+const RAW_MENTION_TAG = /<@[UW][A-Z0-9]+>|<!subteam\^[A-Z0-9]+>|<!(?:here|channel|everyone)>/g;
+
+/**
+ * Rich-text mentions in blocks are data objects, not `<@U…>` text, so deepResolveMentions skips them and
+ * the parser renders them as raw tags. Resolve each distinct tag on its own: running the resolver over the
+ * whole HTML would re-wrap mentions that were already converted.
+ */
+async function resolveRawMentionTags(html: string, token: string, workspaceId?: string): Promise<string> {
+  const tags = [...new Set(html.match(RAW_MENTION_TAG) ?? [])];
+  if (tags.length === 0) return html;
+  const resolved = await Promise.all(tags.map((tag) => resolveSlackMentions(tag, token, false, workspaceId)));
+  return tags.reduce((out, tag, i) => out.split(tag).join(resolved[i]), html);
 }
 
 export async function transformReply(
