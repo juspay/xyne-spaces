@@ -35,6 +35,7 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 export interface CustomCommandMatch {
   def: LoopCommandDef;
   commandId: string;
+  version?: number;
   maxDurationMs: number;
   provider?: string | null;
   modelId?: string | null;
@@ -330,10 +331,14 @@ export function buildFindingsMarkdown(
 }
 
 export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
-  if (!run.orgId) return;
   const markdownText = run.finalReport?.trim()
     ? `**/experiment ended**\n\n${run.finalReport.trim()}`
     : "**/experiment ended**\n\n(experiment ended without final report)";
+  await postThreadMarkdown(run, markdownText);
+}
+
+export async function postThreadMarkdown(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null }, markdownText: string): Promise<void> {
+  if (!run.orgId) return;
   // Started from a chat: it ends there too.
   const { chatTargetFor } = await import("../surfaces/messaging/commands.js");
   const chat = await chatTargetFor(run.conversationId);

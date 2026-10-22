@@ -194,8 +194,14 @@ experimentsInternalRouter.post("/:id/complete", async (req: Request<{ id: string
     return;
   }
   const updated = await experimentRepository.update(run.id, { finalReport: body.report.slice(0, 20000), status: "done" });
-  void postExperimentNotice(updated).catch((err) => {
-    log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
-  });
+  void postExperimentNotice(updated)
+    .catch((err) => {
+      log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
+    })
+    .then(() => import("../lib/loop-sequence.js"))
+    .then((m) => m?.onExperimentFinished(updated, "done"))
+    .catch((err) => {
+      log.warn(`[experiment] sequence advance failed id=${updated.id}: ${errMsg(err)}`);
+    });
   res.json({ success: true });
 });

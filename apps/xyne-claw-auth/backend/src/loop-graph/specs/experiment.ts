@@ -7,6 +7,7 @@ import { LOOP_COMMANDS, loopCommandFor, type LoopCommandDef, type LoopKey } from
 import { advanceLoop, passesExhausted, pastDeadline, pastHardStop, type LoopEdge, type LoopNode, type LoopSpec } from "../engine.js";
 import { decided, xorDecideNode, type Decision } from "../decide.js";
 import { loopDefForRun } from "../../lib/loop-command-defs.js";
+import { onExperimentFinished } from "../../lib/loop-sequence.js";
 
 const log = createLogger("experiment");
 
@@ -158,6 +159,7 @@ function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
         kind: "end",
         run: async (ledger) => {
           await experimentRepository.update(ledger.run.id, { status: "done", lastEpochEndedAt: new Date() });
+          await onExperimentFinished(ledger.run, "done").catch((err) => log.warn(`[experiment] sequence advance failed id=${ledger.run.id}: ${errMsg(err)}`));
           return { output: false };
         },
       },
@@ -169,6 +171,7 @@ function buildEpochLoop(def: LoopCommandDef): ExperimentSpec {
           await postExperimentNotice({ ...ledger.run, finalReport }).catch((err) => {
             log.warn(`[experiment] force-done notice failed id=${ledger.run.id}: ${errMsg(err)}`);
           });
+          await onExperimentFinished(ledger.run, "done").catch((err) => log.warn(`[experiment] sequence advance failed id=${ledger.run.id}: ${errMsg(err)}`));
         },
       },
       idle: { kind: "wait" },

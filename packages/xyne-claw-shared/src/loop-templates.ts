@@ -9,7 +9,7 @@ export const LOOP_SKILL_BUNDLES = [
 
 export const LOOP_SKILL_BUNDLE_IDS: ReadonlySet<string> = new Set(LOOP_SKILL_BUNDLES.map((b) => b.id));
 
-export const LOOP_TEMPLATE_IDS = ["deadline-checker", "frontier", "cursor-walk", "until-condition", "fix-retry"] as const;
+export const LOOP_TEMPLATE_IDS = ["deadline-checker", "frontier", "cursor-walk", "until-condition", "fix-retry", "sequence"] as const;
 
 export type LoopTemplateId = (typeof LOOP_TEMPLATE_IDS)[number];
 
@@ -26,7 +26,16 @@ export interface LoopTemplate {
   defaultDurationMin: number;
   maxDurationMin: number;
   exitText: string;
+  composite?: boolean;
 }
+
+export interface LoopSequenceStep {
+  command: string;
+  args: string;
+}
+
+export const MAX_SEQUENCE_STEPS = 6;
+export const MIN_SEQUENCE_STEPS = 2;
 
 export const LOOP_TEMPLATES: readonly LoopTemplate[] = [
   {
@@ -99,7 +108,26 @@ export const LOOP_TEMPLATES: readonly LoopTemplate[] = [
     maxDurationMin: 12 * 60,
     exitText: "EXIT: after every pass a judge reads your reply and asks whether problems remain. If they do, you are sent back to fix them, a few times at most; when the run is clean (or the retries run out) you are asked for the final report. END EVERY PASS with a short status that says plainly what still fails, if anything. Never hide a failure to get a clean run.",
   },
+  {
+    id: "sequence",
+    title: "Sequence of commands",
+    summary: "Runs other loop commands one after another in the same thread, each starting when the previous one finishes, then posts a combined summary.",
+    example: "/release-check = /ui-test /settings, then /security-scan 30m auth, then /perf-hunt",
+    graph: "timeboxed",
+    exit: "deadline",
+    deadlineReleases: true,
+    question: null,
+    deliverable: "none",
+    defaultDurationMin: 60,
+    maxDurationMin: 24 * 60,
+    exitText: "",
+    composite: true,
+  },
 ];
+
+export function fillStepArgs(args: string, focus: string | undefined): string {
+  return args.includes("{focus}") ? args.replaceAll("{focus}", focus ?? "").replace(/\s+/g, " ").trim() : args.trim();
+}
 
 export function getLoopTemplate(id: string): LoopTemplate | undefined {
   return LOOP_TEMPLATES.find((t) => t.id === id);
@@ -123,6 +151,7 @@ export const DEFAULT_MAX_RETRIES = 6;
 export function buildCustomLoopDef(c: CustomLoopCommand): LoopCommandDef {
   const t = getLoopTemplate(c.template);
   if (!t) throw new Error(`unknown loop template ${c.template}`);
+  if (t.composite) throw new Error(`${c.template} is a sequence of commands, not a loop`);
   const judgeQuestion: DecideQuestion | null =
     t.question && c.judgeQuestion?.trim() ? { id: "condition", type: "yesno", question: c.judgeQuestion.trim() } : null;
   const command = `/${c.name}`;

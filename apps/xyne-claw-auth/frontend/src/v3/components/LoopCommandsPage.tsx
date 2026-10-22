@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowsClockwiseIcon, CircleDashedIcon, CopyIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { ArrowsClockwiseIcon, CircleDashedIcon, CopyIcon, PlusIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import {
   createLoopCommand,
   deleteLoopCommand,
   getLoopTemplates,
   listLoopCommands,
+  listLoopCommandVersions,
   listSubagents,
   publishLoopCommand,
+  rollbackLoopCommand,
   updateLoopCommand,
 } from "../../lib/api";
-import type { LoopCommandBody, LoopCommandRow, LoopTemplateCatalogue, LoopTemplateInfo, SubagentDef } from "../../lib/api";
+import type { LoopCommandBody, LoopCommandRow, LoopCommandVersionInfo, LoopSequenceStep, LoopTemplateCatalogue, LoopTemplateInfo, SubagentDef } from "../../lib/api";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
@@ -32,9 +34,11 @@ interface Draft {
   maxPasses: string;
   deliverable: "" | "md" | "html";
   judgeQuestion: string;
+  steps: LoopSequenceStep[];
 }
 
-const EMPTY: Draft = { id: null, name: "", description: "", template: null, instruction: "", skills: [], subagents: [], provider: "", modelId: "", maxDurationMinutes: "", maxPasses: "", deliverable: "", judgeQuestion: "" };
+const NEW_STEPS: LoopSequenceStep[] = [{ command: "", args: "" }, { command: "", args: "" }];
+const EMPTY: Draft = { id: null, name: "", description: "", template: null, instruction: "", skills: [], subagents: [], provider: "", modelId: "", maxDurationMinutes: "", maxPasses: "", deliverable: "", judgeQuestion: "", steps: NEW_STEPS };
 
 function draftFrom(row: LoopCommandRow, templates: LoopTemplateInfo[]): Draft {
   return {
@@ -51,6 +55,7 @@ function draftFrom(row: LoopCommandRow, templates: LoopTemplateInfo[]): Draft {
     maxPasses: row.maxPasses ? String(row.maxPasses) : "",
     deliverable: row.deliverable ?? "",
     judgeQuestion: row.judgeQuestion ?? "",
+    steps: row.steps && row.steps.length > 0 ? row.steps : NEW_STEPS,
   };
 }
 
@@ -61,6 +66,12 @@ function problems(d: Draft, existing: string[]): string[] {
   if (!d.id && !NAME_RE.test(d.name)) out.push("Name: 3–32 lowercase letters, digits and hyphens, starting with a letter");
   if (!d.id && existing.includes(d.name)) out.push(`/${d.name} already exists`);
   if (d.description.trim().length < 3) out.push("Write a one-line description");
+  if (t.composite) {
+    if (d.steps.length < 2 || d.steps.length > 6) out.push("A sequence needs 2–6 steps");
+    if (d.steps.some((s) => !s.command)) out.push("Pick a command for every step");
+    if (d.steps.some((s) => s.command === `/${d.name}`)) out.push("A sequence cannot run itself");
+    return out;
+  }
   if (d.instruction.trim().length < 20) out.push("Write the task instruction (at least 20 characters)");
   if (t.question && d.judgeQuestion.trim().length < 10) out.push(`${t.question.label}: write one yes/no question`);
   if (t.deliverable === "required" && !d.deliverable) out.push("Pick a deliverable");
@@ -72,6 +83,9 @@ function problems(d: Draft, existing: string[]): string[] {
 
 function body(d: Draft): LoopCommandBody {
   const t = d.template!;
+  if (t.composite) {
+    return { ...(d.id ? {} : { name: d.name }), description: d.description.trim(), template: t.id, instruction: "", skills: [], subagents: [], maxDurationMinutes: t.defaultDurationMin, steps: d.steps.map((s) => ({ command: s.command, args: s.args.trim() })) };
+  }
   return {
     ...(d.id ? {} : { name: d.name }),
     description: d.description.trim(),
@@ -115,6 +129,28 @@ export function LoopCommandsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<LoopCommandRow | null>(null);
+  const [versions, setVersions] = useState<LoopCommandVersionInfo[] | null>(null);
+
+  useEffect(() => {
+    setVersions(null);
+    if (draft?.id) void listLoopCommandVersions(draft.id).then(setVersions).catch(() => setVersions([]));
+  }, [draft?.id]);
+
+  const rollback = async (version: number) => {
+    if (!draft?.id || !catalogue) return;
+    try {
+      const row = await rollbackLoopCommand(draft.id, version);
+      showSnackbar({ variant: "success", title: `Restored v${version} as v${row.version}` });
+      setDraft(draftFrom(row, catalogue.templates));
+      setVersions(await listLoopCommandVersions(row.id));
+      await load();
+    } catch (err) {
+      showSnackbar({ variant: "error", title: "Rollback failed", description: err instanceof Error ? err.message : undefined });
+    }
+  };
+
+  const setStep = (i: number, patch: Partial<LoopSequenceStep>) =>
+    setDraft((d) => (d ? { ...d, steps: d.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)) } : d));
 
   const load = useCallback(async () => {
     try {
@@ -178,7 +214,12 @@ export function LoopCommandsPage() {
 
   const t = draft?.template ?? null;
   const issues = draft ? problems(draft, existingNames) : [];
-  const tryLine = (row: LoopCommandRow) => `/${row.name} ${Math.min(30, row.maxDurationMinutes)}m <what to focus on>`;
+  const isSequence = (row: LoopCommandRow) => catalogue?.templates.find((x) => x.id === row.template)?.composite === true;
+  const tryLine = (row: LoopCommandRow) => (isSequence(row) ? `/${row.name} <focus, used where a step says {focus}>` : `/${row.name} ${Math.min(30, row.maxDurationMinutes)}m <what to focus on>`);
+  const stepChoices = [
+    ...(catalogue?.builtinLoops ?? []).map((b) => ({ value: b.command, label: `${b.command} (built in)` })),
+    ...(rows ?? []).filter((r) => !isSequence(r) && r.name !== draft?.name).map((r) => ({ value: r.command, label: `${r.command}${r.published ? "" : " (draft)"}` })),
+  ];
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-xyne-surface" data-id="loop-commands">
@@ -236,9 +277,14 @@ export function LoopCommandsPage() {
                     <span className="font-mono font-medium text-xyne-fg-primary">{r.command}</span>
                     <div className="text-[12px] text-xyne-fg-muted">{r.description}</div>
                   </td>
-                  <td className="px-3 py-2 text-xyne-fg-secondary">{catalogue?.templates.find((x) => x.id === r.template)?.title ?? r.template}</td>
+                  <td className="px-3 py-2 text-xyne-fg-secondary">
+                    {catalogue?.templates.find((x) => x.id === r.template)?.title ?? r.template}
+                    <span className="ml-1 text-[11px] text-xyne-fg-muted">v{r.version}</span>
+                  </td>
                   <td className="px-3 py-2 text-[12px] text-xyne-fg-secondary">
-                    ≤ {r.maxDurationMinutes}m{r.maxPasses ? ` · ≤ ${r.maxPasses} passes` : ""}{r.deliverable ? ` · .${r.deliverable}` : ""}
+                    {isSequence(r)
+                      ? (r.steps ?? []).map((s) => s.command).join(" → ")
+                      : `≤ ${r.maxDurationMinutes}m${r.maxPasses ? ` · ≤ ${r.maxPasses} passes` : ""}${r.deliverable ? ` · .${r.deliverable}` : ""}`}
                   </td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] ${r.published ? "bg-xyne-success-fg/10 text-xyne-success-fg" : "bg-xyne-surface-subtle text-xyne-fg-muted"}`}>
@@ -313,6 +359,35 @@ export function LoopCommandsPage() {
               />
               <TextField label="Description" hint="One line, shown in /help" value={draft.description} placeholder="Hunt performance regressions" onChange={(e) => u({ description: e.target.value })} />
             </div>
+            {t.composite && (
+              <div className="space-y-2" data-id="loop-steps">
+                <p className="text-[12px] font-medium text-xyne-fg-secondary">
+                  Steps <span className="font-normal text-xyne-fg-muted">— run one after another in the thread; each starts when the previous one finishes. Write {"{focus}"} in the arguments to pass on what the user types after the command.</span>
+                </p>
+                {draft.steps.map((step, i) => (
+                  <div key={i} className="flex items-start gap-2" data-id="loop-step">
+                    <span className="mt-2 w-5 text-right text-[12px] text-xyne-fg-muted">{i + 1}.</span>
+                    <div className="w-56">
+                      <SelectField value={step.command || undefined} placeholder="Pick a loop command" options={stepChoices} onValueChange={(v) => setStep(i, { command: v ?? "" })} />
+                    </div>
+                    <input
+                      value={step.args}
+                      onChange={(e) => setStep(i, { args: e.target.value })}
+                      placeholder={catalogue.builtinLoops.find((b) => b.command === step.command)?.positional ? "e.g. /settings or {focus}" : "e.g. 30m auth module, or {focus}"}
+                      aria-label={`Arguments for step ${i + 1}`}
+                      className="flex-1 rounded-[var(--comp-input-radius)] border border-xyne-border bg-xyne-surface px-3 py-1.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none"
+                    />
+                    <button type="button" aria-label={`Remove step ${i + 1}`} disabled={draft.steps.length <= 2} onClick={() => u({ steps: draft.steps.filter((_, j) => j !== i) })} className="mt-1.5 text-xyne-fg-muted hover:text-xyne-error-fg disabled:opacity-30">
+                      <XIcon size={15} />
+                    </button>
+                  </div>
+                ))}
+                <Button size="sm" variant="ghost" disabled={draft.steps.length >= 6} onClick={() => u({ steps: [...draft.steps, { command: "", args: "" }] })} leadingIcon={<PlusIcon size={14} />}>
+                  Add step
+                </Button>
+              </div>
+            )}
+            {!t.composite && <>
             <TextField
               label="Task instruction"
               hint="What every pass should do. The template adds the loop and exit rules for you."
@@ -362,6 +437,25 @@ export function LoopCommandsPage() {
               />
               {draft.provider && <TextField label="Model id (optional)" value={draft.modelId} placeholder="e.g. open-fast" onChange={(e) => u({ modelId: e.target.value })} />}
             </div>
+            </>}
+            {draft.id && versions && versions.length > 0 && (
+              <div className="space-y-1.5 border-t border-xyne-border pt-3" data-id="loop-history">
+                <p className="text-[12px] font-medium text-xyne-fg-secondary">History</p>
+                {versions.map((v) => (
+                  <div key={v.version} className="flex items-center justify-between gap-2 text-[12px]">
+                    <span className="text-xyne-fg-secondary">
+                      v{v.version} · {new Date(v.createdAt).toLocaleString()}
+                      {v.snapshot.description ? <span className="text-xyne-fg-muted"> · {v.snapshot.description}</span> : null}
+                    </span>
+                    {v.current ? (
+                      <span className="text-[11px] text-xyne-fg-muted">current</span>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => void rollback(v.version)}>Restore</Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {(issues.length > 0 || error) && (
               <ul className="list-disc space-y-0.5 pl-5 text-[12px] text-xyne-error-fg" data-id="loop-issues">
                 {issues.map((i) => <li key={i}>{i}</li>)}

@@ -6,6 +6,7 @@ const rows = vi.hoisted(() => ({ byName: new Map<string, Record<string, unknown>
 vi.mock("../db.js", () => ({
   prisma: {
     loopCommandDefinition: {
+      findMany: vi.fn(async ({ where }: { where: { name: { in: string[] } } }) => [...rows.byName.values()].filter((r) => where.name.in.includes(r["name"] as string))),
       findUnique: vi.fn(async ({ where }: { where: { orgId_name?: { name: string }; id?: string } }) =>
         where.orgId_name ? rows.byName.get(where.orgId_name.name) ?? null : [...rows.byName.values()].find((r) => r["id"] === where.id) ?? null),
     },
@@ -108,5 +109,40 @@ describe("running a custom command", () => {
     expect(text).toContain("*Loop commands built in your org*");
     expect(text).toContain("`/perf-hunt` — Hunt performance regressions in payments _(draft, only you)_");
     expect(help.buildHelpText({ chat: false, command: "perf-hunt", loops: [{ name: "perf-hunt", description: "d", template: "until-condition", published: true, maxDurationMinutes: 90 }] })).toContain("Loop: Until condition");
+  });
+});
+
+describe("sequence commands", () => {
+  const seq = { name: "release-check", description: "UI, security and perf before a release", template: "sequence", steps: [{ command: "/ui-test", args: "{focus}" }, { command: "/security-scan", args: "30m auth" }] };
+
+  it("accepts 2–6 loop steps and ignores loop-only fields", () => {
+    const v = defs.validateLoopCommand({ ...seq, instruction: "ignored", judgeQuestion: "ignored?", skills: ["understanding-skills"] }, { requireName: true });
+    expect(v).toMatchObject({ template: "sequence", instruction: "", skills: [], judgeQuestion: null, steps: seq.steps });
+  });
+
+  it.each([
+    [{ steps: [{ command: "/ui-test", args: "" }] }, "steps"],
+    [{ steps: [...Array(7)].map(() => ({ command: "/ui-test", args: "" })) }, "steps"],
+    [{ steps: [{ command: "ui-test", args: "" }, { command: "/x1", args: "" }] }, "steps[0].command"],
+    [{ steps: [{ command: "/release-check", args: "" }, { command: "/ui-test", args: "" }] }, "steps[0].command"],
+    [{ steps: [{ command: "/ui-test", args: "x".repeat(301) }, { command: "/ui-test", args: "" }] }, "steps[0].args"],
+  ])("rejects %j", (extra, field) => {
+    let err: unknown;
+    try {
+      defs.validateLoopCommand({ ...seq, ...extra }, { requireName: true });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as InstanceType<typeof defs.LoopCommandValidationError>).field).toBe(field);
+  });
+});
+
+describe("checkSequenceSteps", () => {
+  it("allows built-in loops and the org's own loops, but not missing commands or nested sequences", async () => {
+    rows.byName.set("perf-hunt", { id: "p", name: "perf-hunt", template: "deadline-checker" });
+    rows.byName.set("nightly", { id: "n", name: "nightly", template: "sequence" });
+    await expect(defs.checkSequenceSteps("o1", [{ command: "/ui-test", args: "" }, { command: "/perf-hunt", args: "" }])).resolves.toBeUndefined();
+    await expect(defs.checkSequenceSteps("o1", [{ command: "/ui-test", args: "" }, { command: "/nope", args: "" }])).rejects.toMatchObject({ field: "steps[1].command" });
+    await expect(defs.checkSequenceSteps("o1", [{ command: "/nightly", args: "" }, { command: "/ui-test", args: "" }])).rejects.toThrow(/cannot nest/);
   });
 });
