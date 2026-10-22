@@ -1,52 +1,32 @@
+import { findCommand, renderCommandHelp, renderCommandList } from "@xyne/shared/commands";
 import type { WebhookCommandCtx } from "./context.js";
 
-// ── /help ── list the available slash commands, then stop.
-export async function handleHelp(ctx: WebhookCommandCtx): Promise<void> {
-  await ctx.reply([
-    // KEEP IN SYNC with what actually parses: parseSlashCommand (this
-    // file's control commands), parseExperimentCommand (lib/experiment.ts)
-    // and TASK_COMMANDS (apps/xyne-claw/src/task-commands.ts). Every entry
-    // below is routable today; a command that works but is missing here is
-    // a command nobody discovers — /design, /dashboard, /explainer and
-    // /record-skill shipped unlisted for months.
-    "**Slash commands**",
+const CHAT_ONLY_LINES = [
+  "",
+  "*In this chat*",
+  "- `/new` (or `/reset`, `/clear`) — start a fresh conversation",
+  "- `/agents` — the agents you can talk to here · `/<agent> <message>` — send a message to one of them",
+  "- `/stop` also works as `/cancel` or `/abort`",
+  "- Files a chat can't carry (HTML traces, big downloads) arrive as a link that opens in your browser",
+];
+
+export function buildHelpText(opts: { chat: boolean; command?: string }): string {
+  if (opts.command) {
+    const def = findCommand(opts.command);
+    if (def) return renderCommandHelp(def);
+    return [`No command called \`/${opts.command.replace(/^\//, "")}\`.`, "", ...renderCommandList("webhook")].join("\n");
+  }
+  return [
+    "**Slash commands** · `/help <command>` for details",
     "",
-    "*Autonomy*",
-    "- `/goal <condition>` — work autonomously until the condition is met · `/goal status`",
-    "- `/experiment <duration> [provider=… model=…] [focus...]` — explore until the deadline",
-    "   ↳ duration is `<number><m|h|d>` — e.g. `/experiment 90m`, `/experiment 8h`, `/experiment 14d`. Omit it for 1h; anything longer than the 30d cap is clamped to 30d.",
-    "- `/understanding [duration cap] [focus...]` — explain every path in scope; ends when the frontier is exhausted, not on the clock",
-    "- `/experiment status` · `/experiment list` · `/experiment findings [id]` · `/experiment stop`",
-    "",
-    "*Producing something*",
-    "- `/design <brief>` — design-studio run: produces a self-contained HTML artifact",
-    "- `/dashboard <brief>` — live-data dashboard snapshot, refreshable on a schedule",
-    "- `/explainer <topic>` — narrated explainer video",
-    "- `/record-skill` — turn a recorded walkthrough into a reusable skill",
-    "- `/spec <ticket>` — interview you, then write the specification onto the ticket",
-    "",
-    "*Controlling this thread*",
-    "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
-    "- `/clear` — wipe this thread's context and start fresh",
-    "- `/compact [focus]` — summarize & shrink the context, then continue",
-    "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
-    "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
-    "- `/status` — debug panel for this thread's current run: what it's doing now, tool activity in the last 5 minutes, and whether it's stuck or just slow",
-    "- `/debug` — one HTML file with the full execution trace of this thread's current run: every tool call and LLM turn with timings (no tool outputs)",
-    "- `/debug all` — the same trace for every earlier session in this thread, newest first, each expandable — for tracking an issue across runs",
-    "- `/debug chain` — why the agent workflow bound to this channel did or did not hand off to the next agent: bindings, published state, outgoing edges and plan mode",
-    "- `/eval <question>` — run the question once on every configured provider; each answers in this thread, then an HTML comparison of their timings is attached. `providers=claude,codex` narrows it",
-    "- `/help` — show this list",
-    // Chat-only commands: a messenger has no @mentions or thread controls.
-    ...(ctx.channelDelivery
-      ? [
-          "",
-          "*In this chat*",
-          "- `/new` (or `/reset`, `/clear`) — start a fresh conversation",
-          "- `/agents` — the agents you can talk to here · `/<agent> <message>` — send a message to one of them",
-          "- `/stop` also works as `/cancel` or `/abort`",
-          "- Files a chat can't carry (HTML traces, big downloads) arrive as a link that opens in your browser",
-        ]
-      : []),
-  ].join("\n"), "Failed to post /help reply");
+    ...renderCommandList("webhook"),
+    ...(opts.chat ? CHAT_ONLY_LINES : []),
+  ].join("\n");
+}
+
+export async function handleHelp(ctx: WebhookCommandCtx, command?: string): Promise<void> {
+  await ctx.reply(
+    buildHelpText({ chat: Boolean(ctx.channelDelivery), ...(command ? { command } : {}) }),
+    "Failed to post /help reply",
+  );
 }

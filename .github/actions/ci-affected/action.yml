@@ -2,8 +2,9 @@ name: CI affected check
 description: >-
   Decides whether a CI job needs to run for the current pull request. Runs the
   job only if the given pnpm workspace package changed since the PR base, or
-  depends (transitively, via `workspace:` deps) on one that changed. Always runs
-  on non-PR events, and on any failure to decide.
+  depends (transitively, via `workspace:` deps) on one that changed. In the
+  merge queue, only entries that change nothing outside apps/mobile skip.
+  Always runs on other events, and on any failure to decide.
 
 # Referenced from ci.yml as juspay/xyne-spaces/.github/actions/ci-affected@main
 # (not ./), so a pull request cannot alter it and skip its own checks.
@@ -33,14 +34,24 @@ runs:
       env:
         PKG: ${{ inputs.package }}
         EXTRA_PATHS: ${{ inputs.extra-paths }}
+        MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
       run: |
         set -uo pipefail
         emit() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "ci-affected: $PKG run=$1 ($2)"; exit 0; }
 
-        [ "$GITHUB_EVENT_NAME" = "pull_request" ] || emit true "not a pull_request"
-
-        # On pull_request the checkout is a merge commit; HEAD^1 is the base tip.
-        base=$(git rev-parse --verify -q HEAD^1) || emit true "no base commit"
+        case "$GITHUB_EVENT_NAME" in
+          # On pull_request the checkout is a merge commit; HEAD^1 is the base tip.
+          pull_request) base=$(git rev-parse --verify -q HEAD^1) || emit true "no base commit" ;;
+          merge_group)
+            base=$MERGE_GROUP_BASE
+            if [ -z "$base" ] || ! git fetch -q --no-tags --depth=1 origin "$base" \
+              || ! files=$(git diff --name-only "$base" HEAD) || [ -z "$files" ]; then
+              emit true "no merge queue base commit"
+            fi
+            grep -qv '^apps/mobile/' <<<"$files" && emit true "merge queue entry is not mobile-only"
+            ;;
+          *) emit true "not a pull_request or merge_group" ;;
+        esac
 
         if affected=$(pnpm ls --filter "...[$base]" --depth -1 --json 2>/dev/null \
           | node -e 'const l=JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(l.map(p=>p.name).join("\n"))'); then

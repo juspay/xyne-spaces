@@ -355,6 +355,12 @@ const electronAPI = {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
+  // Spaces MCP: sign in and out through ~/.xyne/agent/spaces.json, and its status.
+  // Main process only answers the main window; the session never comes back here.
+  getSpacesMcpStatus: () => ipcRenderer.invoke('spaces-mcp:status'),
+  signInSpacesMcp: () => ipcRenderer.invoke('spaces-mcp:sign-in'),
+  signOutSpacesMcp: () => ipcRenderer.invoke('spaces-mcp:sign-out'),
+
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
   saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>

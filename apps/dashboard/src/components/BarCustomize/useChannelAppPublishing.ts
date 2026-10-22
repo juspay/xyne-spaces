@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ChannelRole,
@@ -24,7 +25,7 @@ export interface AppPublishOptions {
   /** The channel already has the maximum number of published apps. */
   isFull: boolean;
   onToggle: (app: ArtifactAppSummary, next: boolean) => void;
-  setPublished: (appId: string, next: boolean) => void;
+  setPublished: (appId: string, next: boolean, title: string) => void;
   /** Who a published app reaches, for the picker's copy. */
   audience: 'channel' | 'conversation';
 }
@@ -62,8 +63,8 @@ export const useChannelAppPublishing = (
     if (!canPublish) return undefined;
     // One app per call: the mutator applies it to the rows as they stand, so a
     // quick second click or another person publishing at once isn't lost.
-    const setPublished = (appId: string, next: boolean): void => {
-      void surfaceMutationError(
+    const applyPublished = (appId: string, next: boolean): Promise<boolean> =>
+      surfaceMutationError(
         zero.mutate(
           next
             ? mutators.channel.publishApp({ id: uuidv4(), channelId, appId, timestamp: Date.now() })
@@ -71,6 +72,14 @@ export const useChannelAppPublishing = (
         ),
         next ? 'Could not publish the app' : 'Could not unpublish the app',
       );
+    const setPublished = (appId: string, next: boolean, title: string): void => {
+      void applyPublished(appId, next).then(saved => {
+        if (!saved || next) return;
+        toast.success(`Unpublished ${title}`, {
+          duration: 4000,
+          action: { label: 'Undo', onClick: () => setPublished(appId, true, title) },
+        });
+      });
     };
     return {
       publishedAppIds: new Set(published),
@@ -79,65 +88,8 @@ export const useChannelAppPublishing = (
       setPublished,
       onToggle: (app, next): void => {
         if (next) setAppSnapshot(app.id, { title: app.title, icon: app.icon });
-        setPublished(app.id, next);
+        setPublished(app.id, next, app.title);
       },
     };
   }, [canPublish, published, channelId, zero, isDirect]);
-};
-
-export interface StagedAppPublishing {
-  publish: AppPublishOptions | undefined;
-  isPendingUnpublish: (appId: string) => boolean;
-  commit: () => void;
-  discard: () => void;
-}
-
-/** Holds publish/unpublish changes until `commit`, for the header's Save/Cancel edit mode. */
-export const useStagedAppPublishing = (
-  publish: AppPublishOptions | undefined,
-): StagedAppPublishing => {
-  const [pending, setPending] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-
-  const staged = useMemo((): AppPublishOptions | undefined => {
-    if (!publish) return undefined;
-    const ids = new Set(publish.publishedAppIds);
-    for (const [appId, next] of pending) {
-      if (next) ids.add(appId);
-      else ids.delete(appId);
-    }
-    const setPublished = (appId: string, next: boolean): void =>
-      setPending(prev => {
-        const updated = new Map(prev);
-        if (publish.publishedAppIds.has(appId) === next) updated.delete(appId);
-        else updated.set(appId, next);
-        return updated;
-      });
-    return {
-      ...publish,
-      publishedAppIds: ids,
-      isFull: ids.size >= MAX_PUBLISHED_APPS,
-      setPublished,
-      onToggle: (app, next): void => {
-        if (next) setAppSnapshot(app.id, { title: app.title, icon: app.icon });
-        setPublished(app.id, next);
-      },
-    };
-  }, [publish, pending]);
-
-  const commit = useCallback((): void => {
-    if (publish) {
-      // Unpublishes first, so publishes made room for still fit under the cap.
-      for (const [appId, next] of pending) if (!next) publish.setPublished(appId, false);
-      for (const [appId, next] of pending) if (next) publish.setPublished(appId, true);
-    }
-    setPending(new Map());
-  }, [publish, pending]);
-
-  const discard = useCallback((): void => setPending(new Map()), []);
-  const isPendingUnpublish = useCallback(
-    (appId: string): boolean => pending.get(appId) === false,
-    [pending],
-  );
-
-  return { publish: staged, isPendingUnpublish, commit, discard };
 };

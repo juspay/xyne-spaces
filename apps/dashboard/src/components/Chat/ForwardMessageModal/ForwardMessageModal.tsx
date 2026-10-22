@@ -112,7 +112,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const { isMobile } = usePlatform();
   const MemoizedInputBox = getMemoizedInputBox();
   const [selectedTargets, setSelectedTargets] = useState<ForwardTarget[]>([]);
-  const [isInitialOpen, setIsInitialOpen] = useState(!isMobile); // Don't show initial suggestions on mobile
   const [comboboxOpen, setComboboxOpen] = useState(!isMobile); // Don't auto-open dropdown on mobile
   const comboboxInputRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
@@ -147,8 +146,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   // Focus the combobox input *after* the dialog open animation settles. Focusing
   // it synchronously during open (e.g. via the dialog's auto-focus) gets stolen
   // by the rich-text InputBox mounting, which blurs the combobox — that blur both
-  // closes the popup (base-ui onOpenChange) and trips onBlur → setIsInitialOpen(false),
-  // wiping out the initial suggestions. Deferring the focus avoids that race.
+  // closes the popup (base-ui onOpenChange) and hides the initial suggestions.
+  // Deferring the focus avoids that race.
   useEffect(() => {
     const timeout = setTimeout(() => {
       comboboxInputRef.current?.focus();
@@ -551,7 +550,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     setAddAgent(true);
     setShareOperationId(uuidv4());
     setInputValue('');
-    setIsInitialOpen(true);
     setComboboxOpen(true);
     setTimeout(() => comboboxInputRef.current?.focus(), 0);
   };
@@ -743,9 +741,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     });
   }
   const searchQuery = shownSearch.query;
-  useEffect(() => {
-    if (searchQuery) setIsInitialOpen(false);
-  }, [searchQuery]);
   const affinityVersion = useAffinityCallback();
   const rankedUsers = useRankedActivePeople(searchQuery, 20, {
     searchCandidates: shownSearch.users,
@@ -759,8 +754,17 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     void affinityVersion;
     // Show default suggestions on initial modal open with empty input
     if (!searchQuery) {
-      if (isInitialOpen) {
+      // Show recents whenever the popup is open with an empty query (desktop only) —
+      // not just on first open, so reopening after a pick/blur/clear doesn't render
+      // "No options found".
+      if (comboboxOpen && !isMobile) {
         const defaults: DropdownListItemType[] = [];
+        const usersOnly = selectionMode === 'users' || selectionMode === 'group_dm';
+
+        const groupDmMemberIdsForDefaults =
+          selectionMode === 'group_dm'
+            ? new Set(selectedTargets.find(t => t.type === 'group_dm')?.memberIds ?? [])
+            : new Set<string>();
 
         // Recent 1:1 DMs ranked by MFU affinity, recency tie-break (up to 5)
         const recentDMs =
@@ -777,7 +781,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUser?.id;
           if (isSelfDM) {
             const selfUser = allUsers.find(u => u.id === currentUser?.id);
-            if (selfUser) {
+            if (selfUser && selectionMode === 'none') {
               defaults.push({
                 leftSlot: <Avatar userId={selfUser.id} size='sm' />,
                 label: getForwardUserLabel(selfUser),
@@ -791,7 +795,12 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           const participantIds = getDMParticipantIdsToFetch(channel, currentUser?.id || '');
           const otherUser = allUsers.find(user => participantIds.includes(user.id));
 
-          if (otherUser && otherUser.id !== currentUser?.id) {
+          if (
+            otherUser &&
+            otherUser.id !== currentUser?.id &&
+            !selectedUserIds.has(otherUser.id) &&
+            !groupDmMemberIdsForDefaults.has(otherUser.id)
+          ) {
             defaults.push({
               leftSlot: <Avatar userId={otherUser.id} size='sm' />,
               label: getUserDisplayName(otherUser),
@@ -800,6 +809,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             });
           }
         });
+
+        // Once people are picked, only more people can be added — no group DMs / channels.
+        if (usersOnly) return defaults;
 
         // Recent GROUP_DMs ranked by MFU affinity, recency tie-break (up to 5)
         const recentGroupDMs = rankChannelsByAffinity(
@@ -911,7 +923,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   }, [
     searchQuery,
     selectedUserIds,
-    isInitialOpen,
+    comboboxOpen,
+    isMobile,
     rankedUsers,
     channelsSuggestions,
     groupDmSearchItems,
@@ -942,7 +955,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       };
       setSelectedTargets((prev: ForwardTarget[]) => [...prev, newTarget]);
       setInputValue('');
-      setIsInitialOpen(false);
       comboboxInputRef.current?.focus();
       return;
     }
@@ -971,7 +983,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         setSelectedTargets([newTarget]);
       }
       setInputValue('');
-      setIsInitialOpen(false);
       return;
     }
   };
@@ -1104,7 +1115,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   ? 'Select an active channel or group DM to share this conversation'
                   : 'Select a channel or one or more users to forward this message'
               }
-              onBlur={() => setIsInitialOpen(false)}
               open={comboboxOpen}
               onOpenChange={setComboboxOpen}
               autoHighlight={true}

@@ -883,11 +883,11 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
-- **spaces-sdlc-write-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
-- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact** with versionId — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
+- **spaces-sdlc-write-artifact** — create or update a PRD or Tech Doc in an SDLC hub. Use action create (channelId, artifactTypeId, trackId; repoIds optional) or update (canvasId).
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact** with versionId — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the hub. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
-These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
+These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`, \`spaces-sdlc-write-artifact\`. Tell the user to hit Approve. Do NOT retry.
 
 # Ask before you assume
 If a question is genuinely ambiguous — which "Apollo"? which team? which time window? — ask ONE crisp clarifying question. Five seconds beats a wrong answer. But resolve easy referents (pronouns, "this/that", "the one we talked about") yourself — only ask when the ambiguity actually changes the answer.

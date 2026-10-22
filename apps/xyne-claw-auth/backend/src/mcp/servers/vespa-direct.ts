@@ -218,6 +218,11 @@ export function transformHit(
   let context: string | undefined;
 
   const textVal = Array.isArray(f["text"]) ? (f["text"] as string[]).join(" ") : String(f["text"] ?? "");
+  // The `claw` summary carries the 3 best term-matched chunks as claw_chunks; `default`
+  // carries chunks.
+  // claw_chunks also rides in `default`, empty when the query scored no chunks.
+  const clawChunks = f["claw_chunks"];
+  const chunks = Array.isArray(clawChunks) && clawChunks.length > 0 ? clawChunks : f["chunks"];
 
   if (docType === "message" || docType === "chat") {
     // chat_message's channel name is `messageChannelName` (not `channelName`), and
@@ -240,7 +245,7 @@ export function transformHit(
     // summary; `text` doesn't exist on file). description is the summary
     // (transcripts put their summary/action-items here); chunks are the
     // best-matching body snippets. Surface both so the LLM gets real content.
-    const chunksVal = Array.isArray(f["chunks"]) ? (f["chunks"] as string[]).join("\n") : String(f["chunks"] ?? "");
+    const chunksVal = Array.isArray(chunks) ? (chunks as string[]).join("\n") : String(chunks ?? "");
     context = [String(f["description"] ?? ""), chunksVal].filter(Boolean).join("\n") || textVal;
   } else if (docType === "user") {
     title = String(f["name"] ?? f["email"] ?? "User");
@@ -255,7 +260,7 @@ export function transformHit(
     subtitle = String(f["channelName"] ?? "");
     // Same as file: content is in the best-matching `chunks` (+ description if
     // present); `text` doesn't exist on the attachment schema.
-    const chunksVal = Array.isArray(f["chunks"]) ? (f["chunks"] as string[]).join("\n") : String(f["chunks"] ?? "");
+    const chunksVal = Array.isArray(chunks) ? (chunks as string[]).join("\n") : String(chunks ?? "");
     context = [String(f["description"] ?? ""), chunksVal].filter(Boolean).join("\n") || textVal;
   } else if (docType === "sam_transcript") {
     title = String(f["title"] ?? f["meetingTitle"] ?? "Transcript");
@@ -266,7 +271,7 @@ export function transformHit(
     // citation chip label. Empty subject falls back to "Email".
     title = str(String(f["subject"] ?? "").replace(/<\/?hi>/gi, "")) ?? "Email";
     subtitle = String(f["from"] ?? "");
-    context = Array.isArray(f["chunks"]) ? (f["chunks"] as string[]).join(" ") : textVal;
+    context = Array.isArray(chunks) ? (chunks as string[]).join(" ") : textVal;
   } else if (docType === "project") {
     // project's name field (not `title`) is the human label; description is body.
     title = String(f["name"] ?? f["title"] ?? f["docId"] ?? "Project");
@@ -275,7 +280,7 @@ export function transformHit(
     title = String(f["title"] ?? f["docId"] ?? docType);
     // Surface whatever body the schema/summary provides: description +
     // best-matching chunks + text, whichever are present.
-    const chunksVal = Array.isArray(f["chunks"]) ? (f["chunks"] as string[]).join("\n") : String(f["chunks"] ?? "");
+    const chunksVal = Array.isArray(chunks) ? (chunks as string[]).join("\n") : String(chunks ?? "");
     context = [String(f["description"] ?? ""), chunksVal, textVal].filter(Boolean).join("\n");
   }
 
@@ -704,6 +709,8 @@ export async function queryDirect(
   rankInputs?: Record<string, unknown>,
   workspaceId?: string,
   includeRawFields = false,
+  /** presentation.summary for the hits; omitted → the schema's `default` summary. */
+  summary?: string,
 ): Promise<DirectSearchResponse> {
   if (!userId) throw new Error("queryDirect: userId is required for ACL enforcement — XYNE_USER_ID is not set.");
   if (workspaceId !== undefined && !workspaceId.trim()) throw new Error("queryDirect: workspaceId is required for workspace enforcement.");
@@ -734,6 +741,7 @@ export async function queryDirect(
     timeout: "30s",
     tracelevel: 0,
     "ranking.profile": profile,
+    ...(summary ? { "presentation.summary": summary } : {}),
   };
 
   // `unranked` takes no inputs. For any scoring profile, send the inputs the

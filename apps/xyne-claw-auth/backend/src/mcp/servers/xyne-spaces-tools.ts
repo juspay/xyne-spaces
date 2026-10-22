@@ -18,6 +18,7 @@ import {
   appFetchBuffer,
   type SpacesAuthContext,
 } from "./xyne-spaces-client.js";
+import { MAX_BULK_TICKETS } from "./bulk-tickets.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
@@ -4563,6 +4564,8 @@ const spacesCreateBulkTickets: ToolDef = {
       tickets: {
         type: "array",
         minItems: 1,
+        maxItems: MAX_BULK_TICKETS,
+        description: `At most ${MAX_BULK_TICKETS} tickets per call; split a larger set into several calls.`,
         items: {
           type: "object",
           properties: {
@@ -4591,9 +4594,8 @@ const spacesCreateBulkTickets: ToolDef = {
     const tickets = Array.isArray(args["tickets"]) ? args["tickets"] as BulkTicketInput[] : [];
     if (tickets.length === 0) return err("tickets must contain at least one ticket.");
 
-    const MAX_TICKETS = 100;
-    if (tickets.length > MAX_TICKETS) {
-      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Create bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    if (tickets.length > MAX_BULK_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_BULK_TICKETS}). Create bulk tickets in batches of ${MAX_BULK_TICKETS} or fewer.`);
     }
 
     const defaultProjectId = optionalString(args["projectId"]);
@@ -4848,6 +4850,8 @@ const spacesUpdateBulkTickets: ToolDef = {
       tickets: {
         type: "array",
         minItems: 1,
+        maxItems: MAX_BULK_TICKETS,
+        description: `At most ${MAX_BULK_TICKETS} tickets per call; split a larger set into several calls.`,
         items: {
           type: "object",
           properties: {
@@ -4883,9 +4887,8 @@ const spacesUpdateBulkTickets: ToolDef = {
     const tickets = Array.isArray(args["tickets"]) ? (args["tickets"] as BulkTicketUpdateInput[]) : [];
     if (tickets.length === 0) return err("tickets must contain at least one ticket.");
 
-    const MAX_TICKETS = 100;
-    if (tickets.length > MAX_TICKETS) {
-      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Update bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
+    if (tickets.length > MAX_BULK_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_BULK_TICKETS}). Update bulk tickets in batches of ${MAX_BULK_TICKETS} or fewer.`);
     }
 
     const defaultStage = optionalString(args["defaultStage"]);
@@ -5640,7 +5643,7 @@ const spacesSdlcListTracks = sdlcTool({
   name: SDLC_TOOL_NAMES.listTracks,
   description:
     "List the tracks (workstreams) of one SDLC Hub with each track's folders ({ id, name, parentId }; parentId is the track id for a " +
-    "top-level folder). Call it before creating a PRD or Tech Doc so the user can pick a track.",
+    "top-level folder). Call it before creating an artifact to resolve its trackId.",
   inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
   handler: (args, ctx) => sdlcClawCall("SDLC tracks", "/tracks/list", pick(args, ["channelId"]), ctx),
 });
@@ -5683,9 +5686,25 @@ const spacesSdlcListArtifactTypes = sdlcTool({
   name: SDLC_TOOL_NAMES.listArtifactTypes,
   description:
     "List the artifact types of one SDLC Hub with their id. PRD and Tech Doc are built in; users add custom types. " +
-    "Pass the id as artifactTypeId to spaces-sdlc-write-artifact create.",
+    "Pass the id as artifactTypeId to spaces-sdlc-write-artifact create. canCreate false means this user cannot create that type (Hub Knowledge for non-admins): never offer it. canWriteWiki false means this user cannot write Wiki pages.",
   inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
   handler: (args, ctx) => sdlcClawCall("SDLC artifact types", "/artifact-types/list", pick(args, ["channelId"]), ctx),
+});
+
+const spacesSdlcCreateArtifactType = sdlcTool({
+  name: SDLC_TOOL_NAMES.createArtifactType,
+  description:
+    "Create a custom artifact type in one SDLC Hub. Returns its id to pass as artifactTypeId. " +
+    "Only when the user asks for a new type; fails if the hub already has a type with that name.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      name: { type: "string", minLength: 1, maxLength: 80 },
+    },
+    required: ["channelId", "name"],
+  },
+  handler: (args, ctx) => sdlcClawCall("SDLC artifact type", "/artifact-types", pick(args, ["channelId", "name"]), ctx),
 });
 
 const spacesSdlcListEntityLinks = sdlcTool({
@@ -5809,7 +5828,7 @@ async function writeSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCont
     case "remove_section":
       return sdlcClawCall("Edit SDLC artifact section", "/artifacts/section", pick(args, ["canvasId", "action", "heading", "markdown"]), ctx);
     case "move":
-      return sdlcClawCall("Move SDLC artifact", "/artifacts/move", pick(args, ["canvasId", "parentId"]), ctx);
+      return sdlcClawCall("Move SDLC artifact", "/artifacts/move", { ...pick(args, ["canvasId", "parentId", "adoptApproved"]), folderId: args["artifactTypeId"] }, ctx);
     default:
       return err(`Unsupported SDLC artifact action: ${action}`);
   }
@@ -5847,11 +5866,14 @@ const spacesSdlcWriteArtifact = sdlcTool({
     "Create or change one SDLC artifact (PRD, Tech Doc, custom type, Hub Knowledge) or, with kind WIKI, one Wiki page. " +
     "create: artifacts take channelId, artifactTypeId (from spaces-sdlc-list-artifact-types), trackId (every type except Hub Knowledge), " +
     "optional trackFolderId (a folder inside that track, from spaces-sdlc-list-tracks), title, markdown, optional repoIds and relatedCanvasIds; " +
-    "Wiki pages take channelId, optional repoId (omit for the Hub Wiki), folderPath, title, markdown. " +
+    "Wiki pages take channelId, repoId of the repository's Wiki, omitted only when the user named the Hub Wiki, folderPath, title, markdown. " +
     "update: canvasId plus any of markdown, title, relatedCanvasIds (links are added, never removed). " +
     "replace_section / insert_section: canvasId, heading (an existing heading), markdown starting with a heading; remove_section: canvasId, heading. " +
     "Prefer section actions for focused edits so unrelated content survives. " +
-    "move: artifacts take canvasId and parentId (a track folder in the same track, or the track id for its root); Wiki pages take canvasId and folderPath. " +
+    "move: artifacts take canvasId plus parentId (a track folder in the same track, or the track id for its root) and/or artifactTypeId to change its type; " +
+    "artifactTypeId of Hub Knowledge takes the artifact out of its track into Hub Knowledge (no parentId). " +
+    "move also files an existing non-SDLC canvas the user owns into the hub (and makes it visible to hub members): pass artifactTypeId, plus parentId unless the type is Hub Knowledge. " +
+    "Wiki pages take canvasId and folderPath. " +
     "Wiki actions always take channelId and the repoId of that Wiki. Cite code as markdown links pinned to a commit.",
   inputSchema: {
     type: "object",
@@ -5863,10 +5885,10 @@ const spacesSdlcWriteArtifact = sdlcTool({
       title: { type: "string", minLength: 1, maxLength: 255 },
       markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
       heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing heading the section action targets." },
-      artifactTypeId: { type: "string", minLength: 1, description: `For create. ${SDLC_ARTIFACT_TYPE}` },
+      artifactTypeId: { type: "string", minLength: 1, description: `For create, and for move to change the type or file a non-SDLC canvas. ${SDLC_ARTIFACT_TYPE}` },
       trackId: { type: "string", minLength: 1, description: "Track id, for create." },
       trackFolderId: { type: "string", minLength: 1, description: `For create, optional: file the artifact in this folder of trackId instead of the track's top level. ${SDLC_TRACK_FOLDER}` },
-      parentId: { type: "string", minLength: 1, description: "Artifact move target: a track folder id in the same track, or the track id for its top level." },
+      parentId: { type: "string", minLength: 1, description: "Artifact move target: a track folder id in the same track, or the track id for its top level. Omit for Hub Knowledge." },
       folderPath: { type: "string", maxLength: 512, description: "Wiki folders separated by \"/\", e.g. \"architecture/payments\". Empty is the Wiki's top level." },
       repoId: { type: "string", minLength: 1, description: "Wiki only: the repository whose Wiki the page belongs to." },
       repoIds: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 50, description: "Artifact create only: repositories the artifact is about." },
@@ -5892,6 +5914,7 @@ const spacesSdlcArchiveArtifact = sdlcTool({
     sdlcClawCall("Archive SDLC artifact", "/artifacts/archive", {
       canvasId: args["canvasId"],
       archived: args["action"] === "archive",
+      ...pick(args, ["generationCommit", "repoId"]),
     }, ctx),
 });
 
@@ -8125,6 +8148,8 @@ const spacesVespaSearch: ToolDef = {
         built.rankProfile,
         undefined,
         workspaceId,
+        undefined,
+        built.summary,
       );
       return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
@@ -10677,6 +10702,7 @@ export const tools: ToolDef[] = [
   spacesSdlcCreateTrack,
   spacesSdlcCreateTrackFolder,
   spacesSdlcListArtifactTypes,
+  spacesSdlcCreateArtifactType,
   spacesSdlcWriteArtifact,
   spacesSdlcArchiveArtifact,
   spacesSdlcCreatePullRequest,

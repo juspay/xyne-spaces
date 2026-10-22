@@ -37,8 +37,8 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       # Early exit: skip every step below when nothing this job builds changed
-      # (pull requests only; push/merge queue always run). The action is pinned to
-      # main so a PR cannot edit it to skip its own checks.
+      # (pull requests, and mobile-only merge queue entries; push always runs).
+      # The action is pinned to main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
         uses: juspay/xyne-spaces/.github/actions/ci-affected@main
@@ -129,8 +129,8 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       # Early exit: skip every step below when nothing this job builds changed
-      # (pull requests only; push/merge queue always run). The action is pinned to
-      # main so a PR cannot edit it to skip its own checks.
+      # (pull requests, and mobile-only merge queue entries; push always runs).
+      # The action is pinned to main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
         uses: juspay/xyne-spaces/.github/actions/ci-affected@main
@@ -214,10 +214,20 @@ jobs:
       PARALLEL: 5
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
+      # Skips the suite for mobile-only merge queue entries.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: xyne-automation
+
       - uses: actions/setup-node@v5
+        if: steps.affected.outputs.run == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -226,20 +236,22 @@ jobs:
       # container (mcr.microsoft.com/playwright base image, Chromium pre-baked),
       # and the runner's egress proxy blocks cdn.playwright.dev anyway.
       - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
         run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
 
       - name: Run automation tests
+        if: steps.affected.outputs.run == 'true'
         run: pnpm run test
 
       - name: Show container states and logs
-        if: always()
+        if: always() && steps.affected.outputs.run == 'true'
         run: |
           find tools/xyne-automation/reports -type f \( -name '*.log' -o -name '*.txt' \) | sort | while read -r f; do
             echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
           done
 
       - name: Push report to Spaces
-        if: always()
+        if: always() && steps.affected.outputs.run == 'true'
         env:
           JWT: ${{ secrets.TESTCASES_JWT }}
           CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
@@ -306,8 +318,8 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       # Early exit: skip every step below when nothing this job builds changed
-      # (pull requests only; push/merge queue always run). The action is pinned to
-      # main so a PR cannot edit it to skip its own checks.
+      # (pull requests, and mobile-only merge queue entries; push always runs).
+      # The action is pinned to main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
         uses: juspay/xyne-spaces/.github/actions/ci-affected@main
@@ -360,8 +372,8 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       # Early exit: skip every step below when nothing this job builds changed
-      # (pull requests only; push/merge queue always run). The action is pinned to
-      # main so a PR cannot edit it to skip its own checks.
+      # (pull requests, and mobile-only merge queue entries; push always runs).
+      # The action is pinned to main so a PR cannot edit it to skip its own checks.
       - name: Check if affected
         id: affected
         uses: juspay/xyne-spaces/.github/actions/ci-affected@main
@@ -404,6 +416,79 @@ jobs:
       - name: Typecheck xyne-claw
         if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-claw run typecheck
+
+  # apps/mobile has its own lockfile; @xyne/shared is linked, so build it first.
+  mobile:
+    name: Mobile checks
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      # apps/mobile is outside the root workspace, so it is matched by path.
+      - name: Check if affected
+        id: affected
+        uses: juspay/xyne-spaces/.github/actions/ci-affected@main
+        with:
+          package: "@xyne/shared"
+          extra-paths: apps/mobile
+
+      - uses: actions/setup-node@v5
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/mobile/pnpm-lock.yaml
+
+      - name: Authenticate to GCP (npm mirror)
+        id: gcp-auth
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
+          token_format: access_token
+
+      # User-level config: apps/mobile is its own workspace and ignores the root .npmrc.
+      - name: Configure pnpm for Artifact Registry npm mirror
+        if: steps.affected.outputs.run == 'true' && vars.USE_SELF_HOSTED_CI == 'true'
+        run: |
+          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
+          pnpm config set "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken" "${{ steps.gcp-auth.outputs.access_token }}"
+
+      - name: Install + build @xyne/shared
+        if: steps.affected.outputs.run == 'true'
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --filter @xyne/shared...
+
+      - name: Install dependencies
+        if: steps.affected.outputs.run == 'true'
+        run: >-
+          pnpm install ${{ env.PNPM_FLAGS }}
+          ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
+          --dir apps/mobile
+
+      - name: Typecheck
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm --dir apps/mobile run typecheck
+
+      - name: Lint (errors only)
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm --dir apps/mobile run lint:errors-only
+
+      - name: Format check
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm --dir apps/mobile run format:check
+
+      - name: Tests
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm --dir apps/mobile run test
 
   # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed

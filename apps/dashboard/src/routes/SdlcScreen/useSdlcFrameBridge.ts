@@ -10,6 +10,7 @@ import {
   type SdlcEmbedTab,
   type SdlcHistoryPage,
 } from './sdlcFrameMessages';
+import { invalidateSdlcResource } from './sdlcResourceChanged';
 
 /** True when this document is the SDLC bundle running inside the parent's frame. */
 export function isFramedSdlcSurface(): boolean {
@@ -394,6 +395,10 @@ export function useSdlcFrameBridge(): void {
       if (event.source !== window.parent) return;
 
       const message = parseSdlcFrameMessage(event.data);
+      if (message?.type === SDLC_FRAME_MESSAGE.resourceChanged) {
+        invalidateSdlcResource(message.kind);
+        return;
+      }
       if (message?.type === SDLC_FRAME_MESSAGE.showBrowser) {
         const here = locationRef.current;
         const next = browserTabSearch(here.search);
