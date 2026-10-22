@@ -1,7 +1,7 @@
 //! A warm start: the query shapes the last process was asked for, kept in
 //! a file and planned again before this process says it is ready, so a
-//! restart does not pay the planner's counts (and PostgreSQL's cold cache
-//! under them) on the first client of every shape. A shape is a query's
+//! restart does not pay the planner's estimates (and PostgreSQL's cold
+//! cache under them) on the first client of every shape. A shape is a query's
 //! name and the AST the application server gave for it; the plan cache is
 //! keyed by the tree that AST translates to, so a shape planned here is a
 //! cache hit for the first client that asks for it again. The file is
@@ -335,7 +335,7 @@ mod tests {
                 DbColumn::new("conversationId", ValueType::String),
             ],
         )]);
-        let cache = PlanCache::new(Duration::from_secs(60), 100, Duration::from_secs(60));
+        let cache = PlanCache::new(Duration::from_secs(60), 100);
         let storage = MemoryStorage::new();
         let policy = Policy {
             limit: 1000,
@@ -377,16 +377,12 @@ mod tests {
                 skipped: 0
             }
         );
-        assert_eq!(cache.queries(), 1, "two threads of one query are one plan");
-        assert!(
-            (1..=2).contains(&cache.len()),
-            "the second thread is planned by the name once the first is"
-        );
+        assert_eq!(cache.len(), 2, "each thread is planned on its own");
         let none = WarmStart::replay(
             shapes,
             &catalog,
             policy,
-            &PlanCache::new(Duration::from_secs(60), 100, Duration::from_secs(60)),
+            &PlanCache::new(Duration::from_secs(60), 100),
             &storage,
             Duration::ZERO,
             4,

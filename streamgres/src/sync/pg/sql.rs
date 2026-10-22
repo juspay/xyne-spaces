@@ -96,6 +96,18 @@ pub fn count_sql(
     ))
 }
 
+/// `EXPLAIN (FORMAT JSON)` of the rows of `name` (described by `table`)
+/// matching `filter`, rendered as a plain `SELECT` renders it (an
+/// `EXISTS` leaf is false): PostgreSQL's estimate of the rows, nothing
+/// read.
+pub fn explain_sql(name: &str, table: &DbTable, filter: &Where) -> String {
+    format!(
+        "EXPLAIN (FORMAT JSON) SELECT 1 FROM {} WHERE {}",
+        quote_ident(name),
+        render_where(filter, &Scope::plain(table))
+    )
+}
+
 /// What a filter's columns refer to while it is rendered: the table (for
 /// the columns' types) and, in a count, the alias the columns are
 /// qualified with, the node whose inner edges an `EXISTS` leaf may name,
