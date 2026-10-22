@@ -8,7 +8,8 @@ vi.mock("./governance-audit.js", () => ({ recordGovernanceEvent: record, queueGo
 vi.mock("./audit.js", () => ({ orgIdForUser: vi.fn(async (id: string) => (id === "u1" ? "org-1" : undefined)) }));
 vi.mock("../db.js", () => ({ prisma: { agentRun: { findUnique: findRun } } }));
 const kill = { snapshot: { epoch: 0, takenAtMs: 0, switches: [] as Array<Record<string, unknown>> } };
-vi.mock("./governance-kill.js", () => ({ currentKillSnapshot: () => ({ ...kill.snapshot, takenAtMs: kill.snapshot.takenAtMs || Date.now() }), killForTool: () => null }));
+// A fresh snapshot by default; stamped slightly in the past so it never reads as taken after the decision's clock.
+vi.mock("./governance-kill.js", () => ({ currentKillSnapshot: () => ({ ...kill.snapshot, takenAtMs: kill.snapshot.takenAtMs || Date.now() - 50 }), killForTool: () => null }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 
 const { effectiveGrant, gateCall, runContextForSession } = await import("./governance-gate.js");
