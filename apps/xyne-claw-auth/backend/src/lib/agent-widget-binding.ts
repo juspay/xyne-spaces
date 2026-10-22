@@ -123,6 +123,57 @@ export async function setWidgetBindingStatus(
   });
 }
 
+/**
+ * Point a binding at where its widget now lives without touching the status it
+ * last showed — the status is only ever moved by claimWidgetBindingStatus. A
+ * binding re-pointed at a different chat/thread starts with no status, so the
+ * new place hears the current one even if the old place already did.
+ */
+export async function upsertWidgetBindingRoute(input: WidgetBindingInput): Promise<void> {
+  const where = { kind_screenId: { kind: input.kind, screenId: input.screenId } };
+  const prev = await prisma.agentWidgetBinding.findUnique({
+    where,
+    select: { channelId: true, conversationId: true },
+  });
+  const moved = !!prev && (prev.channelId !== input.channelId || prev.conversationId !== input.conversationId);
+  const route = {
+    orgId: input.orgId,
+    externalKey: input.externalKey ?? null,
+    conversationId: input.conversationId,
+    channelId: input.channelId,
+    messageId: input.messageId ?? null,
+    spacesAppId: input.spacesAppId,
+    spacesAppUserId: input.spacesAppUserId,
+    agentSlug: input.agentSlug ?? null,
+    data: input.data ? (input.data as Prisma.InputJsonValue) : Prisma.JsonNull,
+  };
+  await prisma.agentWidgetBinding.upsert({
+    where,
+    create: { kind: input.kind, screenId: input.screenId, ...route, status: null },
+    update: { ...route, ...(moved ? { status: null } : {}) },
+  });
+}
+
+/**
+ * Move a binding to `status` and say whether this call did it: true exactly
+ * once per status change. For surfaces that cannot edit a message in place and
+ * resend instead (a messenger), so the in-run render, the git-host webhook and
+ * a provider re-delivery reporting the same transition send it once between
+ * them. The WHERE is the lock — Postgres serializes concurrent claims and the
+ * losers match 0 rows. NULL never equals anything, hence the explicit branch.
+ */
+export async function claimWidgetBindingStatus(
+  kind: WidgetKind,
+  screenId: string,
+  status: string,
+): Promise<boolean> {
+  const { count } = await prisma.agentWidgetBinding.updateMany({
+    where: { kind, screenId, OR: [{ status: null }, { status: { not: status } }] },
+    data: { status },
+  });
+  return count === 1;
+}
+
 /** The `data` blob a 'pr' binding stores so a webhook can rebuild the card. */
 export interface PrBindingData {
   provider: string;
