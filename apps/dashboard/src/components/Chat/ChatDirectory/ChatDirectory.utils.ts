@@ -51,6 +51,24 @@ export const sumSectionUnread = (
     0,
   );
 
+/**
+ * Channels a "Mark as read" header action should clear: those with an unread badge,
+ * plus channels that only show bold (new activity since the user last looked, no
+ * badge). Takes the group's UNFILTERED channel list, so channels hidden by the
+ * section's current filter are cleared too.
+ */
+export const selectChannelIdsToMarkRead = (
+  channels: Pick<VisibleChannel, 'id' | 'scopeType' | 'channelStats'>[],
+  unreadCounts: Record<string, number>,
+  statuses: Map<string, Pick<ChannelUserStatus, 'lastViewedAt' | 'desktopNotificationLevel'>>,
+): string[] =>
+  channels
+    .filter(channel => {
+      const unreadCount = unreadCounts[channel.id] ?? 0;
+      return unreadCount > 0 || isChannelBold(channel, unreadCount, statuses.get(channel.id));
+    })
+    .map(channel => channel.id);
+
 export const DEFAULT_FILTER_MODE = ChannelFilterMode.ACTIVE;
 export const DEFAULT_GROUP_SORT_ORDER = ChannelSortOrder.UNREAD;
 export const ACTIVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
