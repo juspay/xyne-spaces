@@ -38,6 +38,14 @@ const SERVER_CREATION = /(create|add|register|install|connect)[_-]?(mcp|server|c
 const STANDING_WRITE = /^(create-skill|update-skill|propose-skill|write-memory-file|save-memory|update-agent)$/i;
 const DRAFT = /draft/i;
 const ADDRESS = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|https?:\/\/[^\s"'<>]+|\+\d{8,15}/gi;
+const DEST_KEY = /"(to|cc|bcc|recipients?|channel(?:_?id)?|user(?:_?id)?|chat_?id|phone|number|webhook|url|destination|target)"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/gi;
+
+/** The string values under destination-like keys, so a channel or user id counts as a recipient too. */
+function destinationValues(argsText: string): string[] {
+  const out: string[] = [];
+  for (const m of argsText.matchAll(DEST_KEY)) for (const s of m[2]!.match(/"(?:[^"\\]|\\.)*"/g) ?? []) out.push(s.slice(1, -1));
+  return out;
+}
 
 /** The critic runs only for a side effect beyond a plain write, after untyped content was read. */
 export function criticNeeded(effect: EffectClass | "unknown", readUntypedContent: boolean): boolean {
@@ -68,10 +76,11 @@ export function toolRiskRules(input: ToolRiskInput): ToolRisk | null {
   if (r.reasons.length > 0) return r;
   if (effect === "read") return { ...r, reasons: ["a read"] };
   if (effect === "write") return DRAFT.test(toolName) ? { ...r, reasons: ["a draft the user owns"] } : { ...r, level: "medium", reasons: ["a plain write"] };
-  // publish, send and unknown: settled only when every recipient in the call was typed by the person.
-  const recipients = argsText.match(ADDRESS) ?? [];
-  const typed = (input.request ?? "").toLowerCase();
-  if (recipients.length > 0 && recipients.every((a) => typed.includes(a.toLowerCase()))) return { ...r, reasons: ["every recipient was typed by the person"] };
+  // publish, send and unknown: settled only when every destination in the call is exactly an address the person typed.
+  const typed = new Set(((input.request ?? "").match(ADDRESS) ?? []).map((a) => a.toLowerCase()));
+  const recipients = (argsText.match(ADDRESS) ?? []).map((a) => a.toLowerCase());
+  const destinations = destinationValues(argsText).map((d) => d.toLowerCase());
+  if (recipients.length > 0 && recipients.every((a) => typed.has(a)) && destinations.every((d) => typed.has(d))) return { ...r, reasons: ["every recipient was typed by the person"] };
   return null;
 }
 

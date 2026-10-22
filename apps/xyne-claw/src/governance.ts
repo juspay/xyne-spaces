@@ -93,6 +93,10 @@ export interface C1Decision {
   toolCallId: string;
   criticStatus?: CriticVerdict["status"] | undefined;
   criticLevel?: CriticLevel | undefined;
+  criticSource?: ToolRisk["source"] | undefined;
+  criticCategories?: string[] | undefined;
+  criticReasons?: string[] | undefined;
+  judgeMs?: number | undefined;
 }
 
 export interface RunGovernanceStats {
@@ -283,9 +287,10 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     return { verdict: r.status === "decided" ? { status: "decided", level: r.risk.level } : { status: "unavailable" }, risk: r.risk, ms: r.ms };
   };
 
+  const criticTags = (risk: ToolRisk): string[] => [`critic.${risk.source}.${risk.level}`, ...risk.categories.map((c) => `critic.${c}`)];
+
   const gate = async (ctx: BeforeToolCallContext, mode: "shadow" | "enforce"): Promise<BeforeToolCallResult | undefined> => {
     const t0 = performance.now();
-    started.set(ctx.toolCall.id, Date.now());
     const name = ctx.toolCall.name;
     const meta = toolMeta.get(name);
     const descriptor = resolveToolDescriptor({ toolName: meta?.mcpToolName ?? name, serverType: meta?.serverType, writeTool: meta?.isWriteTool, args: ctx.args });
@@ -295,18 +300,33 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const current = criticNeeded(descriptor.effect, state.readUntypedContent)
       ? { toolCallId: ctx.toolCall.id, toolName: name, effect: descriptor.effect, destination: descriptor.destination, argsText, judgeAddressedInArgs: argScan.findings.some((f) => f.family === "judge_addressing") }
       : null;
-    const critic = current ? await criticVerdict(ctx, current) : { verdict: { status: "not_needed" } as CriticVerdict };
+    // Enforce waits for the critic because it decides the call; shadow lets the call go and records the critic's verdict when it arrives.
+    const critic = current && mode === "enforce" ? await criticVerdict(ctx, current) : { verdict: { status: "not_needed" } as CriticVerdict };
     const nowMs = Date.now();
     const hint = grantOf(meta?.permission);
-    const verdict = decide({
+    const decideWith = (c: CriticVerdict) => decide({
       call: { toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
       // Kill switches arrive with PR-12; until then every snapshot is fresh and empty.
       kill: { snapshot: { epoch: 0, takenAtMs: nowMs, switches: [] }, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: name }, nowMs },
       conversation: state,
-      critic: critic.verdict,
+      critic: c,
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },
     });
-    const decision: C1Decision = { decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id, criticStatus: critic.verdict.status, ...(critic.verdict.level ? { criticLevel: critic.verdict.level } : {}) };
+    const verdict = decideWith(critic.verdict);
+    const decision: C1Decision = {
+      decisionId: randomUUID(), decision: verdict.decision, reasonCode: verdict.reasonCode, risk: state.risk, privateData: state.privateData, pendingVerdicts: state.pendingVerdicts, toolCallId: ctx.toolCall.id,
+      criticStatus: critic.verdict.status,
+      ...(critic.verdict.level ? { criticLevel: critic.verdict.level } : {}),
+      ...(critic.risk ? { criticSource: critic.risk.source, criticCategories: critic.risk.categories, criticReasons: critic.risk.reasons } : {}),
+      ...(critic.ms !== undefined ? { judgeMs: critic.ms } : {}),
+    };
+    if (current && mode !== "enforce") {
+      void criticVerdict(ctx, current).then((r) => {
+        if (!r.risk) return;
+        const would = decideWith(r.verdict);
+        queueGovernance({ ...base(), eventType: "critic_verdict", toolCallId: ctx.toolCall.id, toolName: name, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), subjectKind: "c1", subjectId: decision.decisionId, decision: would.decision, reasonCode: would.reasonCode, reasonText: `shadow: would decide ${would.decision} (${would.reasonCode}); critic ${r.risk.source} ${r.risk.level}${r.risk.reasons.length > 0 ? `: ${r.risk.reasons.join("; ")}` : ""}`.slice(0, 1_900), checkTierReached: r.risk.source === "xor" ? "xor_judge" : "parser", ...(r.ms !== undefined ? { judgeMs: r.ms } : {}), matchedRuleIds: criticTags(r.risk) });
+      }).catch((err) => log.warn(`[governance] critic failed session=${sessionId}: ${err instanceof Error ? err.message : String(err)}`));
+    }
     decisions.set(ctx.toolCall.id, decision);
     stats.decisions++;
     const event: GovernanceEvent = {
@@ -328,15 +348,16 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       argumentsRedacted: secretInArguments ? "[redacted: secret in arguments]" : argsText.slice(0, 2_048),
       checkTierReached: critic.risk?.source === "xor" ? "xor_judge" : "parser",
       ...(critic.ms !== undefined ? { judgeMs: critic.ms } : {}),
-      ...(critic.risk ? { matchedRuleIds: [`critic.${critic.risk.source}.${critic.risk.level}`, ...critic.risk.categories.map((c) => `critic.${c}`)] } : {}),
+      ...(critic.risk ? { matchedRuleIds: criticTags(critic.risk) } : {}),
       ...(critic.risk && critic.risk.reasons.length > 0 ? { reasonText: `${verdict.reasonText} Critic: ${critic.risk.reasons.join("; ")}`.slice(0, 1_900) } : {}),
       gateMs: Math.round(performance.now() - t0),
       subjectKind: "c1",
       subjectId: decision.decisionId,
     };
-    // An MCP call is recorded once, by C2 in claw-auth, which receives this decision with the call.
+    // An MCP call is recorded once, by C2 in claw-auth, which receives this decision with the call; a call C1
+    // stops here never reaches claw-auth, so C1 records that one itself.
     if (meta?.serverType) {
-      /* C2 writes the tool_call row */
+      if (verdict.decision === "block" && mode === "enforce" && !(await recordGovernanceNow(event))) stats.auditFailures++;
     } else if (descriptor.effect !== "read") {
       const recorded = await recordGovernanceNow(event);
       if (!recorded) {
@@ -351,6 +372,8 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
       log.info(`[governance] C1 ${mode} block session=${sessionId} tool=${name} ${verdict.reasonCode}`);
       if (mode === "enforce") return { block: true, reason: `Blocked by policy (${verdict.reasonCode}): ${verdict.reasonText} Do not retry; tell the user.` };
     }
+    // The outcome's duration counts from here, after the decision and its record.
+    started.set(ctx.toolCall.id, Date.now());
     return undefined;
   };
 

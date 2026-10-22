@@ -60,9 +60,9 @@ describe("gateCall", () => {
   it("lets a deny grant beat the forced ask, and honours the critic level C1 handed over", async () => {
     expect([effectiveGrant("deny", true), effectiveGrant("allow", true), effectiveGrant("ask", false), effectiveGrant(undefined, false)]).toEqual(["deny", "ask", "ask", "allow"]);
     expect(await gateCall({ ...base, grant: "deny", permissionHint: "ask" })).toMatchObject({ decision: "block", reasonCode: "GOV-GRANT-DENY" });
-    const c1 = { decisionId: "d2", decision: "ask", risk: "none", privateData: false, pendingVerdicts: 0, toolCallId: "c9", criticStatus: "decided", criticLevel: "high" };
+    const c1 = { decisionId: "d2", decision: "ask", risk: "none", privateData: false, pendingVerdicts: 0, toolCallId: "c9", criticStatus: "decided", criticLevel: "high", criticSource: "xor", criticCategories: ["exfiltration"], criticReasons: ["exfiltration 90%"], judgeMs: 640 };
     expect(await gateCall({ ...base, c1 })).toMatchObject({ decision: "ask", reasonCode: "GOV-CRITIC-HIGH" });
-    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ toolCallId: "c9", matchedRuleIds: ["critic.high"] }));
+    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ toolCallId: "c9", matchedRuleIds: ["critic.xor.high", "critic.exfiltration"], judgeMs: 640, checkTierReached: "xor_judge", reasonText: expect.stringContaining("Critic: exfiltration 90%") }));
   });
 
   it("caches the run behind a session id", async () => {
