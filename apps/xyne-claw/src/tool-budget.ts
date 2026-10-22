@@ -31,6 +31,7 @@ export interface ToolBudgetTracker {
 interface InstallToolBudgetOptions {
   sessionId: string;
   budgetScale?: number;
+  maxCalls?: number;
 }
 
 // Owner decision (2026-07-07): the budget NEVER blocks tool calls — agent
@@ -106,8 +107,17 @@ export function installToolBudget(
     }
   };
 
+  const maxCalls = opts.maxCalls && opts.maxCalls > 0 ? Math.floor(opts.maxCalls) : undefined;
+
   agent.beforeToolCall = async (context, signal) => {
     calls += 1;
+    if (maxCalls !== undefined && calls > maxCalls) {
+      log.warn(`[agent] tool-budget-cap session=${opts.sessionId} calls=${calls} max=${maxCalls}`);
+      return { block: true, reason: `Tool budget of ${maxCalls} calls reached. Do not call more tools; give your final answer now with the evidence you have.` };
+    }
+    if (maxCalls !== undefined && calls === maxCalls) {
+      queueSteering(`This is your last tool call (budget ${maxCalls}). After it, stop calling tools and give your final answer with the evidence you have.`);
+    }
     if (calls >= nextNudgeAt) {
       log.warn(`[agent] tool-budget-nudge session=${opts.sessionId} calls=${calls}`);
       queueSteering(

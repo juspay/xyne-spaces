@@ -2239,6 +2239,12 @@ model SubagentDefinition {
   /// NULL or missing keys = inherit all instances of that server type
   /// from the parent agent (Stance A — today's behavior).
   mcpInstanceMap   Json?
+  fast             Boolean                 @default(false)
+  checks           Json?
+  checksVersion    Int                     @default(0)
+  samples          Json?
+  model            String?
+  budget           Json?
   /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).
