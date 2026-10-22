@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CanvasLabelsByCanvasId } from '../../api/canvasLabelsApi';
 
-const getCanvasLabels = vi.fn();
+const getCanvasLabels = vi.fn<(ids: string[]) => Promise<CanvasLabelsByCanvasId>>();
 
 vi.mock('../../api/canvasLabelsApi', () => ({
   canvasLabelsApi: {
@@ -15,7 +16,7 @@ import {
   resetCanvasLabelCacheForTests,
 } from './useCanvasLabels';
 
-const labelsFor = (ids: string[]) =>
+const labelsFor = (ids: string[]): CanvasLabelsByCanvasId =>
   Object.fromEntries(
     ids.map(id => [id, [{ id: `label-${id}`, canvasId: id, name: 'tag', createdAt: 1 }]]),
   );
@@ -24,7 +25,7 @@ describe('canvas label store', () => {
   beforeEach(() => {
     resetCanvasLabelCacheForTests();
     getCanvasLabels.mockReset();
-    getCanvasLabels.mockImplementation(async (ids: string[]) => labelsFor(ids));
+    getCanvasLabels.mockImplementation((ids: string[]) => Promise.resolve(labelsFor(ids)));
   });
 
   it('coalesces 200 single-row requests in the same tick into one bulk call', async () => {
@@ -43,9 +44,7 @@ describe('canvas label store', () => {
     await loadCanvasLabels(ids);
 
     expect(getCanvasLabels).toHaveBeenCalledTimes(3);
-    expect(getCanvasLabels.mock.calls.map(call => (call[0] as string[]).length)).toEqual([
-      200, 200, 50,
-    ]);
+    expect(getCanvasLabels.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 50]);
   });
 
   it('only fetches ids that were never loaded when the id set grows page by page', async () => {
