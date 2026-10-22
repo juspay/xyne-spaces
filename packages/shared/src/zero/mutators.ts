@@ -3752,6 +3752,8 @@ export const mutators = defineMutators({
                 id: existingParticipant.id,
                 response: InvitationResponse.INVITED,
                 ringStatus: RingStatus.CALLING,
+                // An explicit invite rings even if the call was scheduled not to.
+                ringNotification: null,
                 meetingStatus: existingParticipant.meetingStatus,
                 invitedBy: ctx.userID,
                 invitedAt: now,

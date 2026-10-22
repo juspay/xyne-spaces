@@ -498,6 +498,14 @@ export enum RingStatus {
   BUSY = 'BUSY',
 }
 
+// Whether a scheduled call rings this participant once it starts. Null (rows written
+// before the option existed, ad-hoc calls) rings, same as ENABLED.
+// @ts-ignore TS1294
+export enum CallRingNotification {
+  ENABLED = 'ENABLED',
+  DISABLED = 'DISABLED',
+}
+
 // @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',

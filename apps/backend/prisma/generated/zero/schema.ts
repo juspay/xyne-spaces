@@ -1800,6 +1800,7 @@ export const callParticipantTable = table("call_participants")
     email: string().optional(),
     isExternal: boolean(),
     ringStatus: string().optional(),
+    ringNotification: string().optional(),
   })
   .primaryKey("id");
 
@@ -1862,6 +1863,7 @@ export const recurringCallParticipantTable = table("recurring_call_participants"
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringNotification: string().optional(),
   })
   .primaryKey("id");
 

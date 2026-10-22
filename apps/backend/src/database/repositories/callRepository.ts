@@ -5,7 +5,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus,  MessageArtifactStatus } from '@xyne/shared';
+import { CallOrigin, CallRingNotification, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus,  MessageArtifactStatus } from '@xyne/shared';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -176,6 +176,8 @@ export interface CreateCallWithParticipantsInput {
   endsAt: Date;
   targetUserIds?: string[];
   participantInviters?: Record<string, string>;
+  ringNotification?: CallRingNotification; // Applied to every internal participant (one-time calls)
+  participantRingNotifications?: Record<string, CallRingNotification | null>; // Per user, from the series rows (recurring instances)
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
@@ -844,6 +846,7 @@ export class CallRepository {
         respondedAt: userId === params.createdByUserId ? new Date() : null,
         joinedAt: null,
         leftAt: null,
+        ringNotification: params.participantRingNotifications?.[userId] ?? params.ringNotification ?? null,
       })),
     });
 
@@ -1624,6 +1627,18 @@ export class CallRepository {
    * `invitedByUserId` is stamped on the newly added rows — it is the editor, not necessarily
    * the organizer, so a participant who added someone can later be allowed to remove them.
    */
+  /** Set the ring-on-start option on every internal participant of these calls. */
+  async setInternalParticipantsRingNotification(
+    callIds: string[],
+    ringNotification: CallRingNotification,
+  ): Promise<void> {
+    if (callIds.length === 0) return;
+    await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: { callId: { in: callIds }, isExternal: false },
+      data: { ringNotification },
+    });
+  }
+
   async updateScheduledCall(params: {
     callId: string;
     title?: string;
@@ -1637,11 +1652,12 @@ export class CallRepository {
     callUpdatesChannel?: string | null;
     externalInvitees?: string[];
     summaryTemplateId?: string | null;
+    ringNotification?: CallRingNotification;
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees, summaryTemplateId } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees, summaryTemplateId, ringNotification } = params;
     const db = DatabaseClient.getInstance();
 
-    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId);
+    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId, ringNotification);
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
     queueScheduledCallPillSync(callId, updatedCall.externalId, 'callRepository.updateScheduledCall');

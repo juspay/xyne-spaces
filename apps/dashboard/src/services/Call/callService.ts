@@ -2,7 +2,7 @@ import { apiInstance } from '../clients/apiClient';
 import type { SdlcCallLink } from '@xyne/shared';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
-import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
+import { CallType, MeetingStatus, type HostControls, CalendarVisibility, type CallRingNotification } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 
 // ============================================================================
@@ -73,6 +73,8 @@ export interface ScheduleCallRequest {
     timezone?: string;
   };
   notifyParticipantsByEmail?: boolean;
+  /** Whether participants are rung when the call starts. */
+  ringNotification?: CallRingNotification;
 }
 
 export interface ScheduleCallResponse {
@@ -97,6 +99,7 @@ export interface CreateRecurringSeriesRequest {
   externalInvitees?: string[];
   invitation?: ScheduleCallRequest['invitation'];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification;
 }
 
 export interface CreateRecurringSeriesResponse {
@@ -114,6 +117,7 @@ export interface UpdateScheduleCallRequest {
   callUpdatesChannel?: string;
   externalInvitees?: string[];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification;
 }
 
 export interface UpdateRecurringSeriesRequest {
@@ -129,6 +133,7 @@ export interface UpdateRecurringSeriesRequest {
   callUpdatesChannel?: string;
   externalInvitees?: string[];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification;
 }
 
 export interface ApiErrorResponse {

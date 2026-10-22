@@ -1,10 +1,11 @@
-import { CallOrigin, ChannelScopeType, InvitationResponse, RingStatus } from '@xyne/shared';
+import { CallOrigin, CallRingNotification, ChannelScopeType, InvitationResponse, RingStatus } from '@xyne/shared';
 import { useChannel } from '../../hooks/useChannels';
 
 export interface RingableParticipantRow {
   readonly userId: string;
   readonly response: string | null;
   readonly ringStatus?: string | null | undefined;
+  readonly ringNotification?: string | null | undefined;
   readonly joinedAt: number | null;
   readonly isExternal?: boolean | null | undefined;
 }
@@ -39,7 +40,8 @@ export function toRingStatus(ringStatus: string | null | undefined): RingStatus 
 /**
  * Invitees still being rung: INVITED, never joined, not already in the LiveKit room
  * (the DB lags the join by a webhook round-trip), and not the viewer themselves.
- * External email invitees are never rung, so they don't get a tile.
+ * External email invitees, and invitees of a call scheduled not to ring, are never rung,
+ * so they don't get a tile.
  */
 export function getRingingInvitees(
   participants: readonly RingableParticipantRow[] | null | undefined,
@@ -52,6 +54,7 @@ export function getRingingInvitees(
         p.response === InvitationResponse.INVITED &&
         p.joinedAt === null &&
         p.isExternal !== true &&
+        p.ringNotification !== CallRingNotification.DISABLED &&
         p.userId !== currentUserId &&
         !connectedIdentities.has(p.userId),
     )

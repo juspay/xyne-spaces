@@ -76,6 +76,7 @@ import {
   RecapEntityType,
   RecurringCallSeriesStatus,
   RingStatus,
+  CallRingNotification,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -1280,6 +1281,7 @@ export const callParticipantTable = table('call_participants')
     email: string().optional(),
     isExternal: boolean(),
     ringStatus: enumeration<RingStatus>().optional(),
+    ringNotification: enumeration<CallRingNotification>().optional(),
   })
   .primaryKey('id');
 
@@ -1320,6 +1322,7 @@ export const recurringCallParticipantTable = table('recurring_call_participants'
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringNotification: enumeration<CallRingNotification>().optional(),
   })
   .primaryKey('id');
 

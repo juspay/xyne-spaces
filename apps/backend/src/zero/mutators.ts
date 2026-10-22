@@ -5394,6 +5394,8 @@ export function createMutators(
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
                   ringStatus: RingStatus.CALLING,
+                  // An explicit invite rings even if the call was scheduled not to.
+                  ringNotification: null,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,

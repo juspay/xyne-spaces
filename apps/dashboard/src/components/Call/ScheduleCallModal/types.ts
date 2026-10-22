@@ -16,6 +16,7 @@ export interface EditCallData {
     email?: string | null;
     isExternal?: boolean | null;
     invitedBy?: string | null;
+    ringNotification?: string | null;
   }>;
   /** Organizer of the call. A non-organizer participant may only edit the invite list. */
   organizerUserId?: string | null;
