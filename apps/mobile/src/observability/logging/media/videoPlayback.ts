@@ -90,7 +90,7 @@ const DECODER_PATTERN =
 const PARSE_PATTERN =
   /ParserException|UnrecognizedInputFormat|malformed|AVFoundationErrorDomain[^\d-]*-11850/i;
 const NETWORK_PATTERN =
-  /Unable to connect|timed? ?out|network|connection (?:refused|reset|closed|abort)|UnknownHost|SocketException|SSLHandshake|NSURLErrorDomain|not connected/i;
+  /Unable to connect|Could not connect|timed? ?out|network|connection (?:refused|reset|closed|abort)|UnknownHost|SocketException|SSLHandshake|NSURLErrorDomain|not connected/i;
 /** Only an explicit HTTP status counts as an HTTP failure. */
 const HTTP_PATTERN = /Response code:\s*[45]\d\d\b/i;
 

@@ -65,6 +65,16 @@ describe('video playback telemetry', () => {
     assert.ok(!('originalFilename' in fields), 'never logs the full filename');
   });
 
+  it('labels the iOS AVPlayer loopback connect failure as network', () => {
+    assert.equal(
+      classifyVideoPlaybackError(
+        'player_status',
+        'Failed to load the player item: Could not connect to the server.',
+      ),
+      'network',
+    );
+  });
+
   it('labels connectivity failures as network even when the message has an http:// URL', () => {
     const msg =
       'A playback exception has occurred: Source error Unable to connect to http://127.0.0.1:53211/stream?cap=abc123';

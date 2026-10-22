@@ -6,9 +6,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { NativeModules } from 'react-native';
+import { AppState, NativeModules, Platform } from 'react-native';
 
 import { API_BASE_URL } from '@/src/config';
+import {
+  bumpProxyEpoch,
+  nextForegroundProbeState,
+  verifyOrRestartProxy,
+  type ProxyRecoveryOutcome,
+} from '@/src/hooks/mtlsProxyRecovery';
+import { logger, type EventType } from '@/src/utils/logger';
 import {
   getAuthSessionGeneration,
   isAuthSessionCurrent,
@@ -284,7 +291,24 @@ export async function ensureProxyRunning(
     )) as number;
     assertCurrentSession();
     if (currentPort > 0) {
-      return currentPort;
+      if (Platform.OS !== 'ios') {
+        return currentPort;
+      }
+      // iOS may have reclaimed the listener while the app was suspended
+      // without telling it, so a reported port does not prove it is alive.
+      installForegroundProxyProbe();
+      const outcome = await verifyOrRestartProxy(MtlsProxy, API_BASE_URL, withProxyTimeout);
+      reportProxyRecovery('stream_open', outcome);
+      assertCurrentSession();
+      if (outcome.action === 'restarted') {
+        bumpProxyEpoch();
+        return outcome.port;
+      }
+      if (outcome.action !== 'restart_failed') {
+        return outcome.port;
+      }
+      // Restart failed: the old listener is already cancelled, so fall
+      // through to the regular start path below.
     }
 
     let port: number;
@@ -299,7 +323,74 @@ export async function ensureProxyRunning(
     }
     console.log(`[ensureProxyRunning] Proxy started on port ${port}`);
     assertCurrentSession();
+    if (Platform.OS === 'ios') {
+      installForegroundProxyProbe();
+    }
     return port;
+  });
+}
+
+const MTLS_PROXY_RECOVERY_EVENT = 'lotus_ios_mtls_proxy' as EventType;
+
+type ProxyRecoveryReason = 'stream_open' | 'foreground';
+
+function reportProxyRecovery(reason: ProxyRecoveryReason, outcome: ProxyRecoveryOutcome): void {
+  // Healthy / not-running checks happen on every video open; only the
+  // actionable outcomes are worth a log line.
+  if (outcome.action !== 'restarted' && outcome.action !== 'restart_failed') {
+    return;
+  }
+  const payload = {
+    diagnostic: 'ios_mtls_proxy',
+    phase: outcome.action,
+    reason,
+    previousPort: outcome.previousPort,
+    port: outcome.port,
+    ...(outcome.error !== undefined
+      ? {
+          errorMessage:
+            outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+        }
+      : {}),
+  };
+  try {
+    if (outcome.action === 'restarted') {
+      logger.warn(MTLS_PROXY_RECOVERY_EVENT, payload);
+    } else {
+      logger.error(MTLS_PROXY_RECOVERY_EVENT, payload);
+    }
+  } catch {
+    // Telemetry must never affect proxy recovery.
+  }
+}
+
+let foregroundProbeInstalled = false;
+let wasBackgroundedSinceActive = false;
+
+/**
+ * On iOS, re-check the proxy whenever the app returns from the background so
+ * a video screen left open across a suspension gets a working URL again.
+ * Installed lazily on first proxy use; does nothing when the proxy is not
+ * running (e.g. after logout, which stops it through the same queue).
+ */
+function installForegroundProxyProbe(): void {
+  if (foregroundProbeInstalled || Platform.OS !== 'ios') return;
+  foregroundProbeInstalled = true;
+  wasBackgroundedSinceActive = AppState.currentState === 'background';
+  AppState.addEventListener('change', nextState => {
+    const next = nextForegroundProbeState(wasBackgroundedSinceActive, nextState);
+    wasBackgroundedSinceActive = next.wasBackgrounded;
+    if (!next.probe || !MtlsProxy) return;
+    void enqueueProxyLifecycle(async () => {
+      const outcome = await verifyOrRestartProxy(MtlsProxy, API_BASE_URL, withProxyTimeout);
+      reportProxyRecovery('foreground', outcome);
+      if (outcome.action === 'restarted' || outcome.action === 'restart_failed') {
+        // Either way, URLs issued for the old listener are dead.
+        bumpProxyEpoch();
+      }
+    }).catch(error => {
+      console.warn('[useMtlsProxy] Foreground proxy check failed:', error);
+    });
   });
 }
 
