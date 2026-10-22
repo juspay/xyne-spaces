@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 
-import { useLocation } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AIShell } from '../../../components/AIScreen/AIShell';
 import ClawAgentCreateV2 from '../library/agents/create/ClawAgentCreateV2';
 import { AgentDraftBuilderPanel } from '../library/agents/create/AgentDraftBuilderPanel';
-import {
-  INITIAL_WIZARD_STATE,
-  slugify,
-  type WizardState,
-} from '../../ClawAgentsScreen/create/wizardState';
+import { INITIAL_WIZARD_STATE, type WizardState } from '../../ClawAgentsScreen/create/wizardState';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 import { useClawAgentDetail } from '../../../hooks/useClawAgentDetail';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -16,28 +12,12 @@ import { wizardStateFromAgent } from '../library/agents/create/agentDraft';
 
 const AUTOSAVE_DELAY_MS = 1200;
 
-export interface AgentDraftSeed {
-  name?: string;
-  intent?: string;
-  color?: string;
-}
-
-function seededDraft(seed: AgentDraftSeed | undefined): WizardState {
-  if (!seed) return INITIAL_WIZARD_STATE;
-  const name = seed.name?.trim() ?? '';
-  return {
-    ...INITIAL_WIZARD_STATE,
-    ...(name ? { name, slug: slugify(name) } : {}),
-    ...(seed.color ? { color: seed.color } : {}),
-  };
-}
-
 const AIAgentCreateScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
-  const location = useLocation();
-  const seed = (location.state as { draftSeed?: AgentDraftSeed } | null)?.draftSeed;
+  const navigate = useNavigate();
+  const { workspaceId, slug: routeSlug } = useParams<{ workspaceId?: string; slug?: string }>();
 
-  const [draft, setDraft] = useState<WizardState>(() => seededDraft(seed));
+  const [draft, setDraft] = useState<WizardState>(INITIAL_WIZARD_STATE);
 
   const saveRef = useRef<((options?: { quiet?: boolean }) => Promise<void>) | null>(null);
   const createdRef = useRef(false);
@@ -58,7 +38,7 @@ const AIAgentCreateScreen = (): ReactElement => {
 
   const [aiBusy, setAiBusy] = useState(false);
 
-  const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+  const [createdSlug, setCreatedSlug] = useState<string | null>(routeSlug ?? null);
   const {
     data: createdAgent,
     isError: createdAgentFailed,
@@ -83,9 +63,19 @@ const AIAgentCreateScreen = (): ReactElement => {
     await saveRef.current();
   }, []);
 
+  const handleCreated = useCallback(
+    (slug: string): void => {
+      setCreatedSlug(slug);
+      const base = workspaceId ? `/${workspaceId}` : '';
+      void navigate(`${base}/ai/library/agent/create/${slug}`, { replace: true });
+    },
+    [navigate, workspaceId],
+  );
+
   createdRef.current = createdSlug !== null;
   const applyAiPatch = useCallback((patch: Partial<WizardState>) => {
     setDraft(prev => ({ ...prev, ...patch }));
+    setEditTick(tick => tick + 1);
     if (patch.systemPrompt !== undefined && !createdRef.current) {
       setInstructionsPatchNonce(n => n + 1);
     }
@@ -108,7 +98,6 @@ const AIAgentCreateScreen = (): ReactElement => {
       workspacePanel={
         <AgentDraftBuilderPanel
           draft={draft}
-          intent={seed?.intent ?? ''}
           onApplyPatch={applyAiPatch}
           onBusyChange={setAiBusy}
           onAgentCreated={setCreatedSlug}
@@ -145,6 +134,9 @@ const AIAgentCreateScreen = (): ReactElement => {
           busy={aiBusy}
           instructionsPatchNonce={instructionsPatchNonce}
           hideSubmit
+          showDraftHeader
+          created={createdSlug !== null}
+          onCreated={handleCreated}
           registerSave={registerSave}
           {...(createdAgent ? { agent: createdAgent } : {})}
         />

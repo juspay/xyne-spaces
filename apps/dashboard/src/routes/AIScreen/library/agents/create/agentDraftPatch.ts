@@ -213,6 +213,24 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
+function onlyStrings(value: unknown[]): string[] {
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function stringList(value: unknown): string[] | null {
+  if (Array.isArray(value)) return onlyStrings(value);
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (!trimmed.startsWith('[')) return [trimmed];
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? onlyStrings(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function paramsToDraftPatch(
   params: Record<string, unknown>,
   draft: WizardState,
@@ -247,22 +265,26 @@ export function paramsToDraftPatch(
     patch.systemPrompt = prompt.prompt;
   }
 
-  const proposedTools = params['tools'];
-  const proposedMcps = params['mcps'];
-  if (Array.isArray(proposedTools) || Array.isArray(proposedMcps)) {
-    const strings = (value: unknown): string[] =>
-      Array.isArray(value)
-        ? value.filter((entry): entry is string => typeof entry === 'string')
-        : [];
-    const replaces = context.toolsIntent !== 'merge' && Array.isArray(proposedTools);
+  const proposedTools = stringList(params['tools']);
+  const proposedMcps = stringList(params['mcps']);
+  if (proposedTools !== null || proposedMcps !== null) {
+    const replaces = context.toolsIntent !== 'merge' && proposedTools !== null;
     const kept = replaces ? [] : grantedNames(draft.tools);
-    const names = [...kept, ...strings(proposedTools)];
-    const resolved = resolveProposedTools(names, catalog, draft.tools, strings(proposedMcps));
+    const names = [...kept, ...(proposedTools ?? [])];
+    const resolved = resolveProposedTools(names, catalog, draft.tools, proposedMcps ?? []);
 
     if (resolved.status === 'catalog-unavailable') {
       problems.push('Tools not applied — the tool catalogue is still loading. Try again.');
     } else if (resolved.status === 'resolved') {
       patch.tools = resolved.tools;
+      if (resolved.unknown.length > 0) {
+        problems.push(`Not added — no such capability here: ${resolved.unknown.join(', ')}.`);
+      }
+      if (resolved.trimmedSubagents.length > 0) {
+        problems.push(
+          `Not added — this draft keeps at most ${MAX_SUBAGENTS} subagents, so these were dropped: ${resolved.trimmedSubagents.join(', ')}.`,
+        );
+      }
     }
   }
 

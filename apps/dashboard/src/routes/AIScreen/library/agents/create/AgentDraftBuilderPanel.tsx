@@ -9,9 +9,11 @@ import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { wizardStateFromAgent } from './agentDraft';
-import { buildHiddenContext, buildSeedQuery } from './agentBuilderPrompt';
+import { buildHiddenContext } from './agentBuilderPrompt';
 import { bareToolSlug, paramsToDraftPatch, type DraftPatchContext } from './agentDraftPatch';
 import { BUILDER_DRIVER_SLUG } from '../detail/AgentBuilderPanel';
+
+const KICKOFF_QUERY = 'Help me set up an agent';
 
 const DRAFT_TOOLS = new Set(['create-agent', 'update-agent']);
 
@@ -67,7 +69,6 @@ function parseFlowParams(raw: unknown): Record<string, unknown> | null {
 
 interface AgentDraftBuilderPanelProps {
   draft: WizardState;
-  intent: string;
   onApplyPatch: (patch: Partial<WizardState>) => void;
   onBusyChange?: (busy: boolean) => void;
   onAgentCreated?: (slug: string) => void;
@@ -78,7 +79,6 @@ interface AgentDraftBuilderPanelProps {
 
 export function AgentDraftBuilderPanel({
   draft,
-  intent,
   onApplyPatch,
   onBusyChange,
   onAgentCreated,
@@ -93,19 +93,17 @@ export function AgentDraftBuilderPanel({
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
 
-  const intentRef = useRef(intent);
-  intentRef.current = intent;
-
-  const seed = useMemo(
-    () =>
-      catalogPending
-        ? null
-        : { query: buildSeedQuery(draftRef.current, intentRef.current), nonce: Date.now() },
-    [catalogPending],
-  );
-
   const createdSlugRef = useRef(createdSlug);
   createdSlugRef.current = createdSlug;
+
+  const openedOnSavedAgent = useRef(createdSlug !== null && createdSlug !== undefined);
+  const seed = useMemo(
+    () =>
+      catalogPending || openedOnSavedAgent.current
+        ? null
+        : { query: KICKOFF_QUERY, nonce: Date.now() },
+    [catalogPending],
+  );
 
   const savedState = useMemo(
     () => (savedAgent ? wizardStateFromAgent(savedAgent) : null),
@@ -120,7 +118,6 @@ export function AgentDraftBuilderPanel({
     () =>
       buildHiddenContext(
         draftRef.current,
-        intentRef.current,
         catalogRef.current,
         createdSlugRef.current,
         savedStateRef.current,
@@ -167,6 +164,7 @@ export function AgentDraftBuilderPanel({
         if (data['actionType'] !== 'write') return false;
         return typeof data['tool'] === 'string' && DRAFT_TOOLS.has(bareToolSlug(data['tool']));
       },
+      hidesCard: (): boolean => true,
       onCardSeen: (flow: FlowDefinition): void => {
         if (seenCardsRef.current.has(flow.screenId)) return;
         seenCardsRef.current.add(flow.screenId);
@@ -232,7 +230,11 @@ export function AgentDraftBuilderPanel({
             hiddenContext={hiddenContext}
             onInterceptPendingAction={onInterceptPendingAction}
             {...(onBusyChange ? { onStreamingChange: onBusyChange } : {})}
-            composerPlaceholder='Ask Xyne AI to update this agent…'
+            emptyStateTitle='What would you like to create today?'
+            emptyStateSubtitle='Describe the job and I’ll set the agent up on the left.'
+            composerPlaceholder={
+              createdSlug ? 'Ask Xyne AI to update this agent…' : 'Describe the agent you want…'
+            }
             showAgentHeader
             hideAgentName
             roomyContent

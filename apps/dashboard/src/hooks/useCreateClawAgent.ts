@@ -52,7 +52,9 @@ function hasResearchConfig(s: WizardSubmission): boolean {
  * were chosen) PUT /agents/:slug with the config. On success, invalidate the
  * agent list and route to the new agent's detail screen.
  */
-export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubmission> => {
+export const useCreateClawAgent = ({
+  redirect = true,
+}: { redirect?: boolean } = {}): UseMutationResult<Agent, Error, WizardSubmission> => {
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
@@ -150,7 +152,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
       toast.success('Agent created');
       if (sdlcChannelId && returnTo?.startsWith('/') && !returnTo.startsWith('//')) {
         void navigate(returnTo);
-      } else void navigate(detailPath(agent.slug));
+      } else if (redirect) void navigate(detailPath(agent.slug));
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so
@@ -160,7 +162,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
         toast.error(
           'Agent created, but tools and skills could not be attached — add them from the agent page.',
         );
-        void navigate(detailPath(err.slug));
+        if (redirect) void navigate(detailPath(err.slug));
       }
       // Plain create failures surface via the mutation's `error` (Review step box).
     },

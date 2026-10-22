@@ -63,14 +63,7 @@ export function buildCatalogDigest(catalog: AvailableTools | null | undefined): 
   ];
 }
 
-export function buildSeedQuery(draft: WizardState, intent: string): string {
-  const name = draft.name.trim();
-  const subject = name || 'this agent';
-  const purpose = intent.trim() ? ` — ${intent.trim()}` : '';
-  return `Set up “${subject}”${purpose}`;
-}
-
-function draftSummary(draft: WizardState, intent: string): string[] {
+function draftSummary(draft: WizardState): string[] {
   const tools = [
     ...draft.tools.subagents,
     ...draft.tools.direct,
@@ -79,7 +72,6 @@ function draftSummary(draft: WizardState, intent: string): string[] {
   ];
   return [
     '[Agent draft — the user is building this right now. It has NOT been created.]',
-    `What the user asked for: ${intent.trim() || '(not given)'}`,
     `Name: ${draft.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(draft) || '(unset)'}`,
     `Description: ${draft.description.trim() || '(unset)'}`,
@@ -107,11 +99,10 @@ function unsavedFields(saved: WizardState, draft: WizardState): string[] {
   return changed;
 }
 
-function savedSummary(saved: WizardState, draft: WizardState, intent: string): string[] {
+function savedSummary(saved: WizardState, draft: WizardState): string[] {
   const unsaved = unsavedFields(saved, draft);
   return [
     '[Agent saved — this is what is stored right now.]',
-    `What the user asked for: ${intent.trim() || '(not given)'}`,
     `Name: ${saved.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(saved) || '(unset)'}`,
     `Description: ${saved.description.trim() || '(unset)'}`,
@@ -128,11 +119,25 @@ function savedSummary(saved: WizardState, draft: WizardState, intent: string): s
 }
 
 const STANDING_TASK = [
-  'Your standing task: write the instructions and choose the tools this agent',
-  'needs, working from what the user asked for. Instructions start EMPTY on',
-  'purpose — the one line above is the brief, not a draft prompt, and it is',
-  'yours to turn into a real one. Do not describe the setup as a placeholder',
-  'or ask the user to write it for you.',
+  'Your standing task: name this agent, write its instructions and choose the',
+  'tools it needs. The setup starts EMPTY on purpose — the user tells you what',
+  'they want in chat, and turning that into a real configuration is your job,',
+  'not theirs. Do not describe the setup as a placeholder or ask the user to',
+  'write it for you.',
+  '',
+  'The conversation opens with a bare request for help that names no job —',
+  '"Help me set up an agent". That is a greeting, not a brief. Answer it with',
+  'one short, friendly question asking what the agent should do, and propose',
+  'NOTHING until they tell you. Do not invent a generic assistant, do not list',
+  'what you could build, and do not call a tool on that turn.',
+  '',
+  'Once they describe the job, act on it. Ask again only when you could not',
+  'pick tools without the answer — a thin brief is still enough to propose a',
+  'sensible starting point the user can correct.',
+  '',
+  'Name it the way a colleague would refer to it: short, concrete, title case',
+  '("PR Reviewer", "Release Notes", "Support Triage"). Not "Agent for reviewing',
+  'pull requests", and not a restatement of the request.',
 ];
 
 const HOW_TO_NAME_TOOLS = [
@@ -198,15 +203,23 @@ const HOW_TO_PROPOSE = [
   'Your proposal is applied to this draft only — it creates nothing, and the',
   'user saves it themselves when they are happy. Do not call create-agent or',
   'update-agent: there is no saved agent yet, and they would bypass the form.',
-  'After the proposal, reply with one or two plain sentences saying what you',
-  'changed and why. Do not narrate tool calls or context lookups.',
-  'Describe only what you actually granted. Do not say the agent can read a',
-  'repository, search a system or post anywhere unless a tool you granted',
-  'does that — claiming a capability it does not hold is worse than saying',
-  'the setup is partial.',
-  'The setup is NOT saved. Approving fills the form on the left; the user',
-  'still has to press "Create agent" themselves. Never tell them it is saved,',
-  'created or live — say it is ready for them to review and save.',
+  'ALWAYS send `summary`. The call ENDS your turn — you do not get to reply',
+  'afterwards, so `summary` is the only thing the user reads from you. Omit it',
+  'and they get a blank stand-in that tells them nothing. One or two plain',
+  'sentences on what you changed and why; no tool names, no narration.',
+  '',
+  '`summary` must describe the setup you are ACTUALLY sending in this call.',
+  'Before you write it, re-read your own `tools` and `mcps` arrays and name',
+  'only what is in them. A capability you decided against, or could not fit,',
+  'is not in the setup no matter how reasonable it sounded — saying you added',
+  'it is the worst outcome here, because the user believes it and finds out',
+  'later. If the user asked for something by name and you are not granting it,',
+  'say so plainly in `summary` and give the reason.',
+  'The setup is NOT saved. Your proposal fills in the panel on the left, and',
+  'the user presses "Create agent" there when they are happy with it. Never',
+  'tell them it is saved, created or live — say it is ready for them to review',
+  'and create. Never ask them to approve or confirm anything in this chat:',
+  'the only button that creates the agent is the one on the left.',
 ];
 
 function howToUpdate(slug: string): string[] {
@@ -223,8 +236,8 @@ function howToUpdate(slug: string): string[] {
     'For promptEdits, anchor on the "Saved instructions" block above and nothing',
     'else — that is the text the server searches. Quote it exactly, including',
     'punctuation and line breaks. Anything listed as unsaved is not in it yet.',
-    'The change is applied to the setup on the left for the user to review; they',
-    'press the button themselves to save it. Nothing you call writes directly.',
+    'The change lands on the setup on the left and is saved for them — there is',
+    'no button left to press and nothing to approve in this chat.',
     'After it, reply with one or two plain sentences saying what you changed and',
     'why. Do not narrate tool calls or context lookups.',
     'Describe only what you actually granted. Do not say the agent can read a',
@@ -243,13 +256,12 @@ const STAY_IN_CHARACTER = [
 
 export function buildHiddenContext(
   draft: WizardState,
-  intent: string,
   catalog?: AvailableTools | null,
   createdSlug?: string | null,
   saved?: WizardState | null,
 ): string {
   return [
-    ...(saved ? savedSummary(saved, draft, intent) : draftSummary(draft, intent)),
+    ...(saved ? savedSummary(saved, draft) : draftSummary(draft)),
     '',
     ...STANDING_TASK,
     '',

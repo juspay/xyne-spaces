@@ -194,6 +194,8 @@ interface XyneAISidebarProps {
   // Drops the tilted suggestion cards from the empty state, leaving the heading.
   // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
   hideEmptyStateSuggestions?: boolean;
+  emptyStateTitle?: string;
+  emptyStateSubtitle?: string;
   hideBackgroundStreamNotice?: boolean;
   showAgentHeader?: boolean;
   hideAgentName?: boolean;
@@ -257,6 +259,8 @@ const XyneAISidebar = ({
   onStreamingChange,
   onFinalResponse,
   hideEmptyStateSuggestions = false,
+  emptyStateTitle,
+  emptyStateSubtitle,
   hideBackgroundStreamNotice = false,
   showAgentHeader = false,
   hideAgentName = false,
@@ -2779,6 +2783,8 @@ const XyneAISidebar = ({
                   ) : (
                     <XyneAIEmptyState
                       hideSuggestions={hideEmptyStateSuggestions}
+                      {...(emptyStateTitle ? { title: emptyStateTitle } : {})}
+                      {...(emptyStateSubtitle ? { subtitle: emptyStateSubtitle } : {})}
                       starters={openedForOnboarding ? assistant.starters : []}
                       onSelectStarter={assistant.choose}
                     />
