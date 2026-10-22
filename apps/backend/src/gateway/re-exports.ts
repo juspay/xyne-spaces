@@ -22,7 +22,10 @@ export type { RawBodyRequest } from '@/types/express';
 
 export { conversationService } from '@/services/conversationService';
 export { deleteConversationMessage } from '@/apps/core/conversationUtils';
-export { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+// Loaded on first use: messages-handler imports gatewayHooks, so a static import here is a cycle.
+export const loadMessagesSideEffectHandler = async (): Promise<
+  typeof import('@/zero/side-effects/tables/messages-handler').MessagesSideEffectHandler
+> => (await import('@/zero/side-effects/tables/messages-handler')).MessagesSideEffectHandler;
 export { buildUserQueryContext } from '@/utils/queryContext';
 export { ExternalAttachmentService } from '@/services/externalAttachmentService';
 export type {

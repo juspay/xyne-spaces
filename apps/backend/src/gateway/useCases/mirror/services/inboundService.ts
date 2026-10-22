@@ -2,11 +2,11 @@ import {
   ExternalAttachmentService,
   type DownloadedAttachment,
   MessageDirection,
-  MessagesSideEffectHandler,
   acquireLock,
   buildUserQueryContext,
   conversationService,
   deleteConversationMessage,
+  loadMessagesSideEffectHandler,
   logger,
   releaseLock,
   repositories,
@@ -266,6 +266,7 @@ export class InboundService {
   /** Notifications, mentions and automations, as for any service-written message. */
   private async runSideEffects(userId: string, messageId: string): Promise<void> {
     try {
+      const MessagesSideEffectHandler = await loadMessagesSideEffectHandler();
       const handler = new MessagesSideEffectHandler(await buildUserQueryContext(userId));
       await handler.onInsert({ entityId: messageId, entityType: 'messages', operation: 'insert' });
     } catch (error) {

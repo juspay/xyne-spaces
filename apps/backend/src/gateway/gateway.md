@@ -10,6 +10,7 @@ The gateway carries everything between Spaces and an external app (a provider). 
 - The rest of the repo imports the gateway only through `index.ts`.
 - Don't change `core/` for one provider. If every provider needs something, add it to a base class.
 - `core/` never imports from `useCases/`. Each use case implements `GatewayHandler`: `onProviderEvent`, plus `onSpacesMessageChanged`, `onSpacesMemberChanged` and `runJob` only if it needs them, and builds its own services and routes (`createMirror`); `index.ts` gives core the handlers and mounts the routes.
+- Each provider event goes to every handler at once; one handler's failure doesn't stop the others, but it answers 5xx, so the provider sends the event again to all of them. `onProviderEvent` must be safe to receive the same event twice (Mirror skips anything already in its message map).
 - Use cases never see provider secrets. They get a `ProviderConnection` (`ConfigService.getConnectionBy…()`, or the one passed to `onProviderEvent`): ids, workspace, app name, a ready `api` and `toSpaces()`. Only core and the provider read `credentials`.
 - `core/` is shared by every use case. A use case's controllers, services and guards live in `useCases/<name>/` (Mirror's in `useCases/mirror/`); repositories every use case shares (connections, pairs, people's tokens) stay in `core/repositories/`, and a use case's own stores in `useCases/<name>/repositories/` (Mirror's message map and Redis sync requests).
 

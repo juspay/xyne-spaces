@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express';
-import type { RawBodyRequest } from '../../re-exports';
+import { logger, type RawBodyRequest } from '../../re-exports';
 import { GatewayError } from '../errors';
 import { asyncRoute } from '../middleware/errorHandler';
 import type { GatewayHandler, ProviderServices } from '../types';
@@ -28,9 +28,17 @@ export class EventsController {
       config.credentials
     );
 
-    if (request.event) {
+    const { event } = request;
+    if (event) {
       const connection = configService.toConnection(config);
-      for (const handler of this.handlers) await handler.onProviderEvent(connection, request.event);
+      const results = await Promise.allSettled(
+        this.handlers.map((handler) => handler.onProviderEvent(connection, event))
+      );
+      const [firstError, ...otherErrors] = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason as unknown] : []
+      );
+      for (const error of otherErrors) logger.error('[Gateway] Event handler failed', { error });
+      if (firstError) throw firstError;
     }
     res.status(200).json({ ok: true });
   });
