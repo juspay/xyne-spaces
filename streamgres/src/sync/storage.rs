@@ -97,6 +97,16 @@ pub trait Storage {
         count_by_select(self, query, cap).await
     }
 
+    /// The rows [`Storage::count`] would count, estimated rather than
+    /// counted, no higher than `cap`: what a planner asks instead of the
+    /// count when the count's own cost is the one to avoid. An estimate
+    /// may be off either way; an error says the tree cannot be estimated
+    /// (the caller counts it instead). A source with no estimates of its
+    /// own counts.
+    async fn estimate(&self, query: &MultiTableReadQuery, cap: u64) -> Result<u64, StorageError> {
+        self.count(query, cap).await
+    }
+
     /// The stream has been delivered (and applied by the engine) up to
     /// `feed`: a snapshot at or below it may now serve reads.
     fn advance(&self, feed: Lsn);
