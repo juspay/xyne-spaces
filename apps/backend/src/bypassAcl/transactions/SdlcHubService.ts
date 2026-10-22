@@ -11,6 +11,7 @@ import { BoardType, CanvasVisibility, isSdlcTreeItemType, SDLC_CONTAINMENT_RELAT
 import { Prisma } from '@prisma/client';
 import { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
+import { isChannelNameUniqueViolation } from '@/database/repositories/channelNameUniqueness';
 import type { TransactionClient } from '@/sdlc/SdlcHubService';
 
 
@@ -461,47 +462,56 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
     // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
 
-    await tx.channel.create({
-      data: {
-        id: channelId,
-        name,
-        description: `Private SDLC workspace for ${name}`,
-        type: ChannelType.SDLC,
-        scopeType: ChannelScopeType.DEFAULT,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: actor.userId,
-        projectId: input.projectId,
-        workspaceId: actor.workspaceId,
-        connectId,
-        participantCount: 1,
-        addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
-        showTicketsTabTicketsInChat: false,
-        metadata: {},
-        channelStats: {
-          create: {
-            workspaceId: actor.workspaceId,
-            lastActivityAt: now,
-            participantCount: 1,
-            addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
+    // The duplicate check above races with concurrent creates; the channel-name unique index is the
+    // real guard. Surface its violation as the same 409 (the error also rolls back this transaction).
+    try {
+      await tx.channel.create({
+        data: {
+          id: channelId,
+          name,
+          description: `Private SDLC workspace for ${name}`,
+          type: ChannelType.SDLC,
+          scopeType: ChannelScopeType.DEFAULT,
+          visibility: ChannelVisibility.PRIVATE,
+          createdBy: actor.userId,
+          projectId: input.projectId,
+          workspaceId: actor.workspaceId,
+          connectId,
+          participantCount: 1,
+          addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
+          showTicketsTabTicketsInChat: false,
+          metadata: {},
+          channelStats: {
+            create: {
+              workspaceId: actor.workspaceId,
+              lastActivityAt: now,
+              participantCount: 1,
+              addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
+            },
+          },
+          participants: {
+            create: {
+              workspaceId: actor.workspaceId,
+              userId: actor.userId,
+              role: ChannelRole.ADMIN,
+            },
+          },
+          participantsStatus: {
+            create: {
+              workspaceId: actor.workspaceId,
+              userId: actor.userId,
+              isDeleted: false,
+              updatedAt: now,
+            },
           },
         },
-        participants: {
-          create: {
-            workspaceId: actor.workspaceId,
-            userId: actor.userId,
-            role: ChannelRole.ADMIN,
-          },
-        },
-        participantsStatus: {
-          create: {
-            workspaceId: actor.workspaceId,
-            userId: actor.userId,
-            isDeleted: false,
-            updatedAt: now,
-          },
-        },
-      },
-    });
+      });
+    } catch (error) {
+      if (isChannelNameUniqueViolation(error)) {
+        throw new AppError(`Channel with name "${name}" already exists.`, 409);
+      }
+      throw error;
+    }
     await createConnectGroupForEntity(tx, {
       entityType: ConnectEntityType.CHANNEL,
       entityId: channelId,
