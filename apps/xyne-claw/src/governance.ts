@@ -322,9 +322,11 @@ export function createRunGovernance(opts: RunGovernanceOptions): RunGovernance {
     const critic = current && mode === "enforce" ? await criticVerdict(ctx, current) : { verdict: { status: "not_needed" } as CriticVerdict };
     const nowMs = Date.now();
     const hint = grantOf(meta?.permission);
+    // One snapshot per call; a deferred (shadow) critic decision measures its age from its own clock, not the gate's.
+    const killSnapshot = componentMode("kill") === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot();
     const decideWith = (c: CriticVerdict) => decide({
       call: { toolName: toolLabel, ...(meta?.serverType ? { mcpServerId: meta.serverType } : {}), effect: descriptor.effect, destination: descriptor.destination, secretInArguments },
-      kill: { snapshot: componentMode("kill") === "off" ? { epoch: 0, takenAtMs: nowMs, switches: [] } : currentKillSnapshot(), scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(orgId ? { org: orgId } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: toolLabel }, nowMs },
+      kill: { snapshot: killSnapshot, scopes: { run: sessionId, user: userId, ...(agentSlug ? { agent: agentSlug } : {}), ...(orgId ? { org: orgId } : {}), ...(meta?.serverType ? { mcp_server: meta.serverType } : {}), tool: toolLabel }, nowMs: Date.now() },
       conversation: state,
       critic: c,
       policy: { ...(hint ? { permissionHint: hint } : {}), judgeAvailable: criticEnabled(opts.critic), auditAvailable: true },

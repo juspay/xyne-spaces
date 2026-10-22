@@ -57,11 +57,26 @@ const VERBS: ReadonlyArray<[RegExp, EffectClass]> = [
 const INTERNAL_HOSTS = /(^|\.)(localhost|internal|local|svc|cluster\.local)$/i;
 const URL_IN_TEXT = /https?:\/\/([a-z0-9.-]{1,253})(?::\d{1,5})?(?=[/?#\s"'<>]|$)/gi;
 
+/** Publish words that are also the object of a read tool's name (message-detail, get-comment). */
+const NOUN_LIKE_PUBLISH = /^(message|mail|email|comment|share|dm|post|reply|invite|tweet|broadcast)$/;
+
 function effectFromVerb(toolName: string): EffectClass | undefined {
+  let first: EffectClass | undefined;
+  let firstIsNoun = false;
+  let sawRead = false;
   for (const token of toolName.toLowerCase().split(/[^a-z0-9]+/)) {
-    for (const [re, effect] of VERBS) if (re.test(token)) return effect;
+    for (const [re, effect] of VERBS) {
+      if (!re.test(token)) continue;
+      if (effect === "read") sawRead = true;
+      if (first === undefined) {
+        first = effect;
+        firstIsNoun = effect === "publish" && NOUN_LIKE_PUBLISH.test(token);
+      }
+      break;
+    }
   }
-  return undefined;
+  // A read verb beside a noun-like publish word names a read, not a send.
+  return first === "publish" && firstIsNoun && sawRead ? "read" : first;
 }
 
 const RANK: Readonly<Record<EffectClass | "unknown", number>> = { read: 0, write: 1, persist: 2, publish: 3, send: 4, execute: 5, delete: 6, admin: 7, unknown: 1 };
