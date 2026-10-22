@@ -103,10 +103,15 @@ export interface EngineRun<T> {
   error?: unknown;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
 export interface LlmReply<T> {
   answer: T | null;
   model: string;
-  usage?: { promptTokens: number; completionTokens: number };
+  usage?: TokenUsage;
 }
 
 /** One engine's answer as compared with the others'. */
