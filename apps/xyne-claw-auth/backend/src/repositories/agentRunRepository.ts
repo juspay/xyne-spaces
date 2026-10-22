@@ -470,6 +470,7 @@ function recordRunStats(sessionId: string, pending: PendingRunStats): void {
         llmCalls: pending.llmCalls ? (stripNulDeep(pending.llmCalls) as unknown[]) : undefined,
         toolsUsed: pending.toolsUsed,
         citationOutcome: pending.citationOutcome,
+        invocations: pending.invocations,
       }]),
       { timeout: 10_000, maxWait: 5_000 },
     );

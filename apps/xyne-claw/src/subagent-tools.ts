@@ -52,7 +52,7 @@ import { compactionExtension } from "./compaction-extension.js";
 import { installMidTurnCompaction } from "./mid-turn-compaction.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import type { ClawStreamMeta, DecideQuestion } from "xyne-claw-shared";
-import { takeCitations, recordCitations } from "./citations.js";
+import { takeCitations, recordCitations, takeDebug, recordDebug } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { type LlmCallStat } from "./llm-turn-stats.js";
@@ -825,6 +825,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
       let childTurns = 0;
+      let fallbacks = 0;
+      const xorAgg = { calls: 0, items: 0, answers: 0, unsure: 0, unavailable: 0, cached: 0, failedExpect: 0, quotaBlocked: 0 };
+      const reviewSamples: unknown[] = [];
       let childToolMs = 0;
       // parentRunId + parentToolCallId + subagentName are what let the
       // retrieval route nest this run under its parent — no child-only format.
@@ -1182,7 +1185,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         if (slowModelFallback) {
           installStreamModelFallback(session.agent, model, slowModelFallback, {
             label: def.name,
-            onFallback: (reason) => pushDebugEvent("model_fallback", { from: model.id, to: slowModelFallback.id, reason }),
+            onFallback: (reason) => {
+              fallbacks += 1;
+              pushDebugEvent("model_fallback", { from: model.id, to: slowModelFallback.id, reason });
+            },
           });
         }
         toolBudget = installToolBudget(session.agent, {
@@ -1290,6 +1296,14 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
             if (childCitations) {
               recordCitations(_toolCallId, childCitations);
             }
+            const childDebug = takeDebug(event.toolCallId);
+            const xs = childDebug?.["xor"] as Record<string, unknown> | undefined;
+            if (xs) {
+              xorAgg.calls += 1;
+              for (const k of ["items", "answers", "unsure", "unavailable", "cached", "failedExpect"] as const) xorAgg[k] += typeof xs[k] === "number" ? (xs[k] as number) : 0;
+              if (xs["quotaBlocked"]) xorAgg.quotaBlocked += 1;
+            }
+            if (Array.isArray(childDebug?.["review"])) reviewSamples.push(...(childDebug["review"] as unknown[]).slice(0, 4));
 
             // Capture the raw text of any child tool result that carries inline
             // citation tokens (e.g. `[clf-abc123#14]`). The text we return to
@@ -1343,6 +1357,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
                   parentToolCallId: _toolCallId,
                   subagentName: def.name,
                   ...(childCitations ? { citations: childCitations } : {}),
+                  ...(childDebug ? { debug: childDebug } : {}),
                 };
                 pushInvocation(progressCtx.progressUrl, progressCtx.parentSessionId, childInv);
                 // The stream push is fire-and-forget; this is the durable copy.
@@ -1688,6 +1703,20 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // the normal paths costs nothing.
         if (stickyTimer) clearInterval(stickyTimer);
         stickyLabel = null;
+        if (def.fast || def.delegationPreferred) {
+          recordDebug(_toolCallId, {
+            fastSubagent: {
+              fast: Boolean(def.fast),
+              model: childModelId,
+              tokensIn: childTokenUsage.input + childTokenUsage.cacheRead,
+              tokensOut: childTokenUsage.output,
+              turns: childTurns,
+              fallbacks,
+              xor: xorAgg,
+              ...(reviewSamples.length ? { review: reviewSamples.slice(0, 6) } : {}),
+            },
+          });
+        }
         // Dispose the child session even on the error path — the success path
         // already disposed it (dispose() is idempotent), but the catch path
         // didn't, leaking the session's listeners/extension context on every
@@ -1754,7 +1783,7 @@ export interface CustomSubagentSpec {
   skills: Array<{ slug: string; name: string; description: string; content: string }>;
   fast?: boolean;
   model?: string;
-  budget?: { maxToolCalls?: number };
+  budget?: { maxToolCalls?: number; xorItemsPerHour?: number };
   checks?: DecideQuestion[];
   checksVersion?: number;
 }

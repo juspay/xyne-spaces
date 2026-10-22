@@ -3498,3 +3498,75 @@ model ChatConversationDesignSystem {
   @@index([orgId])
   @@map("chat_conversation_design_systems")
 }
+
+/// One row per fast subagent call (custom `fast` subagents and ui-tester), copied from the
+/// wrapper invocation's debug.fastSubagent when the parent run's stats are written.
+model FastSubagentCall {
+  id             String   @id @default(cuid())
+  runId          String
+  orgId          String
+  agentSlug      String
+  subagentName   String
+  toolCallId     String
+  completedAt    DateTime
+  durationMs     Int
+  isError        Boolean
+  fast           Boolean
+  model          String?
+  tokensIn       Int
+  tokensOut      Int
+  turns          Int
+  fallbacks      Int
+  xorCalls       Int
+  xorItems       Int
+  xorAnswers     Int
+  xorUnsure      Int
+  xorUnavailable Int
+  xorCached      Int
+  quotaBlocked   Int
+
+  @@unique([runId, toolCallId])
+  @@index([orgId, subagentName, completedAt])
+  @@index([completedAt])
+  @@map("fast_subagent_calls")
+}
+
+/// Confident xor answers sampled from fast subagent calls for a human to mark right or wrong.
+model XorReviewSample {
+  id           String    @id @default(cuid())
+  orgId        String
+  subagentName String
+  runId        String
+  item         String    @db.Text
+  questionId   String
+  question     String    @db.Text
+  value        String
+  confidence   Float
+  verdict      String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([orgId, subagentName, verdict])
+  @@index([runId])
+  @@map("xor_review_samples")
+}
+
+/// Drift alert for a fast subagent; unique per hour bucket so every pod's sweeper can insert safely.
+model FastSubagentAlert {
+  id             String    @id @default(cuid())
+  orgId          String
+  subagentName   String
+  kind           String
+  bucket         String
+  baseline       Float
+  current        Float
+  samples        Int
+  message        String    @db.Text
+  createdAt      DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  @@unique([orgId, subagentName, kind, bucket])
+  @@index([orgId, createdAt])
+  @@map("fast_subagent_alerts")
+}

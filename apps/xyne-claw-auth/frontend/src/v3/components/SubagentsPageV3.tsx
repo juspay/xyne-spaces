@@ -143,12 +143,20 @@ export function SubagentsPageV3({ userId }: SubagentsPageV3Props) {
                 createLabel="New subagent"
                 onCreateClick={() => setShowCreateDialog(true)}
                 secondaryAction={
+                  <>
+                  <button
+                    onClick={() => navigate("/v3/fast-subagents")}
+                    className="flex flex-shrink-0 cursor-pointer items-center gap-[6px] rounded-[8px] border border-xyne-border bg-xyne-surface px-[14px] py-[8px] font-sans text-[13px] font-medium text-xyne-fg-primary transition hover:bg-xyne-surface-subtle"
+                  >
+                    Fast subagent ops
+                  </button>
                   <button
                     onClick={() => setShowTemplates(true)}
                     className="flex flex-shrink-0 cursor-pointer items-center gap-[6px] rounded-[8px] border border-xyne-border bg-xyne-surface px-[14px] py-[8px] font-sans text-[13px] font-medium text-xyne-fg-primary transition hover:bg-xyne-surface-subtle"
                   >
                     From template
                   </button>
+                  </>
                 }
                 searchValue={searchQuery}
                 onSearchChange={setSearchQuery}

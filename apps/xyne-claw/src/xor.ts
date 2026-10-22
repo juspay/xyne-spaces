@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { recordJudgeExchange } from "./judge-trace.js";
@@ -28,6 +29,7 @@ export interface XorRequest {
   images?: string[] | undefined;
   signal?: AbortSignal | undefined;
   model?: string | undefined;
+  cache?: boolean | undefined;
 }
 
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
@@ -136,6 +138,70 @@ async function post(
   return normaliseScores(body.answers ?? {}, questions);
 }
 
+export const XOR_CACHED = Symbol("xorCached");
+
+const CACHE_TTL_MS = Number(process.env["XOR_CACHE_TTL_MS"] ?? 600_000);
+const CACHE_MAX = 2_000;
+const cache = new Map<string, { at: number; answers: Record<string, XorAnswer> }>();
+
+function cacheKey(url: string, model: string | undefined, state: string, questions: Record<string, XorQuestion>, images: string[]): string {
+  return createHash("sha256").update(JSON.stringify([url, model ?? "", state, questions, images])).digest("hex");
+}
+
+function cacheGet(key: string): Record<string, XorAnswer> | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  cache.delete(key);
+  if (Date.now() - hit.at > CACHE_TTL_MS) return null;
+  cache.set(key, hit);
+  return hit.answers;
+}
+
+function cachePut(key: string, answers: Record<string, XorAnswer>): void {
+  if (CACHE_TTL_MS <= 0) return;
+  cache.set(key, { at: Date.now(), answers });
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+}
+
+export function clearXorCache(): void {
+  cache.clear();
+}
+
+export function isCachedAnswer(answers: Record<string, XorAnswer> | null): boolean {
+  return Boolean(answers && (answers as Record<symbol, unknown>)[XOR_CACHED]);
+}
+
+const MAX_CONCURRENCY = Math.max(1, Number(process.env["XOR_MAX_CONCURRENCY"] ?? 16));
+let active = 0;
+const waiting: Array<() => void> = [];
+
+async function acquire(): Promise<() => void> {
+  if (active >= MAX_CONCURRENCY) {
+    metric.count("xor_queued", {});
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+  active += 1;
+  return () => {
+    active -= 1;
+    waiting.shift()?.();
+  };
+}
+
+export function xorInFlight(): { active: number; waiting: number; max: number } {
+  return { active, waiting: waiting.length, max: MAX_CONCURRENCY };
+}
+
+async function postWithRetry(...args: Parameters<typeof post>): Promise<Record<string, XorAnswer>> {
+  try {
+    return await post(...args);
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== "xor 429" || args[3].aborted) throw err;
+    metric.count("xor_rate_limited", {});
+    await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 400)));
+    return post(...args);
+  }
+}
+
 export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | null> {
   const { state, questions, purpose, signal } = req;
   const images = req.images ?? [];
@@ -164,8 +230,20 @@ export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | 
       ...(error ? { error } : {}),
       at: new Date(started).toISOString(),
     });
+  const key = req.cache && cfg.backend === "xor" ? cacheKey(cfg.url, req.model, state, questions, images) : null;
+  const cached = key ? cacheGet(key) : null;
+  if (cached) {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+    metric.count("xor_cache_hit", { purpose });
+    record(0, cached);
+    return Object.defineProperty({ ...cached }, XOR_CACHED, { value: true, enumerable: false });
+  }
+  let release: (() => void) | null = null;
   try {
-    const answers = await post(cfg, state, questions, controller.signal, images, req.model);
+    release = await acquire();
+    const answers = await postWithRetry(cfg, state, questions, controller.signal, images, req.model);
+    if (key) cachePut(key, answers);
     const elapsed = Date.now() - started;
     metric.observe("xor_ms", elapsed, { purpose, backend: cfg.backend, result: "ok", questions: count, images: images.length });
     record(elapsed, answers);
@@ -179,6 +257,7 @@ export async function xor(req: XorRequest): Promise<Record<string, XorAnswer> | 
     log.warn(`[xor] ${purpose} unavailable after ${elapsed}ms (${reason}: ${msg}) — caller falls back`);
     return null;
   } finally {
+    release?.();
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
