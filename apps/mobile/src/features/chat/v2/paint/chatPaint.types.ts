@@ -1,3 +1,4 @@
+import type { RecordingPreview } from '@/src/types/recordings';
 import type { ChannelScopeType } from '@xyne/shared';
 
 export type SenderPaintModel = {
@@ -73,11 +74,7 @@ export type ChatPaintCollapseModel = {
   collapsedLines: number;
 };
 
-export type RecordingPreview = {
-  callId: string;
-  durationMs: number;
-  title: string;
-};
+export type { RecordingPreview } from '@/src/types/recordings';
 
 export type PaintPreviewSegment =
   | {

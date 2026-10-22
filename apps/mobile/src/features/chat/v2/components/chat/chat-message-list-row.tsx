@@ -188,10 +188,12 @@ export const ChatMessageListRow = memo(function ChatMessageListRow({
   const isForwardedMessage = initialMessageSummary?.msgType === MessageType.FORWARDED;
   const isFlowJsonMessage = isFlowJsonHtml(initialMessageSummary?.content ?? '');
   const useSpecialSystemComposer =
-    item.paint.rowKind === 'SYSTEM' && hasSpecialSystemMessageUi(initialMessageSummary);
+    !item.paint.recordingPreview &&
+    item.paint.rowKind === 'SYSTEM' &&
+    hasSpecialSystemMessageUi(initialMessageSummary);
   const useStableSystemRow =
     item.paint.rowKind === 'SYSTEM' && !useSpecialSystemComposer && !isFlowJsonMessage;
-  const useMessageRow = useStableTicketRow || useStableSystemRow;
+  const useMessageRow = !!item.paint.recordingPreview || useStableTicketRow || useStableSystemRow;
   const shouldKeepPaintPreview = shouldKeepChatPaintPreview({
     isCollapsible: item.paint.collapse.isCollapsible,
     isForwardedMessage,

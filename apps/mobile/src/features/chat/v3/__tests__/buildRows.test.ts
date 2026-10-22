@@ -492,3 +492,85 @@ describe('row identity', (): void => {
     }
   });
 });
+
+describe('recording message reuse', () => {
+  it('routes a system thread anchor to the recording pill and updates it when recording ends', () => {
+    const metadata = { isRecordingMessage: true, isHeadlessRecording: true, callId: 'recording-1' };
+    const active = message(
+      buildRows([base({ messageType: 'SYSTEM', parentConversationId: 'thread', metadata })], ctx),
+    );
+    assert.equal(active.recordingPreview?.isActive, true);
+    assert.equal(
+      getRowType({ type: 'message', id: active.conversationId, model: active }),
+      'recording',
+    );
+    const ended = message(
+      buildRows(
+        [
+          base({
+            messageType: 'SYSTEM',
+            parentConversationId: 'thread',
+            metadata: { ...metadata, operation: 'recording_ended', durationMs: 45000 },
+          }),
+        ],
+        ctx,
+      ),
+    );
+    assert.equal(ended.recordingPreview?.isActive, false);
+    assert.equal(ended.recordingPreview?.callId, 'recording-1');
+    assert.equal(ended.recordingPreview?.durationMs, 45000);
+    assert.notEqual(active.contentSignature, ended.contentSignature);
+  });
+  it('keeps shared recordings playable and removes recording actions from deleted messages', () => {
+    const metadata = { isRecordingMessage: true, callId: 'shared' };
+    assert.equal(message(buildRows([base({ metadata })], ctx)).recordingPreview?.isActive, false);
+    assert.equal(
+      message(buildRows([base({ metadata, isDeleted: true })], ctx)).recordingPreview,
+      null,
+    );
+    assert.equal(
+      message(buildRows([base({ metadata: { isRecordingMessage: true, callId: '' } })], ctx))
+        .recordingPreview,
+      null,
+    );
+  });
+});
+
+it('preserves legacy headless calls and their transcript surface', () => {
+  const activeMetadata = {
+    isCallMessage: true,
+    callId: 'headless',
+    callType: 'HEADLESS',
+    isHeadlessRecording: true,
+    messageSubtype: 'call_started',
+    operation: 'call_active',
+  };
+  for (const metadata of [
+    activeMetadata,
+    { ...activeMetadata, operation: 'call_ended', durationMs: 12000 },
+    { isCallMessage: true, callId: 'headless', isHeadlessRecording: true, durationMs: 12000 },
+  ]) {
+    const model = message(
+      buildRows([base({ messageType: 'SYSTEM', markdown: 'Recording started', metadata })], ctx),
+    );
+    assert.equal(getRowType({ type: 'message', id: model.conversationId, model }), 'call');
+    assert.equal(model.recordingPreview, null);
+  }
+  const normalCall = message(
+    buildRows(
+      [
+        base({
+          messageType: 'SYSTEM',
+          metadata: {
+            isCallMessage: true,
+            callId: 'audio',
+            callType: 'AUDIO',
+            operation: 'call_active',
+          },
+        }),
+      ],
+      ctx,
+    ),
+  );
+  assert.equal(normalCall.recordingPreview, null);
+});

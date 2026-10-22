@@ -14,6 +14,7 @@ const shouldShowIdentity = (
   if (
     channelKind === 'dm' ||
     row.rowKind === 'CURRENT_USER' ||
+    row.recordingPreview ||
     row.callPreview ||
     paintsAsCenteredSystem(row)
   ) {
@@ -44,7 +45,7 @@ export const applySenderNames = (
     if (row.showSenderName !== showSenderName) {
       rows[index] = { ...row, showSenderName };
     }
-    if (!paintsAsCenteredSystem(row) && !row.callPreview) {
+    if (!paintsAsCenteredSystem(row) && !row.callPreview && !row.recordingPreview) {
       previous = rows[index] ?? row;
     }
   }
@@ -76,7 +77,7 @@ export const applyTrailingGroupAvatars = (
       continue;
     }
 
-    if (row.callPreview) {
+    if (row.callPreview || row.recordingPreview) {
       if (row.showAvatar) rows[index] = { ...row, showAvatar: false };
       continue;
     }

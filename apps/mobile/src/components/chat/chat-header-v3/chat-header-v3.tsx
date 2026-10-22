@@ -1,3 +1,4 @@
+import { GroupCallConfirmationSheet } from '@/src/components/call/GroupCallConfirmationSheet';
 import React, { useCallback } from 'react';
 import { InteractionManager, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -73,6 +74,9 @@ const ChatHeaderV3: React.FC<ChatHeaderV3Props> = ({
     memberCount,
     memberLabel,
     handleCallPress,
+    isCallConfirmationOpen,
+    closeCallConfirmation,
+    confirmGroupCall,
   } = useConversationHeaderData(channelId, { enabled: postPaintReady });
 
   if (postPaintReady) {
@@ -254,6 +258,12 @@ const ChatHeaderV3: React.FC<ChatHeaderV3Props> = ({
           </HeaderIconButton>
         </View>
       </View>
+      <GroupCallConfirmationSheet
+        isOpen={isCallConfirmationOpen}
+        onClose={closeCallConfirmation}
+        onConfirm={confirmGroupCall}
+        channelName={displayName}
+      />
     </View>
   );
 };

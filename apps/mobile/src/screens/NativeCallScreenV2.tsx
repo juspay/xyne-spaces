@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 /**
  * NativeCallScreen using roomMachine
  *
@@ -67,6 +68,8 @@ import {
 } from '@/src/features/chat/navigation/chatOpenIntent';
 
 interface NativeCallScreenProps {
+  conversationId?: string;
+  targetUserIds?: string[];
   channelId: string;
   callType?: CallType;
   shouldInitiateCall?: boolean;
@@ -502,6 +505,8 @@ const styles = StyleSheet.create({
 export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
   channelId,
   callType = CallType.AUDIO,
+  conversationId,
+  targetUserIds,
   shouldInitiateCall = true,
   initialMicrophoneEnabled,
   initialCameraEnabled,
@@ -677,10 +682,20 @@ export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
     hasAttemptedConnection.current = true;
 
     if (shouldInitiateCall) {
+      // A missing list falls back to the entire channel on the server. Fail closed for threads.
+      if (conversationId && !targetUserIds?.length) {
+        Alert.alert(
+          'Choose participants',
+          'Reopen the thread call picker to choose who to invite.',
+        );
+        return;
+      }
       // Use roomMachine to initiate call
       roomActor.send({
         type: 'INITIATE_CALL',
         channelId,
+        ...(conversationId ? { conversationId } : {}),
+        ...(targetUserIds ? { targetUserIds } : {}),
         callType,
         zero: null, // Zero is managed separately in Lotus
         viewMode: 'full',
@@ -698,7 +713,15 @@ export const NativeCallScreen: React.FC<NativeCallScreenProps> = ({
       });
     }
     // else: call was already initiated externally (e.g. instant call from sheet) — just show machine state
-  }, [channelId, callType, initialCameraEnabled, initialMicrophoneEnabled, shouldInitiateCall]);
+  }, [
+    channelId,
+    conversationId,
+    targetUserIds,
+    callType,
+    initialCameraEnabled,
+    initialMicrophoneEnabled,
+    shouldInitiateCall,
+  ]);
 
   // Leaves the call screen with the call still running behind the top bar. `thenOpen` navigates
   // on from wherever that lands; it is skipped when the phone has to go back to the lock screen.

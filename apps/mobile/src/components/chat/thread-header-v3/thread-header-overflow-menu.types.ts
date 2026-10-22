@@ -1,3 +1,4 @@
+import type { ThreadHeaderOverflow } from '@/src/features/chat/thread-header/thread-header-overflow';
 import type { ReactElement } from 'react';
 
 export type {
@@ -6,9 +7,7 @@ export type {
 } from '@/src/features/chat/thread-header/thread-header-overflow';
 
 export type ThreadHeaderOverflowMenuProps = {
-  channelId: string;
-  threadId: string;
-  canUseMemberActions: boolean;
+  overflow: ThreadHeaderOverflow;
 };
 
 export type ThreadHeaderOverflowMenuComponent = (

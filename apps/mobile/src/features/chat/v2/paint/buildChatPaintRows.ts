@@ -1,3 +1,4 @@
+import { recordingPreviewFromMetadata } from '@/src/utils/recordingMessage';
 import { format } from 'date-fns';
 import {
   ChannelScopeType,
@@ -810,24 +811,6 @@ const isTicketActivityMessage = (metadataJson: string | null | undefined): boole
   }
 };
 
-const getRecordingMeta = (
-  metadataJson: string | null | undefined,
-): Omit<RecordingPreview, 'title'> | null => {
-  if (!metadataJson) return null;
-  try {
-    const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
-    if (metadata['isRecordingMessage'] !== true || typeof metadata['callId'] !== 'string') {
-      return null;
-    }
-    return {
-      callId: metadata['callId'],
-      durationMs: typeof metadata['durationMs'] === 'number' ? metadata['durationMs'] : 0,
-    };
-  } catch {
-    return null;
-  }
-};
-
 const shouldShowIdentity = (
   row: Pick<ChatPaintRow, 'createdAt' | 'rowKind' | 'senderPaintModel'>,
   channelType: ChannelScopeType | undefined,
@@ -1037,7 +1020,7 @@ const buildChatPaintRow = ({
   const ticketPreview = isDeleted
     ? null
     : getTicketPreview(conversation.ticket_md ?? null, currentUser, identities);
-  const recordingMeta = isDeleted ? null : getRecordingMeta(summary?.metadata);
+  const recordingMeta = isDeleted ? null : recordingPreviewFromMetadata(summary?.metadata);
   const allAttachmentsDeleted =
     !isDeleted && hasSoftDeletedAttachmentsOnly(conversation.initialMessageAttachments);
   const mediaPlaceholder = isDeleted ? null : getMediaPlaceholder(conversation);
