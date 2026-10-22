@@ -140,7 +140,7 @@ groups and their load balancers, the bastion.
 | `/external/` | `xyne-dashboard-external:80` | that app is on |
 | `/claw/api/`, `/claw/health` | `xyne-claw-auth:3003` | `xyne-claw-auth` is on |
 | `/claw/`, `/claw` | `xyne-claw-auth-frontend:80` | `xyne-claw-auth-frontend` is on |
-| `/claw-preview/` | `xyne-sandbox-router:8080` | sandboxes and claw are on |
+| `/claw-preview/`, `/claw-code/` | `xyne-sandbox-router:8080` | sandboxes and claw are on |
 | `/` | `xyne-dashboard:80` | always |
 
 ## Identities and secrets

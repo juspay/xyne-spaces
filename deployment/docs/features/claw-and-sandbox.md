@@ -9,7 +9,7 @@ cut off from the cluster and reaching the internet only through an allow-listed 
 - [What a sandbox is](#what-a-sandbox-is)
 - [The workspace image](#the-workspace-image)
 - [Network isolation](#network-isolation)
-- [Live preview](#live-preview)
+- [Live preview and editor](#live-preview-and-editor)
 - [Kata runtime settings](#kata-runtime-settings)
 - [Check it works](#check-it-works)
 
@@ -106,8 +106,8 @@ The same image runs on every cloud. Inside, as uid 1000:
 | Port | Service |
 |---|---|
 | 8888 | the workspace API claw drives: run commands, read and write files |
-| 6080 | the noVNC live view of a headed Chromium ([Live preview](#live-preview)) |
-| 8443 | code-server (VS Code in the browser) |
+| 6080 | the noVNC live view of a headed Chromium ([Live preview and editor](#live-preview-and-editor)) |
+| 8443 | code-server (VS Code in the browser, [same section](#live-preview-and-editor)) |
 | 9223 | a Chromium DevTools endpoint for browser automation |
 
 To have each warm sandbox clone and prepare a repository before it is claimed:
@@ -152,13 +152,43 @@ When the cluster runs NodeLocal DNSCache, lookups never reach a kube-dns pod and
 rule does not match: put both addresses from its `-localip` flag in `policy.dns.cidrs`, or every
 lookup in a sandbox hangs.
 
-## Live preview
+## Live preview and editor
 
 claw posts a link to watch, and drive, the agent's browser:
 `https://<domain>/claw-preview/<sandbox>/`. The gateway routes `/claw-preview/` to the sandbox
 router, which forwards to the sandbox's noVNC on 6080 (`SANDBOX_PREVIEW_BASE_URL` on claw is the
 public URL). The route has no authentication of its own: anyone with a sandbox's name can drive
-its browser. The editor link claw also posts, `/claw-code/<sandbox>`, is not routed yet.
+its browser.
+
+claw posts the editor alongside it: `https://<domain>/claw-code/<sandbox>/`, routed the same way
+to code-server on 8443. Two things differ from the preview route.
+
+The trailing slash is required. code-server resolves its asset URLs relative to the current
+directory, so `/claw-code/<sandbox>` would dial `/claw-code/<asset>` and load an empty workbench;
+the router answers the unslashed form with a 302 to the slashed one.
+
+And it is gated. code-server offers file read/write and a terminal in a pod holding the workspace's
+GitHub SSH key, so before proxying, the router asks claw-auth
+(`CLAW_AUTH_URL`, `GET /claw/api/v1/sandbox-access`) whether the browser's Spaces session owns this
+sandbox or can reach a conversation it appears in — the artifact rows `/webhook/progress` and the
+`/ai` stream consumer write. Decisions are cached for a minute and single-flighted per session. A
+claw-auth that cannot be reached fails closed with a 503, and clearing `CLAW_AUTH_URL` turns the
+gate off entirely, which leaves the editor as open as the preview.
+
+A run that never recorded an ownership row — `resolveSessionContext` came back empty, or the `/ai`
+consumer shed the frame under load — has no row for the gate to match, and the sandbox reads as
+`unknown-sandbox`: a 403 even for the person who started it. Before the gate existed the link was
+simply dead, so this is newly visible rather than newly broken (XYNE-65825).
+
+The Xyne AI workspace pane does not embed the editor; it offers a button that opens it in a tab.
+Neither is a security boundary: frames under `/claw-preview/` and `/claw-code/` are granted
+`allow-same-origin` (`iframeSandboxFor`), so inline or in a tab the sandbox's pages run on the
+Spaces origin — see [security](../concepts/security.md#sandboxes). The router refuses a
+`/claw-code/` request whose `Origin` is not the public host it arrived on (or one listed in
+`PUBLIC_ORIGINS`), and a `/claw-code/` WebSocket upgrade with no `Origin` at all, before it rewrites
+`Origin` for code-server. From the desktop app
+it is the system browser, which carries its own cookies, so a refusal there is a short page asking
+the reader to sign in to Xyne in that browser rather than a dead end.
 
 ## Kata runtime settings
 

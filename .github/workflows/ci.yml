@@ -491,6 +491,29 @@ jobs:
         run: pnpm --dir apps/mobile run test
 
   # ---------------------------------------------------------------------------
+  # sandbox-router (FastAPI). The only Python service this tree tests: its path
+  # modes decide who reaches a sandbox's editor, and the suite mocks both the
+  # sandbox and claw-auth, so it needs no cluster.
+  # ---------------------------------------------------------------------------
+  sandbox-router:
+    name: sandbox-router tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: claw-deployments/kata-infra/sandbox-router-ws
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        working-directory: claw-deployments/kata-infra/sandbox-router-ws
+        run: pytest -q
+
+  # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
   # .gitleaks.toml allowlist, mirroring the Jenkins gitleaksScan() step.
   # Pinned to the same version Jenkins uses. `dir` scans files (not git

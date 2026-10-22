@@ -341,13 +341,14 @@ describe("ingestArtifactSignals", () => {
     await ingestSandboxPreviewSignals(CTX, {
       sandboxId: "sbx_3",
       sandboxPreviewUrl: "https://p.example/claw-preview/sbx_3/",
-      sandboxCodePreviewUrl: "https://p.example/claw-code/sbx_3",
+      sandboxCodePreviewUrl: "https://p.example/claw-code/sbx_3/",
     });
     expect(state.upserts.map((u) => u.create["kind"])).toEqual(["DIFF", "PREVIEW"]);
     expect(state.upserts[0]?.create).toMatchObject({
       refService: "CLAW",
       refId: "sbx_3",
-      url: "https://p.example/claw-code/sbx_3",
+      // Slashed: code-server's assets are relative to the current directory.
+      url: "https://p.example/claw-code/sbx_3/",
       latestVersionRef: "run_1",
     });
   });
