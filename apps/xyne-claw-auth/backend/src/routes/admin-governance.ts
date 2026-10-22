@@ -48,18 +48,41 @@ export function eventsWhere(q: Record<string, unknown>, orgId: string | undefine
 const SELECT = {
   id: true, occurredAt: true, orgSequence: true, orgId: true, eventType: true, actorKind: true, actorId: true, onBehalfOfUserId: true, runId: true, conversationId: true,
   toolCallId: true, mcpServerId: true, toolName: true, decision: true, reasonCode: true, reasonText: true, toolEffect: true, destinationKind: true, destinationHost: true,
-  riskLevelAtCall: true, carriedPrivateData: true, outcome: true, matchedRuleIds: true, gateMs: true, judgeMs: true, subjectKind: true, subjectId: true, argumentsRedacted: true,
+  riskLevelAtCall: true, carriedPrivateData: true, outcome: true, matchedRuleIds: true, gateMs: true, judgeMs: true, subjectKind: true, subjectId: true, argumentsRedacted: true, scannerVersion: true,
 } as const;
 
-/** Display names for the ids the rows carry: agents by slug, people by id. */
-async function namesFor(agentSlugs: Iterable<string | null>, userIds: Iterable<string | null>, orgId: string | undefined): Promise<{ agents: Record<string, string>; users: Record<string, { name: string; email: string }> }> {
+/** Display names for the ids the rows carry: agents by slug, people by id, skills by subject id. */
+async function namesFor(agentSlugs: Iterable<string | null>, userIds: Iterable<string | null>, orgId: string | undefined, subjectIds: Iterable<string | null> = []): Promise<{ agents: Record<string, string>; users: Record<string, { name: string; email: string }>; skills: Record<string, { slug: string; name: string }> }> {
   const slugs = [...new Set([...agentSlugs].filter((s): s is string => !!s))];
   const ids = [...new Set([...userIds].filter((s): s is string => !!s))];
-  const [agents, users] = await Promise.all([
+  const skillIds = [...new Set([...subjectIds].flatMap((s) => (s?.startsWith("skill:") ? [s.slice(6)] : [])))];
+  const [agents, users, skills] = await Promise.all([
     slugs.length > 0 ? prisma.agent.findMany({ where: { slug: { in: slugs }, ...(orgId ? { orgId } : {}) }, select: { slug: true, name: true } }) : [],
     ids.length > 0 ? prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } }) : [],
+    skillIds.length > 0 ? prisma.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true, slug: true, name: true } }) : [],
   ]);
-  return { agents: Object.fromEntries(agents.map((a) => [a.slug, a.name])), users: Object.fromEntries(users.map((u) => [u.id, { name: u.name, email: u.email }])) };
+  return {
+    agents: Object.fromEntries(agents.map((a) => [a.slug, a.name])),
+    users: Object.fromEntries(users.map((u) => [u.id, { name: u.name, email: u.email }])),
+    skills: Object.fromEntries(skills.map((s) => [s.id, { slug: s.slug, name: s.name }])),
+  };
+}
+
+type CriticRow = { toolCallId: string | null; decision: string | null; reasonCode: string | null; reasonText: string | null; matchedRuleIds: string[]; judgeMs: number | null; occurredAt: Date };
+
+/** In shadow the critic answers after the call ran and its verdict is its own event; the feed joins it to the call by id. */
+export async function criticsFor(rows: ReadonlyArray<{ eventType: string; toolCallId: string | null; occurredAt: Date }>, orgId: string | undefined): Promise<Map<string, CriticRow>> {
+  const out = new Map<string, CriticRow>();
+  const calls = rows.filter((r) => r.eventType === "tool_call" && r.toolCallId);
+  if (calls.length === 0) return out;
+  const times = calls.map((r) => r.occurredAt.getTime());
+  const verdicts: CriticRow[] = await governancePrisma.governanceAuditEvent.findMany({
+    where: { ...(orgId ? { orgId } : {}), eventType: "critic_verdict", toolCallId: { in: calls.map((r) => r.toolCallId!) }, occurredAt: { gte: new Date(Math.min(...times) - 60_000), lte: new Date(Math.max(...times) + 10 * 60_000) } },
+    orderBy: { occurredAt: "asc" },
+    select: { toolCallId: true, decision: true, reasonCode: true, reasonText: true, matchedRuleIds: true, judgeMs: true, occurredAt: true },
+  });
+  for (const v of verdicts) if (v.toolCallId) out.set(v.toolCallId, v);
+  return out;
 }
 
 router.get("/events", asyncHandler(async (req: Request, res: Response) => {
@@ -72,11 +95,12 @@ router.get("/events", asyncHandler(async (req: Request, res: Response) => {
     governancePrisma.governanceAuditEvent.count({ where }),
   ]);
   const runIds = [...new Set(rows.map((r) => r.runId).filter((id): id is string => !!id))];
-  const [sessions, names] = await Promise.all([
+  const [sessions, names, critics] = await Promise.all([
     runIds.length > 0 ? prisma.agentRun.findMany({ where: { id: { in: runIds } }, select: { id: true, sessionId: true } }).then((runs) => new Map(runs.map((r) => [r.id, r.sessionId]))) : new Map<string, string>(),
-    namesFor(rows.map((r) => (r.actorKind === "agent" ? r.actorId : null)), rows.flatMap((r) => [r.onBehalfOfUserId, r.actorKind === "agent" ? null : r.actorId]), scope.orgId),
+    namesFor(rows.map((r) => (r.actorKind === "agent" ? r.actorId : null)), rows.flatMap((r) => [r.onBehalfOfUserId, r.actorKind === "agent" ? null : r.actorId]), scope.orgId, rows.map((r) => r.subjectId)),
+    criticsFor(rows, scope.orgId),
   ]);
-  ok(res, { rows: rows.map((r) => ({ ...r, sessionId: r.runId ? sessions.get(r.runId) ?? null : null })), total, names });
+  ok(res, { rows: rows.map((r) => ({ ...r, sessionId: r.runId ? sessions.get(r.runId) ?? null : null, critic: r.toolCallId ? critics.get(r.toolCallId) ?? null : null })), total, names });
 }));
 
 /** The values the feed's filters can take in a window, with counts and names, so a filter offers what exists. */

@@ -66,6 +66,19 @@ const opts = (values: readonly string[], any?: string) => [...(any ? [{ value: "
 const decisionVariant = (d: string | null): "success" | "warning" | "error" | "neutral" => (d === "allow" ? "success" : d === "ask" ? "warning" : d === "block" ? "error" : "neutral");
 const modeVariant = (m: string | undefined): "success" | "warning" | "neutral" => (m === "enforce" ? "success" : m === "shadow" ? "warning" : "neutral");
 const riskClass = (r: string | null): string => (r === "high" ? "text-xyne-error-fg" : r === "elevated" ? "text-xyne-warning-fg" : "text-xyne-fg-muted");
+const criticClass = (level: string): string => (level === "critical" || level === "high" ? "text-xyne-error-fg" : level === "medium" ? "text-xyne-warning-fg" : "text-xyne-fg-muted");
+/** Rows that record a fact rather than a decision. */
+const INFO_BADGE: Record<string, string> = { run_started: "started", config_changed: "changed", version_status_changed: "changed", admin_override: "override" };
+const CRITIC_TAG = /^critic\.(xor|rule|c1|fallback)\.(\w+)$/;
+/** The critic's level and categories: on the row itself in enforce, or from the verdict recorded after the call in shadow. */
+function criticOf(r: GovernanceEvent): { level: string; categories: string[]; afterTheCall: boolean } | null {
+  const own = r.matchedRuleIds.some((t) => CRITIC_TAG.test(t));
+  const tags = own ? r.matchedRuleIds : r.critic?.matchedRuleIds ?? [];
+  const level = tags.map((t) => CRITIC_TAG.exec(t)?.[2]).find((l): l is string => !!l);
+  if (!level) return null;
+  return { level, categories: tags.filter((t) => t.startsWith("critic.") && !CRITIC_TAG.test(t)).map((t) => t.slice(7).replace(/_/g, " ")), afterTheCall: !own };
+}
+const loadedSkills = (r: GovernanceEvent): string[] => (r.reasonText ?? "").split(", ").filter(Boolean).map((s) => s.split("@")[0] ?? s);
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const when = (iso: string): string => new Date(iso).toLocaleString();
 const TH = "px-3 py-2 font-medium";
@@ -140,12 +153,19 @@ export function GovernancePageV3({ userId }: { userId: string }): ReactElement {
   useEffect(() => { if (feed.error) show({ variant: "error", title: "Failed to load the feed", description: feed.error }); }, [feed.error, show]);
   useEffect(() => { if (switches.error) show({ variant: "error", title: "Failed to load kill switches", description: switches.error }); }, [switches.error, show]);
 
-  const names: GovernanceNames = feed.data?.names ?? { agents: {}, users: {} };
+  const names: GovernanceNames = feed.data?.names ?? { agents: {}, users: {}, skills: {} };
   const agentLabel = (slug: string | null): string => (slug ? names.agents[slug] ?? facets.data?.agents.find((a) => a.slug === slug)?.name ?? slug : "—");
   const userLabel = (id: string | null): string => {
     if (!id) return "—";
     const u = names.users[id] ?? facets.data?.users.find((x) => x.id === id);
     return u?.email ?? u?.name ?? id;
+  };
+  const subjectLabel = (r: GovernanceEvent): string => {
+    if (r.toolName) return `${r.mcpServerId ? `${r.mcpServerId}/` : ""}${r.toolName}`;
+    if (r.eventType === "run_started") return `run · ${loadedSkills(r).length} skills`;
+    if (r.subjectId?.startsWith("skill:")) return `skill · ${names.skills[r.subjectId.slice(6)]?.slug ?? r.subjectId.slice(6)}`;
+    if (r.subjectKind?.startsWith("kill:")) return `${r.subjectKind.slice(5).replace("_", " ")} ${r.subjectId ?? ""}`.trim();
+    return r.subjectKind ? `${r.subjectKind}${r.subjectId ? ` ${r.subjectId}` : ""}` : "—";
   };
   const openPath = (r: GovernanceEvent): string | null => {
     if (r.conversationId && r.actorKind === "agent" && r.actorId) return runReplayPath({ agentSlug: r.actorId, conversationId: r.conversationId }, { allRuns: r.onBehalfOfUserId !== userId });
@@ -204,7 +224,7 @@ export function GovernancePageV3({ userId }: { userId: string }): ReactElement {
               <Button size="sm" variant="secondary" className="ml-auto" onClick={() => void downloadGovernanceCsv(userId, feedQuery).catch((err) => show({ variant: "error", title: "Export failed", description: errorText(err) }))}>Export CSV</Button>
             </div>
             <Legend />
-            <FeedTable rows={feed.data?.rows ?? []} loading={feed.loading} calls={tab === "calls"} agentLabel={agentLabel} userLabel={userLabel} openPath={openPath} onOpen={(p) => navigate(p)} showOrg={allOrgs} />
+            <FeedTable rows={feed.data?.rows ?? []} loading={feed.loading} calls={tab === "calls"} agentLabel={agentLabel} userLabel={userLabel} subjectLabel={subjectLabel} openPath={openPath} onOpen={(p) => navigate(p)} showOrg={allOrgs} />
             <div className="flex items-center justify-between text-[11px] text-xyne-fg-muted">
               <span>Showing {(feed.data?.total ?? 0) === 0 ? 0 : page * PAGE + 1}–{Math.min(page * PAGE + (feed.data?.rows.length ?? 0), feed.data?.total ?? 0)} of {feed.data?.total ?? 0}</span>
               <div className="flex items-center gap-2">
@@ -272,15 +292,17 @@ function Legend(): ReactElement {
       <div className="mt-2 grid gap-3 md:grid-cols-2">
         <div>
           <p className="font-medium text-xyne-fg-primary">Decision</p>
-          <p><b>allow</b>: the call ran and was recorded. <b>ask</b>: a person must approve it; MCP calls wait on an approval card, and in shadow this is only recorded. <b>block</b>: refused in enforce; in shadow recorded as "would block". The reason code says which rule decided.</p>
+          <p><b>allow</b>: the call ran and was recorded. <b>ask</b>: a person must approve it; an MCP call waits on an approval card, and in shadow this is only recorded (a grant's own ask, GOV-GRANT-ASK, has always shown the card). <b>block</b>: refused in enforce; in shadow recorded as "would block". The reason code says which rule decided.</p>
+          <p className="mt-2 font-medium text-xyne-fg-primary">Where a call is decided</p>
+          <p><b>C1</b> runs in claw before any tool runs, for every tool, claw's own and MCP alike: it classifies the call, checks the kill switches, the conversation's risk and the critic, and the policy table answers allow, ask or block. An MCP call then reaches claw-auth, where <b>C2</b> decides again with what only claw-auth knows (the server's write policy, the agent's grant, the credentials) and records the call; an ask there is the approval card. Both services read the same kill switches; in shadow both only record.</p>
           <p className="mt-2 font-medium text-xyne-fg-primary">Conversation risk</p>
           <p><b>none</b>: the run has read only what people typed and clean results. <b>elevated</b>: a scan is still pending, or something the agent read looked unsure or suspicious; publish, send, delete, execute, persist and admin calls then need approval. <b>high</b>: an injection was found in something the agent read; every call except a read needs approval and sends outside the org are blocked. <b>private</b>: the run read private data (mail, chat, Spaces), so a send outside the org asks.</p>
         </div>
         <div>
           <p className="font-medium text-xyne-fg-primary">Effect and destination</p>
-          <p>Classified in under a millisecond from the tool's name, its server's declared write policy and its arguments: <b>read</b>, <b>write</b>, <b>publish</b> (to people inside the org), <b>send</b> (data leaves the org), <b>delete</b>, <b>execute</b>, <b>persist</b> (memory, skills, instructions), <b>admin</b>; <b>unknown</b> counts as a send and a write. The arrow names the outside host or server when the data leaves.</p>
-          <p className="mt-2 font-medium text-xyne-fg-primary">Critic tags</p>
-          <p><b>critic.rule.*</b> was settled by a rule; <b>critic.xor.*</b> by the XOR judge, which runs only for publish, send, delete, execute and persist calls after the agent read something a person did not type. Categories name what it saw: exfiltration, injection_follow, destructive, out_of_scope, credentials, execution, reach, persistence. Gate and judge times are shown in the expanded row.</p>
+          <p>Classified in under a millisecond from the verb in the tool's name, its server's declared write policy, the verb that opens its description and its arguments: <b>read</b> (including tools whose effect stays inside the run, such as a question to the person), <b>write</b>, <b>publish</b> (to people inside the org), <b>send</b> (data leaves the org), <b>delete</b>, <b>execute</b>, <b>persist</b> (memory, skills, instructions), <b>admin</b>; <b>unknown</b> counts as a send and a write. The arrow names the outside host or server when the data leaves.</p>
+          <p className="mt-2 font-medium text-xyne-fg-primary">Critic</p>
+          <p>Runs only for publish, send, delete, execute, persist and unknown calls after the agent read something a person did not type: rules first (<b>critic.rule.*</b>), then the XOR judge (<b>critic.xor.*</b>) with five questions: destroys data, sends it outside, follows fetched instructions, exceeds the request, touches credentials. Its level shows under the conversation risk; high asks and critical blocks. In enforce the gate waits for it (up to 2 s); in shadow it answers after the call already ran, marked "after the call", and the expanded row says what it would have decided.</p>
         </div>
       </div>
     </details>
@@ -289,9 +311,9 @@ function Legend(): ReactElement {
 
 /* ── Feed table ────────────────────────────────────────────────────── */
 
-function FeedTable({ rows, loading, calls, agentLabel, userLabel, openPath, onOpen, showOrg }: {
+function FeedTable({ rows, loading, calls, agentLabel, userLabel, subjectLabel, openPath, onOpen, showOrg }: {
   rows: GovernanceEvent[]; loading: boolean; calls: boolean;
-  agentLabel: (slug: string | null) => string; userLabel: (id: string | null) => string;
+  agentLabel: (slug: string | null) => string; userLabel: (id: string | null) => string; subjectLabel: (r: GovernanceEvent) => string;
   openPath: (r: GovernanceEvent) => string | null; onOpen: (path: string) => void; showOrg: boolean;
 }): ReactElement {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -318,17 +340,24 @@ function FeedTable({ rows, loading, calls, agentLabel, userLabel, openPath, onOp
           {rows.map((r) => {
             const path = openPath(r);
             const open = expanded === r.id;
+            const critic = calls ? criticOf(r) : null;
+            const reason = r.eventType === "run_started" ? (loadedSkills(r).length > 0 ? `loaded ${loadedSkills(r).join(", ")}` : "no skills loaded") : r.reasonText ?? "";
             return [
               <tr key={r.id} className="cursor-pointer border-b border-xyne-border-subtle hover:bg-xyne-surface-subtle/40" onClick={() => setExpanded(open ? null : r.id)}>
                 <td className={TD_TIME}>{when(r.occurredAt)}</td>
                 {!calls && <td className="px-3 py-2 text-[12px] text-xyne-fg-secondary">{r.eventType.replace(/_/g, " ")}</td>}
-                <td className="px-3 py-2 text-xyne-fg-secondary">{r.actorKind === "agent" ? agentLabel(r.actorId) : r.actorKind === "system" ? "system" : userLabel(r.actorId)}</td>
-                <td className="px-3 py-2 text-[12px] text-xyne-fg-secondary">{userLabel(r.onBehalfOfUserId)}</td>
-                <td className="px-3 py-2 text-xyne-fg-primary">{calls ? `${r.mcpServerId ? `${r.mcpServerId}/` : ""}${r.toolName ?? "—"}` : r.toolName ?? (r.subjectKind ? `${r.subjectKind}${r.subjectId ? ` ${r.subjectId}` : ""}` : "—")}</td>
+                <td className="px-3 py-2 text-xyne-fg-secondary">{r.actorKind === "agent" ? agentLabel(r.actorId) : r.actorKind === "system" ? "system" : "—"}</td>
+                <td className="px-3 py-2 text-[12px] text-xyne-fg-secondary">{userLabel(r.onBehalfOfUserId ?? (r.actorKind === "agent" || r.actorKind === "system" ? null : r.actorId))}</td>
+                <td className="px-3 py-2 text-xyne-fg-primary">{subjectLabel(r)}</td>
                 {calls && <td className="px-3 py-2 text-xyne-fg-secondary">{r.toolEffect ?? "—"}{r.destinationKind && r.destinationKind !== "internal" ? ` → ${r.destinationHost ?? r.destinationKind.replace(/_/g, " ")}` : ""}</td>}
-                <td className="px-3 py-2">{r.decision ? <Badge as="span" size="sm" variant={decisionVariant(r.decision)} label={r.decision} /> : r.outcome ? <Badge as="span" size="sm" variant={r.outcome === "error" ? "error" : "neutral"} label={r.outcome} /> : "—"}</td>
-                {calls && <td className={`px-3 py-2 text-[12px] ${riskClass(r.riskLevelAtCall)}`}>{r.riskLevelAtCall ?? "—"}{r.carriedPrivateData ? " · private" : ""}</td>}
-                <td className="max-w-[320px] truncate px-3 py-2 text-[12px] text-xyne-fg-secondary" title={r.reasonText ?? undefined}>{r.reasonCode ? <span className="font-mono text-[11px]">{r.reasonCode}</span> : null}{r.reasonCode && r.reasonText ? " · " : ""}{r.reasonText ?? ""}</td>
+                <td className="px-3 py-2">{r.decision ? <Badge as="span" size="sm" variant={decisionVariant(r.decision)} label={r.decision} /> : r.outcome ? <Badge as="span" size="sm" variant={r.outcome === "error" ? "error" : "neutral"} label={r.outcome} /> : INFO_BADGE[r.eventType] ? <Badge as="span" size="sm" variant="neutral" label={INFO_BADGE[r.eventType]!} /> : "—"}</td>
+                {calls && (
+                  <td className="px-3 py-2 text-[12px]">
+                    <div className={riskClass(r.riskLevelAtCall)}>{r.riskLevelAtCall ?? "—"}{r.carriedPrivateData ? " · private" : ""}</div>
+                    {critic && <div className={criticClass(critic.level)} title={critic.afterTheCall ? "The critic answered after the call had already run (shadow)." : undefined}>critic {critic.level}{critic.categories.length > 0 ? `: ${critic.categories.join(", ")}` : ""}{critic.afterTheCall ? " · after the call" : ""}</div>}
+                  </td>
+                )}
+                <td className="max-w-[320px] truncate px-3 py-2 text-[12px] text-xyne-fg-secondary" title={reason}>{r.reasonCode ? <span className="font-mono text-[11px]">{r.reasonCode}</span> : null}{r.reasonCode && reason ? " · " : ""}{reason}</td>
                 <td className="px-3 py-2 text-[12px]">
                   {path ? <button type="button" className="text-xyne-fg-secondary underline hover:text-xyne-fg-primary" onClick={(e) => { e.stopPropagation(); onOpen(path); }}>{path.startsWith("/v3/chat") ? "conversation" : "run"}</button> : "—"}
                 </td>
@@ -337,9 +366,10 @@ function FeedTable({ rows, loading, calls, agentLabel, userLabel, openPath, onOp
                 <tr key={`${r.id}-d`} className="border-b border-xyne-border-subtle bg-xyne-surface-subtle/40">
                   <td colSpan={10} className="px-3 py-2 text-[12px] text-xyne-fg-secondary">
                     <div>{r.reasonText}</div>
+                    {r.critic && <div className="mt-1">critic, {r.critic.judgeMs ?? "—"} ms after the call: {r.critic.reasonText}</div>}
                     {r.matchedRuleIds.length > 0 && <div className="mt-1 text-xyne-fg-muted">tags: {r.matchedRuleIds.join(", ")}</div>}
                     <div className="mt-1 text-xyne-fg-muted">
-                      gate {r.gateMs ?? "—"} ms · judge {r.judgeMs ?? "—"} ms · seq {r.orgSequence ?? "unchained"} · call {r.toolCallId ?? "—"} · run {r.runId ?? "—"}{showOrg ? ` · org ${r.orgId}` : ""}
+                      gate {r.gateMs ?? "—"} ms · judge {r.judgeMs ?? r.critic?.judgeMs ?? "—"} ms · seq {r.orgSequence ?? "unchained"} · call {r.toolCallId ?? "—"} · run {r.runId ?? "—"}{r.scannerVersion ? ` · scanner ${r.scannerVersion}` : ""}{showOrg ? ` · org ${r.orgId}` : ""}
                     </div>
                     {r.argumentsRedacted && <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-xyne-border bg-xyne-surface p-2 font-mono text-[11px] text-xyne-fg-secondary">{r.argumentsRedacted}</pre>}
                   </td>
@@ -414,7 +444,7 @@ function StatsView({ stats, agentLabel }: { stats: GovernanceStats | undefined; 
 const MODE_HELP: Record<string, { title: string; body: string }> = {
   stop: { title: "Stop", body: "New runs for the scope are refused at the door, live runs abort within about 2 seconds, and every tool call is blocked. The agent is off until the switch is cleared or expires." },
   read_only: { title: "Read-only", body: "Calls that only read run. Every other call (write, publish, send, delete, execute, persist, admin) is blocked." },
-  ask_all: { title: "Ask-all", body: "Calls that only read run. Every other MCP call waits for a person's approval, on the same card a write tool uses, even when its grant is allow. Calls to claw's own tools (memory, skills, shell) have no approval card yet and do not run." },
+  ask_all: { title: "Ask-all", body: "Calls that only read, or stay inside the run (a question to the person, the plan), run. Every other MCP call waits for a person's approval, on the same card a write tool uses, even when its grant is allow. Calls to claw's own tools with a side effect (files, memory, skills, shell) have no approval card yet and do not run." },
 };
 const SCOPE_HELP: Record<string, string> = {
   agent: "one agent, by slug", user: "one person's runs, by user id", mcp_server: "one server type on every agent (e.g. slack)", tool: "one tool name on every agent", run: "one live run, by session id", org: "every agent in this organization", platform: "everything",

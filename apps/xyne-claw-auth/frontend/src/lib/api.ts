@@ -8593,8 +8593,11 @@ export interface GovernanceEvent {
   runId: string | null; conversationId: string | null; toolCallId: string | null; mcpServerId: string | null; toolName: string | null; decision: string | null; reasonCode: string | null;
   reasonText: string | null; toolEffect: string | null; destinationKind: string | null; destinationHost: string | null; riskLevelAtCall: string | null; carriedPrivateData: boolean | null;
   outcome: string | null; matchedRuleIds: string[]; gateMs: number | null; judgeMs: number | null; subjectKind: string | null; subjectId: string | null; argumentsRedacted: string | null;
-  sessionId: string | null;
+  scannerVersion: string | null; sessionId: string | null;
+  /** The shadow critic's verdict, recorded after the call as its own event and joined here by call id. */
+  critic?: GovernanceCritic | null;
 }
+export interface GovernanceCritic { decision: string | null; reasonCode: string | null; reasonText: string | null; matchedRuleIds: string[]; judgeMs: number | null; occurredAt: string }
 export interface GovernanceStats {
   days: number;
   byDecision: Array<{ decision: string; count: number }>;
@@ -8609,7 +8612,7 @@ export interface KillSwitchRow {
   id: string; orgId: string; scopeKind: string; scopeId: string; mode: string; reason: string; setBy: string; setByUserId: string | null; epoch: number;
   expiresAt: string | null; clearedByUserId: string | null; clearedAt: string | null; clearReason: string | null; createdAt: string;
 }
-export interface GovernanceNames { agents: Record<string, string>; users: Record<string, { name: string; email: string }> }
+export interface GovernanceNames { agents: Record<string, string>; users: Record<string, { name: string; email: string }>; skills: Record<string, { slug: string; name: string }> }
 export interface GovernanceFacets {
   agents: Array<{ slug: string; name: string | null; count: number }>;
   users: Array<{ id: string; name: string | null; email: string | null; count: number }>;
