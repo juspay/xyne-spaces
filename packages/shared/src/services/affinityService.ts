@@ -70,8 +70,9 @@ export function registerAffinityService(service: AffinityService): void {
 }
 
 /**
- * The registered app service, as the rankers and `useAffinityCallback` read it. Weights are 0 until
- * an app registers one, the same as an AffinityService whose weights have not loaded yet.
+ * The registered app service, as the rankers, `useAffinityCallback` and `useMentionSearch` read it.
+ * Weights are 0 until an app registers one, the same as an AffinityService whose weights have not
+ * loaded yet.
  */
 export const affinityService = {
   prefetch: (): Promise<void> => registeredAffinityService?.prefetch() ?? Promise.resolve(),

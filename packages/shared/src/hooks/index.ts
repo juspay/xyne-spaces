@@ -8,10 +8,6 @@ export {
 } from "./HttpClientContext.js";
 export type { HttpClient } from "./HttpClientContext.js";
 
-export {
-  useAffinityService,
-  AffinityServiceProvider,
-} from "./useAffinityService.js";
 export { AffinityService, registerAffinityService } from "../services/affinityService.js";
 export { useAffinityCallback } from "./useAffinityCallback.js";
 export type { AffinityWeights } from "../services/affinityService.js";
