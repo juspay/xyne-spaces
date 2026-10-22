@@ -7,6 +7,7 @@ import type {
   DecisionAnswer,
   DecisionQuestion,
   ScoreQuestion,
+  TokenUsage,
   YesNoQuestion,
 } from './types';
 
@@ -149,6 +150,13 @@ export const asNoulQuestions = (
     ])
   );
 
+/** The reply's `usage` ({ input_tokens, output_tokens }); undefined when it gave no counts. */
+const readUsage = (usage: { input_tokens?: unknown; output_tokens?: unknown } | undefined): TokenUsage | undefined => {
+  const promptTokens = Number(usage?.input_tokens);
+  const completionTokens = Number(usage?.output_tokens);
+  return Number.isFinite(promptTokens) && Number.isFinite(completionTokens) ? { promptTokens, completionTokens } : undefined;
+};
+
 /** P(yes) per question; null when there are no answers or any is not a yes/no. */
 export const readNouls = (answers: Record<string, DecisionAnswer> | null): Record<string, number> | null => {
   if (!answers) return null;
@@ -169,7 +177,7 @@ export const readNouls = (answers: Record<string, DecisionAnswer> | null): Recor
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
  * `target` sends it to another service with the same wire format, e.g. XOR; `engine` names
- * it in logs. Never throws.
+ * it in logs. `onUsage` gets the tokens the reply reports, whether or not its answers are usable. Never throws.
  */
 export const requestClassifierAnswers = async (
   state: string | Record<string, unknown>,
@@ -179,11 +187,13 @@ export const requestClassifierAnswers = async (
   {
     partial = false,
     onFailure,
+    onUsage,
     target = envConfig.jev,
     engine = 'jev',
   }: {
     partial?: boolean;
     onFailure?: (failure: AskFailure) => void;
+    onUsage?: (usage: TokenUsage) => void;
     target?: ClassifierTarget;
     engine?: ClassifierEngine;
   } = {}
@@ -210,7 +220,12 @@ export const requestClassifierAnswers = async (
       return null;
     }
 
-    const body = (await response.json()) as { answers?: Record<string, unknown> };
+    const body = (await response.json()) as {
+      answers?: Record<string, unknown>;
+      usage?: { input_tokens?: unknown; output_tokens?: unknown };
+    };
+    const usage = readUsage(body.usage);
+    if (usage) onUsage?.(usage);
     const answers: Record<string, DecisionAnswer> = {};
     const unusable: string[] = [];
     for (const [key, question] of Object.entries(questions)) {
