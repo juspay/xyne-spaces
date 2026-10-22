@@ -83,6 +83,34 @@ describe("judgeChunks", () => {
     expect(results.find((r) => r.key === "u")).toMatchObject({ verdict: "unsure", source: "llm" });
   });
 
+  it("never clears a chunk XOR did not score, and never turns a judge outage into an injection", async () => {
+    // XOR answers only one of the three questions: no verdict, so the chunk stays unsure, not clean.
+    const partial: XorAsk = async () => ({ instruct: { type: "noul", noul: 0.05 } });
+    const r1 = await judgeChunks({ ...base, chunks: [chunk("p", "partial")] }, { ask: partial });
+    expect(r1.results[0]).toMatchObject({ verdict: "unverified", source: "unverified" });
+    // The LLM throws: the lone unsure chunk is unverified, not injection, and nothing is cached.
+    const down = vi.fn(async () => { throw new Error("502"); });
+    const r2 = await judgeChunks({ ...base, chunks: [chunk("q", "quarter [[p=0.5]]", "unsure")] }, { ask: xorByText, llm: down });
+    expect(r2.results[0]).toMatchObject({ verdict: "unverified", source: "unverified" });
+    expect(r2.stats.llmFailures["error"]).toBe(1);
+    const r3 = await judgeChunks({ ...base, source: "call-2", chunks: [chunk("q", "quarter [[p=0.5]]", "unsure")] }, { ask: xorByText, llm: down });
+    expect(r3.stats).toMatchObject({ cached: 0, llmCalls: 1 });
+    // XOR down and a side effect waiting: the LLM alone may clear a chunk XOR never saw.
+    const r4 = await judgeChunks({ ...base, waitingSideEffect: true, chunks: [chunk("z", "lunch menu")] }, { ask: async () => null, llm: honestLlm });
+    expect(r4.results[0]).toMatchObject({ verdict: "clean", source: "llm" });
+  });
+
+  it("stops calling the LLM once the split budget is spent and leaves the rest unverified", async () => {
+    let t = 5_000_000;
+    const now = () => t;
+    const slow: LlmCall = async (instruction, body) => { t += 6_000; return honestLlm(instruction, body, new AbortController().signal); };
+    const chunks = Array.from({ length: 13 }, (_, i) => chunk(`u${i}`, `unsure text ${i} [[p=0.5]]`, "unsure"));
+    const { results, stats } = await judgeChunks({ ...base, chunks }, { ask: xorByText, llm: slow, now });
+    expect(stats.llmCalls).toBe(1);
+    expect(results.filter((r) => r.verdict === "injection")).toEqual([]);
+    expect(results.filter((r) => r.verdict === "unverified")).toHaveLength(1);
+  });
+
   it("opens the breaker after repeated failures and lets one probe through after 15 s", async () => {
     let t = 1_000_000;
     const now = () => t;
