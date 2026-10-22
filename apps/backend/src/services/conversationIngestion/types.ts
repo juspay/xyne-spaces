@@ -3,6 +3,8 @@ export type ConversationSource = 'workflowSteps' | 'xyne-cli' | 'claude';
 export interface MemoryIngestionContext {
   sessionId: string;
   userId: string;
+  // Tenant the session belongs to; resolved server-side by the adapter, never from the payload.
+  workspaceId: string;
   repoUrl: string;
   commitId: string;
   ticketId: string;

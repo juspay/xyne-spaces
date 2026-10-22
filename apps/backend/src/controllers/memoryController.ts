@@ -20,6 +20,19 @@ export interface SessionTurnPayload {
 }
 
 /**
+ * A memory document belongs to the caller only inside the caller's workspace: emails are
+ * unique per workspace, so the owner match alone is not enough. The doc's `userId` stores
+ * the owner's email or id.
+ */
+function ownsMemoryDocument(
+  doc: VespaMemoryDocument,
+  user: { id: string; email: string; workspaceId: string } | undefined,
+): boolean {
+  if (!user || doc.workspaceId !== user.workspaceId) return false;
+  return doc.userId === user.email || doc.userId === user.id;
+}
+
+/**
  * Controller for memory/knowledge base operations
  * Used by external services (e.g., Electron) to interact with Vespa memory schema
  */
@@ -65,13 +78,9 @@ export class MemoryController {
       document.userId = user.email;
 
       // The underlying insert is an upsert keyed on the caller-supplied docId, so reject when
-      // the docId already belongs to another user. The owner is stored as either email or id.
+      // the docId already belongs to another user or workspace.
       const existingDoc = await getMemoryById(document.docId);
-      if (
-        existingDoc &&
-        existingDoc.userId !== user.email &&
-        existingDoc.userId !== userId
-      ) {
+      if (existingDoc && !ownsMemoryDocument(existingDoc, user)) {
         logger.warn('Blocked cross-user memory overwrite', {
           docId: document.docId,
           owner: existingDoc.userId,
@@ -87,7 +96,7 @@ export class MemoryController {
         sessionId: document.sessionId,
       });
 
-      await insertMemory(document);
+      await insertMemory(document, user.workspaceId);
 
       logger.info('Memory document indexed successfully', {
         docId: document.docId,
@@ -177,7 +186,7 @@ export class MemoryController {
 
       const document = await getMemoryById(docId);
 
-      if (!document) {
+      if (!document || document.workspaceId !== req.user?.workspaceId) {
         res.status(404).json({
           success: false,
           error: 'Document not found',
@@ -225,17 +234,12 @@ export class MemoryController {
 
       logger.info('Updating memory document', { docId });
 
-      // Only the owner may modify a memory document. The doc's `userId` field stores the
-      // owner's email (buildMemoryYql scope 'my'); accept the caller's email OR id to match
-      // the stored convention.
+      // Any member of the workspace may modify a memory document. A doc in another workspace
+      // is reported as missing so a foreign id is indistinguishable from an unknown one.
       const existingDoc = await getMemoryById(docId);
-      if (!existingDoc) {
+      if (!existingDoc || existingDoc.workspaceId !== req.user?.workspaceId) {
+        if (existingDoc) logger.warn('Blocked cross-workspace memory update', { docId });
         res.status(404).json({ success: false, error: 'Memory document not found' });
-        return;
-      }
-      if (existingDoc.userId !== req.user?.email && existingDoc.userId !== req.user?.id) {
-        logger.warn('Blocked cross-user memory update', { docId, owner: existingDoc.userId });
-        res.status(403).json({ success: false, error: 'Forbidden' });
         return;
       }
 
@@ -285,16 +289,11 @@ export class MemoryController {
 
       logger.info('Deleting memory document', { docId });
 
-      // Only the owner may delete a memory document (see updateMemoryDocument). The doc's
-      // `userId` holds the owner's email.
+      // Any member of the workspace may delete a memory document (see updateMemoryDocument).
       const docToDelete = await getMemoryById(docId);
-      if (!docToDelete) {
+      if (!docToDelete || docToDelete.workspaceId !== req.user?.workspaceId) {
+        if (docToDelete) logger.warn('Blocked cross-workspace memory delete', { docId });
         res.status(404).json({ success: false, error: 'Memory document not found' });
-        return;
-      }
-      if (docToDelete.userId !== req.user?.email && docToDelete.userId !== req.user?.id) {
-        logger.warn('Blocked cross-user memory delete', { docId, owner: docToDelete.userId });
-        res.status(403).json({ success: false, error: 'Forbidden' });
         return;
       }
 
@@ -500,21 +499,9 @@ export class MemoryController {
       );
       const contextDoc = existing.documents[0];
 
-      // Verify this session's memory belongs to the caller before replacing it. replaceSession
-      // deletes the existing docs for `sessionId`. The doc's `userId` field stores the owner's
-      // email; contextDoc is the session's first existing doc.
-      if (contextDoc && !contextDoc.userId) {
-        logger.warn('replaceSession on a memory doc with no owner', { sessionId });
-      }
-      if (
-        contextDoc?.userId &&
-        contextDoc.userId !== user.email &&
-        contextDoc.userId !== userId
-      ) {
-        logger.warn('Blocked cross-user replaceSession', { sessionId, owner: contextDoc.userId });
-        res.status(403).json({ success: false, error: 'Forbidden' });
-        return;
-      }
+      // Any member of the workspace may replace a session's memory. Both the lookup above and
+      // the delete inside replaceSession are confined to the caller's workspace, so a session
+      // belonging to another workspace is never read or touched.
 
       const repoUrl  = contextDoc?.repoUrl  ?? '';
       const commitId = contextDoc?.commitId ?? '';
@@ -524,6 +511,7 @@ export class MemoryController {
         sessionId,
         user.email,
         docs.map((d) => ({ ...d, repoUrl, commitId, ticketId, reviewStatus })),
+        user.workspaceId,
       );
 
       res.status(200).json({

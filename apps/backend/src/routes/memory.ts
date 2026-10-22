@@ -172,7 +172,7 @@ router.post(
 
 /**
  * @route DELETE /api/memory/sessions
- * @desc Delete all Vespa memory documents for the given session IDs.
+ * @desc Delete the caller's workspace's Vespa memory documents for the given session IDs.
  * @access Private — requires MEMORY ADMIN permission
  * @body { sessionIds: string[] }
  */
@@ -186,7 +186,7 @@ router.delete(
 
 /**
  * @route DELETE /api/memory/vespa-memory
- * @desc Cleanup — deletes ALL documents from the Vespa memory schema. Irreversible.
+ * @desc Cleanup — deletes ALL memory documents of the caller's workspace. Irreversible.
  * @access Private — requires MEMORY ADMIN permission
  */
 router.delete(

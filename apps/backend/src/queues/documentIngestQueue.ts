@@ -6,6 +6,8 @@ export interface DocumentIngestJobData {
   // Full GCS URI: gs://bucket-name/path/to/file.txt
   gcsUri: string;
   userId: string;
+  // Uploader's workspace. Optional only for jobs enqueued before this field existed.
+  workspaceId?: string;
   sessionId: string;
   originalFilename: string;
   repoUrl: string;
