@@ -4,13 +4,18 @@
  * One method, but the mapping of `singletonKey` is a real decision — see below. The Bull
  * queue itself lives in `src/queues/workflowsQueue.ts` per `docs/guidelines/JOBS.md`.
  */
-import type { QueueAdapter } from '@xyne/workflow-sdk';
+import { CONVERSATIONAL_FLOW_KIND, type QueueAdapter } from '@xyne/workflow-sdk';
 import { logger } from '@/utils/logger';
 import {
   WORKFLOWS_JOB_NAME,
   workflowsQueue,
   type WorkflowsJobData,
 } from '@/queues/workflowsQueue';
+import {
+  CONVERSATIONAL_FLOW_JOB_NAME,
+  conversationalFlowQueue,
+  type ConversationalFlowJobData,
+} from '@/queues/conversationalFlowQueue';
 
 export class BullQueueAdapter implements QueueAdapter {
   /**
@@ -40,27 +45,33 @@ export class BullQueueAdapter implements QueueAdapter {
     executionId: string;
     delay?: number;
     singletonKey?: string;
+    kind?: string;
   }): Promise<void> {
-    const queue = workflowsQueue.getQueue();
-    const jobData: WorkflowsJobData = { executionId: data.executionId };
+    const conversational = data.kind === CONVERSATIONAL_FLOW_KIND;
+    const queue = conversational
+      ? conversationalFlowQueue.getQueue()
+      : workflowsQueue.getQueue();
+    const jobName = conversational ? CONVERSATIONAL_FLOW_JOB_NAME : WORKFLOWS_JOB_NAME;
+    const label = conversational ? 'CONVERSATIONAL-FLOW-QUEUE' : 'WORKFLOWS-QUEUE';
+    const jobData: WorkflowsJobData | ConversationalFlowJobData = { executionId: data.executionId };
     const jobId = data.singletonKey ?? data.executionId;
     const delay = data.delay !== undefined && data.delay > 0 ? data.delay : undefined;
     if (delay === undefined) {
       const pending = await queue.getJob(jobId);
       if (pending && (await pending.isDelayed())) {
         await pending.promote();
-        logger.debug(`[WORKFLOWS-QUEUE] promoted delayed pass for ${data.executionId}`);
+        logger.debug(`[${label}] promoted delayed pass for ${data.executionId}`);
         return;
       }
     }
 
-    await queue.add(WORKFLOWS_JOB_NAME, jobData, {
+    await queue.add(jobName, jobData, {
       jobId,
       ...(delay !== undefined ? { delay } : {}),
     });
 
     logger.debug(
-      `[WORKFLOWS-QUEUE] enqueued execution ${data.executionId}` +
+      `[${label}] enqueued execution ${data.executionId}` +
         (data.delay ? ` (delay ${String(data.delay)}ms)` : ''),
     );
   }
