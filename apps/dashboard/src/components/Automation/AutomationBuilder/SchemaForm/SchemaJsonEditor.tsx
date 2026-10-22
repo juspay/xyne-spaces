@@ -8,7 +8,7 @@ import {
 } from '@codemirror/autocomplete';
 import { Button } from '../../../ui/Button/Button';
 
-export const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'array'] as const;
+export const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'array', 'any'] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 // `secret` is a string leaf that also marks the field sensitive (its value is

@@ -60,9 +60,9 @@ router.post(
       headerSchema?: Record<string, unknown>;
     };
     const headerSchema = triggerConfig.headerSchema ?? {};
-    const markedSecretHeaders = Object.keys(headerSchema).filter(
-      k => headerSchema[k] === 'secret',
-    );
+    const markedSecretHeaders = Object.keys(headerSchema)
+      .filter(k => headerSchema[k] === 'secret')
+      .map(k => k.replace(/\?$/, ''));
 
     const body =
       req.body && typeof req.body === 'object' && !Array.isArray(req.body)

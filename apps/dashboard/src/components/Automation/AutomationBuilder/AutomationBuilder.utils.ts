@@ -12,6 +12,7 @@ import type {
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 import { resolveSchema } from './SchemaForm/SchemaForm.utils';
+import type { SchemaNode } from './SchemaForm/SchemaJsonEditor';
 
 export function emptyConfig(): AutomationConfig {
   return {
@@ -182,7 +183,8 @@ function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
       ? (declaredRaw as Record<string, unknown>)
       : {};
   const properties: Record<string, JsonSchemaT> = {};
-  for (const [key, value] of Object.entries(declared)) {
+  for (const [rawKey, value] of Object.entries(declared)) {
+    const key = rawKey.replace(/\?$/, '');
     if (typeof value === 'string') {
       const t = value === 'secret' ? 'string' : value;
       properties[key] = { type: t as 'string' | 'number' | 'boolean' | 'object' | 'array' };
@@ -191,6 +193,18 @@ function jsonSchemaFromDeclared(declaredRaw: unknown): JsonSchemaT {
     }
   }
   return { type: 'object', properties, additionalProperties: true };
+}
+
+export function schemaFromPayload(value: unknown): SchemaNode {
+  if (Array.isArray(value)) return 'array';
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([k]) => k)
+        .map(([k, v]) => (v === null ? [`${k}?`, 'any'] : [k, schemaFromPayload(v)])),
+    );
+  }
+  return typeof value === 'number' || typeof value === 'boolean' ? typeof value : 'string';
 }
 
 /** Build the webhook trigger's output schema from its body/header schemas. */
