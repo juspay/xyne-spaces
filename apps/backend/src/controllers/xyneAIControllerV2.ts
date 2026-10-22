@@ -168,6 +168,7 @@ const XyneAIRequestSchemaV2 = z.object({
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
+  speed: z.enum(['fast', 'standard']).optional(),
   approvedAction: ApprovedActionSchema.optional(),
   studioMode: z.literal('design').optional(),
   sandboxMode: z.enum(['local', 'remote', 'container']).optional(),
@@ -342,6 +343,7 @@ export class XyneAIControllerV2 {
       deep_research_enabled: deepResearchEnabledSC,
       instant,
       thinkingLevel,
+      speed,
       approvedAction,
       studioMode,
       sandboxMode,
@@ -605,6 +607,7 @@ export class XyneAIControllerV2 {
           // cmd+K scopes the agent's own search to the tab the answer is shown on.
           ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
           ...(thinkingLevel ? { thinkingLevel } : {}),
+          ...(speed ? { speed } : {}),
           ...(approvedAction ? { approvedAction } : {}),
           ...(studioMode ? { studioMode } : {}),
           ...(sandboxMode ? { sandboxMode } : {}),
