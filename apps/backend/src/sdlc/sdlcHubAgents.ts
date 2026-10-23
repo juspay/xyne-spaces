@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { ChannelRole } from '@xyne/shared';
+import { ChannelAddUserPolicy, ChannelRole } from '@xyne/shared';
 import { SDLC_AGENT_PENDING_RELATION } from '@xyne/shared/sdlc';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { AppError } from '@/middleware/errorHandler';
@@ -105,9 +105,20 @@ export async function markHubAgentPending(
       userId: actor.userId,
       channel: { workspaceId: actor.workspaceId, type: 'SDLC' },
     },
-    select: { id: true },
+    select: {
+      role: true,
+      channel: { select: { channelStats: { select: { addUserPolicy: true } } } },
+    },
   });
   if (!member) throw new AppError('SDLC hub membership is required', 403);
+  // Approval adds it to the hub, so the hub's Add members rule applies now.
+  if (
+    member.role !== ChannelRole.ADMIN &&
+    (member.channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE) !==
+      ChannelAddUserPolicy.EVERYONE
+  ) {
+    throw new AppError('Only hub admins can add agents to this hub', 403);
+  }
   // Only the creator's own unregistered agent; anything else would skip the normal add-bot flow.
   const agent = (
     await listScopedClawAgents({ userId: actor.userId, workspaceId: actor.workspaceId })

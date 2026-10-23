@@ -37,7 +37,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { useQueryClient } from '@tanstack/react-query';
 import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
@@ -2576,6 +2576,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       setDebugSessionId(null);
     }
   }, [streamingBotTurnIndex]);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const debugRunParam = searchParams.get('debugRun');
+  const debugAgentParam = searchParams.get('debugAgent');
+  useEffect(() => {
+    if (!isV2 || !debugRunParam) return;
+    setDebugAgentSlug(debugAgentParam);
+    setDebugTurnIndex(null);
+    setDebugSessionId(debugRunParam);
+    setDebugFocusToolCallId(null);
+    setShowDebugger(true);
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('debugRun');
+        next.delete('debugAgent');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [isV2, debugRunParam, debugAgentParam, setSearchParams]);
 
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
