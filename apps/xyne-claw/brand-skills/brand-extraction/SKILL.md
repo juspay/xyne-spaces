@@ -8,13 +8,15 @@ description: Extract a design system from a live website or a screenshot — col
 Produce a design system from a source someone already has. You are reading an
 existing brand, not designing one. Measure what is there; never improve it.
 
-Deliver exactly three files, plus assets:
+Deliver exactly three files, plus assets — and a fourth file when, and only
+when, the source has a dark theme:
 
 | File | Purpose |
 | --- | --- |
 | `DESIGN.md` | The prose contract. Injected verbatim into later `/design` runs. |
 | `tokens.css` | Custom properties under `:root`. |
 | `brand.json` | Structured summary. Renders the review card. |
+| `tokens.dark.css` | The dark set, same token names. Only when one was found. |
 
 Assets: `logo.*`, `favicon.*`, `screenshot-desktop.png`, `screenshot-mobile.png`.
 
@@ -64,6 +66,39 @@ system that looks subtly wrong everywhere it is used.
    `screenshot-desktop.png` at 1440px wide and `screenshot-mobile.png` at 390px.
 7. Follow redirects and record the URL you actually landed on in `sourceUrl`.
 
+## Dark theme
+
+Most sources have one theme. Look for a second before concluding there is none,
+and never manufacture one: a dark palette derived by inverting a light one is
+wrong in every artifact built from it afterwards. If you find no dark theme,
+deliver no `tokens.dark.css`, set no `colorsDark`, and move on — that is a
+normal result, not a gap worth reporting.
+
+Three places a dark theme actually lives:
+
+1. **`prefers-color-scheme`** — re-measure with the emulated preference flipped
+   (`sandbox-pw-evaluate` after emulating dark, or by matching
+   `@media (prefers-color-scheme: dark)` rules in the stylesheets). Measure the
+   same way you measured light: computed styles, not the CSS source.
+2. **A class or attribute on the root** — `.dark`, `[data-theme="dark"]`,
+   `[data-mode="dark"]`. Set it on `<html>`, let styles settle, then re-measure.
+   This is how Tailwind and most component libraries ship dark mode.
+3. **Theme files** — for a repo source, a second palette in the Tailwind config
+   (`darkMode`, a `dark` key), a `theme-dark.css`, or a second block of custom
+   properties. Read the values rather than rendering.
+
+Record which one you used in `brand.json` as `darkThemeSource`:
+`prefers-color-scheme`, `class` or `theme-file`. Set `colorsDark` alongside it,
+with the SAME `token` and `role` values as `colors` so the two sets line up —
+the review card pairs them by token to preview both.
+
+`tokens.dark.css` defines the same custom property names as `tokens.css` with
+the dark values. Emit the properties alone; the `/design` run decides the
+selectors and media queries that apply them.
+
+Only colour is expected to differ. If the type scale, spacing or radii genuinely
+change between themes, say so in `gaps` rather than inventing a second scale.
+
 ## From a screenshot
 
 With no URL, derive the same fields from the attached image. You cannot count
@@ -73,6 +108,11 @@ gap: `"colour frequency unavailable — derived from a screenshot"`.
 Read colours from large flat regions, not from edges or gradients. State
 sizes in px relative to the image's own scale and note that in `gaps` when the
 device pixel ratio is unknown.
+
+One image is one theme. Do not infer a dark set from a light screenshot, however
+obvious the inversion looks. If the user attached two images and said which is
+which, treat the dark one as `darkThemeSource: "theme-file"` — you read it from a
+supplied source, not from a measured preference.
 
 ## Admitting gaps
 
@@ -102,6 +142,10 @@ refuses a payload that does not match, so check before delivering:
 - `colors[].token` matches the custom property in `tokens.css` without `--`
 - `fonts[].role` is `heading`, `body` or `mono`
 - `typeScale[]` entries carry `name` and numeric `sizePx`
+- `colorsDark[]`, when present, satisfies every rule above that `colors[]` does,
+  and `darkThemeSource` is set to `prefers-color-scheme`, `class` or `theme-file`
+- omit both when the source has one theme; a `colorsDark` with no
+  `darkThemeSource` is dropped by the card rather than shown
 
 `tokens.css` defines every `colors[].token` under `:root` as `--<token>`, plus
 type, radii, spacing and shadow values. Name by purpose, not by appearance:

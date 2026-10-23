@@ -18,6 +18,9 @@ export interface DesignSystemRef {
   name: string;
   designMd: string;
   tokensCss: string;
+  /** Empty unless the system has a dark set. The runtime uses its presence to
+   *  decide whether to ask for themed output at all (XYNE-66829). */
+  tokensCssDark: string;
   origin: string;
 }
 
@@ -52,10 +55,12 @@ export async function resolveDesignSystemRef(
       name: resolvedSystem.name,
       designMd: resolvedSystem.designMd,
       tokensCss: resolvedSystem.tokensCss,
+      tokensCssDark: resolvedSystem.tokensCssDark,
       origin: resolvedSystem.origin,
     };
     log.info(
-      `[design-system] resolved origin=${ref.origin} id=${ref.id ?? "legacy"} chars=${ref.designMd.length}`,
+      `[design-system] resolved origin=${ref.origin} id=${ref.id ?? "legacy"} chars=${ref.designMd.length}` +
+        ` themes=${ref.tokensCssDark ? "light+dark" : "light"}`,
     );
     return ref;
   } catch (err) {

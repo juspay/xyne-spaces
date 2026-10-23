@@ -77,15 +77,26 @@ function uniq(values: string[]): string[] {
  *
  * `allowedFonts` comes from the system's font list rather than tokens.css,
  * because a font is usually declared where it is used, not as a token.
+ *
+ * `tokensCssDark` is the dark set (XYNE-66829) and is checked as part of the
+ * SAME palette, not a separate pass. A themed artifact legitimately paints both
+ * sets — the dark values sit under `@media (prefers-color-scheme: dark)` and
+ * `[data-theme="dark"]` in the very file being checked — so comparing against
+ * the light set alone would report every dark token as off-palette and bury the
+ * real findings. It is last in the list only so the existing call sites keep
+ * working unchanged.
  */
 export function checkDesignSystemCompliance(
   artifact: string,
   tokensCss: string,
   allowedFonts: string[] = [],
+  tokensCssDark = "",
 ): DesignSystemQaFindings {
   if (!artifact.trim()) return { offPaletteColors: [], unauthorizedFonts: [] };
 
-  const palette = new Set((tokensCss.match(HEX_RE) ?? []).map(normalizeHex));
+  const palette = new Set(
+    [...(tokensCss.match(HEX_RE) ?? []), ...(tokensCssDark.match(HEX_RE) ?? [])].map(normalizeHex),
+  );
   const used = uniq((artifact.match(HEX_RE) ?? []).map(normalizeHex));
   // With no palette to compare against there is nothing to be off, and
   // reporting every colour as a violation would be noise, not a finding.

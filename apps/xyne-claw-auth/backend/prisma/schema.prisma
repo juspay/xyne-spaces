@@ -3461,6 +3461,11 @@ model DesignSystem {
   designMd  String @default("") @db.Text
   tokensCss String @default("") @db.Text
 
+  /// The dark counterpart of tokensCss, empty when the source has only one
+  /// theme. A sibling column rather than a shape change to tokensCss: every
+  /// existing row and every reader keeps working untouched.
+  tokensCssDark String @default("") @db.Text
+
   /// Descriptors only — { logo: { storagePath, mimeType, width, height }, fonts: [...] }.
   /// Bytes ride GCS. Deliberately not a ChatAttachment reference: those
   /// cascade-delete with their chat message and carry no org scope.

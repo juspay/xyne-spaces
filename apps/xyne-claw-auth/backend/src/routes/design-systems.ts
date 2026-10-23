@@ -40,7 +40,17 @@ const log = createLogger("design-systems");
 export const designSystemsRouter: Router = Router();
 
 const MAX_NAME_CHARS = 120;
-/** Token CSS is not prompt-injected, so it is not bound by the 32k prompt cap. */
+/**
+ * Token CSS is stored, not injected verbatim, so it is not bound by the 32k
+ * prompt cap that governs designMd.
+ *
+ * It is no longer entirely absent from the prompt: XYNE-66829 injects a token
+ * SUMMARY so a run can emit the dark switching. That summary is budgeted
+ * separately in apps/xyne-claw/src/task-commands.ts and is dropped whole when
+ * it would not fit, so a 64k token file still cannot crowd out the run — which
+ * is why this cap stays where it is. Each set is capped independently; two
+ * 64k sets are two columns, not one 128k prompt.
+ */
 const MAX_TOKENS_CSS_CHARS = 64_000;
 
 const assetsSchema = z.record(z.string(), z.unknown());
@@ -49,6 +59,7 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_CHARS),
   designMd: z.string().max(DESIGN_SYSTEM_MAX_CHARS).optional(),
   tokensCss: z.string().max(MAX_TOKENS_CSS_CHARS).optional(),
+  tokensCssDark: z.string().max(MAX_TOKENS_CSS_CHARS).optional(),
   assets: assetsSchema.nullable().optional(),
   source: z.enum(DESIGN_SYSTEM_SOURCES).optional(),
   sourceUrl: z.string().url().max(2048).nullable().optional(),
