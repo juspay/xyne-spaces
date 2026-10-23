@@ -287,6 +287,10 @@ const commentSafeName = (name: string): string =>
     .trim()
     .slice(0, 80);
 
+const CLASS_ATTR = /class\s*=\s*"([^"]*)"/i;
+const BUTTON_CLASS = /\b(?:btn|button|cta)\b/i;
+const ROLE_BUTTON = /role\s*=\s*"button"/i;
+
 const BRAND_STYLE_MARKER = "xyne-brand";
 const brandStyleBlock = (css: string): string =>
   `<style data-${BRAND_STYLE_MARKER}="1">\n${css}\n</style>`;
@@ -433,7 +437,14 @@ export function injectEmailBrandStyles(html: string, branding: VisualBranding): 
 
   // A button is an <a> or <button> carrying a btn-ish class or role. Checked
   // first so the plain-link rule below cannot claim it.
-  const buttonish = /class\s*=\s*"[^"]*\b(btn|button|cta)\b[^"]*"|role\s*=\s*"button"/i;
+  //
+  // The class value is pulled out before being tested, rather than matched in
+  // one pattern. `[^"]*\b(btn|…)\b[^"]*"` has two unbounded classes competing
+  // either side of the keyword, which backtracks on a long class list that
+  // does not contain one — the same polynomial shape CodeQL flagged elsewhere
+  // in this series.
+  const buttonish = (tag: string): boolean =>
+    ROLE_BUTTON.test(tag) || BUTTON_CLASS.test(CLASS_ATTR.exec(tag)?.[1] ?? "");
 
   let out = html;
   const apply = (pattern: RegExp, decide: (tag: string) => string) => {
@@ -443,9 +454,9 @@ export function injectEmailBrandStyles(html: string, branding: VisualBranding): 
   apply(/<body\b[^>]*>/gi, () => bodyDecls);
   apply(/<(?:h[1-6])\b[^>]*>/gi, () => headingDecls);
   apply(/<button\b[^>]*>/gi, () => buttonDecls);
-  apply(/<a\b[^>]*>/gi, (tag) => (buttonish.test(tag) ? buttonDecls : linkDecls));
+  apply(/<a\b[^>]*>/gi, (tag) => (buttonish(tag) ? buttonDecls : linkDecls));
   apply(/<(?:table|td|th|p|li|div|span)\b[^>]*>/gi, (tag) =>
-    buttonish.test(tag) ? buttonDecls : textDecls,
+    buttonish(tag) ? buttonDecls : textDecls,
   );
   apply(/<(?:small|footer)\b[^>]*>/gi, () => mutedDecls);
 
