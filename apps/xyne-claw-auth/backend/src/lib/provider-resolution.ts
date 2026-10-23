@@ -32,6 +32,7 @@ export interface ProviderResolutionInput {
   agent: { id?: string; orgId?: string | null; slug: string };
   agentRow?: { id?: string; config?: unknown } | null;
   conversationId?: string | undefined;
+  speed?: ModelSpeed | undefined;
   log?: ResolutionLogger;
 }
 
@@ -66,7 +67,7 @@ export async function resolveProvidersForDispatch(
   const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
   const userDeferredToAgent = rawPersonalProvider === "spaces";
 
-  const mentionSpeed = agentDefaultSpeed(agentRow?.config);
+  const mentionSpeed = input.speed ?? agentDefaultSpeed(agentRow?.config);
   const mentionSpeedConfig = providerConfigForSpeed(agentRow?.config, mentionSpeed);
   const agentLevelProvider = mentionSpeedConfig["provider"] as string | undefined;
   const rawProviderOrder = mentionSpeedConfig["providerOrder"];
@@ -151,5 +152,23 @@ export async function resolveProvidersForDispatch(
     agentLevelProvider,
     agentProviderOrder,
     mentionSpeed,
+  };
+}
+
+export interface PersonalProviderDispatch {
+  provider: string;
+  providerConfigs: Record<string, ProviderConfig>;
+  providerOrder: string[];
+}
+
+export function personalProviderDispatch(
+  resolution: ProviderResolution | null | undefined,
+): PersonalProviderDispatch | undefined {
+  const personal = resolution?.personalProvider;
+  if (!resolution || !personal || resolution.resolvedParentProvider !== personal) return undefined;
+  return {
+    provider: personal,
+    providerConfigs: resolution.providerConfigs,
+    providerOrder: resolution.runtimeProviderOrder,
   };
 }

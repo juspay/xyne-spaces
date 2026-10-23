@@ -22,7 +22,7 @@ vi.mock("../repositories/index.js", () => ({
 vi.mock("./claude-oauth-refresh.js", () => ({ getValidClaudeBearer: async () => "fresh-claude" }));
 vi.mock("./codex-oauth-refresh.js", () => ({ getValidCodexBearer: async () => "fresh-codex" }));
 
-import { resolveProvidersForDispatch } from "./provider-resolution.js";
+import { personalProviderDispatch, resolveProvidersForDispatch } from "./provider-resolution.js";
 
 function cred(provider: string, extra: Record<string, unknown> = {}) {
   return {
@@ -43,12 +43,14 @@ const agent = { id: "a1", orgId: "org1", slug: "doctor" };
 function run(opts: {
   config?: Record<string, unknown>;
   conversationId?: string;
+  speed?: "fast" | "standard";
 } = {}) {
   return resolveProvidersForDispatch({
     targetUserId: "u1",
     agent,
     agentRow: { id: "a1", config: opts.config ?? {} },
     conversationId: opts.conversationId ?? "conv1",
+    speed: opts.speed,
   });
 }
 
@@ -151,5 +153,38 @@ describe("resolveProvidersForDispatch", () => {
     const r = await run({ config: { subagentProviderMode: "parent" } });
     expect(r.subagentProviders).toEqual({ researcher: "codex" });
     expect(r.subagentProviderMode).toBe("parent");
+  });
+});
+
+describe("personalProviderDispatch", () => {
+  it("routes the run to the user's picked provider with its credentials and fallback order", async () => {
+    state.userAgentConfig = { provider: "claude" };
+    state.userCreds = [cred("claude")];
+    state.agentCreds = [cred("codex")];
+    const dispatch = personalProviderDispatch(await run({ config: { providerOrder: ["codex"] } }));
+    expect(dispatch?.provider).toBe("claude");
+    expect(dispatch?.providerOrder).toEqual(["claude", "codex"]);
+    expect(dispatch?.providerConfigs["claude"]?.apiKey).toBe("dec:claude-key");
+  });
+
+  it("leaves the run on the agent's providers when the pick has no credential", async () => {
+    state.userAgentConfig = { provider: "copilot" };
+    state.agentCreds = [cred("codex")];
+    expect(personalProviderDispatch(await run({ config: { providerOrder: ["codex"] } }))).toBeUndefined();
+  });
+
+  it("leaves the run alone for no pick, a spaces pick or a local harness pick", async () => {
+    state.userCreds = [cred("claude")];
+    expect(personalProviderDispatch(await run())).toBeUndefined();
+    state.userAgentConfig = { provider: "spaces" };
+    expect(personalProviderDispatch(await run())).toBeUndefined();
+    state.userAgentConfig = { provider: "claude-code" };
+    expect(personalProviderDispatch(await run())).toBeUndefined();
+    expect(personalProviderDispatch(null)).toBeUndefined();
+  });
+
+  it("resolves against the run's speed instead of the agent default", async () => {
+    const r = await run({ speed: "fast" });
+    expect(r.mentionSpeed).toBe("fast");
   });
 });
