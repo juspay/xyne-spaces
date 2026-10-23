@@ -431,6 +431,18 @@ describe("contrastPaletteFromTokensCss", () => {
     expect(contrastPaletteFromTokensCss(css).tokens.background).toBe("#FFFFFF");
   });
 
+  it("stays linear on CSS full of unclosed comments", () => {
+    // `/\/\*[\s\S]*?\*\//g` restarted its lazy scan at every `/*` and ran it to
+    // end of input — CodeQL's js/polynomial-redos. The token CSS is
+    // model-written inside a sandbox, so this is reachable input.
+    const pathological = `${"a/*".repeat(40_000)}:root{--brand-primary:#0B5FFF}`;
+    const started = Date.now();
+    // An unterminated comment runs to end of file, per the CSS spec, so the
+    // declaration after it is commented out — which is the point of stripping.
+    expect(contrastPaletteFromTokensCss(pathological).tokens).toEqual({});
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("returns nothing for CSS with no usable colour tokens", () => {
     expect(contrastPaletteFromTokensCss(":root { --radius: 8px; }").tokens).toEqual({});
     expect(contrastPaletteFromTokensCss("").tokens).toEqual({});

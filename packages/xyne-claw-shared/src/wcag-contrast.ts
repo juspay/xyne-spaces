@@ -592,7 +592,34 @@ export function matchContrastSlot(tokenName: string): ContrastSlot | null {
   return null;
 }
 
-const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
+/**
+ * Strip `/* … *\/` comments in one pass.
+ *
+ * Deliberately not a regex. `/\/\*[\s\S]*?\*\//g` restarts its lazy scan at
+ * every `/*` and runs it to the end of the input, so a file holding many
+ * unclosed ones costs quadratic time — CodeQL's js/polynomial-redos. The token
+ * CSS here is model-written inside a sandbox, so that is reachable input.
+ *
+ * An unterminated comment runs to end of file, which is what the CSS spec says
+ * and what a browser does. The regex left that text in place, where the scan
+ * below would have read commented-out declarations as live.
+ *
+ * The same scanner exists in brand-repo.ts (XYNE-66819). Both are deliberate
+ * copies while these PRs are independent; they fold into one module once the
+ * design-systems series has landed.
+ */
+function stripCssComments(css: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const start = css.indexOf("/*", from);
+    if (start === -1) return out + css.slice(from);
+    out += `${css.slice(from, start)} `;
+    const end = css.indexOf("*/", start + 2);
+    if (end === -1) return out;
+    from = end + 2;
+  }
+}
 /** `--name: #hex`. Six digits are tried before three so `#abcdef` is not read
  *  as `#abc`. */
 const CSS_COLOR_DECLARATION = /--([a-z0-9][a-z0-9_-]*)\s*:\s*(#(?:[0-9a-f]{6}|[0-9a-f]{3}))\b/gi;
@@ -613,7 +640,7 @@ const CSS_COLOR_DECLARATION = /--([a-z0-9][a-z0-9_-]*)\s*:\s*(#(?:[0-9a-f]{6}|[0
 export function contrastPaletteFromTokensCss(css: string): ContrastPalette {
   const tokens: ContrastTokens = {};
   const names: ContrastTokenNames = {};
-  const declarations = css.replace(CSS_COMMENT, " ");
+  const declarations = stripCssComments(css);
   for (const match of declarations.matchAll(CSS_COLOR_DECLARATION)) {
     const name = match[1];
     const hex = match[2];
