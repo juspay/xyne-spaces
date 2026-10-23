@@ -1,4 +1,5 @@
 import type { Message } from '../../../Chat/XyneAISidebar/utils/XyneAITypes';
+import { buildOverrideStyleBlock, SLIDER_OVERRIDE_STYLE_ID } from './tokenSliders';
 
 export interface DesignNodeSelection {
   selector: string;
@@ -46,6 +47,15 @@ export const DESIGN_SCROLL_EVENT = 'xyne-design-scroll';
 export const DESIGN_SCROLL_RESTORE_EVENT = 'xyne-design-scroll-restore';
 export const DESIGN_VERIFY_EVENT = 'xyne-design-verify-selection';
 export const DESIGN_VERIFY_RESULT_EVENT = 'xyne-design-verify-selection-result';
+/** Frame → parent, on load: the `:root` custom properties this document declares,
+ *  with their effective values. The slider panel is built from these and nothing
+ *  else, so a control can never address a variable the document does not have. */
+export const DESIGN_TOKENS_EVENT = 'xyne-design-root-tokens';
+/** Parent → frame: `{ vars: { '--name': value | null } }`. Applied straight onto
+ *  `documentElement.style`, which is why dragging a slider costs no reload — the
+ *  frame is sandboxed without allow-same-origin, so the parent cannot reach its
+ *  DOM any other way. `null` removes the inline override. */
+export const DESIGN_SET_TOKEN_EVENT = 'xyne:set-slider-token';
 
 export function serializeDesignDocument(document: Document): string {
   const doctype = document.doctype;
@@ -89,6 +99,49 @@ export function applyManualEdits(html: string, edits: DesignManualEdit[]): Appli
     return { ...edit, stale: false };
   });
   return { html: serializeDesignDocument(document), edits: appliedEdits };
+}
+
+const OVERRIDE_OPEN_TAG = `<style id="${SLIDER_OVERRIDE_STYLE_ID}">`;
+const OVERRIDE_CLOSE_TAG = '</style>';
+
+/**
+ * The document with the slider overrides written into it, for "Save to design".
+ *
+ * One `<style id="xyne-slider-overrides">` block, replaced rather than appended,
+ * so saving twice does not stack two of them. The design's own `:root` rule is
+ * left exactly as the model wrote it — the saved file still shows the original
+ * values, and the override block above them says what was moved.
+ *
+ * Returns the input untouched when there is nothing to write and nothing to
+ * remove, because rewriting a document that did not change would show up as a
+ * change nobody made.
+ */
+export function withSliderOverrides(html: string, overrides: Record<string, string>): string {
+  const block = buildOverrideStyleBlock(overrides);
+  // String surgery rather than DOMParser, so this is testable in the repo's
+  // node test environment — there is no DOM library in the workspace, which is
+  // why applyManualEdits above has no tests. Sound here because only this
+  // function ever writes the block, so its opening tag is an exact known
+  // string, and buildOverrideStyleBlock has already refused any value that
+  // could contain `<` and end the element early.
+  const start = html.indexOf(OVERRIDE_OPEN_TAG);
+  if (start !== -1) {
+    const contentStart = start + OVERRIDE_OPEN_TAG.length;
+    const end = html.indexOf(OVERRIDE_CLOSE_TAG, contentStart);
+    if (end !== -1) {
+      const before = html.slice(0, start);
+      const after = html.slice(end + OVERRIDE_CLOSE_TAG.length);
+      if (!block) return `${before}${after}`;
+      return `${before}${OVERRIDE_OPEN_TAG}\n${block}\n${OVERRIDE_CLOSE_TAG}${after}`;
+    }
+  }
+  if (!block) return html;
+  const tag = `${OVERRIDE_OPEN_TAG}\n${block}\n${OVERRIDE_CLOSE_TAG}`;
+  // Last in head so it follows the document's own `:root` rule; `!important`
+  // carries it the rest of the way.
+  if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, `${tag}</head>`);
+  if (/<\/body\s*>/i.test(html)) return html.replace(/<\/body\s*>/i, `${tag}</body>`);
+  return `${html}${tag}`;
 }
 
 export function normalizeDesignNodeSelection(input: unknown): DesignNodeSelection | null {
@@ -266,6 +319,49 @@ export function withDesignInspector(html: string): string {
       selection.addRange(range);
     }
   }
+  var TOKEN_NAME = /^--[A-Za-z0-9_-]{1,80}$/;
+  var MAX_TOKENS = 400;
+  function collectTokenNames(rules, names, depth) {
+    if (depth > 4) return;
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      var nested = null;
+      try { nested = rule.cssRules; } catch (e) { nested = null; }
+      if (nested && nested.length) {
+        collectTokenNames(nested, names, depth + 1);
+        continue;
+      }
+      var selector = String(rule.selectorText || '');
+      if (!/(^|,)\s*(:root|html)\b/.test(selector)) continue;
+      var style = rule.style;
+      if (!style) continue;
+      for (var j = 0; j < style.length; j++) {
+        var property = style[j];
+        if (TOKEN_NAME.test(property)) names[property] = true;
+      }
+    }
+  }
+  function reportRootTokens() {
+    var names = {};
+    var sheets = document.styleSheets;
+    for (var s = 0; s < sheets.length; s++) {
+      var rules = null;
+      try { rules = sheets[s].cssRules; } catch (e) { rules = null; }
+      if (rules) collectTokenNames(rules, names, 0);
+    }
+    var computed = window.getComputedStyle(document.documentElement);
+    var declared = {};
+    var count = 0;
+    for (var name in names) {
+      if (!Object.prototype.hasOwnProperty.call(names, name)) continue;
+      if (count >= MAX_TOKENS) break;
+      var value = String(computed.getPropertyValue(name) || '').trim();
+      if (!value) continue;
+      declared[name] = value;
+      count++;
+    }
+    window.parent.postMessage({ type: '${DESIGN_TOKENS_EVENT}', declared: declared }, '*');
+  }
   var scrollTimer = null;
   window.addEventListener('scroll', function () {
     if (scrollTimer) return;
@@ -275,6 +371,24 @@ export function withDesignInspector(html: string): string {
     }, 150);
   }, { passive: true });
   window.addEventListener('message', function (event) {
+    if (event.data && event.data.type === '${DESIGN_SET_TOKEN_EVENT}') {
+      var vars = event.data.vars;
+      if (!vars || typeof vars !== 'object') return;
+      for (var key in vars) {
+        if (!Object.prototype.hasOwnProperty.call(vars, key)) continue;
+        if (!TOKEN_NAME.test(key)) continue;
+        var value = vars[key];
+        if (value === null) {
+          document.documentElement.style.removeProperty(key);
+          continue;
+        }
+        // Re-checked here as well as on the parent: this writes into a live
+        // document, and the frame cannot know the sender validated anything.
+        if (typeof value !== 'string' || /[;{}<>]/.test(value)) continue;
+        document.documentElement.style.setProperty(key, value);
+      }
+      return;
+    }
     if (event.data && event.data.type === '${DESIGN_VERIFY_EVENT}') {
       var sel = String(event.data.selector || '');
       var ok = false;
@@ -354,6 +468,11 @@ export function withDesignInspector(html: string): string {
     }
   }, true);
   mount();
+  // Once now — the script sits at the end of body, so the document's own
+  // stylesheets are parsed — and again on load, because a late or external
+  // sheet can add tokens after that. The parent keeps the later report.
+  reportRootTokens();
+  window.addEventListener('load', reportRootTokens);
 })();`;
   const closing = `</${'script'}>`;
   const tag = `<script data-xyne-design-inspector>${inspector}${closing}`;
