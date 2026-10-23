@@ -311,6 +311,31 @@ type AppLogEvents = {
     error: unknown;
   }>;
 
+  push_registration_outcome: Readonly<{
+    outcome:
+      | 'registered'
+      | 'already_registered'
+      | 'register_failed'
+      | 'permission_denied'
+      | 'token_unavailable'
+      | 'boot_failed';
+    stage: 'permission' | 'token' | 'register' | 'boot';
+    trigger: 'start' | 'foreground' | 'token_refresh';
+    platform: 'ios' | 'android';
+    permissionStatus: 'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown';
+    deviceId: string | null;
+    error: string | null;
+  }>;
+
+  push_registration_recovery: Readonly<{
+    action: 'none' | 'reboot' | 'retry_registration';
+    phase: 'idle' | 'booting' | 'blocked' | 'listening';
+    registrationConfirmed: boolean;
+    permissionStatus: 'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown';
+    platform: 'ios' | 'android';
+    deviceId: string | null;
+  }>;
+
   video_playback_ready: VideoPlaybackReadyFields;
 
   video_playback_failed: VideoPlaybackFailedFields;

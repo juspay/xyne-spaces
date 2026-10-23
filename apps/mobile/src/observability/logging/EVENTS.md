@@ -464,6 +464,63 @@ completed.
 
 ---
 
+### `push_registration_outcome`
+
+**Purpose:** Result of registering this device for push with the backend. Before
+this event existed, a device that never registered left no trace anywhere, so
+"user gets no mobile push" could not be told apart from "push dropped".
+
+**Fields:**
+
+| Field              | Meaning                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `outcome`          | `registered` · `already_registered` · `register_failed` · `permission_denied` · `token_unavailable` · `boot_failed`                    |
+| `stage`            | `permission` · `token` · `register` · `boot` (a step threw) — the boot step that produced the outcome                                  |
+| `trigger`          | `start` (sign-in / app start) · `foreground` (recovery on return to app) · `token_refresh`                                             |
+| `platform`         | `ios` · `android`                                                                                                                      |
+| `permissionStatus` | OS notification permission at the time, read without prompting: `authorized` · `provisional` · `denied` · `not_determined` · `unknown` |
+| `deviceId`         | The app's random per-install id (same value the backend logs on `[FCM] registerToken`), or `null`. Not a push token                    |
+| `error`            | Short redacted error for `register_failed` and `boot_failed`, otherwise `null`. Never contains tokens                                  |
+
+`registered` means the backend answered this attempt with success.
+`already_registered` means the same token was already sent this session, so no
+request was made.
+
+**When:** Once per boot of `NotificationService` (`start` or `foreground`), and
+on every FCM token rotation. `permission_denied` / `token_unavailable` mean the
+boot stopped early, and `boot_failed` means a boot step threw; all three are
+retried automatically when the app returns to the foreground with permission
+granted. `token_unavailable` is also retried as soon as FCM issues a token.
+
+**Typical level:** `info`
+
+---
+
+### `push_registration_recovery`
+
+**Purpose:** Proves the foreground retry ran, and records why it did or did not
+act. Sent only when the device is blocked or its registration is unconfirmed, so
+healthy sessions emit nothing. A check that acts is always sent; one that found
+nothing to do (`none`) is sent once per session.
+
+**Fields:**
+
+| Field                   | Meaning                                                                    |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `action`                | `reboot` (re-run boot) · `retry_registration` · `none` (nothing to do yet) |
+| `phase`                 | Boot phase at the time: `idle` · `booting` · `blocked` · `listening`       |
+| `registrationConfirmed` | Whether the backend had already accepted the token this session            |
+| `permissionStatus`      | Same values as in `push_registration_outcome`                              |
+| `platform`              | `ios` · `android`                                                          |
+| `deviceId`              | Same as in `push_registration_outcome`                                     |
+
+**When:** On a background → foreground transition while the boot is `blocked`,
+or `listening` without a confirmed registration.
+
+**Typical level:** `info`
+
+---
+
 ### `video_playback_ready`
 
 **Purpose:** A video source reached `readyToPlay` in a native player. Pair with

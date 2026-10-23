@@ -30,6 +30,26 @@ async function readCurrentStatus(): Promise<number | null> {
   }
 }
 
+export type NotificationPermissionStatus =
+  'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown';
+
+/** Read the OS notification permission as a label, WITHOUT prompting. For telemetry. */
+export async function readNotificationPermissionStatus(): Promise<NotificationPermissionStatus> {
+  const status = await readCurrentStatus();
+  switch (status) {
+    case AuthorizationStatus.AUTHORIZED:
+      return 'authorized';
+    case AuthorizationStatus.PROVISIONAL:
+      return 'provisional';
+    case AuthorizationStatus.DENIED:
+      return 'denied';
+    case AuthorizationStatus.NOT_DETERMINED:
+      return 'not_determined';
+    default:
+      return 'unknown';
+  }
+}
+
 export async function requestNotificationPermission(): Promise<boolean> {
   try {
     const current = await readCurrentStatus();

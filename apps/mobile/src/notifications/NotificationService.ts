@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
   emitNotificationDisplayed,
@@ -13,9 +13,26 @@ import {
   isIosOperatingSystemPresentedBanner,
   type NotificationDeliveryFields,
 } from '@/src/observability/logging/notification/notificationDelivery';
+import { logger as structuredLogger } from '@/src/observability/logging/appLogger';
 import { prefetchActivitiesDelta } from '@/src/services/notificationCaching/activitiesPrefetch';
 
-import { registerDeviceWithBackend, resetDeviceRegistrationState } from './backend/deviceRegistry';
+import {
+  getRegisteredDeviceId,
+  registerDeviceWithBackend,
+  resetDeviceRegistrationState,
+} from './backend/deviceRegistry';
+import {
+  canBeginBoot,
+  decideForegroundRecovery,
+  describeRegistrationError,
+  isForegroundTransition,
+  isPermissionGranted,
+  needsForegroundRecovery,
+  shouldReportRecovery,
+  type ForegroundRecoveryAction,
+  type NotificationBootBlockReason,
+  type NotificationBootPhase,
+} from './bootRecoveryPolicy';
 import { CALL_NOTIFICATION_TYPES, REMINDER_NOTIFICATION_TYPES } from './config';
 import { ensureNotificationSetup } from './display/notificationSetup';
 import { presentNotification, presentReminderNotification } from './display/presentNotification';
@@ -42,7 +59,11 @@ import {
   subscribeToForegroundMessages,
   subscribeToTokenRefresh,
 } from './platform/messaging';
-import { requestNotificationPermission } from './platform/permissions';
+import {
+  readNotificationPermissionStatus,
+  requestNotificationPermission,
+  type NotificationPermissionStatus,
+} from './platform/permissions';
 import { resolvePushToken } from './platform/pushToken';
 import type { ChatRouteTarget, DeliveryContext, ParsedMessage, RawPushMessage } from './types';
 import { subscribeToNotificationOpen } from './platform/messaging';
@@ -76,6 +97,16 @@ const isReminderNotification = (data: Record<string, string>): boolean => {
  * Step 1 scope: parse → display → cache → navigate all live inside handleMessage,
  * so the whole inbound flow stays readable in this one file.
  */
+type BootTrigger = 'start' | 'foreground' | 'token_refresh';
+
+/** The boot step each early stop is reported against. */
+const BLOCK_STAGE: Readonly<Record<NotificationBootBlockReason, 'permission' | 'token' | 'boot'>> =
+  {
+    ['permission_denied']: 'permission',
+    ['token_unavailable']: 'token',
+    ['boot_failed']: 'boot',
+  };
+
 class NotificationService {
   // Ensures the boot sequence runs at most once per signed-in session.
   private started = false;
@@ -89,10 +120,44 @@ class NotificationService {
   // Unsubscribe functions for every listener we attach; called on stop().
   private cleanups: Array<() => void> = [];
 
+  // Where the boot sequence is. Lets an early stop (no permission / no token)
+  // be retried instead of leaving the device unregistered for the session.
+  private bootPhase: NotificationBootPhase = 'idle';
+
+  // True once the backend accepted this device's FCM token this session.
+  private registrationConfirmed = false;
+
+  // The foreground recovery running now, if any. An object per run, so a run
+  // that outlives stop() cannot clear the marker of the run after it.
+  private activeRecovery: object | null = null;
+
+  // Whether a foreground check that found nothing to do was already logged
+  // this session. Later ones are not.
+  private idleRecoveryReported = false;
+
+  // While blocked on a missing FCM token: removes the wait for one.
+  private tokenWait: (() => void) | null = null;
+
+  // AppState subscription for foreground recovery; removed on stop().
+  private foregroundRecoverySub: { remove: () => void } | null = null;
+
   /** Run the full boot sequence. Call once after the user signs in. */
   async start(authToken: string): Promise<void> {
-    if (this.started) {
+    await this.runBoot(authToken, 'start');
+  }
+
+  /**
+   * The ordered boot sequence. Re-runnable after an early stop: `bootPhase`
+   * (not `started`) decides whether a new run may begin, so a run that stopped
+   * at permission/token can be retried by start() or by foreground recovery.
+   */
+  private async runBoot(authToken: string, trigger: BootTrigger): Promise<void> {
+    if (!canBeginBoot(this.bootPhase)) {
       return;
+    }
+    if (this.bootPhase === 'blocked' && this.authToken !== authToken) {
+      // A different session: drop the old session's state before booting.
+      this.stop();
     }
     const lifecycleGeneration = ++this.lifecycleGeneration;
     const isCurrentLifecycle = (): boolean =>
@@ -102,40 +167,49 @@ class NotificationService {
 
     this.started = true;
     this.authToken = authToken;
+    this.bootPhase = 'booting';
+    this.attachForegroundRecovery();
+    this.detachTokenWait();
 
-    // STEP 1 — permission. No permission, no notifications. Stop here.
-    const granted = await requestNotificationPermission();
-    if (!granted || !isCurrentLifecycle()) {
-      return;
-    }
-
-    // STEP 2 — prepare channels / iOS categories so display is instant later.
-    await ensureNotificationSetup();
-    if (!isCurrentLifecycle()) return;
-
-    // STEP 3 — make sure iOS delivers foreground payloads to us.
-    await configureIosForegroundDelivery();
-    if (!isCurrentLifecycle()) return;
-
-    // STEP 3 — resolve the FCM token for this device.
-    const fcmToken = await resolvePushToken();
-    if (!fcmToken || !isCurrentLifecycle()) {
-      return;
-    }
-
-    // STEP 4 — register the device with the backend.
     try {
-      await registerDeviceWithBackend(authToken, fcmToken, {
-        isCurrent: isCurrentLifecycle,
-      });
-    } catch {
-      // Already logged in deviceRegistry. We still start listening so a later
-      // token-refresh retry can recover the registration.
-    }
-    if (!isCurrentLifecycle()) return;
+      // STEP 1 — permission. No permission, no notifications. Stop here.
+      const granted = await requestNotificationPermission();
+      if (!isCurrentLifecycle()) return;
+      if (!granted) {
+        this.blockBoot('permission_denied', trigger);
+        return;
+      }
 
-    // STEP 5 — start listening for payloads + token rotations.
-    this.startListening(lifecycleGeneration);
+      // STEP 2 — prepare channels / iOS categories so display is instant later.
+      await ensureNotificationSetup();
+      if (!isCurrentLifecycle()) return;
+
+      // STEP 3 — make sure iOS delivers foreground payloads to us.
+      await configureIosForegroundDelivery();
+      if (!isCurrentLifecycle()) return;
+
+      // STEP 3 — resolve the FCM token for this device.
+      const fcmToken = await resolvePushToken();
+      if (!isCurrentLifecycle()) return;
+      if (!fcmToken) {
+        this.blockBoot('token_unavailable', trigger);
+        return;
+      }
+
+      // STEP 4 — register the device with the backend.
+      await this.registerToken(authToken, fcmToken, isCurrentLifecycle, trigger);
+      if (!isCurrentLifecycle()) return;
+
+      // STEP 5 — start listening for payloads + token rotations.
+      this.bootPhase = 'listening';
+      this.startListening(lifecycleGeneration);
+    } catch (error) {
+      // A step threw. Left as `booting`, no start() or foreground check would
+      // ever run the boot again, so record it as blocked instead.
+      if (isCurrentLifecycle() && this.bootPhase === 'booting') {
+        this.blockBoot('boot_failed', trigger, describeRegistrationError(error));
+      }
+    }
 
     // Warm-up writes bounded per-entity chat keys plus chatCacheIndex. JS uses
     // this layout directly; the iOS NSE mirrors it for killed/background opens.
@@ -146,6 +220,12 @@ class NotificationService {
   /** Tear everything down. Call on sign-out / hook cleanup. */
   stop(): void {
     this.lifecycleGeneration += 1;
+    this.detachForegroundRecovery();
+    this.detachTokenWait();
+    this.bootPhase = 'idle';
+    this.registrationConfirmed = false;
+    this.activeRecovery = null;
+    this.idleRecoveryReported = false;
     if (!this.started) {
       this.authToken = null;
       resetDeviceRegistrationState();
@@ -156,6 +236,210 @@ class NotificationService {
     this.started = false;
     this.authToken = null;
     resetDeviceRegistrationState();
+  }
+
+  /** Mark the boot as stopped early so start()/foreground recovery can retry. */
+  private blockBoot(
+    reason: NotificationBootBlockReason,
+    trigger: BootTrigger,
+    error?: string,
+  ): void {
+    this.bootPhase = 'blocked';
+    this.reportRegistration({
+      outcome: reason,
+      stage: BLOCK_STAGE[reason],
+      trigger,
+      ...(error !== undefined ? { error } : {}),
+    });
+    if (reason === 'token_unavailable') this.waitForToken();
+  }
+
+  /**
+   * FCM issues a token later than asked for when, say, the device was offline
+   * at boot. Without this the boot would wait for the next return to the
+   * foreground; the payload listeners that also watch rotations are not
+   * attached until the boot finishes. Still never prompts: the boot only runs
+   * again if permission is granted.
+   */
+  private waitForToken(): void {
+    if (this.tokenWait) return;
+    const authToken = this.authToken;
+    const generation = this.lifecycleGeneration;
+    if (!authToken) return;
+    this.tokenWait = subscribeToTokenRefresh(() => {
+      const isCurrent =
+        this.lifecycleGeneration === generation &&
+        this.authToken === authToken &&
+        this.bootPhase === 'blocked';
+      if (!isCurrent) return;
+      this.detachTokenWait();
+      void this.rebootIfPermitted(authToken, generation);
+    });
+  }
+
+  private detachTokenWait(): void {
+    this.tokenWait?.();
+    this.tokenWait = null;
+  }
+
+  private async rebootIfPermitted(authToken: string, generation: number): Promise<void> {
+    try {
+      const permissionStatus = await readNotificationPermissionStatus();
+      if (this.lifecycleGeneration !== generation || this.authToken !== authToken) return;
+      if (isPermissionGranted(permissionStatus) !== true) return;
+      await this.runBoot(authToken, 'token_refresh');
+    } catch {
+      // Best effort; the next foreground tries again.
+    }
+  }
+
+  /** Register with the backend and record whether it was accepted. */
+  private async registerToken(
+    authToken: string,
+    fcmToken: string,
+    isCurrent: () => boolean,
+    trigger: BootTrigger,
+  ): Promise<void> {
+    try {
+      const result = await registerDeviceWithBackend(authToken, fcmToken, { isCurrent });
+      // `skipped`: nothing was sent (signed out / session changed / unsupported).
+      if (result === 'skipped' || !isCurrent()) return;
+      this.registrationConfirmed = true;
+      // `registered` only when the backend actually answered this attempt.
+      this.reportRegistration({
+        outcome: result === 'sent' ? 'registered' : 'already_registered',
+        stage: 'register',
+        trigger,
+      });
+    } catch (error) {
+      // Keep listening: token refresh and foreground recovery retry this.
+      if (!isCurrent()) return;
+      this.registrationConfirmed = false;
+      this.reportRegistration({
+        outcome: 'register_failed',
+        stage: 'register',
+        trigger,
+        error: describeRegistrationError(error),
+      });
+    }
+  }
+
+  private reportRegistration(fields: {
+    outcome: 'registered' | 'already_registered' | 'register_failed' | NotificationBootBlockReason;
+    stage: 'permission' | 'token' | 'register' | 'boot';
+    trigger: BootTrigger;
+    error?: string;
+  }): void {
+    // Fire-and-forget: the permission read is async and telemetry must never
+    // delay or affect notification setup.
+    void (async (): Promise<void> => {
+      try {
+        const permissionStatus = await readNotificationPermissionStatus().catch(
+          (): NotificationPermissionStatus => 'unknown',
+        );
+        structuredLogger.info('push_registration_outcome', {
+          outcome: fields.outcome,
+          stage: fields.stage,
+          trigger: fields.trigger,
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          permissionStatus,
+          deviceId: getRegisteredDeviceId(),
+          error: fields.error ?? null,
+        });
+      } catch {
+        // Telemetry must never affect notification setup.
+      }
+    })();
+  }
+
+  /** One event per foreground check that had something to consider. */
+  private reportRecovery(fields: {
+    action: ForegroundRecoveryAction;
+    phase: NotificationBootPhase;
+    registrationConfirmed: boolean;
+    permissionStatus: NotificationPermissionStatus;
+  }): void {
+    try {
+      structuredLogger.info('push_registration_recovery', {
+        action: fields.action,
+        phase: fields.phase,
+        registrationConfirmed: fields.registrationConfirmed,
+        permissionStatus: fields.permissionStatus,
+        platform: Platform.OS === 'ios' ? 'ios' : 'android',
+        deviceId: getRegisteredDeviceId(),
+      });
+    } catch {
+      // Telemetry must never affect notification setup.
+    }
+  }
+
+  /**
+   * Retry an early-stopped boot (or a failed registration) when the app
+   * returns to the foreground — e.g. after the user enables notifications in
+   * OS Settings. Never prompts for permission.
+   */
+  private attachForegroundRecovery(): void {
+    if (this.foregroundRecoverySub) return;
+    let previous: string = AppState.currentState;
+    this.foregroundRecoverySub = AppState.addEventListener('change', next => {
+      const wasForegrounded = isForegroundTransition(previous, next);
+      previous = next;
+      if (wasForegrounded) void this.recoverOnForeground();
+    });
+  }
+
+  private detachForegroundRecovery(): void {
+    this.foregroundRecoverySub?.remove();
+    this.foregroundRecoverySub = null;
+  }
+
+  private async recoverOnForeground(): Promise<void> {
+    const authToken = this.authToken;
+    if (!authToken || this.activeRecovery) return;
+    if (!needsForegroundRecovery(this.bootPhase, this.registrationConfirmed)) return;
+
+    const generation = this.lifecycleGeneration;
+    const run = {};
+    this.activeRecovery = run;
+    try {
+      const permissionStatus = await readNotificationPermissionStatus();
+      if (this.lifecycleGeneration !== generation || this.authToken !== authToken) return;
+
+      const action = decideForegroundRecovery({
+        phase: this.bootPhase,
+        hasAuthToken: true,
+        registrationConfirmed: this.registrationConfirmed,
+        recoveryInFlight: false,
+        permissionGranted: isPermissionGranted(permissionStatus),
+      });
+      // Only reached while blocked or unconfirmed, so healthy sessions stay quiet.
+      if (shouldReportRecovery(action, this.idleRecoveryReported)) {
+        if (action === 'none') this.idleRecoveryReported = true;
+        this.reportRecovery({
+          action,
+          phase: this.bootPhase,
+          registrationConfirmed: this.registrationConfirmed,
+          permissionStatus,
+        });
+      }
+
+      if (action === 'reboot') {
+        await this.runBoot(authToken, 'foreground');
+        return;
+      }
+
+      if (action === 'retry_registration') {
+        const isCurrent = (): boolean =>
+          this.started && this.lifecycleGeneration === generation && this.authToken === authToken;
+        const fcmToken = await resolvePushToken();
+        if (!fcmToken || !isCurrent()) return;
+        await this.registerToken(authToken, fcmToken, isCurrent, 'foreground');
+      }
+    } catch {
+      // Best effort; the next foreground or token refresh tries again.
+    } finally {
+      if (this.activeRecovery === run) this.activeRecovery = null;
+    }
   }
 
   /** Attach foreground + token-refresh listeners; remember how to remove them. */
@@ -174,12 +458,15 @@ class NotificationService {
       subscribeToTokenRefresh(token => {
         if (this.lifecycleGeneration === lifecycleGeneration && this.started && this.authToken) {
           const refreshAuthToken = this.authToken;
-          void registerDeviceWithBackend(refreshAuthToken, token, {
-            isCurrent: () =>
+          void this.registerToken(
+            refreshAuthToken,
+            token,
+            () =>
               this.lifecycleGeneration === lifecycleGeneration &&
               this.started &&
               this.authToken === refreshAuthToken,
-          }).catch(() => {});
+            'token_refresh',
+          );
         }
       }),
     );

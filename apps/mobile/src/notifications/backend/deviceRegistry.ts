@@ -50,6 +50,19 @@ function getOrCreateDeviceId(): string {
   return created;
 }
 
+/**
+ * Result of a registration call:
+ * - `sent`: the backend accepted the token (HTTP success).
+ * - `already_registered`: this exact token was already sent this session, so no call was made.
+ * - `skipped`: nothing was sent (unsupported platform, empty input, or the session changed).
+ */
+export type DeviceRegistrationResult = 'sent' | 'already_registered' | 'skipped';
+
+/** The app's random per-install id, if one exists. Never creates one. Not a push token. */
+export function getRegisteredDeviceId(): string | null {
+  return getExistingDeviceId() ?? null;
+}
+
 function getExistingDeviceId(): string | undefined {
   const existing = getString(DEVICE_ID_STORAGE_KEY)?.trim();
   return existing || undefined;
@@ -61,19 +74,19 @@ export async function registerDeviceWithBackend(
   authToken: string,
   fcmToken: string,
   scope: DeviceRegistrationScope = {},
-): Promise<void> {
+): Promise<DeviceRegistrationResult> {
   const generation = scope.generation ?? getAuthSessionGeneration();
   const operation = scope.operation ?? getAuthOperation();
   const isCurrent = (): boolean =>
     isAuthScopeCurrent(generation, operation) && (scope.isCurrent?.() ?? true);
 
   const platform = getSupportedPlatform();
-  if (!platform) return;
-  if (!authToken.trim() || !fcmToken.trim() || !isCurrent()) return;
+  if (!platform) return 'skipped';
+  if (!authToken.trim() || !fcmToken.trim() || !isCurrent()) return 'skipped';
 
   // Already registered this exact token this session — nothing to do.
   if (fcmToken === lastRegisteredToken) {
-    return;
+    return 'already_registered';
   }
 
   const registrationAttempt = ++latestRegistrationAttempt;
@@ -92,8 +105,11 @@ export async function registerDeviceWithBackend(
   // Logout or a notification-service stop may have invalidated this request
   // while the backend call was in flight. Do not let an old completion poison
   // the next account's dedupe state.
-  if (!canCommitDeviceRegistration(fcmToken, lastRegisteredToken, isCurrentRegistration)) return;
+  if (!canCommitDeviceRegistration(fcmToken, lastRegisteredToken, isCurrentRegistration)) {
+    return 'skipped';
+  }
   lastRegisteredToken = fcmToken;
+  return 'sent';
 }
 
 // Clears session state on sign-out so the next user registers cleanly.
