@@ -79,6 +79,10 @@ function formatReport(result: VoiceCheckResult): string {
   ].join("\n");
 }
 
+/** 512 KB. A delivered artifact is tens of KB; a bundled React one can reach a
+ *  few hundred. Past that it is not a document being QA'd. */
+const MAX_CONTENT_CHARS = 512 * 1024;
+
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 
 export const designVoiceCheck: ToolDefinition = {
@@ -111,8 +115,28 @@ export const designVoiceCheck: ToolDefinition = {
     if (!content.trim()) {
       return "Error: content is required — pass the artifact's HTML or markdown.";
     }
+    // The check runs synchronously in the claw process, so an artifact far
+    // larger than any real one would hold the event loop and stall other runs.
+    // The scan itself is linear now, but a bound belongs here regardless: this
+    // is a QA step on a document, not a bulk text pipeline.
+    if (content.length > MAX_CONTENT_CHARS) {
+      return (
+        `Error: content is ${(content.length / 1024).toFixed(0)} KB, over the ` +
+        `${MAX_CONTENT_CHARS / 1024} KB limit for one voice check. Check the ` +
+        "document in parts, or check only the copy."
+      );
+    }
     // Explicit param wins, so a run can check against another system; otherwise
     // the run's own design system, pinned into meta by the runtime.
+    //
+    // KNOWN GAP, blocked on XYNE-66821. `designVoice` is derived from
+    // `agentConfig.designSystem` independently of the prompt injection, so the
+    // two can disagree: a system over the 32k injection cap is dropped from the
+    // prompt but still read here, and once XYNE-66821 lands its
+    // `designSystemRef` the legacy text will be the wrong source entirely — a
+    // chat pinned to system B would be checked against system A. The fix is to
+    // take the section from the injection RESULT, which that ticket owns.
+    // Resolving it here as well would mean two resolvers for one value.
     const designMd = asString(params["designMd"]) || asString(context?.meta?.["designVoice"]);
     if (!designMd.trim()) {
       return (

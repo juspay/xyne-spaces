@@ -3,8 +3,10 @@ import type { VoiceCasing, VoiceRules } from "../../lib/api";
 /**
  * The voice rules a design system states, as read by the parser (XYNE-66830).
  *
- * Presentational only — `parseVoiceSection` runs server-side, because it is the
- * prompt-injection boundary for a file drafted from an untrusted page.
+ * Presentational only — `parseVoiceSection` runs server-side, because it bounds
+ * what this card and the QA check act on for a file drafted from an untrusted
+ * page. It does not bound what reaches a /design prompt; that fence is
+ * XYNE-66821's.
  *
  * Its real job is the empty state. A `## Voice` section written as prose parses
  * to nothing, and without this the reviewer saves a system that looks like it

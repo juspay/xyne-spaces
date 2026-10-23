@@ -113,8 +113,10 @@ brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request
  *
  * Parsed here rather than in the card for the same reason the brand summary is
  * validated here: this frontend has no workspace dependencies by design, and
- * the parser is also the prompt-injection boundary for a file drafted from an
- * untrusted page — one implementation, under test, on the server.
+ * the parser also bounds what the card and the QA check act on for a file
+ * drafted from an untrusted page — one implementation, under test, on the
+ * server. It is not the fence on what reaches a /design prompt; that is
+ * XYNE-66821's.
  *
  * Always 200 with a rules object. Empty rules are a legitimate answer — the
  * system may simply not state a voice — and the card renders that as its empty

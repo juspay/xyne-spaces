@@ -54,24 +54,112 @@ const ATX_CLOSING_HASHES = /\s*#+\s*$/;
 /** A line that is nothing but a link reads as a call to action. */
 const STANDALONE_LINK = /^\s*\*{0,2}\[([^\]]+)\]\([^)]*\)\*{0,2}\s*$/;
 
-const HTML_HEADING = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi;
-const HTML_BUTTON = /<button\b[^>]*>([\s\S]*?)<\/button\s*>/gi;
-const HTML_BUTTON_CLASS =
-  /<(a|div|span|p)\b[^>]*\bclass\s*=\s*["'][^"']*(?:\bbtn\b|\bbtn[-_]|\bbutton\b)[^"']*["'][^>]*>([\s\S]*?)<\/\1\s*>/gi;
-const HTML_BUTTON_ROLE =
-  /<([a-z][\w-]*)\b[^>]*\brole\s*=\s*["']button["'][^>]*>([\s\S]*?)<\/\1\s*>/gi;
 const HTML_INPUT = /<input\b[^>]*>/gi;
 /** Buttons are very often cased in CSS rather than in the markup. */
 const CSS_UPPERCASE = /text-transform\s*:\s*uppercase/i;
 
+/** Never has content, so a scan must not wait for a close tag. */
+const VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
+
+/** Tags whose CONTENT is not copy — their text sits between tags rather than
+ *  inside one, so stripping tags alone leaves a `.synergy-grid` selector and a
+ *  `const delve = utilize()` reading as prose. */
+const RAW_TEXT_TAGS = new Set(["style", "script", "pre", "code", "template"]);
+
+interface ScannedElement {
+  tag: string;
+  /** The whole opening tag, `<a class="btn" href="/x">`. */
+  openTag: string;
+  /** Text between the open and its matching close. */
+  inner: string;
+  /** Offset of the opening `<`, for the line number. */
+  index: number;
+  innerStart: number;
+  innerEnd: number;
+}
+
 /**
- * Elements whose CONTENT is not copy. Their text sits between tags rather than
- * inside one, so stripping tags leaves it behind: a `.seamlessly-grid` selector
- * in a `<style>` block and a `const delve = utilize()` in a `<pre><code>` both
- * read as prose otherwise. HTML is what a `/design` run delivers, so this is
- * the common case and not an edge one.
+ * Every element in the document, in one forward pass.
+ *
+ * Replaces five `<tag>([\s\S]*?)</tag>` regexes. Each of those restarted its
+ * lazy scan at every candidate open tag and ran it to the end of the input, so
+ * an artifact with unclosed tags cost quadratic time — measured at 143 / 558 /
+ * 2215 / 8929 ms for 10k / 20k / 40k / 80k unclosed `<div class="btn">`, a
+ * clean 4x per doubling, all of it synchronous in the claw process. This visits
+ * each character once.
+ *
+ * Quote-aware so `<a title="a > b">` does not end early, and stack-based so a
+ * close tag pairs with its own open rather than the nearest one.
  */
-const RAW_TEXT_ELEMENTS = /<(style|script|pre|code|template)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+function scanElements(html: string): ScannedElement[] {
+  const found: ScannedElement[] = [];
+  const open: Array<Omit<ScannedElement, "inner" | "innerEnd">> = [];
+  let index = 0;
+
+  while (index < html.length) {
+    const lt = html.indexOf("<", index);
+    if (lt === -1) break;
+    if (html.startsWith("<!--", lt)) {
+      const end = html.indexOf("-->", lt + 4);
+      index = end === -1 ? html.length : end + 3;
+      continue;
+    }
+
+    let cursor = lt + 1;
+    let quote: string | null = null;
+    while (cursor < html.length) {
+      const char = html[cursor] as string;
+      if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") quote = char;
+      else if (char === ">") break;
+      cursor += 1;
+    }
+    if (cursor >= html.length) break;
+
+    const raw = html.slice(lt, cursor + 1);
+    const name = /^<\/?\s*([a-z][\w-]*)/i.exec(raw);
+    if (!name) {
+      index = cursor + 1;
+      continue;
+    }
+    const tag = (name[1] as string).toLowerCase();
+
+    if (raw.startsWith("</")) {
+      for (let depth = open.length - 1; depth >= 0; depth -= 1) {
+        const candidate = open[depth] as Omit<ScannedElement, "inner" | "innerEnd">;
+        if (candidate.tag !== tag) continue;
+        found.push({
+          ...candidate,
+          inner: html.slice(candidate.innerStart, lt),
+          innerEnd: lt,
+        });
+        open.length = depth;
+        break;
+      }
+    } else if (raw.endsWith("/>") || VOID_TAGS.has(tag)) {
+      found.push({
+        tag,
+        openTag: raw,
+        inner: "",
+        index: lt,
+        innerStart: cursor + 1,
+        innerEnd: cursor + 1,
+      });
+    } else {
+      open.push({ tag, openTag: raw, index: lt, innerStart: cursor + 1 });
+    }
+    index = cursor + 1;
+  }
+  return found;
+}
+
+/** Same length, same newlines — so every offset and line number downstream
+ *  still refers to the caller's own content. */
+const blankOut = (text: string): string => text.replace(/[^\n]/g, " ");
 
 /** Lower-cased in title case; capitalised anywhere else only at the start or
  *  the end of the phrase. */
@@ -102,27 +190,70 @@ function stripHtmlComments(text: string): string {
   }
 }
 
-/** Tags, inline code and link syntax gone; what is left is what a reader sees. */
-function visibleText(line: string): string {
-  return stripHtmlComments(line)
-    .replace(/`[^`]*`/g, " ")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/^\s{0,3}#{1,6}\s+/, "");
+/**
+ * The document with everything that is NOT copy blanked out, character for
+ * character.
+ *
+ * Offset-preserving on purpose. The old version stripped tags one line at a
+ * time, which had two consequences: the attributes on the continuation lines of
+ * a tag spread over several lines were treated as copy — so `href="/login"` and
+ * `class="synergy-link"` were reported as findings — and a phrase could not be
+ * matched across a line break even though the phrase pattern allows one, so
+ * `best\n in class` was missed. Blanking in place instead means the scan runs
+ * over the whole document while every line number still refers to the caller's
+ * own content.
+ *
+ * Blanked, in order: the content of raw-text elements, every tag, HTML
+ * comments, fenced code blocks, inline code, and the URL half of a markdown
+ * link.
+ */
+function visibleCopy(content: string, fenced: readonly boolean[], starts: readonly number[]): string {
+  const chars = [...content];
+  const blank = (from: number, to: number): void => {
+    for (let at = from; at < to && at < chars.length; at += 1) {
+      if (chars[at] !== "\n") chars[at] = " ";
+    }
+  };
+
+  for (const element of scanElements(content)) {
+    // The element's text, when the element is one whose content is not copy.
+    if (RAW_TEXT_TAGS.has(element.tag)) blank(element.innerStart, element.innerEnd);
+    // The tags themselves, open and close.
+    blank(element.index, element.innerStart);
+    if (element.innerEnd > element.innerStart) {
+      const close = content.indexOf(">", element.innerEnd);
+      blank(element.innerEnd, close === -1 ? content.length : close + 1);
+    }
+  }
+
+  let text = chars.join("");
+  // An unclosed tag leaves no element, so sweep whatever tag-shaped text is
+  // left. Bounded to a single line, which is what an unclosed tag is.
+  text = text.replace(/<[^>\n]*>?/g, (tag) => blankOut(tag));
+  text = text.replace(/<!--[\s\S]*?-->/g, (comment) => blankOut(comment));
+  text = text.replace(/`[^`\n]*`/g, (code) => blankOut(code));
+  // Keep the link label, lose the URL.
+  text = text.replace(/\]\([^)\n]*\)/g, (url) => blankOut(url));
+  text = text.replace(/^(\s{0,3}#{1,6}\s+)/gm, (hashes) => blankOut(hashes));
+
+  // Fenced blocks, by line.
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    if (fenced[index]) lines[index] = blankOut(lines[index] ?? "");
+  }
+  void starts;
+  return lines.join("\n");
 }
 
-/**
- * Blank out the content of every raw-text element, keeping newlines and the
- * character count so every line number and offset downstream still lines up
- * with the content the caller passed in.
- */
-function maskRawTextElements(content: string): string {
-  return content.replace(RAW_TEXT_ELEMENTS, (whole, _tag: string, inner: string) => {
-    if (!inner) return whole;
-    // `inner` begins immediately after the opening tag's `>`.
-    const start = whole.indexOf(">") + 1;
-    return `${whole.slice(0, start)}${inner.replace(/[^\n]/g, " ")}${whole.slice(start + inner.length)}`;
-  });
+/** Tags and inline code gone from a short fragment — a heading or button label
+ *  already carved out by the scanner. Not offset-preserving; callers only want
+ *  the words. */
+function fragmentText(fragment: string): string {
+  return fragment
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]*>/g, " ");
 }
 
 /** Which lines sit inside a fenced block, markers included. */
@@ -310,24 +441,51 @@ function lineAt(starts: readonly number[], index: number): number {
   return low + 1;
 }
 
-/** Collect matches of an HTML element pattern, skipping fenced regions, taking
- *  the given capture group as the element's text. */
-function htmlCandidates(
-  content: string,
-  pattern: RegExp,
-  group: number,
+/** Offsets covered by a raw-text element's content. A heading or a button that
+ *  only exists inside a `<code>` example is markup being shown, not copy being
+ *  delivered, so it is not checked. */
+function rawTextRanges(elements: readonly ScannedElement[]): ReadonlyArray<readonly [number, number]> {
+  return elements
+    .filter((element) => RAW_TEXT_TAGS.has(element.tag))
+    .map((element) => [element.innerStart, element.innerEnd] as const);
+}
+
+const isInsideRawText = (
+  ranges: ReadonlyArray<readonly [number, number]>,
+  at: number,
+): boolean => ranges.some(([from, to]) => at >= from && at < to);
+
+/** Elements the scanner found, filtered and turned into candidates. */
+function elementCandidates(
+  elements: readonly ScannedElement[],
+  wanted: (element: ScannedElement) => boolean,
   starts: readonly number[],
   fenced: readonly boolean[],
+  rawRanges: ReadonlyArray<readonly [number, number]>,
 ): Candidate[] {
   const found: Candidate[] = [];
-  for (const match of content.matchAll(pattern)) {
-    const line = lineAt(starts, match.index ?? 0);
+  for (const element of elements) {
+    if (!wanted(element)) continue;
+    if (isInsideRawText(rawRanges, element.index)) continue;
+    const line = lineAt(starts, element.index);
     if (fenced[line - 1]) continue;
-    const text = collapse(visibleText(match[group] ?? ""));
+    const text = collapse(fragmentText(element.inner));
     if (text) found.push({ text, line });
   }
   return found;
 }
+
+/** An `<a>` or `<button>` carrying a btn-ish class or `role="button"`. The
+ *  class value is pulled out before being tested: `[^"]*\b(btn|…)\b[^"]*"` has
+ *  two unbounded classes competing either side of the keyword. */
+const CLASS_ATTR = /class\s*=\s*["']([^"']*)["']/i;
+const BUTTON_CLASS = /\b(?:btn|btn[-_]\w+|button|cta)\b/i;
+const ROLE_BUTTON = /role\s*=\s*["']button["']/i;
+
+const isButtonish = (element: ScannedElement): boolean =>
+  element.tag === "button" ||
+  ROLE_BUTTON.test(element.openTag) ||
+  BUTTON_CLASS.test(CLASS_ATTR.exec(element.openTag)?.[1] ?? "");
 
 function inputButtons(
   content: string,
@@ -367,14 +525,17 @@ export function checkVoiceToneCompliance(
 ): VoiceToneFinding[] {
   if (!content) return [];
 
-  // Everything below works off the masked copy, so a heading or a button label
-  // inside a `<code>` example is not checked either. Masking preserves offsets,
-  // so reported line numbers still refer to the caller's content.
-  const masked = maskRawTextElements(content);
-  const lines = masked.split(/\r?\n/);
+  const lines = content.split(/\r?\n/);
   const fenced = fencedLines(lines);
   const starts = lineStarts(lines);
   const findings: VoiceToneFinding[] = [];
+  // One pass for the whole document, reused by the heading and button checks.
+  const elements = scanElements(content);
+  // Copy with every non-copy region blanked in place. Scanned as one string
+  // rather than line by line, so a phrase can match across a line break and a
+  // multi-line tag's attributes cannot be read as prose.
+  const copy = visibleCopy(content, fenced, starts);
+  const rawRanges = rawTextRanges(elements);
 
   // --- Phrases, over visible copy only ------------------------------------
   const banned = rules.bannedPhrases.map((phrase) => ({ phrase, pattern: phrasePattern(phrase) }));
@@ -383,17 +544,15 @@ export function checkVoiceToneCompliance(
    *  preferred wording. A phrase that is both gets the stronger finding. */
   const bannedHits = new Set<string>();
 
-  for (let index = 0; index < lines.length; index += 1) {
-    if (fenced[index]) continue;
-    const text = visibleText(lines[index] ?? "");
-    if (!text.trim()) continue;
-    const line = index + 1;
+  {
+    const text = copy;
 
     for (const { phrase, pattern } of banned) {
       pattern.lastIndex = 0;
       let match = pattern.exec(text);
       while (match !== null) {
         const matchedText = match[0];
+        const line = lineAt(starts, match.index);
         bannedHits.add(`${line}:${matchedText.toLowerCase()}`);
         findings.push({
           type: "banned-phrase",
@@ -410,6 +569,7 @@ export function checkVoiceToneCompliance(
       let match = pattern.exec(text);
       while (match !== null) {
         const matchedText = match[0];
+        const line = lineAt(starts, match.index);
         if (!bannedHits.has(`${line}:${matchedText.toLowerCase()}`)) {
           findings.push({
             type: "preferred-wording",
@@ -432,10 +592,13 @@ export function checkVoiceToneCompliance(
       if (fenced[index]) continue;
       const markdown = MARKDOWN_HEADING.exec(lines[index] ?? "");
       if (!markdown) continue;
-      const text = collapse(visibleText((markdown[2] ?? "").replace(ATX_CLOSING_HASHES, "")));
+      if (isInsideRawText(rawRanges, starts[index] ?? 0)) continue;
+      const text = collapse(fragmentText((markdown[2] ?? "").replace(ATX_CLOSING_HASHES, "")));
       if (text) headings.push({ text, line: index + 1 });
     }
-    headings.push(...htmlCandidates(masked, HTML_HEADING, 2, starts, fenced));
+    headings.push(
+      ...elementCandidates(elements, (element) => /^h[1-6]$/.test(element.tag), starts, fenced, rawRanges),
+    );
 
     for (const heading of headings) {
       const verdict = checkCasing(heading.text, headingRule);
@@ -454,10 +617,8 @@ export function checkVoiceToneCompliance(
   const buttonRule = rules.casing.buttons;
   if (buttonRule) {
     const buttons: Candidate[] = [
-      ...htmlCandidates(masked, HTML_BUTTON, 1, starts, fenced),
-      ...htmlCandidates(masked, HTML_BUTTON_CLASS, 2, starts, fenced),
-      ...htmlCandidates(masked, HTML_BUTTON_ROLE, 2, starts, fenced),
-      ...inputButtons(masked, starts, fenced),
+      ...elementCandidates(elements, isButtonish, starts, fenced, rawRanges),
+      ...inputButtons(content, starts, fenced),
     ];
     for (let index = 0; index < lines.length; index += 1) {
       if (fenced[index]) continue;

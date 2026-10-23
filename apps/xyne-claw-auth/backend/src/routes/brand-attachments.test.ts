@@ -217,7 +217,8 @@ describe("GET /attachments/:id/brand-summary", () => {
 /**
  * XYNE-66830. Parsed server-side for the same reason the brand summary is
  * validated here: this frontend has no workspace dependencies, and the parser
- * is the prompt-injection boundary for a file drafted from an untrusted page.
+ * bounds what the card and the QA check act on for a file drafted from an
+ * untrusted page.
  */
 describe("GET /attachments/:id/voice-rules", () => {
   it("requires an authenticated user", async () => {
