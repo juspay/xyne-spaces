@@ -10,15 +10,10 @@
  * custom arrays), so the high-frequency writes that don't touch tools (memory
  * status, spacesAppId, scope flips, prompt denorm) don't spam the audit table.
  *
- * Imports prisma directly (not lib/audit.ts → repositories/index) to avoid an
- * import cycle: agentRepository → this → repositories/index → agentRepository.
  */
 import type { Prisma } from "@prisma/client";
-import { prisma } from "../db.js";
+import { writeAuditLog } from "./audit.js";
 import { getAuditActor } from "./audit-context.js";
-import { createLogger } from "../logger.js";
-
-const log = createLogger("agent-config-audit");
 
 type ToolsConfig = { subagents?: string[]; direct?: string[]; custom?: string[] };
 
@@ -42,8 +37,8 @@ function diff(before: string[] = [], after: string[] = []): { added: string[]; r
 
 /**
  * Compare the tools selection before/after a config write and, if it changed,
- * write an AGENT_CONFIG_UPDATED audit row. Never throws — auditing must not
- * break the write it observes.
+ * write an AGENT_CONFIG_UPDATED audit row. writeAuditLog never throws, so
+ * auditing cannot break the write it observes.
  *
  * @param data the update payload — we only act when it actually sets `config`.
  */
@@ -52,53 +47,47 @@ export async function auditAgentConfigChange(
   beforeConfig: unknown,
   data: Prisma.AgentUpdateInput,
 ): Promise<void> {
-  try {
-    // Only a `config` write can change tools. Anything else is irrelevant.
-    if (!("config" in data) || data.config === undefined) return;
+  // Only a `config` write can change tools. Anything else is irrelevant.
+  if (!("config" in data) || data.config === undefined) return;
 
-    const before = readTools(beforeConfig);
-    const after = readTools(data.config as unknown);
+  const before = readTools(beforeConfig);
+  const after = readTools(data.config as unknown);
 
-    const d = {
-      subagents: diff(before.subagents, after.subagents),
-      direct: diff(before.direct, after.direct),
-      custom: diff(before.custom, after.custom),
-    };
+  const d = {
+    subagents: diff(before.subagents, after.subagents),
+    direct: diff(before.direct, after.direct),
+    custom: diff(before.custom, after.custom),
+  };
 
-    const changed =
-      d.subagents.added.length || d.subagents.removed.length ||
-      d.direct.added.length || d.direct.removed.length ||
-      d.custom.added.length || d.custom.removed.length;
-    if (!changed) return;
+  const changed =
+    d.subagents.added.length || d.subagents.removed.length ||
+    d.direct.added.length || d.direct.removed.length ||
+    d.custom.added.length || d.custom.removed.length;
+  if (!changed) return;
 
-    const actorUserId = getAuditActor();
-    const counts = (k: "subagents" | "direct" | "custom") => `${k} +${d[k].added.length}/-${d[k].removed.length}`;
-    const description =
-      `tools changed (${counts("subagents")}, ${counts("direct")}, ${counts("custom")})` +
-      (actorUserId ? "" : " [no actor — non-HTTP/system write]");
+  const actorUserId = getAuditActor();
+  const counts = (k: "subagents" | "direct" | "custom") => `${k} +${d[k].added.length}/-${d[k].removed.length}`;
+  const description =
+    `tools changed (${counts("subagents")}, ${counts("direct")}, ${counts("custom")})` +
+    (actorUserId ? "" : " [no actor — non-HTTP/system write]");
 
-    await prisma.agentAuditLog.create({
-      data: {
-        actorUserId: actorUserId ?? null,
-        eventType: "AGENT_CONFIG_UPDATED",
-        targetId: agentId,
-        description,
-        metadata: {
-          diff: d,
-          beforeCounts: {
-            subagents: before.subagents?.length ?? 0,
-            direct: before.direct?.length ?? 0,
-            custom: before.custom?.length ?? 0,
-          },
-          afterCounts: {
-            subagents: after.subagents?.length ?? 0,
-            direct: after.direct?.length ?? 0,
-            custom: after.custom?.length ?? 0,
-          },
-        } as Prisma.InputJsonValue,
+  await writeAuditLog({
+    actorUserId,
+    eventType: "AGENT_CONFIG_UPDATED",
+    targetId: agentId,
+    description,
+    metadata: {
+      diff: d,
+      beforeCounts: {
+        subagents: before.subagents?.length ?? 0,
+        direct: before.direct?.length ?? 0,
+        custom: before.custom?.length ?? 0,
       },
-    });
-  } catch (err) {
-    log.error("[agent-config-audit] failed to write audit:", err);
-  }
+      afterCounts: {
+        subagents: after.subagents?.length ?? 0,
+        direct: after.direct?.length ?? 0,
+        custom: after.custom?.length ?? 0,
+      },
+    },
+  });
 }

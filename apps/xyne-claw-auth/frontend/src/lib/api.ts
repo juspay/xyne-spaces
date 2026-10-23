@@ -3,7 +3,7 @@ import type { User, McpServer, UserConnection, HealthResult, CredentialField, Ga
 import { frontendConfig } from "./config";
 
 const BACKEND_URL = frontendConfig.spacesAuthBaseUrl;
-const AUTH_API_URL = frontendConfig.clawApiBaseUrl;
+export const AUTH_API_URL = frontendConfig.clawApiBaseUrl;
 
 export class ApiError extends Error {
   constructor(
@@ -90,7 +90,7 @@ export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> 
   return response.blob();
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+export async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: "include",
     ...init,

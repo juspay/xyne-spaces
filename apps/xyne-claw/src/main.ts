@@ -2,6 +2,8 @@
 process.env.SERVICE_NAME ||= "xyne-claw";
 
 import express from "express";
+import { extension } from "./extension.js";
+import { validateS2SKey } from "./middleware/auth.js";
 import { DATA_DIR_IS_EXPLICIT, PATHS, SERVER } from "./config.js";
 import { initStore } from "./store.js";
 import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
@@ -88,6 +90,9 @@ app.get("/healthz/ready", (_req, res) => {
   res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
 });
 
+// The private extension (src/extensions/, gitignored) mounts its routes here.
+extension?.mount?.(app, { validateS2SKey });
+
 app.use(runRouter);
 app.use(curatorRouter);
 app.use(userMemoryRouter);
@@ -108,6 +113,7 @@ app.use(litellmModelsRouter);
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
   startPodAddressPublisher(SERVER.port);
+  extension?.start?.();
 });
 
 let shuttingDown = false;
@@ -163,6 +169,7 @@ async function shutdown(signal: string): Promise<void> {
   });
   await stopTelemetry();
   stopLoopWatchdog();
+  await extension?.stop?.().catch(() => undefined);
   server.close(() => process.exit(0));
 }
 

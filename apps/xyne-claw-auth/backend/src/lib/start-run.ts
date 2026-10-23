@@ -1,4 +1,5 @@
 import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
+import { governance } from "./governance-hooks.js";
 import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
@@ -313,6 +314,9 @@ async function resolveUserId(
 
 function toRunSkill(skill: Prisma.SkillGetPayload<{ include: { files: true } }>) {
   return {
+    id: skill.id,
+    orgId: skill.orgId,
+    scope: skill.scope,
     slug: skill.slug,
     name: skill.name,
     description: skill.description ?? "",
@@ -345,6 +349,9 @@ async function resolveAgent(
       spacesAppToken?: string | null;
       spacesAppUserId?: string | null;
       skills?: {
+        id: string;
+        orgId: string;
+        scope: string;
         slug: string;
         name: string;
         description: string;
@@ -771,6 +778,16 @@ export async function prepareRun(
     const agent = await resolveAgent(agentSlug, runtimeOrgId);
     if ("error" in agent) {
       return { ok: false, status: 400, error: agent.error };
+    }
+    // A stop switch refuses the run at the door; read-only and ask-all bite at each call instead.
+    const kill = governance.killForAdmission({ orgId: agent.orgId, agentSlug: agentSlug ?? undefined, userId: resolved.userId });
+    if (kill) {
+      const stopped = `Stopped by a kill switch (${kill.scopeKind}): ${kill.reason ?? "no reason given"}`;
+      if (governance.componentMode("kill") === "enforce") {
+        log.warn(`[run] refused: ${stopped} agentSlug=${agentSlug ?? "default"} userId=${resolved.userId}`);
+        return { ok: false, status: 403, error: stopped };
+      }
+      log.warn(`[run] shadow: would refuse (${stopped}) agentSlug=${agentSlug ?? "default"} userId=${resolved.userId}`);
     }
 
     // Invocation whitelist — the universal chokepoint for CLI / service-token /
@@ -1553,7 +1570,8 @@ export async function prepareRun(
           )
         : [];
     const ownSlugs = new Set((agent.skills ?? []).map((sk) => sk.slug ?? sk.name));
-    const agentSkills = [...(agent.skills ?? []), ...hubSkills.filter((sk) => !ownSlugs.has(sk.slug))];
+    // The registry pins every stored skill the run loads; in enforce mode only an approved hash serves.
+    const agentSkills = (await governance.resolveRunSkills([...(agent.skills ?? []), ...hubSkills.filter((sk) => !ownSlugs.has(sk.slug))])).skills;
     // Agent-attached skills win a slug collision — an org's own skill must not
     // be silently shadowed by a hub-linked or caller-supplied one.
     const takenSlugs = new Set(agentSkills.map((sk) => sk.slug ?? sk.name));
@@ -1613,6 +1631,7 @@ export async function prepareRun(
         : {}),
       ...(cwd ? { cwd } : {}),
       ...(mergedSkills.length > 0 ? { skills: mergedSkills } : {}),
+      orgId: agent.orgId,
       ...(awakeningBlock ? { awakening: awakeningBlock } : {}),
       ...(progressUrl ? { progressUrl } : {}),
       ...(attachments?.length ? { attachments } : {}),

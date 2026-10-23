@@ -28,6 +28,8 @@ export interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  /** The connector declared its writes (a write policy or list), so governance reads every other tool as a read. */
+  readonly writePolicyDeclared?: boolean;
   /**
    * Set when the group exists ONLY because a subagent definition carries the
    * credentials for this server. xyne-claw uses it to keep those tools inside

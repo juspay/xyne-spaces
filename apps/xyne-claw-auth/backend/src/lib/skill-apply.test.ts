@@ -14,6 +14,7 @@ vi.mock("../db.js", () => ({
   prisma: { user: { findUnique: vi.fn(async () => (state.orgId ? { orgId: state.orgId } : null)) } },
 }));
 
+vi.mock("./governance-hooks.js", () => ({ governance: { commitSkillVersion: vi.fn(async () => null) } }));
 vi.mock("../repositories/index.js", () => ({
   skillRepository: {
     findBySlug: vi.fn(async () => state.existing),

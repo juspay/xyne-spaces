@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { governance } from "./governance-hooks.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Attachment } from "./agent.js";
 import { SERVER } from "./config.js";
@@ -70,6 +71,7 @@ interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  readonly writePolicyDeclared?: boolean;
   readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
@@ -398,7 +400,7 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean; declaredWrite?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
         serverToolKey: toolKey,
@@ -410,6 +412,8 @@ export async function loadMcpToolsForUser(
         // every read-palette run. Only `true` means write anywhere downstream,
         // so `false` narrows nothing that was previously wide.
         ...(mcpTool.readOnly === true ? { isWriteTool: false } : {}),
+        // Governance only: under a declared write policy a tool outside it is a read, as claw-auth's gate reads it.
+        ...(server.writePolicyDeclared ? { declaredWrite: (server.writeTools ?? []).includes(mcpTool.name) } : {}),
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }
@@ -426,7 +430,7 @@ export async function loadMcpToolsForUser(
             ? ` Trusted SDLC fields (${Object.keys(trustedBindings).join(", ")}) are bound by the server; do not supply them.`
             : ""),
         parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, signal) {
           // For allowlisted servers, replace any `{{file:<relpath>}}` markers in
           // the params with the base64 content of the referenced workspace file
           // before the call leaves claw. The model never sees the bytes.
@@ -461,6 +465,8 @@ export async function loadMcpToolsForUser(
             sessionToken,
             {
               method: "POST",
+              // The run's abort signal: a kill or a cancel reaches the request in flight.
+              ...(signal ? { signal } : {}),
               headers: clawUserHeaders(clawUserId),
               body: JSON.stringify({
                 serverType: server.serverType,
@@ -469,6 +475,7 @@ export async function loadMcpToolsForUser(
                 permission,
                 agentSlug,
                 ...((subagentId ?? currentSubagentMcpId()) ? { subagentId: subagentId ?? currentSubagentMcpId() } : {}),
+                ...(governance.decisionFor(_toolCallId) ? { governance: governance.decisionFor(_toolCallId) } : {}),
               }),
             },
             server.serverType,

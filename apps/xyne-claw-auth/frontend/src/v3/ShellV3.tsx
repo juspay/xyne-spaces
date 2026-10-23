@@ -42,6 +42,7 @@ import {
   ArrowUUpLeftIcon,
   ClockCounterClockwiseIcon,
 } from "@phosphor-icons/react";
+import { extensionRoutes } from "./components/extensionRoutes";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "./hooks/useTheme";
 import { Avatar } from "./components/ui/Avatar";
@@ -147,7 +148,11 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
 
 const ADMIN_GROUP: SidebarGroupConfig = {
   label: "Admin",
-  items: [{ label: "Admin", path: "/v3/admin", icon: ShieldCheckIcon }],
+  items: [
+    { label: "Admin", path: "/v3/admin", icon: ShieldCheckIcon },
+    // Pages the private extension adds (extensions/routes/*.tsx) sit beside Admin.
+    ...extensionRoutes.filter((route) => route.adminOnly).map((route) => ({ label: route.label, path: route.path, icon: route.icon })),
+  ],
 };
 
 /* ── Sub-components ────────────────────────────────────────────────── */

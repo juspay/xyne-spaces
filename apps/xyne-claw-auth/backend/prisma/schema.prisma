@@ -1841,7 +1841,11 @@ model AgentAuditLog {
   description String
   metadata    Json?
   createdAt   DateTime        @default(now())
+  /// Null on rows written before 2026-10; readers fall back to the actor's org.
+  orgId       String?
 
+  @@index([orgId, createdAt])
+  @@index([targetId, createdAt])
   @@map("agent_audit_logs")
 }
 
@@ -3646,4 +3650,163 @@ model LoopSequenceRun {
   @@index([orgId, commandId, createdAt])
   @@index([conversationId, status])
   @@map("loop_sequence_runs")
+}
+
+/// One version of a static item (skill, prompt layer, memory file, instruction, agent config text,
+/// MCP tool definition or server package, code constant) with its approval. Text columns hold one word
+/// from a fixed set: approvalStatus pending|approved|rejected|held|revoked; approvedVia
+/// baseline|checks_passed|owner|claw_admin|admin_override|ci_build; writtenBy
+/// person|agent|seed|mcp_server|admin|build; verdicts clean|unsure|unverified|suspicious|injection.
+model StaticContentVersion {
+  id                      String               @id @default(cuid())
+  orgId                   String
+  contentKind             String
+  /// What the version belongs to, such as skill:<id> or mcp:<serverId>:<toolName>.
+  subjectKey              String
+  contentSha256           String
+  approvalStatus          String               @default("pending")
+  approvedVia             String?
+  approvedByUserId        String?
+  approvedAt              DateTime?
+  overrideReason          String?
+  overrideExpiresAt       DateTime?
+  writtenBy               String
+  writtenByUserId         String?
+  writtenByAgentId        String?
+  writtenInConversationId String?
+  writtenAtRiskLevel      String?
+  carriesPrivateData      Boolean              @default(false)
+  parserVerdict           String?
+  judgeVerdict            String?
+  detonatorVerdict        String?
+  scannerVersion          String?
+  lastScannedAt           DateTime?
+  /// Small kinds keep their text here; skill bundles live in storage and prompts in AgentPromptVersion.
+  bytesText               String?              @db.Text
+  bytesStoragePath        String?
+  promptVersionId         String?
+  supersedesVersionId     String?
+  createdAt               DateTime             @default(now())
+  findings                ContentScanFinding[]
+
+  @@unique([orgId, subjectKey, contentSha256])
+  @@index([orgId, subjectKey, createdAt])
+  @@map("static_content_versions")
+}
+
+/// One span a check flagged or could not verify, in static or runtime content. foundIn
+/// static_version|tool_result|user_message|subagent_result|compaction_summary|agent_answer; foundByCheck
+/// parser|xor_judge|llm_judge|detonator; verdict unsure|unverified|suspicious|injection.
+model ContentScanFinding {
+  id                     String                @id @default(cuid())
+  orgId                  String
+  foundIn                String
+  staticContentVersionId String?
+  runId                  String?
+  conversationId         String?
+  toolCallId             String?
+  chunkSha256            String?
+  foundByCheck           String
+  verdict                String
+  ruleId                 String?
+  ruleFamily             String?
+  score                  Float
+  startOffset            Int
+  endOffset              Int
+  redactedExcerpt        String
+  scanProfile            String
+  scannerVersion         String
+  clearedByUserId        String?
+  clearedAt              DateTime?
+  clearReason            String?
+  createdAt              DateTime              @default(now())
+  staticContentVersion   StaticContentVersion? @relation(fields: [staticContentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, conversationId, clearedAt])
+  @@index([staticContentVersionId])
+  @@map("content_scan_findings")
+}
+
+/// One audited thing that happened; a tool call is one row of eventType tool_call. Rows are inserted
+/// without chain columns and a sequencer fills orgSequence, previousRowSha256 and rowSha256 afterwards,
+/// so the hot path never chains. eventType content_scan|content_finding|tool_call|approval_requested|
+/// approval_decided|approval_expired|kill_switch_set|kill_switch_enforced|kill_switch_cleared|
+/// admin_override|version_status_changed|config_changed|run_started; actorKind user|agent|system|admin;
+/// decision allow|ask|block; outcome executed|blocked|cancelled|error|unknown_after_abort.
+/// Two more indexes live only in migration 20261021220000 (Prisma cannot express partial indexes):
+/// a unique (orgId, runId, toolCallId) on tool_call rows and (orgId, occurredAt) on unchained rows.
+model GovernanceAuditEvent {
+  id                  String    @id @default(cuid())
+  orgId               String
+  eventType           String
+  occurredAt          DateTime
+  orgSequence         Int?
+  previousRowSha256   String?
+  rowSha256           String?
+  actorKind           String
+  actorId             String?
+  onBehalfOfUserId    String?
+  actorIp             String?
+  actorUserAgent      String?
+  subjectKind         String?
+  subjectId           String?
+  contentSha256Before String?
+  contentSha256After  String?
+  agentId             String?
+  runId               String?
+  conversationId      String?
+  toolCallId          String?
+  mcpServerId         String?
+  toolName            String?
+  traceId             String?
+  spanId              String?
+  decision            String?
+  reasonCode          String?
+  reasonText          String?
+  policyVersion       String?
+  scannerVersion      String?
+  matchedRuleIds      String[]  @default([])
+  findingIds          String[]  @default([])
+  checkTierReached    String?
+  parserMs            Int?
+  judgeMs             Int?
+  gateMs              Int?
+  outcome             String?
+  toolEffect          String?
+  destinationKind     String?
+  destinationHost     String?
+  riskLevelAtCall     String?
+  carriedPrivateData  Boolean?
+  argumentsRedacted   String?   @db.Text
+  approvalId          String?
+  loadedVersionIds    String[]  @default([])
+  createdAt           DateTime  @default(now())
+
+  @@unique([orgId, orgSequence])
+  @@index([orgId, occurredAt])
+  @@map("governance_audit_events")
+}
+
+model KillSwitch {
+  id              String    @id @default(cuid())
+  orgId           String
+  scopeKind       String
+  scopeId         String
+  mode            String
+  reason          String
+  setBy           String
+  setByUserId     String?
+  triggerKey      String?
+  /// Moves on every set or clear: one integer tells a pod whether its snapshot is current.
+  epoch           BigInt
+  expiresAt       DateTime?
+  clearedByUserId String?
+  clearedAt       DateTime?
+  clearReason     String?
+  createdAt       DateTime  @default(now())
+
+  @@index([clearedAt, expiresAt])
+  @@index([orgId, createdAt])
+  @@index([epoch])
+  @@map("governance_kill_switches")
 }
