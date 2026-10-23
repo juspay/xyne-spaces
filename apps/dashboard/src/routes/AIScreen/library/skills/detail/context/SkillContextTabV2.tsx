@@ -188,7 +188,9 @@ export function SkillContextTabV2({
         trailingAlign='end'
       >
         {skill.content ? (
-          <ProseBox>{skill.content}</ProseBox>
+          // `fit` so short instructions do not sit in a fixed 298px box, while
+          // a long SKILL.md still caps and scrolls.
+          <ProseBox fit>{skill.content}</ProseBox>
         ) : (
           <DetailCard>
             <DetailEmptyState

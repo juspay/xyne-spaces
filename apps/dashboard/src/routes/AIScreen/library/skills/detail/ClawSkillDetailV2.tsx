@@ -138,11 +138,11 @@ const ClawSkillDetailV2 = (props: {
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
+                  <h1 className='truncate text-sm font-semibold leading-[22px] text-foreground'>
                     {entry.label}
-                  </span>
+                  </h1>
                   <Pill tone={skill.enabled ? 'success' : 'neutral'}>
-                    {skill.enabled ? 'Active' : 'Disabled'}
+                    {skill.enabled ? 'Enabled' : 'Disabled'}
                   </Pill>
                   {actions.busy.toggling && (
                     <Loader2 className='size-3.5 animate-spin text-muted-foreground' aria-hidden />
