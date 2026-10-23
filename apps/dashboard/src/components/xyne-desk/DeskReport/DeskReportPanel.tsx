@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, Download, RefreshCw, FileText } from 'lucide-react';
+import { X, Download, RefreshCw, FileText, ChevronDown, History, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
@@ -23,6 +29,13 @@ export interface DeskReportPanelProps {
   embedded?: boolean;
 }
 
+interface DeskReportHistoryItem {
+  id: string;
+  generatedAt: string;
+  rangeDays: number;
+  url: string;
+}
+
 interface LatestDeskReport {
   status: 'pending' | 'completed' | 'failed';
   url: string | null;
@@ -33,6 +46,8 @@ interface LatestDeskReport {
   // True while a regeneration is in flight — purely a banner, never hides
   // the previous completed report.
   generating: boolean;
+  // Completed reports, newest first. Absent when none has completed yet.
+  history?: DeskReportHistoryItem[];
 }
 
 interface LatestDeskReportResponse {
@@ -41,6 +56,17 @@ interface LatestDeskReportResponse {
   // Computed server-side (canManageDeskReport) — not re-derived here.
   canGenerate: boolean;
 }
+
+/** One explicit format everywhere, e.g. "Thu 22 Oct, 6:17 PM" — relative words made same-day runs look identical. */
+const stamp = (iso: string): string =>
+  new Date(iso).toLocaleString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 
 /**
  * Sidebar panel for the scheduled desk report
@@ -58,6 +84,12 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // null follows the newest report, so a freshly generated one shows up on its own.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const history = report?.history ?? [];
+  // An id cleanup has since deleted falls back to the newest.
+  const shown = history.find(h => h.id === selectedId) ?? history[0];
 
   // Full-panel spinner only on first load — later refreshes update in place.
   const fetchLatest = useCallback(
@@ -150,10 +182,10 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   }, [channelId, fetchLatest, report?.rangeDays, report?.agentSlug]);
 
   const handleDownload = useCallback(async () => {
-    if (!report?.url) return;
+    if (!shown) return;
     setDownloading(true);
     try {
-      const res = await apiInstance.get(`${report.url}?download=1`, { responseType: 'blob' });
+      const res = await apiInstance.get(`${shown.url}&download=1`, { responseType: 'blob' });
       const filename = `${channelName ?? 'desk'}-report.html`;
       const blobUrl = URL.createObjectURL(res.data as Blob);
       const a = document.createElement('a');
@@ -169,7 +201,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
     } finally {
       setDownloading(false);
     }
-  }, [report?.url, channelName]);
+  }, [shown, channelName]);
 
   return (
     <DeskInsightsShell
@@ -205,10 +237,10 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   Desk Report{channelName ? ` — ${channelName}` : ''}
                 </h2>
               </div>
-              {report && report.status === 'completed' && (
+              {report && report.status === 'completed' && shown && (
                 <p className='mt-0.5 flex items-center gap-1.5 text-xs text-desk-muted'>
                   <span>
-                    Generated {new Date(report.generatedAt).toLocaleString()} · last{' '}
+                    Generated {new Date(shown.generatedAt).toLocaleString()} · last{' '}
                     {report.rangeDays === 1 ? '1 day' : `${report.rangeDays} days`}
                   </span>
                   {report.generating && (
@@ -221,7 +253,46 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
               )}
             </div>
             <div className='flex shrink-0 items-center gap-2 pr-12'>
-              {report?.status === 'completed' && report.url && (
+              {history.length > 1 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type='button'
+                      className='flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent'
+                      data-track-category='DeskReport'
+                      data-track-name='OpenHistory'
+                    >
+                      <History size={14} className='text-desk-muted' />
+                      {shown ? stamp(shown.generatedAt) : 'History'}
+                      <ChevronDown size={14} className='text-desk-muted' />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='end' className='max-h-80 min-w-[260px] overflow-y-auto'>
+                    {history.map((item, i) => (
+                      <DropdownMenuItem
+                        key={item.id}
+                        onSelect={() => setSelectedId(i === 0 ? null : item.id)}
+                        data-track-category='DeskReport'
+                        data-track-name='SelectHistoryItem'
+                      >
+                        <span className='flex w-full items-center justify-between gap-4'>
+                          <span className='flex flex-col'>
+                            <span className='text-sm font-medium text-foreground'>
+                              {stamp(item.generatedAt)}
+                            </span>
+                            <span className='text-xs text-desk-muted'>
+                              {i === 0 ? 'Latest · ' : ''}Last{' '}
+                              {item.rangeDays === 1 ? '1 day' : `${item.rangeDays} days`}
+                            </span>
+                          </span>
+                          {item.id === shown?.id && <Check size={14} className='text-desk-accent' />}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {report?.status === 'completed' && shown && (
                 <button
                   type='button'
                   onClick={() => void handleDownload()}
@@ -306,7 +377,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 <UnmountWhenCovered fallback={<div className='h-full w-full flex-1' />}>
                   <iframe
                     title='Desk report'
-                    src={report.url ? `${BASE_URL}${report.url}` : undefined}
+                    src={shown ? `${BASE_URL}${shown.url}` : undefined}
                     sandbox='allow-scripts'
                     className='h-full w-full flex-1 border-0'
                   />

@@ -123,12 +123,12 @@ export class DeskReportPanelController {
 
       // Query the latest completed report and the newest row directly via
       // uploadStatus — no fixed-window scan to push a completed report out of view.
-      const [newest, completed] = await Promise.all([
+      const [newest, completedRows] = await Promise.all([
         db.messageAttachment.findFirst({
           where: { entityType: AttachmentEntityType.DESK_REPORT, entityId: channelId, isDeleted: false },
           orderBy: { createdAt: 'desc' },
         }),
-        db.messageAttachment.findFirst({
+        db.messageAttachment.findMany({
           where: {
             entityType: AttachmentEntityType.DESK_REPORT,
             entityId: channelId,
@@ -138,6 +138,13 @@ export class DeskReportPanelController {
           orderBy: { createdAt: 'desc' },
         }),
       ]);
+      const completed = completedRows[0];
+      const history = completedRows.map((row) => ({
+        id: row.id,
+        generatedAt: row.createdAt.toISOString(),
+        rangeDays: ((row.metadata as Record<string, unknown> | null)?.['rangeDays'] as number | undefined) ?? 1,
+        url: `/desk-report/${encodeURIComponent(channelId)}/view?reportId=${encodeURIComponent(row.id)}`,
+      }));
 
       if (!newest) {
         res.json({ success: true, data: null, canGenerate });
@@ -193,6 +200,7 @@ export class DeskReportPanelController {
               : ((newestMetadata?.['error'] as string | undefined) ?? 'Generation failed')
             : null,
           generating,
+          history,
         },
         canGenerate,
       });
@@ -231,9 +239,12 @@ export class DeskReportPanelController {
 
       // Must match getLatest — serve the latest COMPLETED row directly via
       // uploadStatus, not just the newest, since a regeneration may still be
-      // pending.
+      // pending. An explicit reportId picks a past one, still scoped to this
+      // channel (the ACL above is per channel).
+      const reportId = typeof req.query['reportId'] === 'string' ? req.query['reportId'] : undefined;
       const latest = await db.messageAttachment.findFirst({
         where: {
+          ...(reportId ? { id: reportId } : {}),
           entityType: AttachmentEntityType.DESK_REPORT,
           entityId: channelId,
           isDeleted: false,
