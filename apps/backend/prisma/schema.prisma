@@ -1991,6 +1991,10 @@ model StageTransition {
 }
 
 // Channel Models
+// A partial unique index `channels_workspaceId_name_active_default_key ON channels ("workspaceId",
+// name) WHERE "scopeType" = 'DEFAULT' AND "isArchived" = false` is added via raw SQL in migration
+// 20261022120000_channels_unique_active_default_name (Prisma can't express it). It is the real guard
+// against concurrent duplicate channel names; ChannelRepository maps its P2002 to a 409.
 model Channel {
   id              String            @id @default(cuid())
   name            String
