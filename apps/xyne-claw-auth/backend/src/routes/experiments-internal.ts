@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { loopCommandFor } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { experimentRepository } from "../repositories/index.js";
 import { proofWasDelivered } from "../repositories/experimentRepository.js";
@@ -76,7 +77,7 @@ experimentsInternalRouter.post("/:id/findings", async (req: Request<{ id: string
   // against the repo forever, whereas /workspace/... dies with the sandbox.
   let status = body.status;
   let downgradeNote: string | null = null;
-  const understanding = run.kind === "understanding";
+  const understanding = loopCommandFor(run.kind).proofRule === "file-line-citation";
   if (understanding && status === "proved" && !hasResolvableCitation(body.note)) {
     status = "conjecture";
     downgradeNote =
@@ -193,8 +194,14 @@ experimentsInternalRouter.post("/:id/complete", async (req: Request<{ id: string
     return;
   }
   const updated = await experimentRepository.update(run.id, { finalReport: body.report.slice(0, 20000), status: "done" });
-  void postExperimentNotice(updated).catch((err) => {
-    log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
-  });
+  void postExperimentNotice(updated)
+    .catch((err) => {
+      log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
+    })
+    .then(() => import("../lib/loop-sequence.js"))
+    .then((m) => m?.onExperimentFinished(updated, "done"))
+    .catch((err) => {
+      log.warn(`[experiment] sequence advance failed id=${updated.id}: ${errMsg(err)}`);
+    });
   res.json({ success: true });
 });

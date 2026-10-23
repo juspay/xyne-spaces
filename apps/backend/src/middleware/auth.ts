@@ -287,7 +287,8 @@ export class AuthMiddleware {
                 secure: isProduction,
                 sameSite: 'strict',
                 path: '/',
-                maxAge: config.jwt.expirationSeconds * 1000,
+                maxAge:
+                  (refreshResult.accessTokenLifetimeSeconds ?? config.jwt.expirationSeconds) * 1000,
               });
 
               // Update req.cookies for downstream handlers
@@ -391,7 +392,8 @@ export class AuthMiddleware {
               secure: isProduction,
               sameSite: 'strict',
               path: '/',
-              maxAge: config.jwt.expirationSeconds * 1000,
+              maxAge:
+                (refreshResult.accessTokenLifetimeSeconds ?? config.jwt.expirationSeconds) * 1000,
             });
 
             // IMPORTANT: Update req.cookies so downstream handlers get the new token
@@ -573,7 +575,12 @@ export class AuthMiddleware {
    */
   private async refreshTokenBySession(
     sessionId: string
-  ): Promise<{ success: boolean; customToken?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    customToken?: string;
+    accessTokenLifetimeSeconds?: number;
+    error?: string;
+  }> {
     try {
       logger.info(`[AUTH] refreshTokenBySession started`);
 
@@ -627,16 +634,22 @@ export class AuthMiddleware {
         email: session.user.email,
       });
       
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-        providerUserId: session.user.providerUserId,
-        provider: session.user.authProvider,
-      });
+      const accessTokenLifetimeSeconds = jwtService.getAccessTokenLifetimeSeconds(
+        session.refreshTokenExpiry
+      );
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId,
+          memberId: session.user.orgMemberId,
+          providerUserId: session.user.providerUserId,
+          provider: session.user.authProvider,
+        },
+        accessTokenLifetimeSeconds
+      );
 
       // Update session activity
       logger.info(`[AUTH] refreshTokenBySession updating session activity`, {
@@ -650,7 +663,7 @@ export class AuthMiddleware {
         userId: session.user.id,
         email: session.user.email,
       });
-      return { success: true, customToken };
+      return { success: true, customToken, accessTokenLifetimeSeconds };
     } catch (error) {
       logger.error(`[AUTH] refreshTokenBySession failed with exception:`, {
         error: error instanceof Error ? error.message : 'Unknown error',

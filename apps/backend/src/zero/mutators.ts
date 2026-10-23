@@ -2,6 +2,7 @@ import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, Applicat
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
+  AgentProactivityMode,
   ChannelType,
   ChannelVisibility,
   MessageType,
@@ -210,6 +211,7 @@ import {
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
+import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditionService';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
@@ -1689,6 +1691,32 @@ export function createMutators(
           const row = rows.find(r => r.entityId === appId);
           if (!row) return;
           await tx.mutate.channel_published_tabs.delete({ id: row.id });
+        },
+      ),
+      updateAgentProactivityMode: defineMutator(
+        z.object({
+          channelId: z.string(),
+          mode: z.nativeEnum(AgentProactivityMode),
+        }),
+        async ({ tx, args: { channelId, mode } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          // Never DMs: an unprompted answer lands where everyone in the room reads it.
+          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+            throw new Error('Can only update this setting for default channels');
+          }
+
+          const participant = await tx.run(
+            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
+          );
+          if (channel.createdBy !== authData.sub && (!participant || participant.role !== ChannelRole.ADMIN)) {
+            throw new Error('Only channel admins or the owner can change how agents answer');
+          }
+
+          await tx.mutate.channels.update({ id: channelId, agentProactivityMode: mode });
         },
       ),
       updateShowTicketsTabTicketsInChat: defineMutator(
@@ -4814,6 +4842,9 @@ export function createMutators(
                       if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                         await deleteHeicRenditions(attachment.url);
                       }
+                      if (isVideoMimetype(attachment.mimetype)) {
+                        await deleteVideoRenditions(attachment.url);
+                      }
                     }
                   } catch (error) {
                     // Don't throw - continue deleting other files even if one fails
@@ -4852,6 +4883,9 @@ export function createMutators(
                   }
                   if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                     await deleteHeicRenditions(attachment.url);
+                  }
+                  if (isVideoMimetype(attachment.mimetype)) {
+                    await deleteVideoRenditions(attachment.url);
                   }
                 }
               } catch (error) {
@@ -4927,6 +4961,9 @@ export function createMutators(
                 }
                 if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                   await deleteHeicRenditions(attachment.url);
+                }
+                if (isVideoMimetype(attachment.mimetype)) {
+                  await deleteVideoRenditions(attachment.url);
                 }
               }
             } catch (error) {
@@ -5394,6 +5431,8 @@ export function createMutators(
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
                   ringStatus: RingStatus.CALLING,
+                  // An explicit invite rings even if the call was scheduled not to.
+                  ringNotification: null,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,

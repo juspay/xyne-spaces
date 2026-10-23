@@ -14,9 +14,9 @@ import {
   MessageType,
   InvitationResponse,
   NotificationType,
-  ChannelScopeType,
   CallType,
   CallOrigin,
+  isSilentChannelCall,
 } from '@xyne/shared';
 
 class CallSideEffectService {
@@ -58,13 +58,13 @@ class CallSideEffectService {
 
         const channel = await db.channel.findUnique({
             where: { id: call.channelId ?? undefined },
-            select: { scopeType: true }
+            select: { scopeType: true, type: true }
         });
 
         // Only suppress for whole-channel broadcast calls in a DEFAULT-scope channel.
         // Thread/conversation calls (CallOrigin.CONVERSATION) are targeted invites and
         // must still notify the invited participants even inside a DEFAULT channel.
-        if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
+        if (isSilentChannelCall(channel, call.callOrigin)) {
             this.logger.info(`Skipping missed call notifications for DEFAULT scope channel: ${call.channelId}`);
             return;
         }
@@ -188,14 +188,14 @@ class CallSideEffectService {
 
             const channel = await db.channel.findUnique({
                 where: { id: call.channelId ?? undefined },
-                select: { scopeType: true }
+                select: { scopeType: true, type: true }
             });
 
             // Only suppress for whole-channel broadcast calls in a DEFAULT-scope channel.
             // Thread/conversation calls (CallOrigin.CONVERSATION) are targeted invites (e.g.
             // calling someone from within a message thread) and must still send the
             // INCOMING_CALL push to the invited participant even inside a DEFAULT channel.
-            if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
+            if (isSilentChannelCall(channel, call.callOrigin)) {
                 this.logger.info(`Skipping side effects for DEFAULT scope channel: ${call.channelId}`);
                 return;
             }

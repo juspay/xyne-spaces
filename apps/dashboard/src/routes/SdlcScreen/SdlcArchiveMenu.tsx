@@ -34,14 +34,14 @@ export function SdlcArchiveMenu(props: {
           data-track-category='SdlcHub'
           data-track-name={`${props.trackingScope}ArchiveMenuOpened`}
           className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             props.className,
           )}
         >
           <Ellipsis size={16} />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='end' className='w-40 rounded-xl p-1.5 shadow-sm'>
+      <DropdownMenuContent align='end' sideOffset={6}>
         <DropdownMenuItem
           onClick={event => {
             event.stopPropagation();

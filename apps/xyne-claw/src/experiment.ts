@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SERVER } from "./config.js";
+import { resolveLoop, type LoopCloseCheck, type LoopCommandDef, type LoopKind } from "xyne-claw-shared";
 
 export interface ExperimentContext {
   id: string;
@@ -17,7 +18,8 @@ export interface ExperimentContext {
    *  Each unexplored path is recorded as an open conjecture; closing every one of
    *  them (proved/refuted, with evidence) is the exit. The deadline still applies
    *  as a hard safety cap so the loop stays bounded. */
-  kind?: "understanding" | "framework" | "security" | "repo-history";
+  kind?: LoopKind;
+  loop?: LoopCommandDef;
 }
 
 /** Minimum closed paths before an "exhausted" frontier is believed. Guards the
@@ -218,6 +220,102 @@ export function buildExperimentReviewTools(ctx: ExperimentContext): ToolDefiniti
   ];
 }
 
+const CLOSE_CHECKS: Record<LoopCloseCheck, (note: string) => ReturnType<typeof textResult> | null> = {
+  // A security close must be an OBSERVATION, not a code reading.
+  // Measured across the first three live runs: 67 findings recorded
+  // as proved, 8 survived testing — the rest were scripts asserting a
+  // vulnerable pattern exists in source, which only re-proves what the
+  // agent already read. `proved` therefore requires evidence that
+  // something was actually executed; everything else is a lead.
+  "observation": (note) => {
+    const observed =
+      /\bHTTP[ /]?\d{3}\b/i.test(note) ||
+      /\b(?:status|code)\s*[=:]\s*\d{3}\b/i.test(note) ||
+      /\b(?:observed|captured|returned|responded)\b/i.test(note);
+    if (!observed) {
+      return textResult(
+        "Cannot mark this proved: `note` shows no observed result. A CONFIRMED finding needs what you actually got back — the status code, the response, or the row that changed (e.g. \"POST /api/x -> HTTP 200, returned another workspace's row\"). Reading the code and asserting the pattern exists is a LEAD: record it with status=conjecture instead. If a guard stopped you, close it as refuted and say what stopped you.",
+        { error: true, needsObservation: true },
+      );
+    }
+    if (!CITATION_RE.test(note)) {
+      return textResult(
+        "Cannot mark this proved: `note` needs a file:line citation for the code path you exploited, alongside the observed result.",
+        { error: true, needsCitation: true },
+      );
+    }
+    return null;
+  },
+  // A framework opportunity is a STRUCTURAL claim, not taste — and NOT
+  // just duplication. The old gate demanded ">=3 identical occurrences",
+  // which reduced framework mode to a dedup linter and wrongly refused
+  // the opportunities that matter most (convention drift, missing paved
+  // paths, change-amplification) precisely because their sites VARY.
+  //
+  // Replaced with a tag-agnostic contract the agent self-tags into:
+  //   Tag:        <the agent's own word for the shape of the gap>
+  //   evidence:   at least one file:line the gap actually lives at
+  //   Prevents:   the concrete bug / drift / change-amplification the
+  //               framework would have stopped — this is what separates
+  //               an opportunity from taste, and it holds for ANY tag.
+  // The ledger does NOT judge whether the evidence fits the tag; that
+  // subjective call is the checker's job (experiment-review).
+  "structural-opportunity": (note) => {
+    const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+    const hasCitation = /[\w./-]+\.[A-Za-z][\w]*:\d+/.test(note);
+    const hasConsequence = /(^|\n)\s*(prevents|consequence):\s*\S/i.test(note);
+    if (!hasTag || !hasCitation || !hasConsequence) {
+      const missing = [
+        !hasTag ? "a `Tag:` line (your own word for the shape — e.g. convention-drift, missing-paved-path, change-amplification, duplication; reuse a tag already in the ledger if it fits)" : null,
+        !hasCitation ? "at least one `file.ext:LINE` where the gap lives" : null,
+        !hasConsequence ? "a `Prevents:` line naming the concrete bug, drift, or change-amplification the framework would have stopped" : null,
+      ].filter(Boolean).join("; ");
+      return textResult(
+        `Cannot close this opportunity — the note is missing: ${missing}. A framework opportunity is not \"this could be abstracted\"; it is a named structural gap with evidence and a cost. If you cannot name what it prevents, it is taste — refute it and move on.`,
+        { error: true, needsFrameworkContract: true },
+      );
+    }
+    return null;
+  },
+  // Understanding runs close a path by EXPLAINING it, and the failure
+  // mode is a close that restates the identifier ("gateway_card_info
+  // stores gateway card info"). A name-restatement cannot cite where
+  // the behaviour lives, so requiring the citation shape up front is
+  // what separates the two. claw-auth enforces the same rule; this
+  // check just fails fast with an actionable message.
+  "file-line-explanation": (note) => {
+    if (!CITATION_RE.test(note)) {
+      return textResult(
+        "Cannot close this path: `note` needs at least one file:line citation (e.g. `src/foo/bar.ts:214`) showing where the behaviour actually lives, plus what the code does and why. A description that only restates the name does not close a path.",
+        { error: true, needsCitation: true },
+      );
+    }
+    return null;
+  },
+  // repo-history: a distilled batch is only "proved" when it yields a
+  // durable RULE tied to the SHA it came from and a theme TAG. This
+  // stops the failure mode of recording a changelog ("commit X changed
+  // Y") instead of the reusable coding decision someone rebuilding the
+  // repo would follow. Reconciliation-against-HEAD is the checker's job.
+  "decision-rule": (note) => {
+    const hasRule = /(^|\n)\s*rule:\s*\S/i.test(note);
+    const hasSha = /(^|\n)\s*sha:\s*[0-9a-f]{7,}/i.test(note);
+    const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+    if (!hasRule || !hasSha || !hasTag) {
+      const missing = [
+        !hasRule ? "a `Rule:` line (the durable instruction someone rebuilding the repo would follow — not a changelog of what changed)" : null,
+        !hasSha ? "a `sha:` line naming the commit this rule derives from" : null,
+        !hasTag ? "a `Tag:` line (kebab-case theme — e.g. error-handling, provider-fallback, security; reuse a tag already in the ledger if it fits)" : null,
+      ].filter(Boolean).join("; ");
+      return textResult(
+        `Cannot close this batch — the note is missing: ${missing}. Record the DECISION (the rule), not the diff. If the batch establishes no durable rule, refute it and advance the cursor.`,
+        { error: true, needsRepoHistoryContract: true },
+      );
+    }
+    return null;
+  },
+};
+
 export function buildExperimentTools(
   ctx: ExperimentContext,
   abortRun?: () => void,
@@ -312,98 +410,10 @@ export function buildExperimentTools(
             if (typeof title !== "string" || typeof hypothesis !== "string") {
               return textResult("Missing required title or hypothesis.", { error: true });
             }
-            // Understanding runs close a path by EXPLAINING it, and the failure
-            // mode is a close that restates the identifier ("gateway_card_info
-            // stores gateway card info"). A name-restatement cannot cite where
-            // the behaviour lives, so requiring the citation shape up front is
-            // what separates the two. claw-auth enforces the same rule; this
-            // check just fails fast with an actionable message.
-            // A security close must be an OBSERVATION, not a code reading.
-            // Measured across the first three live runs: 67 findings recorded
-            // as proved, 8 survived testing — the rest were scripts asserting a
-            // vulnerable pattern exists in source, which only re-proves what the
-            // agent already read. `proved` therefore requires evidence that
-            // something was actually executed; everything else is a lead.
-            if (ctx.kind === "security" && status === "proved") {
-              const note = typeof p["note"] === "string" ? p["note"] : "";
-              const observed =
-                /\bHTTP[ /]?\d{3}\b/i.test(note) ||
-                /\b(?:status|code)\s*[=:]\s*\d{3}\b/i.test(note) ||
-                /\b(?:observed|captured|returned|responded)\b/i.test(note);
-              if (!observed) {
-                return textResult(
-                  "Cannot mark this proved: `note` shows no observed result. A CONFIRMED finding needs what you actually got back — the status code, the response, or the row that changed (e.g. \"POST /api/x -> HTTP 200, returned another workspace's row\"). Reading the code and asserting the pattern exists is a LEAD: record it with status=conjecture instead. If a guard stopped you, close it as refuted and say what stopped you.",
-                  { error: true, needsObservation: true },
-                );
-              }
-              if (!CITATION_RE.test(note)) {
-                return textResult(
-                  "Cannot mark this proved: `note` needs a file:line citation for the code path you exploited, alongside the observed result.",
-                  { error: true, needsCitation: true },
-                );
-              }
-            }
-            // A framework opportunity is a STRUCTURAL claim, not taste — and NOT
-            // just duplication. The old gate demanded ">=3 identical occurrences",
-            // which reduced framework mode to a dedup linter and wrongly refused
-            // the opportunities that matter most (convention drift, missing paved
-            // paths, change-amplification) precisely because their sites VARY.
-            //
-            // Replaced with a tag-agnostic contract the agent self-tags into:
-            //   Tag:        <the agent's own word for the shape of the gap>
-            //   evidence:   at least one file:line the gap actually lives at
-            //   Prevents:   the concrete bug / drift / change-amplification the
-            //               framework would have stopped — this is what separates
-            //               an opportunity from taste, and it holds for ANY tag.
-            // The ledger does NOT judge whether the evidence fits the tag; that
-            // subjective call is the checker's job (experiment-review).
-            if (ctx.kind === "framework" && status === "proved") {
-              const note = typeof p["note"] === "string" ? p["note"] : "";
-              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
-              const hasCitation = /[\w./-]+\.[A-Za-z][\w]*:\d+/.test(note);
-              const hasConsequence = /(^|\n)\s*(prevents|consequence):\s*\S/i.test(note);
-              if (!hasTag || !hasCitation || !hasConsequence) {
-                const missing = [
-                  !hasTag ? "a `Tag:` line (your own word for the shape — e.g. convention-drift, missing-paved-path, change-amplification, duplication; reuse a tag already in the ledger if it fits)" : null,
-                  !hasCitation ? "at least one `file.ext:LINE` where the gap lives" : null,
-                  !hasConsequence ? "a `Prevents:` line naming the concrete bug, drift, or change-amplification the framework would have stopped" : null,
-                ].filter(Boolean).join("; ");
-                return textResult(
-                  `Cannot close this opportunity — the note is missing: ${missing}. A framework opportunity is not \"this could be abstracted\"; it is a named structural gap with evidence and a cost. If you cannot name what it prevents, it is taste — refute it and move on.`,
-                  { error: true, needsFrameworkContract: true },
-                );
-              }
-            }
-            if (ctx.kind === "understanding" && status === "proved") {
-              const note = typeof p["note"] === "string" ? p["note"] : "";
-              if (!CITATION_RE.test(note)) {
-                return textResult(
-                  "Cannot close this path: `note` needs at least one file:line citation (e.g. `src/foo/bar.ts:214`) showing where the behaviour actually lives, plus what the code does and why. A description that only restates the name does not close a path.",
-                  { error: true, needsCitation: true },
-                );
-              }
-            }
-            // repo-history: a distilled batch is only "proved" when it yields a
-            // durable RULE tied to the SHA it came from and a theme TAG. This
-            // stops the failure mode of recording a changelog ("commit X changed
-            // Y") instead of the reusable coding decision someone rebuilding the
-            // repo would follow. Reconciliation-against-HEAD is the checker's job.
-            if (ctx.kind === "repo-history" && status === "proved") {
-              const note = typeof p["note"] === "string" ? p["note"] : "";
-              const hasRule = /(^|\n)\s*rule:\s*\S/i.test(note);
-              const hasSha = /(^|\n)\s*sha:\s*[0-9a-f]{7,}/i.test(note);
-              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
-              if (!hasRule || !hasSha || !hasTag) {
-                const missing = [
-                  !hasRule ? "a `Rule:` line (the durable instruction someone rebuilding the repo would follow — not a changelog of what changed)" : null,
-                  !hasSha ? "a `sha:` line naming the commit this rule derives from" : null,
-                  !hasTag ? "a `Tag:` line (kebab-case theme — e.g. error-handling, provider-fallback, security; reuse a tag already in the ledger if it fits)" : null,
-                ].filter(Boolean).join("; ");
-                return textResult(
-                  `Cannot close this batch — the note is missing: ${missing}. Record the DECISION (the rule), not the diff. If the batch establishes no durable rule, refute it and advance the cursor.`,
-                  { error: true, needsRepoHistoryContract: true },
-                );
-              }
+            const closeCheck = resolveLoop(ctx).closeCheck;
+            if (closeCheck && status === "proved") {
+              const refusal = CLOSE_CHECKS[closeCheck](typeof p["note"] === "string" ? p["note"] : "");
+              if (refusal) return refusal;
             }
             const payload: {
               epoch: number;
@@ -487,7 +497,8 @@ export function buildExperimentTools(
         // is the commit batches ahead of the cursor, so `open === 0` means the
         // walk has reached HEAD (nothing left to enumerate). Same exit + .md
         // deliverable gate as framework.
-        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "repo-history") {
+        const loop = resolveLoop(ctx);
+        if (loop.exit === "frontier") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
           // runs out. The deadline is only a hard safety cap so the loop stays
@@ -518,7 +529,7 @@ export function buildExperimentTools(
           // HEAD). For understanding/framework the deadline still releases the run
           // as a safety cap. (The epoch loop keeps chaining past the deadline for
           // repo-history too — see continueExperiment.)
-          const deadlineReleases = ctx.kind !== "repo-history";
+          const deadlineReleases = loop.deadlineReleases;
           if ((!pastDeadline || !deadlineReleases) && !frontierExhausted) {
             const openStr = open === undefined ? "unknown" : String(open);
             const why = open === 0 && closed < MIN_CLOSED_PATHS
@@ -540,7 +551,7 @@ export function buildExperimentTools(
           // produces a markdown report of tagged opportunities. Requiring .html
           // for framework (the old bug) refused every correctly-finished
           // framework run and told it to draw SVG diagrams for a dedup report.
-          const wantsHtml = ctx.kind === "understanding" || ctx.kind === "repo-history";
+          const wantsHtml = loop.deliverable === "html";
           const ext = wantsHtml ? ".html" : ".md";
           const hasDeliverable = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(ext));
           if (ledgerReadOk && !hasDeliverable) {
@@ -551,7 +562,7 @@ export function buildExperimentTools(
               { refused: true, reason: wantsHtml ? "missing-html-artifact" : "missing-md-artifact" },
             );
           }
-        } else if (!pastDeadline) {
+        } else if (loop.exit === "deadline" && !pastDeadline) {
           let open = "unknown";
           try {
             const ledger = await readLedger(ctx);

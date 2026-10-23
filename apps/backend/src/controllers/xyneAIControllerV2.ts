@@ -61,6 +61,16 @@ const ResearchContextSchema = z.object({
   name: z.string().min(1),
 });
 
+const ApprovedActionSchema = z
+  .object({
+    tool: z.string().min(1).max(200),
+    result: z.string().max(20_000).optional(),
+    error: z.string().max(2_000).optional(),
+  })
+  .refine((action) => action.result !== undefined || action.error !== undefined, {
+    message: 'approvedAction needs a result or an error',
+  });
+
 // Selection context schema - selected text from canvas.
 // `canvas_view_access_id` / `canvasViewAccessId` are legacy aliases for
 // canvas_id accepted for backward compatibility with clients that predate
@@ -158,6 +168,8 @@ const XyneAIRequestSchemaV2 = z.object({
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
+  speed: z.enum(['fast', 'standard']).optional(),
+  approvedAction: ApprovedActionSchema.optional(),
   studioMode: z.literal('design').optional(),
   sandboxMode: z.enum(['local', 'remote', 'container']).optional(),
   designArtifactAttachmentId: z.string().min(1).max(200).optional(),
@@ -331,6 +343,8 @@ export class XyneAIControllerV2 {
       deep_research_enabled: deepResearchEnabledSC,
       instant,
       thinkingLevel,
+      speed,
+      approvedAction,
       studioMode,
       sandboxMode,
       designArtifactAttachmentId,
@@ -593,6 +607,8 @@ export class XyneAIControllerV2 {
           // cmd+K scopes the agent's own search to the tab the answer is shown on.
           ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
           ...(thinkingLevel ? { thinkingLevel } : {}),
+          ...(speed ? { speed } : {}),
+          ...(approvedAction ? { approvedAction } : {}),
           ...(studioMode ? { studioMode } : {}),
           ...(sandboxMode ? { sandboxMode } : {}),
           ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),

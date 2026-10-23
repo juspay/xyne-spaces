@@ -1,5 +1,5 @@
 import type { JsonValue } from '@openfeature/server-sdk';
-import { superpositionClient } from '@/services/superpositionClient';
+import { superpositionClient, type SuperpositionContext } from '@/services/superpositionClient';
 import { askDecisionNouls } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
 import type { YesNoQuestion } from '@/services/decision/types';
@@ -17,6 +17,8 @@ export interface QueryIntent {
 export interface QueryIntentContext {
   userId: string;
   workspaceId: string;
+  /** Request context from cacContextFromRequest, so the same overrides apply as /api/cac-config. */
+  cac?: SuperpositionContext;
 }
 
 /**
@@ -84,7 +86,7 @@ const getIntentConfig = async (ctx: QueryIntentContext): Promise<IntentConfig> =
   (await superpositionClient.getObjectValue(
     INTENT_CONFIG_KEY,
     DEFAULT_INTENT_CONFIG as unknown as JsonValue,
-    { userId: ctx.userId, workspaceId: ctx.workspaceId }
+    { userId: ctx.userId, workspaceId: ctx.workspaceId, ...ctx.cac }
   )) as unknown as IntentConfig;
 
 /**

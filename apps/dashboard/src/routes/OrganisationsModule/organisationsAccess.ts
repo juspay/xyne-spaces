@@ -8,6 +8,7 @@ export type OrganisationsSectionKey =
   | 'guests'
   | 'repository-credentials'
   | 'toolbar'
+  | 'agent-activity'
   | 'user-groups'
   | 'roles'
   | 'all';
@@ -41,6 +42,7 @@ export const organisationsAccess = (
     guests: workspace,
     'repository-credentials': workspace,
     toolbar: workspace,
+    'agent-activity': workspace,
     'user-groups': canWrite('USER-GROUPS') || ownsUserGroup,
     roles: isAdmin('ROLES'),
     all: isAdmin('ORGANIZATIONS'),

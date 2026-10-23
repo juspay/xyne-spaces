@@ -52,51 +52,74 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       const { channelId, userId } = participant;
 
       // Member joined → refresh canvases shared to this channel (regardless of notification).
-      await Promise.all([
-        refreshCanvasPermissionsForChannel(channelId).catch(err =>
-          logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`)),
-        refreshRecordingTranscriptPermissionsForChannel(channelId).catch(err =>
-          logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${channelId}: ${err}`)),
-      ]);
-
-
-      if (this.ctx.userID === userId) {
-        logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);
-        return; // Don't notify user when they join themselves
-      }
-
-      // Someone else added them - get the adder's info
-      const adder = await db.user.findUnique({
-        where: { id: this.ctx.userID },
-        select: { name: true, displayName: true, id: true }
-      });
-      const adderName = adder?.displayName || adder?.name || 'Someone';
-      const adderId = adder?.id || 'unknown';
-      
-      logger.info(`[ChannelParticipantsHandler] User ${userId} was added to channel ${channelId} by ${this.ctx.userID} (${adderName})`);
-
-      // Query channel for name
-      const channel = await db.channel.findUnique({
-        where: { id: channelId },
-        select: { name: true, scopeType: true }
-      });
-
-      const channelName = channel?.name || 'a channel';
-
-      // Send notification to the added user
-      await notificationService.createParticipantAddedNotifications(
-        [userId],
-        channelId,
-        channel?.scopeType === ChannelScopeType.GROUP_DM ? 'a group DM' : channelName,
-        adderId,
-        adderName,
-        this.ctx.workspaceId
-      );
-
-      logger.info(`[ChannelParticipantsHandler] Notification sent for user ${userId} added to channel ${channelId} by ${adderName}`);
-
+      await this.refreshChannelAccess(channelId);
+      await this.notifyAdded(channelId, [userId]);
     } catch (error) {
       logger.error(`[ChannelParticipantsHandler] Failed to process onInsert for entity ${job.entityId}:`, error);
     }
+  }
+
+  /**
+   * Several people added to one channel in one call. The channel-wide canvas and recording refresh
+   * covers every canvas and recording in the channel, not one person's access, so it runs once here
+   * instead of once per person; only the notification is per person.
+   */
+  async onBatchInsert(channelId: string, userIds: string[]): Promise<void> {
+    logger.info(`[ChannelParticipantsHandler] onBatchInsert called for channel ${channelId} with ${userIds.length} users`);
+
+    try {
+      await this.refreshChannelAccess(channelId);
+      await this.notifyAdded(channelId, userIds);
+    } catch (error) {
+      logger.error(`[ChannelParticipantsHandler] Failed to process onBatchInsert for channel ${channelId}:`, error);
+    }
+  }
+
+  private async refreshChannelAccess(channelId: string): Promise<void> {
+    await Promise.all([
+      refreshCanvasPermissionsForChannel(channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`)),
+      refreshRecordingTranscriptPermissionsForChannel(channelId).catch(err =>
+        logger.error(`[ChannelParticipantsHandler] recording ACL refresh failed for channel ${channelId}: ${err}`)),
+    ]);
+  }
+
+  private async notifyAdded(channelId: string, userIds: string[]): Promise<void> {
+    // Don't notify a user who joined themselves.
+    const others = userIds.filter(userId => userId !== this.ctx.userID);
+    if (others.length === 0) {
+      logger.info(`[ChannelParticipantsHandler] Only the actor joined channel ${channelId} - skipping notification`);
+      return;
+    }
+
+    // Someone else added them - get the adder's info
+    const adder = await db.user.findUnique({
+      where: { id: this.ctx.userID },
+      select: { name: true, displayName: true, id: true }
+    });
+    const adderName = adder?.displayName || adder?.name || 'Someone';
+    const adderId = adder?.id || 'unknown';
+
+    logger.info(`[ChannelParticipantsHandler] ${others.length} user(s) were added to channel ${channelId} by ${this.ctx.userID} (${adderName})`);
+
+    // Query channel for name
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true, scopeType: true }
+    });
+
+    const channelName = channel?.name || 'a channel';
+
+    // Send notification to the added users
+    await notificationService.createParticipantAddedNotifications(
+      others,
+      channelId,
+      channel?.scopeType === ChannelScopeType.GROUP_DM ? 'a group DM' : channelName,
+      adderId,
+      adderName,
+      this.ctx.workspaceId
+    );
+
+    logger.info(`[ChannelParticipantsHandler] Notification sent for ${others.length} user(s) added to channel ${channelId} by ${adderName}`);
   }
 }

@@ -34,6 +34,7 @@ import { wrapTransactionWithACL } from './acl';
 import { createZeroAuditJobs, flushAuditTrail } from './audit';
 import type { AuditJobsAccumulator } from './audit';
 import { decryptQueryResult } from './encryption-interceptor';
+import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -637,9 +638,19 @@ export async function runCatalogQuery(
 
   try {
     const serverSchema = await fetchServerSchema();
-    const data = await provider.transaction(async (tx) =>
-      executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema),
-    );
+    const data = await provider.transaction(async (tx) => {
+      // Flat queries: build JSON in the app instead of json_agg in Postgres.
+      const flat = await executeFlatCatalogQuery(
+        // @ts-ignore - DBTransaction exposes query(sql, params) at runtime
+        tx.dbTransaction,
+        ast,
+        format,
+        serverSchema,
+        name,
+      );
+      if (flat !== NOT_FLAT) return flat;
+      return executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema);
+    });
     conformToZeroShape(data, format as ZeroResultFormat);
     return await decryptQueryResult(data, { queryName: name });
   } catch (error) {

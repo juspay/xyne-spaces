@@ -113,12 +113,16 @@ pub struct Correlation {
 /// them: the parent columns, the child columns and the child table.
 type Relationship<'a> = (&'a [String], &'a [String], &'a str);
 
-/// A translated query: the tree to register, and the parts whose rows
-/// stay on the server (permission subqueries).
+/// A translated query: the tree to register, the parts whose rows stay
+/// on the server (permission subqueries), and, when a page of it has a
+/// keyset cursor, the same tree with every cursor left out — what the
+/// planner estimates its sizes on, so a page turn asks nothing a first
+/// page did not.
 #[derive(Debug, Clone)]
 pub struct Translated {
     pub query: MultiTableReadQuery,
     pub hidden: HashSet<QueryPart>,
+    pub uncursored: Option<MultiTableReadQuery>,
 }
 
 /// Translate `ast` against `catalog`; an error says what the engine
@@ -126,7 +130,34 @@ pub struct Translated {
 pub fn translate(ast: &Ast, catalog: &Catalog) -> Result<Translated, String> {
     let mut hidden = HashSet::new();
     let query = node(ast, Vec::new(), false, catalog, &mut hidden)?;
-    Ok(Translated { query, hidden })
+    let uncursored = match without_cursors(ast) {
+        Some(plain) => Some(node(&plain, Vec::new(), false, catalog, &mut HashSet::new())?),
+        None => None,
+    };
+    Ok(Translated {
+        query,
+        hidden,
+        uncursored,
+    })
+}
+
+/// `ast` with the cursor of every page in it (its own and its related
+/// subqueries'; an `EXISTS` has none) left out, when it has one.
+fn without_cursors(ast: &Ast) -> Option<Ast> {
+    fn has(ast: &Ast) -> bool {
+        ast.start.is_some() || ast.related.iter().any(|sub| has(&sub.subquery))
+    }
+    fn clear(ast: &mut Ast) {
+        ast.start = None;
+        for sub in &mut ast.related {
+            clear(&mut sub.subquery);
+        }
+    }
+    has(ast).then(|| {
+        let mut plain = ast.clone();
+        clear(&mut plain);
+        plain
+    })
 }
 
 /// Build the tree below `ast` at `path`.
@@ -950,6 +981,23 @@ mod tests {
                 .unwrap_err()
                 .contains("none of the sort columns")
         );
+    }
+
+    /// A page with a cursor carries the same tree without it, which the
+    /// first page is; a tree without a cursor carries none.
+    #[test]
+    fn a_cursor_is_left_out_of_the_uncursored_tree() {
+        let first: Ast = serde_json::from_str(r#"{"table": "messages", "where": {"type": "simple", "op": "=", "left": {"type": "column", "name": "visibleTo"}, "right": {"type": "literal", "value": "me"}}, "orderBy": [["createdAt", "desc"]], "limit": 5}"#).unwrap();
+        let mut turned = first.clone();
+        turned.start = Some(Bound {
+            row: serde_json::from_str(r#"{"createdAt": 1000}"#).unwrap(),
+            exclusive: true,
+        });
+        let first = translate(&first, &catalog()).unwrap();
+        assert!(first.uncursored.is_none());
+        let turned = translate(&turned, &catalog()).unwrap();
+        assert_ne!(turned.query, first.query, "the cursor is in the tree");
+        assert_eq!(turned.uncursored, Some(first.query), "and not in its uncursored tree");
     }
 
     /// What the engine cannot run is refused by name.

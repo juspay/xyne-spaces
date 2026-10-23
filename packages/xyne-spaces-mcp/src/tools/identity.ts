@@ -17,6 +17,7 @@ import {
 	toIST,
 } from "../render.js";
 import { MAX_LIMIT, type SearchOptions, type SearchResult } from "@xyne/spaces-sdk";
+import { signedInUntil } from "../config.js";
 import { put } from "../render.js";
 import type { ToolDef } from "./shared.js";
 
@@ -50,7 +51,7 @@ const whoami: ToolDef = {
 	name: "spaces_whoami",
 	description:
 		"Identify the Xyne Spaces user this session acts as. Returns the user id, email, name, workspace id, org id, " +
-		"role, and when the session expires. Call this FIRST in any session that will filter or write by user — every " +
+		"role, and how long the sign-in lasts. Call this FIRST in any session that will filter or write by user — every " +
 		"other tool that takes a user takes the id returned here. Also the quickest way to confirm the server is signed " +
 		"in and the session is live.",
 	inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -68,7 +69,13 @@ const whoami: ToolDef = {
 			.filter(Boolean)
 			.join(" · ");
 		if (roles) lines.push(`  ${roles}`);
-		if (config.session) lines.push(`  Session expires: ${toIST(config.session.expiresAt)} IST`);
+		if (config.session) {
+			lines.push(
+				config.session.refreshToken
+					? `  Signed in until: ${toIST(signedInUntil(config.session))} IST (renewed automatically until then)`
+					: `  Session expires: ${toIST(config.session.expiresAt)} IST`,
+			);
+		}
 		lines.push("");
 		lines.push(
 			"  Pass the User ID above wherever a tool asks for a user — assignee on spaces_ticket_update, " +

@@ -62,6 +62,10 @@ export type SpacesMcpSignInResult =
   | { ok: true; status: SpacesMcpStatus }
   | { ok: false; message: string };
 
+export type SpacesMcpSignOutResult =
+  | { ok: true; status: SpacesMcpStatus; notice?: string }
+  | { ok: false; message: string };
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -244,6 +248,8 @@ export interface ElectronAPI {
   getSpacesMcpStatus?: () => Promise<SpacesMcpStatus>;
   /** Sign the Spaces MCP in as the app's user, writing `~/.xyne/agent/spaces.json`. */
   signInSpacesMcp?: () => Promise<SpacesMcpSignInResult>;
+  /** End the sign-in on Spaces and remove it from `~/.xyne/agent/spaces.json`. */
+  signOutSpacesMcp?: () => Promise<SpacesMcpSignOutResult>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
   onRecordingStopForTeardown?: (callback: () => void) => () => void;

@@ -20,14 +20,14 @@ import {
 	type CallToolResult,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createSpacesSdk, resolveConfig, resolveWrites } from "./config.js";
+import { createSpacesSdk, isSessionUsable, loadSavedSession, resolveConfig, resolveWrites } from "./config.js";
 import { describeError, NotSignedInError } from "./errors.js";
 import { pendingLogin } from "./login.js";
 import { runLoginCommand } from "./login-command.js";
 import { watchSharedConfig } from "./watch.js";
 import { runWritesCommand } from "./writes-command.js";
 import { asObject, err } from "./render.js";
-import { useSession } from "./tools/login.js";
+import { dropSession, useSession } from "./tools/login.js";
 import type { ToolContext, ToolDef } from "./tools/shared.js";
 import { allTools } from "./tools/index.js";
 
@@ -82,7 +82,7 @@ const instructions = [
 ].join(" ");
 
 const server = new Server(
-	{ name: "xyne-spaces-mcp", version: "0.1.0" },
+	{ name: "xyne-spaces-mcp", version: "0.2.0" },
 	{ capabilities: { tools: { listChanged: true } }, instructions },
 );
 
@@ -104,11 +104,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
 	// Checked here rather than per call: the session and its expiry are known
 	// locally, so sending a request would be a round trip to learn something
-	// already known — and it would fail this way while offline too.
+	// already known — and it would fail this way while offline too. An expired
+	// cookie that can still be renewed passes: the SDK renews it first.
 	if (tool.name !== "spaces_login") {
 		const waiting = pendingLogin();
+		// Another process may have signed in, or renewed, since this one started
+		if (config.sessionSource !== "env" && !(config.session && isSessionUsable(config.session))) {
+			const saved = loadSavedSession();
+			if (saved && isSessionUsable(saved)) useSession(ctx, saved);
+		}
 		const session = config.session;
-		if (!session || session.expiresAt <= Date.now()) {
+		if (!session || !isSessionUsable(session)) {
 			if (waiting) {
 				return err(
 					`Sign-in is waiting for approval. Ask the user to open ${waiting.link}, check it shows the code ` +
@@ -134,14 +140,17 @@ await server.connect(transport);
 // outside: `writes on|off`, a sign-in from another client or the desktop app.
 // Follow it so those take effect here without a restart.
 let writesListed = resolveWrites().enabled;
-watchSharedConfig(({ writes, session }) => {
+watchSharedConfig(({ writes, session, signedOut }) => {
 	if (writes !== writesListed) {
 		writesListed = writes;
 		void server.sendToolListChanged().catch(() => {});
 	}
-	const current = config.session;
-	if (session && config.sessionSource !== "env" && session.cookie.value !== current?.cookie.value) {
-		useSession(ctx, session);
+	if (config.sessionSource !== "env") {
+		if (signedOut) {
+			if (config.session) dropSession(ctx);
+		} else if (session && isSessionUsable(session) && session.cookie.value !== config.session?.cookie.value) {
+			useSession(ctx, session);
+		}
 	}
 });
 

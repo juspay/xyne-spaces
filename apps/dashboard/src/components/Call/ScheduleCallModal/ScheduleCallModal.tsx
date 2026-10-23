@@ -1,7 +1,7 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
+import { CallRingNotification, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
 import { channelService } from '../../../services/Chat/channelService';
 import { useSelf, useActiveUsers, useUsersById } from '../../../hooks/useUsers';
@@ -143,6 +143,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
   const [editEntireSeries, setEditEntireSeries] = useState(false);
   // Opt-in: email all participants (internal and external) about the change.
   const [notifyByEmail, setNotifyByEmail] = useState(false);
+  // Ring participants' Xyne app when the call starts (prefilled from the call in edit mode).
+  const [ringParticipants, setRingParticipants] = useState(true);
 
   // Selective participants: tracks which participant IDs were in the original call (edit mode)
   // and whether the exclusion set has been initialized from the channel member list.
@@ -328,6 +330,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     setEditEntireSeries,
     setIsRecurring,
     setPostCallUpdates,
+    setRingParticipants,
     setRecurringTimesFromDates,
     setSeriesEndsOn,
     setSeriesEndsType,
@@ -450,6 +453,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     (channelMembersOptions ? channelMembersOptions.length - excludedChannelMembers.size : 0);
   const showEmailOption = !participantsOnly && emailRecipientCount <= MAX_EMAIL_PARTICIPANTS;
   const notifyParticipantsByEmail = showEmailOption && notifyByEmail;
+  // Ringing is the default, so only opting out is stored; null clears it on an edit.
+  const ringNotification = ringParticipants ? null : CallRingNotification.DISABLED;
 
   // Restricted editors may drop the people they invited themselves, so only the organizer
   // and everyone invited by someone else is pinned. Mirrors the backend's pinned set in
@@ -681,6 +686,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   startsOn: data.startsAt.getTime(),
                   externalInvitees: effExternals,
                   ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
+                  ringNotification,
                   ...(seriesEndsType === 'on' &&
                     seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
                 },
@@ -709,6 +715,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   ...((userIds.length > 0 || !channelId) && { targetUserIds: userIds }),
                   externalInvitees: effExternals,
                   ...(notifyParticipantsByEmail && { notifyParticipantsByEmail }),
+                  ringNotification,
                 },
           );
           toast.success('Call Updated', {
@@ -742,6 +749,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
           startTime: recurringStartTime,
           endTime: recurringEndTime,
           startsOn: data.startsAt.getTime(),
+          ringNotification,
         };
         if (seriesEndsType === 'on' && seriesEndsOn !== null) {
           recurringRequest.endsOn = seriesEndsOn.getTime();
@@ -761,6 +769,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
           title: data.title,
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
+          ringNotification,
         };
         if (threadConversationId) {
           // Thread-linked: always use the thread's channel and pass conversationId
@@ -890,6 +899,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     resetRecurringState(defaultStart);
     setEditEntireSeries(false);
     setNotifyByEmail(false);
+    setRingParticipants(true);
     resetPostCallUpdates();
     onClose();
   }, [reset, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2001,6 +2011,32 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                 </div>
               )}
             </section>
+          )}
+
+          {!participantsOnly && (
+            <div className='flex items-center gap-1.5 w-full'>
+              <Checkbox
+                checked={ringParticipants}
+                onChange={setRingParticipants}
+                data-track-category='CALLS'
+                data-track-name='RING_PARTICIPANTS_TOGGLE'
+                label='Ring participants when the call starts'
+              />
+              <Tooltip
+                content='When on, participants get an incoming call once the call begins. When off, they only see it on their calendar and can join from there.'
+                side='top'
+                sideOffset={6}
+                className='max-w-60'
+              >
+                <button
+                  type='button'
+                  aria-label='About ringing participants when the call starts'
+                  className='text-muted-foreground hover:text-foreground transition-colors'
+                >
+                  <Info className='size-3.5' strokeWidth={2} />
+                </button>
+              </Tooltip>
+            </div>
           )}
 
           {showEmailOption && (

@@ -71,6 +71,7 @@ import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { resolveCallSttRouting } from '@/services/callSttRouting';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
@@ -520,9 +521,14 @@ export class CallController {
         const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
+        const sttRouting = await resolveCallSttRouting({
+          requestedModel: sttModel,
+          workspaceId: req.user!.workspaceId,
+          email: userEmail,
+        });
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
-          sttModel: sttModel || 'google',
+          ...sttRouting,
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
@@ -785,11 +791,16 @@ export class CallController {
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
+      const sttRouting = await resolveCallSttRouting({
+        requestedModel: sttModel,
+        workspaceId: req.user!.workspaceId,
+        email: userEmail,
+      });
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
-        sttModel: sttModel || 'google',
+        ...sttRouting,
         createdBy: userId,
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
@@ -2537,6 +2548,8 @@ export class CallController {
               data: {
                 response: InvitationResponse.INVITED,
                 ringStatus: RingStatus.CALLING,
+                // An explicit invite rings even if the call was scheduled not to.
+                ringNotification: null,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,

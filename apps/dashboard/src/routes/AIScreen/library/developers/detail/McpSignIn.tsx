@@ -14,12 +14,18 @@ const MCP_PACKAGE = '@xyne/spaces-mcp';
 function desktopBridge(): {
   getStatus: () => Promise<SpacesMcpStatus>;
   signIn: NonNullable<NonNullable<Window['electronAPI']>['signInSpacesMcp']>;
+  /** Absent in the first desktop builds with the bridge, which had no sign-out */
+  signOut: NonNullable<Window['electronAPI']>['signOutSpacesMcp'];
 } | null {
   const api = window.electronAPI;
   if (typeof api?.getSpacesMcpStatus !== 'function' || typeof api.signInSpacesMcp !== 'function') {
     return null;
   }
-  return { getStatus: api.getSpacesMcpStatus, signIn: api.signInSpacesMcp };
+  return {
+    getStatus: api.getSpacesMcpStatus,
+    signIn: api.signInSpacesMcp,
+    signOut: typeof api.signOutSpacesMcp === 'function' ? api.signOutSpacesMcp : undefined,
+  };
 }
 
 function formatTime(epochMs: number): string {
@@ -116,21 +122,24 @@ function describeStatus(status: SpacesMcpStatus): {
 }
 
 /**
- * Step 2 of the MCP page. In the desktop app: the saved session's status and a
- * one-click sign-in. Elsewhere: how to sign in from the agent or a terminal.
+ * Step 2 of the MCP page. In the desktop app: the saved session's status, and
+ * one-click sign-in and sign-out. Elsewhere: how to sign in from the agent or a
+ * terminal.
  */
 export function McpSignIn(): ReactElement {
   const baseUrl = spacesBaseUrl();
   // Read once: the bridge does not change while the page is open
   const [bridge] = useState(desktopBridge);
   const [status, setStatus] = useState<SpacesMcpStatus | null>(null);
-  const [busy, setBusy] = useState<'checking' | 'signing-in' | null>(null);
+  const [busy, setBusy] = useState<'checking' | 'signing-in' | 'signing-out' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const check = useCallback(async (): Promise<void> => {
     if (!bridge) return;
     setBusy('checking');
     setError(null);
+    setNotice(null);
     try {
       setStatus(await bridge.getStatus());
     } catch (e) {
@@ -148,10 +157,31 @@ export function McpSignIn(): ReactElement {
     if (!bridge) return;
     setBusy('signing-in');
     setError(null);
+    setNotice(null);
     try {
       const result = await bridge.signIn();
       if (result.ok) setStatus(result.status);
       else setError(result.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const signOut = async (): Promise<void> => {
+    if (!bridge?.signOut) return;
+    setBusy('signing-out');
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await bridge.signOut();
+      if (result.ok) {
+        setStatus(result.status);
+        if (result.notice) setNotice(result.notice);
+      } else {
+        setError(result.message);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -175,13 +205,15 @@ export function McpSignIn(): ReactElement {
 
   const described = status ? describeStatus(status) : null;
   const signedIn = status?.state === 'signed_in';
+  // Any saved session, working or not, can be signed out
+  const hasSession = status !== null && status.state !== 'signed_out';
 
   return (
     <>
       <Text>
         Signs the MCP in as you, on this computer, for every agent you have connected. The session
         is saved to <InlineCode>~/.xyne/agent/spaces.json</InlineCode>, and agents already running
-        pick it up on their next request.
+        pick it up on their next request. Signing in again or signing out ends the previous sign-in.
       </Text>
       <div className='flex w-full flex-col gap-3 rounded-2xl border border-border bg-card p-4'>
         <div className='flex items-start gap-2 text-sm leading-[22px]'>
@@ -201,7 +233,9 @@ export function McpSignIn(): ReactElement {
               ? 'Checking…'
               : busy === 'signing-in'
                 ? 'Signing in…'
-                : (described?.text ?? 'Checking…')}
+                : busy === 'signing-out'
+                  ? 'Signing out…'
+                  : (described?.text ?? 'Checking…')}
           </span>
         </div>
         <div className='flex flex-wrap gap-2'>
@@ -218,9 +252,18 @@ export function McpSignIn(): ReactElement {
             busy={busy !== null}
             trackName='Spaces MCP: check sign-in status'
           />
+          {hasSession && bridge.signOut && (
+            <ActionButton
+              label='Sign out'
+              onClick={() => void signOut()}
+              busy={busy !== null}
+              trackName='Spaces MCP: sign out from desktop app'
+            />
+          )}
         </div>
       </div>
       {error && <Callout tone='warning'>{error}</Callout>}
+      {notice && <Callout>{notice}</Callout>}
       <Text>
         A client that sets <InlineCode>XYNE_SPACES_COOKIE</InlineCode> in its own MCP config uses
         that session instead, and this status does not cover it.

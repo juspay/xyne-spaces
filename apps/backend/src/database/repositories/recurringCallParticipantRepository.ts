@@ -1,5 +1,6 @@
 
 import { type Prisma, type RecurringCallParticipant } from '@prisma/client';
+import type { CallRingNotification } from '@xyne/shared';
 import { DatabaseClient } from '../client';
 
 export function normalizeUserIds(userIds: string[] | undefined, organizerId: string): string[] {
@@ -52,7 +53,7 @@ export class RecurringCallParticipantRepository {
   async findInternalParticipants(
     recurringSeriesId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<Array<{ userId: string; invitedBy: string }>> {
+  ): Promise<Array<{ userId: string; invitedBy: string; ringNotification: string | null }>> {
     return this.client(tx).recurringCallParticipant.findMany({
       where: {
         recurringSeriesId,
@@ -61,6 +62,7 @@ export class RecurringCallParticipantRepository {
       select: {
         userId: true,
         invitedBy: true,
+        ringNotification: true,
       },
       orderBy: {
         invitedAt: 'asc',
@@ -99,6 +101,7 @@ export class RecurringCallParticipantRepository {
   ): Promise<{
     targetUserIds?: string[];
     participantInviters: Record<string, string>;
+    participantRingNotifications: Record<string, CallRingNotification | null>;
     externalInvitees: string[];
   }> {
     const internalParticipants = await this.findInternalParticipants(recurringSeriesId, tx);
@@ -110,6 +113,9 @@ export class RecurringCallParticipantRepository {
         : undefined,
       participantInviters: Object.fromEntries(
         internalParticipants.map(p => [p.userId, p.invitedBy]),
+      ),
+      participantRingNotifications: Object.fromEntries(
+        internalParticipants.map(p => [p.userId, p.ringNotification as CallRingNotification | null]),
       ),
       externalInvitees,
     };

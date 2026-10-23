@@ -1,4 +1,4 @@
-import type { Ticket, TicketTag, TicketStatusV2, FormFieldType } from '@xyne/shared';
+import type { Ticket, TicketStatusV2, FormFieldType } from '@xyne/shared';
 import type { BoardSlaPolicy } from '../../hooks/useChannelSlaPolicy';
 import type { SubTicketProgress } from '../../components/Tickets/SubTickets/SubTickets.types';
 
@@ -26,7 +26,6 @@ export interface Stage {
 
 export interface SortableTicketCardProps {
   ticket: Ticket;
-  tags: TicketTag[];
   availableTags?: string[] | undefined;
   /** Callback to load more tags */
   onLoadMoreTags?: (() => void) | undefined;
@@ -34,7 +33,7 @@ export interface SortableTicketCardProps {
   hasMoreTags?: boolean | undefined;
   /** Callback for server-side tag search */
   onSearchTags?: ((query: string) => void) | undefined;
-  onClick: (e: React.MouseEvent | KeyboardEvent) => void;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string | undefined;
   showEmailReads?: boolean | undefined;

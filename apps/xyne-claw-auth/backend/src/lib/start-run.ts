@@ -7,6 +7,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
+import { resolveProjectInstructions } from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -231,7 +232,7 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
@@ -976,6 +977,33 @@ export async function prepareRun(
           errMsg(err),
         );
       }
+
+      // Appended AFTER the user's own instructions, so precedence runs
+      // agent prompt -> user per-agent instructions -> project -> message.
+      // Inside the daily_brief guard for the same reason: a brief can execute
+      // on a shared agent, and a project's instructions have no business
+      // reaching it.
+      // Every id this user's rows may be keyed under. A chat filed under their
+      // workspace-scoped Spaces id is still theirs, and matching the canonical
+      // id alone would silently skip the project's instructions.
+      const projectLookupIds = conversationId
+        ? [
+            ...new Set(
+              [
+                resolved.userId,
+                await spacesUserIdForClawUser(resolved.userId).catch(() => null),
+              ].filter((id): id is string => Boolean(id)),
+            ),
+          ]
+        : [];
+      const projectInstructions = conversationId
+        ? await resolveProjectInstructions(conversationId, projectLookupIds, agent.orgId)
+        : null;
+      if (projectInstructions) {
+        additionalInstructions = additionalInstructions
+          ? `${additionalInstructions}\n\n${projectInstructions}`
+          : projectInstructions;
+      }
     }
 
     // Promote the attached-context prefix into `context` (NOT additionalInstructions).
@@ -1088,7 +1116,7 @@ export async function prepareRun(
         const hubWorkspaceId =
           typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
         const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
-        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, resolved.userId, agent.orgId);
+        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, agent.orgId);
         hubSkills = hub.skills.map(toRunSkill);
         if (hub.text) mergedContext = mergedContext ? `${hub.text}\n\n${mergedContext}` : hub.text;
       } catch (err) {
@@ -1546,9 +1574,14 @@ export async function prepareRun(
     const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;
     mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
     // Sandbox tools see built-in profiles plus this workspace's own. Set last so a caller can't pick another.
-    const { workspaceId: _suppliedWorkspaceId, ...agentConfigWithoutWorkspace } = mergedAgentConfig;
+    const { workspaceId: _suppliedWorkspaceId, spacesUserId: _suppliedSpacesUserId, ...agentConfigWithoutWorkspace } = mergedAgentConfig;
     const runWorkspaceId = await getWorkspaceIdForUser(resolved.userId, "start-run").catch(() => null);
-    mergedAgentConfig = runWorkspaceId ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId } : agentConfigWithoutWorkspace;
+    const runSpacesUserId = runWorkspaceId
+      ? await spacesUserIdForClawUser(resolved.userId, runWorkspaceId).catch(() => null)
+      : null;
+    mergedAgentConfig = runWorkspaceId
+      ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId, ...(runSpacesUserId ? { spacesUserId: runSpacesUserId } : {}) }
+      : agentConfigWithoutWorkspace;
 
     const forwardBody = {
       sessionId,

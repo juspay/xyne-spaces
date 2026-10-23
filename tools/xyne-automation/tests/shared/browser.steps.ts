@@ -831,6 +831,28 @@ export default class BrowserSteps {
     });
   }
 
+  // Waits for the text to be gone, so it also covers a list that updates after an action (leave,
+  // remove). Assert the positive state first where "never there" would make this pass vacuously.
+  @Step(
+    'verifying stored user <userAlias> channel <channelAlias> field <fieldName> is not visible in <selector>'
+  )
+  public async verifyStoredUserChannelFieldNotVisible(
+    userAlias: string,
+    channelAlias: string,
+    fieldName: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    const text = `user:${userAlias}.channels.${channelAlias}.${fieldName}`;
+    const resolvedText = resolveStoredText(text);
+    const container = testContext.activePage.locator(selector).first();
+    await container.waitFor({ state: 'visible' });
+    await expect(container.getByText(resolvedText, { exact: true })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  }
+
   @Step(
     'verifying stored user <userAlias> dm <dmAlias> message <messageAlias> is visible in <selector>'
   )

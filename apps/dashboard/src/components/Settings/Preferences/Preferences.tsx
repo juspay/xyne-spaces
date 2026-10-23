@@ -114,7 +114,7 @@ import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
 import { searchSettings, findSettingElement, type SettingsSearchEntry } from './settingsSearch';
 import { SettingsSearchInput } from './SettingsSearchInput';
-import { SettingsSearchResults } from './SettingsSearchResults';
+import { SettingsSearchResults, settingsSearchOptionId } from './SettingsSearchResults';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -252,7 +252,7 @@ const QualitySelect: FC<{
 const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Appearance' subtitle='Choose your theme' />
-    <div className='flex gap-4 flex-wrap'>
+    <div className='flex gap-4 flex-wrap rounded-lg'>
       {THEMES.map(themeOption => (
         <button
           key={themeOption.id}
@@ -1622,6 +1622,18 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
     [searchQuery, sectionLabels],
   );
   const isSearching = searchQuery.trim().length > 0;
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const activeResult = isSearching ? searchResults[activeResultIndex] : undefined;
+
+  const changeSearchQuery = (value: string): void => {
+    setSearchQuery(value);
+    setActiveResultIndex(0);
+  };
+
+  const moveActiveResult = (step: 1 | -1): void => {
+    if (searchResults.length === 0) return;
+    setActiveResultIndex(index => (index + step + searchResults.length) % searchResults.length);
+  };
 
   const selectSearchResult = (entry: SettingsSearchEntry): void => {
     setSearchQuery('');
@@ -1640,8 +1652,9 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
     const current = highlightRef.current;
     if (!current) return;
     clearTimeout(current.timer);
-    current.el.classList.remove('ring-2', 'ring-primary');
-    current.el.removeAttribute('data-search-highlight');
+    if (current.el.getAttribute('data-search-highlight') === 'flash') {
+      current.el.removeAttribute('data-search-highlight');
+    }
     highlightRef.current = null;
   };
 
@@ -1654,14 +1667,27 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
       if (!target) return;
       clearHighlight();
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      target.classList.add('ring-2', 'ring-primary');
-      target.setAttribute('data-search-highlight', 'true');
-      highlightRef.current = { el: target, timer: setTimeout(clearHighlight, 1800) };
+      target.querySelector<HTMLElement>('button, input')?.focus({ preventScroll: true });
+      target.setAttribute('data-search-highlight', 'flash');
+      highlightRef.current = { el: target, timer: setTimeout(clearHighlight, 2400) };
     });
     return () => cancelAnimationFrame(frame);
   }, [pendingFocus, activeSection]);
 
   useEffect(() => clearHighlight, []);
+
+  useEffect(() => {
+    if (isMobile || !activeResult) return;
+    const target = panelRef.current ? findSettingElement(panelRef.current, activeResult) : null;
+    if (!target) return;
+    target.setAttribute('data-search-highlight', 'preview');
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return (): void => {
+      if (target.getAttribute('data-search-highlight') === 'preview') {
+        target.removeAttribute('data-search-highlight');
+      }
+    };
+  }, [isMobile, activeResult]);
 
   useEffect(() => {
     if (open) {
@@ -1684,7 +1710,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
     if (!next) onClose();
   };
 
-  const ActiveSection = SECTIONS[activeSection ?? 'appearance'];
+  const ActiveSection = SECTIONS[activeResult?.section ?? activeSection ?? 'appearance'];
 
   return (
     <>
@@ -1740,8 +1766,12 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
               <nav className='flex flex-col py-2'>
                 <SettingsSearchInput
                   value={searchQuery}
-                  onChange={setSearchQuery}
-                  onSubmit={() => searchResults[0] && selectSearchResult(searchResults[0])}
+                  onChange={changeSearchQuery}
+                  onSubmit={() => activeResult && selectSearchResult(activeResult)}
+                  onMove={moveActiveResult}
+                  activeOptionId={
+                    activeResult ? settingsSearchOptionId(activeResultIndex) : undefined
+                  }
                   className='px-4 pb-2'
                 />
                 {isSearching ? (
@@ -1750,7 +1780,9 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                       query={searchQuery}
                       results={searchResults}
                       navItems={navItems}
+                      activeIndex={activeResultIndex}
                       onSelect={selectSearchResult}
+                      onHover={setActiveResultIndex}
                       itemClassName='py-3'
                     />
                   </div>
@@ -1804,8 +1836,12 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
               >
                 <SettingsSearchInput
                   value={searchQuery}
-                  onChange={setSearchQuery}
-                  onSubmit={() => searchResults[0] && selectSearchResult(searchResults[0])}
+                  onChange={changeSearchQuery}
+                  onSubmit={() => activeResult && selectSearchResult(activeResult)}
+                  onMove={moveActiveResult}
+                  activeOptionId={
+                    activeResult ? settingsSearchOptionId(activeResultIndex) : undefined
+                  }
                   className='mb-1.5'
                 />
                 {isSearching ? (
@@ -1813,7 +1849,9 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                     query={searchQuery}
                     results={searchResults}
                     navItems={navItems}
+                    activeIndex={activeResultIndex}
                     onSelect={selectSearchResult}
+                    onHover={setActiveResultIndex}
                   />
                 ) : (
                   navItems.map(item => {
@@ -1841,8 +1879,29 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 )}
               </div>
 
-              <div ref={panelRef} role='tabpanel' className='flex-1 overflow-y-auto px-6 py-5'>
-                <ActiveSection state={state} />
+              <div className='flex flex-1 flex-col min-w-0'>
+                <div ref={panelRef} role='tabpanel' className='flex-1 overflow-y-auto px-6 py-5'>
+                  <ActiveSection state={state} />
+                </div>
+                {activeResult && (
+                  <div className='flex items-center justify-between gap-4 h-9 shrink-0 px-4 border-t border-border text-xs text-muted-foreground'>
+                    <span className='truncate'>
+                      Previewing{' '}
+                      <span className='font-medium text-foreground'>
+                        {sectionLabels[activeResult.section]}
+                      </span>
+                    </span>
+                    <span className='flex items-center gap-1 shrink-0'>
+                      <KeyCap>↑</KeyCap>
+                      <KeyCap>↓</KeyCap>
+                      <span className='mr-2'>to move</span>
+                      <KeyCap>↵</KeyCap>
+                      <span className='mr-2'>to open</span>
+                      <KeyCap>esc</KeyCap>
+                      <span>to go back</span>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

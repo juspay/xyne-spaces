@@ -12,7 +12,7 @@ export interface ModelCard {
 
 export const BASELINE_MODEL = "claude-opus-5-5";
 
-const OPEN_RATE: ModelRate = { inPerM: 0.15, outPerM: 0.5, cacheReadPerM: 0.03, cacheWritePerM: 0 };
+export const OPEN_RATE: ModelRate = { inPerM: 0.15, outPerM: 0.5, cacheReadPerM: 0.03, cacheWritePerM: 0 };
 
 export const MODEL_CARD: Record<string, ModelCard> = {
   "claude-opus-5-5": { open: false, rate: { inPerM: 4, outPerM: 20, cacheReadPerM: 0.2, cacheWritePerM: 5 } },
@@ -162,4 +162,50 @@ export function computeCostSavings(rows: PricedRow[]): CostSavings {
     saved: baselineCounterfactual - openActual,
     cacheWriteShare,
   };
+}
+
+const OPEN_FAMILY = /^(open-|private-|kimi|glm|qwen|gemma|deepseek)/i;
+
+export function rateFor(model: string | null): ModelRate | null {
+  const card = cardFor(model);
+  if (card) return card.rate;
+  return model && OPEN_FAMILY.test(model) ? OPEN_RATE : null;
+}
+
+export interface FastCostRow {
+  model: string | null;
+  parentModel: string | null;
+  calls: number;
+  xorCalls: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface FastSubagentCost {
+  spent: number;
+  inline: number;
+  saved: number;
+  pricedCalls: number;
+  unpricedCalls: number;
+}
+
+export function computeFastSubagentCost(rows: FastCostRow[]): FastSubagentCost {
+  let spent = 0;
+  let inline = 0;
+  let pricedCalls = 0;
+  let unpricedCalls = 0;
+  for (const r of rows) {
+    const child = rateFor(r.model);
+    if (!child) {
+      unpricedCalls += r.calls;
+      continue;
+    }
+    const t: TokenCounts = { tokensIn: r.tokensIn, tokensOut: r.tokensOut, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite };
+    spent += costOf(child, t) + r.xorCalls * XOR_JUDGE_COST_PER_CALL;
+    inline += costOf(rateFor(r.parentModel) ?? BASELINE_RATE, t);
+    pricedCalls += r.calls;
+  }
+  return { spent, inline, saved: inline - spent, pricedCalls, unpricedCalls };
 }
