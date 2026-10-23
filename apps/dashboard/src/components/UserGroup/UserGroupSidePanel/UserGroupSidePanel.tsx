@@ -11,9 +11,18 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
-export const UserGroupSidePanel = (): ReactElement | null => {
+interface UserGroupSidePanelProps {
+  groupId?: string;
+  onClose?: () => void;
+}
+
+export const UserGroupSidePanel = ({
+  groupId: groupIdProp,
+  onClose,
+}: UserGroupSidePanelProps): ReactElement | null => {
   const navigate = useNavigate();
-  const { channelId, groupId } = useParams<{ channelId?: string; groupId: string }>();
+  const { channelId, groupId: groupIdParam } = useParams<{ channelId?: string; groupId: string }>();
+  const groupId = groupIdProp ?? groupIdParam;
   const { baseRoute } = useRouteContext();
   const userGroup = useUserGroupById(groupId || '');
 
@@ -23,7 +32,9 @@ export const UserGroupSidePanel = (): ReactElement | null => {
   );
 
   const handleClose = (): void => {
-    if (channelId) {
+    if (onClose) {
+      onClose();
+    } else if (channelId) {
       void navigate(`${baseRoute}/${channelId}`);
     } else {
       void navigate(baseRoute);
@@ -55,7 +66,7 @@ export const UserGroupSidePanel = (): ReactElement | null => {
   if (!groupId || !userGroup) return null;
 
   return (
-    <div className='h-full w-full bg-background flex flex-col'>
+    <div className='h-full min-h-0 w-full bg-background flex flex-col'>
       {/* Header - Slack-like design */}
       <div className='flex items-center justify-between px-6 py-4 border-b border-border bg-background flex-shrink-0'>
         <div className='flex items-center gap-3 min-w-0 flex-1'>
