@@ -69,6 +69,12 @@ export const FLAGS = {
     // Same reason as the DMs screen: search lives in the new bottom bar.
     requires: 'ui.shell',
   },
+  'ui.global_search': {
+    label: 'Global Search',
+    description: 'The rewritten global search screen',
+    default: false,
+    removeBy: '2026-12-31',
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FlagKey = keyof typeof FLAGS;
