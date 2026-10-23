@@ -1,0 +1,162 @@
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+import { SCENARIOS } from '../config/catalog.mjs';
+import { PROFILE_NAMES } from '../k6/profiles.mjs';
+
+const repositoryRoot = path.resolve(import.meta.dirname, '..', '..');
+
+test('Jenkins adapter is parameterized, conditional, secret-bound, and always archives reports', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'ci', 'jenkins-performance-stage.groovy'),
+    'utf8',
+  );
+
+  for (const parameter of [
+    'RUN_PERFORMANCE_TESTS',
+    'PERF_PROFILE',
+    'PERF_ENVIRONMENT',
+    'PERF_SCENARIO',
+    'PERF_VUS_OVERRIDE',
+    'PERF_DURATION_OVERRIDE',
+  ]) {
+    assert.match(source, new RegExp(parameter));
+  }
+  assert.match(source, /when\s*\{[\s\S]*RUN_PERFORMANCE_TESTS/);
+  assert.match(source, /withCredentials/);
+  assert.match(source, /pnpm perf:run/);
+  assert.match(source, /post\s*\{[\s\S]*always[\s\S]*archiveArtifacts/);
+  assert.doesNotMatch(source, /production/);
+});
+
+test('k6 configuration excludes raw URL tags from reports and remote metrics', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'lib', 'config.js'),
+    'utf8',
+  );
+  const systemTags = source.match(/systemTags:\s*\[([^\]]+)]/)?.[1] ?? '';
+
+  assert.notEqual(systemTags, '', 'systemTags must be explicit');
+  assert.doesNotMatch(systemTags, /['"]url['"]/);
+  assert.match(systemTags, /['"]name['"]/);
+});
+
+test('Jenkins adapter bounds the stage so a hung run cannot hold an agent forever', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'ci', 'jenkins-performance-stage.groovy'),
+    'utf8',
+  );
+
+  assert.match(source, /timeout\(/);
+  // The ceiling must cover the longest legal run: sandbox allows an 8h duration.
+  assert.match(source, /unit:\s*'HOURS'/);
+});
+
+test('Jenkins adapter offers the Zero and REST scenarios by their explicit names', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'ci', 'jenkins-performance-stage.groovy'),
+    'utf8',
+  );
+
+  assert.match(source, /'zero-query-transform'/);
+  assert.match(source, /'rest-messaging'/);
+  assert.match(source, /'search'/);
+  assert.match(source, /'attachments'/);
+});
+
+test('Jenkins adapter offers exactly the profiles and scenarios the runner accepts', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'ci', 'jenkins-performance-stage.groovy'),
+    'utf8',
+  );
+  const choicesOf = (name) => {
+    const block = source.match(new RegExp(`name: '${name}',\\s*choices: \\[([^\\]]+)]`))?.[1];
+    assert.ok(block, `${name} choices not found`);
+    return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+  };
+
+  assert.deepEqual(choicesOf('PERF_PROFILE'), [...PROFILE_NAMES].sort());
+  assert.deepEqual(choicesOf('PERF_SCENARIO'), [...SCENARIOS].sort());
+  // Without the opt-in in the environment block, the write scenarios are unreachable.
+  assert.match(source, /booleanParam\(\s*name: 'PERF_ALLOW_WRITE_SCENARIOS'/);
+  assert.match(source, /PERF_ALLOW_WRITE_SCENARIOS = "\$\{params\.PERF_ALLOW_WRITE_SCENARIOS\}"/);
+});
+
+test('the Zero query scenario reads only, so a run needs no fixture reset', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'zero-query-transform.js'),
+    'utf8',
+  );
+
+  assert.match(source, /\/api\/zero\/query/);
+  // One POST helper (the query endpoint is itself a POST) and no write endpoints.
+  assert.doesNotMatch(source, /\/api\/conversations/);
+  assert.doesNotMatch(source, /http\.(put|patch|del)\(/);
+});
+
+test('the Zero query scenario sends the verified transform envelope only', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'zero-query-transform.js'),
+    'utf8',
+  );
+
+  assert.match(source, /buildTransformMessage/);
+  // A rejected fixture token must be reported as an environment fault, not a slow product.
+  assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
+});
+
+test('the Zero query scenario treats a TransformFailed 200 as a failure', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'zero-query-transform.js'),
+    'utf8',
+  );
+
+  assert.match(source, /isTransformFailure/);
+});
+
+test('CI runs the offline performance suite, so it is not hook-dependent', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'),
+    'utf8',
+  );
+
+  assert.match(source, /perf:validate/);
+  // Must be its own job, not bolted onto a build that could skip it.
+  assert.match(source, /^\s{2}performance:/m);
+});
+
+test('the search scenario reads only — no write verbs, no mutation endpoints', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'search.js'),
+    'utf8',
+  );
+
+  assert.match(source, /\/api\/vespaSearch/);
+  assert.doesNotMatch(source, /http\.(post|put|patch|del)\(/);
+  assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
+});
+
+test('the attachments scenario reads only and does not buffer file bodies', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'attachments.js'),
+    'utf8',
+  );
+
+  assert.match(source, /\/api\/attachments/);
+  assert.doesNotMatch(source, /http\.(post|put|patch|del)\(/);
+  // Bodies are discarded after transfer so a large file does not sit in k6 memory.
+  assert.match(source, /responseType:\s*'none'/);
+  assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
+});
+
+test('every authenticated scenario sends the environment routing header', () => {
+  // Pre-production is the production host plus x-route-env, so a scenario that omits it
+  // would silently exercise production when pointed at that host.
+  const dir = path.join(repositoryRoot, 'performance', 'k6', 'scenarios');
+  for (const file of readdirSync(dir)) {
+    const source = readFileSync(path.join(dir, file), 'utf8');
+    assert.match(source, /routeEnvHeaders/, `${file} must apply the routing header`);
+  }
+});

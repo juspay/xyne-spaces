@@ -1,0 +1,701 @@
+{
+  "uid": "xyne-api-endpoint-report",
+  "title": "Xyne API Endpoint Report",
+  "description": "Per-endpoint latency, throughput and errors over 1h / 6h / 24h windows. Percentiles come from the http_request_duration_ms histogram, whose largest explicit bucket is 10000 ms.",
+  "tags": [
+    "xyne",
+    "api",
+    "performance"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 42,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "window",
+        "type": "custom",
+        "label": "Window",
+        "query": "1h,6h,24h",
+        "current": {
+          "text": "1h",
+          "value": "1h"
+        },
+        "options": [
+          {
+            "text": "1h",
+            "value": "1h",
+            "selected": true
+          },
+          {
+            "text": "6h",
+            "value": "6h",
+            "selected": false
+          },
+          {
+            "text": "24h",
+            "value": "24h",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "route",
+        "type": "query",
+        "label": "Endpoint filter",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "P4169E866C3094E38"
+        },
+        "query": {
+          "qryType": 1,
+          "query": "label_values(http_requests_total, route)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Endpoint performance — $window window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "All matched Express routes. Latency percentiles are interpolated from histogram buckets that top out at 10000 ms, so any endpoint genuinely slower than 10 s reports as 10 s. Avg pass covers 2xx/3xx, avg error covers 4xx/5xx.",
+      "gridPos": {
+        "h": 18,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum by (route) (increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window])))",
+          "refId": "B",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window])))",
+          "refId": "C",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window])))",
+          "refId": "D",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum by (route) (increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[$window]))",
+          "refId": "E",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum by (route) (increase(http_request_duration_ms_sum{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[23]..\"}[$window])) / sum by (route) (increase(http_request_duration_ms_count{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[23]..\"}[$window]))",
+          "refId": "F",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum by (route) (increase(http_request_duration_ms_sum{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[$window])) / sum by (route) (increase(http_request_duration_ms_count{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[$window]))",
+          "refId": "G",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "route",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "Requests",
+              "Value #B": "p50 (ms)",
+              "Value #C": "p90 (ms)",
+              "Value #D": "p99 (ms)",
+              "Value #E": "Errors",
+              "Value #F": "Avg pass (ms)",
+              "Value #G": "Avg error (ms)",
+              "route": "Endpoint"
+            },
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "right",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "unit": "ms",
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Endpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.align",
+                "value": "left"
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 380
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Requests"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 100
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99 (ms)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1000
+                    },
+                    {
+                      "color": "red",
+                      "value": 5000
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Requests",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "p99 drift across windows",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Same metric over three windows. A p99 that climbs as the window shortens means the problem is recent.",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[1h])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[6h])))",
+          "refId": "B",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(http_request_duration_ms_bucket{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[24h])))",
+          "refId": "C",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum by (route) (increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[24h]))",
+          "refId": "D",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "route",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value #A": "p99 · 1h",
+              "Value #B": "p99 · 6h",
+              "Value #C": "p99 · 24h",
+              "Value #D": "Errors · 24h",
+              "route": "Endpoint"
+            },
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "right",
+            "filterable": true
+          },
+          "unit": "ms",
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Endpoint"
+            },
+            "properties": [
+              {
+                "id": "custom.align",
+                "value": "left"
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 380
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Errors · 24h"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "p99 · 1h",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Requests · $window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum(increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window]))",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Errors · $window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum(increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[$window]))",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Error rate · $window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "100 * sum(increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\",status_code=~\"[45]..\"}[$window])) / sum(increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window]))",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Endpoints seen · $window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "count(sum by (route) (increase(http_requests_total{route=~\"$route\",route!=\"/metrics\",route!=\"unmatched route\"}[$window])) > 0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}
