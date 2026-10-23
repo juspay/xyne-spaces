@@ -1,18 +1,15 @@
 import { memo, useMemo, type ReactElement } from 'react';
 import { View } from 'react-native';
 
-import { AvatarFace } from './avatar-face';
 import { AvatarStack } from './avatar-stack';
 import type { AvatarProps } from './avatar.types';
 
 /** The DM row's slot. Every other size is this one scaled. */
 export const DEFAULT_AVATAR_SIZE = 40;
 
-/** The DM list draws rows straight onto the screen background. */
-const DEFAULT_RING_CLASS = 'border-spaces-background';
-
 /**
- * The Spaces avatar: one squircle for a person, two stacked for a group.
+ * The Spaces avatar: one squircle for a person, two stacked for a group, with
+ * an optional badge cut into its bottom-right corner.
  *
  * Takes the same props as the classic avatar and resolves identities through
  * the same hooks — this is a second look at the same data, not a second source
@@ -28,7 +25,7 @@ export const Avatar = memo(function Avatar({
   fallbackUsers = [],
   memberCount,
   size = DEFAULT_AVATAR_SIZE,
-  ringClassName = DEFAULT_RING_CLASS,
+  cornerBadge,
   style,
 }: AvatarProps): ReactElement | null {
   const validUserIds = useMemo(
@@ -42,28 +39,20 @@ export const Avatar = memo(function Avatar({
     return null;
   }
 
-  if (second === undefined) {
-    return (
-      <View style={style}>
-        <AvatarFace
-          key={first}
-          userId={first}
-          size={size}
-          fallbackUser={fallbackUsers.find(user => user.id === first)}
-        />
-      </View>
-    );
-  }
-
+  /*
+   * One tree for every shape — a person, a group, with or without a badge —
+   * and no identity keys. In a recycled list a row moves from one conversation
+   * to the next; this way it keeps its views and redraws them, rather than
+   * unmounting the avatar and mounting a new one on every row that scrolls in.
+   */
   return (
     <View style={style}>
       <AvatarStack
-        key={`${first}:${second}`}
-        userIds={[first, second]}
+        userIds={second === undefined ? [first] : [first, second]}
         fallbackUsers={fallbackUsers}
         memberCount={memberCount ?? validUserIds.length}
         size={size}
-        ringClassName={ringClassName}
+        cornerBadge={cornerBadge}
       />
     </View>
   );

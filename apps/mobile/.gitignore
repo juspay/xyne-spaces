@@ -47,6 +47,11 @@ app-example
 /ios
 /android
 
+# Build output of local native modules; their sources under modules/*/android
+# and modules/*/ios are tracked.
+/modules/*/android/build/
+/modules/*/android/.cxx/
+
 !src/data
 # Root .gitignore ignores `data/`; re-include the chat v3 data sources.
 !/src/features/chat/v3/data/

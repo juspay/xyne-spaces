@@ -1,3 +1,5 @@
+import { avatarCornerBadgeSize } from '@/src/ui/avatar/avatar.geometry';
+
 /**
  * Row metrics.
  *
@@ -36,7 +38,8 @@ export const DM_TIMESTAMP_LINE_HEIGHT = 14;
  */
 export const DM_BADGE_GAP = DM_TITLE_LINE_HEIGHT + DM_PREVIEW_GAP - DM_TIMESTAMP_LINE_HEIGHT;
 
-export const DM_STAR_SIZE = 17;
+/** The star in the avatar's corner cut-out, with room around it inside the circle. */
+export const DM_STAR_SIZE = Math.round(avatarCornerBadgeSize(DM_AVATAR_SIZE) * 0.68);
 
 export const DM_BADGE_SIZE = 22;
 export const DM_BADGE_PADDING_X = 6;
