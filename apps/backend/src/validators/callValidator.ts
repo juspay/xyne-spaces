@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CallStatus, CallType, MeetingStatus, RecurringCallSeriesStatus, RingStatus } from '@xyne/shared';
+import { CallStatus, CallType, MeetingStatus, RecurringCallSeriesStatus, RingStatus, sdlcCallLinkSchema } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
@@ -112,6 +112,8 @@ export const ScheduleCallSchema = z.object({
   notifyParticipantsByEmail: z.boolean().optional(),
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
+  // SDLC hub: the track or item the call is booked from; it is filed there.
+  sdlcLink: sdlcCallLinkSchema.optional(),
 }).refine(
   // A guest-only call has no channel or teammates; it is backed by the organizer's self-DM.
   (data) =>
@@ -172,6 +174,8 @@ export const RecurringScheduleCallSchema = z
     notifyParticipantsByEmail: z.boolean().optional(),
     // Pinned onto every instance of the series; see ScheduleCallSchema.summaryTemplateId.
     summaryTemplateId: z.string().trim().min(1).optional(),
+    // Filed onto every instance of the series; see ScheduleCallSchema.sdlcLink.
+    sdlcLink: sdlcCallLinkSchema.optional(),
   })
   .refine(
     // A guest-only series has no channel or teammates; it is backed by the organizer's self-DM.

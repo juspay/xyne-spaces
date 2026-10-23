@@ -2,7 +2,8 @@ import rruleLib from 'rrule';
 const { RRule } = rruleLib;
 import { v4 as uuidv4 } from 'uuid';
 import { type Call, type Prisma } from '@prisma/client';
-import { CallOrigin, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
+import { CallOrigin, CallType, RecurringCallSeriesStatus, sdlcCallLinkSchema } from '@xyne/shared';
+import { linkCallToSdlcOwner } from '@/sdlc/entityLinkService';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
@@ -37,6 +38,7 @@ export interface RecurringSeriesShape {
   endsOn: Date | null;
   callUpdatesChannel: string | null;
   summaryTemplateId?: string | null;
+  metadata?: Prisma.JsonValue;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -124,6 +126,19 @@ export class RecurringCallService {
         callUpdatesChannel: callUpdatesChannel ?? null,
         ...(recurringSeries.summaryTemplateId && { summaryTemplateId: recurringSeries.summaryTemplateId }),
       }, tx);
+
+      // A series booked from an SDLC track or item files each instance there.
+      const sdlcLink = sdlcCallLinkSchema.safeParse(
+        (recurringSeries.metadata as { sdlcLink?: unknown } | null | undefined)?.sdlcLink,
+      );
+      if (sdlcLink.success) {
+        await linkCallToSdlcOwner(tx, sdlcLink.data, {
+          callId,
+          channelId: recurringSeries.channelId,
+          workspaceId: workspaceId!,
+          userId: recurringSeries.organizerId,
+        });
+      }
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
       // Every materialized instance — first creation, buffer replenishment,

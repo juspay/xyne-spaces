@@ -57,6 +57,8 @@ export interface ScheduleCallRequest {
   targetUserIds?: string[];
   callUpdatesChannel?: string; // Explicit broadcast channel for post-call summaries/action items
   conversationId?: string; // Optional: for thread-initiated scheduled calls
+  /** SDLC hub: the track or item the call is booked from. */
+  sdlcLink?: SdlcCallLink;
   /** External emails to invite. */
   externalInvitees?: string[];
   /** How external invite emails should be delivered. Defaults to standalone email. */
@@ -88,6 +90,8 @@ export interface CreateRecurringSeriesRequest {
   channelId?: string;
   targetUserIds?: string[];
   callUpdatesChannel?: string; // Explicit broadcast channel for post-call summaries/action items
+  /** SDLC hub: the track or item every instance is filed under. */
+  sdlcLink?: SdlcCallLink;
   timezone: string;
   recurrenceRule: string; // e.g. "FREQ=WEEKLY;BYDAY=MO,WE,FR"
   startTime: string; // HH:mm 24-hour format
@@ -580,6 +584,7 @@ export class CallService {
         targetUserIds: data.targetUserIds,
         ...(data.callUpdatesChannel && { callUpdatesChannel: data.callUpdatesChannel }),
         ...(data.conversationId && { conversationId: data.conversationId }),
+        ...(data.sdlcLink && { sdlcLink: data.sdlcLink }),
         ...(data.externalInvitees &&
           data.externalInvitees.length > 0 && {
             externalInvitees: data.externalInvitees,
@@ -632,6 +637,7 @@ export class CallService {
         externalInvitees: data.externalInvitees,
         invitation: data.invitation,
         ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
+        ...(data.sdlcLink && { sdlcLink: data.sdlcLink }),
       });
 
       return response.data;

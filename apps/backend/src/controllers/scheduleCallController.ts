@@ -5,7 +5,8 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus,  RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, CallStatus,  RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType, type SdlcCallLink } from '@xyne/shared';
+import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -243,6 +244,22 @@ export class ScheduleCallController {
    * A pinned summary template must be one the organizer can access: the detailed summary
    * later resolves it as the organizer, and falls back to LLM selection if it can't.
    */
+  // The SDLC track or item a call is booked from, if it belongs to the call's hub.
+  // Invalid input is dropped with a warning rather than failing the schedule.
+  private async resolveSdlcLink(
+    sdlcLink: SdlcCallLink | undefined,
+    channelId: string | undefined,
+  ): Promise<SdlcCallLink | null> {
+    if (!sdlcLink || !channelId) return null;
+    const valid = await validateOwnerInChannel(
+      DatabaseClient.getInstance(),
+      { sourceType: sdlcLink.ownerType, sourceId: sdlcLink.ownerId },
+      channelId,
+    );
+    if (!valid) logger.warn(`[scheduleCall] sdlc_link_dropped | reason=entity_not_in_channel channel=${channelId}`);
+    return valid ? sdlcLink : null;
+  }
+
   private async canPinSummaryTemplate(
     summaryTemplateId: string,
     req: Request,
@@ -281,6 +298,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        sdlcLink,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
 
@@ -324,6 +342,8 @@ export class ScheduleCallController {
         return;
       }
 
+      const validatedSdlcLink = await this.resolveSdlcLink(sdlcLink, channelId);
+
       const recurringParticipantUserIds = await this.resolveRecurringInternalParticipantUserIds({
         targetUserIds,
         channelId: finalChannelId!,
@@ -333,7 +353,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId));
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId, validatedSdlcLink));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -418,6 +438,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        sdlcLink,
       } = ScheduleCallSchema.parse(req.body);
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
@@ -468,8 +489,9 @@ export class ScheduleCallController {
 
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
+      const validatedSdlcLink = await this.resolveSdlcLink(sdlcLink, channelId);
 
-      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId);
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId, validatedSdlcLink);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {

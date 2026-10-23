@@ -96,6 +96,8 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { SdlcChatPanel } from './SdlcChatPanel';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
+import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
+import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -670,6 +672,7 @@ export default function SdlcScreen(): ReactElement {
   // The call being set up, and where: fixed when the picker opens, so what's on screen
   // moving underneath it can't change where the call goes.
   const [callPicker, setCallPicker] = useState<SdlcCallScope | null>(null);
+  const [scheduleScope, setScheduleScope] = useState<SdlcCallScope | null>(null);
   // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
   const [createTicketSource, setCreateTicketSource] = useState('sdlc_header');
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
@@ -1621,22 +1624,27 @@ export default function SdlcScreen(): ReactElement {
           <>
             {/* Only the people picked are invited, and the call becomes a discussion in
               what it is for — never a call the whole hub is rung for. */}
-            <Button
-              size='icon'
-              variant='ghost'
-              aria-label={`Start a call in ${scope.name}`}
-              title={isHubMember ? `Start a call in ${scope.name}` : 'Join the hub to start a call'}
-              disabled={!isHubMember}
-              onClick={() => setCallPicker(scope)}
-              data-track-category='SdlcHub'
-              data-track-name='StartCallOpened'
-              data-track-metadata={JSON.stringify({
-                place,
-                scope: scope.link?.ownerType ?? 'HUB',
-              })}
-            >
-              <PhoneDefault size={16} />
-            </Button>
+            {isHubMember ? (
+              <ThreadCallButton
+                onStartCall={() => setCallPicker(scope)}
+                onScheduleCall={() => setScheduleScope(scope)}
+                callTooltip={`Call in ${scope.name}`}
+                testId='sdlc-call-button'
+                trackCategory='SdlcHub'
+                trackName='StartCallOpened'
+                trackMetadata={{ place, scope: scope.link?.ownerType ?? 'HUB' }}
+              />
+            ) : (
+              <Button
+                size='icon'
+                variant='ghost'
+                aria-label={`Start a call in ${scope.name}`}
+                title='Join the hub to start a call'
+                disabled
+              >
+                <PhoneDefault size={16} />
+              </Button>
+            )}
             <Button
               size='icon'
               variant='ghost'
@@ -4663,6 +4671,16 @@ export default function SdlcScreen(): ReactElement {
           channelId={channel.id}
           callDisplayName={callPicker.name}
           {...(callPicker.link ? { sdlcLink: callPicker.link } : {})}
+        />
+      ) : null}
+
+      {scheduleScope ? (
+        <ScheduleCallModal
+          isOpen
+          onClose={() => setScheduleScope(null)}
+          channelId={channel.id}
+          initialTitle={scheduleScope.name}
+          {...(scheduleScope.link ? { sdlcLink: scheduleScope.link } : {})}
         />
       ) : null}
 

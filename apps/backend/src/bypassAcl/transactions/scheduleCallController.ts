@@ -4,13 +4,14 @@ import { recurringCallService } from '@/services/recurringCallService';
 import { INSTANCE_BUFFER_DAYS } from '@/controllers/scheduleCallController';
 import { transaction } from '../base';
 import { type Prisma, PrismaClient } from '@prisma/client';
-import { CallType, CallOrigin } from '@xyne/shared';
+import { CallType, CallOrigin, type SdlcCallLink } from '@xyne/shared';
+import { linkCallToSdlcOwner } from '@/sdlc/entityLinkService';
 import { replaceInternalParticipants, replaceExternalInvitees } from '@/bypassAcl/transactions/recurringCallParticipantRepository';
 import { createInstancesForDateRange } from '@/bypassAcl/transactions/recurringCallService';
 import { createScheduledCallPill } from '@/bypassAcl/transactions/callRepository';
-export async function scheduleCallTx(db: PrismaClient, callId: string, externalId: string, title: string, userId: string, finalChannelId: string | undefined, conversationId: string | undefined, roomLink: string, startsAt: number, endsAt: number, targetUserIds: string[] | undefined, callUpdatesChannel: string | null, normalizedExternalInvitees: string[], resolvedCallOrigin: CallOrigin, req: Request, summaryTemplateId?: string) {
+export async function scheduleCallTx(db: PrismaClient, callId: string, externalId: string, title: string, userId: string, finalChannelId: string | undefined, conversationId: string | undefined, roomLink: string, startsAt: number, endsAt: number, targetUserIds: string[] | undefined, callUpdatesChannel: string | null, normalizedExternalInvitees: string[], resolvedCallOrigin: CallOrigin, req: Request, summaryTemplateId?: string, sdlcLink?: SdlcCallLink | null) {
   let pillConversationId: string | undefined;
-  const created = await transaction(['Call', 'CallParticipant'], 'scheduleCall: call row and participant rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  const created = await transaction(['Call', 'CallParticipant', 'SdlcEntityLink'], 'scheduleCall: call row and participant rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     const result = await repositories.calls.createCallWithParticipants({
       callId,
       externalId,
@@ -30,6 +31,10 @@ export async function scheduleCallTx(db: PrismaClient, callId: string, externalI
       ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
       ...(summaryTemplateId && { summaryTemplateId }),
     }, tx);
+
+    if (sdlcLink) {
+      await linkCallToSdlcOwner(tx, sdlcLink, { callId, channelId: finalChannelId!, workspaceId: req.user!.workspaceId!, userId });
+    }
 
     // Same transaction as the call, so a pill can never outlive a failed insert.
     const workspaceId = await repositories.channels.getWorkspaceId(finalChannelId!);
@@ -83,8 +88,8 @@ export function updateRecurringSeriesTx(db: PrismaClient, seriesId: string, seri
   });
 }
 
-export async function createRecurringSeriesTx(dbClient: PrismaClient, seriesId: string, title: string, description: string | undefined, req: Request, userId: string, finalChannelId: string | undefined, recurrenceRule: string, timezone: string, startTime: string, endTime: string, startsOn: number, resolvedEndsOn: Date | null, callUpdatesChannel: string | null, recurringParticipantUserIds: string[], normalizedExternalInvitees: string[], createdCallIds: string[], summaryTemplateId?: string) {
-  const result = await transaction(['Call', 'CallParticipant', 'Channel', 'RecurringCallParticipant', 'RecurringCallSeries'], 'createRecurringSeries: series, participant rows and buffered instances must commit atomically; tx is not ACL-wrapped', dbClient, async (tx) => {
+export async function createRecurringSeriesTx(dbClient: PrismaClient, seriesId: string, title: string, description: string | undefined, req: Request, userId: string, finalChannelId: string | undefined, recurrenceRule: string, timezone: string, startTime: string, endTime: string, startsOn: number, resolvedEndsOn: Date | null, callUpdatesChannel: string | null, recurringParticipantUserIds: string[], normalizedExternalInvitees: string[], createdCallIds: string[], summaryTemplateId?: string, sdlcLink?: SdlcCallLink | null) {
+  const result = await transaction(['Call', 'CallParticipant', 'Channel', 'RecurringCallParticipant', 'RecurringCallSeries', 'SdlcEntityLink'], 'createRecurringSeries: series, participant rows and buffered instances must commit atomically; tx is not ACL-wrapped', dbClient, async (tx) => {
     const series = await repositories.recurringCallSeries.create({
       id: seriesId,
       title,
@@ -102,6 +107,8 @@ export async function createRecurringSeriesTx(dbClient: PrismaClient, seriesId: 
       updatedAt: new Date(),
       callUpdatesChannel,
       ...(summaryTemplateId && { summaryTemplateId }),
+      // Read back by createInstance, which files every instance under it.
+      ...(sdlcLink && { metadata: { sdlcLink } }),
     }, tx);
 
     await replaceInternalParticipants(repositories.recurringCallParticipants, {

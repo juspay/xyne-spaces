@@ -1,3 +1,4 @@
+import type { SdlcCallLink } from '@xyne/shared';
 import type { ScheduleCallRequest } from '../../../services/Call/callService';
 
 export type RecurrenceFrequency = 'DAY' | 'WEEK' | 'MONTH';
@@ -39,6 +40,8 @@ export interface ScheduleCallModalProps {
   channelId?: string;
   /** When set, links the scheduled call to this thread conversation. */
   conversationId?: string;
+  /** SDLC hub: the track or item the call (or every instance of a series) is filed under. */
+  sdlcLink?: SdlcCallLink;
   /** When set, pre-fills the call title in create mode. */
   initialTitle?: string;
   /** Controls how entered external invitee emails are delivered. */
