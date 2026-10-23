@@ -173,6 +173,23 @@ const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\
 
 const collapse = (value: string): string => value.replace(/\s+/g, " ").trim();
 
+/** The same one pass, but blanking in place so offsets survive — what
+ *  visibleCopy needs. */
+function blankHtmlComments(text: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf("<!--", from);
+    if (start === -1) return out + text.slice(from);
+    out += text.slice(from, start);
+    const end = text.indexOf("-->", start + 4);
+    const stop = end === -1 ? text.length : end + 3;
+    out += blankOut(text.slice(start, stop));
+    if (end === -1) return out;
+    from = stop;
+  }
+}
+
 /** One pass, not `/<!--[\s\S]*?-->/g`: that restarts its lazy scan at every
  *  `<!--` and runs to the end of the input, so markup holding many unclosed
  *  ones costs quadratic time. An unclosed comment runs to the end, which is
@@ -230,7 +247,7 @@ function visibleCopy(content: string, fenced: readonly boolean[], starts: readon
   // An unclosed tag leaves no element, so sweep whatever tag-shaped text is
   // left. Bounded to a single line, which is what an unclosed tag is.
   text = text.replace(/<[^>\n]*>?/g, (tag) => blankOut(tag));
-  text = text.replace(/<!--[\s\S]*?-->/g, (comment) => blankOut(comment));
+  text = blankHtmlComments(text);
   text = text.replace(/`[^`\n]*`/g, (code) => blankOut(code));
   // Keep the link label, lose the URL.
   text = text.replace(/\]\([^)\n]*\)/g, (url) => blankOut(url));
@@ -249,8 +266,7 @@ function visibleCopy(content: string, fenced: readonly boolean[], starts: readon
  *  already carved out by the scanner. Not offset-preserving; callers only want
  *  the words. */
 function fragmentText(fragment: string): string {
-  return fragment
-    .replace(/<!--[\s\S]*?-->/g, " ")
+  return stripHtmlComments(fragment)
     .replace(/`[^`]*`/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ");
