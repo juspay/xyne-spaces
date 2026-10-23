@@ -412,6 +412,73 @@ describe("real-world token CSS", () => {
     expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
   });
 
+  it("reads a shadcn globals.css, where :root sits inside @layer base", () => {
+    // Scoping to the top level alone exported NOTHING for this layout — the
+    // default for shadcn and Tailwind v3, and what repo extraction and
+    // hand-edited systems most often look like. A silently empty download.
+    const shadcn = `@tailwind base;
+@layer base {
+  :root {
+    --brand-primary: #2563EB;
+    --radius-md: 0.5rem;
+    --font-body: Inter, sans-serif;
+  }
+  .dark {
+    --brand-primary: #60A5FA;
+  }
+}`;
+    const tokens = designTokensFromTokensCss(shadcn);
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+    expect(tokens.radii).toEqual([{ key: "md", value: "0.5rem" }]);
+    expect(tokens.fonts).toEqual([{ key: "body", stack: ["Inter", "sans-serif"] }]);
+  });
+
+  it("does not walk into a conditional at-rule, only a grouping one", () => {
+    // @layer only groups; @media and @supports are conditions, and a block
+    // inside one is a variant rather than a token of this set.
+    const conditional = `@media (min-width: 40rem){:root{--brand-primary:#111111}}
+@supports (display:grid){:root{--brand-primary:#222222}}
+@layer tokens{:root{--brand-primary:#2563EB}}`;
+    expect(designTokensFromTokensCss(conditional).colors).toEqual([
+      { key: "primary", hex: "#2563EB" },
+    ]);
+  });
+
+  it("treats an attribute or class dark variant as a variant, not a token", () => {
+    // A substring test on the selector let these through as primary-2 and
+    // primary-3.
+    const variants = `:root{--brand-primary:#2563EB}
+:root[data-theme="dark"]{--brand-primary:#60A5FA}
+:root.dark{--brand-primary:#1D4ED8}
+html.theme-dark{--brand-primary:#1E40AF}`;
+    expect(designTokensFromTokensCss(variants).colors).toEqual([
+      { key: "primary", hex: "#2563EB" },
+    ]);
+  });
+
+  it("still accepts a selector list of plain root selectors", () => {
+    expect(designTokensFromTokensCss(":root, html{--brand-primary:#2563EB}").colors).toEqual([
+      { key: "primary", hex: "#2563EB" },
+    ]);
+  });
+
+  it("does not let a brace inside a string throw off the block walk", () => {
+    // The comment strip became quote-aware; the brace counting had not, so
+    // `content: "{"` emptied the whole export.
+    const tokens = designTokensFromTokensCss(
+      '.a { content: "{" } :root { --brand-primary: #2563EB; --label: "}" ; --space-2: 8px }',
+    );
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+    expect(tokens.spacing).toEqual([{ key: "2", value: "8px" }]);
+  });
+
+  it("matches units whatever their case", () => {
+    expect(designTokensFromTokensCss(":root{--text-lg:2.5REM;--text-sm:12PX}").typeScale).toEqual([
+      { key: "lg", sizePx: 40 },
+      { key: "sm", sizePx: 12 },
+    ]);
+  });
+
   it("reads a Tailwind v4 @theme block, which is top level too", () => {
     expect(designTokensFromTokensCss("@theme{--color-primary:#2563EB}").colors).toEqual([
       { key: "primary", hex: "#2563EB" },
@@ -459,6 +526,23 @@ describe("the CSS export cannot be broken out of", () => {
     expect(css).not.toContain("--radius-md");
     // The rest of the system still exports.
     expect(css).toContain("--color-primary: #0B5FFF;");
+  });
+
+  it("drops the value for EVERY format, not just the CSS writer", () => {
+    // Guarding only toCssVars left Tailwind emitting
+    // `"md": "4px;} body{display:none"` — valid JSON, but Tailwind writes it
+    // into generated CSS and the extra rule comes back.
+    const hostile = {
+      ...SUMMARY,
+      radii: [{ token: "radius-md", value: "4px;} body{display:none" }],
+      fonts: [{ family: "Inter;} body{display:none", role: "body" as const }],
+    };
+    for (const format of DESIGN_EXPORT_FORMATS) {
+      const out = exportDesignSystem(hostile, format);
+      expect(out, format).not.toContain("display:none");
+    }
+    expect(JSON.parse(exportDesignSystem(hostile, "tailwind"))).not.toHaveProperty("borderRadius");
+    expect(JSON.parse(exportDesignSystem(hostile, "tailwind"))).not.toHaveProperty("fontFamily");
   });
 
   it("strips a comment terminator out of the system name", () => {

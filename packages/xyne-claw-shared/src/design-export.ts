@@ -206,7 +206,7 @@ const scaleTokens = (
   for (const entry of entries ?? []) {
     const slug = slugifyTokenName(entry.token);
     const value = entry.value.trim();
-    if (!slug || !value) continue;
+    if (!slug || !value || !isSafeCssValue(value)) continue;
     out.push({ key: uniqueKey(stripCategory(slug, prefix), taken), value });
   }
   return out;
@@ -237,7 +237,11 @@ export function designTokensFromBrandSummary(summary: BrandSummary): DesignToken
   for (const role of ["heading", "body", "mono"] as const) {
     const font = summary.fonts.find((candidate) => candidate.role === role);
     if (!font?.family.trim()) continue;
-    fonts.push({ key: role, stack: [font.family.trim(), ...(font.fallbacks ?? [])] });
+    const stack = [font.family.trim(), ...(font.fallbacks ?? [])]
+      .map((family) => family.trim())
+      .filter((family) => family.length > 0 && isSafeCssValue(family));
+    if (stack.length === 0) continue;
+    fonts.push({ key: role, stack });
   }
 
   const typeTaken = new Set<string>();
@@ -324,46 +328,160 @@ function stripCssComments(css: string): string {
   return out;
 }
 
-/**
- * The declarations of every top-level `:root` (and Tailwind v4 `@theme`) block,
- * concatenated.
- *
- * Scoped on purpose. Reading declarations from anywhere in the file exported a
- * `prefers-color-scheme: dark` override as a SECOND colour — `primary` and
- * `primary-2` — so a download carried phantom tokens nobody authored. Dark
- * variants are XYNE-66829's; until then only the light set is exported.
- *
- * Nested blocks inside the matched block (a `@media` inside `@theme`, keyframe
- * stops) are skipped too: a value inside one is not a theme token.
- */
-function topLevelThemeDeclarations(css: string): string {
-  const out: string[] = [];
-  let index = 0;
-  // A forward walk at depth 0 only. Testing the text between the keyword and
-  // its brace was not enough: the `:root` INSIDE
-  // `@media (prefers-color-scheme: dark) { :root { … } }` has clean selector
-  // text too, so the dark override still came through as `primary-2`. What
-  // matters is that the block itself is top level.
+/** Index just past the closing quote of the string starting at `at`. Shared by
+ *  every step that walks this CSS, so the comment strip, the block walk and the
+ *  declaration pass cannot disagree about where a string ends. */
+function skipQuoted(css: string, at: number): number {
+  const quote = css[at];
+  let index = at + 1;
   while (index < css.length) {
-    const open = css.indexOf("{", index);
-    if (open === -1) break;
-    const selector = css.slice(index, open);
-    let depth = 0;
-    let close = open;
-    for (; close < css.length; close += 1) {
-      if (css[close] === "{") depth += 1;
-      else if (css[close] === "}") {
-        depth -= 1;
-        if (depth === 0) break;
-      }
+    if (css[index] === "\\") {
+      index += 2;
+      continue;
     }
-    if (/:root|@theme/.test(selector)) {
-      // Top level of THIS block: a nested rule's declarations are not tokens.
-      const body = css.slice(open + 1, close);
-      out.push(body.replace(/\{[^{}]*\}/g, " ").replace(/[^;{}]*\{/g, " "));
+    if (css[index] === quote) return index + 1;
+    index += 1;
+  }
+  return css.length;
+}
+
+/** The `}` matching the `{` at `open`. Quote-aware: `content: "{"` counted as a
+ *  real brace and threw the whole walk off, emptying the export. */
+function matchingBrace(css: string, open: number, limit: number): number {
+  let depth = 0;
+  let index = open;
+  while (index < limit) {
+    const char = css[index];
+    if (char === '"' || char === "'") {
+      index = skipQuoted(css, index);
+      continue;
+    }
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+    index += 1;
+  }
+  return limit;
+}
+
+/**
+ * Selector lists whose declarations are the light theme.
+ *
+ * Matched exactly, per part. A substring test let `:root[data-theme="dark"]`
+ * and `:root.dark` through as extra colours — they are dark variants, which are
+ * XYNE-66829's, not tokens of the set being exported.
+ */
+const THEME_SELECTORS = new Set([":root", ":host", "html"]);
+
+function isThemeSelector(selector: string): boolean {
+  const text = selector.trim().toLowerCase();
+  if (!text) return false;
+  // Tailwind v4, including `@theme inline`.
+  if (/^@theme\b/.test(text)) return true;
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => THEME_SELECTORS.has(part));
+}
+
+/**
+ * At-rules that only group, so their contents sit at the same level.
+ *
+ * `@layer base { :root { … } }` is the default globals.css layout for shadcn
+ * and Tailwind v3, and scoping to the top level alone exported NOTHING for it —
+ * a silently empty download. `@media`, `@supports` and `@container` are not
+ * transparent: a block inside one is conditional, which is what made the dark
+ * override a phantom token in the first place.
+ */
+const isTransparentAtRule = (selector: string): boolean =>
+  /^@layer\b/.test(selector.trim().toLowerCase());
+
+/** A block's own declarations, with nested rules removed. Quote-aware for the
+ *  same reason matchingBrace is. */
+function topLevelOf(css: string, from: number, to: number): string {
+  let out = "";
+  let index = from;
+  let depth = 0;
+  while (index < to) {
+    const char = css[index] as string;
+    if (char === '"' || char === "'") {
+      const close = skipQuoted(css, index);
+      if (depth === 0) out += css.slice(index, Math.min(close, to));
+      index = close;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    else if (char === "}") depth -= 1;
+    else if (depth === 0) out += char;
+    index += 1;
+  }
+  return out;
+}
+
+/** The final selector in a run of statements, e.g. `@layer base` out of
+ *  `@tailwind base;\n@layer base`. */
+function lastSelector(text: string): string {
+  let out = text;
+  for (const terminator of [";", "}"]) {
+    const at = out.lastIndexOf(terminator);
+    if (at !== -1) out = out.slice(at + 1);
+  }
+  return out;
+}
+
+/** Guard against pathological `@layer` nesting; real files are one deep. */
+const MAX_AT_RULE_DEPTH = 8;
+
+function collectThemeBlocks(
+  css: string,
+  from: number,
+  to: number,
+  depth: number,
+  out: string[],
+): void {
+  if (depth > MAX_AT_RULE_DEPTH) return;
+  let index = from;
+  while (index < to) {
+    let open = -1;
+    let cursor = index;
+    while (cursor < to) {
+      const char = css[cursor];
+      if (char === '"' || char === "'") {
+        cursor = skipQuoted(css, cursor);
+        continue;
+      }
+      if (char === "{") {
+        open = cursor;
+        break;
+      }
+      cursor += 1;
+    }
+    if (open === -1) return;
+    // Only the text after the last statement terminator is this block's
+    // selector. A statement at-rule before it — `@tailwind base;`, which every
+    // shadcn globals.css opens with — would otherwise be read as part of the
+    // selector and hide the `@layer` that follows.
+    const selector = lastSelector(css.slice(index, open));
+    const close = matchingBrace(css, open, to);
+    if (isThemeSelector(selector)) out.push(topLevelOf(css, open + 1, close));
+    else if (isTransparentAtRule(selector)) {
+      collectThemeBlocks(css, open + 1, close, depth + 1, out);
     }
     index = close + 1;
   }
+}
+
+/**
+ * The declarations of every theme block, concatenated.
+ *
+ * Scoped on purpose: reading declarations from anywhere in the file exported a
+ * `prefers-color-scheme: dark` override as a SECOND colour — `primary` and
+ * `primary-2` — so a download carried phantom tokens nobody authored. Dark
+ * variants are XYNE-66829's; until then only the light set is exported.
+ */
+function themeDeclarations(css: string): string {
+  const out: string[] = [];
+  collectThemeBlocks(css, 0, css.length, 0, out);
   return out.join(";\n");
 }
 
@@ -386,11 +504,11 @@ const ROOT_FONT_PX = 16;
  * leading number read off.
  */
 function parseLengthPx(value: string): number | null {
-  const match = /^(-?(?:\d+\.?\d*|\.\d+))(px|rem|em)?$/.exec(value.trim());
+  const match = /^(-?(?:\d+\.?\d*|\.\d+))(px|rem|em)?$/i.exec(value.trim());
   if (!match) return null;
   const size = Number.parseFloat(match[1] as string);
   if (!Number.isFinite(size)) return null;
-  const unit = match[2];
+  const unit = match[2]?.toLowerCase();
   if (unit === "rem" || unit === "em") return size * ROOT_FONT_PX;
   return size;
 }
@@ -444,7 +562,7 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
   const shadowKeys = new Set<string>();
   const seenFonts = new Set<DesignFontToken["key"]>();
 
-  for (const match of topLevelThemeDeclarations(stripCssComments(css)).matchAll(CSS_DECLARATION)) {
+  for (const match of themeDeclarations(stripCssComments(css)).matchAll(CSS_DECLARATION)) {
     const rawName = match[1];
     const rawValue = match[2];
     if (!rawName || !rawValue) continue;
@@ -570,10 +688,14 @@ function toTailwind(tokens: DesignTokenSet): string {
 /**
  * A value that cannot end its own declaration.
  *
+ * Applied when tokens are NORMALISED, not when they are formatted. Guarding
+ * only the CSS writer left Tailwind emitting `"md": "4px;} body{display:none"`
+ * — valid JSON, but Tailwind writes that value into generated CSS and the extra
+ * rule reappears. One check at the boundary covers every format.
+ *
  * The CSS entry point can't produce one — its regex stops at `;{}` — but the
- * brand.json path can: a model-written radius of `4px;} body{display:none`
- * wrote a whole extra rule into the file the user downloads. Refused rather
- * than escaped, because there is no legitimate token value containing these.
+ * brand.json path can, since those values are model-written. Refused rather
+ * than escaped: no legitimate token value contains these.
  */
 const isSafeCssValue = (value: string): boolean => !/[;{}]/.test(value);
 
@@ -583,9 +705,9 @@ const commentSafe = (value: string): string => value.replace(/\*+\//g, "").trim(
 
 function toCssVars(tokens: DesignTokenSet): string {
   const lines: string[] = [];
-  const push = (name: string, value: string) => {
-    if (isSafeCssValue(value)) lines.push(`  --${name}: ${value};`);
-  };
+  // No guard here: normalisation already refused anything that could end its
+  // own declaration, so every format gets the same safe values.
+  const push = (name: string, value: string) => lines.push(`  --${name}: ${value};`);
 
   for (const color of tokens.colors) push(`color-${color.key}`, color.hex);
   for (const font of tokens.fonts) push(`font-${font.key}`, font.stack.join(", "));
