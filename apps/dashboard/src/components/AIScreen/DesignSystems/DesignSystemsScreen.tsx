@@ -142,10 +142,18 @@ export function DesignSystemsScreen(): ReactElement {
     );
   };
 
+  const uniqueName = (base: string): string => {
+    const taken = new Set(systems.map(system => system.name));
+    if (!taken.has(base)) return base;
+    let suffix = 2;
+    while (taken.has(`${base} ${suffix}`)) suffix += 1;
+    return `${base} ${suffix}`;
+  };
+
   const onUseStarter = (starter: StarterSystem): void => {
     create.mutate(
       {
-        name: starter.name,
+        name: uniqueName(starter.name),
         designMd: starter.designMd,
         tokensCss: starter.tokensCss,
         source: 'library',

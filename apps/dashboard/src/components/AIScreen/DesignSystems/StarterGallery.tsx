@@ -24,6 +24,7 @@ function StarterCard({
     <button
       type='button'
       onClick={onSelect}
+      aria-pressed={selected}
       className={cn(
         'w-full rounded-xl border p-3 text-left transition-colors',
         selected ? 'border-foreground bg-secondary/60' : 'border-border hover:bg-secondary/40',
