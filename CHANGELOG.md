@@ -1,3 +1,10 @@
+## [1.519.0-release-20261023.3](https://github.com/juspay/xyne-spaces/compare/v1.519.0-release-20261023.2...v1.519.0-release-20261023.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* remediate eMudhra emSign G3 CA compromise in runtimes and base images ([#3324](https://github.com/juspay/xyne-spaces/issues/3324)) ([#3461](https://github.com/juspay/xyne-spaces/issues/3461)) ([9df4373](https://github.com/juspay/xyne-spaces/commit/9df4373f616cd8a8a612f6e06531961e91314cdc))
+
 ## [1.519.0-release-20261023.2](https://github.com/juspay/xyne-spaces/compare/v1.519.0-release-20261023.1...v1.519.0-release-20261023.2) (2026-10-23)
 
 
