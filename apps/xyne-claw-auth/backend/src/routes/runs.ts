@@ -15,6 +15,7 @@ import { gcsService } from "../services/storageService.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
+import { getLatestSessionForRun, hasActiveRunRecovery } from "../queue/run-recovery-worker.js";
 const log = createLogger("runs");
 
 const router = Router();
@@ -540,11 +541,17 @@ router.get("/:sessionId", async (req: Request<{ sessionId: string }>, res: Respo
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
     }
-    const run = await agentRunRepository.findBySessionId(req.params.sessionId);
-    if (!run) {
+    // ?followRecovery=1: a recovered run continues under a newer session, and is running while recovery is.
+    const follow = req.query["followRecovery"] === "1";
+    const latest = follow ? await getLatestSessionForRun(req.params.sessionId) : null;
+    const found = await agentRunRepository.findBySessionId(latest ?? req.params.sessionId);
+    if (!found) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
+    const run = follow && (await hasActiveRunRecovery(req.params.sessionId))
+      ? { ...found, status: "running", completedAt: null }
+      : found;
     // The row may be keyed by either verified id form of this caller.
     if (!matchesAuthenticatedUserId(req, run.userId)) {
       res.status(403).json({ success: false, error: "Forbidden" });

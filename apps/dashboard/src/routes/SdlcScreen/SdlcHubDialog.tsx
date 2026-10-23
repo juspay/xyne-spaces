@@ -180,12 +180,12 @@ export function SdlcHubDialog({
           <Button
             type='submit'
             loading={busy}
-            disabled={!name || nameError !== null || !activeProjectId}
+            disabled={!name || nameError !== null || !activeProjectId || projectRows === undefined}
             data-track-category='SdlcHub'
             data-track-name='HubCreated'
           >
-            <Plus />
-            Create hub
+            {!busy && <Plus />}
+            {busy ? 'Creating…' : 'Create hub'}
           </Button>
         </div>
       </form>

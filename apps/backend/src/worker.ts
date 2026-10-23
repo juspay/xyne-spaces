@@ -55,6 +55,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { agentWaitSweeperWorker } from '@/workers/agentWaitSweeperWorker';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 import { videoRenditionQueue } from '@/queues/videoRenditionQueue';
@@ -202,6 +203,7 @@ class WorkerService {
       if (workflowsEnabled) {
         logger.info('Starting workflows worker...');
         await workflowsWorker.start();
+        await agentWaitSweeperWorker.start();
       }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
@@ -539,6 +541,7 @@ class WorkerService {
 
       if (workflowsEnabled) {
         await workflowsWorker.stop()
+        await agentWaitSweeperWorker.stop()
         const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
         await shutdownWorkflows()
       }

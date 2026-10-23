@@ -5,11 +5,13 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { workflowAttachmentUpload } from '@/middleware/upload';
-import { ShareableEntityType } from '@xyne/shared';
+import { SDLC_WIKI_WORKFLOW_RELATION, SDLC_WORKFLOW_RELATION, ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
+import { cancelParkedClawRuns } from './agents/clawSessions';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
+import { SDLC_STARTED_BY_KEY } from './constants';
 import type { XyneCtx } from './types';
 
 /**
@@ -84,6 +86,12 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
+
+const isSdlcWorkflow = async (workflowId: string): Promise<boolean> =>
+  Boolean(await db.sdlcEntityLink.findFirst({
+    where: { targetType: 'WORKFLOW', targetId: workflowId, relationType: { in: [SDLC_WORKFLOW_RELATION, SDLC_WIKI_WORKFLOW_RELATION] } },
+    select: { id: true },
+  }));
 
 /** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
 const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
@@ -381,8 +389,19 @@ const mount = (
             (routeRequest as { body: unknown }).body = body;
           }
           if (ctx) await guardSdlcAuthor(key, routeRequest, ctx);
+          // SDLC agent steps act as whoever started the run: only this route says who that is.
+          if (isPlainObject(routeRequest.body)) {
+            delete routeRequest.body[SDLC_STARTED_BY_KEY];
+            if (ctx && key === 'POST /workflows/:id/trigger' && (await isSdlcWorkflow(req.params['id'] ?? ''))) {
+              routeRequest.body[SDLC_STARTED_BY_KEY] = ctx.userId;
+            }
+          }
 
           const response = await route.handler(routeRequest, ctx);
+          // The SDK cancel never reaches claw, whose run would keep writing.
+          if (key === 'POST /executions/:execId/cancel' && response.status < 300) {
+            void cancelParkedClawRuns(req.params['execId'] ?? '');
+          }
           const name = typeof req.query['name'] === 'string' ? req.query['name'] : 'download';
           await sendRouteResponse(res, response, route.path, name);
         } catch (err) {

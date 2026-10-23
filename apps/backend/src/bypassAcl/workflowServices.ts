@@ -33,7 +33,7 @@ export function findWorkflowExecutionForCallback(executionId: string) {
     () =>
       db.workflowExecution.findFirst({
         where: { id: executionId, workflowType: WORKFLOWS_TYPE },
-        select: { workspaceId: true, createdBy: true },
+        select: { workspaceId: true, createdBy: true, status: true },
       }),
   );
 }

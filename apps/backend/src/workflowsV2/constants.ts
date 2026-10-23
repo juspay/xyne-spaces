@@ -14,3 +14,6 @@ export const CREDENTIAL_SUMMARY_SELECT = {
   createdAt: true,
   updatedAt: true,
 } as const;
+
+/** Who started an SDLC run, on its trigger input. Only the server writes it: the trigger route and the sweeper's restart. */
+export const SDLC_STARTED_BY_KEY = 'sdlcStartedBy';

@@ -50,7 +50,7 @@ import {
   requireResultToken,
   s2sKeyMatches,
 } from "../middleware/require-auth.js";
-import { handleRunCompletion } from "../queue/run-recovery-worker.js";
+import { cancelRunRecovery, getLatestSessionForRun, handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
@@ -798,7 +798,18 @@ router.post(
   "/run/:sessionId/cancel",
   requireRunCaller,
   async (req: Request<{ sessionId: string }>, res: Response) => {
+    // Stop recovery first, or it re-dispatches the cancelled run; then cancel whichever session is live.
+    const latest = await getLatestSessionForRun(req.params.sessionId).catch(() => null);
+    await cancelRunRecovery(req.params.sessionId).catch((err) => log.warn(`[run] cancel recovery failed: ${errMsg(err)}`));
+    if (latest) req.params.sessionId = latest;
     await forwardRunControl("cancel", req, res);
+    // With recovery cancelled, the run's own "cancelled" callback is dropped as stale, so settle the row here.
+    if (res.statusCode < 300) {
+      await prisma.agentRun.updateMany({
+        where: { sessionId: req.params.sessionId, status: "running" },
+        data: { status: "cancelled", completedAt: new Date(), currentToolLabel: null },
+      }).catch((err) => log.warn(`[run] cancel finalize failed: ${errMsg(err)}`));
+    }
   },
 );
 

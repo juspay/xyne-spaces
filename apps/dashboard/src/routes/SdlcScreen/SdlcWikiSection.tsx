@@ -1,17 +1,28 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useMemo, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import {
+  ArchiveRestore,
+  ArchiveX,
   ArrowRight,
   BookOpen,
-  ChevronDown,
-  ChevronRight,
+  Check,
+  Ellipsis,
   FileText,
+  Folder,
+  FolderPlus,
   Network,
+  Pencil,
   Plus,
   Search,
 } from 'lucide-react';
 import { ProviderIcon } from '../AIScreen/environments/ProviderIcon';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -22,19 +33,42 @@ import {
 import { setUserPreference, userPreferencesSnapshot } from '../../machines/userPreferencesMachine';
 import { cn } from '../../utils/classNames';
 import { formatRelativeTime } from '../../utils/dateUtils';
-import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import type { SdlcWikiHubPage, SdlcWikiPage, WikiScope } from './sdlcWikiTree';
+import type { RepositoryWikiStatus } from './useSdlcWikiData';
 
 interface WikiTreeNode {
   name: string;
   path: string;
   folders: WikiTreeNode[];
   pages: SdlcWikiPage[];
+  /** The page named like the folder: the folder's name opens it. */
+  page?: SdlcWikiPage;
 }
 
 // Numeric, so "10 Operations" comes after "2 Architecture": generated titles carry their order.
 const byNumberedName = (left: string, right: string): number =>
   left.localeCompare(right, undefined, { numeric: true });
+
+/** A title or section as readers see it: "2.1 Pet data model" reads "Pet data model". */
+export const withoutWikiNumber = (name: string): string => name.replace(/^\d+(?:\.\d+)*\s+/, '');
+
+const numberOf = (name: string): string | undefined => /^(\d+(?:\.\d+)*)\s/.exec(name)?.[1];
+
+/**
+ * The next free number under `base` ("" for a top-level section, "2" for a page in "2 Architecture").
+ * Archived pages count, so a retired number is not reused; 1 is the Overview and 99 the Glossary.
+ */
+function nextWikiNumber(names: string[], base: string): string {
+  const depth = base ? base.split('.').length + 1 : 1;
+  const used = names
+    .map(numberOf)
+    .filter((number): number is string => Boolean(number) && number!.split('.').length === depth)
+    .filter(number => !base || number.startsWith(`${base}.`))
+    .map(number => Number(number.split('.').pop()))
+    .filter(number => base || number !== 99);
+  const next = Math.max(base ? 0 : 1, ...used) + 1;
+  return base ? `${base}.${next}` : String(next);
+}
 
 function createTreeNode(name: string, path: string): WikiTreeNode {
   return { name, path, folders: [], pages: [] };
@@ -57,7 +91,8 @@ export function buildWikiTree(pages: SdlcWikiPage[]): WikiTreeNode {
       }
       parent = node;
     }
-    parent.pages.push(page);
+    if (parent !== root && page.title === parent.name && !parent.page) parent.page = page;
+    else parent.pages.push(page);
   }
 
   const sortNode = (node: WikiTreeNode): void => {
@@ -78,11 +113,6 @@ function filterWikiPages(pages: SdlcWikiPage[], query: string): SdlcWikiPage[] {
       page.folderPath.toLocaleLowerCase().includes(normalized),
   );
 }
-
-const folderAncestors = (folderPath: string): string[] => {
-  const segments = folderPath.split('/').filter(Boolean);
-  return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
-};
 
 /** A page a reader opened, and when. Kept per user, on this device. */
 interface WikiView {
@@ -127,127 +157,163 @@ export function wikiLandingPage(
   );
 }
 
+/** What a row menu acts on: a page, a section, or (neither) the Wiki itself. */
+interface WikiMenuTarget {
+  page?: SdlcWikiPage;
+  folder?: WikiTreeNode;
+}
+
 /**
- * The tree as a docs site draws it, not as a file browser: every folder is the same
- * folding group, whatever its depth, and pages are plain lines of text under it.
+ * The tree as a docs site draws it, not as a file browser: always open, every folder a
+ * label, and its pages one step in under it.
  */
 function WikiFolderNode(props: {
   node: WikiTreeNode;
   depth: number;
-  expanded: Set<string>;
-  forceExpanded: boolean;
   activeCanvasId: string | null;
-  onToggle: (path: string) => void;
   onOpen: (page: SdlcWikiPage) => void;
-  /** Undefined for everyone but hub admins. */
-  onArchivePage: ((page: SdlcWikiPage, archived: boolean) => void) | undefined;
+  /** Edit mode only: opens the row menu at a point. */
+  onMenu: ((target: WikiMenuTarget, at: { x: number; y: number }) => void) | undefined;
 }): ReactElement {
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const open = props.forceExpanded || props.expanded.has(props.node.path);
-  const Chevron = open ? ChevronDown : ChevronRight;
-  // A folder steps in once per level, and its pages line up under its name.
-  const folderIndent = 8 + Math.max(0, props.depth - 1) * 14;
-  const pageIndent = props.depth === 0 ? 8 : folderIndent + 19;
+  const label = props.onMenu ? (name: string): string => name : withoutWikiNumber;
+  const openMenu =
+    props.onMenu &&
+    ((target: WikiMenuTarget) =>
+      (event: MouseEvent): void => {
+        event.preventDefault();
+        event.stopPropagation();
+        // A right-click opens at the pointer, the "..." button under itself.
+        const rect =
+          event.type === 'contextmenu' ? null : event.currentTarget.getBoundingClientRect();
+        props.onMenu?.(
+          target,
+          rect ? { x: rect.left, y: rect.bottom } : { x: event.clientX, y: event.clientY },
+        );
+      });
+  const menuButton = (target: WikiMenuTarget, name: string): ReactElement | null =>
+    openMenu ? (
+      <button
+        type='button'
+        onClick={openMenu(target)}
+        aria-label={`Actions for ${name}`}
+        data-track-category='SdlcHub'
+        data-track-name='WikiRowMenuOpened'
+        className='grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      >
+        <Ellipsis size={16} />
+      </button>
+    ) : null;
+  const folderIndent = 8 + Math.max(0, props.depth - 1) * 16;
+  const pageIndent = props.depth === 0 ? 8 : folderIndent + 16;
+  const folderPage = props.node.page;
 
   return (
     <div>
-      {props.depth > 0 ? (
-        <button
-          type='button'
-          onClick={() => props.onToggle(props.node.path)}
-          className='flex h-8 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-          style={{ paddingLeft: `${folderIndent}px` }}
-          aria-expanded={open}
-          data-track-category='SdlcHub'
-          data-track-name='WikiFolderToggled'
-          data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
+      {props.depth > 0 && (
+        <div
+          className={cn(
+            'mb-1 flex h-7 items-center rounded-lg border border-transparent pr-1 transition-colors',
+            folderPage?.canvasId === props.activeCanvasId
+              ? 'border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground'
+              : folderPage
+                ? 'text-sidebar-foreground hover:bg-sidebar-accent'
+                : 'text-sidebar-foreground',
+          )}
+          onContextMenu={openMenu?.({ folder: props.node })}
         >
-          <Chevron size={13} className='shrink-0 text-sidebar-foreground/60' />
-          <span className='min-w-0 flex-1 truncate' title={props.node.name}>
-            {props.node.name}
-          </span>
-        </button>
-      ) : null}
-      {open || props.depth === 0 ? (
-        <div>
-          {props.node.pages.map(page => {
-            const active = page.canvasId === props.activeCanvasId;
-            return (
-              <div
-                key={page.canvasId}
-                className={cn(
-                  'group flex h-8 items-center rounded-lg border border-transparent pr-1 transition-colors',
-                  active
-                    ? 'border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent',
-                  page.archived && 'opacity-60',
-                )}
-                // The menu button shows on hover only, so right-click opens it too.
-                onContextMenu={
-                  props.onArchivePage &&
-                  ((event): void => {
-                    event.preventDefault();
-                    setMenuFor(page.canvasId);
-                  })
-                }
-              >
-                <button
-                  type='button'
-                  onClick={() => props.onOpen(page)}
-                  {...(active && { 'aria-current': 'page' as const })}
-                  className='flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left text-[13px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                  style={{ paddingLeft: `${pageIndent}px` }}
-                  data-track-category='SdlcHub'
-                  data-track-name='WikiCanvasOpened'
-                  data-track-metadata={JSON.stringify({ canvasId: page.canvasId })}
-                >
-                  <span
-                    className={cn('min-w-0 flex-1 truncate', active && 'font-medium')}
-                    title={page.archived ? `${page.title} (archived)` : page.title}
-                  >
-                    {page.title}
-                  </span>
-                  {page.archived && (
-                    <span className='shrink-0 text-[11px] text-sidebar-foreground/70'>
-                      Archived
-                    </span>
-                  )}
-                </button>
-                {props.onArchivePage && (
-                  <SdlcArchiveMenu
-                    title={page.title}
-                    archived={page.archived}
-                    trackingScope='Wiki'
-                    className='size-6 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100'
-                    open={menuFor === page.canvasId}
-                    onOpenChange={next => setMenuFor(next ? page.canvasId : null)}
-                    onToggle={archived => props.onArchivePage?.(page, archived)}
-                  />
-                )}
-              </div>
-            );
-          })}
-          {props.node.folders.map(folder => (
-            <WikiFolderNode
-              key={folder.path}
-              node={folder}
-              depth={props.depth + 1}
-              expanded={props.expanded}
-              forceExpanded={props.forceExpanded}
-              activeCanvasId={props.activeCanvasId}
-              onToggle={props.onToggle}
-              onOpen={props.onOpen}
-              onArchivePage={props.onArchivePage}
-            />
-          ))}
+          {folderPage ? (
+            <button
+              type='button'
+              onClick={() => props.onOpen(folderPage)}
+              {...(folderPage.canvasId === props.activeCanvasId && {
+                'aria-current': 'page' as const,
+              })}
+              className='flex h-full min-w-0 flex-1 items-center rounded-lg pr-2 text-left text-[13px] font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+              style={{ paddingLeft: `${folderIndent}px` }}
+              data-track-category='SdlcHub'
+              data-track-name='WikiCanvasOpened'
+              data-track-metadata={JSON.stringify({ canvasId: folderPage.canvasId })}
+            >
+              {props.onMenu && (
+                <Folder size={14} className='mr-1.5 shrink-0 text-sidebar-foreground/70' />
+              )}
+              <span className='min-w-0 flex-1 truncate' title={label(props.node.name)}>
+                {label(props.node.name)}
+              </span>
+            </button>
+          ) : (
+            <div
+              className='flex h-full min-w-0 flex-1 items-center pr-2 text-[13px] font-medium'
+              style={{ paddingLeft: `${folderIndent}px` }}
+            >
+              {props.onMenu && (
+                <Folder size={14} className='mr-1.5 shrink-0 text-sidebar-foreground/70' />
+              )}
+              <span className='min-w-0 flex-1 truncate' title={label(props.node.name)}>
+                {label(props.node.name)}
+              </span>
+            </div>
+          )}
+          {menuButton({ folder: props.node }, props.node.name)}
         </div>
-      ) : null}
+      )}
+      <div>
+        {props.node.pages.map(page => {
+          const active = page.canvasId === props.activeCanvasId;
+          return (
+            <div
+              key={page.canvasId}
+              className={cn(
+                'group mb-1 flex h-7 items-center rounded-lg border border-transparent pr-1 transition-colors',
+                active
+                  ? 'border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent',
+                page.archived && 'opacity-60',
+              )}
+              // The menu button shows on hover only, so right-click opens it too.
+              onContextMenu={openMenu?.({ page })}
+            >
+              <button
+                type='button'
+                onClick={() => props.onOpen(page)}
+                {...(active && { 'aria-current': 'page' as const })}
+                className='flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left text-[13px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+                style={{ paddingLeft: `${pageIndent}px` }}
+                data-track-category='SdlcHub'
+                data-track-name='WikiCanvasOpened'
+                data-track-metadata={JSON.stringify({ canvasId: page.canvasId })}
+              >
+                {props.onMenu && (
+                  <FileText size={14} className='shrink-0 text-sidebar-foreground/70' />
+                )}
+                <span
+                  className={cn('min-w-0 flex-1 truncate', active && 'font-medium')}
+                  title={page.archived ? `${label(page.title)} (archived)` : label(page.title)}
+                >
+                  {label(page.title)}
+                </span>
+                {page.archived && (
+                  <span className='shrink-0 text-[11px] text-sidebar-foreground/70'>Archived</span>
+                )}
+              </button>
+              {menuButton({ page }, page.title)}
+            </div>
+          );
+        })}
+        {props.node.folders.map(folder => (
+          <WikiFolderNode
+            key={folder.path}
+            node={folder}
+            depth={props.depth + 1}
+            activeCanvasId={props.activeCanvasId}
+            onOpen={props.onOpen}
+            onMenu={props.onMenu}
+          />
+        ))}
+      </div>
     </div>
   );
 }
-
-/** Open folders per Wiki, kept while the reader moves between its pages. */
-const expandedByScope = new Map<string, Set<string>>();
 
 /**
  * A Wiki's own side panel, shown in the hub sidebar the way a track's folder page shows
@@ -260,56 +326,51 @@ export function SdlcWikiExplorer(props: {
   pages: SdlcWikiPage[];
   activeCanvasId: string | null;
   showArchived: boolean;
-  /** Hub admins only; hides New page and the archive menus when false. */
+  /** Hub admins only; hides Edit when false. */
   canManage: boolean;
+  /** Edit mode: numbers, row menus and editable pages. View mode hides all three. */
+  editing: boolean;
+  onEditingChange: (next: boolean) => void;
   onSelectScope: (folderId: string) => void;
   onShowArchivedChange: (next: boolean) => void;
   onOpen: (page: SdlcWikiPage) => void;
-  onCreatePage: () => void;
+  /** `number` is the new page's number, to put before its title; absent for an unnumbered folder. */
+  onAddPage: (input: { folderPath: string; number?: string }) => void;
+  /** `number` is the new section's number, to put before its name. */
+  onAddSection: (number: string) => void;
   onArchivePage: (page: SdlcWikiPage, archived: boolean) => void;
 }): ReactElement {
   const scopeId = props.scope.folderId;
   const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(expandedByScope.get(scopeId)),
-  );
-  const activeFolderPath = props.pages.find(
-    page => page.canvasId === props.activeCanvasId,
-  )?.folderPath;
-  const topFolders = useMemo(
-    () => [...new Set(props.pages.flatMap(page => page.folderPath.split('/')[0] || []))],
-    [props.pages],
-  );
-  // A Wiki opens with its top folders open, or as the reader left it. Keyed on the folder
-  // names, not the array, so a data sync does not reopen a folder the reader closed.
-  const topFolderKey = topFolders.join('/');
-  useEffect(() => {
-    if (!topFolderKey) return;
-    const next = new Set(expandedByScope.get(scopeId) ?? topFolderKey.split('/'));
-    expandedByScope.set(scopeId, next);
-    setExpanded(next);
-  }, [scopeId, topFolderKey]);
-  // The open page is always in view, whichever way the reader got to it.
-  useEffect(() => {
-    if (!activeFolderPath) return;
-    setExpanded(current => {
-      const next = new Set([...current, ...folderAncestors(activeFolderPath)]);
-      expandedByScope.set(scopeId, next);
-      return next;
-    });
-  }, [scopeId, activeFolderPath]);
+  const [menu, setMenu] = useState<(WikiMenuTarget & { x: number; y: number }) | null>(null);
   const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
   const tree = useMemo(() => buildWikiTree(visiblePages), [visiblePages]);
-  const toggle = (path: string): void => {
-    setExpanded(current => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      expandedByScope.set(scopeId, next);
-      return next;
+  const editing = props.canManage && props.editing;
+  const onMenu = editing
+    ? (target: WikiMenuTarget, at: { x: number; y: number }): void => setMenu({ ...target, ...at })
+    : undefined;
+  // Numbers come from every page, not only the ones the search shows.
+  // "" is the Wiki's top level, where pages and sections share one numbering.
+  const addPage = (folderPath: string): void => {
+    let node = buildWikiTree(props.pages);
+    for (const segment of folderPath.split('/').filter(Boolean))
+      node = node.folders.find(child => child.name === segment) ?? node;
+    const base = folderPath ? numberOf(node.name) : '';
+    const names = [...node.pages.map(page => page.title), ...node.folders.map(child => child.name)];
+    props.onAddPage({
+      folderPath,
+      ...(base !== undefined && { number: nextWikiNumber(names, base) }),
     });
   };
-
+  const addSection = (): void => {
+    const full = buildWikiTree(props.pages);
+    props.onAddSection(
+      nextWikiNumber(
+        [...full.folders.map(folder => folder.name), ...full.pages.map(page => page.title)],
+        '',
+      ),
+    );
+  };
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-2'>
       <Select value={scopeId} onValueChange={props.onSelectScope}>
@@ -354,6 +415,13 @@ export function SdlcWikiExplorer(props: {
       <nav
         aria-label='Research pages'
         className='no-scrollbar mt-1 min-h-0 flex-1 overflow-y-auto pb-2'
+        onContextMenu={
+          onMenu &&
+          ((event): void => {
+            event.preventDefault();
+            onMenu({}, { x: event.clientX, y: event.clientY });
+          })
+        }
       >
         {visiblePages.length === 0 ? (
           <p className='px-2 py-3 text-[13px] text-sidebar-foreground/70'>
@@ -363,27 +431,75 @@ export function SdlcWikiExplorer(props: {
           <WikiFolderNode
             node={tree}
             depth={0}
-            expanded={expanded}
-            forceExpanded={Boolean(query.trim())}
             activeCanvasId={props.activeCanvasId}
-            onToggle={toggle}
             onOpen={props.onOpen}
-            onArchivePage={props.canManage ? props.onArchivePage : undefined}
+            onMenu={onMenu}
           />
         )}
       </nav>
+      {/* The row menu, opened at the pointer or under a row's "..." button. */}
+      <DropdownMenu open={Boolean(menu)} onOpenChange={open => !open && setMenu(null)}>
+        <DropdownMenuTrigger asChild>
+          <span
+            aria-hidden='true'
+            className='pointer-events-none fixed size-0'
+            style={{ left: menu?.x ?? 0, top: menu?.y ?? 0 }}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align='start'
+          sideOffset={2}
+          className='w-48'
+          onCloseAutoFocus={event => event.preventDefault()}
+        >
+          <DropdownMenuItem
+            onClick={() => addPage(menu?.page?.folderPath ?? menu?.folder?.path ?? '')}
+            data-track-category='SdlcHub'
+            data-track-name='WikiAddPageOpened'
+          >
+            <Plus size={15} />
+            Add page
+          </DropdownMenuItem>
+          {menu?.page ? (
+            <DropdownMenuItem
+              onClick={() => props.onArchivePage(menu.page!, !menu.page!.archived)}
+              data-track-category='SdlcHub'
+              data-track-name={menu.page.archived ? 'WikiRestored' : 'WikiArchived'}
+            >
+              {menu.page.archived ? <ArchiveRestore size={15} /> : <ArchiveX size={15} />}
+              {menu.page.archived ? 'Restore' : 'Archive'}
+            </DropdownMenuItem>
+          ) : menu?.folder ? null : (
+            <DropdownMenuItem
+              onClick={addSection}
+              data-track-category='SdlcHub'
+              data-track-name='WikiAddSectionOpened'
+            >
+              <FolderPlus size={15} />
+              Add section
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <div className='flex shrink-0 flex-col gap-2 border-t border-sidebar-border-muted px-1 py-3'>
         {props.canManage && (
           <button
             type='button'
-            onClick={props.onCreatePage}
+            onClick={() => props.onEditingChange(!props.editing)}
+            aria-pressed={props.editing}
             className='flex h-8 items-center gap-2 rounded-lg px-1.5 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
             data-track-category='SdlcHub'
-            data-track-name='WikiPageCreateOpened'
+            data-track-name={props.editing ? 'WikiEditDone' : 'WikiEditStarted'}
           >
-            <Plus size={15} />
-            New page
+            {props.editing ? <Check size={15} /> : <Pencil size={15} />}
+            {props.editing ? 'Done' : 'Edit'}
           </button>
+        )}
+        {editing && (
+          <p className='px-1.5 text-xs text-sidebar-foreground/70'>
+            Right-click the tree to add a page or a section. A section is a folder with an overview
+            page of its name.
+          </p>
         )}
         <div className='px-1.5'>
           <Checkbox
@@ -425,8 +541,11 @@ function RecentList(props: {
           >
             <FileText size={15} className='shrink-0 text-muted-foreground' />
             <span className='min-w-0 flex-1'>
-              <span className='block truncate text-sm font-medium' title={page.title}>
-                {page.title}
+              <span
+                className='block truncate text-sm font-medium'
+                title={withoutWikiNumber(page.title)}
+              >
+                {withoutWikiNumber(page.title)}
               </span>
               <span className='block truncate text-xs text-muted-foreground'>{page.scopeName}</span>
             </span>
@@ -437,6 +556,23 @@ function RecentList(props: {
       {props.note && <p className='mt-2 text-xs text-muted-foreground'>{props.note}</p>}
     </div>
   );
+}
+
+const shortSha = (sha: string | null): string => sha?.slice(0, 9) ?? 'nothing yet';
+
+export function wikiStatusText(status: RepositoryWikiStatus): string {
+  switch (status.phase) {
+    case 'running':
+      return `Running · window ${status.windowsDone + 1} of ${status.windowsPlanned}`;
+    case 'queued':
+      return `Queued · ${status.windowsPlanned} window${status.windowsPlanned === 1 ? '' : 's'} after the repositories before it`;
+    case 'failed':
+      return `Failed: ${status.error ?? 'see the run'}`;
+    case 'up to date':
+      return `Up to date at ${shortSha(status.documentedSha)}`;
+    case 'behind':
+      return `Documented to ${shortSha(status.documentedSha)}, head ${shortSha(status.headSha)}`;
+  }
 }
 
 /** The Wiki's first page: the hub's repositories, then where the reader left off and what changed. */
@@ -452,6 +588,7 @@ export function SdlcWikiHome(props: {
   canManage: boolean;
   /** Status and button of the run that writes the Wiki. */
   runControl: ReactNode;
+  repositoryStatus: ReadonlyMap<string, RepositoryWikiStatus>;
   onSelectScope: (folderId: string) => void;
   onAddRepository: () => void;
   onOpenPage: (page: SdlcWikiHubPage) => void;
@@ -530,6 +667,7 @@ export function SdlcWikiHome(props: {
         )}
         {visibleScopes.map(scope => {
           const count = props.pageCounts.get(scope.folderId) ?? 0;
+          const status = scope.repoId ? props.repositoryStatus.get(scope.repoId) : undefined;
           const updatedAt = updatedAtByScope.get(scope.folderId);
           return (
             <button
@@ -554,6 +692,17 @@ export function SdlcWikiHome(props: {
               <span className='mt-1 text-xs text-muted-foreground'>
                 {scope.hub ? 'How these repositories connect' : 'Deep research on this repository'}
               </span>
+              {status && (
+                <span
+                  className={cn(
+                    'mt-1 line-clamp-2 text-xs',
+                    status.phase === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                  title={wikiStatusText(status)}
+                >
+                  {wikiStatusText(status)}
+                </span>
+              )}
               <span className='mt-auto flex items-center justify-between gap-3 pt-4 text-xs text-muted-foreground'>
                 <span className='tabular-nums'>
                   {count === 0

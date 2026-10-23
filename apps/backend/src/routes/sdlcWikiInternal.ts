@@ -39,7 +39,7 @@ router.post(
 router.post(
   '/pages/write',
   route(async (req, res) => {
-    const page = await sdlcWikiPageStore.write(parse(writeSdlcWikiPageSchema, req));
+    const page = await sdlcWikiPageStore.write(parse(writeSdlcWikiPageSchema, req), { agent: true });
     res.status(200).json({ success: true, page });
   })
 );

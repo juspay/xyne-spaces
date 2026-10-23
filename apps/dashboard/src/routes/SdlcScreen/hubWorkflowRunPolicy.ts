@@ -19,6 +19,7 @@ export type HubWorkflowPhase =
 export interface HubWorkflowRun {
   id: string;
   status: string;
+  createdAt?: number | null;
   updatedAt?: number | null;
 }
 
@@ -26,11 +27,13 @@ export interface HubWorkflowState {
   phase: HubWorkflowPhase;
   workflowId?: string;
   runId?: string;
+  startedAt?: number;
   updatedAt?: number;
 }
 
 export interface HubWorkflow extends HubWorkflowState {
-  start: () => Promise<void>;
+  /** `input` is the run's trigger input, such as the Wiki's chosen repositories. */
+  start: (input?: Record<string, unknown>) => Promise<void>;
   cancel: () => Promise<void>;
 }
 
@@ -56,6 +59,7 @@ export function hubWorkflowState(input: {
     phase,
     workflowId: input.workflowId,
     runId: latest.id,
+    ...(typeof latest.createdAt === 'number' ? { startedAt: latest.createdAt } : {}),
     ...(typeof latest.updatedAt === 'number' ? { updatedAt: latest.updatedAt } : {}),
   };
 }
@@ -67,11 +71,12 @@ export function useHubWorkflow(workflowId: string | null): HubWorkflow {
     queryKey,
     queryFn: async () => {
       const response = await apiInstance.get<{
-        items: { id: string; status: string; updatedAt?: string }[];
+        items: { id: string; status: string; createdAt?: string; updatedAt?: string }[];
       }>('/workflows-v2/executions', { params: { workflowId, limit: 5 } });
       return response.data.items.map(run => ({
         id: run.id,
         status: run.status,
+        createdAt: run.createdAt ? Date.parse(run.createdAt) : null,
         updatedAt: run.updatedAt ? Date.parse(run.updatedAt) : null,
       }));
     },
@@ -84,8 +89,8 @@ export function useHubWorkflow(workflowId: string | null): HubWorkflow {
 
   return {
     ...state,
-    start: async (): Promise<void> => {
-      await apiInstance.post(`/workflows-v2/workflows/${workflowId}/trigger`, {});
+    start: async (input?: Record<string, unknown>): Promise<void> => {
+      await apiInstance.post(`/workflows-v2/workflows/${workflowId}/trigger`, input ?? {});
       await queryClient.invalidateQueries({ queryKey });
     },
     cancel: async (): Promise<void> => {

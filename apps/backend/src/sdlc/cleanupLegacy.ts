@@ -57,7 +57,7 @@ async function deleteRedisKeys(keys: string[]): Promise<void> {
   }
 }
 
-async function deleteCanvases(canvasIds: string[]): Promise<void> {
+export async function deleteCanvases(canvasIds: string[]): Promise<void> {
   if (canvasIds.length === 0) return;
   const ids = { in: canvasIds };
   await db.$transaction([

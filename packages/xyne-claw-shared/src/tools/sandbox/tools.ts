@@ -926,7 +926,7 @@ export const sandboxCreate: ToolDefinition = {
     properties: {
       timeoutMs: {
         type: "number",
-        description: "Session lifetime in milliseconds before auto-destruction (default: 3600000 = 1 hour)",
+        description: "Session lifetime in milliseconds before auto-destruction (default: 3600000 = 1 hour). Not a startup wait and not a command timeout: leave it unset.",
       },
       idleTimeoutMs: {
         type: "number",

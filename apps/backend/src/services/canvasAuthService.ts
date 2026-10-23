@@ -10,6 +10,7 @@ import {
   WorkspaceRole,
   CanvasVisibility,
   SDLC_HUB_KNOWLEDGE_FOLDER,
+  SDLC_WIKI_FOLDER,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -264,7 +265,8 @@ class CanvasAuthService {
             await dbClient.canvasFolder.findFirst({
               where: {
                 id: canvas.folderId,
-                name: SDLC_HUB_KNOWLEDGE_FOLDER,
+                // Hub admins edit Hub Knowledge and Wiki pages.
+                name: { in: [SDLC_HUB_KNOWLEDGE_FOLDER, SDLC_WIKI_FOLDER] },
                 channel: { type: ChannelType.SDLC },
               },
               select: { id: true },

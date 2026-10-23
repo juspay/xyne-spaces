@@ -471,6 +471,8 @@ const sdlcWikiScopeSchema = z.object({
 
 export const listSdlcWikiPagesSchema = sdlcWikiScopeSchema.extend({
   includeArchived: z.boolean().optional(),
+  // Repository paths, such as a commit window's diff: only the pages they touch.
+  changedPaths: z.array(z.string().trim().min(1).max(1024)).max(5000).optional(),
 });
 export type ListSdlcWikiPagesInput = z.infer<typeof listSdlcWikiPagesSchema>;
 

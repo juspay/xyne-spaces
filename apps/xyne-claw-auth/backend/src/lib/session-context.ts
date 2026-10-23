@@ -158,6 +158,8 @@ export interface SessionContext {
    * resolveMentions/externalResultCallback proxy for those.
    */
   isAutomation?: boolean;
+  /** An SDLC workflow step: it acts as the hub author, so it keeps the user Spaces server (no app-mode swap). */
+  sdlcProfile?: boolean;
   /**
    * Workspace ID of the mentioned user for Digital Twin (USER_MENTIONED)
    * flows. Captured at webhook-receive time via getSpacesAuthForUser and

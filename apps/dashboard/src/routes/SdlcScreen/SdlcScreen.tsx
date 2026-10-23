@@ -126,11 +126,14 @@ import {
   SdlcWikiEmpty,
   SdlcWikiExplorer,
   SdlcWikiHome,
+  wikiStatusText,
   readWikiViews,
   recordWikiView,
   wikiLandingPage,
+  withoutWikiNumber,
 } from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
+import { SdlcWikiRunDialog } from './SdlcWikiRunDialog';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcReleases } from './SdlcReleases/SdlcReleases';
 import { SdlcReleaseBreadcrumb } from './SdlcReleases/SdlcReleaseDetail';
@@ -426,6 +429,10 @@ export default function SdlcScreen(): ReactElement {
         .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)),
     [channel],
   );
+  const wikiRunRepositories = useMemo(
+    () => channelRepos.map(repo => ({ id: repo.id, name: repo.name })),
+    [channelRepos],
+  );
   const hubOptions = useMemo(
     () => channels.map(item => ({ id: item.id, name: item.name, visibility: item.visibility })),
     [channels],
@@ -448,6 +455,9 @@ export default function SdlcScreen(): ReactElement {
     kind: SdlcDocumentKind;
   } | null>(null);
   const [artifactFolderPath, setArtifactFolderPath] = useState('');
+  // A page or section added from the Wiki tree: its number goes before the typed title.
+  const [wikiNumber, setWikiNumber] = useState<{ number: string; section: boolean } | null>(null);
+  const [wikiEditing, setWikiEditing] = useState(false);
   // Each with its title, from the search hit or the artifact it was started from.
   const [relatedCanvases, setRelatedCanvases] = useState<Array<{ id: string; title: string }>>([]);
   const relatedCanvasIds = useMemo(
@@ -468,6 +478,8 @@ export default function SdlcScreen(): ReactElement {
   );
   const [deriveTypeId, setDeriveTypeId] = useState<string | null>(null);
   const [hubDialog, setHubDialog] = useState<'create' | 'manage' | null>(null);
+  const [wikiRunOpen, setWikiRunOpen] = useState(false);
+  const [createdHubId, setCreatedHubId] = useState<string | null>(null);
   const showArchivedKnowledge = useUserPreference('sdlcShowArchivedKnowledge');
   const setShowArchivedKnowledge = (show: boolean): void =>
     setUserPreference('sdlcShowArchivedKnowledge', show);
@@ -680,13 +692,14 @@ export default function SdlcScreen(): ReactElement {
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   useEffect(() => {
-    if (channelId || !workspaceId) return;
+    // The first hub syncs in before its POST returns; redirecting then remounts the dialog.
+    if (channelId || !workspaceId || hubDialog === 'create') return;
     const fallbackId = channels[0]?.id;
     if (!fallbackId) return;
     const storedPath = getLastSdlcLocation(workspaceId);
     const stored = channels.find(item => item.id === (storedPath ? sdlcHubIdOf(storedPath) : null));
     void navigate(`/sdlc/${stored?.id ?? fallbackId}/overview`, { replace: true });
-  }, [navigate, channelId, channels, workspaceId]);
+  }, [navigate, channelId, channels, workspaceId, hubDialog]);
 
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
   const threadOnly = Boolean(
@@ -776,6 +789,10 @@ export default function SdlcScreen(): ReactElement {
     const row = canvasRowOf(openCanvasRow);
     return row && row.id === selectedCanvasId ? (hubArtifactOf(row) ?? undefined) : undefined;
   }, [openCanvasRow, selectedCanvasId, hubArtifactOf]);
+  // Edit mode belongs to the Wiki: leaving it ends the edit.
+  useEffect(() => {
+    if (section !== 'wiki') setWikiEditing(false);
+  }, [section]);
   // Adding and archiving hub documents is admin-only; the server enforces it too.
   const isHubAdmin = useMemo(
     () =>
@@ -927,6 +944,7 @@ export default function SdlcScreen(): ReactElement {
     setShowArchived: setShowArchivedWiki,
     selectedPage: selectedWikiPage,
     workflow: wikiState,
+    repositoryStatus: wikiRepositoryStatus,
   } = useSdlcWikiData({
     channelId: channelId ?? null,
     enabled: section === 'wiki',
@@ -1174,7 +1192,8 @@ export default function SdlcScreen(): ReactElement {
 
   const chatLayout = sdlcChatLayout({
     chatParam: routeSearchParams.get('chat'),
-    discussionParam: routeSearchParams.get('discussion'),
+    // The Wiki is for reading: Discussions opens only when asked for.
+    discussionParam: routeSearchParams.get('discussion') ?? (section === 'wiki' ? '0' : null),
   });
   const sdlcChatTab = chatLayout.activeTab;
   const discussionOpen = chatLayout.panelOpen && sdlcChatTab === 'conversations';
@@ -2205,6 +2224,8 @@ export default function SdlcScreen(): ReactElement {
     startVariant: 'default' | 'outline' = 'default',
     cancelLabel = 'Cancel',
     buttonClassName?: string,
+    /** Replaces starting straight away, for a run that asks for its input first. */
+    onStart?: () => void,
   ): { status: ReactElement; button: ReactElement } => {
     const running = workflow.phase === 'RUNNING';
     const busyKey = `hub-workflow:${label}`;
@@ -2237,13 +2258,17 @@ export default function SdlcScreen(): ReactElement {
             className={buttonClassName}
             loading={busy === busyKey}
             disabled={busy === busyKey}
-            onClick={() =>
+            onClick={() => {
+              if (!running && onStart) {
+                onStart();
+                return;
+              }
               void call(
                 busyKey,
-                running ? workflow.cancel : workflow.start,
+                running ? workflow.cancel : () => workflow.start(),
                 running ? `${label} run cancelled` : `${label} run started`,
-              )
-            }
+              );
+            }}
             data-track-category='SdlcHub'
             data-track-name={running ? 'HubWorkflowRunCancelled' : 'HubWorkflowRunStarted'}
             data-track-metadata={JSON.stringify({ label })}
@@ -2264,13 +2289,19 @@ export default function SdlcScreen(): ReactElement {
       </div>
     );
   };
+  const openWikiRun = (): void => setWikiRunOpen(true);
   const wikiEmptyRun = workflowParts(
     'Deep research',
     wikiState,
     'Run deep research',
     'default',
     'Cancel run',
+    undefined,
+    openWikiRun,
   );
+  const wikiScopeStatus = wikiScope?.repoId
+    ? wikiRepositoryStatus.get(wikiScope.repoId)
+    : undefined;
 
   useEffect(() => {
     if (sdlcChatTab !== 'ai') return;
@@ -2299,6 +2330,7 @@ export default function SdlcScreen(): ReactElement {
     setRelatedListOpen(false);
     setRelatedChipsExpanded(false);
     setArtifactFolderPath('');
+    setWikiNumber(null);
   };
 
   // What was typed into a hub document dialog dismissed by Escape or a click outside,
@@ -2339,18 +2371,24 @@ export default function SdlcScreen(): ReactElement {
   const relatedArtifactsForPayload = (): Array<{ canvasId: string; title: string }> =>
     relatedCanvases.map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
+  // A section is a folder with its own page of the same name.
+  // A title typed with its own number keeps it.
+  const numberedWikiTitle = (title: string): string =>
+    wikiNumber && !/^\d+(?:\.\d+)*\s/.test(title) ? `${wikiNumber.number} ${title}` : title;
+
   const createArtifact = (): void => {
     if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
     const title = artifactTitle.trim();
     const direction = artifactAiPrompt.trim();
     const folderPath = artifactFolderPath.trim();
     const related = relatedArtifactsForPayload();
+    const wikiTitle = numberedWikiTitle(title);
     const query =
       artifactDialog.kind === 'wiki'
         ? buildSdlcWikiPageCreationPrompt({
-            title,
+            title: wikiTitle,
             ...(wikiScopeRepo && { repositoryName: wikiScopeRepo.name, repoId: wikiScopeRepo.id }),
-            ...(folderPath && { folderPath }),
+            ...(wikiNumber?.section ? { folderPath: wikiTitle } : folderPath && { folderPath }),
             ...(direction && { direction }),
           })
         : buildSdlcArtifactCreationPrompt({
@@ -2384,14 +2422,15 @@ export default function SdlcScreen(): ReactElement {
     // The folder page this was started from, before anything is awaited.
     const startedOn = openFolderId;
     if (folder.kind === 'wiki') {
-      const folderPath = artifactFolderPath.trim();
+      const wikiTitle = numberedWikiTitle(title);
+      const folderPath = wikiNumber?.section ? wikiTitle : artifactFolderPath.trim();
       const wikiResponse = await apiInstance.post<{ artifact: { canvasId: string } }>(
         '/sdlc/claw/artifacts',
         {
           artifactType: 'WIKI',
           channelId: channel.id,
-          title,
-          markdown: `# ${title}\n`,
+          title: wikiTitle,
+          markdown: `# ${wikiTitle}\n`,
           ...(wikiScopeRepo && { repoId: wikiScopeRepo.id }),
           ...(folderPath && { folderPath }),
         },
@@ -2505,11 +2544,19 @@ export default function SdlcScreen(): ReactElement {
 
   // Before the empty state: a URL naming a hub that is gone is a 404, not an
   // invitation to create the first one.
-  if (channelId && !channel) return <NotFoundScreen fallbackPath='/sdlc' />;
+  if (channelId && !channel) {
+    // A hub just created is on its way in, not gone.
+    if (channelId !== createdHubId) return <NotFoundScreen fallbackPath='/sdlc' />;
+    return (
+      <div className='h-full grid place-items-center text-muted-foreground'>
+        <Loader2 className='animate-spin' />
+      </div>
+    );
+  }
 
   // Only with no hub open: an open hub is one, and the list fills a moment after the
   // app's own start-up.
-  if (!channelId && channels.length === 0) {
+  if (!channelId && (channels.length === 0 || hubDialog === 'create')) {
     return (
       <div className='h-full bg-muted/30 grid place-items-center p-8'>
         <div className='max-w-lg rounded-2xl border bg-background p-10 text-center shadow-sm'>
@@ -2534,7 +2581,10 @@ export default function SdlcScreen(): ReactElement {
         <SdlcHubDialog
           open={hubDialog !== null}
           onOpenChange={open => setHubDialog(open ? hubDialog : null)}
-          onSaved={savedChannelId => void navigate(`/sdlc/${savedChannelId}/overview`)}
+          onSaved={savedChannelId => {
+            setCreatedHubId(savedChannelId);
+            void navigate(`/sdlc/${savedChannelId}/overview`);
+          }}
         />
       </div>
     );
@@ -2592,7 +2642,11 @@ export default function SdlcScreen(): ReactElement {
     setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
   };
 
-  const openHubDocumentCreate = (kind: 'knowledge' | 'wiki'): void => {
+  const openHubDocumentCreate = (
+    kind: 'knowledge' | 'wiki',
+    /** From the Wiki tree: the folder to add to, and the number to put before the title. */
+    place?: { folderPath?: string; number?: string; section?: boolean },
+  ): void => {
     clearArtifactDialogFields();
     const target =
       kind === 'knowledge'
@@ -2605,6 +2659,8 @@ export default function SdlcScreen(): ReactElement {
       setArtifactAiPrompt(draft.prompt);
       setArtifactFolderPath(draft.folderPath);
     }
+    if (place?.folderPath !== undefined) setArtifactFolderPath(place.folderPath);
+    if (place?.number) setWikiNumber({ number: place.number, section: Boolean(place.section) });
     setArtifactDialog(target);
   };
 
@@ -3031,7 +3087,7 @@ export default function SdlcScreen(): ReactElement {
           )}
         </div>
 
-        {artifactDialogKind === 'wiki' && (
+        {artifactDialogKind === 'wiki' && !wikiNumber?.section && (
           <div className='flex flex-col gap-1.5'>
             <div className='flex items-baseline gap-1.5'>
               <label htmlFor='sdlc-wiki-folder-path' className='text-[12.5px] font-medium'>
@@ -3969,10 +4025,15 @@ export default function SdlcScreen(): ReactElement {
                   activeCanvasId={selectedCanvasId}
                   showArchived={showArchivedWiki}
                   canManage={isHubAdmin}
+                  editing={wikiEditing}
+                  onEditingChange={setWikiEditing}
                   onSelectScope={folderId => openWikiScope(folderId)}
                   onShowArchivedChange={setShowArchivedWiki}
                   onOpen={page => openWikiPage(page.canvasId)}
-                  onCreatePage={() => openHubDocumentCreate('wiki')}
+                  onAddPage={place => openHubDocumentCreate('wiki', place)}
+                  onAddSection={number =>
+                    openHubDocumentCreate('wiki', { folderPath: '', number, section: true })
+                  }
                   onArchivePage={(page, archived) =>
                     archiveArtifact(page.canvasId, archived, page.title)
                   }
@@ -4298,6 +4359,9 @@ export default function SdlcScreen(): ReactElement {
                       showAskAiAction={false}
                       showViewOnly
                       pinnedOutline={section === 'wiki' && !showRightPanel}
+                      // The Wiki reads as a docs site until an admin turns on Edit.
+                      readOnly={section === 'wiki' && !(wikiEditing && isHubAdmin)}
+                      {...(section === 'wiki' && { formatTitle: withoutWikiNumber })}
                       notFoundNoun={hubDocumentNoun}
                       notFoundBackLabel={`Back to ${SECTIONS.find(item => item.id === section)?.label ?? 'the hub'}`}
                       onNotFoundBack={closeOpenCanvas}
@@ -4481,8 +4545,21 @@ export default function SdlcScreen(): ReactElement {
                           <SdlcWikiEmpty
                             canManage={isHubAdmin}
                             repositoryName={wikiScope.hub ? null : wikiScope.name}
-                            running={wikiState.phase === 'RUNNING'}
-                            runStatus={wikiEmptyRun.status}
+                            running={
+                              wikiScope.repoId
+                                ? wikiScopeStatus?.phase === 'running'
+                                : wikiState.phase === 'RUNNING'
+                            }
+                            runStatus={
+                              // A repository's own state, not the hub run's.
+                              wikiScopeStatus ? (
+                                <span className='text-xs text-muted-foreground'>
+                                  {wikiStatusText(wikiScopeStatus)}
+                                </span>
+                              ) : (
+                                wikiEmptyRun.status
+                              )
+                            }
                             runButton={wikiEmptyRun.button}
                             onCreatePage={() => openHubDocumentCreate('wiki')}
                           />
@@ -4495,10 +4572,15 @@ export default function SdlcScreen(): ReactElement {
                           allPages={wikiAllPages}
                           repoUrls={new Map(channelRepos.map(repo => [repo.id, repo.url]))}
                           canManage={isHubAdmin}
+                          repositoryStatus={wikiRepositoryStatus}
                           runControl={renderWorkflowControls(
                             'Deep research',
                             wikiState,
                             wikiAllPages.length > 0 ? 'Update deep research' : 'Run deep research',
+                            'default',
+                            'Cancel',
+                            undefined,
+                            openWikiRun,
                           )}
                           onSelectScope={folderId => openWikiScope(folderId)}
                           onAddRepository={() => setHubDialog('manage')}
@@ -4868,7 +4950,19 @@ export default function SdlcScreen(): ReactElement {
         projectId={channel.projectId}
         open={hubDialog === 'create'}
         onOpenChange={open => setHubDialog(open ? 'create' : null)}
-        onSaved={savedChannelId => void navigate(`/sdlc/${savedChannelId}/overview`)}
+        onSaved={savedChannelId => {
+          setCreatedHubId(savedChannelId);
+          void navigate(`/sdlc/${savedChannelId}/overview`);
+        }}
+      />
+      <SdlcWikiRunDialog
+        open={wikiRunOpen}
+        onOpenChange={setWikiRunOpen}
+        repositories={wikiRunRepositories}
+        onRun={async input => {
+          await wikiState.start({ ...input });
+          toast.success('Deep research run started');
+        }}
       />
       <SdlcHubSwitcher
         open={hubSwitcherOpen}
@@ -5589,9 +5683,9 @@ const WORKFLOW_PHASE_LABEL: Record<HubWorkflowPhase, string> = {
 function WorkflowStatus({
   workflow,
 }: {
-  workflow: Pick<HubWorkflow, 'phase' | 'updatedAt'>;
+  workflow: Pick<HubWorkflow, 'phase' | 'startedAt' | 'updatedAt'>;
 }): ReactElement {
-  const { phase, updatedAt } = workflow;
+  const { phase, startedAt, updatedAt } = workflow;
   const Icon =
     phase === 'RUNNING'
       ? Loader2
@@ -5600,10 +5694,13 @@ function WorkflowStatus({
         : phase === 'FAILED'
           ? CircleAlert
           : CircleDot;
+  // A running run changes at every step, so its last change says nothing; show when it started.
   const label =
-    typeof updatedAt === 'number'
-      ? `${WORKFLOW_PHASE_LABEL[phase]} · ${formatRelativeTime(updatedAt)}`
-      : WORKFLOW_PHASE_LABEL[phase];
+    phase === 'RUNNING' && typeof startedAt === 'number'
+      ? `${WORKFLOW_PHASE_LABEL[phase]} · started ${formatRelativeTime(startedAt)}`
+      : typeof updatedAt === 'number'
+        ? `${WORKFLOW_PHASE_LABEL[phase]} · ${formatRelativeTime(updatedAt)}`
+        : WORKFLOW_PHASE_LABEL[phase];
   return (
     <span
       role='status'

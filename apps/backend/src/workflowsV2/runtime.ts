@@ -19,7 +19,7 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
-import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
+import { SdlcArtifactAgentProvider, SdlcArtifactStep } from './agents/sdlc-artifact-provider';
 import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
 import { SdlcWikiPlanStep } from '@/sdlc/wiki/wikiPlanStep';
 import { RedisEventBus } from './adapters/event-bus';
@@ -96,7 +96,7 @@ class SdlcConnector extends BaseConnector {
   readonly credentials = [];
   readonly triggers = [];
   readonly steps: readonly AnyStep[] = [
-    new HostAgentStep(new SdlcArtifactAgentProvider(), {
+    new SdlcArtifactStep(new SdlcArtifactAgentProvider(), {
       type: 'CREATE_SDLC_ARTIFACT',
       name: 'Create SDLC artifact',
       description: "Generate or refresh one document in an SDLC hub's artifact type",
@@ -105,7 +105,7 @@ class SdlcConnector extends BaseConnector {
     new HostAgentStep(new SdlcAgentProvider(), {
       type: SDLC_AGENT_STEP_TYPE,
       name: 'SDLC Agent',
-      description: 'Run the SDLC agent in a hub, optionally pinned to one repository',
+      description: "Run an agent with this workflow's SDLC hub tools, optionally pinned to a commit",
       category: 'ai',
     }),
     new SdlcWikiPlanStep(),

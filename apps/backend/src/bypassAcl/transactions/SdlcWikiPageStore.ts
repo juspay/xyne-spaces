@@ -113,10 +113,7 @@ export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<
     });
     await recordVersion(tx, scope, existing.id, markdown, content, page.action, commitSha);
     if (commitSha) {
-      await tx.sdlcArtifact.update({
-        where: { artifactId: existing.id },
-        data: { generationCommit: commitSha },
-      });
+      await tx.sdlcArtifact.update({ where: { artifactId: existing.id }, data: { generationCommit: commitSha } });
     }
     return { artifact: existing.id, canvasId: existing.id, content };
   });

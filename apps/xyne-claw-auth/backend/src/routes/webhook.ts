@@ -34,8 +34,9 @@ import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
+import { computeBackoffMs } from "../retry.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
-import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
+import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
@@ -2382,6 +2383,10 @@ export async function handleAutomationWebhook(
   const interpose = Boolean(
     callbackUrl && agent.spacesAppUserId && agent.spacesAppToken && agent.spacesAppId,
   );
+  // Any agent: SDLC workflow steps let the author pick which one runs with the hub's tools.
+  const sdlcProfile =
+    payload.executionProfile === "sdlc" &&
+    s2sKeyMatches(req.headers["x-s2s-key"]);
   let automationSlotToken: string | null = null;
   const releaseAutomationSlot = async (): Promise<void> => {
     if (automationSlotToken && payload.conversationId) {
@@ -2456,6 +2461,7 @@ export async function handleAutomationWebhook(
       // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
       // MCP swap on this (not on the resolveMentions proxy).
       isAutomation: true,
+      ...(sdlcProfile ? { sdlcProfile: true } : {}),
       triggerSource: "automation",
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
@@ -2493,10 +2499,6 @@ export async function handleAutomationWebhook(
   // per-agent DB flag is needed. Workflow-engine steps (`wf-` session ids) get
   // it too; Spaces automations (`<runId>:<step>`) never match and stay
   // read-only (lib/automation-write-policy.ts).
-  const sdlcProfile =
-    payload.executionProfile === "sdlc" &&
-    agentSlug === SDLC_AGENT_SLUG &&
-    s2sKeyMatches(req.headers["x-s2s-key"]);
   const allowSandboxWrite = automationRunAllowsSandboxWrite({
     sessionId,
     requested: payload.allowWriteInReadOnlyJob,
@@ -2735,6 +2737,7 @@ export async function handleAutomationWebhook(
       // no interpose) otherwise carries NEITHER forward flag, and a recovery
       // replay of it would be indistinguishable from an interactive run.
       isAutomation: true,
+      ...(sdlcProfile ? { sdlcProfile: true } : {}),
       // Carry the automation's forward target through recovery. claw calls back
       // with its own sessionId (misses the Redis session keyed by the dispatch
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
@@ -2762,6 +2765,11 @@ export async function handleAutomationWebhook(
 
   res.status(status).type("application/json").send(text);
 }
+
+const RESULT_FORWARD_RETRY_MS = 30 * 60_000;
+const RESULT_FORWARD_BASE_DELAY_MS = 15_000;
+const RESULT_FORWARD_MAX_DELAY_MS = 5 * 60_000;
+const RESULT_FORWARD_ATTEMPT_TIMEOUT_MS = 60_000;
 
 /**
  * Forward a finished run's result to a caller-supplied URL (Spaces auto-draft
@@ -2840,35 +2848,54 @@ async function forwardResult(
       }
     }
   }
-  try {
-    const res = await fetch(deliveryUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify({
-        sessionId: payload.sessionId,
-        status: payload.status,
-        result: resultField,
-        ...(payload.error ? { error: payload.error } : {}),
-        ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
-        // What the run looked things up with, for an internal caller judging the result
-        // (agent proactivity's check before posting).
-        ...(forwardToInternal && payload.toolsUsed?.length ? { toolsUsed: payload.toolsUsed } : {}),
-      }),
-    });
-    if (!res.ok) {
+  const body = JSON.stringify({
+    sessionId: payload.sessionId,
+    status: payload.status,
+    result: resultField,
+    ...(payload.error ? { error: payload.error } : {}),
+    ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+    // What the run looked things up with, for an internal caller judging the result
+    // (agent proactivity's check before posting).
+    ...(forwardToInternal && payload.toolsUsed?.length ? { toolsUsed: payload.toolsUsed } : {}),
+  });
+  // The caller (a parked workflow step) waits forever for this, so a 5xx/429/network failure is retried.
+  const deadline = Date.now() + RESULT_FORWARD_RETRY_MS;
+  for (let attempt = 1; ; attempt++) {
+    let outcome: string;
+    let detail: string;
+    let retryable: boolean;
+    try {
+      const res = await fetch(deliveryUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body,
+        signal: AbortSignal.timeout(RESULT_FORWARD_ATTEMPT_TIMEOUT_MS),
+      });
+      if (res.ok) return;
       // 401/403 on an internal-classified target is the L-18 misconfiguration
       // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
       // key mismatch) — the detail names it so the fix is obvious from the log.
       const authHint = res.status === 401 || res.status === 403
         ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
         : "";
-      forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
+      outcome = `http_${res.status}`;
+      detail = `delivery rejected by target${authHint}`;
+      retryable = res.status >= 500 || res.status === 429;
+    } catch (err) {
+      outcome = "network_error";
+      detail = errMsg(err);
+      retryable = true;
     }
-  } catch (err) {
-    forwardFailure("network_error", errMsg(err));
+    const delayMs = computeBackoffMs(attempt, RESULT_FORWARD_BASE_DELAY_MS, RESULT_FORWARD_MAX_DELAY_MS);
+    if (!retryable || Date.now() + delayMs > deadline) {
+      forwardFailure(outcome, `${detail} (after ${attempt} attempt${attempt === 1 ? "" : "s"})`);
+      return;
+    }
+    clog.warn(`[webhook/result] resultForward ${outcome} session=${payload.sessionId} origin=${targetOrigin} attempt=${attempt} retrying in ${delayMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
 

@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { findWorkflowExecutionForCallback } from '@/bypassAcl/workflowServices';
 import { resumeWorkflowClawCallback } from '@/bypassAcl/workflowOperations';
 import { logger } from '@/utils/logger';
+import { TERMINAL_EXECUTION_STATUSES } from '../constants';
 
 /**
  * A stale callback answers 200, not an error. Claw did nothing wrong, and a
@@ -55,6 +56,12 @@ export async function handleWorkflowClawCallback(
         `[workflows] claw-callback: execution ${executionId} not found or not a workflow run — ignoring`,
       );
       res.status(404).json({ success: false, error: 'execution not found' });
+      return;
+    }
+
+    // A cancelled or failed run can't be resumed. 200, or claw-auth would retry a result we discard on purpose.
+    if ((TERMINAL_EXECUTION_STATUSES as readonly string[]).includes(execution.status)) {
+      res.json({ success: true, ignored: 'execution finished' });
       return;
     }
 

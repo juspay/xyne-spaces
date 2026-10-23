@@ -19,6 +19,7 @@ import {
 import { Loader2 } from 'lucide-react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { useNavigate } from 'react-router-dom';
 import { getMathSlashMenuItems } from '@blocknote/math-block';
 import type {
   Block,
@@ -253,6 +254,8 @@ export const CollaborativeCanvasEditor = forwardRef<
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
+      // handleLinkClickCapture opens links; BlockNote's own window.open would add a second tab.
+      links: { onClick: () => true },
       _tiptapOptions: canvasTiptapOptions,
     };
 
@@ -559,6 +562,8 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
     const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [activeHeadingId, setActiveHeadingId] = useState<string>();
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
 
@@ -710,9 +715,51 @@ export const CollaborativeCanvasEditor = forwardRef<
       return unsubscribe;
     }, [editable, editor, isReadOnly, trackEditedRecordingSummaryBlocks]);
 
+    // A hub link opens in place and any other link in one new tab, never both.
+    const navigate = useNavigate();
+    const handleLinkClickCapture = useCallback(
+      (event: React.MouseEvent): void => {
+        if (!(event.target instanceof Element)) return;
+        const anchor = event.target.closest('.bn-editor a[href]');
+        const href = anchor?.getAttribute('href');
+        if (!href) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (href.startsWith('/') && !event.metaKey && !event.ctrlKey) void navigate(href);
+        else window.open(href, '_blank', 'noopener,noreferrer');
+      },
+      [navigate],
+    );
+
     const handleHeadingClick = useCallback((id: string) => {
       scrollToHeading(id, containerRef.current);
     }, []);
+
+    // The pinned outline marks the last heading scrolled past the top of the page.
+    useEffect(() => {
+      const scroller = scrollRef.current;
+      if (!pinnedOutline || !scroller || tocHeadings.length === 0) return undefined;
+      let frame = 0;
+      const update = (): void => {
+        frame = 0;
+        const top = scroller.getBoundingClientRect().top + 120;
+        let active = tocHeadings[0]?.id;
+        for (const heading of tocHeadings) {
+          const element = scroller.querySelector(`[data-id="${heading.id}"]`);
+          if (element && element.getBoundingClientRect().top <= top) active = heading.id;
+        }
+        setActiveHeadingId(active);
+      };
+      const onScroll = (): void => {
+        if (!frame) frame = requestAnimationFrame(update);
+      };
+      update();
+      scroller.addEventListener('scroll', onScroll, { passive: true });
+      return () => {
+        scroller.removeEventListener('scroll', onScroll);
+        cancelAnimationFrame(frame);
+      };
+    }, [pinnedOutline, tocHeadings]);
 
     const canvasFormattingToolbar = useMemo(
       () =>
@@ -799,6 +846,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         // Disable native browser context menu to prevent conflicts with BlockNote's custom menus (Slash menu, Format menu, etc.)
         onContextMenu={(e): void => e.preventDefault()}
         onFocusCapture={handleFocusCapture}
+        onClickCapture={handleLinkClickCapture}
         onBlurCapture={handleBlurCapture}
         role='application'
         tabIndex={-1}
@@ -807,7 +855,8 @@ export const CollaborativeCanvasEditor = forwardRef<
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           {(connectionFailed || isReconnecting) && (
             <div
-              className='absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-sm'
+              // Bottom right, clear of the pinned outline at the top right.
+              className='absolute bottom-3 right-3 z-40 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-sm'
               title={
                 isReconnecting
                   ? 'Reconnecting to the canvas...'
@@ -836,7 +885,9 @@ export const CollaborativeCanvasEditor = forwardRef<
             </div>
           )}
           <div
-            className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'
+            ref={scrollRef}
+            // Room for the pinned outline, so the text centers in the space beside it.
+            className={`thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8 ${pinnedOutline && tocHeadings.length > 0 ? 'xl:pr-72' : ''}`}
             style={{
               maxWidth: '100%',
               wordBreak: 'break-word',
@@ -955,6 +1006,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           headings={tocHeadings}
           onHeadingClick={handleHeadingClick}
           pinned={pinnedOutline}
+          activeId={activeHeadingId}
         />
 
         {/* Search Overlay */}

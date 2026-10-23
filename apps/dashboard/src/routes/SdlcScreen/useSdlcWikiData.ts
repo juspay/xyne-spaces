@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiInstance } from '../../services/clients/apiClient';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import {
@@ -29,6 +31,17 @@ export interface SdlcWikiData<Repo> {
   /** The open page, when the open artifact is one of the scope's pages. */
   selectedPage: SdlcWikiPage | undefined;
   workflow: HubWorkflow;
+  repositoryStatus: ReadonlyMap<string, RepositoryWikiStatus>;
+}
+
+export interface RepositoryWikiStatus {
+  repoId: string;
+  phase: 'queued' | 'running' | 'failed' | 'up to date' | 'behind';
+  windowsDone: number;
+  windowsPlanned: number;
+  documentedSha: string | null;
+  headSha: string | null;
+  error: string | null;
 }
 
 /**
@@ -61,6 +74,22 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
     },
   );
   const workflow = useHubWorkflow(active ? (workflowLink?.workflow?.id ?? null) : null);
+  const statusRows = useQuery({
+    queryKey: ['sdlc-wiki-status', channelId, workflow.runId, workflow.phase],
+    queryFn: async () =>
+      (
+        await apiInstance.get<{ repositories: RepositoryWikiStatus[] }>(
+          `/sdlc/channels/${encodeURIComponent(channelId ?? '')}/wiki/status`,
+        )
+      ).data.repositories,
+    enabled: active,
+    // Windows finish every hour or two; a minute is close enough while one runs.
+    refetchInterval: workflow.phase === 'RUNNING' ? 60_000 : false,
+  });
+  const repositoryStatus = useMemo(
+    () => new Map((statusRows.data ?? []).map(status => [status.repoId, status])),
+    [statusRows.data],
+  );
 
   const edges = useMemo(
     () => (active && Array.isArray(itemRows) ? itemRows : []),
@@ -172,5 +201,6 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
     setShowArchived,
     selectedPage,
     workflow,
+    repositoryStatus,
   };
 }
