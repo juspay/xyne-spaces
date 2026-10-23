@@ -4,7 +4,7 @@ export const CONV_AFFINITY_ENABLED = process.env["CLAW_CONV_AFFINITY"] === "true
 
 const KEY_PREFIX = "claw:conv-affinity:";
 const CAP_KEY_PREFIX = "claw:pod-free:";
-const TTL_SECONDS = Number(process.env["CLAW_CONV_AFFINITY_TTL_S"] ?? 6 * 3600);
+const TTL_SECONDS = Number(process.env["CLAW_CONV_AFFINITY_TTL_S"] ?? Number(process.env["SESSION_TTL_HOURS"] ?? 6) * 3600);
 const CAP_TTL_SECONDS = Number(process.env["CLAW_CONV_AFFINITY_CAP_TTL_S"] ?? 8);
 const MAX_WAIT_MS = Number(process.env["CLAW_CONV_AFFINITY_MAX_WAIT_MS"] ?? 1500);
 export const AFFINITY_DEFER_MS = Number(process.env["CLAW_CONV_AFFINITY_DEFER_MS"] ?? 250);
