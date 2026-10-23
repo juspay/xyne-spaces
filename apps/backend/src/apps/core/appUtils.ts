@@ -12,13 +12,6 @@ import { syncInstalledCommandsTx } from '@/bypassAcl/transactions/appUtils';
 import { isSpacesAppClawAgent } from '@/services/clawAgentService';
 
 /**
- * Install an external app
- *
- * @param appId - The ID of the external app to install
- * @param workspaceId - The workspace ID to install the app in
- * @returns The created installed app entry
- */
-/**
  * Sync a workspace's installed command snapshot with the app's current commands.
  * Upserts each template command (matched by sourceCommandId) and removes installed commands
  * whose template source no longer exists. Used on both install and Update.
@@ -67,7 +60,7 @@ export async function installApp(appId: string, workspaceId: string) {
         updatedAt: new Date(),
       });
       logger.info(`[INSTALL-APP] App ${appId} updated in workspace ${workspaceId}`);
-      return { jwtToken };
+      return { jwtToken, signingSecret };
     }
 
     // 2. New install — dedicated per-workspace app user. Email is suffixed with the workspace id
@@ -126,10 +119,11 @@ export async function installApp(appId: string, workspaceId: string) {
     });
 
     await repositories.appPermissions.copyFromApp(appId, installedApp.id);
+
     await syncInstalledCommands(installedApp.id, appId, workspaceId);
     logger.info(`[INSTALL-APP] Installed app ${appId} (entry ${installedApp.id}) in workspace ${workspaceId}`);
 
-    return { jwtToken };
+    return { jwtToken, signingSecret };
   } catch (error) {
     logger.error(`[INSTALL-APP] Error installing app ${appId}:`, error);
     throw error;

@@ -33,7 +33,7 @@ export function toScope(name: string, type: AppPermissionType): string {
   return `${name}:${type.toLowerCase()}`;
 }
 
-function parseScope(scope: string): { name: string; type: AppPermissionType } {
+export function parseScope(scope: string): { name: string; type: AppPermissionType } {
   const colonIdx = scope.indexOf(':');
   if (colonIdx === -1) {
     throw new Error(`Invalid permission scope "${scope}" — expected "resource:action" e.g. "chat:write"`);
