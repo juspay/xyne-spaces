@@ -113,9 +113,9 @@ const ClawSubagentDetailV2 = (): ReactElement => {
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
+                  <h1 className='truncate text-sm font-semibold leading-[22px] text-foreground'>
                     {subagent.name}
-                  </span>
+                  </h1>
                   <Pill tone={subagent.enabled ? 'success' : 'neutral'}>
                     {subagent.enabled ? 'Enabled' : 'Disabled'}
                   </Pill>

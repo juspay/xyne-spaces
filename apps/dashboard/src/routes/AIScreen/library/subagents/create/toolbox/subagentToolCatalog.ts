@@ -17,6 +17,8 @@ export interface SubagentToolSectionData {
   kind: SubagentToolKind;
   title: string;
   caption: string;
+  /** Written out, not derived from the title: lowercasing it turned MCP into "mcp". */
+  emptyLabel: string;
   groups: SubagentToolGroup[];
   total: number;
 }
@@ -75,13 +77,15 @@ export function buildSubagentToolSections(
       kind: 'write',
       title: 'Write Tools',
       caption: 'Actions that change something. Selected by name.',
+      emptyLabel: 'No write tools added yet.',
       groups: group(write),
       total: write.length,
     },
     {
       kind: 'server',
-      title: 'MCP',
+      title: 'MCP Tools',
       caption: 'Tools exposed by connected MCP servers.',
+      emptyLabel: 'No MCP tools added yet.',
       groups: group(server),
       total: server.length,
     },
@@ -89,6 +93,7 @@ export function buildSubagentToolSections(
       kind: 'system',
       title: 'System Tools',
       caption: 'Platform tool groups registered for this workspace.',
+      emptyLabel: 'No system tools added yet.',
       groups: group(system),
       total: system.length,
     },

@@ -51,7 +51,10 @@ export function useSubagentDetailActions(subagent: SubagentDef | undefined): Sub
     setRemoving(true);
     try {
       await toggle.mutateAsync({ name: subagent.name, enabled: false });
-      toast.success(`${subagent.name} removed`);
+      // Says what actually happened. This disables the subagent — the confirm
+      // dialog already explains the definition is kept — so reporting it as
+      // "removed" told the user something the product had not done.
+      toast.success(`${subagent.name} will no longer be offered to agents`);
       void navigate(`${libraryPath}?tab=subagents`);
     } catch (err) {
       toast.error(clawErrorText(err, 'Could not remove this subagent'));

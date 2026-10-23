@@ -120,7 +120,7 @@ export function SubagentToolsTabV2({
             <DetailListCard
               items={items}
               loading={tools.isLoading}
-              emptyLabel={`No ${section.title.toLowerCase()} added yet.`}
+              emptyLabel={section.emptyLabel}
               canEdit={canEdit && !saving}
               note={note}
               removeLabel={item => `Remove ${item.name}`}

@@ -54,7 +54,9 @@ export function SubagentPersonaTabV2({
         {...badge}
       >
         {subagent.systemPrompt ? (
-          <ProseBox>{subagent.systemPrompt}</ProseBox>
+          // `fit` so a short prompt does not sit in a 298px box of empty space,
+          // while a long one still caps and scrolls.
+          <ProseBox fit>{subagent.systemPrompt}</ProseBox>
         ) : (
           <DetailCard>
             <DetailEmpty>No system prompt set</DetailEmpty>
