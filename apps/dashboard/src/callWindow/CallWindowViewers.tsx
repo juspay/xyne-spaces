@@ -3,6 +3,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
+import { UserGroupDialog } from '../components/UserGroup/UserGroupDialog/UserGroupDialog';
 
 /**
  * The viewers the call's chat opens (attachments, citations), as the main app
@@ -16,6 +17,7 @@ export default function CallWindowViewers(): ReactElement {
       <AttachmentCitationPreview />
       <ThreadCitationModal />
       <TranscriptCitationModal />
+      <UserGroupDialog />
     </>
   );
 }
