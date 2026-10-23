@@ -1,5 +1,6 @@
 import {
   CallOrigin,
+  CallRingNotification,
   ChannelScopeType,
   InvitationResponse,
   isSilentChannelCall,
@@ -72,8 +73,10 @@ export function isRingableCall(input: {
   // view model, but acting on it is a product change, not a rendering one.
   if (isSilentChannelCall(channel, call.callOrigin)) return false;
 
-  // A scheduled call rings when it starts, not when it is booked.
+  // A scheduled call rings when it starts, not when it is booked — and only if the
+  // organizer left ringing on when scheduling it.
   if (call.startsAt && now < new Date(call.startsAt).getTime()) return false;
+  if (myParticipant?.ringNotification === CallRingNotification.DISABLED) return false;
 
   return myParticipant?.response === InvitationResponse.INVITED;
 }

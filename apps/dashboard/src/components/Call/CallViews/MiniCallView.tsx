@@ -85,6 +85,7 @@ interface MiniCallViewProps {
         readonly displayName?: string | null | undefined;
         readonly isExternal?: boolean | undefined;
         readonly ringStatus?: string | null | undefined;
+        readonly ringNotification?: string | null | undefined;
       }>
     | undefined;
   isHost?: boolean | undefined;
