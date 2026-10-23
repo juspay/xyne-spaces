@@ -1,3 +1,15 @@
+## [1.519.0](https://github.com/juspay/xyne-spaces/compare/v1.518.1...v1.519.0) (2026-10-23)
+
+
+### Features
+
+* add e2e tests for private/public channels, join, rename, description, leave and remove member ([#3332](https://github.com/juspay/xyne-spaces/issues/3332)) ([1fb6d3b](https://github.com/juspay/xyne-spaces/commit/1fb6d3b140e289e3f0751f250bf9239ad243fcfa))
+
+
+### Bug Fixes
+
+* show release-check report times in local time with time zone ([#3308](https://github.com/juspay/xyne-spaces/issues/3308)) ([2eec3bf](https://github.com/juspay/xyne-spaces/commit/2eec3bf06e10be0935f6aafb5a1fad73bde052d5))
+
 ## [1.518.1](https://github.com/juspay/xyne-spaces/compare/v1.518.0...v1.518.1) (2026-10-23)
 
 
