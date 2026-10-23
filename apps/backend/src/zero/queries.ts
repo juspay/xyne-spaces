@@ -976,35 +976,80 @@ const trackTableTicketsPageArgsSchema = tableTicketsPageArgsSchema.extend(trackT
 
 // Without the public arm every branch is bounded by the viewer, so each is flipped and
 // the viewer's own canvases / participations drive instead of every canvas in the workspace.
-const applyPrivateCanvasVisibilityQueryFilter = (query: any, userId: string) => {
+const privateCanvasVisibilityArms = (helpers: any, userId: string): any[] => {
   const flip = { flip: true };
+  return [
+    helpers.exists('createdByUser', (u: any) => u.where('id', userId), flip),
+    helpers.exists('participants', (p: any) => p.where('userId', userId), flip),
+    helpers.exists(
+      'participants',
+      (p: any) =>
+        p.whereExists(
+          'userGroup',
+          (ug: any) => ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId), flip),
+          flip,
+        ),
+      flip,
+    ),
+    helpers.exists(
+      'participants',
+      (p: any) =>
+        p.whereExists(
+          'channel',
+          (ch: any) => ch.whereExists('participants', (cp: any) => cp.where('userId', userId), flip),
+          flip,
+        ),
+      flip,
+    ),
+  ];
+};
+
+// Private visibility plus "public canvases in my regular channels" — exactly the rows the
+// old per-channel channelCanvasesPaginated fan-out in My Canvas added on top of
+// userCanvasesPaginated. Every arm is still bounded by the viewer's own channel
+// memberships, so the scan stays viewer-driven (one query instead of one per channel).
+const applyUserAndPublicChannelCanvasFilter = (query: any, userId: string) => {
+  const flip = { flip: true };
+  const myRegularChannel = (ch: any) =>
+    ch
+      .where('scopeType', ChannelScopeType.DEFAULT)
+      .whereExists('participants', (cp: any) => cp.where('userId', userId), flip);
   return query.where((helpers: any) =>
     helpers.or(
-      helpers.exists('createdByUser', (u: any) => u.where('id', userId), flip),
-      helpers.exists('participants', (p: any) => p.where('userId', userId), flip),
-      helpers.exists(
-        'participants',
-        (p: any) =>
-          p.whereExists(
-            'userGroup',
-            (ug: any) => ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId), flip),
-            flip,
-          ),
-        flip,
-      ),
-      helpers.exists(
-        'participants',
-        (p: any) =>
-          p.whereExists(
-            'channel',
-            (ch: any) => ch.whereExists('participants', (cp: any) => cp.where('userId', userId), flip),
-            flip,
-          ),
-        flip,
+      ...privateCanvasVisibilityArms(helpers, userId),
+      // Canvases shared into one of my channels already match the last private arm
+      // (participants -> channel -> participants = me), so only canvases owned by one of
+      // my regular channels need the extra public arm.
+      helpers.and(
+        helpers.cmp('visibility', CanvasVisibility.PUBLIC),
+        helpers.exists('channel', myRegularChannel, flip),
       ),
     ),
   );
 };
+
+// "Created by me" / "Shared" tabs. Filtering here means the tabs no longer page through
+// every canvas just to filter in the browser.
+// 'me' is handled before the visibility filter in userCanvasesPaginated (createdBy = me is
+// already visible), so this only narrows the 'others' case.
+const applyCanvasCreatorFilter = (
+  query: any,
+  userId: string,
+  {
+    creatorFilter,
+    createdByUserId,
+  }: { creatorFilter?: 'me' | 'others' | undefined; createdByUserId?: string | undefined },
+) => {
+  if (creatorFilter === 'others') {
+    return createdByUserId && createdByUserId !== userId
+      ? query.where('createdBy', createdByUserId)
+      : query.where('createdBy', '!=', userId);
+  }
+  return query;
+};
+
+const applyPrivateCanvasVisibilityQueryFilter = (query: any, userId: string) =>
+  query.where((helpers: any) => helpers.or(...privateCanvasVisibilityArms(helpers, userId)));
 
 const applyCanvasVisibilityQueryFilter = (
   query: any,
@@ -3296,10 +3341,27 @@ export const queries: AnyQueryRegistry = defineQueries({
       includeArchived: z.boolean().optional(),
       onlyArchived: z.boolean().optional(),
       direction: z.enum(['forward', 'backward']).optional(),
+      // Also include public canvases in the viewer's regular channels (replaces the
+      // per-channel channelCanvasesPaginated fan-out in My Canvas).
+      includePublicChannelCanvases: z.boolean().optional(),
+      // 'me' = created by the viewer; 'others' = created by someone else
+      // (optionally a specific createdByUserId).
+      creatorFilter: z.enum(['me', 'others']).optional(),
+      createdByUserId: z.string().optional(),
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
+      // "Created by me": every canvas the viewer created is visible to them, so skip the
+      // visibility OR and read canvases_createdBy_updatedAt_id_idx directly. The ACL still
+      // applies on top.
+      let query =
+        args.creatorFilter === 'me'
+          ? zql.canvases.where('createdBy', ctx.userID)
+          : args.includePublicChannelCanvases
+            ? applyUserAndPublicChannelCanvasFilter(zql.canvases, ctx.userID)
+            : applyCanvasVisibilityQueryFilter(zql.canvases, ctx.userID, false);
+
+      query = applyCanvasCreatorFilter(query, ctx.userID, args);
 
       if (!args.includeQuartoDocs) {
         query = query.where('docType', DocType.Canvas);
