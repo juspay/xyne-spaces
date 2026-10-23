@@ -51,6 +51,7 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUserGroupMappings } from '../../../hooks/useUserGroup';
+import { useUserGroupDialog } from '../../../store/useUserGroupDialogStore';
 import { API_BASE_URL } from '../../../config';
 import { FlowScreenManager } from '../../flowUI/FlowScreenManager';
 import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
@@ -517,7 +518,6 @@ export function GroupMentionRenderer({
   groupName: string;
   alias: string;
 }): JSX.Element {
-  const stableRouter = useStableRouter();
   const userMemberships = useUserGroupMappings();
 
   const isCurrentUserInGroup = useMemo(
@@ -525,11 +525,9 @@ export function GroupMentionRenderer({
     [userMemberships, groupId],
   );
 
-  const handleClick = (): void => {
-    const channelId = stableRouter.getSnapshot().params['channelId'];
-    if (channelId) {
-      void stableRouter.navigate(`/chat/dir/${channelId}/group/${groupId}`);
-    }
+  const handleClick = (event: React.SyntheticEvent): void => {
+    event.stopPropagation();
+    useUserGroupDialog.getState().open(groupId);
   };
 
   return (
@@ -554,7 +552,7 @@ export function GroupMentionRenderer({
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            handleClick();
+            handleClick(e);
           }
         }}
       >
