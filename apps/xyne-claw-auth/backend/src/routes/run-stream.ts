@@ -9,6 +9,7 @@ import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/p
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
 import { resolveProjectInstructions } from "../lib/project-context.js";
+import { resolveDesignSystemRef } from "../lib/design-system-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -1450,10 +1451,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       sdlcRepository: _untrustedSdlcRepository,
       sdlcContext: _untrustedSdlcContext,
       requireSdlcRepository: _untrustedSdlcRequirement,
+      // Resolved server-side below. A caller that could supply it would be
+      // choosing the text injected into the prompt.
+      designSystemRef: _untrustedDesignSystemRef,
       ...safeIncomingAgentConfig
     } = incomingAgentConfig;
+    const designSystemRef = await resolveDesignSystemRef(agentRow, convId);
     const enrichedAgentConfig: Record<string, unknown> = {
       ...safeIncomingAgentConfig,
+      ...(designSystemRef ? { designSystemRef } : {}),
       ...(sdlcContext ? { sdlcContext } : {}),
       followUpConversationHistory: buildFollowUpConversationHistory(
         existingMessageRows.map((message) => ({
