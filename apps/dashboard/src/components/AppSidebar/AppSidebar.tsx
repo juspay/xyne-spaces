@@ -1072,7 +1072,6 @@ const SidebarMoreMenu = ({
               <Fragment key={item.path}>
                 {slot === index && slotRow}
                 <li
-                  ref={drag.rowRef(item.path)}
                   data-more-row=''
                   data-rail-label={item.label}
                   onPointerDown={event => drag.startMorePress(item.path, event)}

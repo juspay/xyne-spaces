@@ -358,6 +358,8 @@ export interface VespaFileDocument extends VespaDocument {
   fileName: string;
   description: string;
   chunks: string[];
+  /** The best query-matched chunks, in document order; only in the `claw` summary. */
+  claw_chunks?: string[];
   chunks_pos: string[];
   chunks_map?: VespaChunkMeta[];
   image_chunks: string[];

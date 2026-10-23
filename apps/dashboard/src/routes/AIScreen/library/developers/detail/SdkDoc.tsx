@@ -25,7 +25,11 @@ const RESOURCES: { name: string; description: string }[] = [
   { name: 'messages', description: 'Messages, reactions, drafts and scheduled sends.' },
   { name: 'tickets', description: 'Tickets, sub-tickets, tags, references and approvals.' },
   { name: 'canvases', description: 'Canvases: content, sharing, comments, versions, folders.' },
-  { name: 'claw', description: 'Run Xyne Claw agents and read their results.' },
+  {
+    name: 'claw',
+    description:
+      'Xyne Claw: build agents, subagents and skills, stream or poll runs, memory, chat and schedules.',
+  },
 ];
 
 export function SdkDoc(): ReactElement {
@@ -86,8 +90,9 @@ console.log(\`Signed in as \${me.email}\`);`;
             },
             {
               title: 'AI agents on demand',
-              body: 'Hand a task to a Xyne Claw agent and get its answer back, no extra credentials.',
-              example: "await sdk.claw.runAndWait({ agent: 'ask-ai', task: '…' });",
+              body: 'Stream a Xyne Claw agent’s answer as it is written, no extra credentials.',
+              example:
+                "for await (const e of sdk.claw.runStream({ agent: 'assistant', task: '…' })) {}",
             },
           ]}
         />
