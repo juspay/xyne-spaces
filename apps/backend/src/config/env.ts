@@ -362,6 +362,7 @@ const envSchema = Joi.object({
   DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
   // Decision evaluation: every decision is also queued for the other engines, to compare them.
   DECISION_EVAL_ENABLED: Joi.boolean().default(false),
+  DECISION_EVAL_CONCURRENCY: Joi.number().integer().min(1).default(4),
   ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
   ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
   ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
@@ -1059,6 +1060,7 @@ export const config = {
   decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
   decisionEval: {
     enabled: envVars.DECISION_EVAL_ENABLED,
+    concurrency: envVars.DECISION_EVAL_CONCURRENCY as number,
   },
   elevenLabs: {
     apiKey: envVars.ELEVENLABS_API_KEY as string,
