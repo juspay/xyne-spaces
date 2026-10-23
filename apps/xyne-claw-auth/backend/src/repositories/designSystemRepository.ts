@@ -1,4 +1,5 @@
-import { Prisma, type DesignSystem } from "@prisma/client";
+import { Prisma, type DesignSystem, type DesignSystemVersion } from "@prisma/client";
+import { formatContentChangeSummary } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -40,10 +41,16 @@ export interface DesignSystemInput {
   sourceUrl?: string | null | undefined;
   sourceRepo?: string | null | undefined;
   sourceCommit?: string | null | undefined;
+  /** One line describing this revision, stored on its version row. A re-import
+   *  knows the token-level diff and should pass it; absent, the repository
+   *  derives a line-level one. */
+  changeSummary?: string | undefined;
 }
 
 export type DesignSystemUpdate = Partial<Omit<DesignSystemInput, "name">> & {
   name?: string | undefined;
+  /** Who is making this edit, credited on the version row. */
+  updatedBy?: string | undefined;
 };
 
 const resolved = (row: DesignSystem, origin: DesignSystemOrigin): ResolvedDesignSystem => ({
@@ -62,22 +69,49 @@ export const designSystemRepository = {
     prisma.designSystem.findFirst({ where: { id, orgId } }),
 
   create: (orgId: string, createdBy: string, input: DesignSystemInput): Promise<DesignSystem> =>
-    prisma.designSystem.create({
-      data: {
-        orgId,
-        createdBy,
-        name: input.name,
-        designMd: input.designMd ?? "",
-        tokensCss: input.tokensCss ?? "",
-        ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
-        ...(input.source ? { source: input.source } : {}),
-        sourceUrl: input.sourceUrl ?? null,
-        sourceRepo: input.sourceRepo ?? null,
-        sourceCommit: input.sourceCommit ?? null,
-      },
+    // The v1 snapshot is written here, not on the first edit, so the history is
+    // complete from the row's first moment and `getVersion(id, 1)` answers for
+    // a system nobody has edited yet.
+    prisma.$transaction(async (tx) => {
+      const created = await tx.designSystem.create({
+        data: {
+          orgId,
+          createdBy,
+          name: input.name,
+          designMd: input.designMd ?? "",
+          tokensCss: input.tokensCss ?? "",
+          ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
+          ...(input.source ? { source: input.source } : {}),
+          sourceUrl: input.sourceUrl ?? null,
+          sourceRepo: input.sourceRepo ?? null,
+          sourceCommit: input.sourceCommit ?? null,
+        },
+      });
+      await tx.designSystemVersion.create({
+        data: {
+          orgId,
+          designSystemId: created.id,
+          version: created.version,
+          designMd: created.designMd,
+          tokensCss: created.tokensCss,
+          ...(created.assets === null ? {} : { assets: created.assets as Prisma.InputJsonValue }),
+          changeSummary: input.changeSummary ?? "Created",
+          createdBy,
+        },
+      });
+      return created;
     }),
 
-  /** Content edits bump `version`; a rename on its own does not. */
+  /**
+   * Content edits bump `version` and archive the new content under it; a rename
+   * on its own does neither.
+   *
+   * Both writes share one transaction, and the version number comes from the
+   * update's own result. Reading `existing.version` and adding one outside a
+   * transaction would let two concurrent edits pick the same number, and one of
+   * them would die on the `[designSystemId, version]` unique constraint — which
+   * is a real rejection from Postgres, not a theoretical one.
+   */
   update: async (
     id: string,
     orgId: string,
@@ -89,21 +123,78 @@ export const designSystemRepository = {
       (input.designMd !== undefined && input.designMd !== existing.designMd) ||
       (input.tokensCss !== undefined && input.tokensCss !== existing.tokensCss) ||
       input.assets !== undefined;
-    return prisma.designSystem.update({
-      where: { id: existing.id },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.designMd !== undefined ? { designMd: input.designMd } : {}),
-        ...(input.tokensCss !== undefined ? { tokensCss: input.tokensCss } : {}),
-        ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
-        ...(input.source !== undefined ? { source: input.source } : {}),
-        ...(input.sourceUrl !== undefined ? { sourceUrl: input.sourceUrl } : {}),
-        ...(input.sourceRepo !== undefined ? { sourceRepo: input.sourceRepo } : {}),
-        ...(input.sourceCommit !== undefined ? { sourceCommit: input.sourceCommit } : {}),
-        ...(contentChanged ? { version: { increment: 1 } } : {}),
-      },
+    // Captured before the write, not read off `existing` after it. The summary
+    // describes a transition, and anything that compares post-write state to
+    // itself reports "No changes" on an edit that plainly changed something.
+    const before = { designMd: existing.designMd, tokensCss: existing.tokensCss };
+    const editor = input.updatedBy ?? existing.createdBy;
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.designSystem.update({
+        where: { id: existing.id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.designMd !== undefined ? { designMd: input.designMd } : {}),
+          ...(input.tokensCss !== undefined ? { tokensCss: input.tokensCss } : {}),
+          ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
+          ...(input.source !== undefined ? { source: input.source } : {}),
+          ...(input.sourceUrl !== undefined ? { sourceUrl: input.sourceUrl } : {}),
+          ...(input.sourceRepo !== undefined ? { sourceRepo: input.sourceRepo } : {}),
+          ...(input.sourceCommit !== undefined ? { sourceCommit: input.sourceCommit } : {}),
+          ...(contentChanged ? { version: { increment: 1 } } : {}),
+        },
+      });
+      if (!contentChanged) return updated;
+      await tx.designSystemVersion.create({
+        data: {
+          orgId,
+          designSystemId: updated.id,
+          version: updated.version,
+          designMd: updated.designMd,
+          tokensCss: updated.tokensCss,
+          ...(updated.assets === null ? {} : { assets: updated.assets as Prisma.InputJsonValue }),
+          changeSummary:
+            input.changeSummary ??
+            formatContentChangeSummary({
+              oldDesignMd: before.designMd,
+              newDesignMd: updated.designMd,
+              oldTokensCss: before.tokensCss,
+              newTokensCss: updated.tokensCss,
+            }),
+          // Who made the edit, not who created the system. The caller supplies
+          // it; falling back to the system's creator would credit the wrong
+          // person for every edit anyone else makes.
+          createdBy: editor,
+        },
+      });
+      return updated;
     });
   },
+
+  /**
+   * Newest first, capped. A system edited daily for a year would otherwise
+   * return 365 rows carrying two documents each; the cap matches
+   * loop_command_versions. Nothing prunes history, so this is a read bound and
+   * not a retention policy.
+   */
+  listVersions: (
+    designSystemId: string,
+    orgId: string,
+    take = 50,
+  ): Promise<DesignSystemVersion[]> =>
+    prisma.designSystemVersion.findMany({
+      where: { designSystemId, orgId },
+      orderBy: { version: "desc" },
+      take,
+    }),
+
+  /** One archived revision, or null. Org-scoped like every other read here, so
+   *  a known id from another org cannot be read by guessing version numbers. */
+  getVersion: (
+    designSystemId: string,
+    version: number,
+    orgId: string,
+  ): Promise<DesignSystemVersion | null> =>
+    prisma.designSystemVersion.findFirst({ where: { designSystemId, version, orgId } }),
 
   /** Conversation pins cascade with the row; agents keep a dangling
    *  `config.designSystemId`, which resolveForAgent treats as absent. */

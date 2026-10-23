@@ -128,6 +128,63 @@ designSystemsRouter.get("/:id", asyncHandler(async (req: Request<{ id: string }>
   ok(res, row);
 }));
 
+// Version history (XYNE-66824). Reads, so org scope is the only gate — the same
+// rule as `GET /:id`. Editing is still creator-or-admin; being able to read a
+// system's current content and not its previous content would be a strange
+// line to draw.
+//
+// No route-order note needed: `:id` matches a single segment, so `/:id/versions`
+// cannot be swallowed by `/:id` whichever is registered first.
+designSystemsRouter.get(
+  "/:id/versions",
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const { orgId } = requireCaller(req);
+    // The parent read is what enforces "exists, and in your org"; it also
+    // supplies `version`, which is how a row is marked current.
+    const row = await designSystemRepository.findById(req.params.id, orgId);
+    if (!row) throw notFound("Design system not found");
+    const versions = await designSystemRepository.listVersions(row.id, orgId);
+    ok(
+      res,
+      versions.map((v) => ({
+        version: v.version,
+        changeSummary: v.changeSummary,
+        createdBy: v.createdBy,
+        createdAt: v.createdAt,
+        current: v.version === row.version,
+      })),
+    );
+  }),
+);
+
+designSystemsRouter.get(
+  "/:id/versions/:version",
+  asyncHandler(async (req: Request<{ id: string; version: string }>, res: Response) => {
+    const { orgId } = requireCaller(req);
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      throw badRequest("version must be a positive integer");
+    }
+    const row = await designSystemRepository.findById(req.params.id, orgId);
+    if (!row) throw notFound("Design system not found");
+    const archived = await designSystemRepository.getVersion(row.id, version, orgId);
+    // Reachable for a system that predates version history: the migration
+    // records only the revision that still existed, so asking for an earlier
+    // one is a legitimate miss rather than a bad id.
+    if (!archived) throw notFound(`Version ${version} not found for this design system`);
+    ok(res, {
+      version: archived.version,
+      designMd: archived.designMd,
+      tokensCss: archived.tokensCss,
+      assets: archived.assets,
+      changeSummary: archived.changeSummary,
+      createdBy: archived.createdBy,
+      createdAt: archived.createdAt,
+      current: archived.version === row.version,
+    });
+  }),
+);
+
 designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const caller = requireCaller(req);
   const input = parseBody(updateSchema, req.body);
@@ -139,6 +196,7 @@ designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string 
   const updated = await designSystemRepository.update(existing.id, caller.orgId, {
     ...input,
     assets: toJsonInput(input.assets),
+    updatedBy: caller.requesterId,
   });
   if (!updated) throw notFound("Design system not found");
 
