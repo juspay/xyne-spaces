@@ -845,7 +845,8 @@ export async function handleKbSearch(args: {
         `collection="${escapeXmlAttr(h.collectionName)}" cite="[clf-__TOOL_CALL_ID__#${i}]">`,
     );
     if (h.snippet) {
-      const snippet = h.snippet.replace(/<\/?[^>]+>/g, "").replace(/\s+/g, " ").slice(0, KB_SNIPPET_MAX_CHARS);
+      // Strip highlight tags, then any stray `<`/`>` a nested tag left behind.
+      const snippet = h.snippet.replace(/<\/?[^>]+>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").slice(0, KB_SNIPPET_MAX_CHARS);
       lines.push(`    <snippet>${escapeXmlText(snippet)}</snippet>`);
     }
     lines.push(`  </hit>`);
