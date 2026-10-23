@@ -1,4 +1,4 @@
-import { ChannelRole, ChannelScopeType, ChannelType, DeskType } from '../zero/types.js';
+import { CallOrigin, ChannelRole, ChannelScopeType, ChannelType, DeskType } from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -84,6 +84,21 @@ export function canPublishAppsTo(
     return isDeskOwner || participantRole === ChannelRole.ADMIN;
   }
   return supportsChannelApps(channel) && canPublishChannelApps(channel.scopeType, participantRole);
+}
+
+/**
+ * A whole-channel call in a DEFAULT channel rings nobody: no incoming-call UI, push or
+ * missed-call alert (channels can be huge). SDLC hubs are the exception and always ring.
+ */
+export function isSilentChannelCall(
+  channel: { scopeType?: string | null; type?: string | null } | null | undefined,
+  callOrigin: string | null | undefined,
+): boolean {
+  return (
+    channel?.scopeType === ChannelScopeType.DEFAULT &&
+    channel?.type !== ChannelType.SDLC &&
+    callOrigin === CallOrigin.CHANNEL
+  );
 }
 
 export const CHANNEL_NAME_MIN_LENGTH = 2;

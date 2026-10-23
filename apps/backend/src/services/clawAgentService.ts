@@ -372,7 +372,7 @@ export interface ConversationInsight {
 // Internal helpers
 // ============================================================================
 
-function getClawBaseUrl(): string {
+export function getClawBaseUrl(): string {
   return config.xyneClaw.authUrl;
 }
 
@@ -593,8 +593,14 @@ export async function runClawAgentStream(
   req: { headers?: { cookie?: string } },
   res: Response,
   request: ClawRunRequest,
-  opts: { signal?: AbortSignal } = {}
+  opts: {
+    signal?: AbortSignal;
+    /** Forward debugger frames (`debug_event`, `debug_artifacts_ready`). The
+     *  dashboard draws them; SDK callers have no debugger, so it passes false. */
+    includeDebug?: boolean;
+  } = {}
 ): Promise<ClawRunStreamResult> {
+  const includeDebug = opts.includeDebug !== false;
   const clawAuthUrl = `${getClawBaseUrl()}/claw/api/v1/run/stream`;
   const clawConversationId = request.sessionId || `chat-${randomUUID()}`;
 
@@ -692,24 +698,26 @@ export async function runClawAgentStream(
   // The debugger must become visible when this request starts, not after
   // claw-auth has created/restored the agent session. The later `run` event
   // still supplies the trace id, and claw's duplicate session_start is ignored.
-  res.write(
-    `data: ${JSON.stringify({
-      type: 'debug_event',
-      debugEvent: {
-        seq: 1,
-        at: new Date().toISOString(),
-        kind: 'session_start',
-        data: {
-          conversationId: clawConversationId,
-          agentSlug: request.agentSlug,
-          userId: request.userId,
-          provider: request.provider,
-          task: request.query,
+  if (includeDebug) {
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'debug_event',
+        debugEvent: {
+          seq: 1,
+          at: new Date().toISOString(),
+          kind: 'session_start',
+          data: {
+            conversationId: clawConversationId,
+            agentSlug: request.agentSlug,
+            userId: request.userId,
+            provider: request.provider,
+            task: request.query,
+          },
         },
-      },
-    })}\n\n`
-  );
-  if (typeof (res as any).flush === 'function') (res as any).flush();
+      })}\n\n`
+    );
+    if (typeof (res as any).flush === 'function') (res as any).flush();
+  }
 
   const response = await fetch(clawAuthUrl, {
     method: 'POST',
@@ -832,7 +840,7 @@ export async function runClawAgentStream(
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'debug') {
-              if (parsed.debugEvent?.kind !== 'session_start') {
+              if (includeDebug && parsed.debugEvent?.kind !== 'session_start') {
                 res.write(
                   `data: ${JSON.stringify({
                     type: 'debug_event',
@@ -842,13 +850,15 @@ export async function runClawAgentStream(
               }
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'debug_artifacts_ready') {
-              res.write(
-                `data: ${JSON.stringify({
-                  type: 'debug_artifacts_ready',
-                  sessionId: parsed.sessionId,
-                  conversationId: parsed.conversationId || clawConversationId,
-                })}\n\n`
-              );
+              if (includeDebug) {
+                res.write(
+                  `data: ${JSON.stringify({
+                    type: 'debug_artifacts_ready',
+                    sessionId: parsed.sessionId,
+                    conversationId: parsed.conversationId || clawConversationId,
+                  })}\n\n`
+                );
+              }
               if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'done') {
               logger.info('[follow-ups] forwarding completion', {
@@ -2109,6 +2119,21 @@ export class ClawAgentNotAvailableError extends Error {
   }
 }
 
+/**
+ * The agent exists and is visible, but cannot be dispatched yet: dispatch goes
+ * through the agent's Spaces app, and a newly created agent has none until its
+ * app is created and installed.
+ */
+export class ClawAgentNotInstalledError extends Error {
+  constructor(readonly agentSlug: string) {
+    super(
+      `Agent "${agentSlug}" has no Spaces app yet, so it cannot be dispatched. Create and install its app ` +
+        'from the agent\'s page in Claw first.'
+    );
+    this.name = 'ClawAgentNotInstalledError';
+  }
+}
+
 /** Identity a scoped Claw call acts as. Every field comes from the verified session. */
 export interface ScopedClawIdentity {
   /** Spaces user id — claw-auth resolves visibility against this. */
@@ -2189,9 +2214,7 @@ export async function runScopedClawAgent(
     throw new ClawAgentNotAvailableError(req.agentSlug);
   }
   if (!agent.spacesAppId) {
-    throw new Error(
-      `[ClawAgentService] runScopedClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
-    );
+    throw new ClawAgentNotInstalledError(req.agentSlug);
   }
   // Dispatched with the agent object already resolved, not by slug again: going
   // back through the unscoped lookup could match a different agent of the same

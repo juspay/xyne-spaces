@@ -5,6 +5,7 @@
  * exactly five concerns:
  *
  *   v1/          the versioned surface: operation map, argument parsers, routes
+ *   v2/          v1 plus the Claw product API (claw/)
  *   query.ts     run one catalog query
  *   mutation.ts  run one catalog mutator
  *   direct.ts    call the product controllers behind the catalog gaps
@@ -21,6 +22,7 @@ import { Router, type Request, type Response } from 'express';
 import { callLog, errorHandler, notFound, requestId } from './handler';
 import { readsAvailable } from './query';
 import { createSdkV1Router } from './v1';
+import { createSdkV2Router } from './v2';
 
 /**
  * Unauthenticated service endpoints, mounted before the authenticated router
@@ -39,7 +41,7 @@ export function createSdkPublicRouter(): Router {
   router.use(callLog);
 
   router.get('/version', (_req: Request, res: Response) => {
-    res.json({ version: 'v1', service: 'xyne-spaces-api' });
+    res.json({ version: 'v2', versions: ['v1', 'v2'], service: 'xyne-spaces-api' });
   });
 
   router.get('/health', (_req: Request, res: Response) => {
@@ -68,7 +70,7 @@ export function createSdkRouter(): Router {
   const router = Router();
 
   router.use('/v1', createSdkV1Router());
-
+  router.use('/v2', createSdkV2Router());
 
   router.use(notFound);
   router.use(errorHandler);

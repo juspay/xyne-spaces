@@ -1,3 +1,26 @@
+## [1.519.0](https://github.com/juspay/xyne-spaces/compare/v1.518.1...v1.519.0) (2026-10-23)
+
+
+### Features
+
+* add e2e tests for private/public channels, join, rename, description, leave and remove member ([#3332](https://github.com/juspay/xyne-spaces/issues/3332)) ([1fb6d3b](https://github.com/juspay/xyne-spaces/commit/1fb6d3b140e289e3f0751f250bf9239ad243fcfa))
+
+
+### Bug Fixes
+
+* show release-check report times in local time with time zone ([#3308](https://github.com/juspay/xyne-spaces/issues/3308)) ([2eec3bf](https://github.com/juspay/xyne-spaces/commit/2eec3bf06e10be0935f6aafb5a1fad73bde052d5))
+
+## [1.518.1](https://github.com/juspay/xyne-spaces/compare/v1.518.0...v1.518.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* fall back after 45s when Claude sends no first token ([#3406](https://github.com/juspay/xyne-spaces/issues/3406)) ([c8b3a14](https://github.com/juspay/xyne-spaces/commit/c8b3a14e53831255727407a171d6cddfbc7dfce3))
+* give the model the user's Spaces id so Ask AI skips the spaces-whoami turn ([#3407](https://github.com/juspay/xyne-spaces/issues/3407)) ([1740343](https://github.com/juspay/xyne-spaces/commit/17403434a53bd26d456c0623e7de4131e39d5154))
+* show a plan only for five-plus-step work, and keep the todo tools for a plan later ([#3408](https://github.com/juspay/xyne-spaces/issues/3408)) ([7c129f9](https://github.com/juspay/xyne-spaces/commit/7c129f918df982b4a0d970c7f85f914ed41d8b06))
+* show delivered files as workspace artifact chips on the Xyne AI screen ([#3395](https://github.com/juspay/xyne-spaces/issues/3395)) ([a062371](https://github.com/juspay/xyne-spaces/commit/a0623713ac9972ed93386815db8efb826ec7d63d))
+* write a non-empty debug index marker so the storage client accepts it ([#3405](https://github.com/juspay/xyne-spaces/issues/3405)) ([f63bcaa](https://github.com/juspay/xyne-spaces/commit/f63bcaaa48bc7be4212a80d07d02d543d54e72ce))
+
 ## [1.518.0](https://github.com/juspay/xyne-spaces/compare/v1.517.0...v1.518.0) (2026-10-22)
 
 

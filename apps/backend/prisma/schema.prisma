@@ -3278,6 +3278,7 @@ model CallParticipant {
   email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
   ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
+  ringNotification String?         // DISABLED stops a scheduled call ringing this participant when it starts; null rings
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
@@ -3376,6 +3377,7 @@ model RecurringCallParticipant {
   displayName       String?             // Name for external users
   email             String?             // Email for external invitees
   isExternal        Boolean             @default(false)
+  ringNotification  String?             // DISABLED | null — copied onto each instance's call_participants row; null rings
 
   // Relations
   recurringSeries RecurringCallSeries @relation(fields: [recurringSeriesId], references: [id], onDelete: Cascade)

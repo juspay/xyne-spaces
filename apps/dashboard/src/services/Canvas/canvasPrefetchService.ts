@@ -254,6 +254,17 @@ class CanvasPrefetchService {
           error: error,
         });
       }
+      // The doc was never handed to an editor (consumePrefetchedCanvas removes it from the
+      // map first), so nothing else holds it. Destroy it to free its store and listeners.
+      try {
+        canvas.doc.destroy();
+      } catch (error) {
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error destroying prefetched Y.Doc:'),
+          error: error,
+        });
+      }
       this.prefetchedCanvases.delete(canvasId);
     }
   }
