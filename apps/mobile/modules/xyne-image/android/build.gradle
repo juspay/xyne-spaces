@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.xyne.spaces'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.xyneimage"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // Both come with expo-image at runtime; these are the versions it ships
+  // (expo-image/android/build.gradle). Compile-only, so this module never
+  // pulls in a second copy or a different version.
+  compileOnly "com.github.bumptech.glide:glide:5.0.5"
+  compileOnly "com.github.penfeizhou.android.animation:glide-plugin:3.0.5"
+}

@@ -1,0 +1,383 @@
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import {
+  useEffect,
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type RefObject,
+} from 'react';
+import { Keyboard, StyleSheet, View } from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCSSVariable } from 'uniwind';
+
+import { FiltersSheet } from '../components/filters/filters-sheet';
+import { GlobalSearchFilterBar } from '../components/filters/global-search-filter-bar';
+import { SearchCategoryTags } from './search-category-tags';
+import { useSearchState, type SearchDispatch } from '../hooks/use-search-state';
+import {
+  canOpenFiltersSheet,
+  countActiveFilters,
+  toSearchResultsFilters,
+} from '../utils/filter-registry';
+import type { StructuredSearchFilters } from '../utils/filter-model';
+import type { SortBy } from '../utils/rank-sort';
+import {
+  initialTabForSurface,
+  SEARCH_TABS,
+  tabHrefForSurface,
+  type GlobalSearchTab,
+  type SearchSourceSurface,
+} from '../utils/search-tabs';
+import type { SearchFilterChip, SearchScope } from '../types';
+import {
+  SEARCH_BAR_HEIGHT,
+  SEARCH_CATEGORY_ROW_HEIGHT,
+  SEARCH_CATEGORY_ROW_TOP_GAP,
+  SEARCH_FILTER_ROW_COLLAPSE_DISTANCE,
+  SEARCH_FILTER_ROW_HEIGHT,
+  SEARCH_FILTER_ROW_TOP_GAP,
+} from '../constants';
+import { SearchInput, type SearchInputHandle } from './search-input';
+import { SearchResults } from './search-results';
+
+const TOOLBAR_TOP_PADDING = 10;
+const TOOLBAR_BOTTOM_GAP = 8;
+const TOOLBAR_EXTRA_LIST_GAP = 16;
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  results: { flex: 1, overflow: 'hidden' },
+  toolbarInner: { flex: 1, overflow: 'hidden', zIndex: 1 },
+});
+
+type RouteParams = {
+  initialTab?: string | string[];
+  sourceSurface?: string | string[];
+  /** Set when opened from a conversation's info screen — locks search to it. */
+  scopeChannelId?: string | string[];
+  scopeLabel?: string | string[];
+};
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isSearchTab(value: string | undefined): value is GlobalSearchTab {
+  return SEARCH_TABS.some(tab => tab.id === value);
+}
+
+function parseSourceSurface(value: string | undefined): SearchSourceSurface {
+  return value === 'channels' || value === 'calls' || value === 'dms' ? value : 'dms';
+}
+
+function parseInitialTab(params: RouteParams): GlobalSearchTab {
+  const routeTab = firstParam(params.initialTab);
+  return isSearchTab(routeTab)
+    ? routeTab
+    : initialTabForSurface(parseSourceSurface(firstParam(params.sourceSurface)));
+}
+
+export function GlobalSearchScreen(): ReactElement {
+  const params = useLocalSearchParams<RouteParams>();
+  const insets = useSafeAreaInsets();
+
+  const [state, dispatch] = useSearchState(parseInitialTab(params));
+  const inputRef = useRef<SearchInputHandle>(null);
+
+  /** The locked conversation comes from the route and is never part of the state. */
+  const scope = useMemo((): SearchScope | null => {
+    const channelId = firstParam(params.scopeChannelId);
+    const label = firstParam(params.scopeLabel);
+    return channelId && label ? { channelId, label } : null;
+  }, [params.scopeChannelId, params.scopeLabel]);
+
+  /** Results scroll offset, written on the UI thread by whichever list is mounted. */
+  const scrollOffset = useSharedValue(0);
+
+  /** Mode pills (@Ch / Bot / Exact) — only on remote Vespa tabs, not DMs / Channels. */
+  const showModeFilterRow = !scope && canOpenFiltersSheet(state.tab);
+
+  /** The block the filter row occupies — the only part of the toolbar that collapses. */
+  const filterRowBlock = showModeFilterRow
+    ? SEARCH_FILTER_ROW_TOP_GAP + SEARCH_FILTER_ROW_HEIGHT
+    : 0;
+
+  const toolbarHeight =
+    insets.top +
+    TOOLBAR_TOP_PADDING +
+    SEARCH_BAR_HEIGHT +
+    // Must track the toolbar hiding the tags and filter row when scoped, or the list
+    // gets a dead gap above it — listContentTop derives from this.
+    (scope ? 0 : SEARCH_CATEGORY_ROW_TOP_GAP + SEARCH_CATEGORY_ROW_HEIGHT) +
+    filterRowBlock +
+    TOOLBAR_BOTTOM_GAP;
+
+  // Deliberately the *expanded* height: the toolbar collapsing must not reflow the
+  // list under it, or content would jump up as the user scrolls down.
+  const listContentTop = toolbarHeight + TOOLBAR_EXTRA_LIST_GAP;
+  const bottomContentInset = insets.bottom + TOOLBAR_EXTRA_LIST_GAP;
+
+  /** Picking a suggestion adds its chip and eats the `from:` / `in:` that led to it. */
+  const pickFilter = useCallback(
+    (chip: SearchFilterChip) => {
+      dispatch({ type: 'chipAdded', chip });
+      inputRef.current?.resolveTrigger();
+    },
+    [dispatch],
+  );
+
+  // Dismissing the keyboard alone leaves the field as first responder on iOS, which
+  // can re-present the keyboard over the screen that was just pushed.
+  const blurInput = useCallback(() => inputRef.current?.blur(), []);
+
+  return (
+    <View className='flex-1 bg-tabs-screen' style={styles.screen}>
+      <View style={styles.results}>
+        <SearchResults
+          state={state}
+          scope={scope}
+          onPickFilter={pickFilter}
+          onLeave={blurInput}
+          listContentTop={listContentTop}
+          bottomContentInset={bottomContentInset}
+          scrollOffset={scrollOffset}
+        />
+      </View>
+      <SearchToolbar
+        tab={state.tab}
+        chips={state.chips}
+        structured={state.structured}
+        onlyMyChannels={state.onlyMyChannels}
+        includeBotMessages={state.includeBotMessages}
+        exactMatch={state.exactMatch}
+        sortBy={state.sortBy}
+        rankProfile={state.rankProfile}
+        dispatch={dispatch}
+        inputRef={inputRef}
+        topInset={insets.top}
+        toolbarHeight={toolbarHeight}
+        filterRowBlock={filterRowBlock}
+        scrollOffset={scrollOffset}
+        scope={scope}
+      />
+    </View>
+  );
+}
+
+/**
+ * Takes the slices it shows rather than the whole state, so a committed query or a
+ * suggestion being typed does not re-render it.
+ */
+const SearchToolbar = memo(function SearchToolbar({
+  tab,
+  chips,
+  structured,
+  onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
+  sortBy,
+  rankProfile,
+  dispatch,
+  inputRef,
+  topInset,
+  toolbarHeight,
+  filterRowBlock,
+  scrollOffset,
+  scope,
+}: {
+  tab: GlobalSearchTab;
+  chips: readonly SearchFilterChip[];
+  structured: StructuredSearchFilters;
+  onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
+  sortBy: SortBy;
+  rankProfile: string;
+  dispatch: SearchDispatch;
+  inputRef: RefObject<SearchInputHandle | null>;
+  topInset: number;
+  toolbarHeight: number;
+  /** Height the filter row costs — 0 when scoped, where there is no row to collapse. */
+  filterRowBlock: number;
+  scrollOffset: SharedValue<number>;
+  scope: SearchScope | null;
+}): ReactElement {
+  const router = useRouter();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // The screen's own background, so results scrolling under the toolbar are hidden
+  // rather than showing through, and the band has no visible edge against the page.
+  const backgroundColor = useCSSVariable('--color-tabs-screen') as string;
+
+  const didCloseRef = useRef(false);
+  const onRequestClose = useCallback(() => {
+    if (didCloseRef.current) return;
+    didCloseRef.current = true;
+
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace(tabHrefForSurface('dms') as Href);
+  }, [router]);
+
+  const onTabChange = useCallback(
+    (next: GlobalSearchTab) => dispatch({ type: 'tabChanged', tab: next }),
+    [dispatch],
+  );
+
+  const appliedFilters = useMemo(
+    () =>
+      toSearchResultsFilters({
+        tab,
+        chips,
+        structured,
+        onlyMyChannels,
+        includeBotMessages,
+        exactMatch,
+        sortBy,
+        rankProfile,
+      }),
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, rankProfile, sortBy, structured, tab],
+  );
+
+  const filtersAvailable = canOpenFiltersSheet(tab);
+  const filterBadgeCount = filtersAvailable ? countActiveFilters(appliedFilters) : 0;
+
+  // Local tabs have no Filters sheet — drop any leftover open state when switching away.
+  useEffect(() => {
+    if (!filtersAvailable) setFiltersOpen(false);
+  }, [filtersAvailable]);
+
+  const openFilters = useCallback(() => {
+    if (!canOpenFiltersSheet(tab)) return;
+    Keyboard.dismiss();
+    setFiltersOpen(true);
+  }, [tab]);
+
+  const applyFilters = useCallback(
+    (next: {
+      structured: StructuredSearchFilters;
+      chips: readonly SearchFilterChip[];
+      onlyMyChannels: boolean;
+      sortBy: SortBy;
+      rankProfile: string;
+    }) => {
+      dispatch({
+        type: 'structuredApplied',
+        structured: next.structured,
+        chips: next.chips,
+        onlyMyChannels: next.onlyMyChannels,
+        sortBy: next.sortBy,
+        rankProfile: next.rankProfile,
+      });
+    },
+    [dispatch],
+  );
+
+  /**
+   * The whole toolbar shrinks by exactly the filter row's block, which both clips the
+   * row away (the inner column is `overflow: hidden`) and pulls the background band
+   * up with it. The pill and the category tags sit above the cut and never move.
+   */
+  const toolbarStyle = useAnimatedStyle(() => {
+    if (filterRowBlock === 0) return { height: toolbarHeight };
+    return {
+      height: interpolate(
+        scrollOffset.value,
+        [0, SEARCH_FILTER_ROW_COLLAPSE_DISTANCE],
+        [toolbarHeight, toolbarHeight - filterRowBlock],
+        Extrapolation.CLAMP,
+      ),
+    };
+  });
+
+  /**
+   * Faded out well before the clip reaches it — chips sliced in half by the container
+   * edge read as a rendering bug rather than as a collapse.
+   */
+  const filterRowStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      scrollOffset.value,
+      [0, SEARCH_FILTER_ROW_COLLAPSE_DISTANCE / 2],
+      [1, 0],
+      Extrapolation.CLAMP,
+    );
+    return { opacity, pointerEvents: opacity < 0.5 ? 'none' : 'auto' };
+  });
+
+  const containerStyle = useMemo(
+    () => ({
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      top: 0,
+      zIndex: 30,
+      backgroundColor,
+    }),
+    [backgroundColor],
+  );
+
+  const innerStyle = useMemo(
+    () => [
+      styles.toolbarInner,
+      { paddingTop: topInset + TOOLBAR_TOP_PADDING, paddingBottom: TOOLBAR_BOTTOM_GAP },
+    ],
+    [topInset],
+  );
+
+  return (
+    <>
+      <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
+        <View pointerEvents='box-none' style={innerStyle}>
+          <SearchInput
+            ref={inputRef}
+            tab={tab}
+            chips={chips}
+            scope={scope}
+            exactMatch={exactMatch}
+            dispatch={dispatch}
+            onRequestClose={onRequestClose}
+            filterBadgeCount={filterBadgeCount}
+            {...(scope || !filtersAvailable ? {} : { onFilterPress: openFilters })}
+          />
+          {scope ? null : (
+            <>
+              <SearchCategoryTags tab={tab} onTabChange={onTabChange} />
+              {filtersAvailable ? (
+                <Animated.View style={filterRowStyle}>
+                  <GlobalSearchFilterBar
+                    tab={tab}
+                    onlyMyChannels={onlyMyChannels}
+                    includeBotMessages={includeBotMessages}
+                    exactMatch={exactMatch}
+                    dispatch={dispatch}
+                  />
+                </Animated.View>
+              ) : null}
+            </>
+          )}
+        </View>
+      </Animated.View>
+      {scope || !filtersAvailable ? null : (
+        <FiltersSheet
+          isOpen={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          tab={tab}
+          applied={appliedFilters}
+          onApply={applyFilters}
+        />
+      )}
+    </>
+  );
+});
