@@ -3,7 +3,7 @@ import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { type LegendListRef } from '@legendapp/list/react-native';
 import { useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Text, View } from 'react-native';
-import { useSharedValue } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
@@ -43,9 +43,10 @@ const keyExtractor = (id: string): string => id;
 
 type DmsListProps = {
   onChannelSelect?: ((channelId: string) => void) | undefined;
+  scrollOffset: SharedValue<number>;
 };
 
-export function DmsList({ onChannelSelect }: DmsListProps = {}): ReactElement {
+export function DmsList({ onChannelSelect, scrollOffset }: DmsListProps): ReactElement {
   const { loadMore, hasMore, isLoading, isLoadingMore, hasLoadError, isEmpty, isFiltering } =
     useDmRows();
 
@@ -60,8 +61,7 @@ export function DmsList({ onChannelSelect }: DmsListProps = {}): ReactElement {
 
   const listRef = useRef<LegendListRef>(null);
 
-  // Written by the list on the UI thread; only the button reads it.
-  const scrollOffset = useSharedValue(0);
+  // Written by the list on the UI thread; the pull-down shell reads it too.
   const sharedValues = useMemo(() => ({ scrollOffset }), [scrollOffset]);
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
@@ -212,6 +212,7 @@ e
         ListFooterComponent={footer}
         onEndReached={loadMore}
         onEndReachedThreshold={END_REACHED_THRESHOLD}
+        bounces={false}
         keyboardDismissMode='on-drag'
         keyboardShouldPersistTaps='handled'
         showsVerticalScrollIndicator={false}

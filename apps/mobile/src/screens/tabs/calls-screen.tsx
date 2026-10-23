@@ -19,6 +19,7 @@ import { mutators } from '@/src/zero/mutators';
 import { useDeferredLiveData } from '@/src/hooks/useDeferredLiveData';
 import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
+import { PullDownSearchShell } from '@/src/features/screen-header';
 
 type CallListRow =
   | { type: 'header'; key: string; label: string } // date section header ("Today", "Mon May 6")
@@ -396,6 +397,7 @@ const CallsScreen = (): ReactElement => {
   // const headerGradientLocations = theme === 'dark' ? ([0, 0.6, 1] as const) : ([0, 1] as const);
 
   return (
+    <PullDownSearchShell tab='calls' scrollOffset={scrollY}>
     <View className='flex-1 bg-tabs-screen' onLayout={handleLayout} onTouchStart={Keyboard.dismiss}>
       <View className='flex-1 bg-tabs-screen'>
         <AnimatedLegendList
@@ -415,6 +417,7 @@ const CallsScreen = (): ReactElement => {
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.5}
           onMomentumScrollBegin={armEndReached}
+          bounces={false}
           onScrollBeginDrag={armEndReached}
           sharedValues={{ scrollOffset: scrollY }}
           scrollEventThrottle={16}
@@ -451,6 +454,7 @@ const CallsScreen = (): ReactElement => {
         />
       ) : null}
     </View>
+    </PullDownSearchShell>
   );
 };
 

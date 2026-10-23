@@ -1,4 +1,4 @@
-import { useRouter, type Href } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Search } from 'lucide-react-native';
 import { useMemo, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -13,6 +13,7 @@ import type { GlobalSearchTab } from '@/src/features/global-search';
 import { haptics } from '@/src/utils/haptics';
 
 import { LiveSyncStatus } from './live-sync-status';
+import { openGlobalSearch } from './open-global-search';
 
 const AVATAR_SIZE = 32;
 const SEARCH_ICON_SIZE = 22;
@@ -65,10 +66,7 @@ function SearchButton({ tab }: { tab: GlobalSearchTab }): ReactElement {
       className='items-center justify-center active:opacity-60'
       onPress={() => {
         void haptics.buttonTap();
-        router.push({
-          pathname: '/(protected)/global-search',
-          params: { initialTab: tab },
-        } as unknown as Href);
+        openGlobalSearch(router, tab);
       }}
     >
       <Search size={SEARCH_ICON_SIZE} color={foreground} strokeWidth={1.8} />
