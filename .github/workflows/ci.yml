@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "22.23.4"
   # --prod=false: the runner env can set NODE_ENV=production, which would skip
   #   the devDependencies (typescript, react, @types/*) these builds need.
   # Each job installs only its own package plus that package's workspace
