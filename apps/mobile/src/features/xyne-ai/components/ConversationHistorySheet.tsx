@@ -15,14 +15,23 @@ import {
 } from '@/src/features/global-search/hooks/use-mount-while-open';
 
 import type { ConversationSummary } from '../api/xyneAIConversations';
+import { useAgentDirectory } from '../hooks/useAgentDirectory';
 import { useXyneAIConversations } from '../hooks/useXyneAIConversations';
+import {
+  agentIdentity,
+  rowAgentSlug,
+  type AgentDirectory,
+  type AgentIdentity,
+} from '../model/agentIdentity';
 import { filterByTitle, groupConversations } from '../model/conversationGroups';
+import { AgentAvatar } from './AgentAvatar';
 import { PickerSheet, SheetCard, useAfterDismiss, useSheetBottomPadding } from './PickerSheet';
 
 type Item = { header: string } | { conversation: ConversationSummary };
 
 const ConversationRow = ({
   conversation,
+  agent,
   isRenaming,
   isRunning,
   onOpen,
@@ -30,6 +39,8 @@ const ConversationRow = ({
   onRename,
 }: {
   conversation: ConversationSummary;
+  /** Who the chat was with; absent only when the row carries no agent. */
+  agent: AgentIdentity | undefined;
   isRenaming: boolean;
   isRunning: boolean;
   onOpen: () => void;
@@ -52,14 +63,17 @@ const ConversationRow = ({
   ) : (
     <Pressable
       accessibilityRole='button'
+      accessibilityLabel={agent ? `${title}, ${agent.name}` : title}
       accessibilityHint='Long press for more options'
       onPress={onOpen}
       onLongPress={(): void => {
         void haptics.buttonTap();
         onShowActions();
       }}
-      className='min-h-12 flex-row items-center gap-2 px-5 py-3 active:bg-secondary'
+      className='min-h-12 flex-row items-center gap-3 px-5 py-3 active:bg-secondary'
     >
+      {/* Fixed slot so titles line up even on a row with no agent. */}
+      <View className='size-5'>{agent ? <AgentAvatar identity={agent} /> : null}</View>
       <Text numberOfLines={1} className='min-w-0 flex-1 text-[15px] text-foreground'>
         {title}
       </Text>
@@ -67,6 +81,14 @@ const ConversationRow = ({
       {conversation.pinned ? <Pin size={14} color={muted} /> : null}
     </Pressable>
   );
+};
+
+const agentFor = (
+  agents: AgentDirectory,
+  conversation: ConversationSummary,
+): AgentIdentity | undefined => {
+  const slug = rowAgentSlug(conversation);
+  return slug ? agentIdentity(agents, slug) : undefined;
 };
 
 function ConversationHistoryBody({
@@ -82,6 +104,7 @@ function ConversationHistoryBody({
   runningConversationId: string | undefined;
 }): ReactElement {
   const { list, update, remove } = useXyneAIConversations();
+  const agents = useAgentDirectory();
   const [query, setQuery] = useState('');
   const [renamingId, setRenamingId] = useState<string>();
   // Kept after closing so the sheet's content stays put while it animates away.
@@ -138,6 +161,7 @@ function ConversationHistoryBody({
             ) : (
               <ConversationRow
                 conversation={item.conversation}
+                agent={agentFor(agents, item.conversation)}
                 isRenaming={renamingId === item.conversation.rowId}
                 isRunning={item.conversation.conversationId === runningConversationId}
                 onOpen={(): void => onOpenConversation(item.conversation)}

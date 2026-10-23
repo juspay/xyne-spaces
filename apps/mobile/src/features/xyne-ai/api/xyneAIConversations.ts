@@ -10,7 +10,10 @@ export interface ConversationSummary {
   title: string;
   pinned?: boolean;
   lastMessageAt: string;
+  /** The agent to open and continue the conversation with. */
   agentSlug: string;
+  /** Every agent that answered, in first-use order; absent from older servers. */
+  agentSlugs?: string[];
 }
 
 export interface ConversationPage {
