@@ -6,6 +6,7 @@ import remarkBreaks from 'remark-breaks';
 import type { Components } from 'react-markdown';
 import type { Element } from 'hast';
 import { cn } from '../../../utils/classNames';
+import { safeMarkdownUrlTransform } from '../../../utils/safeUrl';
 import {
   buildClawCitationToolNumbers,
   linkifyAndGroupClawCitations,
@@ -170,7 +171,7 @@ export function ClawMarkdown({
     <div className={cn('claw-markdown', className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={url => url}
+        urlTransform={safeMarkdownUrlTransform}
         components={markdownComponents}
       >
         {renderedContent}

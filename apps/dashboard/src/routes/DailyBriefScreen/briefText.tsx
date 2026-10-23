@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createMarkdownComponents, type ClawCitationContext } from '../../utils/markdownComponents';
+import { safeMarkdownUrlTransform } from '../../utils/safeUrl';
 import {
   buildClawCitationToolNumbers,
   linkifyAndGroupClawCitations,
@@ -216,7 +217,11 @@ export function BriefLine({ children, context }: BriefLineProps): ReactElement |
   const text = linkifyMentions(cited, ticketPrefixes);
   if (!text.trim()) return null;
   return (
-    <Markdown remarkPlugins={REMARK_PLUGINS} urlTransform={url => url} components={components}>
+    <Markdown
+      remarkPlugins={REMARK_PLUGINS}
+      urlTransform={safeMarkdownUrlTransform}
+      components={components}
+    >
       {text}
     </Markdown>
   );

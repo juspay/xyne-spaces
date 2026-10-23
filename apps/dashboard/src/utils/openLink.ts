@@ -3,6 +3,7 @@ import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { isCallWindowRoute } from './callWindow';
 import { logger, Event } from './logger';
+import { isSafeUrl } from './safeUrl';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
 
@@ -69,6 +70,9 @@ export const resolveLinkTarget = (
   !wantsExternal(event, opts) && isElectronApp() ? 'in-app' : 'external';
 
 export const openLink = (url: string, event?: MouseLike | null, opts?: OpenLinkOpts): void => {
+  // Never hand script-capable URLs (javascript:, data:, ...) to window.open / the shell.
+  if (!isSafeUrl(url)) return;
+
   const wantExternal = wantsExternal(event, opts);
   const modifier = !!(event?.metaKey || event?.ctrlKey);
 

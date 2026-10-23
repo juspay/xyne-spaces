@@ -30,6 +30,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
+import { safeMarkdownUrlTransform } from '../../../../utils/safeUrl';
 import {
   StreamingMarkdownBlocks,
   rehypeStreamWordFade,
@@ -1776,7 +1777,7 @@ const ANSWER_REHYPE_PLUGINS = [rehypeHighlight, rehypeStreamWordFade];
 // non-http(s) schemes, which would erase the href before the `a` override can
 // intercept it and substitute a ClawCitationChip. Same fix as v3
 // ChatPageV3.tsx:417.
-const preserveUrlTransform = (url: string): string => url;
+const preserveUrlTransform = safeMarkdownUrlTransform;
 
 const MessageContent = ({
   message,

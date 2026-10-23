@@ -198,6 +198,8 @@ async function generateDocxThumbnail(file: File): Promise<Blob> {
       ignoreWidth: false,
       ignoreHeight: false,
       className: 'docx-preview',
+      // altChunk renders untrusted HTML in an unsandboxed iframe (XSS).
+      renderAltChunks: false,
     });
 
     // Strip the page-wrapper styling so the thumbnail shows clean white content
