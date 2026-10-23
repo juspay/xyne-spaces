@@ -69,6 +69,22 @@ export function findSessionInCachedPages<T extends { sessionId: string }>(
 }
 
 /**
+ * A remembered row, but only while it still belongs to the open chat.
+ *
+ * The badge keeps the last row it resolved so it cannot blank mid-move. Reused
+ * without this check, opening a chat that no cached list holds fell back to the
+ * PREVIOUS chat's row — so the header named the wrong chat's project, and a move
+ * from that badge moved the wrong chat.
+ */
+export function rememberedSessionFor<T extends { sessionId: string }>(
+  remembered: T | null | undefined,
+  conversationId: string | null | undefined,
+): T | null {
+  if (!remembered || !conversationId) return null;
+  return remembered.sessionId === conversationId ? remembered : null;
+}
+
+/**
  * The session the project badge should describe.
  *
  * `moved` is what the user just picked, honoured until the cached lists agree:

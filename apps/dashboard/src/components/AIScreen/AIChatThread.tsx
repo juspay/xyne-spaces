@@ -94,6 +94,7 @@ import { renderEmoji } from '../../utils/customEmojiUtils';
 import {
   DEFAULT_PROJECT_ICON,
   canFileSession,
+  rememberedSessionFor,
   sessionWithPendingProject,
 } from './SidebarProjects/SidebarProjects.utils';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
@@ -1914,16 +1915,26 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // disappearing under the user mid-move.
   const lastSessionRef = useRef<ConversationHistoryType | null>(null);
   if (cachedSession) lastSessionRef.current = cachedSession;
-  else if (!conversationId) lastSessionRef.current = null;
-  const resolvedSession = cachedSession ?? lastSessionRef.current;
-  // What the user just picked, held until the lists agree with it.
-  const [movedProjectId, setMovedProjectId] = useState<string | null | undefined>(undefined);
-  useEffect(() => setMovedProjectId(undefined), [conversationId]);
+  // Only while it is still THIS chat's row: a chat no cached list holds would
+  // otherwise fall back to the previously open chat, naming the wrong chat's
+  // project and moving that chat instead of the one on screen.
+  const resolvedSession =
+    cachedSession ?? rememberedSessionFor(lastSessionRef.current, conversationId);
+  // What the user just picked, held until the lists agree with it. Carries the
+  // chat it belongs to, so opening another chat drops it in the same render
+  // rather than one render later — which would have shown the previous chat's
+  // pick on this one.
+  const [moved, setMoved] = useState<{ sessionId: string; projectId: string | null } | null>(null);
+  const movedProjectId = moved?.sessionId === conversationId ? moved.projectId : undefined;
   useEffect(() => {
-    if (movedProjectId !== undefined && cachedSession?.projectId === movedProjectId) {
-      setMovedProjectId(undefined);
+    if (
+      moved &&
+      cachedSession?.sessionId === moved.sessionId &&
+      cachedSession.projectId === moved.projectId
+    ) {
+      setMoved(null);
     }
-  }, [movedProjectId, cachedSession?.projectId]);
+  }, [moved, cachedSession]);
   const activeSession = useMemo(() => {
     if (!isV2 || !conversationId) return null;
     return sessionWithPendingProject(resolvedSession, movedProjectId);
@@ -1931,7 +1942,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const handleMoveToProject = useCallback(
     (projectId: string | null): void => {
       if (!activeSession) return;
-      setMovedProjectId(projectId);
+      setMoved({ sessionId: activeSession.sessionId, projectId });
       void (async () => {
         try {
           await moveChatToProject(
@@ -1941,7 +1952,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             activeSession.agentSlug ?? null,
           );
         } catch {
-          setMovedProjectId(undefined);
+          setMoved(null);
           toast.error(projectId ? 'Could not move chat' : 'Could not remove chat from project');
         }
       })();

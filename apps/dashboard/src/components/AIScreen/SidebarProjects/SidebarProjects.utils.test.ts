@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canFileSession,
   findSessionInCachedPages,
+  rememberedSessionFor,
   sessionWithPendingProject,
 } from './SidebarProjects.utils';
 
@@ -128,5 +129,29 @@ describe('sessionWithPendingProject', () => {
   it('has nothing to describe when no row resolved at all', () => {
     expect(sessionWithPendingProject(null, 'proj-new')).toBeNull();
     expect(sessionWithPendingProject(undefined, undefined)).toBeNull();
+  });
+});
+
+describe('rememberedSessionFor', () => {
+  const chatA = { sessionId: 'chat-a', projectId: 'proj-a' };
+
+  it('reuses the remembered row while its own chat is open', () => {
+    expect(rememberedSessionFor(chatA, 'chat-a')).toBe(chatA);
+  });
+
+  // Without this the header named chat A's project while chat B was on screen,
+  // and moving from that badge moved chat A.
+  it('does not use a row remembered for chat A when chat B is open', () => {
+    expect(rememberedSessionFor(chatA, 'chat-b')).toBeNull();
+  });
+
+  it('has nothing to reuse once no chat is open', () => {
+    expect(rememberedSessionFor(chatA, null)).toBeNull();
+    expect(rememberedSessionFor(chatA, '')).toBeNull();
+  });
+
+  it('has nothing to reuse before a row has been resolved', () => {
+    expect(rememberedSessionFor(null, 'chat-a')).toBeNull();
+    expect(rememberedSessionFor(undefined, 'chat-a')).toBeNull();
   });
 });
