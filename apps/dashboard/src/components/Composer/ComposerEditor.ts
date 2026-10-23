@@ -1,6 +1,8 @@
-import { Mark, Node, mergeAttributes } from '@tiptap/core';
+import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { ContextRef, PickKind } from './Composer.types';
-import { mentionToken } from './Composer.utils';
+import { ATOM_PLACEHOLDER, mentionToken } from './Composer.utils';
 
 /**
  * Inline pill for something picked from the @ or # menu. It reads as part of
@@ -83,6 +85,51 @@ export function mentionRefs(doc: {
   });
   return refs;
 }
+
+/** A leading "/command" and the whitespace before it, read from the first line. */
+const LEADING_COMMAND = /^(\s*)(\/([^\s@#/]+))/;
+
+/**
+ * The slash command a message starts with ("/design …"), painted like a
+ * channel pill once it names a real command. Only a decoration: the text
+ * stays plain and editable, so the agent still reads "/design" at the start.
+ * The negative margin lets the pill's padding bleed out without moving the
+ * text as it turns blue.
+ */
+export const CommandHighlight = Extension.create<{ isCommand: (name: string) => boolean }>({
+  name: 'commandHighlight',
+
+  addOptions() {
+    return { isCommand: (): boolean => false };
+  },
+
+  addProseMirrorPlugins() {
+    const { isCommand } = this.options;
+    return [
+      new Plugin({
+        key: new PluginKey('commandHighlight'),
+        props: {
+          decorations: (state): DecorationSet | null => {
+            const first = state.doc.firstChild;
+            if (!first?.isTextblock) return null;
+            const text = first.textBetween(0, first.content.size, undefined, ATOM_PLACEHOLDER);
+            const match = LEADING_COMMAND.exec(text);
+            const [, lead = '', token = '', name = ''] = match ?? [];
+            if (!match || !isCommand(name)) return null;
+            // The first line's text starts at position 1.
+            const from = 1 + lead.length;
+            return DecorationSet.create(state.doc, [
+              Decoration.inline(from, from + token.length, {
+                class:
+                  '-mx-1 rounded-[5px] bg-[var(--mention-bg)] px-1 font-medium text-[color:var(--mention-color)]',
+              }),
+            ]);
+          },
+        },
+      }),
+    ];
+  },
+});
 
 /** Interim dictation text, painted with a shimmer until it is final (see VoiceInput). */
 export const VoiceShimmerMark = Mark.create({

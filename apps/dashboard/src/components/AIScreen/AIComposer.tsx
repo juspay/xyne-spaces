@@ -57,6 +57,7 @@ import type {
 } from '../Composer/Composer.types';
 import { addPicked, pickedRefsOf, removePicked } from '../Composer/Composer.utils';
 import {
+  MENU_ICON,
   PlusMenuChoice,
   knowledgeTrayItems,
   selectionTrayItems,
@@ -851,7 +852,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           ...(harnessAvailable && {
             extra: (
               <PlusMenuChoice
-                icon={<Box className='size-[18px] shrink-0 text-muted-foreground' aria-hidden />}
+                icon={<Box className={MENU_ICON} aria-hidden />}
                 label='Sandbox'
                 value={sandboxMode}
                 options={SANDBOX_MODE_OPTIONS.map(o => ({
