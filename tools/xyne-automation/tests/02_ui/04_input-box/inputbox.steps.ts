@@ -5,6 +5,7 @@ import { BASELINE_DM_KEY } from '@/fixtures/baseline';
 import { getStoredUser } from '@/fixtures/fixture-helpers';
 import { testContext } from '@/tests/shared/runtime/test-context';
 import { assertValidUserAlias } from '@/tests/shared/support/literal-validation';
+import { waitForZeroSyncToSettle } from '@/tests/shared/support/zero-sync-bridge';
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -42,10 +43,10 @@ export default class InputBoxSteps {
         // chat-list-loading may not render at all; safe to continue
       });
 
-    // Second call absorbs drafts arriving just after the first clear (Zero sync race).
+    // A saved draft can land via Zero sync after the page renders; clear only once the socket is quiet.
+    await waitForZeroSyncToSettle(page, 150);
     await page.evaluate(InputBoxSteps.clearProseMirrorScript);
-    await page.waitForTimeout(150);
-    await page.evaluate(InputBoxSteps.clearProseMirrorScript);
+    await expect(inputbox).toHaveText('');
   }
 
   // IIFE: page.evaluate no-ops a bare `() => {}` string, so it must self-invoke.
@@ -204,7 +205,6 @@ export default class InputBoxSteps {
     const page = testContext.activePage;
     const inputbox = page.locator("[data-testid='message-input']").first();
     await inputbox.press('Enter');
-    await page.waitForTimeout(400);
   }
 
   @Step('pressing Cmd+Enter in inputbox')
@@ -220,7 +220,6 @@ export default class InputBoxSteps {
     const page = testContext.activePage;
     const inputbox = page.locator("[data-testid='message-input']").first();
     await inputbox.press('Tab');
-    await page.waitForTimeout(400);
   }
 
   @Step('pressing End in inputbox')
@@ -236,7 +235,6 @@ export default class InputBoxSteps {
     const inputbox = page.locator("[data-testid='message-input']").first();
     await inputbox.press('Home');
     await inputbox.press('Backspace');
-    await page.waitForTimeout(400);
   }
 
   @Step('exiting current list via double Enter')
@@ -251,7 +249,11 @@ export default class InputBoxSteps {
         break;
       }
       await inputbox.press('Enter');
-      await page.waitForTimeout(200);
+      // Ends as soon as the root paragraph shows up; a timeout just means try another Enter.
+      await rootParagraph
+        .first()
+        .waitFor({ state: 'attached', timeout: 300 })
+        .catch(() => {});
     }
     if ((await rootParagraph.count()) === 0) {
       await page.evaluate(InputBoxSteps.appendRootParagraphScript);
@@ -483,8 +485,9 @@ export default class InputBoxSteps {
   public async verifyInputboxContainsMultipleLines(): Promise<void> {
     const page = testContext.activePage;
     const paragraphs = page.locator("[data-testid='message-input'] p");
-    const count = await paragraphs.count();
-    assert.ok(count >= 2, `Expected at least 2 paragraphs, found ${count}`);
+    await expect
+      .poll(() => paragraphs.count(), { message: 'Expected at least 2 paragraphs' })
+      .toBeGreaterThanOrEqual(2);
   }
 
   @Step('verifying cursor is outside list')
@@ -506,19 +509,20 @@ export default class InputBoxSteps {
   @Step('verifying list item was outdented')
   public async verifyListItemWasOutdented(): Promise<void> {
     const page = testContext.activePage;
-    // After outdenting, should have fewer nested lists
-    const nestedLists = page.locator("[data-testid='message-input'] ul ul");
-    const count = await nestedLists.count();
-    // This is a simplified check - real test may need more specific logic
-    assert.ok(count >= 0, 'List structure exists');
+    // The only nested item was lifted back to the top level, so no nested list remains.
+    const nestedLists = page.locator(
+      "[data-testid='message-input'] ul ul, [data-testid='message-input'] ol ol"
+    );
+    await expect(nestedLists).toHaveCount(0);
   }
 
   @Step('verifying multiple list items exist')
   public async verifyMultipleListItemsExist(): Promise<void> {
     const page = testContext.activePage;
     const listItems = page.locator("[data-testid='message-input'] li");
-    const count = await listItems.count();
-    assert.ok(count >= 2, `Expected at least 2 list items, found ${count}`);
+    await expect
+      .poll(() => listItems.count(), { message: 'Expected at least 2 list items' })
+      .toBeGreaterThanOrEqual(2);
   }
 
   @Step('verifying second list item exists at same level')
@@ -527,8 +531,9 @@ export default class InputBoxSteps {
     const listItems = page.locator(
       "[data-testid='message-input'] > ul > li, [data-testid='message-input'] > ol > li"
     );
-    const count = await listItems.count();
-    assert.ok(count >= 2, `Expected at least 2 list items at same level, found ${count}`);
+    await expect
+      .poll(() => listItems.count(), { message: 'Expected at least 2 list items at same level' })
+      .toBeGreaterThanOrEqual(2);
   }
 
   @Step('verifying list depth does not exceed <maxDepth> levels')
@@ -557,17 +562,15 @@ export default class InputBoxSteps {
     await expect(sendButton).toBeEnabled();
     // Verify message is still in input (not sent)
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = await editor.textContent();
-    assert.ok(text && text.length > 0, 'Message still in editor');
+    await expect(editor, 'Message still in editor').toHaveText(/\S/);
   }
 
   @Step('verifying message was sent to conversation')
   public async verifyMessageWasSentToConversation(): Promise<void> {
     const page = testContext.activePage;
-    // Check that input is cleared
+    // The composer clears once the send goes through.
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = await editor.textContent();
-    assert.strictEqual(text?.trim(), '', 'Input should be cleared after send');
+    await expect(editor).toHaveText('', { timeout: 10000 });
   }
 
   @Step('verifying message appears in conversation')
@@ -581,8 +584,7 @@ export default class InputBoxSteps {
   public async verifyInputIsCleared(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = await editor.textContent();
-    assert.strictEqual(text?.trim(), '', 'Input should be empty');
+    await expect(editor, 'Input should be empty').toHaveText('');
   }
 
   @Step('verifying voice input button is visible')
@@ -619,11 +621,12 @@ export default class InputBoxSteps {
     const page = testContext.activePage;
     const codeBlock = page.locator("[data-testid='message-input'] pre").first();
     await expect(codeBlock).toBeVisible();
-    const text = (await codeBlock.textContent()) ?? '';
-    assert.ok(
-      text.includes('\n') || text.split('\n').length >= 2,
-      'Code block should contain multiple lines'
-    );
+    // Raw textContent: toHaveText would collapse the newline being checked for.
+    await expect
+      .poll(async () => (await codeBlock.textContent()) ?? '', {
+        message: 'Code block should contain multiple lines',
+      })
+      .toContain('\n');
   }
 
   // ===========================================
@@ -727,11 +730,9 @@ export default class InputBoxSteps {
   public async verifyLinkWasRemovedAndTextRemains(): Promise<void> {
     const page = testContext.activePage;
     const links = page.locator("[data-testid='message-input'] a");
-    const count = await links.count();
-    assert.strictEqual(count, 0, 'Link element should be removed from editor');
+    await expect(links, 'Link element should be removed from editor').toHaveCount(0);
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.ok(text.trim().length > 0, 'Original text should remain in editor');
+    await expect(editor, 'Original text should remain in editor').toHaveText(/\S/);
   }
 
   @Step('verifying link text is <expectedText>')
@@ -839,24 +840,23 @@ export default class InputBoxSteps {
   public async verifyEmojiIsInsertedInEditor(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.ok(text.length > 0, 'Editor should contain inserted emoji');
+    await expect(editor, 'Editor should contain inserted emoji').toHaveText(/\S/);
   }
 
   @Step('verifying emoji appears in editor')
   public async verifyEmojiAppearsInEditor(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.ok(text.length > 0 && !text.includes(':smile:'), 'Emoji shortcut should be converted');
+    await expect(editor, 'Emoji shortcut should be converted').not.toContainText(':smile:');
+    await expect(editor).toHaveText(/\S/);
   }
 
   @Step('verifying smiley emoji appears in editor')
   public async verifySmileyEmojiAppearsInEditor(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.ok(text.length > 0 && !text.includes(':)'), 'Smiley emoticon should be converted');
+    await expect(editor, 'Smiley emoticon should be converted').not.toContainText(':)');
+    await expect(editor).toHaveText(/\S/);
   }
 
   @Step('verifying custom emoji is inserted in editor')
@@ -956,8 +956,9 @@ export default class InputBoxSteps {
     const num = Number.parseInt(count, 10);
     const previews = page.locator('[data-testid="attachment-preview"]');
     await expect(previews.first()).toBeVisible({ timeout: 5000 });
-    const actual = await previews.count();
-    assert.ok(actual >= num, `Expected at least ${num} previews, found ${actual}`);
+    await expect
+      .poll(() => previews.count(), { message: `Expected at least ${num} previews` })
+      .toBeGreaterThanOrEqual(num);
   }
 
   @Step('attaching test file')
@@ -1023,8 +1024,9 @@ export default class InputBoxSteps {
     const page = testContext.activePage;
     const num = Number.parseInt(count, 10);
     const previews = page.locator('[data-testid="attachment-preview"]');
-    const actual = await previews.count();
-    assert.ok(actual >= num, `Expected at least ${num} attachments, found ${actual}`);
+    await expect
+      .poll(() => previews.count(), { message: `Expected at least ${num} attachments` })
+      .toBeGreaterThanOrEqual(num);
   }
 
   @Step('attempting to attach 11th file')
@@ -1262,16 +1264,14 @@ export default class InputBoxSteps {
   public async verifyTextAppearsInEditor(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.ok(text.trim().length > 0, 'Expected text in editor');
+    await expect(editor, 'Expected text in editor').toHaveText(/\S/);
   }
 
   @Step('verifying no file attachment created')
   public async verifyNoFileAttachmentCreated(): Promise<void> {
     const page = testContext.activePage;
     const previews = page.locator('button[aria-label^="Remove attachment"]');
-    const count = await previews.count();
-    assert.strictEqual(count, 0, 'Expected no file attachments');
+    await expect(previews, 'Expected no file attachments').toHaveCount(0);
   }
 
   @Step('verifying error message about table size')
@@ -1526,22 +1526,13 @@ export default class InputBoxSteps {
     await page.locator('[aria-label="Stop voice input"]').first().click();
   }
 
-  @Step('speaking test phrase')
-  public async speakTestPhrase(): Promise<void> {
-    const page = testContext.activePage;
-    await page.waitForTimeout(500);
-  }
-
-  @Step('speaking user mention')
-  public async speakUserMention(): Promise<void> {
-    const page = testContext.activePage;
-    await page.waitForTimeout(500);
-  }
-
   @Step('waiting for transcription')
   public async waitForTranscription(): Promise<void> {
     const page = testContext.activePage;
-    await page.waitForTimeout(2000);
+    await page
+      .locator('text=/Transcrib/i, [data-testid="transcribing"]')
+      .first()
+      .waitFor({ state: 'hidden', timeout: 15000 });
   }
 
   @Step('verifying transcribed text appears in editor')
@@ -1602,8 +1593,7 @@ export default class InputBoxSteps {
   public async verifyCommandWasExecuted(): Promise<void> {
     const page = testContext.activePage;
     const editor = page.locator("[data-testid='message-input']").first();
-    const text = (await editor.textContent()) ?? '';
-    assert.strictEqual(text.trim(), '', 'Editor should be cleared after command execution');
+    await expect(editor, 'Editor should be cleared after command execution').toHaveText('');
   }
 
   @Step('verifying message was not sent to conversation')

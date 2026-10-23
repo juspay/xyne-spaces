@@ -25,7 +25,10 @@ RUN apt-get update && apt-get install -y \
 # --- framework: deps then source ---
 
 # --- backend: deps then source ---
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+# Install pnpm via npm, not corepack: on the CI runner's egress proxy
+# `corepack prepare` fails fetching pnpm from registry.npmjs.org, while npm
+# pulls from the same registry fine (same fix as tools/xyne-automation/Dockerfile).
+RUN npm install -g pnpm@10.15.0
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/

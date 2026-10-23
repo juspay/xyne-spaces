@@ -22,6 +22,7 @@ import {
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
 import { clickHoverActionOnMessage as hoverAndClickActionOnMessage } from '@/tests/shared/support/message-hover';
+import { waitForZeroSyncToSettle } from '@/tests/shared/support/zero-sync-bridge';
 
 function resolvePathValue(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((currentValue, segment) => {
@@ -51,6 +52,36 @@ function resolveStoredText(text: unknown): string {
 
     return String(value);
   });
+}
+
+const VIRTUAL_MESSAGE_LIST = '[data-testid="virtuoso-item-list"]';
+
+// The virtualized list element is full-height inner content; the element that actually
+// scrolls is an ancestor ([data-virtuoso-scroller] in the chat list). Every match is
+// checked because a channel and an open thread panel each render their own list.
+async function waitForTextInVirtualList(page: Page, selector: string, text: string): Promise<void> {
+  await page.waitForFunction(
+    ({ sel, text }) => {
+      // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
+      // @ts-ignore - document exists in browser context
+      const lists = Array.from(document.querySelectorAll(sel));
+      // biome-ignore lint/suspicious/noExplicitAny: DOM types are not in the Node lib
+      for (const list of lists as any[]) {
+        let scroller = list.closest('[data-virtuoso-scroller]');
+        if (!scroller) {
+          scroller = list;
+          while (scroller && scroller.scrollHeight <= scroller.clientHeight) {
+            scroller = scroller.parentElement;
+          }
+        }
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: DOM types are not in the Node lib
+      return (lists as any[]).some((list) => list.textContent?.includes(text));
+    },
+    { sel: selector, text },
+    { timeout: 60000 }
+  );
 }
 
 function resolveStoredMessageText(
@@ -547,26 +578,26 @@ export default class BrowserSteps {
     const element = page.locator(selector).first();
     await element.waitFor({ state: 'visible' });
 
-    // Scroll to bottom using JavaScript and wait for scroll to complete
-    await page.evaluate((sel: string) => {
-      // @ts-expect-error - document exists in browser context
-      const virtuoso = document.querySelector(sel);
-      if (virtuoso) {
-        virtuoso.scrollTop = virtuoso.scrollHeight;
-        // Force a reflow to ensure scroll has happened
-        void virtuoso.scrollTop;
-      }
-    }, selector);
-
-    // Wait for scroll position to stabilize (virtuoso updates scrollTop asynchronously)
+    // Scroll the element that actually scrolls (see waitForTextInVirtualList), then wait for it
+    // to settle at the bottom - the virtualizer can grow the content after the first jump.
     await page.waitForFunction(
       (sel: string) => {
         // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
         // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector(sel);
-        if (!virtuoso) return false;
-        // Check if we're at the bottom (within 10px tolerance)
-        return virtuoso.scrollHeight - virtuoso.scrollTop - virtuoso.clientHeight < 10;
+        const element = document.querySelector(sel);
+        if (!element) return false;
+        let scroller = element.closest('[data-virtuoso-scroller]');
+        if (!scroller) {
+          scroller = element;
+          while (scroller && scroller.scrollHeight <= scroller.clientHeight) {
+            scroller = scroller.parentElement;
+          }
+        }
+        // Nothing overflows, so the content is already fully in view.
+        if (!scroller) return true;
+        const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 10;
+        if (!atBottom) scroller.scrollTop = scroller.scrollHeight;
+        return atBottom;
       },
       selector,
       { timeout: 5000 }
@@ -655,41 +686,20 @@ export default class BrowserSteps {
 
   @Step('waiting for zero sync to settle')
   public async waitForZeroSyncToSettle(): Promise<void> {
-    // The bridge is dormant by default - patches do effectively nothing while
-    // inactive. Calling activate() flips the bookkeeping on, then we poll
-    // isSettled until 400ms of WebSocket silence have passed.
-    const page = testContext.activePage;
-    await page.evaluate(() => {
-      // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
-      // @ts-ignore - __zeroSync is injected before page load
-      if (typeof window.__zeroSync !== 'undefined') window.__zeroSync.activate();
-    });
-    await page.waitForFunction(
-      // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
-      // @ts-ignore - __zeroSync is injected before page load
-      () => typeof window.__zeroSync !== 'undefined' && window.__zeroSync.isSettled(400),
-      null,
-      { timeout: 15000, polling: 100 }
-    );
+    await waitForZeroSyncToSettle(testContext.activePage, 400);
   }
 
   @Step('waiting for zero sync to settle fast')
   public async waitForZeroSyncToSettleFast(): Promise<void> {
-    // Fast variant: only waits 150ms of WebSocket silence (62% faster than default).
-    // Use for simple operations like message sends where full 400ms is overkill.
-    const page = testContext.activePage;
-    await page.evaluate(() => {
-      // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
-      // @ts-ignore - __zeroSync is injected before page load
-      if (typeof window.__zeroSync !== 'undefined') window.__zeroSync.activate();
-    });
-    await page.waitForFunction(
-      // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
-      // @ts-ignore - __zeroSync is injected before page load
-      () => typeof window.__zeroSync !== 'undefined' && window.__zeroSync.isSettled(150),
-      null,
-      { timeout: 10000, polling: 50 }
-    );
+    // 150ms of WebSocket silence is enough for simple operations like message sends.
+    await waitForZeroSyncToSettle(testContext.activePage, 150, 10000);
+  }
+
+  @Step('waiting for zero sync to be idle for <milliseconds> milliseconds')
+  public async waitForZeroSyncToBeIdleFor(milliseconds: string): Promise<void> {
+    // For debounced writes (e.g. canvas autosave), pick a window longer than the debounce
+    // so the write has gone out before the socket counts as idle.
+    await waitForZeroSyncToSettle(testContext.activePage, Number(milliseconds));
   }
 
   @Step('waiting for <selector> to be empty')
@@ -726,28 +736,7 @@ export default class BrowserSteps {
     const page = testContext.activePage;
     const container = page.locator(selector).first();
     await container.waitFor({ state: 'visible', timeout: 10000 });
-    // Scroll to bottom while waiting - virtualized list may push new messages out of view
-    // when shared channels receive concurrent system messages from parallel tests.
-    await page.waitForFunction(
-      ({ sel, text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector(sel);
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const node = document.querySelector(sel);
-        return node?.textContent?.includes(text) ?? false;
-      },
-      { sel: selector, text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, selector, resolvedText);
   }
 
   @Step(
@@ -767,27 +756,7 @@ export default class BrowserSteps {
     const page = testContext.activePage;
     const container = page.locator(selector).first();
     await container.waitFor({ state: 'visible', timeout: 10000 });
-    // Scroll to bottom while waiting - virtualized list may push new messages out of view.
-    await page.waitForFunction(
-      ({ sel, text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector(sel);
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const node = document.querySelector(sel);
-        return node?.textContent?.includes(text) ?? false;
-      },
-      { sel: selector, text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, selector, resolvedText);
   }
 
   // ===========================================
@@ -836,22 +805,15 @@ export default class BrowserSteps {
 
   @Step('verifying <selector> is not visible')
   public async verifySelectorIsNotVisible(selector: string): Promise<void> {
-    const element = testContext.activePage.locator(selector).first();
-    const count = await element.count();
-    if (count > 0) {
-      await element.waitFor({ state: 'hidden', timeout: 5000 });
-    }
+    await expect(testContext.activePage.locator(selector).first()).toBeHidden({ timeout: 5000 });
   }
 
   @Step('verifying <selector> contains text <expectedText>')
   public async verifySelectorContainsText(selector: string, expectedText: string): Promise<void> {
-    const element = testContext.activePage.locator(selector).first();
-    await element.waitFor({ state: 'visible' });
-    const textContent = await element.textContent();
-    assert.ok(
-      textContent?.includes(expectedText),
-      `Expected "${selector}" to contain "${expectedText}" but got "${textContent}"`
-    );
+    // Retries until the text matches, so a value that arrives via sync just after render still passes.
+    await expect(testContext.activePage.locator(selector).first()).toContainText(expectedText, {
+      timeout: config.timeout,
+    });
   }
 
   @Step('verifying stored user <userAlias> field <fieldName> is visible in <selector>')
@@ -950,27 +912,7 @@ export default class BrowserSteps {
     const container = page.locator(selector).first();
     await container.waitFor({ state: 'visible' });
 
-    // Interval scrolling: continuously scroll to bottom while waiting for message
-    await page.waitForFunction(
-      ({ sel, text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector(sel);
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const container = document.querySelector(sel);
-        return container?.textContent?.includes(text) ?? false;
-      },
-      { sel: selector, text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, selector, resolvedText);
   }
 
   @Step(
@@ -991,27 +933,7 @@ export default class BrowserSteps {
     const container = page.locator(selector).first();
     await container.waitFor({ state: 'visible' });
 
-    // Interval scrolling: continuously scroll to bottom while waiting for message
-    await page.waitForFunction(
-      ({ sel, text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector(sel);
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const container = document.querySelector(sel);
-        return container?.textContent?.includes(text) ?? false;
-      },
-      { sel: selector, text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, selector, resolvedText);
   }
 
   @Step(
@@ -1131,27 +1053,7 @@ export default class BrowserSteps {
     const virtuosoList = page.locator('[data-testid="virtuoso-item-list"]').first();
     await virtuosoList.waitFor({ state: 'visible', timeout: 30000 });
 
-    // Interval scrolling: continuously scroll to bottom while waiting for message
-    await page.waitForFunction(
-      ({ text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const container = document.querySelector('[data-testid="virtuoso-item-list"]');
-        return container?.textContent?.includes(text) ?? false;
-      },
-      { text: messageText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, VIRTUAL_MESSAGE_LIST, messageText);
   }
 
   @Step(
@@ -1172,27 +1074,7 @@ export default class BrowserSteps {
     const virtuosoList = page.locator('[data-testid="virtuoso-item-list"]').first();
     await virtuosoList.waitFor({ state: 'visible', timeout: 30000 });
 
-    // Interval scrolling: continuously scroll to bottom while waiting for message
-    await page.waitForFunction(
-      ({ text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const container = document.querySelector('[data-testid="virtuoso-item-list"]');
-        return container?.textContent?.includes(text) ?? false;
-      },
-      { text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, VIRTUAL_MESSAGE_LIST, resolvedText);
   }
 
   @Step(
@@ -1213,27 +1095,7 @@ export default class BrowserSteps {
     const virtuosoList = page.locator('[data-testid="virtuoso-item-list"]').first();
     await virtuosoList.waitFor({ state: 'visible', timeout: 30000 });
 
-    // Interval scrolling: continuously scroll to bottom while waiting for message
-    await page.waitForFunction(
-      ({ text }) => {
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const virtuoso = document.querySelector('[data-testid="virtuoso-item-list"]');
-        if (virtuoso) {
-          // The chat list scrolls on its [data-virtuoso-scroller] ancestor, not on the item list.
-          // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where properties exist
-          // @ts-ignore - scrollTop/scrollHeight exist on virtuoso element
-          const scroller = virtuoso.closest('[data-virtuoso-scroller]') ?? virtuoso;
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-        // biome-ignore lint/suspicious/noTsIgnore: Code runs in browser context where document exists
-        // @ts-ignore - document exists in browser context
-        const container = document.querySelector('[data-testid="virtuoso-item-list"]');
-        return container?.textContent?.includes(text) ?? false;
-      },
-      { text: resolvedText },
-      { timeout: 60000 }
-    );
+    await waitForTextInVirtualList(page, VIRTUAL_MESSAGE_LIST, resolvedText);
   }
 
   // ===========================================
@@ -1390,10 +1252,16 @@ export default class BrowserSteps {
     await removeButton.waitFor({ state: 'visible', timeout: 60000 });
     // The tile (and its remove button) shows as soon as the file is picked; the
     // composer keeps its send button disabled until the bytes finish uploading.
+    // Only look inside the attachment's own composer: an ancestor that wraps a
+    // dialog (e.g. the page behind the create-ticket modal) holds some other
+    // composer's send button. Forms without one (ticket modal) upload on submit.
     const sendButton = removeButton
-      .locator('xpath=ancestor::*[.//*[@data-testid="send-message-button"]][1]')
+      .locator(
+        'xpath=ancestor::*[.//*[@data-testid="send-message-button"]][not(.//*[@role="dialog"])][1]'
+      )
       .locator('[data-testid="send-message-button"]')
       .first();
+    if ((await sendButton.count()) === 0) return;
     await expect(sendButton).toBeEnabled({ timeout: 60000 });
   }
 
@@ -1408,22 +1276,8 @@ export default class BrowserSteps {
     const tmpFile = path.join(os.tmpdir(), `test-attachment-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, 'Test attachment content');
     await element.setInputFiles(tmpFile);
-    // Wait for upload completion indicators instead of hardcoded timeout
-    const page = testContext.activePage;
-    // Look for common upload completion indicators: file name displayed, upload spinner gone, etc.
-    await Promise.race([
-      page.locator('[data-testid*="file-"], [data-testid*="attachment-"]').first().waitFor({
-        state: 'visible',
-        timeout: 3000,
-      }),
-      page.locator('[data-testid*="upload"], [data-testid*="spinner"]').first().waitFor({
-        state: 'hidden',
-        timeout: 3000,
-      }),
-      page.waitForTimeout(2000), // Fallback to original timeout if no indicators found
-    ]).catch(() => {
-      // If no upload indicators are present, the upload might be instant
-    });
+    // The attachment preview renders its remove button once the file is accepted.
+    await this.waitForAttachmentUpload(path.basename(tmpFile));
   }
 
   // ===========================================
