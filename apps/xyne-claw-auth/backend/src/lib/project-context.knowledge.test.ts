@@ -249,9 +249,18 @@ describe("resolveProjectKnowledge — callers that cannot deliver files", () => 
   it("rewords delivered files as unavailable without dropping them from the list", async () => {
     state.knowledge = [row()];
     const result = await resolve();
-    expect(result?.manifest).toContain("supplied to you as attached files");
+    expect(result?.manifest).toContain("attached where available");
     expect(result?.manifestFilesUnavailable).toContain("- Brand guide (file — contents not available on this run)");
-    expect(result?.manifestFilesUnavailable).not.toContain("supplied to you as attached files");
+    expect(result?.manifestFilesUnavailable).not.toContain("attached where available");
+  });
+
+  // claw drops a gcsRef it cannot fetch with only a log line, so a manifest
+  // that promised the file outright had the agent describing one it never got.
+  it("does not promise a file is attached, since claw drops one it cannot fetch", async () => {
+    state.knowledge = [row()];
+    const result = await resolve();
+    expect(result?.manifest).not.toContain("are supplied to you as attached files");
+    expect(result?.manifest).toContain("say so instead of describing its contents");
   });
 
   it("leaves non-file items worded identically in both manifests", async () => {
