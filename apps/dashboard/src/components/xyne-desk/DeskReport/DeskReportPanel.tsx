@@ -267,7 +267,10 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                       <ChevronDown size={14} className='text-desk-muted' />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' className='max-h-80 min-w-[260px] overflow-y-auto'>
+                  <DropdownMenuContent
+                    align='end'
+                    className='max-h-80 min-w-[260px] overflow-y-auto'
+                  >
                     {history.map((item, i) => (
                       <DropdownMenuItem
                         key={item.id}
@@ -285,7 +288,9 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                               {item.rangeDays === 1 ? '1 day' : `${item.rangeDays} days`}
                             </span>
                           </span>
-                          {item.id === shown?.id && <Check size={14} className='text-desk-accent' />}
+                          {item.id === shown?.id && (
+                            <Check size={14} className='text-desk-accent' />
+                          )}
                         </span>
                       </DropdownMenuItem>
                     ))}
