@@ -20,9 +20,9 @@
  * Pure: no DOM, no CSS parsing, no network.
  */
 
-export type TokenSliderKind = "radius" | "accent" | "spacing" | "fontSize";
+export type TokenSliderKind = 'radius' | 'accent' | 'spacing' | 'fontSize';
 
-export type TokenSliderUnit = "px" | "rem" | "em" | "%" | "none";
+export type TokenSliderUnit = 'px' | 'rem' | 'em' | '%' | 'none';
 
 export interface TokenSliderControl {
   /** The custom property, `--` included, exactly as the document declared it. */
@@ -35,7 +35,7 @@ export interface TokenSliderControl {
 }
 
 export interface TokenRangeControl extends TokenSliderControl {
-  kind: "radius" | "spacing" | "fontSize";
+  kind: 'radius' | 'spacing' | 'fontSize';
   unit: TokenSliderUnit;
   /** Parsed from `originalValue`; the slider starts here. */
   value: number;
@@ -45,7 +45,7 @@ export interface TokenRangeControl extends TokenSliderControl {
 }
 
 export interface TokenColorControl extends TokenSliderControl {
-  kind: "accent";
+  kind: 'accent';
   /** Six-digit hex, upper case. Only colours we can round-trip become controls. */
   value: string;
 }
@@ -53,14 +53,14 @@ export interface TokenColorControl extends TokenSliderControl {
 export type TokenControl = TokenRangeControl | TokenColorControl;
 
 export const isColorControl = (control: TokenControl): control is TokenColorControl =>
-  control.kind === "accent";
+  control.kind === 'accent';
 
 /** Names that say outright what they are, most specific first. */
 const NAME_PATTERNS: ReadonlyArray<{ kind: TokenSliderKind; pattern: RegExp }> = [
-  { kind: "radius", pattern: /radius|rounded|corner/ },
-  { kind: "spacing", pattern: /spacing|space|gap|gutter|inset/ },
-  { kind: "fontSize", pattern: /font-size|fontsize|text-size|type-scale|leading|line-height/ },
-  { kind: "accent", pattern: /accent|primary|brand/ },
+  { kind: 'radius', pattern: /radius|rounded|corner/ },
+  { kind: 'spacing', pattern: /spacing|space|gap|gutter|inset/ },
+  { kind: 'fontSize', pattern: /font-size|fontsize|text-size|type-scale|leading|line-height/ },
+  { kind: 'accent', pattern: /accent|primary|brand/ },
 ];
 
 /**
@@ -89,9 +89,9 @@ export function toHexColor(value: string): string | null {
   const full =
     digits.length === 3
       ? digits
-          .split("")
-          .map((d) => d + d)
-          .join("")
+          .split('')
+          .map(d => d + d)
+          .join('')
       : digits;
   return `#${full.toUpperCase()}`;
 }
@@ -109,7 +109,7 @@ export function parseLength(raw: string): ParsedLength | null {
   if (!match) return null;
   const value = Number(match[1]);
   if (!Number.isFinite(value)) return null;
-  const unit = (match[2]?.toLowerCase() ?? "none") as TokenSliderUnit;
+  const unit = (match[2]?.toLowerCase() ?? 'none') as TokenSliderUnit;
   return { value, unit };
 }
 
@@ -122,17 +122,20 @@ export function parseLength(raw: string): ParsedLength | null {
  * nearest bound and silently restyle the design before anyone touched a
  * control.
  */
-function rangeFor(kind: TokenRangeControl["kind"], parsed: ParsedLength): {
+function rangeFor(
+  kind: TokenRangeControl['kind'],
+  parsed: ParsedLength,
+): {
   min: number;
   max: number;
   step: number;
 } {
-  const rem = parsed.unit === "rem" || parsed.unit === "em";
-  if (kind === "radius") {
+  const rem = parsed.unit === 'rem' || parsed.unit === 'em';
+  if (kind === 'radius') {
     const max = rem ? 3 : 48;
     return { min: 0, max: Math.max(max, Math.ceil(parsed.value)), step: rem ? 0.0625 : 1 };
   }
-  if (kind === "spacing") {
+  if (kind === 'spacing') {
     const max = rem ? 6 : 96;
     return { min: 0, max: Math.max(max, Math.ceil(parsed.value)), step: rem ? 0.0625 : 1 };
   }
@@ -148,7 +151,7 @@ function rangeFor(kind: TokenRangeControl["kind"], parsed: ParsedLength): {
   };
 }
 
-const labelFor = (name: string): string => name.replace(/^--/, "");
+const labelFor = (name: string): string => name.replace(/^--/, '');
 
 function classify(name: string, value: string): TokenSliderKind | null {
   const lower = name.toLowerCase();
@@ -156,7 +159,7 @@ function classify(name: string, value: string): TokenSliderKind | null {
     if (pattern.test(lower)) return kind;
   }
   // Decided by the value, not the name. See AMBIGUOUS_TEXT.
-  if (AMBIGUOUS_TEXT.test(lower) && parseLength(value)) return "fontSize";
+  if (AMBIGUOUS_TEXT.test(lower) && parseLength(value)) return 'fontSize';
   return null;
 }
 
@@ -186,7 +189,7 @@ export function buildTokenControls(declared: Record<string, string>): TokenContr
     const kind = classify(name, value);
     if (!kind) continue;
 
-    if (kind === "accent") {
+    if (kind === 'accent') {
       const hex = toHexColor(value);
       if (!hex) continue;
       controls.push({ name, kind, originalValue: value, label: labelFor(name), value: hex });
@@ -198,7 +201,7 @@ export function buildTokenControls(declared: Record<string, string>): TokenContr
     // A unitless length is only safe for a scale factor, and these are all
     // absolute lengths — writing `12` back where `12px` was declared would
     // change nothing in CSS and look like a dead slider.
-    if (parsed.unit === "none" || parsed.unit === "%") continue;
+    if (parsed.unit === 'none' || parsed.unit === '%') continue;
     controls.push({
       name,
       kind,
@@ -219,11 +222,11 @@ export function buildTokenControls(declared: Record<string, string>): TokenContr
 /** The value to write for a control at a given slider position. */
 export function formatControlValue(control: TokenControl, next: number | string): string {
   if (isColorControl(control)) return String(next);
-  const numeric = typeof next === "number" ? next : Number(next);
+  const numeric = typeof next === 'number' ? next : Number(next);
   if (!Number.isFinite(numeric)) return control.originalValue;
   // Trailing zeros removed so a rem value reads `0.5rem`, not `0.5000rem`.
   const rounded = Math.round(numeric * 10_000) / 10_000;
-  return `${rounded}${control.unit === "none" ? "" : control.unit}`;
+  return `${rounded}${control.unit === 'none' ? '' : control.unit}`;
 }
 
 /** Only the controls moved away from what the document declared. Reset and Save
@@ -244,7 +247,7 @@ export function changedOverrides(
 
 /** The id of the block "Save to design" writes, so a second save replaces the
  *  first instead of stacking another one on top. */
-export const SLIDER_OVERRIDE_STYLE_ID = "xyne-slider-overrides";
+export const SLIDER_OVERRIDE_STYLE_ID = 'xyne-slider-overrides';
 
 /**
  * Nothing here is written into a document unescaped without passing this first.
@@ -273,6 +276,6 @@ export function buildOverrideStyleBlock(overrides: Record<string, string>): stri
     .filter(([name, value]) => isEmittableName(name) && isEmittableValue(value))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, value]) => `  ${name}: ${value.trim()} !important;`);
-  if (declarations.length === 0) return "";
-  return `:root {\n${declarations.join("\n")}\n}`;
+  if (declarations.length === 0) return '';
+  return `:root {\n${declarations.join('\n')}\n}`;
 }

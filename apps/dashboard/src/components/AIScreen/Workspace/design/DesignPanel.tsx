@@ -412,10 +412,7 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   /** Straight to the frame. No state round-trip, no srcDoc rebuild, no reload —
    *  this is what makes dragging feel like dragging. */
   const postTokenVars = useCallback((vars: Record<string, string | null>): void => {
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: DESIGN_SET_TOKEN_EVENT, vars },
-      '*',
-    );
+    iframeRef.current?.contentWindow?.postMessage({ type: DESIGN_SET_TOKEN_EVENT, vars }, '*');
   }, []);
 
   const setTokenValue = useCallback(
@@ -751,9 +748,9 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
               // empty box: a design that hardcodes its values has nothing to
               // drag, and the fix is a word to the model, not a retry here.
               <p className='px-3 py-3 text-[11px] leading-relaxed text-muted-foreground'>
-                This design declares no adjustable tokens. Ask for its colours, radii and spacing
-                as CSS variables under <code className='font-mono'>:root</code> and they will show
-                up here.
+                This design declares no adjustable tokens. Ask for its colours, radii and spacing as
+                CSS variables under <code className='font-mono'>:root</code> and they will show up
+                here.
               </p>
             ) : (
               <>
