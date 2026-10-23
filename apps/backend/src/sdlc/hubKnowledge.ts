@@ -14,6 +14,7 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { listS2SClawSkills } from '@/services/clawAgentService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { ensureLink } from './entityLinkService';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import { notifySdlcResourceChanged } from './sdlcResourceChanged';
 import type { SdlcActor } from './types';
 
@@ -174,7 +175,7 @@ export async function linkHubSkill(
     (candidate) => candidate.id === skillId
   );
   if (!skill) throw new AppError('Skill not found', 404);
-  await ensureLink(db, skillLink(channelId, skillId), actor);
+  await withSdlcSearchSync(changes => ensureLink(db, skillLink(channelId, skillId), actor, changes));
   notifySdlcResourceChanged('knowledge', { channelId });
 }
 
@@ -238,6 +239,6 @@ export async function setHubPin(
     select: { id: true },
   });
   if (!inHub) throw new AppError('Not found in Hub Knowledge', 404);
-  await ensureLink(db, pin, actor);
+  await withSdlcSearchSync(changes => ensureLink(db, pin, actor, changes));
   notifySdlcResourceChanged('knowledge', { channelId });
 }

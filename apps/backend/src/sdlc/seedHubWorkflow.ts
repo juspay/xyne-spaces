@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 import { workflowRuntime } from '@/workflowsV2/runtime';
 import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from '@/workflowsV2/agents/sdlc-dispatch';
 import { ensureHubKnowledgeFolder, ensureHubWikiFolder, ensureRepositoryWikiFolder } from './hubFolders';
+import { withSdlcSearchSync } from '@/zero/vespa-injection/core/sdlc-sync';
 import { HUB_KNOWLEDGE_DEFINITIONS } from './hubKnowledgeDefinitions';
 import { repoIdsForChannel } from './sdlcChannelMembership';
 import type { SdlcActor } from './types';
@@ -141,11 +142,13 @@ async function prepareHub(actor: SdlcActor, channelId: string): Promise<Hub> {
     },
     update: {},
   });
-  await ensureHubKnowledgeFolder(db, actor, channelId);
-  await ensureHubWikiFolder(db, actor, channelId);
-  for (const repo of repos) {
-    await ensureRepositoryWikiFolder(db, actor, channelId, repo);
-  }
+  await withSdlcSearchSync(async changes => {
+    await ensureHubKnowledgeFolder(db, actor, channelId, changes);
+    await ensureHubWikiFolder(db, actor, channelId, changes);
+    for (const repo of repos) {
+      await ensureRepositoryWikiFolder(db, actor, channelId, repo, changes);
+    }
+  });
   return { channelId, folderId: await ensureHubFolder(actor, channelId, channel.name) };
 }
 

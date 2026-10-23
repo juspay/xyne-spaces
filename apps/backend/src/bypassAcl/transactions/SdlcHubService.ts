@@ -1,4 +1,5 @@
 import { transaction } from '../base';
+import { withSdlcSearchSync, type SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
@@ -65,7 +66,7 @@ export function createRepositoryTx(self: SdlcHubService, input: { projectId: str
   });
 }
 export function createChannelTx(self: SdlcHubService, input: { name: string; projectId: string; repoIds: string[]; }, actor: SdlcActor) {
-  return transaction(['Board', 'CanvasFolder', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Project', 'Repo', 'ResourceAccess', 'SdlcEntityLink', 'SdlcFolder', 'User'], 'createChannel: project check, channel plus board-mapping/folder rows and repo links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['Board', 'CanvasFolder', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Project', 'Repo', 'ResourceAccess', 'SdlcEntityLink', 'SdlcFolder', 'User'], 'createChannel: project check, channel plus board-mapping/folder rows and repo links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const project = await tx.project.findFirst({
       where: { id: input.projectId, workspaceId: actor.workspaceId },
       select: { id: true },
@@ -78,19 +79,19 @@ export function createChannelTx(self: SdlcHubService, input: { name: string; pro
     const channelId = await createSdlcChannel(tx, actor, {
       projectId: project.id,
       name: input.name,
-    });
+    }, changes);
 
-    const repoIds = await attachRepositoriesToChannel(tx, actor, channelId, input.repoIds);
+    const repoIds = await attachRepositoriesToChannel(tx, actor, channelId, input.repoIds, changes);
 
     return { id: channelId, name: input.name.trim(), projectId: project.id, repoIds };
-  });
-}
-export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor, channelId: string, repoIds: string[]) {
-  return transaction(['Channel', 'Repo', 'SdlcEntityLink', 'SdlcFolder'], 'addChannelRepositories: channel repo links and hub/wiki folder rows must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => ({
-    repoIds: await attachRepositoriesToChannel(tx, actor, channelId, repoIds),
   }));
 }
-export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[]) {
+export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor, channelId: string, repoIds: string[]) {
+  return withSdlcSearchSync(changes => transaction(['Channel', 'Repo', 'SdlcEntityLink', 'SdlcFolder'], 'addChannelRepositories: channel repo links and hub/wiki folder rows must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => ({
+    repoIds: await attachRepositoriesToChannel(tx, actor, channelId, repoIds, changes),
+  })));
+}
+export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[], changes: SdlcSearchChanges) {
   return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const viewAccessId = randomUUID();
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
@@ -122,7 +123,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       hostWorkspaceId: actor.workspaceId,
       connectId,
     });
-    await fileArtifactTx(tx, actor, channelId, canvas.id, { ...input, trackFolderId, hubKnowledge, repoId: repo?.id, repoIds });
+    await fileArtifactTx(tx, actor, channelId, canvas.id, { ...input, trackFolderId, hubKnowledge, repoId: repo?.id, repoIds }, changes);
     return {
       artifact: {
         canvasId: canvas.id,
@@ -136,7 +137,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
 }
 
 export function adoptCanvasAsArtifactTx(self: SdlcHubService, actor: SdlcActor, canvas: { id: string; connectId: string | null }, channelId: string, folderId: string, projectId: string, trackId: string | undefined, trackFolderId: string | undefined) {
-  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'adoptCanvasAsArtifact: hub placement, hub access and artifact links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'adoptCanvasAsArtifact: hub placement, hub access and artifact links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const connectId = canvas.connectId ?? newConnectId();
     if (!canvas.connectId) {
       await createConnectGroupForEntity(tx, {
@@ -157,24 +158,24 @@ export function adoptCanvasAsArtifactTx(self: SdlcHubService, actor: SdlcActor, 
       create: { ...hubParticipant, canvasId: canvas.id },
       update: {},
     });
-    await fileArtifactTx(tx, actor, channelId, canvas.id, { trackId, trackFolderId, hubKnowledge: !trackId, repoIds: [] });
-  });
+    await fileArtifactTx(tx, actor, channelId, canvas.id, { trackId, trackFolderId, hubKnowledge: !trackId, repoIds: [] }, changes);
+  }));
 }
 
-async function placeHubKnowledge(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string) {
+async function placeHubKnowledge(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string, changes: SdlcSearchChanges) {
   const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
-  const knowledgeFolderId = await ensureHubKnowledgeFolder(tx, actorRef, channelId);
+  const knowledgeFolderId = await ensureHubKnowledgeFolder(tx, actorRef, channelId, changes);
   await placeHubItem(tx, actorRef, {
     channelId,
     scopeFolderId: knowledgeFolderId,
     parentId: knowledgeFolderId,
     targetType: 'CANVAS',
     targetId: canvasId,
-  });
+  }, changes);
 }
 
 /** Track edges, artifact row, Hub Knowledge placement and repo/related links that make a canvas an SDLC artifact. */
-async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string, opts: { trackId?: string | undefined; trackFolderId?: string | undefined; hubKnowledge: boolean; repoId?: string | undefined; repoIds: string[]; relatedCanvasIds?: string[] | undefined }) {
+async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId: string, canvasId: string, opts: { trackId?: string | undefined; trackFolderId?: string | undefined; hubKnowledge: boolean; repoId?: string | undefined; repoIds: string[]; relatedCanvasIds?: string[] | undefined }, changes: SdlcSearchChanges) {
   if (opts.trackId) {
     await tx.sdlcEntityLink.create({
       data: {
@@ -209,7 +210,8 @@ async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId
           ? { type: 'FOLDER', id: opts.trackFolderId }
           : { type: 'TRACK', id: opts.trackId },
       },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
   }
   await tx.sdlcArtifact.create({
@@ -223,7 +225,7 @@ async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId
     },
   });
 
-  if (opts.hubKnowledge) await placeHubKnowledge(tx, actor, channelId, canvasId);
+  if (opts.hubKnowledge) await placeHubKnowledge(tx, actor, channelId, canvasId, changes);
 
   for (const artifactRepoId of opts.repoIds) {
     await ensureLink(
@@ -236,26 +238,27 @@ async function fileArtifactTx(tx: TransactionClient, actor: SdlcActor, channelId
         targetId: artifactRepoId,
         relationType: SDLC_ARTIFACT_REPOSITORY_RELATION,
       },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
   }
 
-  await linkRelatedCanvases(tx, actor, channelId, canvasId, opts.relatedCanvasIds);
+  await linkRelatedCanvases(tx, actor, channelId, canvasId, opts.relatedCanvasIds, changes);
 }
 
 export function updateArtifactTitleOrLinksTx(self: SdlcHubService, actor: SdlcActor, channelId: string, existing: { id: string; viewAccessId: string | null; title: string }, input: { title?: string | undefined; relatedCanvasIds?: string[] | undefined }) {
-  return transaction(['Canvas', 'SdlcEntityLink'], 'updateArtifactFromClaw (title/links only): canvas title update and related-canvas links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
-    await linkRelatedCanvases(tx, actor, channelId, existing.id, input.relatedCanvasIds);
+  return withSdlcSearchSync(changes => transaction(['Canvas', 'SdlcEntityLink'], 'updateArtifactFromClaw (title/links only): canvas title update and related-canvas links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+    await linkRelatedCanvases(tx, actor, channelId, existing.id, input.relatedCanvasIds, changes);
     if (!input.title) return existing;
     return tx.canvas.update({
       where: { id: existing.id },
       data: { title: input.title, lastEditedBy: actor.userId, lastEditedAt: new Date() },
       select: { id: true, viewAccessId: true },
     });
-  });
+  }));
 }
 
-export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, channelId: string, canvasId: string, content: BlockNoteBlock[], extra: { title?: string | undefined; repoId?: string | undefined; relatedCanvasIds?: string[] | undefined }) {
+export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, channelId: string, canvasId: string, content: BlockNoteBlock[], extra: { title?: string | undefined; repoId?: string | undefined; relatedCanvasIds?: string[] | undefined }, changes: SdlcSearchChanges) {
   return transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink'], 'writeArtifactContent: canvas content, artifact upsert and related-canvas links must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const canvas = await tx.canvas.update({
       where: { id: canvasId },
@@ -278,7 +281,7 @@ export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, c
       },
       update: {},
     });
-    await linkRelatedCanvases(tx, actor, channelId, canvasId, extra.relatedCanvasIds);
+    await linkRelatedCanvases(tx, actor, channelId, canvasId, extra.relatedCanvasIds, changes);
     return {
       artifact: {
         canvasId: canvas.id,
@@ -292,7 +295,7 @@ export function writeArtifactContentTx(self: SdlcHubService, actor: SdlcActor, c
 }
 
 export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { name: string; channelId: string; description?: string | undefined; repoId?: string | undefined; }, channelId: string) {
-  return transaction(['SdlcEntityLink', 'SdlcTrack'], 'createTrack: track create and hub membership edge must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['SdlcEntityLink', 'SdlcTrack'], 'createTrack: track create and hub membership edge must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const track = await tx.sdlcTrack.create({
       data: {
         workspaceId: actor.workspaceId,
@@ -316,13 +319,14 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
         createdBy: actor.userId,
       },
     });
+    changes.push({ hubId: channelId, change: { containers: [track.id] } });
     return track;
-  });
+  }));
 }
 
   /** The private channel a hub lives in, plus its starting artifact-type folders. */
 export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, channelId: string, input: { canvasId: string; parentId: string; folderId?: string | undefined }, toRoot: boolean) {
-  return transaction(['Canvas', 'SdlcEntityLink'], 'moveArtifactFromClaw: the type, the old containment edge, the new one and the folder edges that follow must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return withSdlcSearchSync(changes => transaction(['Canvas', 'SdlcEntityLink'], 'moveArtifactFromClaw: the type, the old containment edge, the new one and the folder edges that follow must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
     if (input.folderId) {
       await tx.canvas.update({ where: { id: input.canvasId }, data: { folderId: input.folderId } });
     }
@@ -344,7 +348,8 @@ export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, c
         targetId: input.canvasId,
         relationType: SDLC_CONTAINMENT_RELATION,
       },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
     await refileFolderEdges(
       tx,
@@ -353,14 +358,15 @@ export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, c
         item: { type: 'CANVAS', id: input.canvasId },
         parent: { type: toRoot ? 'TRACK' : 'FOLDER', id: input.parentId },
       },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
-  });
+  }));
 }
 
 /** Takes a track artifact out of its track and files it as Hub Knowledge, like creating one there. */
 export function moveArtifactToHubKnowledgeTx(self: SdlcHubService, actor: SdlcActor, channelId: string, canvasId: string, folderId: string) {
-  return transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder'], 'moveArtifactToHubKnowledge: leaving the track, the type and the Hub Knowledge placement must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return withSdlcSearchSync(changes => transaction(['Canvas', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder'], 'moveArtifactToHubKnowledge: leaving the track, the type and the Hub Knowledge placement must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
     await tx.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -372,12 +378,13 @@ export function moveArtifactToHubKnowledgeTx(self: SdlcHubService, actor: SdlcAc
     await refileFolderEdges(
       tx,
       { channelId, item: { type: 'CANVAS', id: canvasId }, parent: null },
-      { workspaceId: actor.workspaceId, userId: actor.userId }
+      { workspaceId: actor.workspaceId, userId: actor.userId },
+      changes
     );
     await tx.canvas.update({ where: { id: canvasId }, data: { folderId } });
     await tx.sdlcArtifact.update({ where: { artifactId: canvasId }, data: { artifactType: SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE } });
-    await placeHubKnowledge(tx, actor, channelId, canvasId);
-  });
+    await placeHubKnowledge(tx, actor, channelId, canvasId, changes);
+  }));
 }
 
 /**
@@ -385,24 +392,30 @@ export function moveArtifactToHubKnowledgeTx(self: SdlcHubService, actor: SdlcAc
  * folders it was under, taking everything beneath it along.
  */
 export function unlinkContextTx(self: SdlcHubService, actor: SdlcActor, channelId: string, link: { id: string; relationType: string; targetType: string; targetId: string }): Promise<number> {
-  return transaction(['SdlcEntityLink'], 'unlinkContext: the link and the folder edges that follow an unfiled item must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return withSdlcSearchSync(changes => transaction(['SdlcEntityLink'], 'unlinkContext: the link and the folder edges that follow an unfiled item must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+    const row = await tx.sdlcEntityLink.findFirst({
+      where: { id: link.id, channelId, workspaceId: actor.workspaceId },
+      select: { sourceType: true, sourceId: true, targetType: true, targetId: true, relationType: true },
+    });
     const removed = await tx.sdlcEntityLink.deleteMany({
       where: { id: link.id, channelId, workspaceId: actor.workspaceId },
     });
+    if (row && removed.count > 0) changes.push({ hubId: channelId, change: { link: row, removed: true } });
     if (removed.count > 0 && link.relationType === SDLC_CONTAINMENT_RELATION && isSdlcTreeItemType(link.targetType)) {
       await refileFolderEdges(
         tx,
         { channelId, item: { type: link.targetType, id: link.targetId }, parent: null },
-        { workspaceId: actor.workspaceId, userId: actor.userId }
+        { workspaceId: actor.workspaceId, userId: actor.userId },
+        changes
       );
     }
     return removed.count;
-  });
+  }));
 }
 
 export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { channelId: string; trackId: string; name: string; parentTrackFolderId?: string | undefined }) {
   const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
-  return transaction(['SdlcEntityLink', 'SdlcFolder'], 'createTrackFolderFromClaw: folder create, its containment and track edges and its folder edges must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return withSdlcSearchSync(changes => transaction(['SdlcEntityLink', 'SdlcFolder'], 'createTrackFolderFromClaw: folder create, its containment and track edges and its folder edges must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
     const folder = await tx.sdlcFolder.create({
       data: { workspaceId: actor.workspaceId, name: input.name, createdBy: actor.userId },
       select: { id: true, name: true },
@@ -417,7 +430,8 @@ export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcAct
         targetId: folder.id,
         relationType: SDLC_CONTAINMENT_RELATION,
       },
-      actorRef
+      actorRef,
+      changes
     );
     await ensureLink(
       tx,
@@ -429,7 +443,8 @@ export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcAct
         targetId: folder.id,
         relationType: SDLC_TRACK_FLAT_RELATION,
       },
-      actorRef
+      actorRef,
+      changes
     );
     await refileFolderEdges(
       tx,
@@ -440,13 +455,14 @@ export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcAct
           ? { type: 'FOLDER', id: input.parentTrackFolderId }
           : { type: 'TRACK', id: input.trackId },
       },
-      actorRef
+      actorRef,
+      changes
     );
     return { ...folder, trackId: input.trackId, parentId: input.parentTrackFolderId ?? input.trackId };
-  });
+  }));
 }
 
-export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor, input: { projectId: string; name: string }): Promise<string> {
+export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor, input: { projectId: string; name: string }, changes: SdlcSearchChanges): Promise<string> {
     const name = normalizeChannelName(input.name.trim());
     const nameError = validateChannelName(name);
     if (nameError) {
@@ -545,10 +561,12 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
       })),
     });
 
+    // A hub made here is a Prisma write, so no Zero channel handler feeds its entry.
+    changes.push({ hubId: channelId, change: { hub: true } });
     return channelId;
   }
 
-export async function attachRepositoriesToChannel(tx: TransactionClient, actor: SdlcActor, channelId: string, repoIds: readonly string[]): Promise<string[]> {
+export async function attachRepositoriesToChannel(tx: TransactionClient, actor: SdlcActor, channelId: string, repoIds: readonly string[], changes: SdlcSearchChanges): Promise<string[]> {
     const unique = [...new Set(repoIds)];
     if (unique.length === 0) return [];
 
@@ -580,10 +598,11 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       })),
       skipDuplicates: true,
     });
-    await ensureHubKnowledgeFolder(tx, actor, channelId);
-    await ensureHubWikiFolder(tx, actor, channelId);
+    changes.push({ hubId: channelId, change: { attachedRepositories: repos.map((repo: { id: string }) => repo.id) } });
+    await ensureHubKnowledgeFolder(tx, actor, channelId, changes);
+    await ensureHubWikiFolder(tx, actor, channelId, changes);
     for (const repo of repos) {
-      await ensureRepositoryWikiFolder(tx, actor, channelId, repo);
+      await ensureRepositoryWikiFolder(tx, actor, channelId, repo, changes);
     }
 
     return repos.map((repo: { id: string; name: string }) => repo.id);

@@ -1,4 +1,5 @@
 import { transaction } from '../base';
+import { withSdlcSearchSync, type SdlcSearchChanges } from '@/zero/vespa-injection/core/sdlc-sync';
 import { placeHubItem } from '@/sdlc/hubFolders';
 import { sdlcCanvasParticipants } from '@/sdlc/sdlcCanvasAccess';
 import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
@@ -11,7 +12,7 @@ import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 
 export function ensureFolderPathTx(self: SdlcWikiPageStore, parent: string, name: string, scope: WikiScope, actor: { workspaceId: string; userId: string; }) {
-  return transaction(['SdlcEntityLink', 'SdlcFolder'], 'ensureFolderPath: advisory-locked find-or-create of a wiki folder so parallel page writes into a new path create it once; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['SdlcEntityLink', 'SdlcFolder'], 'ensureFolderPath: advisory-locked find-or-create of a wiki folder so parallel page writes into a new path create it once; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Parallel page writes into a new path would each create the folder.
     await advisoryXactLock(tx, ['SdlcEntityLink'],
       'sdlc wiki: serialize get-or-create of a folder node so parallel page writes do not duplicate it',
@@ -43,11 +44,11 @@ export function ensureFolderPathTx(self: SdlcWikiPageStore, parent: string, name
       parentId: parent,
       targetType: 'FOLDER',
       targetId: folderId,
-    });
+    }, changes);
     return folderId;
-  });
+  }));
 }
-export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string) {
+export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { title: string; action: "create"; markdown: string; folderPath?: string | undefined; }, content: BlockNoteBlock[], typeFolderId: string, commitSha: string | undefined, actor: { workspaceId: string; userId: string; }, parentId: string, changes: SdlcSearchChanges) {
   return transaction(['Canvas', 'SdlcArtifact', 'ConnectGroup'], 'create wiki page: canvas, SDLC artifact, hub placement and first version must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
     const connectId = newConnectId();
@@ -96,7 +97,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
       parentId,
       targetType: 'CANVAS',
       targetId: canvas.id,
-    });
+    }, changes);
     return { artifact: canvas.id, canvasId: canvas.id, content };
   });
 }
@@ -122,7 +123,7 @@ export function editTx(self: SdlcWikiPageStore, existing: any, page: PageAction<
   });
 }
 export function moveTx(self: SdlcWikiPageStore, scope: WikiScope, existing: any, parentId: string, page: { canvasId: string; action: "move"; folderPath: string; title?: string | undefined; }) {
-  return transaction(['Canvas', 'SdlcEntityLink'], 'move wiki page: removing the old hub placement and adding the new one must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return withSdlcSearchSync(changes => transaction(['Canvas', 'SdlcEntityLink'], 'move wiki page: removing the old hub placement and adding the new one must commit together; tx is not ACL-wrapped', self.prisma, async (tx) => {
     await tx.sdlcEntityLink.deleteMany({
       where: {
         channelId: scope.channelId,
@@ -140,12 +141,13 @@ export function moveTx(self: SdlcWikiPageStore, scope: WikiScope, existing: any,
         parentId,
         targetType: 'CANVAS',
         targetId: existing.id,
-      }
+      },
+      changes
     );
     if (page.title) {
       await tx.canvas.update({ where: { id: existing.id }, data: { title: page.title } });
     }
-  });
+  }));
 }
 
 export async function recordVersion(tx: Prisma.TransactionClient, scope: WikiScope, canvasId: string, markdown: string, content: BlockNoteBlock[], action: string, commitSha: string | undefined): Promise<void> {
