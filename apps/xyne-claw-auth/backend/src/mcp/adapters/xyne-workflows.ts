@@ -9,6 +9,8 @@ const SERVER_PATH = resolve(
 
 export const xyneWorkflowsAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  // Runs claw-auth's own libs, which read this service's config (XYNE-66849).
+  inheritParentEnv: true,
   type: "xyne-workflows",
   healthCheck: { name: "workflow_catalog", params: {} },
   writeTools: [],

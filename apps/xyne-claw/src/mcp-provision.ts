@@ -7,6 +7,7 @@ import {
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { buildChildEnv } from "xyne-claw-shared";
 import path from "node:path";
 
 import { createLogger } from "./logger.js";
@@ -198,7 +199,8 @@ async function install(name: string, version: string | undefined, dir: string): 
         timeout: INSTALL_TIMEOUT_MS,
         // npm install output can exceed the 1MB default and abort with ENOBUFS.
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, npm_config_update_notifier: "false" },
+        // npm runs the package's install scripts: no claw secrets in its env.
+        env: buildChildEnv(process.env, { npm_config_update_notifier: "false" }, { inheritPrefixes: ["npm_config_", "NPM_CONFIG_"] }),
       },
     );
 

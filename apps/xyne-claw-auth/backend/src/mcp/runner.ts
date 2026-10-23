@@ -10,6 +10,7 @@ import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./t
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
+import { buildChildEnv } from "xyne-claw-shared";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
@@ -428,10 +429,17 @@ async function spawnSession(
     // `ERR_MODULE_NOT_FOUND` → `MCP error -32000: Connection closed`. Non-npx
     // commands pass through untouched; failures fall back to the original npx.
     const launch = await provisionStdioCommand(cmd, resolvedArgs);
+    // Never the whole process.env: that handed claw-auth's secrets to every
+    // third-party adapter (XYNE-66849). The child gets the base allowlist, its
+    // launch env, and what its adapter declares it reads.
     transport = new StdioClientTransport({
       command: launch.command,
       args: launch.args,
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: buildChildEnv(process.env, env, {
+        inherit: definition.inheritEnv,
+        inheritAll: definition.inheritParentEnv,
+        inheritPrefixes: cmd === "uvx" ? ["UV_"] : [],
+      }),
       cwd: "/tmp",
     });
   }

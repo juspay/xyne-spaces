@@ -17,6 +17,7 @@ const SERVER_PATH = resolve(
  */
 export const xyneDashboardAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  inheritEnv: ["SPACES_BACKEND_URL", "SPACES_CLIENT_DEBUG"],
   type: "xyne-dashboard",
   // suggest_components is handled locally in the server (no Spaces round-trip),
   // so the penny-drop works without a real data source in scope.

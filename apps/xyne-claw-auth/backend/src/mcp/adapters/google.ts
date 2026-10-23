@@ -18,6 +18,8 @@ const googleWriteTools = getAllCustomTools()
 
 export const googleAdapter: StdioMcpAdapter = {
   transport: "stdio",
+  // Runs claw-auth's own libs, which read this service's config (XYNE-66849).
+  inheritParentEnv: true,
   type: "google",
   // Cheap no-arg read to verify the spawned server + token are live.
   healthCheck: { name: "google-calendar-list", params: {} },
