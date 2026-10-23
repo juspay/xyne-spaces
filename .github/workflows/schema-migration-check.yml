@@ -1,7 +1,8 @@
 name: Schema Migration Check
 
 # PR-only guards for database schema safety (no DB required — pure git-diff).
-# Two independent jobs so their git state can't interfere with each other.
+# One job on the self-hosted `mini` pool (was three ubuntu-latest jobs, each
+# paying for its own runner start + checkout).
 on:
   pull_request:
 
@@ -17,17 +18,29 @@ concurrency:
         && !startsWith(github.head_ref, 'release') }}
 
 jobs:
-  # A Prisma schema change must ship with a matching migration, new models/
-  # enums must be mirrored into shared/src/zero/schema.ts, and new models must
-  # carry a non-nullable tenant key.
-  schema-migrations:
-    name: Validate schema migrations
-    runs-on: ubuntu-latest
+  schema-migration-check:
+    name: Schema Migration Check
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       # fetch-depth: 0 so we can find the merge-base with the target branch.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
+      # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls
+      # back to main), does its own fetch, and diffs BASE...HEAD.
+      # Must run BEFORE the staging step below: that step moves HEAD to the
+      # merge-base, which would make this diff empty.
+      - name: Enum guard
+        env:
+          CHANGE_TARGET: ${{ github.base_ref }}
+        run: bash scripts/validate-no-new-enums.sh --ci
+
+      # The old standalone "Raw SQL guard" job is intentionally gone: apps/backend's
+      # `prebuild` hook (scripts/validate-no-acl-bypass.sh) runs in the Backend
+      # build and is stricter — it fails on any raw-SQL primitive outside
+      # apps/backend/src/bypassAcl/, not just newly added ones.
 
       # validate-schema-migrations.sh inspects `git diff --cached` (the staged
       # index). A CI checkout stages nothing, so we stage exactly the PR's diff
@@ -42,43 +55,11 @@ jobs:
           echo "Staging PR changes relative to merge-base ${MERGE_BASE}"
           git reset --soft "${MERGE_BASE}"
 
+      # A Prisma schema change must ship with a matching migration, new models/
+      # enums must be mirrored into shared/src/zero/schema.ts, and new models must
+      # carry a non-nullable tenant key.
       - name: Validate schema migrations
         run: bash scripts/validate-schema-migrations.sh --ci-mode
 
       - name: Validate tenant keys on new models
         run: bash scripts/validate-workspace-id.sh
-
-  # Raw SQL is frozen: block a NEW raw-query call in any file. Those APIs are
-  # the only way to reach the DB without the Prisma query builder, and therefore
-  # without the tenant ACL filter + workspaceId stamper. Same self-resolving
-  # base as the enum guard: $CHANGE_TARGET, own fetch, BASE...HEAD. Compares
-  # per-file call COUNTS, so existing raw SQL is never retroactively flagged and
-  # reformatting it does not false-fire.
-  raw-sql-guard:
-    name: Raw SQL guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Raw SQL guard
-        env:
-          CHANGE_TARGET: ${{ github.base_ref }}
-        run: bash scripts/validate-no-raw-sql.sh --ci
-
-  # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
-  # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls
-  # back to main), does its own fetch, and diffs BASE...HEAD.
-  enum-guard:
-    name: Enum guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Enum guard
-        env:
-          CHANGE_TARGET: ${{ github.base_ref }}
-        run: bash scripts/validate-no-new-enums.sh --ci

@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   create-daily-branch:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
