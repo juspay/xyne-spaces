@@ -8,10 +8,12 @@
  *
  * What it checks and what it refuses to:
  *
- *  - Copy, not markup. Tags, inline code, fenced blocks and link URLs are
- *    stripped before any phrase scan, so `class="synergy-grid"` and a code
- *    sample that happens to say `utilize` are not findings. A QA check that
- *    reports markup gets switched off, and then it is checking nothing.
+ *  - Copy, not markup. Tags, link URLs, fenced blocks and the CONTENT of
+ *    `<style>`, `<script>`, `<pre>`, `<code>` and `<template>` are all removed
+ *    before any scan, so neither `class="synergy-grid"`, nor a
+ *    `.synergy-grid` selector in a stylesheet, nor a code sample that happens
+ *    to say `utilize`, is a finding. A QA check that reports markup gets
+ *    switched off, and then it is checking nothing.
  *  - Casing conservatively. Proper nouns are indistinguishable from title case
  *    to any amount of regex, so the heuristics below are tuned to stay quiet
  *    on "Built with GitHub Actions" at the cost of missing the occasional real
@@ -57,6 +59,15 @@ const HTML_INPUT = /<input\b[^>]*>/gi;
 /** Buttons are very often cased in CSS rather than in the markup. */
 const CSS_UPPERCASE = /text-transform\s*:\s*uppercase/i;
 
+/**
+ * Elements whose CONTENT is not copy. Their text sits between tags rather than
+ * inside one, so stripping tags leaves it behind: a `.seamlessly-grid` selector
+ * in a `<style>` block and a `const delve = utilize()` in a `<pre><code>` both
+ * read as prose otherwise. HTML is what a `/design` run delivers, so this is
+ * the common case and not an edge one.
+ */
+const RAW_TEXT_ELEMENTS = /<(style|script|pre|code|template)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+
 /** Lower-cased in title case; capitalised anywhere else only at the start or
  *  the end of the phrase. */
 const FUNCTION_WORDS = new Set([
@@ -77,6 +88,20 @@ function visibleText(line: string): string {
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ")
     .replace(/^\s{0,3}#{1,6}\s+/, "");
+}
+
+/**
+ * Blank out the content of every raw-text element, keeping newlines and the
+ * character count so every line number and offset downstream still lines up
+ * with the content the caller passed in.
+ */
+function maskRawTextElements(content: string): string {
+  return content.replace(RAW_TEXT_ELEMENTS, (whole, _tag: string, inner: string) => {
+    if (!inner) return whole;
+    // `inner` begins immediately after the opening tag's `>`.
+    const start = whole.indexOf(">") + 1;
+    return `${whole.slice(0, start)}${inner.replace(/[^\n]/g, " ")}${whole.slice(start + inner.length)}`;
+  });
 }
 
 /** Which lines sit inside a fenced block, markers included. */
@@ -321,7 +346,11 @@ export function checkVoiceToneCompliance(
 ): VoiceToneFinding[] {
   if (!content) return [];
 
-  const lines = content.split(/\r?\n/);
+  // Everything below works off the masked copy, so a heading or a button label
+  // inside a `<code>` example is not checked either. Masking preserves offsets,
+  // so reported line numbers still refer to the caller's content.
+  const masked = maskRawTextElements(content);
+  const lines = masked.split(/\r?\n/);
   const fenced = fencedLines(lines);
   const starts = lineStarts(lines);
   const findings: VoiceToneFinding[] = [];
@@ -385,7 +414,7 @@ export function checkVoiceToneCompliance(
       const text = collapse(visibleText(markdown[2] ?? ""));
       if (text) headings.push({ text, line: index + 1 });
     }
-    headings.push(...htmlCandidates(content, HTML_HEADING, 2, starts, fenced));
+    headings.push(...htmlCandidates(masked, HTML_HEADING, 2, starts, fenced));
 
     for (const heading of headings) {
       const verdict = checkCasing(heading.text, headingRule);
@@ -404,10 +433,10 @@ export function checkVoiceToneCompliance(
   const buttonRule = rules.casing.buttons;
   if (buttonRule) {
     const buttons: Candidate[] = [
-      ...htmlCandidates(content, HTML_BUTTON, 1, starts, fenced),
-      ...htmlCandidates(content, HTML_BUTTON_CLASS, 2, starts, fenced),
-      ...htmlCandidates(content, HTML_BUTTON_ROLE, 2, starts, fenced),
-      ...inputButtons(content, starts, fenced),
+      ...htmlCandidates(masked, HTML_BUTTON, 1, starts, fenced),
+      ...htmlCandidates(masked, HTML_BUTTON_CLASS, 2, starts, fenced),
+      ...htmlCandidates(masked, HTML_BUTTON_ROLE, 2, starts, fenced),
+      ...inputButtons(masked, starts, fenced),
     ];
     for (let index = 0; index < lines.length; index += 1) {
       if (fenced[index]) continue;
@@ -421,6 +450,8 @@ export function checkVoiceToneCompliance(
     // Casing an upper-case brand in CSS is the norm, so a `text-transform`
     // anywhere in the content is taken as the rule being met in the stylesheet
     // rather than in every label.
+    // Deliberately the UNMASKED content: `text-transform` lives inside the
+    // `<style>` block, whose body is blanked out everywhere else.
     const cssUppercases = buttonRule === "uppercase" && CSS_UPPERCASE.test(content);
 
     for (const button of buttons) {

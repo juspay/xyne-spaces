@@ -69,6 +69,45 @@ describe("banned phrases", () => {
     expect(checkVoiceToneCompliance(content, banned)).toEqual([]);
   });
 
+  it("ignores the body of a stylesheet, a script and an HTML code block", () => {
+    // Found by running the check over a real artifact rather than a fixture.
+    // This text sits BETWEEN tags, not inside one, so stripping tags leaves it
+    // behind — and HTML is what a /design run actually delivers.
+    const content = [
+      "<style>",
+      "  .seamlessly-grid { display: grid; }",
+      "</style>",
+      "<script>",
+      "  const delve = loadDelveWidget();",
+      "</script>",
+      "<pre><code>const delve = utilize();</code></pre>",
+      "<p>Read the <code>delve()</code> docs.</p>",
+    ].join("\n");
+    expect(checkVoiceToneCompliance(content, banned)).toEqual([]);
+  });
+
+  it("still reports copy on the lines around a masked block, at the right line", () => {
+    const content = [
+      "<style>",
+      "  .seamlessly-grid { display: grid; }",
+      "</style>",
+      "<p>We seamlessly connect your tools.</p>",
+    ].join("\n");
+    const findings = checkVoiceToneCompliance(content, banned);
+    expect(findings).toHaveLength(1);
+    // Masking preserves offsets, so the line number still refers to the
+    // caller's own content.
+    expect(findings[0]?.line).toBe(4);
+  });
+
+  it("does not check a heading or a button that only exists inside a code example", () => {
+    const rulesWithCasing = rules({
+      casing: { headings: "sentence-case", buttons: "sentence-case" },
+    });
+    const content = "<pre><code>&lt;h1&gt;Get Started Today&lt;/h1&gt;</code></pre>\n<code><button>Start Free Trial</button></code>";
+    expect(checkVoiceToneCompliance(content, rulesWithCasing)).toEqual([]);
+  });
+
   it("still flags the words inside a heading or a button, which are copy", () => {
     const findings = checkVoiceToneCompliance("## Delve deeper\n\n<button>Delve</button>", banned);
     expect(findings).toHaveLength(2);
