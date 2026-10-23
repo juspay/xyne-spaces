@@ -616,6 +616,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         body: JSON.stringify(forwardBody),
       },
       "sse-pass-through",
+      conversationId,
     );
 
     if (!clawRes.ok || !clawRes.body) {
