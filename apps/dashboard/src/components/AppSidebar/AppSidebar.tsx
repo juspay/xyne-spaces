@@ -867,7 +867,7 @@ const AppSidebar = (): ReactElement => {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
               >
-                <UserPlus size={18} variant='Solid' className='text-black' />
+                <UserPlus size={18} variant='Solid' />
               </button>
             </Tooltip>
           )}
