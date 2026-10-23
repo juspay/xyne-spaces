@@ -19,6 +19,14 @@
 export const BRAND_SUMMARY_FILENAME = "brand.json";
 export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
 export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
+export const BRAND_TOKENS_DARK_CSS_FILENAME = "tokens.dark.css";
+
+export const BRAND_DARK_THEME_SOURCES = [
+  "prefers-color-scheme",
+  "class",
+  "theme-file",
+] as const;
+export type BrandDarkThemeSource = (typeof BRAND_DARK_THEME_SOURCES)[number];
 
 /** What the colour is used for on the source, not what it looks like. A
  *  palette the card can group is far more useful than a flat swatch list. */
@@ -103,6 +111,8 @@ export interface BrandSummary {
   sourceCommit?: string;
   extractedAt: string;
   colors: BrandColor[];
+  colorsDark?: BrandColor[];
+  darkThemeSource?: BrandDarkThemeSource;
   fonts: BrandFont[];
   typeScale: BrandTypeStep[];
   radii?: BrandScaleValue[];
@@ -138,6 +148,17 @@ const isOptionalString = (value: unknown): boolean =>
 const isOptionalNumber = (value: unknown): boolean =>
   value === undefined || typeof value === "number";
 
+const isColorList = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.every(
+    (color) =>
+      isRecord(color) &&
+      isHex(color["hex"]) &&
+      typeof color["token"] === "string" &&
+      (BRAND_COLOR_ROLES as readonly string[]).includes(String(color["role"])) &&
+      isOptionalNumber(color["occurrences"]),
+  );
+
 /**
  * Validate a payload before the card renders it. The file is written by a
  * model inside a sandbox, so it is untrusted input.
@@ -164,17 +185,15 @@ export function isBrandSummary(value: unknown): value is BrandSummary {
   if (!isOptionalString(value["sourceRepo"])) return false;
   if (!isOptionalString(value["sourceCommit"])) return false;
 
-  const colors = value["colors"];
-  if (!Array.isArray(colors)) return false;
-  const colorsOk = colors.every(
-    (color) =>
-      isRecord(color) &&
-      isHex(color["hex"]) &&
-      typeof color["token"] === "string" &&
-      (BRAND_COLOR_ROLES as readonly string[]).includes(String(color["role"])) &&
-      isOptionalNumber(color["occurrences"]),
-  );
-  if (!colorsOk) return false;
+  if (!isColorList(value["colors"])) return false;
+
+  if (value["colorsDark"] !== undefined && !isColorList(value["colorsDark"])) return false;
+  if (
+    value["darkThemeSource"] !== undefined &&
+    !(BRAND_DARK_THEME_SOURCES as readonly string[]).includes(String(value["darkThemeSource"]))
+  ) {
+    return false;
+  }
 
   const fonts = value["fonts"];
   if (!Array.isArray(fonts)) return false;

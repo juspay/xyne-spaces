@@ -18,6 +18,7 @@ export interface DesignSystemRef {
   name: string;
   designMd: string;
   tokensCss: string;
+  tokensCssDark: string;
   origin: string;
 }
 
@@ -52,10 +53,12 @@ export async function resolveDesignSystemRef(
       name: resolvedSystem.name,
       designMd: resolvedSystem.designMd,
       tokensCss: resolvedSystem.tokensCss,
+      tokensCssDark: resolvedSystem.tokensCssDark,
       origin: resolvedSystem.origin,
     };
     log.info(
-      `[design-system] resolved origin=${ref.origin} id=${ref.id ?? "legacy"} chars=${ref.designMd.length}`,
+      `[design-system] resolved origin=${ref.origin} id=${ref.id ?? "legacy"} chars=${ref.designMd.length}` +
+        ` themes=${ref.tokensCssDark ? "light+dark" : "light"}`,
     );
     return ref;
   } catch (err) {

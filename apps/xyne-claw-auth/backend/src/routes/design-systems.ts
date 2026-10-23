@@ -40,7 +40,6 @@ const log = createLogger("design-systems");
 export const designSystemsRouter: Router = Router();
 
 const MAX_NAME_CHARS = 120;
-/** Token CSS is not prompt-injected, so it is not bound by the 32k prompt cap. */
 const MAX_TOKENS_CSS_CHARS = 64_000;
 
 const assetsSchema = z.record(z.string(), z.unknown());
@@ -49,6 +48,7 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_CHARS),
   designMd: z.string().max(DESIGN_SYSTEM_MAX_CHARS).optional(),
   tokensCss: z.string().max(MAX_TOKENS_CSS_CHARS).optional(),
+  tokensCssDark: z.string().max(MAX_TOKENS_CSS_CHARS).optional(),
   assets: assetsSchema.nullable().optional(),
   source: z.enum(DESIGN_SYSTEM_SOURCES).optional(),
   sourceUrl: z.string().url().max(2048).nullable().optional(),

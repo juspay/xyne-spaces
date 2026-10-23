@@ -110,3 +110,68 @@ describe("checkDesignSystemCompliance", () => {
     });
   });
 });
+
+describe("checkDesignSystemCompliance — dark token set", () => {
+  const DARK_TOKENS = `
+[data-theme="dark"] {
+  --brand-primary: #60A5FA;
+  --brand-surface: #0B1120;
+}
+`;
+
+  const THEMED_ARTIFACT = `
+<style>
+  :root { color: #1a73e8; background: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { color: #60a5fa; background: #0b1120; }
+  }
+  [data-theme="dark"] { color: #60a5fa; background: #0b1120; }
+</style>
+`;
+
+  it("accepts dark values once the dark set is supplied", () => {
+    const got = checkDesignSystemCompliance(THEMED_ARTIFACT, TOKENS, [], DARK_TOKENS);
+
+    expect(got.offPaletteColors).toEqual([]);
+  });
+
+  it("reports those same dark values when only the light set is known", () => {
+    const got = checkDesignSystemCompliance(THEMED_ARTIFACT, TOKENS);
+
+    expect(got.offPaletteColors).toEqual(["#60a5fa", "#0b1120"]);
+  });
+
+  it("still reports a colour that is in neither set", () => {
+    const got = checkDesignSystemCompliance(
+      '<div style="color:#ff0000"></div>',
+      TOKENS,
+      [],
+      DARK_TOKENS,
+    );
+
+    expect(got.offPaletteColors).toEqual(["#ff0000"]);
+  });
+
+  it("normalises across sets, so shorthand in one matches longhand in the other", () => {
+    const got = checkDesignSystemCompliance(
+      '<p style="color:#60a5faff">hi</p>',
+      TOKENS,
+      [],
+      "[data-theme='dark'] { --p: #60A5FA; }",
+    );
+
+    expect(got.offPaletteColors).toEqual([]);
+  });
+
+  it("falls back to the light set when the dark one is empty", () => {
+    const got = checkDesignSystemCompliance('<div style="color:#1a73e8"></div>', TOKENS, [], "");
+
+    expect(got.offPaletteColors).toEqual([]);
+  });
+
+  it("reports nothing when neither set has a palette to compare against", () => {
+    const got = checkDesignSystemCompliance('<div style="color:#ff0000"></div>', "", [], "");
+
+    expect(got.offPaletteColors).toEqual([]);
+  });
+});

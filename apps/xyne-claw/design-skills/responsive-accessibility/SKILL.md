@@ -16,7 +16,16 @@ Treat mobile and accessibility as design inputs, not cleanup.
 - Ensure every interactive element is reachable and usable by keyboard.
 - Include visible `:focus-visible`, hover, active, disabled, and error states.
 - Respect `prefers-reduced-motion` and do not rely on hover for essential info.
-- Maintain WCAG AA-style contrast for normal text and important controls.
+- Maintain WCAG AA-style contrast for normal text and important controls —
+  4.5:1 for body text, 3:1 for large text and control boundaries.
 
 Validate at approximately 1440px, 1024px, 768px, and 390px widths. Check for
 horizontal overflow, clipped text, inaccessible menus, and reflow problems.
+
+When the artifact ships a light and a dark theme, check contrast in **both**.
+One pass is not two: a pairing that clears 4.5:1 on white often fails on a dark
+surface, because the same muted grey that reads as secondary on light becomes
+low-contrast on dark. Switch the theme with `data-theme` and re-measure text,
+borders, focus rings, placeholders and disabled states; report a failure per
+theme rather than once for the page. A theme nobody measured is the usual place
+contrast failures hide.

@@ -11,6 +11,8 @@ const state = vi.hoisted(() => ({
   systems: [] as Array<Record<string, any>>,
   pins: [] as Array<Record<string, any>>,
   pinLookups: 0,
+  lastCreate: null as Record<string, any> | null,
+  lastUpdate: null as Record<string, any> | null,
 }));
 
 vi.mock("../db.js", () => ({
@@ -20,6 +22,14 @@ vi.mock("../db.js", () => ({
         async (args: { where: { id: string; orgId: string } }) =>
           state.systems.find((s) => s["id"] === args.where.id && s["orgId"] === args.where.orgId) ?? null,
       ),
+      create: vi.fn(async (args: { data: Record<string, any> }) => {
+        state.lastCreate = args.data;
+        return { id: "ds-new", ...args.data };
+      }),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, any> }) => {
+        state.lastUpdate = args.data;
+        return { id: args.where.id, ...args.data };
+      }),
     },
     chatConversationDesignSystem: {
       findUnique: vi.fn(async (args: { where: { conversationId: string } }) => {
@@ -41,6 +51,7 @@ const system = (over: Record<string, unknown> = {}) => ({
   name: "Acme",
   designMd: "# Acme",
   tokensCss: ":root{--x:1}",
+  tokensCssDark: "",
   ...over,
 });
 
@@ -127,5 +138,87 @@ describe("designSystemRepository.resolveForAgent", () => {
     await designSystemRepository.resolveForAgent(agent({ designSystemId: "ds-default" }));
 
     expect(state.pinLookups).toBe(0);
+  });
+
+  it("carries the dark token set through to the resolved system", async () => {
+    state.systems = [system({ id: "ds-themed", tokensCssDark: '[data-theme="dark"]{--x:2}' })];
+
+    const got = await designSystemRepository.resolveForAgent(agent({ designSystemId: "ds-themed" }));
+
+    expect(got).toMatchObject({
+      tokensCss: ":root{--x:1}",
+      tokensCssDark: '[data-theme="dark"]{--x:2}',
+    });
+  });
+
+  it("resolves a single-theme system with an empty dark set, not undefined", async () => {
+    const got = await designSystemRepository.resolveForAgent(agent({ designSystemId: "ds-default" }));
+
+    expect(got?.tokensCssDark).toBe("");
+  });
+
+  it("gives the legacy text an empty dark set rather than omitting it", async () => {
+    const got = await designSystemRepository.resolveForAgent(agent({ designSystem: "# Legacy" }));
+
+    expect(got).toMatchObject({ origin: "legacy", tokensCss: "", tokensCssDark: "" });
+  });
+});
+
+describe("designSystemRepository create/update — tokensCssDark", () => {
+  beforeEach(() => {
+    state.systems = [system({ id: "ds-1", tokensCssDark: "" })];
+    state.lastCreate = null;
+    state.lastUpdate = null;
+    vi.clearAllMocks();
+  });
+
+  it("stores the dark set on create", async () => {
+    await designSystemRepository.create("org-1", "user-1", {
+      name: "Acme",
+      tokensCss: ":root{--x:1}",
+      tokensCssDark: '[data-theme="dark"]{--x:2}',
+    });
+
+    expect(state.lastCreate).toMatchObject({
+      tokensCss: ":root{--x:1}",
+      tokensCssDark: '[data-theme="dark"]{--x:2}',
+    });
+  });
+
+  it("defaults the dark set to empty when a create omits it", async () => {
+    await designSystemRepository.create("org-1", "user-1", { name: "Acme" });
+
+    expect(state.lastCreate?.["tokensCssDark"]).toBe("");
+  });
+
+  it("writes the dark set and bumps the version on update", async () => {
+    await designSystemRepository.update("ds-1", "org-1", {
+      tokensCssDark: '[data-theme="dark"]{--x:2}',
+    });
+
+    expect(state.lastUpdate).toMatchObject({ tokensCssDark: '[data-theme="dark"]{--x:2}' });
+    expect(state.lastUpdate?.["version"]).toEqual({ increment: 1 });
+  });
+
+  it("does not bump the version when the dark set is written unchanged", async () => {
+    await designSystemRepository.update("ds-1", "org-1", { tokensCssDark: "" });
+
+    expect(state.lastUpdate?.["version"]).toBeUndefined();
+  });
+
+  it("leaves the dark set untouched when an update does not mention it", async () => {
+    await designSystemRepository.update("ds-1", "org-1", { name: "Renamed" });
+
+    expect(state.lastUpdate).toMatchObject({ name: "Renamed" });
+    expect(state.lastUpdate).not.toHaveProperty("tokensCssDark");
+  });
+
+  it("can clear a dark set that was previously populated", async () => {
+    state.systems = [system({ id: "ds-1", tokensCssDark: '[data-theme="dark"]{--x:2}' })];
+
+    await designSystemRepository.update("ds-1", "org-1", { tokensCssDark: "" });
+
+    expect(state.lastUpdate).toMatchObject({ tokensCssDark: "" });
+    expect(state.lastUpdate?.["version"]).toEqual({ increment: 1 });
   });
 });

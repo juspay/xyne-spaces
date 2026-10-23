@@ -23,6 +23,7 @@ export interface ResolvedDesignSystem {
   name: string;
   designMd: string;
   tokensCss: string;
+  tokensCssDark: string;
   origin: DesignSystemOrigin;
 }
 
@@ -35,6 +36,7 @@ export interface DesignSystemInput {
   name: string;
   designMd?: string | undefined;
   tokensCss?: string | undefined;
+  tokensCssDark?: string | undefined;
   assets?: Prisma.InputJsonValue | null | undefined;
   source?: DesignSystemSource | undefined;
   sourceUrl?: string | null | undefined;
@@ -51,6 +53,7 @@ const resolved = (row: DesignSystem, origin: DesignSystemOrigin): ResolvedDesign
   name: row.name,
   designMd: row.designMd,
   tokensCss: row.tokensCss,
+  tokensCssDark: row.tokensCssDark,
   origin,
 });
 
@@ -69,6 +72,7 @@ export const designSystemRepository = {
         name: input.name,
         designMd: input.designMd ?? "",
         tokensCss: input.tokensCss ?? "",
+        tokensCssDark: input.tokensCssDark ?? "",
         ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
         ...(input.source ? { source: input.source } : {}),
         sourceUrl: input.sourceUrl ?? null,
@@ -88,6 +92,7 @@ export const designSystemRepository = {
     const contentChanged =
       (input.designMd !== undefined && input.designMd !== existing.designMd) ||
       (input.tokensCss !== undefined && input.tokensCss !== existing.tokensCss) ||
+      (input.tokensCssDark !== undefined && input.tokensCssDark !== existing.tokensCssDark) ||
       input.assets !== undefined;
     return prisma.designSystem.update({
       where: { id: existing.id },
@@ -95,6 +100,7 @@ export const designSystemRepository = {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.designMd !== undefined ? { designMd: input.designMd } : {}),
         ...(input.tokensCss !== undefined ? { tokensCss: input.tokensCss } : {}),
+        ...(input.tokensCssDark !== undefined ? { tokensCssDark: input.tokensCssDark } : {}),
         ...(input.assets === undefined ? {} : { assets: input.assets ?? Prisma.DbNull }),
         ...(input.source !== undefined ? { source: input.source } : {}),
         ...(input.sourceUrl !== undefined ? { sourceUrl: input.sourceUrl } : {}),
@@ -163,6 +169,7 @@ export const designSystemRepository = {
         name: "Design system",
         designMd: legacy.trim(),
         tokensCss: "",
+        tokensCssDark: "",
         origin: "legacy",
       };
     }

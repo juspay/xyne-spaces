@@ -82,10 +82,13 @@ export function checkDesignSystemCompliance(
   artifact: string,
   tokensCss: string,
   allowedFonts: string[] = [],
+  tokensCssDark = "",
 ): DesignSystemQaFindings {
   if (!artifact.trim()) return { offPaletteColors: [], unauthorizedFonts: [] };
 
-  const palette = new Set((tokensCss.match(HEX_RE) ?? []).map(normalizeHex));
+  const palette = new Set(
+    [...(tokensCss.match(HEX_RE) ?? []), ...(tokensCssDark.match(HEX_RE) ?? [])].map(normalizeHex),
+  );
   const used = uniq((artifact.match(HEX_RE) ?? []).map(normalizeHex));
   // With no palette to compare against there is nothing to be off, and
   // reporting every colour as a violation would be noise, not a finding.

@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircleIcon, FloppyDiskIcon, WarningIcon } from "@phosphor-icons/react";
+import {
+  CheckCircleIcon,
+  FloppyDiskIcon,
+  MoonIcon,
+  SunIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
 import {
   ApiError,
   BRAND_DESIGN_MD_FILENAME,
   BRAND_SUMMARY_FILENAME,
   BRAND_TOKENS_CSS_FILENAME,
+  BRAND_TOKENS_DARK_CSS_FILENAME,
   createDesignSystem,
   fetchBrandSummary,
   fetchChatAttachmentText,
@@ -13,6 +20,12 @@ import {
   type BrandSummary,
   type ChatAttachmentMeta,
 } from "../../lib/api";
+import {
+  SpecimenPreview,
+  activePalette,
+  hasUsableDarkSet,
+  resolveSpecimenPalette,
+} from "./SpecimenPreview";
 
 /**
  * Review card for a brand extraction.
@@ -35,6 +48,7 @@ interface BrandFiles {
   summary: ChatAttachmentMeta | undefined;
   designMd: ChatAttachmentMeta | undefined;
   tokensCss: ChatAttachmentMeta | undefined;
+  tokensCssDark: ChatAttachmentMeta | undefined;
 }
 
 /** Last match wins within THIS message's attachments — a run that
@@ -49,6 +63,7 @@ function findBrandFiles(attachments: ChatAttachmentMeta[]): BrandFiles {
     summary: byName(BRAND_SUMMARY_FILENAME),
     designMd: byName(BRAND_DESIGN_MD_FILENAME),
     tokensCss: byName(BRAND_TOKENS_CSS_FILENAME),
+    tokensCssDark: byName(BRAND_TOKENS_DARK_CSS_FILENAME),
   };
 }
 
@@ -99,6 +114,7 @@ export function BrandReviewCard({
   const [designMd, setDesignMd] = useState<string>("");
   const [designMdOpen, setDesignMdOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dark, setDark] = useState(false);
 
   useEffect(() => {
     if (!summaryId) return;
@@ -141,11 +157,15 @@ export function BrandReviewCard({
       const tokensCss = files.tokensCss
         ? await fetchChatAttachmentText(files.tokensCss.id, userId)
         : "";
+      const tokensCssDark = files.tokensCssDark
+        ? await fetchChatAttachmentText(files.tokensCssDark.id, userId)
+        : "";
       const created = await createDesignSystem({
         name: name.trim() || summary.name,
         // Already fetched, shown to the user, and capped on the way in.
         designMd,
         tokensCss,
+        tokensCssDark,
         source: summary.source,
         sourceUrl: summary.sourceUrl ?? null,
         sourceRepo: summary.sourceRepo ?? null,
@@ -171,7 +191,16 @@ export function BrandReviewCard({
     } finally {
       setSaving(false);
     }
-  }, [summary, files.designMd, files.tokensCss, files.summary, name, userId]);
+  }, [
+    summary,
+    files.designMd,
+    files.tokensCss,
+    files.tokensCssDark,
+    files.summary,
+    designMd,
+    name,
+    userId,
+  ]);
 
   // Not a brand run — render nothing rather than an empty shell.
   if (!files.summary) return null;
@@ -193,10 +222,14 @@ export function BrandReviewCard({
 
   if (!summary) return null;
 
-  const colors = sortColors(summary.colors);
+  const hasDarkSet = hasUsableDarkSet(summary);
+  const { colors: activeColors, showingDark } = activePalette(summary, dark);
+
+  const colors = sortColors(activeColors);
   const headingFont = summary.fonts.find((font) => font.role === "heading") ?? summary.fonts[0];
   const bodyFont = summary.fonts.find((font) => font.role === "body") ?? headingFont;
   const steps = [...summary.typeScale].sort((a, b) => b.sizePx - a.sizePx).slice(0, 5);
+  const typeSurface = resolveSpecimenPalette(colors, showingDark).resolved;
 
   return (
     <div
@@ -210,14 +243,55 @@ export function BrandReviewCard({
             {sourceLabel(summary)}
           </div>
         </div>
-        <span className="shrink-0 rounded-full border border-xyne-border-subtle px-2 py-0.5 text-[10px] uppercase tracking-wide text-xyne-fg-muted">
-          {summary.source}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          {hasDarkSet && (
+            <div
+              role="group"
+              aria-label="Preview theme"
+              className="flex items-center rounded-md border border-xyne-border-subtle p-0.5"
+            >
+              <button
+                type="button"
+                onClick={() => setDark(false)}
+                aria-pressed={!dark}
+                title="Light"
+                className={`inline-flex h-6 w-7 items-center justify-center rounded ${
+                  dark ? "text-xyne-fg-muted hover:text-xyne-fg-primary" : "bg-xyne-surface-subtle text-xyne-fg-primary"
+                }`}
+              >
+                <SunIcon size={13} />
+                <span className="sr-only">Light</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDark(true)}
+                aria-pressed={dark}
+                title={`Dark — from ${summary.darkThemeSource}`}
+                className={`inline-flex h-6 w-7 items-center justify-center rounded ${
+                  dark ? "bg-xyne-surface-subtle text-xyne-fg-primary" : "text-xyne-fg-muted hover:text-xyne-fg-primary"
+                }`}
+              >
+                <MoonIcon size={13} />
+                <span className="sr-only">Dark</span>
+              </button>
+            </div>
+          )}
+          <span className="shrink-0 rounded-full border border-xyne-border-subtle px-2 py-0.5 text-[10px] uppercase tracking-wide text-xyne-fg-muted">
+            {summary.source}
+          </span>
+        </div>
       </header>
 
       <section className="px-4 py-3">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
-          Palette
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+            Palette{hasDarkSet ? (showingDark ? " — dark" : " — light") : ""}
+          </div>
+          {showingDark && (
+            <div className="shrink-0 text-[10px] text-xyne-fg-muted">
+              from {summary.darkThemeSource}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {colors.map((color) => (
@@ -246,13 +320,26 @@ export function BrandReviewCard({
             {headingFont.family}
             {bodyFont && bodyFont.family !== headingFont.family ? ` · ${bodyFont.family}` : ""}
           </div>
-          <div className="mt-2 space-y-1">
+          <div
+            className="mt-2 space-y-1 rounded-md px-2 py-1.5"
+            style={
+              hasDarkSet
+                ? { backgroundColor: typeSurface.background, border: `1px solid ${typeSurface.border}` }
+                : undefined
+            }
+          >
             {steps.map((step) => (
               <div key={step.name} className="flex items-baseline gap-3">
-                <span className="w-10 shrink-0 text-[10px] text-xyne-fg-muted">{step.name}</span>
+                <span
+                  className="w-10 shrink-0 text-[10px] text-xyne-fg-muted"
+                  style={hasDarkSet ? { color: typeSurface.muted } : undefined}
+                >
+                  {step.name}
+                </span>
                 <span
                   className="truncate text-xyne-fg-primary"
                   style={{
+                    ...(hasDarkSet ? { color: typeSurface.text } : {}),
                     // Capped so a 96px display step cannot blow out the card.
                     fontSize: `${Math.min(step.sizePx, 28)}px`,
                     fontFamily: `${JSON.stringify(headingFont.family)}, ${(headingFont.fallbacks ?? ["sans-serif"]).join(", ")}`,
@@ -261,12 +348,29 @@ export function BrandReviewCard({
                 >
                   Ag
                 </span>
-                <span className="text-[10px] text-xyne-fg-muted">{step.sizePx}px</span>
+                <span
+                  className="text-[10px] text-xyne-fg-muted"
+                  style={hasDarkSet ? { color: typeSurface.muted } : undefined}
+                >
+                  {step.sizePx}px
+                </span>
               </div>
             ))}
           </div>
         </section>
       )}
+
+      <section className="border-t border-xyne-border-subtle px-4 py-3">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+          Specimen{hasDarkSet ? (showingDark ? " — dark" : " — light") : ""}
+        </div>
+        <SpecimenPreview
+          colors={colors}
+          fonts={summary.fonts}
+          typeScale={summary.typeScale}
+          dark={showingDark}
+        />
+      </section>
 
       {summary.gaps && summary.gaps.length > 0 && (
         <section className="border-t border-xyne-border-subtle px-4 py-3">

@@ -3640,7 +3640,8 @@ export async function processTask(
       log(
         `[task-command] ${taskCommand?.command ?? "artifact"} designSystem prompt injection applied ` +
           `origin=${designSystemInjection.origin}` +
-          (designSystemInjection.name ? ` name=${designSystemInjection.name}` : ""),
+          (designSystemInjection.name ? ` name=${designSystemInjection.name}` : "") +
+          ` darkTokens=${designSystemInjection.darkTokens}`,
       );
     } else if (designSystemInjection.status === "oversized") {
       log(

@@ -3195,6 +3195,8 @@ export interface BrandSummary {
   sourceCommit?: string;
   extractedAt: string;
   colors: BrandColor[];
+  colorsDark?: BrandColor[];
+  darkThemeSource?: "prefers-color-scheme" | "class" | "theme-file";
   fonts: BrandFont[];
   typeScale: BrandTypeStep[];
   radii?: BrandScaleValue[];
@@ -3209,6 +3211,7 @@ export interface BrandSummary {
 export const BRAND_SUMMARY_FILENAME = "brand.json";
 export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
 export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
+export const BRAND_TOKENS_DARK_CSS_FILENAME = "tokens.dark.css";
 
 /**
  * The validated brand summary for a delivered `brand.json`.
@@ -3272,6 +3275,7 @@ export interface DesignSystemRecord {
   name: string;
   designMd: string;
   tokensCss: string;
+  tokensCssDark: string;
   assets: unknown;
   source: string;
   sourceUrl: string | null;
@@ -3287,6 +3291,7 @@ export interface CreateDesignSystemInput {
   name: string;
   designMd?: string;
   tokensCss?: string;
+  tokensCssDark?: string;
   assets?: Record<string, unknown> | null;
   /** "manual" | "url" | "screenshot" | "repo" | "file" | "library". */
   source?: string;
