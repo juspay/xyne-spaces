@@ -99,6 +99,9 @@ type UpdatedConveresationsAnchor = {
 };
 
 const PAGE_SIZE = 50;
+// Unreads inbox: how many of the channel's latest messages a card shows when it
+// has nothing new to show.
+const UNREADS_FALLBACK_COUNT = 3;
 
 type DeepLinkTarget = { conversationId: string; createdAt: number };
 
@@ -481,10 +484,17 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // In unreads-only mode (the Unreads inbox), hide everything the user has
   // already seen; pending rows carry the newest timestamps so they survive.
+  // When nothing new is visible (the channel was bumped by a thread reply, a ticket
+  // made from an existing message, a join merged into an older message…), the card
+  // shows the channel's latest messages instead of an empty body.
   const filteredConversations = useMemo(() => {
     if (!unreadsOnly || !lastViewedAtOnOpen) return conversationsWithPending;
-    return conversationsWithPending.filter(conv => conv.createdAt > lastViewedAtOnOpen);
-  }, [conversationsWithPending, unreadsOnly, lastViewedAtOnOpen]);
+    const isVisible = (conv: Conversation): boolean =>
+      getInitialMessageFromConversation(conv, user?.id) !== null;
+    const unread = conversationsWithPending.filter(conv => conv.createdAt > lastViewedAtOnOpen);
+    if (unread.some(isVisible)) return unread;
+    return conversationsWithPending.filter(isVisible).slice(-UNREADS_FALLBACK_COUNT);
+  }, [conversationsWithPending, unreadsOnly, lastViewedAtOnOpen, user?.id]);
 
   const ephemeralConversations = useEphemeralChannelConversations(channelId);
   const conversationsWithEphemeral = useMemo(() => {
@@ -1069,8 +1079,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [isInitialLoadComplete, fetchOlderMessages]);
 
   // ── New message boundary ──────────────────────────────────────────────────────
+  // Skipped in unreads-only mode: every row there is already past lastViewedAt,
+  // so the divider and pill would just sit on top of the first message.
   useEffect(() => {
-    if (!lastViewedAtOnOpen || !isInitialLoadComplete) {
+    if (unreadsOnly || !lastViewedAtOnOpen || !isInitialLoadComplete) {
       setNewConversationBoundary(null);
       return;
     }
@@ -1086,7 +1098,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       if (prev !== null && prev.index === idx) return prev;
       return { index: idx, seenConvId: null };
     });
-  }, [combinedMessages, isInitialLoadComplete, lastViewedAtOnOpen, user?.id]);
+  }, [combinedMessages, isInitialLoadComplete, lastViewedAtOnOpen, unreadsOnly, user?.id]);
 
   // ── Initial scroll ────────────────────────────────────────────────────────────
   // Fires as soon as there is data to render (cache or fresh fetch). Runs before
