@@ -206,7 +206,7 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { restoreConversationAttachments, saveConversationAttachments } from "../attachment-carry.js";
 import { metric } from "../metrics.js";
 import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
-import { runWithProviderFallback } from "../provider-fallback.js";
+import { producedNothingVisible, runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
 import {
   buildDesignSystemPromptInjection,
@@ -4435,13 +4435,15 @@ export async function processTask(
       attempts,
       providerLabel: (a) => a.provider ?? "spaces",
       runAttempt,
-      // Nothing user-visible: no text, no attachments, no pending responses/actions.
+      // Nothing user-visible: no text, no attachments, no pending responses/actions/questions.
       producedNothing: (r) =>
-        !r.text.trim() &&
-        getAttachments().length === 0 &&
-        getPendingResponses().length === 0 &&
-        getPendingActions().length === 0 &&
-        getCustomPendingActions().length === 0,
+        producedNothingVisible({
+          text: r.text,
+          attachments: getAttachments().length,
+          pendingResponses: getPendingResponses().length,
+          pendingActions: getPendingActions().length + getCustomPendingActions().length,
+          pendingQuestions: getPendingQuestions(),
+        }),
       // Auth failures walk the fallback chain like quota: a PRESENT-but-bad
       // premium credential (expired OAuth, revoked key → 401/403) must fall
       // through to the next provider (→ spaces), not hard-fail the run. This
