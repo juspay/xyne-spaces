@@ -196,6 +196,22 @@ export type {
   BrandAssetKind,
 } from "./brand-extraction.js";
 export {
+  EMPTY_VOICE_RULES,
+  VOICE_CASINGS,
+  extractVoiceSection,
+  hasVoiceRules,
+  parseVoiceSection,
+} from "./voice-tone.js";
+export type {
+  VoiceCasing,
+  VoiceCasingRules,
+  VoiceNumberDateFormats,
+  VoicePreferredWording,
+  VoiceRules,
+} from "./voice-tone.js";
+export { checkVoiceToneCompliance } from "./voice-tone-qa.js";
+export type { VoiceToneFinding, VoiceToneFindingType } from "./voice-tone-qa.js";
+export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
   INBOUND_ATTACHMENT_FAMILIES,

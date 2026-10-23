@@ -9,7 +9,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
-import { parseBrandSummary } from "xyne-claw-shared";
+import { parseBrandSummary, parseVoiceSection } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { chatAttachmentRepository, designSystemRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
@@ -23,6 +23,10 @@ export const brandAttachmentsRouter: Router = Router();
 
 /** A brand summary is a few KB of JSON; anything larger is not one. */
 const BRAND_SUMMARY_MAX_BYTES = 256 * 1024;
+
+/** A DESIGN.md over 32k is dropped by the runtime anyway (see
+ *  task-commands.ts), so anything near this cap is already not a design doc. */
+const DESIGN_MD_MAX_BYTES = 256 * 1024;
 
 /** The DesignSystem a brand.json was already saved as, recorded on the
  *  attachment so the card stays "saved" across a reload. */
@@ -100,6 +104,53 @@ brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request
     res.json({ success: true, data: summary, savedDesignSystemId: savedDesignSystemIdOf(att.metadata) });
   } catch (err) {
     log.error("[agent-chat] brand summary error:", err);
+    if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * The voice rules stated in a delivered `DESIGN.md` (XYNE-66830).
+ *
+ * Parsed here rather than in the card for the same reason the brand summary is
+ * validated here: this frontend has no workspace dependencies by design, and
+ * the parser also bounds what the card and the QA check act on for a file
+ * drafted from an untrusted page — one implementation, under test, on the
+ * server. It is not the fence on what reaches a /design prompt; that is
+ * XYNE-66821's.
+ *
+ * Always 200 with a rules object. Empty rules are a legitimate answer — the
+ * system may simply not state a voice — and the card renders that as its empty
+ * state rather than as a failure. Same ACL as the routes above: this exposes
+ * text the caller can already download.
+ */
+brandAttachmentsRouter.get("/attachments/:id/voice-rules", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  try {
+    const requesterId = getRequesterId(req);
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
+
+    const att = await chatAttachmentRepository.findById(req.params.id);
+    if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
+
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
+    if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
+
+    // Same refusal as the brand summary: an unknown size refuses rather than
+    // defaulting to 0, which would read the object whole into memory.
+    const declaredSize =
+      att.size ?? (await gcsService.getMetadata(att.url).then((m) => m.size).catch(() => null));
+    if (declaredSize === null || declaredSize === undefined) {
+      res.status(413).json({ success: false, error: "Design doc size could not be determined" });
+      return;
+    }
+    if (declaredSize > DESIGN_MD_MAX_BYTES) {
+      res.status(413).json({ success: false, error: "Design doc is too large to parse" });
+      return;
+    }
+
+    const buffer = await gcsService.getFileBuffer(att.url);
+    res.json({ success: true, data: parseVoiceSection(buffer.toString("utf8")) });
+  } catch (err) {
+    log.error("[agent-chat] voice rules error:", err);
     if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

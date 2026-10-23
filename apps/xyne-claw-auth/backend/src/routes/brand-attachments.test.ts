@@ -86,6 +86,25 @@ const VALID_SUMMARY = JSON.stringify({
   typeScale: [{ name: "body", sizePx: 16 }],
 });
 
+/** A delivered DESIGN.md with a voice section in the documented format. */
+const DESIGN_MD = `# Stripe
+
+## Voice
+
+- **Tone:** direct, concise
+- **Avoid:** delve, seamlessly
+- **Headings:** sentence case
+`;
+
+/** The same thing written as prose. Parses to nothing by design — the card
+ *  renders that as its empty state rather than as a failure. */
+const PROSE_DESIGN_MD = `# Stripe
+
+## Voice
+
+We sound like a knowledgeable colleague, never a brochure.
+`;
+
 async function call(
   method: "GET" | "POST",
   url: string,
@@ -121,12 +140,16 @@ beforeEach(() => {
     ["gcs/valid.json", VALID_SUMMARY],
     ["gcs/invalid.json", JSON.stringify({ version: 1, name: "X", source: "url", colors: "nope" })],
     ["gcs/gaps-string.json", JSON.stringify({ ...JSON.parse(VALID_SUMMARY), gaps: "none" })],
+    ["gcs/design.md", DESIGN_MD],
+    ["gcs/prose-design.md", PROSE_DESIGN_MD],
   ]);
   state.attachments = [
     { id: "att-valid", uploaderUserId: OWNER, url: "gcs/valid.json", originalFilename: "brand.json", mimeType: "application/json", size: Buffer.byteLength(VALID_SUMMARY), metadata: null },
     { id: "att-invalid", uploaderUserId: OWNER, url: "gcs/invalid.json", originalFilename: "brand.json", mimeType: "application/json", size: 40, metadata: null },
     { id: "att-gaps", uploaderUserId: OWNER, url: "gcs/gaps-string.json", originalFilename: "brand.json", mimeType: "application/json", size: null, metadata: null },
     { id: "att-huge", uploaderUserId: OWNER, url: "gcs/valid.json", originalFilename: "brand.json", mimeType: "application/json", size: 900_000, metadata: null },
+    { id: "att-design", uploaderUserId: OWNER, url: "gcs/design.md", originalFilename: "DESIGN.md", mimeType: "text/markdown", size: Buffer.byteLength(DESIGN_MD), metadata: null },
+    { id: "att-design-prose", uploaderUserId: OWNER, url: "gcs/prose-design.md", originalFilename: "DESIGN.md", mimeType: "text/markdown", size: Buffer.byteLength(PROSE_DESIGN_MD), metadata: null },
   ];
   state.admins = new Set([ADMIN]);
   state.updates = [];
@@ -188,6 +211,58 @@ describe("GET /attachments/:id/brand-summary", () => {
     state.attachments[0]!["metadata"] = { savedDesignSystemId: "ds-1" };
     const res = await call("GET", "/attachments/att-valid/brand-summary");
     expect(res.body["savedDesignSystemId"]).toBe("ds-1");
+  });
+});
+
+/**
+ * XYNE-66830. Parsed server-side for the same reason the brand summary is
+ * validated here: this frontend has no workspace dependencies, and the parser
+ * bounds what the card and the QA check act on for a file drafted from an
+ * untrusted page.
+ */
+describe("GET /attachments/:id/voice-rules", () => {
+  it("requires an authenticated user", async () => {
+    expect((await call("GET", "/attachments/att-design/voice-rules", { userId: null })).status).toBe(401);
+  });
+
+  it("404s for an unknown attachment", async () => {
+    expect((await call("GET", "/attachments/nope/voice-rules")).status).toBe(404);
+  });
+
+  it("refuses a stranger and allows a CLAW_ADMIN, same as the download route", async () => {
+    expect((await call("GET", "/attachments/att-design/voice-rules", { userId: STRANGER })).status).toBe(403);
+    expect((await call("GET", "/attachments/att-design/voice-rules", { userId: ADMIN })).status).toBe(200);
+  });
+
+  it("returns the rules stated in the design doc", async () => {
+    const res = await call("GET", "/attachments/att-design/voice-rules");
+    expect(res.status).toBe(200);
+    expect(res.body["data"]).toMatchObject({
+      toneWords: ["direct", "concise"],
+      bannedPhrases: ["delve", "seamlessly"],
+      casing: { headings: "sentence-case" },
+    });
+  });
+
+  it("returns empty rules, not an error, when the section is prose", async () => {
+    // The card renders this as "no voice rules detected", which is the whole
+    // point: a section that looks like a voice but parses to nothing would
+    // otherwise be invisible until a design run quietly ignored it.
+    const res = await call("GET", "/attachments/att-design-prose/voice-rules");
+    expect(res.status).toBe(200);
+    expect(res.body["data"]).toEqual({
+      toneWords: [],
+      bannedPhrases: [],
+      preferredWording: [],
+      casing: {},
+    });
+  });
+
+  it("refuses a design doc whose size cannot be determined", async () => {
+    const { gcsService } = await import("../services/storageService.js");
+    vi.mocked(gcsService.getMetadata).mockResolvedValueOnce({ size: undefined, contentType: "text/markdown" } as never);
+    state.attachments.find((a) => a["id"] === "att-design")!["size"] = null;
+    expect((await call("GET", "/attachments/att-design/voice-rules")).status).toBe(413);
   });
 });
 

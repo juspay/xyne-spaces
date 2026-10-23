@@ -44,8 +44,17 @@ const DESIGN_SYSTEM_TEMPLATE = `# Design System
 - Forms use visible labels, 40px controls, and clear focus rings.
 - Tables prioritize scanability with muted dividers and right-aligned numbers.
 
-## Voice & Content Rules
-- Tone is concise, specific, and operational.
+## Voice
+- **Tone:** concise, specific, operational
+- **Prefer:** "sign in" over "login"; "use" over "utilize"
+- **Avoid:** delve, seamlessly, synergy, best-in-class, revolutionary
+- **Headings:** sentence case
+- **Buttons:** sentence case
+- **CTA style:** active first-person verb, e.g. "Start my trial"
+- **Numbers:** 1,000 — comma thousands separator
+- **Dates:** 3 Mar 2026 — day month year, no ordinals
+
+## Content Rules
 - Prefer concrete labels over marketing language.
 - Empty states should state what happened and the next action.
 - Avoid emoji, decorative gradients, and vague claims.`;
