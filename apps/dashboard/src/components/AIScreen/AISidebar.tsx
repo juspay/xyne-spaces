@@ -27,7 +27,7 @@ import {
   CheckTickSingle,
   SidebarLeftClose,
 } from '@xyne/icons';
-import { Server, X } from 'lucide-react';
+import { Download, Server, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
@@ -50,6 +50,7 @@ import {
 } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Dialog } from '../ui/Dialog/Dialog';
+import { ExportChatDialog } from './ExportChatDialog';
 import { Button } from '../ui/Button';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
@@ -63,6 +64,7 @@ import {
 } from './ConversationAgents';
 import {
   agentIdentity,
+  conversationAgents,
   groupByRecency,
   splitAutoReplies,
 } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
@@ -337,6 +339,7 @@ function SessionHistory({
   showEmpty = true,
 }: SessionHistoryProps): ReactElement | null {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -350,6 +353,7 @@ function SessionHistory({
   };
 
   const pendingSession = sessions.find(s => s.id === pendingDeleteId) ?? null;
+  const exportingSession = sessions.find(s => s.id === exportingId) ?? null;
 
   /** Ignored while the request is in flight so the dialog can't vanish mid-delete. */
   const closeDeleteDialog = (): void => {
@@ -585,6 +589,20 @@ function SessionHistory({
                           <span className='flex-1'>Remove from project</span>
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuItem
+                        className='gap-2'
+                        onClick={() => setExportingId(session.id)}
+                        data-track-category='XyneAI'
+                        data-track-name='OPEN_EXPORT_SESSION'
+                        data-track-metadata={JSON.stringify({
+                          surface: 'page',
+                          conversationId: session.sessionId,
+                        })}
+                        data-testid='export-session'
+                      >
+                        <Download className='size-3.5 shrink-0' aria-hidden />
+                        <span className='flex-1'>Export</span>
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className='gap-2 text-destructive focus:text-destructive'
@@ -607,6 +625,16 @@ function SessionHistory({
           );
         })}
       </ul>
+
+      {exportingSession && (
+        <ExportChatDialog
+          conversationId={exportingSession.sessionId}
+          title={exportingSession.title}
+          agentSlugs={conversationAgents(exportingSession)}
+          defaultAgentSlug={exportingSession.agentSlug}
+          onClose={() => setExportingId(null)}
+        />
+      )}
 
       {pendingSession && (
         <Dialog
@@ -929,11 +957,24 @@ export function AISidebar({
                   aria-hidden
                 />
               </button>
-              <ConversationAgentFilter
-                options={agents}
-                value={agentFilter}
-                onChange={setAgentFilter}
-              />
+              <div className='flex shrink-0 items-center gap-0.5'>
+                <button
+                  type='button'
+                  onClick={() => onCreateChat()}
+                  aria-label='New chat'
+                  title='New chat'
+                  className='flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                  data-track-category='XyneAI'
+                  data-track-name='NEW_CHAT_FROM_RECENTS'
+                >
+                  <ChatPlus className='size-3.5' aria-hidden />
+                </button>
+                <ConversationAgentFilter
+                  options={agents}
+                  value={agentFilter}
+                  onChange={setAgentFilter}
+                />
+              </div>
             </div>
 
             {recentsOpen && (

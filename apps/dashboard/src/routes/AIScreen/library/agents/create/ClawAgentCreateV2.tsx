@@ -7,7 +7,7 @@ import {
   useState,
   type ReactElement,
 } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { PencilEditLine } from '@xyne/icons';
 import { ChevronLeft, Loader2 } from 'lucide-react';
@@ -130,7 +130,14 @@ const ClawAgentCreateV2 = ({
     return (): void => window.clearTimeout(timer);
   }, [instructionsPatchNonce]);
 
-  const leavePath = isEdit ? `${libraryPath}/agent/${agent.slug}?tab=persona` : libraryPath;
+  const returnTo = useSearchParams()[0].get('returnTo');
+  // Set only when opened from an SDLC hub, so it wins after create too.
+  const leavePath =
+    returnTo?.startsWith('/') && !returnTo.startsWith('//')
+      ? returnTo
+      : isEdit
+        ? `${libraryPath}/agent/${agent.slug}?tab=persona`
+        : libraryPath;
 
   const [colorOpen, setColorOpen] = useState(false);
 

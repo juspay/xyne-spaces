@@ -20,9 +20,9 @@ import { AgentGlyph } from './AIAgentSelector';
 
 /**
  * Agents in the chat UI: who a conversation was with (history rows and their
- * filter), who each of the user's messages went to, and who answered. One agent per message
- * is the source of truth (`Message.agentSlug`); the directory resolves it to a
- * name and the avatar Spaces shows for that agent.
+ * filter) and who answered. One agent per message is the source of truth
+ * (`Message.agentSlug`); the directory resolves it to a name and the avatar
+ * Spaces shows for that agent.
  */
 
 const ASK_AI_SLUG = 'ask-ai';
@@ -171,32 +171,13 @@ export function ConversationRowContent({
   );
 }
 
-interface AgentRecipientProps {
+interface AgentBylineProps {
   slug: string;
   className?: string;
 }
 
-/** "To <agent>" above a user message — who the question was sent to. */
-export function AgentRecipient({ slug, className }: AgentRecipientProps): ReactElement {
-  const directory = useAgentDirectory();
-  const identity = agentIdentity(directory, slug);
-  return (
-    <div
-      data-testid='message-recipient'
-      className={cn(
-        'flex items-center justify-end gap-1 text-[11px] leading-4 text-muted-foreground',
-        className,
-      )}
-    >
-      <span>To</span>
-      <IdentityGlyph identity={identity} size={14} />
-      <span className='font-medium text-foreground/80'>{identity.name}</span>
-    </div>
-  );
-}
-
 /** The agent answering, above the start of its response: avatar, then name. */
-export function AgentByline({ slug, className }: AgentRecipientProps): ReactElement {
+export function AgentByline({ slug, className }: AgentBylineProps): ReactElement {
   const directory = useAgentDirectory();
   const identity = agentIdentity(directory, slug);
   return (

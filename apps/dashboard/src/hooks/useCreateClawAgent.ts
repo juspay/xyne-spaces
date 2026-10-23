@@ -1,4 +1,9 @@
-import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+  type UseMutationResult,
+} from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { apiInstance } from '@/services/clients/apiClient';
@@ -47,6 +52,25 @@ function hasResearchConfig(s: WizardSubmission): boolean {
   );
 }
 
+/** Marks a new agent pending in an SDLC hub, so approval adds it there. */
+export async function linkAgentToHub(
+  queryClient: QueryClient,
+  sdlcChannelId: string,
+  agent: Pick<Agent, 'id' | 'slug'>,
+): Promise<void> {
+  try {
+    await apiInstance.post(`/sdlc/channels/${encodeURIComponent(sdlcChannelId)}/agents/pending`, {
+      agentId: agent.id,
+    });
+    queryClient.setQueryData<{ memberSlugs: string[]; pendingSlugs: string[] }>(
+      ['sdlc-hub-agents', sdlcChannelId],
+      old => (old ? { ...old, pendingSlugs: [...old.pendingSlugs, agent.slug] } : old),
+    );
+  } catch {
+    toast.error('Agent created, but it could not be linked to the hub.');
+  }
+}
+
 /**
  * Two-phase agent creation: POST /agents, then (only if tools/skills/research
  * were chosen) PUT /agents/:slug with the config. On success, invalidate the
@@ -93,22 +117,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
       const hasResearch = hasResearchConfig(s);
 
       // Before the config attach: a failed attach must not leave the agent out of its hub.
-      if (sdlcChannelId) {
-        try {
-          await apiInstance.post(
-            `/sdlc/channels/${encodeURIComponent(sdlcChannelId)}/agents/pending`,
-            {
-              agentId: agent.id,
-            },
-          );
-          queryClient.setQueryData<{ memberSlugs: string[]; pendingSlugs: string[] }>(
-            ['sdlc-hub-agents', sdlcChannelId],
-            old => (old ? { ...old, pendingSlugs: [...old.pendingSlugs, agent.slug] } : old),
-          );
-        } catch {
-          toast.error('Agent created, but it could not be linked to the hub.');
-        }
-      }
+      if (sdlcChannelId) await linkAgentToHub(queryClient, sdlcChannelId, agent);
 
       if (hasTools || hasSkills || hasResearch) {
         const config: Record<string, unknown> = {};

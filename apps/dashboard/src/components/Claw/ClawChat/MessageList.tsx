@@ -1,9 +1,8 @@
-import { Fragment, type ReactElement } from 'react';
+import { type ReactElement } from 'react';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { MessageBubble } from './MessageBubble';
-import { AgentRecipient } from '../../AIScreen/ConversationAgents';
 import { useStickyScroll } from './useStickyScroll';
 
 interface MessageListProps {
@@ -35,15 +34,11 @@ export function MessageList({ messages, onRetry }: MessageListProps): ReactEleme
       >
         {messages.map(message => {
           return (
-            <Fragment key={message.id}>
-              {message.type === 'user' && message.agentSlug && (
-                <AgentRecipient slug={message.agentSlug} className='-mb-1' />
-              )}
-              <MessageBubble
-                message={message}
-                {...(message.type === 'bot' && message.errorInfo && onRetry ? { onRetry } : {})}
-              />
-            </Fragment>
+            <MessageBubble
+              key={message.id}
+              message={message}
+              {...(message.type === 'bot' && message.errorInfo && onRetry ? { onRetry } : {})}
+            />
           );
         })}
       </div>

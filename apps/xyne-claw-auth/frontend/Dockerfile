@@ -2,7 +2,7 @@
 # (public.ecr.aws/docker/library/*) instead of Docker Hub — Hub's anonymous
 # pull-rate limit (HTTP 429 "toomanyrequests") was breaking CI builds. The ECR
 # mirror needs no auth and isn't rate-limited; tags match Docker Hub 1:1.
-FROM public.ecr.aws/docker/library/node:22.22.3-slim AS builder
+FROM public.ecr.aws/docker/library/node:22.23.4-slim AS builder
 WORKDIR /app
 COPY apps/xyne-claw-auth/frontend/package*.json ./
 RUN npm ci

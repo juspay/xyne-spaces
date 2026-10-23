@@ -53,4 +53,28 @@ export interface AgentRun {
   readonly chatMessageId?: string | null;
   readonly userName?: string | null;
   readonly userEmail?: string | null;
+  readonly provider?: string | null;
+  readonly model?: string | null;
+}
+
+export type AgentRunSource =
+  | 'automation'
+  | 'scheduled'
+  | 'people'
+  | 'workflow'
+  | 'delegated'
+  | 'awakening';
+
+export type AgentRunInflightState = 'live' | 'stuck' | 'lost';
+
+export interface AgentRunInflight {
+  readonly state: AgentRunInflightState;
+  readonly idleMs: number;
+  readonly owned: boolean;
+}
+
+export interface AgentRunMonitorDetail {
+  readonly run: AgentRun;
+  readonly source: AgentRunSource;
+  readonly inflight: AgentRunInflight | null;
 }
