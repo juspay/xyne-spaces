@@ -9,7 +9,6 @@ import {
 } from 'react';
 import type { FocusEvent } from 'react';
 import {
-  useCreateBlockNote,
   SuggestionMenuController,
   FormattingToolbarController,
   FilePanelController,
@@ -21,6 +20,7 @@ import { BlockNoteView } from '@blocknote/mantine';
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
 import { getMathSlashMenuItems } from '@blocknote/math-block';
 import {
+  BlockNoteEditor,
   InlineContentSchema,
   PartialBlock,
   type BlockSchema,
@@ -169,23 +169,40 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const canvasParticipants = preloadedParticipants ?? queriedParticipants;
 
     // Create BlockNote editor instance with custom schema (cast so extended schema is accepted)
-    const editor = useCreateBlockNote({
-      schema: canvasSchema as unknown as CustomBlockNoteSchema<
-        BlockSchema,
-        InlineContentSchema,
-        StyleSchema
-      >,
-      ...(content && content.length > 0
-        ? {
-            initialContent: removeUnknownBlocks(content, knownCanvasBlockTypes),
-          }
-        : {}),
-      ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
-      resolveFileUrl,
-      dictionary: canvasDictionary,
-      tables: canvasTableOptions,
-      _tiptapOptions: canvasTiptapOptions,
-    });
+    const { editor, renderFailed } = useMemo(() => {
+      const options = {
+        schema: canvasSchema as unknown as CustomBlockNoteSchema<
+          BlockSchema,
+          InlineContentSchema,
+          StyleSchema
+        >,
+        ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
+        resolveFileUrl,
+        dictionary: canvasDictionary,
+        tables: canvasTableOptions,
+        _tiptapOptions: canvasTiptapOptions,
+      };
+      try {
+        return {
+          editor: BlockNoteEditor.create({
+            ...options,
+            ...(content && content.length > 0
+              ? { initialContent: removeUnknownBlocks(content, knownCanvasBlockTypes) }
+              : {}),
+          }),
+          renderFailed: false,
+        };
+      } catch (error) {
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'canvas_render_failed',
+          canvasId,
+          error,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return { editor: BlockNoteEditor.create(options), renderFailed: true };
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Auto-focus the editor on mount if requested (fire only once, cursor at end)
     // BlockNoteView's autoFocus prop is disabled — this effect is the single source of truth.
@@ -626,26 +643,32 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
             <CanvasWidthHandles surfaceRef={containerRef} />
             {header}
-            <CanvasMentionContext.Provider value={mentionContextValue}>
-              <BlockNoteView
-                editor={asBlockNoteEditorForView(editor)}
-                editable={editable}
-                onChange={handleChange}
-                theme={theme === 'midnight' ? 'dark' : 'light'}
-                formattingToolbar={false}
-                tableHandles={editable}
-                slashMenu={false}
-                linkToolbar={false}
-                filePanel={false}
-              >
-                <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
-                <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
-                <CanvasPastedLinkToolbar />
-                <FilePanelController filePanel={CanvasFilePanel} />
-                <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
-                <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
-              </BlockNoteView>
-            </CanvasMentionContext.Provider>
+            {renderFailed ? (
+              <div className='px-12 py-6 text-sm text-muted-foreground'>
+                This canvas could not be displayed because some of its content is invalid.
+              </div>
+            ) : (
+              <CanvasMentionContext.Provider value={mentionContextValue}>
+                <BlockNoteView
+                  editor={asBlockNoteEditorForView(editor)}
+                  editable={editable}
+                  onChange={handleChange}
+                  theme={theme === 'midnight' ? 'dark' : 'light'}
+                  formattingToolbar={false}
+                  tableHandles={editable}
+                  slashMenu={false}
+                  linkToolbar={false}
+                  filePanel={false}
+                >
+                  <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                  <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
+                  <CanvasPastedLinkToolbar />
+                  <FilePanelController filePanel={CanvasFilePanel} />
+                  <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
+                  <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
+                </BlockNoteView>
+              </CanvasMentionContext.Provider>
+            )}
           </div>
 
           <AnimatePresence>
