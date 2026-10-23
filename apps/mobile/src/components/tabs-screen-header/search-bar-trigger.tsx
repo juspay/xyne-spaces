@@ -1,4 +1,5 @@
-import { Pressable, Text } from 'react-native';
+import { Text } from 'react-native';
+import { Pressable } from 'react-native-gesture-handler';
 
 import { haptics } from '@/src/utils/haptics';
 import { type ReactElement } from 'react';
@@ -11,8 +12,6 @@ import { useHeaderHeight } from '@/src/hooks/useHeaderHeight';
 import { SEARCH_BAR_ICON_SIZE } from '@/src/features/global-search/constants';
 import { initialTabForSurface } from '@/src/features/global-search/utils/search-tabs';
 import { useTabsScreenHeader, type SearchBarTriggerProps } from './context';
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export function TabsScreenHeaderSearchBar({
   placeholder,
@@ -59,21 +58,35 @@ export function TabsScreenHeaderSearchBar({
     } as unknown as Href);
   };
 
+  // The bar slides with the scroll, and Reanimated writes that slide straight
+  // to the native view, ahead of React's copy of the layout. React Native's
+  // Pressable checks a release against that older copy and can drop the press;
+  // Gesture Handler's checks it against the view as drawn.
   return (
-    <AnimatedPressable
-      accessibilityRole='search'
-      accessibilityLabel={placeholder}
-      onPress={openSearchScreen}
-      onPressIn={(): void => {
-        void haptics.buttonTap();
-      }}
-      className='relative z-[5] mx-4 flex-row items-center gap-2 rounded-full bg-foreground/5 px-4'
+    <Animated.View
+      className='relative z-[5] mx-4 rounded-full bg-foreground/5'
       style={[{ height: searchBarHeight, marginTop: searchBarGap }, barStyle]}
     >
-      <Search size={SEARCH_BAR_ICON_SIZE} color={muted} />
-      <Text className='text-base' style={{ color: muted }}>
-        {placeholder}
-      </Text>
-    </AnimatedPressable>
+      <Pressable
+        accessibilityRole='search'
+        accessibilityLabel={placeholder}
+        onPress={openSearchScreen}
+        onPressIn={(): void => {
+          void haptics.buttonTap();
+        }}
+        style={{
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 16,
+        }}
+      >
+        <Search size={SEARCH_BAR_ICON_SIZE} color={muted} />
+        <Text className='text-base' style={{ color: muted }}>
+          {placeholder}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
