@@ -9,6 +9,9 @@ import { sendLocalIosPush } from './localIosPush';
 import { getNotificationFcmPayloadTruncated } from '@/services/otel';
 import { Prisma } from '@prisma/client';
 import { SessionStatus } from '@xyne/shared';
+import { getOrgMemberIdForUserQuery } from '@/bypassAcl/notificationServices';
+import { AuthSessionStatus } from '@/services/authSessionService';
+import { getNotificationPushSessionSource, type PushSessionFallbackReason } from '@/services/otel/notificationMetrics';
 
 type CachedAccessToken = {
   accessToken: string;
@@ -154,6 +157,15 @@ class FcmAccessTokenManager {
   }
 }
 
+export type PushSessionTarget = {
+  /** auth_sessions.id (new path) or user_sessions.id (legacy fallback). */
+  id: string;
+  token: string;
+  voipToken?: string;
+  platform: string;
+  appVersion?: string;
+};
+
 export type MobilePushRegistration = {
   fcmToken: string;
   voipToken?: string;
@@ -161,6 +173,9 @@ export type MobilePushRegistration = {
   deviceId?: string;
   sessionId: string;
   appVersion?: string;
+  /** Org-scoped device identity (req.user.memberId + x-device-id); tokens are stored on the matching auth session. */
+  orgMemberId?: string;
+  deviceKey?: string;
 };
 
 export type FcmNotificationPayload = {
@@ -357,6 +372,8 @@ class FcmPushService {
       },
     });
 
+    await this.storeTokenOnAuthSession(payload, composedToken, composedVoipToken);
+
     const duplicateConditions: Prisma.UserSessionWhereInput[] = [{ fcmToken: composedToken }];
 
     if (composedVoipToken) {
@@ -397,6 +414,85 @@ class FcmPushService {
     });
   }
 
+  /**
+   * Push tokens live on the org-scoped auth session (one per orgMemberId + deviceKey), so they
+   * are not tied to a workspace and survive workspace switches.
+   */
+  private async storeTokenOnAuthSession(
+    payload: MobilePushRegistration,
+    composedToken: string,
+    composedVoipToken: string | null
+  ): Promise<void> {
+    const { orgMemberId, deviceKey } = payload;
+    if (!orgMemberId || !deviceKey) {
+      logger.warn('[FCM] registerToken step=auth_session_skipped (missing orgMemberId/deviceKey)', {
+        hasOrgMemberId: !!orgMemberId,
+        hasDeviceKey: !!deviceKey,
+      });
+      return;
+    }
+
+    const session = await db.authSession.findFirst({
+      where: {
+        orgMemberId,
+        deviceKey,
+        status: AuthSessionStatus.ACTIVE,
+        refreshTokenExpiry: { gt: new Date() },
+      },
+      select: { id: true, deviceInfo: true },
+    });
+    if (!session) {
+      logger.warn('[FCM] registerToken step=auth_session_not_found', { orgMemberId, deviceKey });
+      return;
+    }
+
+    let deviceInfo = session.deviceInfo;
+    if (payload.appVersion) {
+      try {
+        deviceInfo = JSON.stringify({ ...(session.deviceInfo ? JSON.parse(session.deviceInfo) : {}), appVersion: payload.appVersion });
+      } catch {
+        // malformed deviceInfo: keep as is
+      }
+    }
+
+    await db.authSession.update({
+      where: { id: session.id },
+      data: { fcmToken: composedToken, voipToken: composedVoipToken, deviceInfo },
+    });
+
+    // A token belongs to one device: drop it from any other session of this member (e.g. a reinstall).
+    await db.authSession.updateMany({
+      where: {
+        orgMemberId,
+        id: { not: session.id },
+        OR: [{ fcmToken: composedToken }, ...(composedVoipToken ? [{ voipToken: composedVoipToken }] : [])],
+      },
+      data: { fcmToken: null, voipToken: null },
+    });
+  }
+
+  /**
+   * Clear the push tokens of a session a push was sent to (invalid token reported by FCM/APNs).
+   * The id is an auth_sessions id or, on the legacy fallback, a user_sessions id; ids are cuids
+   * so at most one table matches.
+   */
+  async clearPushTokenForSession(sessionId: string): Promise<void> {
+    try {
+      await db.authSession.updateMany({ where: { id: sessionId }, data: { fcmToken: null, voipToken: null } });
+      await db.userSession.updateMany({ where: { id: sessionId }, data: { fcmToken: null, voipToken: null, deviceId: null } });
+    } catch (error) {
+      logger.debug('Failed to clear session push token', { error });
+    }
+  }
+
+  /** Clear the push tokens of the device's auth session (explicit unregister). */
+  async clearDevicePushToken(orgMemberId: string, deviceKey: string): Promise<void> {
+    await db.authSession.updateMany({
+      where: { orgMemberId, deviceKey, status: AuthSessionStatus.ACTIVE },
+      data: { fcmToken: null, voipToken: null },
+    });
+  }
+
   async unregisterToken(userId: string, token: string, sessionId?: string): Promise<void> {
     if (!token) return;
 
@@ -432,8 +528,22 @@ class FcmPushService {
     });
   }
 
+  /** True when the user has a push token on either the new (auth_sessions) or old (user_sessions) store. */
   async hasActiveTokens(userId: string): Promise<boolean> {
-    const activeCount = await db.userSession.count({
+    const orgMemberId = await getOrgMemberIdForUserQuery(userId);
+    if (orgMemberId) {
+      const authCount = await db.authSession.count({
+        where: {
+          orgMemberId,
+          status: AuthSessionStatus.ACTIVE,
+          refreshTokenExpiry: { gt: new Date() },
+          fcmToken: { not: null },
+        },
+      });
+      if (authCount > 0) return true;
+    }
+
+    const legacyCount = await db.userSession.count({
       where: {
         userId,
         status: SessionStatus.ACTIVE,
@@ -441,7 +551,7 @@ class FcmPushService {
         OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
       },
     });
-    return activeCount > 0;
+    return legacyCount > 0;
   }
 
   async sendNotification(userId: string, payload: FcmNotificationPayload): Promise<void> {
@@ -787,12 +897,54 @@ class FcmPushService {
   }
 
   /**
-   * Get active sessions with FCM tokens for a user
-   * Used by notification service to queue mobile push jobs
+   * Get active sessions with FCM tokens for a user. Used by the notification service to queue
+   * mobile push jobs.
+   *
+   * New path: userId -> orgMemberId -> the member's active auth_sessions with a token (one per
+   * device, independent of workspace). Falls back to the legacy user_sessions lookup when that
+   * yields nothing; each lookup is counted with the reason for any fallback.
    */
-  async getActiveSessionsWithTokens(
-    userId: string
-  ): Promise<Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }>> {
+  async getActiveSessionsWithTokens(userId: string): Promise<PushSessionTarget[]> {
+    const counter = getNotificationPushSessionSource();
+    let reason: PushSessionFallbackReason;
+
+    const orgMemberId = await getOrgMemberIdForUserQuery(userId);
+    if (!orgMemberId) {
+      reason = 'no_org_member';
+    } else {
+      const rows = await db.authSession.findMany({
+        where: {
+          orgMemberId,
+          status: AuthSessionStatus.ACTIVE,
+          refreshTokenExpiry: { gt: new Date() },
+        },
+        select: { id: true, platform: true, fcmToken: true, voipToken: true, deviceInfo: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const targets = rows
+        .filter((row) => row.fcmToken)
+        .map((row) => this.toPushTarget(row))
+        .filter((target): target is PushSessionTarget => target !== null);
+      if (targets.length > 0) {
+        counter.add(1, { method: 'new', reason: 'none' });
+        return targets;
+      }
+
+      if (rows.length === 0) {
+        reason = 'no_auth_session';
+      } else if (rows.some((row) => row.platform === 'android' || row.platform === 'ios')) {
+        reason = 'no_fcm_token';
+      } else {
+        reason = 'no_mobile_session';
+      }
+    }
+
+    counter.add(1, { method: 'old', reason });
+    return this.getLegacySessionsWithTokens(userId);
+  }
+
+  private async getLegacySessionsWithTokens(userId: string): Promise<PushSessionTarget[]> {
     const sessions = await db.userSession.findMany({
       where: {
         userId,
@@ -804,35 +956,39 @@ class FcmPushService {
       orderBy: { updatedAt: 'desc' },
     });
 
-    const results: Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }> = [];
+    return sessions
+      .map((session) => this.toPushTarget(session))
+      .filter((target): target is PushSessionTarget => target !== null);
+  }
 
-    for (const session of sessions) {
-      const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
-      const parsedVoip = session.voipToken ? this.parseStoredToken(session.voipToken) : null;
+  private toPushTarget(session: {
+    id: string;
+    fcmToken: string | null;
+    voipToken: string | null;
+    deviceInfo: string | null;
+  }): PushSessionTarget | null {
+    const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
+    const parsedVoip = session.voipToken ? this.parseStoredToken(session.voipToken) : null;
+    if (!parsedFcm) return null;
 
-      if (!parsedFcm) continue;
-
-      let appVersion: string | undefined;
-      if (session.deviceInfo) {
-        try {
-          const deviceInfo = JSON.parse(session.deviceInfo);
-          appVersion = deviceInfo.appVersion;
-        } catch {
-          // ignore malformed deviceInfo
-        }
+    let appVersion: string | undefined;
+    if (session.deviceInfo) {
+      try {
+        appVersion = JSON.parse(session.deviceInfo).appVersion;
+      } catch {
+        // ignore malformed deviceInfo
       }
-
-      results.push({
-        id: session.id,
-        token: parsedFcm?.token || '',
-        voipToken: parsedVoip?.token,
-        platform: parsedFcm?.platform || parsedVoip?.platform || 'unknown',
-        appVersion,
-      });
     }
 
-    return results;
+    return {
+      id: session.id,
+      token: parsedFcm.token || '',
+      voipToken: parsedVoip?.token,
+      platform: parsedFcm.platform || parsedVoip?.platform || 'unknown',
+      appVersion,
+    };
   }
+
   /**
    * Direct dispatch to FCM - exposed for worker usage
    * @throws Error if FCM call fails
