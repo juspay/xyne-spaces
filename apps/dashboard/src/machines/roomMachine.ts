@@ -109,6 +109,31 @@ const logRoomMachineEvent = (
   });
 };
 
+// `ended` only fires when the capture is stopped from outside the app (OS, browser bar,
+// shared window closed); a stop from the app calls track.stop(), which doesn't fire it.
+const watchScreenShareCapture = (
+  callId: string,
+  trackSid: string,
+  mediaStreamTrack: MediaStreamTrack,
+): void => {
+  const details = (): Record<string, unknown> => ({
+    trackSid,
+    label: mediaStreamTrack.label,
+    readyState: mediaStreamTrack.readyState,
+  });
+  mediaStreamTrack.addEventListener(
+    'ended',
+    () => logRoomMachineEvent(callId, 'screen_share_capture_ended', details()),
+    { once: true },
+  );
+  mediaStreamTrack.addEventListener('mute', () =>
+    logRoomMachineEvent(callId, 'screen_share_capture_muted', details()),
+  );
+  mediaStreamTrack.addEventListener('unmute', () =>
+    logRoomMachineEvent(callId, 'screen_share_capture_unmuted', details()),
+  );
+};
+
 /**
  * HTTP status behind a rejected API call, when it carried one.
  *
@@ -766,6 +791,13 @@ export const roomMachine = setup({
             trackSid: publication.trackSid,
             isLocal: true,
           });
+          if (publication.source === Track.Source.ScreenShare && publication.track) {
+            watchScreenShareCapture(
+              callId,
+              publication.trackSid,
+              publication.track.mediaStreamTrack,
+            );
+          }
           updateParticipants();
           sendBack({ type: 'LOCAL_TRACK_PUBLISHED' });
         });
@@ -1742,6 +1774,10 @@ export const roomMachine = setup({
           void localParticipant.setCameraEnabled(false);
         }
         if (screenShareTurnedOffByHost && localParticipant?.isScreenShareEnabled) {
+          logRoomMachineEvent(
+            context.externalId ?? context.callId,
+            'screen_share_stopped_by_host_controls',
+          );
           void localParticipant?.setScreenShareEnabled(false);
         }
         return;
@@ -2407,15 +2443,25 @@ export const roomMachine = setup({
         },
         TOGGLE_SCREEN_SHARE: {
           actions: ({ context }): void => {
-            if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) return;
+            const logCallId = context.externalId ?? context.callId;
+            if (isHostControlTurnedOffForLocal(context, 'turnOffScreenShare')) {
+              logRoomMachineEvent(logCallId, 'screen_share_toggle_blocked_by_host_controls');
+              return;
+            }
 
             if (context.isNativeMode) {
               // Get current state from participants
               const localParticipant = context.participants.find(p => p.isLocal);
               const currentState = localParticipant?.isScreenShareEnabled ?? false;
+              logRoomMachineEvent(logCallId, 'screen_share_toggle_requested', {
+                enable: !currentState,
+              });
               reactNativeBridge.livekitToggleScreenShare(!currentState);
             } else if (context.room) {
               const currentState = context.room.localParticipant.isScreenShareEnabled;
+              logRoomMachineEvent(logCallId, 'screen_share_toggle_requested', {
+                enable: !currentState,
+              });
               const { screenShareQuality } = getCallMediaQualitySettings();
               const quality = CALL_MEDIA_QUALITY_CONFIG[screenShareQuality];
               void context.room.localParticipant
