@@ -15,6 +15,8 @@
  *   (no deactivation needed - the next test's fresh context starts inactive again)
  */
 
+import type { Page } from '@playwright/test';
+
 export const ZERO_SYNC_BRIDGE_SCRIPT = `
 (() => {
   if (typeof window === 'undefined' || window.__zeroSync) return;
@@ -70,3 +72,23 @@ export const ZERO_SYNC_BRIDGE_SCRIPT = `
   };
 })();
 `;
+
+/** Resolves once the page's WebSockets have been silent for `idleMs`. */
+export async function waitForZeroSyncToSettle(
+  page: Page,
+  idleMs = 400,
+  timeout = 15000
+): Promise<void> {
+  await page.evaluate(() => {
+    // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
+    // @ts-ignore - __zeroSync is injected before page load
+    if (typeof window.__zeroSync !== 'undefined') window.__zeroSync.activate();
+  });
+  await page.waitForFunction(
+    // biome-ignore lint/suspicious/noTsIgnore: __zeroSync injected via addInitScript
+    // @ts-ignore - __zeroSync is injected before page load
+    (ms) => typeof window.__zeroSync !== 'undefined' && window.__zeroSync.isSettled(ms),
+    idleMs,
+    { timeout, polling: 50 }
+  );
+}
