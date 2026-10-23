@@ -30,6 +30,8 @@ export interface StoredMessage {
 
 export interface StoredConversation extends StoredEntity {
   messages: Record<string, StoredMessage>;
+  /** Set by the channel description steps; read back via `user:<alias>.channels.<alias>.description`. */
+  description?: string;
 }
 
 export interface StoredProject extends StoredEntity {
