@@ -545,6 +545,32 @@ describe("the CSS export cannot be broken out of", () => {
     expect(JSON.parse(exportDesignSystem(hostile, "tailwind"))).not.toHaveProperty("fontFamily");
   });
 
+  it("refuses a value that would break out of a style block or attribute", () => {
+    // CSS_DECLARATION stops at `;{}` but allowed `<>"'`, so these reached the
+    // branding injectors in XYNE-66827 and escaped: the font closed the brand
+    // `<style>` and put a `<script>` in a delivered report, the radius closed
+    // a `style="…"` attribute and added `onload` to an email draft's link.
+    const tokens = designTokensFromTokensCss(
+      ':root{--brand-primary:#2563EB;' +
+        '--radius-md:8px" onload="alert(1);' +
+        '--font-body:Inter</style><script>alert(2)</script>;' +
+        "--space-2:8px}",
+    );
+    expect(tokens.radii).toEqual([]);
+    expect(tokens.fonts).toEqual([]);
+    // The safe tokens around them still export.
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+    expect(tokens.spacing).toEqual([{ key: "2", value: "8px" }]);
+
+    for (const format of DESIGN_EXPORT_FORMATS) {
+      const out = exportTokensCss(
+        ':root{--font-body:Inter</style><script>alert(1)</script>}',
+        format,
+      );
+      expect(out, format).not.toContain("<script>");
+    }
+  });
+
   it("strips a comment terminator out of the system name", () => {
     const css = exportDesignSystem({ ...SUMMARY, name: "Acme */ evil" }, "css-vars");
     expect(css.split("\n")[0]).toBe("/* Acme  evil */");

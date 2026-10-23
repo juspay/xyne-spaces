@@ -589,7 +589,7 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
         const stack = value
           .split(",")
           .map((part) => part.trim().replace(/^["']|["']$/g, ""))
-          .filter(Boolean);
+          .filter((family) => family.length > 0 && isSafeCssValue(family));
         if (stack.length === 0) break;
         seenFonts.add(slot);
         fonts.push({ key: slot, stack });
@@ -603,15 +603,18 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
         break;
       }
       case "radii":
+        if (!isSafeCssValue(value)) break;
         radii.push({ key: uniqueKey(stripCategory(key, CATEGORY_PREFIXES.radii), radiiKeys), value });
         break;
       case "spacing":
+        if (!isSafeCssValue(value)) break;
         spacing.push({
           key: uniqueKey(stripCategory(key, CATEGORY_PREFIXES.spacing), spacingKeys),
           value,
         });
         break;
       case "shadows":
+        if (!isSafeCssValue(value)) break;
         shadows.push({
           key: uniqueKey(stripCategory(key, CATEGORY_PREFIXES.shadows), shadowKeys),
           value,
@@ -693,11 +696,18 @@ function toTailwind(tokens: DesignTokenSet): string {
  * — valid JSON, but Tailwind writes that value into generated CSS and the extra
  * rule reappears. One check at the boundary covers every format.
  *
- * The CSS entry point can't produce one — its regex stops at `;{}` — but the
- * brand.json path can, since those values are model-written. Refused rather
- * than escaped: no legitimate token value contains these.
+ * `<>"'` and a backslash are refused alongside `;{}`, and that is not
+ * belt-and-braces. CSS_DECLARATION stops at `;{}` but allows the rest, so a
+ * model-written `--font-body: Inter</style><script>…` closed the brand style
+ * block in a delivered HTML report, and `--radius-md: 8px" onload="…` closed
+ * the style attribute in an email draft. Applied on BOTH entry points: the
+ * token CSS path is exactly where those arrived.
+ *
+ * Refused rather than escaped, because no legitimate token value contains
+ * these — a quoted font family has already had its quotes stripped by the time
+ * it gets here.
  */
-const isSafeCssValue = (value: string): boolean => !/[;{}]/.test(value);
+const isSafeCssValue = (value: string): boolean => !/[;{}<>"'\\]/.test(value);
 
 /** A star followed by a slash would close the header comment early, so it is
  *  removed from a system name before the name goes in one. */
