@@ -4,7 +4,10 @@ FROM mirror.gcr.io/library/node:22.23.4-slim
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+# Install pnpm via npm, not corepack: on the CI runner's egress proxy
+# `corepack prepare` fails fetching pnpm from registry.npmjs.org, while npm
+# pulls from the same registry fine (same fix as tools/xyne-automation/Dockerfile).
+RUN npm install -g pnpm@10.15.0
 
 WORKDIR /repo
 
