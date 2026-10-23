@@ -1,3 +1,10 @@
+## [1.519.0-release-20261023.2](https://github.com/juspay/xyne-spaces/compare/v1.519.0-release-20261023.1...v1.519.0-release-20261023.2) (2026-10-23)
+
+
+### Features
+
+* kb-search uses default_native and the claw summary for snippets ([#3381](https://github.com/juspay/xyne-spaces/issues/3381)) ([#3428](https://github.com/juspay/xyne-spaces/issues/3428)) ([7160cc3](https://github.com/juspay/xyne-spaces/commit/7160cc38416653fc25b0fce54627074d1528e132))
+
 ## [1.519.0-release-20261023.1](https://github.com/juspay/xyne-spaces/compare/v1.518.1...v1.519.0-release-20261023.1) (2026-10-23)
 
 
