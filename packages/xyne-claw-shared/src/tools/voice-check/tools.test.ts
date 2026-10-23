@@ -110,9 +110,12 @@ describe("design-voice-check tool", () => {
     expect(report).toContain('Banned phrase "data"');
   });
 
-  it("does not stand in the way of a delivery when no system is active", async () => {
+  it("does not stand in the way of a delivery when no rules reached the run", async () => {
+    // "No rules", not "no design system": a system can be configured and still
+    // not be in effect, because the runtime pins only what the prompt injection
+    // gave the model. Claiming there is no system would be the wrong reason.
     const report = await designVoiceCheck.execute({ content: FAILING }, { config: {} });
-    expect(report).toContain("no design system is active");
+    expect(report).toContain("no voice rules are in effect");
     expect(report).toContain("Deliver as normal");
   });
 

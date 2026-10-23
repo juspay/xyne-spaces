@@ -10,8 +10,9 @@
  * Rules come from the design system's `## Voice` section. The run already has
  * that text injected into its prompt, but a tool cannot read a prompt, so the
  * runtime pins the section into `context.meta.designVoice` the same way it pins
- * `sandboxRepo`. A caller can also pass `designMd` explicitly, which is what
- * makes this testable without a run.
+ * `sandboxRepo` — taken from the injection's result, so this can only report
+ * against rules the model was given. A caller can also pass `designMd`
+ * explicitly, which is what makes this testable without a run.
  */
 
 import { parseVoiceSection, type VoiceRules } from "../../voice-tone.js";
@@ -127,21 +128,20 @@ export const designVoiceCheck: ToolDefinition = {
       );
     }
     // Explicit param wins, so a run can check against another system; otherwise
-    // the run's own design system, pinned into meta by the runtime.
+    // the run's own design system, pinned into meta by the runtime. The runtime
+    // takes that pin from the prompt injection's result, so whatever reaches
+    // here is what the model was given — see custom-tools.ts.
     //
-    // KNOWN GAP, blocked on XYNE-66821. `designVoice` is derived from
-    // `agentConfig.designSystem` independently of the prompt injection, so the
-    // two can disagree: a system over the 32k injection cap is dropped from the
-    // prompt but still read here, and once XYNE-66821 lands its
-    // `designSystemRef` the legacy text will be the wrong source entirely — a
-    // chat pinned to system B would be checked against system A. The fix is to
-    // take the section from the injection RESULT, which that ticket owns.
-    // Resolving it here as well would mean two resolvers for one value.
+    // KNOWN GAP, blocked on XYNE-66821. The injection it is taken from still
+    // reads the legacy `agentConfig.designSystem`. Once that ticket lands its
+    // `designSystemRef`, a chat pinned to system B would be checked against
+    // system A — but the fix belongs in the injection, which that ticket owns,
+    // and this now inherits whatever the injection decides.
     const designMd = asString(params["designMd"]) || asString(context?.meta?.["designVoice"]);
     if (!designMd.trim()) {
       return (
-        "Voice QA: no design system is active for this run, so there are no voice rules to check against. " +
-        "Deliver as normal."
+        "Voice QA: no voice rules are in effect for this run — it was given no design system, or its " +
+        "system states no `## Voice` section — so there is nothing to check. Deliver as normal."
       );
     }
     return formatReport(runVoiceCheck({ content, designMd }));
