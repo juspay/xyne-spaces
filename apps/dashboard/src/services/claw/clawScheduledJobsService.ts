@@ -43,6 +43,8 @@ export interface ScheduledJobRun {
 export interface ScheduledJobPatch {
   replyMode?: 'thread' | 'channel';
   label?: string | null;
+  task?: string;
+  context?: string | null;
   targetChannelId?: string | null;
   cronExpression?: string;
   nextRunAt?: string;
@@ -74,6 +76,23 @@ export async function updateScheduledJob(
     `/api/v1/scheduled-jobs/${encodeURIComponent(id)}`,
     { method: 'PATCH', body: JSON.stringify(patch) },
   );
+  return body.data;
+}
+
+export async function pauseScheduledJob(id: string): Promise<{ id: string; status: string }> {
+  const body = await clawRequest<SuccessEnvelope<{ id: string; status: string }>>(
+    `/api/v1/scheduled-jobs/${encodeURIComponent(id)}/pause`,
+    { method: 'POST', body: '{}' },
+  );
+  return body.data;
+}
+
+export async function resumeScheduledJob(
+  id: string,
+): Promise<{ id: string; status: string; nextRunAt?: string }> {
+  const body = await clawRequest<
+    SuccessEnvelope<{ id: string; status: string; nextRunAt?: string }>
+  >(`/api/v1/scheduled-jobs/${encodeURIComponent(id)}/resume`, { method: 'POST', body: '{}' });
   return body.data;
 }
 

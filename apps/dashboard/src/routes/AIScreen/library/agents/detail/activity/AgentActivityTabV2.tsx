@@ -17,6 +17,10 @@ import {
   DetailEmptyState,
   DetailSection,
 } from '../../../shared/primitives/DetailPrimitives';
+import { EditScheduleDialog } from './EditScheduleDialog';
+import { ScheduleActions } from './ScheduleActions';
+import { describeSchedule } from './scheduledJobEdit';
+import type { ScheduledJob, ScheduledJobPatch } from '@/services/claw/clawScheduledJobsService';
 import { useAgentChainWorkflows } from './chainWorkflowsService';
 import { createScheduledJob, type NewScheduledJob } from './createScheduledJob';
 import { CreateScheduleDialog } from './CreateScheduleDialog';
@@ -52,12 +56,10 @@ function relativeTime(value: string | null): string {
   return days < 14 ? `${days}d ago` : new Date(parsed).toLocaleDateString();
 }
 
-function scheduleCadence(cron: string | null, nextRunAt: string | null): string {
-  if (cron) return `Repeats · ${cron}`;
-  if (!nextRunAt) return 'One-off';
-  const parsed = new Date(nextRunAt);
-  return Number.isNaN(parsed.getTime()) ? 'One-off' : `Runs once · ${parsed.toLocaleString()}`;
-}
+const SCHEDULE_TONE: Record<string, 'success' | 'warning' | 'neutral'> = {
+  active: 'success',
+  paused: 'warning',
+};
 
 export function AgentActivityTabV2({
   agent,
@@ -73,6 +75,7 @@ export function AgentActivityTabV2({
   const [creating, setCreating] = useState(false);
   const [scheduleQuery, setScheduleQuery] = useState('');
   const [scheduleSearchOpen, setScheduleSearchOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const [runQuery, setRunQuery] = useState('');
   const [runSearchOpen, setRunSearchOpen] = useState(false);
   const [runStatus, setRunStatus] = useState<AgentRunStatusFilter>('all');
@@ -84,18 +87,49 @@ export function AgentActivityTabV2({
   const workflows = useAgentChainWorkflows(agent.slug);
   const runs = useClawAgentRuns(agent.slug, { status: runStatus, allUsers: true });
 
-  const scheduleItems = useMemo<DetailListItem[]>(() => {
+  const pauseSchedule = (id: string, name: string): void => {
+    jobMutations.pause.mutate(id, {
+      onSuccess: () => toast.success(`${name} paused`),
+      onError: err => toast.error(clawErrorText(err, 'Could not pause that schedule')),
+    });
+  };
+
+  const resumeSchedule = (id: string, name: string): void => {
+    jobMutations.resume.mutate(id, {
+      onSuccess: () => toast.success(`${name} resumed`),
+      onError: err => toast.error(clawErrorText(err, 'Could not resume that schedule')),
+    });
+  };
+
+  const scheduleJobs = useMemo(() => {
     const q = scheduleQuery.trim().toLowerCase();
-    return (jobs.data ?? [])
-      .map(job => ({
-        key: job.id,
-        name: job.label || job.task,
-        description: scheduleCadence(job.cronExpression, job.nextRunAt),
-        badge: <Pill tone={job.status === 'active' ? 'success' : 'neutral'}>{job.status}</Pill>,
-        ...(job.runsCount || job.runCount ? { meta: `${job.runsCount ?? job.runCount} runs` } : {}),
-      }))
-      .filter(item => !q || item.name.toLowerCase().includes(q));
+    return (jobs.data ?? []).filter(job => !q || (job.label || job.task).toLowerCase().includes(q));
   }, [jobs.data, scheduleQuery]);
+
+  const scheduleBusy = jobMutations.pause.isPending || jobMutations.resume.isPending;
+  const scheduleItems: DetailListItem[] = scheduleJobs.map(job => {
+    const name = job.label || job.task;
+    return {
+      key: job.id,
+      name,
+      description: describeSchedule(job),
+      badge: <Pill tone={SCHEDULE_TONE[job.status] ?? 'neutral'}>{job.status}</Pill>,
+      ...(job.runsCount || job.runCount ? { meta: `${job.runsCount ?? job.runCount} runs` } : {}),
+      ...(canEdit
+        ? {
+            actions: (
+              <ScheduleActions
+                job={job}
+                busy={scheduleBusy}
+                onEdit={() => setEditingJob(job)}
+                onPause={() => pauseSchedule(job.id, name)}
+                onResume={() => resumeSchedule(job.id, name)}
+              />
+            ),
+          }
+        : {}),
+    };
+  });
 
   const workflowItems = useMemo<DetailListItem[]>(
     () =>
@@ -137,6 +171,19 @@ export function AgentActivityTabV2({
     } finally {
       setCreating(false);
     }
+  };
+
+  const saveSchedule = (job: { id: string }, patch: ScheduledJobPatch): void => {
+    jobMutations.update.mutate(
+      { id: job.id, patch },
+      {
+        onSuccess: () => {
+          toast.success('Schedule updated');
+          setEditingJob(null);
+        },
+        onError: err => toast.error(clawErrorText(err, 'Could not update that schedule')),
+      },
+    );
   };
 
   const removeSchedule = (id: string, name: string): void => {
@@ -354,6 +401,15 @@ export function AgentActivityTabV2({
         agentSlug={agent.slug}
         saving={creating}
         onCreate={job => void createSchedule(job)}
+      />
+
+      <EditScheduleDialog
+        job={editingJob}
+        saving={jobMutations.update.isPending}
+        onOpenChange={open => {
+          if (!open) setEditingJob(null);
+        }}
+        onSave={saveSchedule}
       />
     </div>
   );
