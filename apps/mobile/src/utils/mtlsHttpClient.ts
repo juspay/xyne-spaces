@@ -281,7 +281,7 @@ async function prepareHeadersForTransport(
 
   const clientSessionId = logger.getClientSessionId();
   if (clientSessionId) {
-    nextHeaders['x-client-session-id'] = clientSessionId;
+    nextHeaders['x-device-id'] = clientSessionId;
   }
 
   const workspaceId = getActiveWorkspaceId();
