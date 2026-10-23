@@ -6,6 +6,7 @@ import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
 
 import { useFabClearance } from '@/src/features/quick-actions';
+import { useScreenHeaderHeight } from '@/src/features/screen-header';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
 import { useChannelRows } from '../hooks/use-channel-rows';
@@ -39,6 +40,8 @@ export function ChannelsList(): ReactElement {
   const { isEmpty, isFiltering } = useChannelRows();
   const groups = useValue(channelGroups$);
   const bottomInset = useFabClearance();
+  // The header floats over the list, so the first row starts below it.
+  const headerHeight = useScreenHeaderHeight();
 
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
@@ -67,7 +70,7 @@ export function ChannelsList(): ReactElement {
         keyboardShouldPersistTaps='handled'
         showsVerticalScrollIndicator={false}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: bottomInset }}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: bottomInset }}
       >
         <ChannelsFilterBar />
         {groups.map(group => (
@@ -75,7 +78,7 @@ export function ChannelsList(): ReactElement {
         ))}
         {isEmpty || !hasRows ? <EmptyState isFiltering={isFiltering} /> : null}
       </Animated.ScrollView>
-      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} topInset={headerHeight} />
     </View>
   );
 }

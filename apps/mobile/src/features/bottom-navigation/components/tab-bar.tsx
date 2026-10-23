@@ -3,7 +3,6 @@ import type { Href } from 'expo-router';
 import type { NavIcon } from './nav-icon';
 import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { useIsFocused } from 'expo-router/react-navigation';
 import { useSharedValue } from 'react-native-reanimated';
 
 import { entryHref, type TabEntry } from '../model/catalog';
@@ -13,7 +12,7 @@ import { usePillGestures } from '../hooks/use-pill-gestures';
 import { useSpacesTabBarHeight } from '../hooks/use-bar-height';
 import {
   PILL_HEIGHT,
-  TAB_BAR_BLUR_FADE,
+  TAB_BAR_FADE_INSET,
   TAB_BAR_HORIZONTAL_PADDING,
   menuHeightForCount,
 } from '../constants';
@@ -56,12 +55,11 @@ export const TabBar = memo(function TabBar({
   onAskAi,
   onCustomize,
 }: TabBarProps): ReactElement {
-  const isFocused = useIsFocused();
   const barHeight = useSpacesTabBarHeight();
   const barPaddingBottom = barHeight - PILL_HEIGHT;
-  const chromeHeight = barPaddingBottom;
-  const blurHeight = chromeHeight + TAB_BAR_BLUR_FADE;
-  const blurStartOffset = chromeHeight / blurHeight;
+  // From the screen's bottom edge to a little above the pill, where the blur
+  // behind the bar starts to fade in.
+  const blurHeight = barHeight + TAB_BAR_FADE_INSET;
 
   const { menuProgress, isMenuOpen, toggleMenu, pillAnimatedStyle } = useBarAnimation(
     menuHeightForCount(menuItems.length),
@@ -116,17 +114,7 @@ export const TabBar = memo(function TabBar({
     <>
       {isMenuOpen ? <Pressable style={styles.backdrop} onPress={toggleMenu} /> : null}
       <View pointerEvents='box-none' style={[styles.frame, { minHeight: blurHeight }]}>
-        {/*
-          Always mounted, unlike the blur inside it. Gating the whole backdrop
-          on focus unmounted the fade the instant a push began and remounted it
-          only after the pop committed, so it trailed the bar on the way back in
-          — the bar never unmounts, and the fade belongs to it.
-        */}
-        <TabBarBackdrop
-          height={blurHeight}
-          startOffset={blurStartOffset}
-          isBlurEnabled={isFocused}
-        />
+        <TabBarBackdrop height={blurHeight} />
         <View
           pointerEvents='box-none'
           style={[styles.container, { paddingBottom: barPaddingBottom }]}

@@ -55,12 +55,10 @@ export const PILL_WIDTH = TOTAL_WIDTH - TAB_BAR_GAP - ACTION_BUTTON_SIZE;
 export const TAB_BAR_BOTTOM_PADDING = 8;
 /** Extra space between the pill and the bottom edge, above the safe-area padding. */
 export const TAB_BAR_LIFT = 12;
-/** Clear band above the pill where the bottom progressive blur fades out. */
-export const TAB_BAR_BLUR_FADE = 44;
-/** Peak opacity of the blur under the mask. The blur itself runs at full strength. */
-export const TAB_BAR_BLUR_ALPHA = 0.55;
-/** Peak opacity of the colour scrim at the very bottom edge. */
-export const TAB_BAR_SCRIM_ALPHA = { light: 0.72, dark: 0.78 } as const;
+/** How far above the pill the blur behind the bar begins. */
+export const TAB_BAR_FADE_INSET = 14;
+/** How far down from where it begins the blur fades in to full strength. */
+export const TAB_BAR_FADE_HEIGHT = 40;
 
 export const MENU_WIDTH = TOTAL_WIDTH;
 export const MENU_BORDER_RADIUS = 38;
@@ -128,17 +126,26 @@ export const TAB_BAR_SHADOW =
 
 export const ACTIVE_TAB_INDICATOR = '#0000000D';
 
+/** Width of the edge strokes on the bar's glass. */
+export const SURFACE_EDGE_WIDTH = 0.4;
+
 export type TabBarPalette = {
   background: string;
   icon: string;
   iconActive: string;
   activeIndicator: string;
   /**
-   * Hairline around the bar's surfaces. The drop shadow separates them from a
-   * light page on its own, but against a dark one it disappears and the panel
-   * runs into the screen behind it.
+   * The edge of the bar's glass: a stroke along the top and a darker one along
+   * the bottom, each fading out down the rounded ends.
    */
-  surfaceBorder: string;
+  edgeTop: string;
+  edgeBottom: string;
+  /**
+   * The shadow under the glass: a 2.667dp shadow layer, 0.85dp down.
+   * Android's layer radius is a blur sigma of 0.577 × radius + 0.5; CSS blur is
+   * twice the sigma, hence about 4.1.
+   */
+  surfaceShadow: string;
   textPrimary: string;
   textSecondary: string;
   divider: string;
@@ -153,7 +160,9 @@ export function useTabBarPalette(): TabBarPalette {
       icon: '#8A8B8D',
       iconActive: '#F4F4F5',
       activeIndicator: '#FFFFFF14',
-      surfaceBorder: 'rgba(255, 255, 255, 0.10)',
+      edgeTop: 'rgba(255, 255, 255, 0.024)',
+      edgeBottom: 'rgba(255, 255, 255, 0.067)',
+      surfaceShadow: '0px 0.85px 4.1px 0px rgba(255, 255, 255, 0.016)',
       textPrimary: 'rgba(255, 255, 255, 0.92)',
       textSecondary: 'rgba(255, 255, 255, 0.45)',
       divider: 'rgba(255, 255, 255, 0.12)',
@@ -166,7 +175,9 @@ export function useTabBarPalette(): TabBarPalette {
     icon: '#A2A3A4',
     iconActive: '#17181C',
     activeIndicator: ACTIVE_TAB_INDICATOR,
-    surfaceBorder: 'rgba(18, 20, 28, 0.06)',
+    edgeTop: 'rgba(0, 0, 0, 0.067)',
+    edgeBottom: 'rgba(0, 0, 0, 0.125)',
+    surfaceShadow: '0px 0.85px 4.1px 0px rgba(0, 0, 0, 0.125)',
     textPrimary: '#111111',
     textSecondary: '#8E8E93',
     divider: 'rgba(18, 20, 28, 0.08)',
