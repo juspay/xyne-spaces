@@ -5,7 +5,10 @@ import { parseTicketMd, type Channel } from '@xyne/shared';
 
 import { navigateToMessage } from '@/src/components/activity/activity-v2-nav';
 import { shouldOpenActivityThread } from '@/src/components/activity/activity-v2-navigation-logic';
-import { deskActivityNavigation, type DeskActivityNavigation } from '@/src/features/xyne-desks/navigation/deskActivityTarget';
+import {
+  deskActivityNavigation,
+  type DeskActivityNavigation,
+} from '@/src/features/xyne-desks/navigation/deskActivityTarget';
 import { openDeskRoute } from '@/src/features/xyne-desks/navigation/openDeskRoute';
 import { getChannelDisplayName } from '@/src/hooks/useChannels';
 import type { ActivityWithRelated } from '@/src/types/activity';

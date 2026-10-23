@@ -10,21 +10,12 @@ describe('isChannelQueryMember', () => {
   });
 
   it('keeps DMs on the member path before a status row exists', () => {
-    assert.equal(
-      isChannelQueryMember({ scopeType: ChannelScopeType.DM }, undefined),
-      true,
-    );
-    assert.equal(
-      isChannelQueryMember({ scopeType: ChannelScopeType.GROUP_DM }, undefined),
-      true,
-    );
+    assert.equal(isChannelQueryMember({ scopeType: ChannelScopeType.DM }, undefined), true);
+    assert.equal(isChannelQueryMember({ scopeType: ChannelScopeType.GROUP_DM }, undefined), true);
   });
 
   it('reads a public channel the user has not joined on the public path', () => {
-    assert.equal(
-      isChannelQueryMember({ scopeType: ChannelScopeType.DEFAULT }, undefined),
-      false,
-    );
+    assert.equal(isChannelQueryMember({ scopeType: ChannelScopeType.DEFAULT }, undefined), false);
   });
 
   it('reads a joined channel on the member path', () => {

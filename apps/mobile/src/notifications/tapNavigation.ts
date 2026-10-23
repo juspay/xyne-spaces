@@ -229,7 +229,7 @@ export function performChatNavigation(
         channelId,
         ticketId: target.ticketId,
         tab: 'messages',
-        ...(target.threadId ?? target.conversationId
+        ...((target.threadId ?? target.conversationId)
           ? { conversationId: target.threadId ?? target.conversationId }
           : {}),
         ...(target.messageId ? { messageId: target.messageId } : {}),
@@ -365,9 +365,7 @@ export function queueBookmarkNotificationNavigationFromData(data: Record<string,
   return true;
 }
 
-export function queueSupportNotificationNavigationFromData(
-  data: Record<string, string>,
-): boolean {
+export function queueSupportNotificationNavigationFromData(data: Record<string, string>): boolean {
   const desk = supportDeepLinkFromNotificationData(data);
   if (!desk) return false;
   if (wasLaunchAlreadyConsumed(data)) return false;

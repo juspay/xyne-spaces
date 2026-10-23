@@ -163,7 +163,7 @@ describe('share-target security boundary', () => {
     assert.match(androidSource, /fun isCopyGenerationStale\(generation: Int\): Boolean/);
     assert.match(
       androidSource,
-      /fun publishPayload\(generation: Int, payload: CachedSharePayload\): Boolean/,
+      /if \(isCopyGenerationStale\(generation\)\) return@synchronized false[\s\S]*clearShareFiles\(payload\.id\)/,
     );
     assert.match(androidSource, /fun shutdownShareCopyWork\(\)/);
     assert.match(androidSource, /copyExecutor\.shutdownNow\(\)/);

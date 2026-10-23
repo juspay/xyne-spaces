@@ -27,10 +27,7 @@ export function openActivityOnDeskOr(
 }
 
 /** Opens the mobile desk screens for a dashboard `/support/` target. */
-export function openDeskRoute(
-  target: DeskOpenTarget,
-  mode: 'push' | 'replace' = 'push',
-): void {
+export function openDeskRoute(target: DeskOpenTarget, mode: 'push' | 'replace' = 'push'): void {
   const channelId = target.channelId.trim();
   if (!channelId) return;
 

@@ -13,18 +13,14 @@ describe('parseSupportDeepLink', () => {
 
   it('reads a desk conversation link', () => {
     assert.deepEqual(
-      parseSupportDeepLink(
-        '/workspace/support/channel-1?conversationId=conv-1&messageId=msg-1',
-      ),
+      parseSupportDeepLink('/workspace/support/channel-1?conversationId=conv-1&messageId=msg-1'),
       { channelId: 'channel-1', conversationId: 'conv-1', messageId: 'msg-1' },
     );
   });
 
   it('leaves chat and DM links alone', () => {
     assert.equal(
-      parseSupportDeepLink(
-        '/workspace/chat/dir/channel-1/conv-1#origin=conv-1&messageId=msg-1',
-      ),
+      parseSupportDeepLink('/workspace/chat/dir/channel-1/conv-1#origin=conv-1&messageId=msg-1'),
       null,
     );
     assert.equal(parseSupportDeepLink('/workspace/chat/dm/channel-1#origin=conv-1'), null);

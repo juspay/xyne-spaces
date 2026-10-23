@@ -16,7 +16,8 @@ import {
 
 export const EtaActivity = ({ activity }: ActivityV2Props): ReactElement | null => {
   const [ticket] = useQuery(queries.ticketByIdV2({ ticketId: activity.actionSourceId ?? '' }));
-  const channelId = ticket?.channelId ?? ticket?.conversation?.channelId ?? activity.channelId ?? '';
+  const channelId =
+    ticket?.channelId ?? ticket?.conversation?.channelId ?? activity.channelId ?? '';
   const channel = useChannelById(channelId);
 
   const isWarning = activity.actorAction === 'eta_warning';

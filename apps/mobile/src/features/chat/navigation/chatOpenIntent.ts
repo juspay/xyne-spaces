@@ -10,7 +10,7 @@ import {
   type PersistedChatWindowTarget,
 } from './restorePersistedChatWindow';
 import { getChannelById } from '@/src/hooks/useChannels';
-import { isDeskActivityChannel } from '@/src/features/xyne-desks/navigation/openDeskRoute';
+import { isDeskActivityChannel } from '@/src/features/xyne-desks/navigation/deskActivityTarget';
 import {
   getChatOpenAttemptId,
   releaseChatOpen,
