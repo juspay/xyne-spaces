@@ -64,12 +64,13 @@ export const KB_TOOLS: McpToolInfo[] = [
       "- `on` — ISO date for a single-day window.\n" +
       "- `offset` — pagination cursor.\n\n" +
       "## IMPORTANT — hits are SHALLOW SNIPPETS, not the full document\n" +
-      "Each hit returns the file id, file name, parent collection, and only the single most relevant matching SNIPPET " +
-      "from the file's content (ranked by Vespa) — NOT the full file. A snippet tells you WHICH file is relevant, not the " +
-      "whole answer. Do NOT answer from the snippet alone.\n" +
+      "Each hit returns the file id, file name, parent collection, and up to 3 of the file's best-matching chunks as " +
+      "`<chunk idx=\"N\">` elements, best first and each truncated (or one `<snippet>` when no chunk matched) — NOT the " +
+      "full file. A chunk tells you WHICH file is relevant, not the whole answer. Do NOT answer from the chunks alone.\n" +
       "Correct pattern: kb-search broad → pick the 1–3 most relevant fileIds from the hits → call `kb-read-file` on each " +
-      "to read the FULL extracted text → then synthesize and cite. Only skip kb-read-file when the snippet itself " +
-      "completely and unambiguously answers the question.",
+      "to read the FULL extracted text, or `kb-get-chunks` with `startChunkIndex` = a chunk's `idx` to read around " +
+      "it → then synthesize and cite. Only skip that when the chunks themselves completely and unambiguously answer " +
+      "the question.",
     inputSchema: {
       type: "object",
       properties: {
