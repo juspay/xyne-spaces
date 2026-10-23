@@ -1445,15 +1445,16 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // items itself, so nothing is added to that body here. Only the harness
     // envelope below — which never reaches prepareRun — gets the manifest.
     //
-    // Gated on the feature flag, not on harness eligibility: that is decided
-    // further down, after this envelope is built. Where local harness is off
-    // the lookup costs nothing.
-    const harnessProjectKnowledge = CONFIG.localHarnessEnabled
-      ? await resolveProjectKnowledge(
-          convId,
-          [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
-          orgId,
-        )
+    // Deferred: only a run that dispatches to the harness reads the manifest,
+    // and eligibility is decided further down. Resolving here spent the queries
+    // on server runs too, where prepareRun resolves the same rows again.
+    const resolveHarnessProjectKnowledge = CONFIG.localHarnessEnabled
+      ? () =>
+          resolveProjectKnowledge(
+            convId,
+            [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+            orgId,
+          )
       : null;
     const aiScreenInstructions = withAiScreenPresentationInstructions(
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
@@ -1693,28 +1694,33 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
     }
 
-    const harnessInstructionBlocks = [
-      typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
-      // A harness run builds its own context and never reaches prepareRun, so
-      // the project's instructions have to be added here or they never arrive.
-      projectInstructions ?? "",
-      // The file-less wording: a harness run fetches attachments from the
-      // device bridge by id, which project knowledge has no row for, so the
-      // agent is told these items exist without being told it has them.
-      harnessProjectKnowledge?.manifestFilesUnavailable ?? "",
-      designSelectionInstruction,
-      pageSelectionInstruction,
-      openItemsInstruction,
-    ].filter(Boolean);
-    const localSandboxContext = [
-      attachedContextPrefix,
-      designRevisionOnly && designArtifactAttachment
-        ? `Current design HTML (revise this):\n\`\`\`html\n${Buffer.from(designArtifactAttachment.data, "base64").toString("utf8")}\n\`\`\``
-        : "",
-      ...harnessInstructionBlocks,
-    ]
-      .filter(Boolean)
-      .join("\n\n") || null;
+    const buildLocalSandboxContext = async (): Promise<string | null> => {
+      const harnessProjectKnowledge = resolveHarnessProjectKnowledge
+        ? await resolveHarnessProjectKnowledge()
+        : null;
+      const harnessInstructionBlocks = [
+        typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+        // A harness run builds its own context and never reaches prepareRun, so
+        // the project's instructions have to be added here or they never arrive.
+        projectInstructions ?? "",
+        // The file-less wording: a harness run fetches attachments from the
+        // device bridge by id, which project knowledge has no row for, so the
+        // agent is told these items exist without being told it has them.
+        harnessProjectKnowledge?.manifestFilesUnavailable ?? "",
+        designSelectionInstruction,
+        pageSelectionInstruction,
+        openItemsInstruction,
+      ].filter(Boolean);
+      return [
+        attachedContextPrefix,
+        designRevisionOnly && designArtifactAttachment
+          ? `Current design HTML (revise this):\n\`\`\`html\n${Buffer.from(designArtifactAttachment.data, "base64").toString("utf8")}\n\`\`\``
+          : "",
+        ...harnessInstructionBlocks,
+      ]
+        .filter(Boolean)
+        .join("\n\n") || null;
+    };
     const attachmentsClear =
       (mergedAttachments.length === 0 && !(Array.isArray(attachments) && attachments.length > 0)) || designRevisionOnly;
     const workspaceRun = Boolean(localFolderWorkspace) && (!isTaskCommandRun || deviceSandboxMode);
@@ -1814,6 +1820,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       if (compactRequested) {
         await localHarnessSessionRepository.clearForConversation(convId).catch(() => 0);
       }
+      const localSandboxContext = await buildLocalSandboxContext();
       const dispatched = await dispatchLocalHarnessRun({
         target: localTarget,
         sessionId: runSessionId,

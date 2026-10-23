@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   projectByConversation: new Map<string, string>(),
   ownedProjects: [] as Array<Record<string, unknown>>,
   knowledge: [] as Array<Record<string, unknown>>,
+  storedFileNames: new Map<string, string>(),
   throwOn: null as null | "conversations" | "findOwned" | "knowledge",
 }));
 
@@ -37,6 +38,16 @@ vi.mock("../repositories/index.js", () => ({
     listForProject: vi.fn(async (projectId: string, orgId: string) => {
       if (state.throwOn === "knowledge") throw new Error("db down");
       return state.knowledge.filter((k) => k["projectId"] === projectId && k["orgId"] === orgId);
+    }),
+  },
+  chatAttachmentRepository: {
+    originalFilenamesByIds: vi.fn(async (ids: string[]) => {
+      const out = new Map<string, string>();
+      for (const id of ids) {
+        const name = state.storedFileNames.get(id);
+        if (name) out.set(id, name);
+      }
+      return out;
     }),
   },
 }));
@@ -71,6 +82,7 @@ beforeEach(() => {
   state.projectByConversation = new Map([["conv-1", "proj-1"]]);
   state.ownedProjects = [{ id: "proj-1", orgId: "org-1" }];
   state.knowledge = [];
+  state.storedFileNames = new Map();
   state.throwOn = null;
 });
 
@@ -249,5 +261,114 @@ describe("resolveProjectKnowledge — callers that cannot deliver files", () => 
     const result = await resolve();
     expect(result?.manifest).toContain("- #design (channel)");
     expect(result?.manifestFilesUnavailable).toContain("- #design (channel)");
+  });
+});
+
+describe("resolveProjectKnowledge — the entity budget", () => {
+  const channels = (count: number) =>
+    Array.from({ length: count }, (_unused, index) =>
+      row({
+        id: `k-${index}`,
+        type: "channel",
+        refId: `chan-${index}`,
+        title: `#team-${index}`,
+        storagePath: null,
+        size: null,
+      }),
+    );
+
+  it("keeps the first 20 entities and names the rest as over budget", async () => {
+    state.knowledge = channels(25);
+    const result = await resolve();
+    expect(result?.entities).toHaveLength(20);
+    expect(result?.manifest).toContain("- #team-19 (channel)");
+    expect(result?.manifest).toContain(
+      "- #team-20 (channel — not attached to this run: over the per-run item budget)",
+    );
+  });
+
+  // The resolver rejects an oversized array wholesale.
+  it("does not lose every entity when the project holds one too many", async () => {
+    state.knowledge = channels(21);
+    const result = await resolve();
+    expect(result?.entities).toHaveLength(20);
+    expect(result?.entities.length).toBeGreaterThan(0);
+  });
+
+  it("gives the project only what the turn's own attachments leave behind", async () => {
+    state.knowledge = channels(25);
+    const result = await resolveProjectKnowledge("conv-1", ["user-1"], "org-1", {
+      entityBudget: 3,
+    });
+    expect(result?.entities).toHaveLength(3);
+    expect(result?.manifest).toContain(
+      "- #team-3 (channel — not attached to this run: over the per-run item budget)",
+    );
+  });
+
+  it("attaches no entities when the turn already fills the ceiling, and still names them", async () => {
+    state.knowledge = channels(4);
+    const result = await resolveProjectKnowledge("conv-1", ["user-1"], "org-1", {
+      entityBudget: 0,
+    });
+    expect(result?.entities).toHaveLength(0);
+    expect(result?.manifest).toContain(
+      "- #team-0 (channel — not attached to this run: over the per-run item budget)",
+    );
+  });
+
+  it("treats a negative remainder as no room rather than reversing the slice", async () => {
+    state.knowledge = channels(4);
+    const result = await resolveProjectKnowledge("conv-1", ["user-1"], "org-1", {
+      entityBudget: -5,
+    });
+    expect(result?.entities).toHaveLength(0);
+  });
+
+  it("does not count files against the entity budget", async () => {
+    state.knowledge = [row({ id: "k-file" }), ...channels(2)];
+    const result = await resolveProjectKnowledge("conv-1", ["user-1"], "org-1", {
+      entityBudget: 2,
+    });
+    expect(result?.files).toHaveLength(1);
+    expect(result?.entities).toHaveLength(2);
+  });
+});
+
+describe("resolveProjectKnowledge — the delivered filename", () => {
+  it("delivers the stored filename rather than the typed title", async () => {
+    state.knowledge = [row({ refId: "att-7", title: "Design notes" })];
+    state.storedFileNames = new Map([["att-7", "design-notes.md"]]);
+    const result = await resolve();
+    expect(result?.files[0]?.fileName).toBe("design-notes.md");
+  });
+
+  it("names both spellings in the manifest so the agent can find the file", async () => {
+    state.knowledge = [row({ refId: "att-7", title: "Design notes" })];
+    state.storedFileNames = new Map([["att-7", "design-notes.md"]]);
+    const result = await resolve();
+    expect(result?.manifest).toContain("- Design notes (file `design-notes.md`)");
+  });
+
+  it("falls back to the title when the attachment row is gone or not the caller's", async () => {
+    state.knowledge = [row({ refId: "att-missing", title: "Brand guide" })];
+    const result = await resolve();
+    expect(result?.files[0]?.fileName).toBe("Brand guide");
+    expect(result?.manifest).toContain("- Brand guide (file)");
+  });
+
+  it("falls back to the title when the stored name is blank", async () => {
+    state.knowledge = [row({ refId: "att-7", title: "Brand guide" })];
+    state.storedFileNames = new Map([["att-7", "   "]]);
+    const result = await resolve();
+    expect(result?.files[0]?.fileName).toBe("Brand guide");
+  });
+
+  it("does not repeat the name when title and stored filename agree", async () => {
+    state.knowledge = [row({ refId: "att-7", title: "brand.pdf" })];
+    state.storedFileNames = new Map([["att-7", "brand.pdf"]]);
+    const result = await resolve();
+    expect(result?.manifest).toContain("- brand.pdf (file)");
+    expect(result?.manifest).not.toContain("(file `brand.pdf`)");
   });
 });

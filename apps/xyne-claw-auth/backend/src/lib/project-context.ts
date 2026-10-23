@@ -7,7 +7,11 @@
  * their project's instructions honoured in a thread but ignored on /ai.
  */
 
-import { chatProjectKnowledgeRepository, chatProjectRepository } from "../repositories/index.js";
+import {
+  chatAttachmentRepository,
+  chatProjectKnowledgeRepository,
+  chatProjectRepository,
+} from "../repositories/index.js";
 import { errMsg } from "./errors.js";
 
 import { createLogger } from "../logger.js";
@@ -71,6 +75,10 @@ const KNOWLEDGE_MAX_FILES = 20;
 const KNOWLEDGE_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const KNOWLEDGE_MAX_PER_FILE_BYTES = 10 * 1024 * 1024;
 
+/** MAX_CONTEXT_TOTAL in agentChatContextService, which rejects an oversized
+ *  array wholesale — so entities over the budget must be dropped here. */
+const KNOWLEDGE_MAX_ENTITIES = 20;
+
 const KNOWLEDGE_FENCE_TAG = "project_knowledge";
 
 /** Titles are free text typed by whoever attached the item, and they land in
@@ -133,8 +141,12 @@ export async function resolveProjectKnowledge(
   conversationId: string,
   userIds: string | string[],
   orgId: string | undefined,
+  opts?: { entityBudget?: number },
 ): Promise<ProjectKnowledge | null> {
   if (!conversationId || !orgId) return null;
+
+  // The turn's own attachments share this ceiling, so the caller passes what is left.
+  const entityBudget = Math.max(0, opts?.entityBudget ?? KNOWLEDGE_MAX_ENTITIES);
 
   try {
     const byConversation = await chatProjectRepository.projectIdsForConversations(
@@ -149,6 +161,14 @@ export async function resolveProjectKnowledge(
 
     const rows = await chatProjectKnowledgeRepository.listForProject(projectId, orgId);
     if (rows.length === 0) return null;
+
+    // `title` is a typed label, and claw picks its conversion path from the
+    // file's EXTENSION — so a .md attached as "Design notes" arrived as bytes.
+    const fileRefIds = rows.filter((row) => row.type === "file").map((row) => row.refId);
+    const storedFileNames = await chatAttachmentRepository.originalFilenamesByIds(
+      fileRefIds,
+      userIds,
+    );
 
     const files: ProjectKnowledgeFile[] = [];
     const entities: ProjectKnowledgeEntity[] = [];
@@ -188,19 +208,31 @@ export async function resolveProjectKnowledge(
           continue;
         }
 
+        const fileName = storedFileNames.get(row.refId)?.trim() || title;
         files.push({
           knowledgeId: row.id,
-          fileName: title,
+          fileName,
           mimeType: row.mimeType || "application/octet-stream",
           storagePath: row.storagePath as string,
           sizeBytes: size as number,
         });
         keptBytes += size as number;
-        manifestLines.push({ text: `- ${title} (file)`, fileDelivered: true });
+        manifestLines.push({
+          text: fileName === title ? `- ${title} (file)` : `- ${title} (file \`${fileName}\`)`,
+          fileDelivered: true,
+        });
         continue;
       }
 
       if (row.type === "channel" || row.type === "ticket" || row.type === "canvas") {
+        if (entities.length >= entityBudget) {
+          undeliverable += 1;
+          manifestLines.push({
+            text: `- ${title} (${row.type} — not attached to this run: over the per-run item budget)`,
+            fileDelivered: false,
+          });
+          continue;
+        }
         entities.push({ type: row.type, id: row.refId, title });
         manifestLines.push({ text: `- ${title} (${row.type})`, fileDelivered: false });
         continue;

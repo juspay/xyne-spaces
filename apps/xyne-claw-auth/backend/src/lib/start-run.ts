@@ -7,7 +7,11 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { resolveProjectInstructions, resolveProjectKnowledge } from "./project-context.js";
+import {
+  resolveProjectInstructions,
+  resolveProjectKnowledge,
+  type ProjectKnowledgeFile,
+} from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
@@ -21,6 +25,7 @@ import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import {
   normalizeAttachedContext,
   buildAttachedContextPayload,
+  MAX_CONTEXT_TOTAL,
   type AttachedContextRef,
 } from "../services/agentChatContextService.js";
 import { storeForSession as storeAttachedContextForSession } from "../mcp/attached-context-injector.js";
@@ -307,6 +312,24 @@ async function resolveUserId(
   }
 
   return { error: "Either userId or (gatewayType + externalUserId) is required" };
+}
+
+/** A file the turn already carries arrived twice — rehydrated as bytes by
+ *  run-stream and as a reference here — and claw overwrites the second with the
+ *  first, so forwarding it cost a fetch for a copy that loses the write. */
+export function projectFilesToAttach(
+  projectFiles: ProjectKnowledgeFile[],
+  turnAttachments: Array<{ fileName: string }>,
+): Array<{ fileName: string; mimeType: string; gcsRef: string; sizeBytes: number }> {
+  const turnFileNames = new Set(turnAttachments.map((file) => file.fileName));
+  return projectFiles
+    .filter((file) => !turnFileNames.has(file.fileName))
+    .map((file) => ({
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+      gcsRef: file.storagePath,
+      sizeBytes: file.sizeBytes,
+    }));
 }
 
 // ── Resolve agent config ──
@@ -896,24 +919,17 @@ export async function prepareRun(
     // Every id this user's rows may be keyed under. A chat filed under their
     // workspace-scoped Spaces id is still theirs, and matching the canonical
     // id alone would silently skip the project's context.
-    const projectLookupIds = conversationId
-      ? [
-          ...new Set(
-            [
-              resolved.userId,
-              await spacesUserIdForClawUser(resolved.userId).catch(() => null),
-            ].filter((id): id is string => Boolean(id)),
-          ),
-        ]
-      : [];
-    // Resolved before attachedContext because the project's own channels,
-    // tickets and canvases join that array and are resolved with it. Skipped
-    // for daily_brief for the same reason the instructions are: a brief can
-    // execute on a shared agent, where a project's knowledge has no business.
-    const projectKnowledge =
+    const projectLookupIds =
       conversationId && bodyMode !== "daily_brief"
-        ? await resolveProjectKnowledge(conversationId, projectLookupIds, agent.orgId)
-        : null;
+        ? [
+            ...new Set(
+              [
+                resolved.userId,
+                await spacesUserIdForClawUser(resolved.userId).catch(() => null),
+              ].filter((id): id is string => Boolean(id)),
+            ),
+          ]
+        : [];
 
     let resolvedAttachedContext:
       | { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string }
@@ -924,11 +940,20 @@ export async function prepareRun(
       if (normalized.error) log.warn(`[run] attachedContext ignored: ${normalized.error}`);
       normalizedAttached = normalized.items;
     }
+    // After the turn's own items, so the project's budget is what they leave.
+    // Skipped for daily_brief like the instructions: a brief can execute on a
+    // shared agent, where a project's knowledge has no business.
+    const projectKnowledge =
+      conversationId && bodyMode !== "daily_brief"
+        ? await resolveProjectKnowledge(conversationId, projectLookupIds, agent.orgId, {
+            entityBudget: MAX_CONTEXT_TOTAL - normalizedAttached.length,
+          })
+        : null;
+
+    // Kept out of the user's own items: merged in, they inherited "I attached
+    // these with my message" and a demand to ground every answer in all of them.
+    let normalizedProjectEntities: AttachedContextRef[] = [];
     if (projectKnowledge?.entities.length) {
-      // Through the same resolver as the user's own attachments, so each item
-      // is fetched under the caller's Spaces access: a channel they can no
-      // longer read resolves to nothing instead of leaking into the prompt.
-      // Items the turn already carries are not added twice.
       const alreadyAttached = new Set(normalizedAttached.map((item) => `${item.type}:${item.id}`));
       const fromProject = projectKnowledge.entities.filter(
         (entity) => !alreadyAttached.has(`${entity.type}:${entity.id}`),
@@ -938,11 +963,12 @@ export async function prepareRun(
         if (normalized.error) {
           log.warn(`[run] project knowledge attachedContext ignored: ${normalized.error}`);
         }
-        normalizedAttached = [...normalizedAttached, ...normalized.items];
+        normalizedProjectEntities = normalized.items;
       }
     }
     if (
       normalizedAttached.length > 0 ||
+      normalizedProjectEntities.length > 0 ||
       attachedThreadConversationId ||
       attachedCanvasViewAccessId ||
       attachedWorkflowId ||
@@ -952,7 +978,8 @@ export async function prepareRun(
       const spacesAuth = (await input.resolveSpacesAuth?.(resolved.userId)) ?? undefined;
       if (spacesAuth) {
         try {
-          resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
+          // The scalars belong to the user's turn, so they ride on that block only.
+          const ownContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
             userId: resolved.userId,
             ...(attachedThreadConversationId ? { threadConversationId: attachedThreadConversationId } : {}),
             ...(attachedCanvasViewAccessId ? { canvasViewAccessId: attachedCanvasViewAccessId } : {}),
@@ -961,8 +988,26 @@ export async function prepareRun(
               ? { workflowExecutionId: attachedWorkflowExecutionId }
               : {}),
           });
+          const projectContext =
+            normalizedProjectEntities.length > 0
+              ? await buildAttachedContextPayload(normalizedProjectEntities, spacesAuth, {
+                  userId: resolved.userId,
+                  framing: "project-knowledge",
+                })
+              : undefined;
+          // Project block leads: claw appends "## Query" after this, so the
+          // items picked for THIS turn sit closest to the question.
+          const promptPrefix = [projectContext?.promptPrefix, ownContext.promptPrefix]
+            .filter((part): part is string => Boolean(part))
+            .join("\n\n");
+          resolvedAttachedContext = {
+            // Project first, like mergedAttachments: claw writes in order, so a
+            // colliding path resolves to the item picked for this turn.
+            contextFiles: [...(projectContext?.contextFiles ?? []), ...ownContext.contextFiles],
+            ...(promptPrefix ? { promptPrefix } : {}),
+          };
           log.info(
-            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""}${attachedWorkflowExecutionId ? " + workflow-run" : attachedWorkflowId ? " + workflow" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
+            `[run] Resolved ${normalizedAttached.length} attached item(s)${normalizedProjectEntities.length > 0 ? ` + ${normalizedProjectEntities.length} project item(s)` : ""}${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""}${attachedWorkflowExecutionId ? " + workflow-run" : attachedWorkflowId ? " + workflow" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
           );
         } catch (err) {
           log.warn(
@@ -984,12 +1029,7 @@ export async function prepareRun(
     // Only a reference is forwarded — claw fetches the bytes from the same
     // object store it already uses for `gcsRef` attachments.
     const mergedAttachments = [
-      ...(projectKnowledge?.files ?? []).map((file) => ({
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        gcsRef: file.storagePath,
-        sizeBytes: file.sizeBytes,
-      })),
+      ...projectFilesToAttach(projectKnowledge?.files ?? [], attachments ?? []),
       ...(attachments ?? []),
     ];
 
