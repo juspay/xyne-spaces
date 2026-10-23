@@ -109,7 +109,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
             />
           )}
 
-          <div className='flex w-full items-center gap-1'>
+          <div className='flex w-full items-center gap-1 overflow-x-auto'>
             {visibleTabs.map(entry => (
               <button
                 key={entry.id}
@@ -161,12 +161,12 @@ const ClawAgentDetailV2 = (): ReactElement => {
                       data-track-name='Agent detail v2: edit name'
                     />
                   ) : (
-                    <span
+                    <h1
                       {...(canEdit ? { onClick: () => startEditing('name') } : {})}
                       className={cn('truncate', NAME_TEXT, canEdit && 'cursor-text')}
                     >
                       {agent.name}
-                    </span>
+                    </h1>
                   )}
                   <Pill tone={agent.enabled ? 'success' : 'neutral'}>
                     {agent.enabled ? 'Enabled' : 'Disabled'}
@@ -210,7 +210,10 @@ const ClawAgentDetailV2 = (): ReactElement => {
                   )}
                 </div>
 
-                {draft.editing && draft.slugError && (
+                {draft.editing && draft.showErrors && draft.nameError && (
+                  <span className='text-xs leading-4 text-destructive'>{draft.nameError}</span>
+                )}
+                {draft.editing && draft.showErrors && draft.slugError && (
                   <span className='text-xs leading-4 text-destructive'>{draft.slugError}</span>
                 )}
                 {draft.editing && draft.slugChanged && !draft.slugError && (

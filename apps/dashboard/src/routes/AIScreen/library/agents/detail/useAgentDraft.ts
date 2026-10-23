@@ -30,6 +30,10 @@ export interface AgentDraft {
   description: string;
   systemPrompt: string;
   slugError: string | null;
+  /** The name's own error, so a name problem is never reported under the handle. */
+  nameError: string | null;
+  /** True once a save has been attempted: errors stay quiet until the user submits. */
+  showErrors: boolean;
   slugChanged: boolean;
   setName: (value: string) => void;
   setSlug: (value: string) => void;
@@ -52,6 +56,7 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
   const [loadedSlug, setLoadedSlug] = useState(agent?.slug ?? '');
   const [loadedVersion, setLoadedVersion] = useState(() => agentVersion(agent));
   const [name, setName] = useState(agent?.name ?? '');
@@ -81,7 +86,10 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
 
   const slugError = slugChanged ? validateHandle(normalizedSlug) : null;
   const nameError = nameChanged && !name.trim() ? 'Name is required.' : null;
-  const canSave = dirty && !saving && !slugError && !nameError;
+  const valid = !slugError && !nameError;
+  // P2: the main action stays live while there is something to save. Validation
+  // is reported on submit, next to the field at fault, rather than by going dead.
+  const canSave = dirty && !saving;
 
   const reset = (): void => {
     if (!agent) return;
@@ -95,11 +103,17 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
 
   const cancel = (): void => {
     reset();
+    setShowErrors(false);
     setEditing(false);
   };
 
   const save = async (): Promise<void> => {
     if (!agent || !canSave) return;
+    if (!valid) {
+      setShowErrors(true);
+      return;
+    }
+    setShowErrors(false);
     setSaving(true);
     const payload: UpdateAgentPayload = {
       ...(nameChanged ? { name: name.trim() } : {}),
@@ -152,7 +166,9 @@ export function useAgentDraft(agent: Agent | undefined, canRenameHandle: boolean
     slug,
     description,
     systemPrompt,
-    slugError: slugError ?? nameError,
+    slugError,
+    nameError,
+    showErrors,
     slugChanged,
     setName,
     setSlug,

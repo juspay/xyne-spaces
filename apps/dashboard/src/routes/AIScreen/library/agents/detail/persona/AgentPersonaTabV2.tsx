@@ -1,5 +1,5 @@
 import { useCallback, type ReactElement } from 'react';
-import { PROSE_BOX_HEIGHT, ProseBox } from '../../../shared/primitives/ProseBox';
+import { ProseBox } from '../../../shared/primitives/ProseBox';
 import { AgentPromptVersions } from './AgentPromptVersions';
 import { CredentialsCard } from './credentials/CredentialsCard';
 import { ModelCard } from './model/ModelCard';
@@ -20,6 +20,9 @@ import {
   useCaretHandoff,
   type CaretHint,
 } from '../../../shared/primitives/ClickToEdit';
+
+/** Taller than the shared default: a system prompt is long and is read as a whole. */
+const SYSTEM_PROMPT_HEIGHT = 560;
 
 export function AgentPersonaTabV2({
   agent,
@@ -105,7 +108,7 @@ export function AgentPersonaTabV2({
               placeholder='Describe how this agent should behave.'
               aria-label='Agent system prompt'
               ref={attachPrompt}
-              style={{ height: PROSE_BOX_HEIGHT }}
+              style={{ height: SYSTEM_PROMPT_HEIGHT }}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: edit system prompt'
               className={PROMPT_EDITOR}
@@ -118,7 +121,7 @@ export function AgentPersonaTabV2({
               onEdit={startWithCaret('systemPrompt')}
             >
               {draft.systemPrompt ? (
-                <ProseBox>{draft.systemPrompt}</ProseBox>
+                <ProseBox height={SYSTEM_PROMPT_HEIGHT}>{draft.systemPrompt}</ProseBox>
               ) : (
                 <DetailCard>
                   <DetailEmpty>No system prompt set</DetailEmpty>

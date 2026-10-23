@@ -111,10 +111,10 @@ export function BehaviourSelect({
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        className={cn('h-9 w-auto min-w-0 max-w-[240px] gap-2 rounded-[10px]', triggerClassName)}
+        className={cn('h-9 w-auto min-w-0 max-w-[280px] gap-2 rounded-[10px]', triggerClassName)}
       >
         <SelectValue>
-          <span className='flex min-w-0 items-center gap-2'>
+          <span className='flex min-w-0 items-center gap-2' title={current?.label ?? ''}>
             {current?.icon}
             <span className='truncate'>{current?.label ?? '—'}</span>
           </span>

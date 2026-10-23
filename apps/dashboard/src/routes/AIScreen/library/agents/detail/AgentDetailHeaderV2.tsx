@@ -43,7 +43,7 @@ const Action = ({
       data-track-category='Claw Agents'
       data-track-name={`Agent detail v2: ${label}`}
       className={cn(
-        'flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
+        'touch-target-44 flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
         primary
           ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
           : 'border-transparent text-foreground hover:bg-muted',
@@ -126,7 +126,7 @@ export function AgentDetailHeaderV2({
   const hasMenu = canEdit || isOwner;
 
   return (
-    <div className='flex w-full items-center justify-between gap-4'>
+    <div className='flex w-full items-center justify-between gap-4 overflow-x-auto'>
       <button
         type='button'
         onClick={onBack}
@@ -277,13 +277,17 @@ export function AgentDetailHeaderV2({
       <ConfirmDialog
         open={moderateOpen !== null}
         onOpenChange={open => setModerateOpen(open ? moderateOpen : null)}
-        title={moderateOpen === 'demote' ? `Unpublish ${agent.name}?` : `Publish ${agent.name}?`}
+        title={
+          moderateOpen === 'demote'
+            ? `Demote ${agent.name} to personal?`
+            : `Promote ${agent.name} to global?`
+        }
         description={
           moderateOpen === 'demote'
             ? 'It becomes personal again and leaves the shared library.'
             : 'It becomes global and everyone in the workspace can use it.'
         }
-        confirmLabel={moderateOpen === 'demote' ? 'Unpublish' : 'Publish'}
+        confirmLabel={moderateOpen === 'demote' ? 'Demote' : 'Promote'}
         loading={busy.moderating !== null}
         onConfirm={() => {
           const action = moderateOpen;

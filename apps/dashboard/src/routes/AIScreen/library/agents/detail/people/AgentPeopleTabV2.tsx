@@ -9,6 +9,7 @@ import {
   SearchDefault,
 } from '@xyne/icons';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { matchesUserQuery } from '@/utils/userDisplayName';
 import { useClawAgentShares } from '@/hooks/useClawAgentDetail';
@@ -21,6 +22,7 @@ import { BehaviourSelect } from '../behaviour/BehaviourRows';
 import {
   DetailCard,
   DetailEmpty,
+  DetailEmptyState,
   DetailLockedNote,
   DetailRow,
   DetailSection,
@@ -57,6 +59,9 @@ export function AgentPeopleTabV2({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<{ userId: string; name: string } | null>(
+    null,
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [defaultRole, setDefaultRole] = useState<AgentShareRole>('VIEWER');
@@ -144,6 +149,7 @@ export function AgentPeopleTabV2({
       toast.error(clawErrorText(err, 'Could not remove that person'));
     } finally {
       setBusyUserId(null);
+      setPendingRemoval(null);
     }
   };
 
@@ -270,9 +276,15 @@ export function AgentPeopleTabV2({
               ))}
             </div>
           ) : rows.length === 0 ? (
-            <DetailEmpty>
-              {query.trim() ? 'No members matched that search.' : 'No one has access yet.'}
-            </DetailEmpty>
+            query.trim() ? (
+              <DetailEmpty>No members matched that search.</DetailEmpty>
+            ) : (
+              <DetailEmptyState
+                icon={<PlusDefault className='size-5' aria-hidden />}
+                title='No one has access yet'
+                description={`Add people to let them run ${agent.name}. They start with the default role above.`}
+              />
+            )
           ) : (
             rows.map(row => (
               <PersonRow
@@ -309,7 +321,7 @@ export function AgentPeopleTabV2({
                       {canShare && (
                         <button
                           type='button'
-                          onClick={() => void removeMember(row.userId, row.name)}
+                          onClick={() => setPendingRemoval({ userId: row.userId, name: row.name })}
                           disabled={busyUserId !== null}
                           aria-label={`Remove ${row.name}`}
                           title={`Remove ${row.name}`}
@@ -385,6 +397,21 @@ export function AgentPeopleTabV2({
         defaultRole={defaultRole}
         saving={busyUserId !== null}
         onAdd={(target, role) => void addMember(target, role)}
+      />
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onOpenChange={open => {
+          if (!open) setPendingRemoval(null);
+        }}
+        title={`Remove ${pendingRemoval?.name ?? ''}?`}
+        description={`They lose access to ${agent.name} and will no longer be able to run it. You can add them again later.`}
+        confirmLabel='Remove'
+        danger
+        loading={busyUserId !== null}
+        onConfirm={() => {
+          if (pendingRemoval) void removeMember(pendingRemoval.userId, pendingRemoval.name);
+        }}
       />
     </div>
   );

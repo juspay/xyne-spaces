@@ -117,7 +117,12 @@ export function LibraryCard({
           {statusDot}
         </div>
         {footer ?? (
-          <p className='truncate text-sm leading-5 text-foreground/60'>
+          // Two lines before truncating, and the full text on hover: a one-line
+          // clamp cut most descriptions mid-word with no way to read the rest.
+          <p
+            className='line-clamp-2 text-sm leading-5 text-foreground/60'
+            {...(description ? { title: description } : {})}
+          >
             {description || 'No description added'}
           </p>
         )}

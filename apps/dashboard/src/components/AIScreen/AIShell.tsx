@@ -19,6 +19,7 @@ import {
 } from '../ui/Resizable/Resizable';
 import { useSidebarResizeShortcut } from '../../hooks/useSidebarResizeShortcut';
 import { usePageCoverage } from '../../hooks/usePageCoverage';
+import { usePlatform } from '../../hooks/usePlatform';
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -186,6 +187,7 @@ export function AIShell({
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
   const workspacePanelRef = useRef<PanelImperativeHandle>(null);
   const narrow = useNarrowViewport();
+  const { isMobile } = usePlatform();
   const hasWorkspace = workspacePanel !== undefined && workspacePanel !== null;
   const workspaceEnabled = hasWorkspace && workspaceOpen !== false;
   const splitMode = workspaceEnabled && !narrow;
@@ -324,13 +326,23 @@ export function AIShell({
   // last — a two-panel layout onto a three-panel tree — then recomputes, fires
   // onLayoutChanged, and churns. Memoized because a fresh array on every render
   // re-initializes useDefaultLayout and reproduces the same churn.
-  const panelIds = useMemo(
-    () =>
-      paneMounted
-        ? ['ai-sidebar-panel', 'ai-chat', 'ai-workspace']
-        : ['ai-sidebar-panel', 'ai-chat'],
-    [paneMounted],
-  );
+  // Escape closes the mobile drawer, as it does every other panel here.
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onMobileOpenChange?.(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return (): void => window.removeEventListener('keydown', onKeyDown);
+  }, [isMobile, mobileOpen, onMobileOpenChange]);
+
+  // On mobile the sidebar leaves the split entirely and opens as a drawer, so
+  // its id must leave this list too or the group restores a layout for a panel
+  // that is not there.
+  const panelIds = useMemo(() => {
+    const leading = isMobile ? [] : ['ai-sidebar-panel'];
+    return paneMounted ? [...leading, 'ai-chat', 'ai-workspace'] : [...leading, 'ai-chat'];
+  }, [paneMounted, isMobile]);
 
   useSidebarResizeShortcut({
     panelRef: sidebarPanelRef,
@@ -346,33 +358,66 @@ export function AIShell({
       panelIds={panelIds}
     >
       <style>{PANE_ANIMATION_CSS}</style>
-      <Panel
-        id='ai-sidebar-panel'
-        panelRef={sidebarPanelRef}
-        defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
-        minSize={CHAT_SIDEBAR_MIN_WIDTH}
-        maxSize={CHAT_SIDEBAR_MAX_WIDTH}
-        groupResizeBehavior='preserve-pixel-size'
-        collapsible
-        collapsedSize={0}
-        onResize={(size: PanelSize) => onSidebarCollapsedChange?.(size.inPixels === 0)}
-      >
-        <aside id='ai-sidebar' aria-label='AI Sidebar' className='h-full w-full'>
-          <AISidebar
-            activeSessionId={activeSessionId}
-            onCreateChat={onCreateChat}
-            onSelectSession={onSelectSession}
-            onAccount={onAccount}
-            mobileOpen={mobileOpen}
-            onMobileOpenChange={onMobileOpenChange}
-            onToggleCollapse={onToggleCollapse}
-          />
-        </aside>
-      </Panel>
+      {/* On a phone the sidebar is not part of the split at all: it would leave
+          the content a column too narrow to read. It opens as a drawer instead,
+          below, driven by the same `mobileOpen` state. */}
+      {!isMobile && (
+        <>
+          <Panel
+            id='ai-sidebar-panel'
+            panelRef={sidebarPanelRef}
+            defaultSize={CHAT_SIDEBAR_DEFAULT_WIDTH}
+            minSize={CHAT_SIDEBAR_MIN_WIDTH}
+            maxSize={CHAT_SIDEBAR_MAX_WIDTH}
+            groupResizeBehavior='preserve-pixel-size'
+            collapsible
+            collapsedSize={0}
+            onResize={(size: PanelSize) => onSidebarCollapsedChange?.(size.inPixels === 0)}
+          >
+            <aside id='ai-sidebar' aria-label='AI Sidebar' className='h-full w-full'>
+              <AISidebar
+                activeSessionId={activeSessionId}
+                onCreateChat={onCreateChat}
+                onSelectSession={onSelectSession}
+                onAccount={onAccount}
+                mobileOpen={mobileOpen}
+                onMobileOpenChange={onMobileOpenChange}
+                onToggleCollapse={onToggleCollapse}
+              />
+            </aside>
+          </Panel>
 
-      <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-        <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-      </Separator>
+          <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+            <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+          </Separator>
+        </>
+      )}
+
+      {isMobile && mobileOpen && (
+        <div className='fixed inset-0 z-50 flex' role='dialog' aria-modal='true' aria-label='AI Sidebar'>
+          <button
+            type='button'
+            aria-label='Close sidebar'
+            className='absolute inset-0 bg-black/40'
+            onClick={() => onMobileOpenChange?.(false)}
+          />
+          <aside
+            id='ai-sidebar'
+            aria-label='AI Sidebar'
+            className='relative h-full w-[280px] max-w-[85vw] border-r border-border bg-sidebar shadow-2xl'
+          >
+            <AISidebar
+              activeSessionId={activeSessionId}
+              onCreateChat={onCreateChat}
+              onSelectSession={onSelectSession}
+              onAccount={onAccount}
+              mobileOpen={mobileOpen}
+              onMobileOpenChange={onMobileOpenChange}
+              onToggleCollapse={onToggleCollapse}
+            />
+          </aside>
+        </div>
+      )}
 
       <Panel id='ai-chat' minSize='30%'>
         <div

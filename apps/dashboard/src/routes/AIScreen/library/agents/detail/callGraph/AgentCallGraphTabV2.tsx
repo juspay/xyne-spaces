@@ -18,6 +18,7 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import {
   DetailCard,
   DetailEmpty,
+  DetailEmptyState,
   DetailSection,
 } from '../../../shared/primitives/DetailPrimitives';
 import { DelegationStatusBadge } from '../tools/DelegationStatusBadge';
@@ -196,7 +197,11 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
           {incoming.isLoading ? (
             loadingBlock
           ) : active.length === 0 ? (
-            <DetailEmpty>No agent can call this one yet.</DetailEmpty>
+            <DetailEmptyState
+              icon={<CheckTickCircle className='size-5' aria-hidden />}
+              title='No agent can call this one yet'
+              description='When another agent asks to delegate work to this one, its request appears above for you to approve.'
+            />
           ) : (
             active.map(grant => (
               <GrantRow
@@ -236,7 +241,11 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
           {outgoing.isLoading ? (
             loadingBlock
           ) : outgoingRows.length === 0 ? (
-            <DetailEmpty>This agent doesn’t call any other agent.</DetailEmpty>
+            <DetailEmptyState
+              icon={<CheckTickCircle className='size-5' aria-hidden />}
+              title='This agent doesn’t call any other agent'
+              description='Add an agent on the Tools tab to let this one delegate work to it.'
+            />
           ) : (
             outgoingRows.map(grant => (
               <GrantRow

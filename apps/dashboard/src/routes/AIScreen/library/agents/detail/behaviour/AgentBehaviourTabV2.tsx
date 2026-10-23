@@ -144,7 +144,7 @@ export function AgentBehaviourTabV2({
               htmlFor='behaviour-reminders'
               className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
             >
-              Description
+              Standing instructions
             </label>
             <textarea
               id='behaviour-reminders'
@@ -212,7 +212,7 @@ export function AgentBehaviourTabV2({
 
           <BehaviourRow
             title='Read-only multi-repo sandbox'
-            hint='Grep across every cloned repo with no per-project clone. Mutating tools are stripped, so this suits agents that only read code.'
+            hint='Searches across every connected repository at once, without setting one up per project. Tools that can change code are turned off, so this suits agents that only read code.'
           >
             <BehaviourToggle
               checked={sandbox.forceReadOnlySandbox}

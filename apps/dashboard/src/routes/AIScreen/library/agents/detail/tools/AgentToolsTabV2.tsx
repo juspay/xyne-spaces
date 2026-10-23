@@ -267,7 +267,7 @@ export function AgentToolsTabV2({
       </DetailSection>
 
       <DetailSection
-        label='Built-In tools'
+        label='Built-in tools'
         info='Tools that ship with the platform, no connection needed'
         trailing={trailingFor('built-in tools', 'builtin')}
         trailingAlign='end'

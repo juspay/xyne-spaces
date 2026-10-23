@@ -21,9 +21,13 @@ export function DetailSectionHeading({
       </span>
       {info && (
         <Tooltip side='top' content={info}>
-          <span className='inline-flex'>
+          <button
+            type='button'
+            aria-label={`What ${label} means`}
+            className='touch-target-44 inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          >
             <InformationCircle className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-          </span>
+          </button>
         </Tooltip>
       )}
       {trailing && (

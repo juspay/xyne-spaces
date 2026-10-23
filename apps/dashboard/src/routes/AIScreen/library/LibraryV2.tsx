@@ -56,7 +56,7 @@ const LIBRARY_TABS = [
     label: 'Apps',
     content: AppsV2,
     searchPlaceholder: 'Search apps',
-    create: { label: 'Create app', dialog: 'app' },
+    create: { label: 'Create App', dialog: 'app' },
   },
   {
     id: 'developers',
@@ -132,7 +132,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
               Agent Hub
             </h1>
             <p className='text-[15px] leading-[1.2] text-muted-foreground'>
-              View and manage agents, subagent, skills and MCP.
+              View and manage agents, subagents, skills, MCP servers, apps and developer tools.
             </p>
           </div>
           {activeTab.create && (
@@ -185,7 +185,7 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
                 aria-label={activeTab.searchPlaceholder}
                 aria-expanded={searchOpen}
                 className={cn(
-                  'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
+                  'touch-target-44 flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
                   searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
                 )}
                 data-track-category='Claw Agents'

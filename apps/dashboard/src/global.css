@@ -5897,3 +5897,21 @@ img.inline-emoji,
     will-change: auto;
   }
 }
+
+/* P6 touch targets: keep the compact visual box, extend the tap area to 44px
+   on coarse pointers only, so mouse layouts are untouched. */
+@media (pointer: coarse) {
+  .touch-target-44 {
+    position: relative;
+  }
+
+  .touch-target-44::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+}
