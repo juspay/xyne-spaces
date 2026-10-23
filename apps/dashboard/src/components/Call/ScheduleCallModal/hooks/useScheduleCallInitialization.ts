@@ -1,5 +1,5 @@
 import { useEffect, useState, type MutableRefObject } from 'react';
-import { ChannelScopeType } from '@xyne/shared';
+import { CallRingNotification, ChannelScopeType } from '@xyne/shared';
 import type { UseFormReset, UseFormSetValue } from 'react-hook-form';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import type { EditCallData, ScheduleCallFormData, SeriesEndsType } from '../types';
@@ -35,6 +35,7 @@ interface UseScheduleCallInitializationParams {
   setEditEntireSeries: (next: boolean) => void;
   setIsRecurring: (next: boolean) => void;
   setPostCallUpdates: (next: boolean) => void;
+  setRingParticipants: (next: boolean) => void;
   setRecurringTimesFromDates: (start: Date, end: Date) => void;
   setSeriesEndsOn: (next: Date | null) => void;
   setSeriesEndsType: (next: SeriesEndsType) => void;
@@ -50,6 +51,16 @@ function isExplicitChannel(channel: VisibleChannel | null | undefined): boolean 
     channel.scopeType !== ChannelScopeType.DM &&
     channel.scopeType !== ChannelScopeType.GROUP_DM
   );
+}
+
+/**
+ * Whether the call rings its participants when it starts. The option is written to every
+ * internal row alike, so the organizer's row speaks for the call; null (older calls) rings.
+ */
+function getCallRingsParticipants(initialCall: EditCallData): boolean {
+  const internal = initialCall.participants.filter(p => !p.isExternal);
+  const row = internal.find(p => p.userId === initialCall.organizerUserId) ?? internal[0];
+  return row?.ringNotification !== CallRingNotification.DISABLED;
 }
 
 function getCallExternalEmails(initialCall: EditCallData): string[] {
@@ -115,6 +126,7 @@ export function useScheduleCallInitialization({
   setEditEntireSeries,
   setIsRecurring,
   setPostCallUpdates,
+  setRingParticipants,
   setRecurringTimesFromDates,
   setSeriesEndsOn,
   setSeriesEndsType,
@@ -170,6 +182,7 @@ export function useScheduleCallInitialization({
         setUpdateChannelId(null);
       }
 
+      setRingParticipants(getCallRingsParticipants(initialCall));
       setRecurringTimesFromDates(callStart, callEnd);
       setEditEntireSeries(false);
       setIsRecurring(!!initialCall.recurringSeriesId);
@@ -212,6 +225,7 @@ export function useScheduleCallInitialization({
     setEditEntireSeries,
     setIsRecurring,
     setPostCallUpdates,
+    setRingParticipants,
     setRecurringTimesFromDates,
     setUpdateChannelId,
     user,

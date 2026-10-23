@@ -6,6 +6,8 @@ export interface UserCatalogEntry {
   alias: string;
   role: UserRole;
   email: string;
+  /** `secondary` logs the user into the second test workspace (cross-workspace tests). */
+  workspace?: 'secondary';
 }
 
 interface UserCatalogFile {

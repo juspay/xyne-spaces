@@ -7,8 +7,6 @@
  * Pure so it can be tested in node.
  */
 
-import { CallOrigin, ChannelScopeType } from '@xyne/shared';
-
 import { isAiAgentIdentity } from './callIdentity';
 
 /** Mirrors `RingStatus` in @xyne/shared. Absent from older shared pins, hence strings. */
@@ -20,6 +18,8 @@ export interface RosterParticipantLike {
   joinedAt?: number | null;
   /** RingStatus written by the backend: CALLING → RINGING (device confirmed) or BUSY. */
   ringStatus?: string | null;
+  /** CallRingNotification in @xyne/shared: DISABLED when a scheduled call was set not to ring. */
+  ringNotification?: string | null;
   displayName?: string | null;
   isExternal?: boolean | null;
 }
@@ -54,8 +54,8 @@ export function getRingStatusLabel(ringStatus: RingStatusValue): string {
 
 /**
  * Invitees still being rung: INVITED, never joined, not already in the LiveKit room (the DB lags
- * the join by a webhook round-trip), and not the viewer. External email invitees are never rung,
- * so they don't get a tile.
+ * the join by a webhook round-trip), and not the viewer. External email invitees, and invitees of a
+ * call scheduled not to ring, are never rung, so they don't get a tile.
  *
  * Callers must only use this for 1:1 DM calls — the dashboard shows ring status in the people list
  * everywhere else.
@@ -73,6 +73,7 @@ export function getRingingInvitees(params: {
         p.response === 'INVITED' &&
         (p.joinedAt === null || p.joinedAt === undefined) &&
         p.isExternal !== true &&
+        p.ringNotification !== 'DISABLED' &&
         p.userId !== currentUserId &&
         !isAiAgentIdentity(p.userId) &&
         !connectedIdentities.has(p.userId),
@@ -124,15 +125,4 @@ export function resolveCallTitle(params: {
   const names = formatParticipantNames(params.otherNames);
   if (names) return names;
   return params.fallback ?? 'Call';
-}
-
-/**
- * A call started from a public channel: it rings nobody and never pops the incoming-call screen,
- * so its invitees read "Invited" rather than a ring status (dashboard rule).
- */
-export function isBroadcastChannelCall(
-  channelScope: string | null | undefined,
-  callOrigin: string | null | undefined,
-): boolean {
-  return channelScope === ChannelScopeType.DEFAULT && callOrigin === CallOrigin.CHANNEL;
 }

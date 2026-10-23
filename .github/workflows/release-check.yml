@@ -1,0 +1,135 @@
+name: Release check
+
+# Manually triggered. Runs `pnpm release:check` (the automation suite in Docker) on the chosen
+# branch and publishes its module-wise report — the evidence to attach to the release ticket
+# before promoting to preprod/prod. The report is posted to the test-report Spaces channel and
+# attached to this run as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to check (e.g. release-20261022)"
+        required: true
+        type: string
+      modules:
+        description: "Only these modules, comma-separated (e.g. chat,calls). Empty = all."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One check per branch at a time; a second click waits instead of racing the first.
+concurrency:
+  group: release-check-${{ inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  release-check:
+    name: Release check
+    runs-on: ci-cluster-github-runners
+    env:
+      NODE_VERSION: "22"
+      TEST_ENV: test
+      BROWSER: chromium
+      # Gauge workers; forwarded into the automation container by the runner.
+      PARALLEL: 5
+      # Inputs go through env, never straight into `run:` scripts, so they can't inject shell.
+      BRANCH: ${{ inputs.branch }}
+      MODULES: ${{ inputs.modules }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # No host-side `playwright install`: Gauge runs inside the xyne-automation container.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prod=false --filter xyne-automation...
+
+      - name: Run release check
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ -n "$MODULES" ]; then
+            # release-check.ts rejects unknown module names; this only blocks odd characters.
+            if ! [[ "$MODULES" =~ ^[a-z,-]+$ ]]; then
+              echo "::error::modules must be comma-separated names like chat,calls"; exit 2
+            fi
+            ARGS+=("--modules=$MODULES")
+          fi
+          pnpm release:check "${ARGS[@]}"
+
+      - name: Find report
+        id: report
+        if: always()
+        run: |
+          # The checked-out branch's commit — GITHUB_SHA is main's (where this workflow runs from).
+          COMMIT=$(git rev-parse --short=9 HEAD)
+          RUN_DIR="tools/xyne-automation/reports/$COMMIT-runner"
+          REPORT=$(find "$RUN_DIR" -maxdepth 1 -name 'release-check-*.html' 2>/dev/null | head -n1)
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "run_dir=$RUN_DIR" >> "$GITHUB_OUTPUT"
+          echo "file=$REPORT" >> "$GITHUB_OUTPUT"
+          if [ -z "$REPORT" ]; then echo "::warning::No release-check report was written"; fi
+
+      - name: Show container states and logs
+        if: always()
+        run: |
+          find tools/xyne-automation/reports -type f \( -name '*.log' -o -name '*.txt' \) | sort | while read -r f; do
+            echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
+          done
+
+      - name: Upload report artifact
+        if: always() && steps.report.outputs.file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-check-report
+          path: ${{ steps.report.outputs.file }}
+          if-no-files-found: warn
+
+      - name: Push report to Spaces
+        if: always() && steps.report.outputs.file != ''
+        env:
+          JWT: ${{ secrets.TESTCASES_JWT }}
+          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
+          SPACES_URL: ${{ secrets.SPACES_URL }}
+          REPORT: ${{ steps.report.outputs.file }}
+          RUN_DIR: ${{ steps.report.outputs.run_dir }}
+          COMMIT: ${{ steps.report.outputs.commit }}
+          RESULT: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JWT:-}" ] || [ -z "${CHANNELID:-}" ] || [ -z "${SPACES_URL:-}" ]; then
+            echo "::notice::Spaces upload secrets not available — skipping report push"
+            exit 0
+          fi
+
+          UPLOAD_ARGS=(-F "files=@$REPORT;type=text/html")
+          if [ -d "$RUN_DIR/docker-logs" ]; then
+            tar -czf "$RUNNER_TEMP/docker-logs.tgz" -C "$RUN_DIR/docker-logs" .
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/docker-logs.tgz;type=application/gzip")
+          fi
+
+          if [ "$RESULT" = "success" ]; then STATUS="✅ passed"; else STATUS="❌ failed"; fi
+          MESSAGE="Release check $STATUS — $BRANCH @ $COMMIT, run by $GITHUB_ACTOR. $RUN_URL"
+
+          # --form-string: the message holds the branch name, which must not be read as a file (@/<).
+          # Success is a FILE_UPLOADED event; a rejected upload comes back 2xx with {"success":false,...}.
+          RESPONSE=$(curl -sS --fail-with-body -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+            -H "Authorization: Bearer $JWT" \
+            -F "channelId=$CHANNELID" \
+            --form-string "markdownText=$MESSAGE" \
+            "${UPLOAD_ARGS[@]}") || { echo "$RESPONSE"; echo "::error::Report push failed"; exit 1; }
+          echo "$RESPONSE"
+          if echo "$RESPONSE" | grep -q '"success":false'; then
+            echo "::error::Report push rejected"; exit 1
+          fi

@@ -1,7 +1,9 @@
 import {
   CallOrigin,
+  CallRingNotification,
   ChannelScopeType,
   InvitationResponse,
+  isSilentChannelCall,
   type Channel,
   type CallParticipant,
   type User,
@@ -32,7 +34,7 @@ export interface IncomingCallRow {
   participants?: readonly CallParticipant[] | undefined;
 }
 
-type ChannelLike = Pick<Channel, 'id' | 'name' | 'scopeType'>;
+type ChannelLike = Pick<Channel, 'id' | 'name' | 'scopeType' | 'type'>;
 
 // ---------------------------------------------------------------------------
 // Ring policy
@@ -69,12 +71,12 @@ export function isRingableCall(input: {
   // suppressed. Note this also swallows calls you were *personally* invited to
   // on a channel call — `invitedBy` distinguishes the two and is carried on the
   // view model, but acting on it is a product change, not a rendering one.
-  if (channel?.scopeType === ChannelScopeType.DEFAULT && call.callOrigin === CallOrigin.CHANNEL) {
-    return false;
-  }
+  if (isSilentChannelCall(channel, call.callOrigin)) return false;
 
-  // A scheduled call rings when it starts, not when it is booked.
+  // A scheduled call rings when it starts, not when it is booked — and only if the
+  // organizer left ringing on when scheduling it.
   if (call.startsAt && now < new Date(call.startsAt).getTime()) return false;
+  if (myParticipant?.ringNotification === CallRingNotification.DISABLED) return false;
 
   return myParticipant?.response === InvitationResponse.INVITED;
 }

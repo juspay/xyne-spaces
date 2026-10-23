@@ -1,3 +1,52 @@
+## [1.519.0](https://github.com/juspay/xyne-spaces/compare/v1.518.1...v1.519.0) (2026-10-23)
+
+
+### Features
+
+* add e2e tests for private/public channels, join, rename, description, leave and remove member ([#3332](https://github.com/juspay/xyne-spaces/issues/3332)) ([1fb6d3b](https://github.com/juspay/xyne-spaces/commit/1fb6d3b140e289e3f0751f250bf9239ad243fcfa))
+
+
+### Bug Fixes
+
+* show release-check report times in local time with time zone ([#3308](https://github.com/juspay/xyne-spaces/issues/3308)) ([2eec3bf](https://github.com/juspay/xyne-spaces/commit/2eec3bf06e10be0935f6aafb5a1fad73bde052d5))
+
+## [1.518.1](https://github.com/juspay/xyne-spaces/compare/v1.518.0...v1.518.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* fall back after 45s when Claude sends no first token ([#3406](https://github.com/juspay/xyne-spaces/issues/3406)) ([c8b3a14](https://github.com/juspay/xyne-spaces/commit/c8b3a14e53831255727407a171d6cddfbc7dfce3))
+* give the model the user's Spaces id so Ask AI skips the spaces-whoami turn ([#3407](https://github.com/juspay/xyne-spaces/issues/3407)) ([1740343](https://github.com/juspay/xyne-spaces/commit/17403434a53bd26d456c0623e7de4131e39d5154))
+* show a plan only for five-plus-step work, and keep the todo tools for a plan later ([#3408](https://github.com/juspay/xyne-spaces/issues/3408)) ([7c129f9](https://github.com/juspay/xyne-spaces/commit/7c129f918df982b4a0d970c7f85f914ed41d8b06))
+* show delivered files as workspace artifact chips on the Xyne AI screen ([#3395](https://github.com/juspay/xyne-spaces/issues/3395)) ([a062371](https://github.com/juspay/xyne-spaces/commit/a0623713ac9972ed93386815db8efb826ec7d63d))
+* write a non-empty debug index marker so the storage client accepts it ([#3405](https://github.com/juspay/xyne-spaces/issues/3405)) ([f63bcaa](https://github.com/juspay/xyne-spaces/commit/f63bcaaa48bc7be4212a80d07d02d543d54e72ce))
+
+## [1.518.0](https://github.com/juspay/xyne-spaces/compare/v1.517.0...v1.518.0) (2026-10-22)
+
+
+### Features
+
+* decision engine evals: record XOR and Jev token usage ([#3385](https://github.com/juspay/xyne-spaces/issues/3385)) ([856ae1b](https://github.com/juspay/xyne-spaces/commit/856ae1bae16931c19375b135b9aace9cde5424c7))
+* fast mode toggle in the Xyne AI composer ([#3335](https://github.com/juspay/xyne-spaces/issues/3335)) ([cc1a6e8](https://github.com/juspay/xyne-spaces/commit/cc1a6e84485fe12a7a0aaced479c726eb2c74821))
+* fast subagent ops: dashboard, xor quotas and concurrency cap, drift alerts, review queue ([#3345](https://github.com/juspay/xyne-spaces/issues/3345)) ([1e622a1](https://github.com/juspay/xyne-spaces/commit/1e622a1418500818732a10f82fa32212b8e77db3))
+* give the agent the thread's PR bindings as run context ([#3323](https://github.com/juspay/xyne-spaces/issues/3323)) ([0faf306](https://github.com/juspay/xyne-spaces/commit/0faf306783591a14a8abb861d1ac097758f4826e))
+* loop command sequences, versioning and rollback ([#3398](https://github.com/juspay/xyne-spaces/issues/3398)) ([0acd1bd](https://github.com/juspay/xyne-spaces/commit/0acd1bd59a7d3b302f952fa6f22031be98b2faac))
+* loop templates and a UI to build loop commands from them ([#3394](https://github.com/juspay/xyne-spaces/issues/3394)) ([ed2f60d](https://github.com/juspay/xyne-spaces/commit/ed2f60d6548d5e1e9fe80235b7d9744a4d932fdf))
+* loop-graph engine; /goal and /experiment run as graph specs ([#3344](https://github.com/juspay/xyne-spaces/issues/3344)) ([f59de58](https://github.com/juspay/xyne-spaces/commit/f59de58055b7322be082271e199bf5a6907169be)), closes [#3349](https://github.com/juspay/xyne-spaces/issues/3349)
+* one queued-message notice per conversation ([#3327](https://github.com/juspay/xyne-spaces/issues/3327)) ([3d2c395](https://github.com/juspay/xyne-spaces/commit/3d2c395520a232a761c45494adc8ed94b1216b6a))
+* per-command loop dashboard: runs, outcomes, duration, cost and findings by version ([#3399](https://github.com/juspay/xyne-spaces/issues/3399)) ([33c4e8d](https://github.com/juspay/xyne-spaces/commit/33c4e8deafe4649134aa032ac0a4e970f3e4b4f9))
+* visual editor for loop command sequences and loop diagrams ([#3401](https://github.com/juspay/xyne-spaces/issues/3401)) ([e2bd495](https://github.com/juspay/xyne-spaces/commit/e2bd4954e4ef611fccfc2ecb9490f58894eb9bd6))
+* xor decide nodes and /ui-test as the first spec-only loop command ([#3363](https://github.com/juspay/xyne-spaces/issues/3363)) ([210be3e](https://github.com/juspay/xyne-spaces/commit/210be3eb0871822299e4096635301a80e89566f2))
+
+
+### Bug Fixes
+
+* build catalog query JSON in the app instead of Postgres json_agg ([#3236](https://github.com/juspay/xyne-spaces/issues/3236)) ([92436c0](https://github.com/juspay/xyne-spaces/commit/92436c0d9ed063b7a57b2acf43233396639d91a2))
+* bump next/handlebars/dompurify/tinypool to clear Trivy CRITICAL gate ([#3392](https://github.com/juspay/xyne-spaces/issues/3392)) ([2e40f47](https://github.com/juspay/xyne-spaces/commit/2e40f47618a5738998c961d3e57c66b3669dcc64))
+* cache the Spaces JWT per session instead of reading the Google token and refreshing on every run ([#3391](https://github.com/juspay/xyne-spaces/issues/3391)) ([0c02b46](https://github.com/juspay/xyne-spaces/commit/0c02b4623bfebc1839809e9ee0b3614e8ec074a2))
+* compatible H.264 SDR video renditions worker (1/3, flags off) ([#3279](https://github.com/juspay/xyne-spaces/issues/3279)) ([8141365](https://github.com/juspay/xyne-spaces/commit/8141365ff5fb303f82e7658ce50fc69c58d30036)), closes [#3281](https://github.com/juspay/xyne-spaces/issues/3281)
+* replace Figma MCP connector with figma-developer-mcp ([#3350](https://github.com/juspay/xyne-spaces/issues/3350)) ([2440a74](https://github.com/juspay/xyne-spaces/commit/2440a74c0cca760fc4a46b177d264cd323b26fc4))
+
 ## [1.517.0](https://github.com/juspay/xyne-spaces/compare/v1.516.0...v1.517.0) (2026-10-22)
 
 

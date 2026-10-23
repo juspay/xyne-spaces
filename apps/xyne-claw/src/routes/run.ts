@@ -3058,10 +3058,10 @@ export async function processTask(
     const planGate = await planGateDecision;
     const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
-    if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
+    if (planGate && !planGate.plan) log(`[plan] jev says under five steps (p=${planGate.probability?.toFixed(2)}) — primer skipped, todo tools kept for a plan later`);
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
-    if (planToolsDefaultOn) {
+    if (planGateEligible) {
       allTools.push(...planTools);
       // The palette filter ran earlier and may have marked plan tools
       // palette-only (they read as non-write); undo that so the framework
@@ -4331,6 +4331,12 @@ export async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
+        ...(typeof agentConfig?.["spacesUserId"] === "string" && agentConfig["spacesUserId"]
+          ? {
+              spacesUserId: agentConfig["spacesUserId"],
+              ...(typeof agentConfig["workspaceId"] === "string" ? { spacesWorkspaceId: agentConfig["workspaceId"] } : {}),
+            }
+          : {}),
         // Answer from Context answers in one turn from the retrieved block: no tools.
         customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,

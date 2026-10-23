@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { Prisma, CallParticipant } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { InvitationResponse, MeetingStatus, CallType, CallOrigin, CallStatus, MessageArtifactStatus, RingStatus, MessageType, TagMethod } from '@xyne/shared';
+import { InvitationResponse, MeetingStatus, CallType, CallOrigin, CallStatus, MessageArtifactStatus, RingStatus, MessageType, TagMethod, type CallRingNotification } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 import { DatabaseClient } from '@/database/client';
@@ -544,7 +544,7 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
   });
 }
 
-export function updateScheduledCallTx(db: PrismaClient, title: string | undefined, startsAt: Date | undefined, endsAt: Date | undefined, channelId: string | undefined, metadata: Record<string, unknown> | undefined, callUpdatesChannel: string | null | undefined, callId: string, removeUserIds: string[] | undefined, addUserIds: string[] | undefined, invitedByUserId: string | undefined, externalInvitees: string[] | undefined, summaryTemplateId?: string | null) {
+export function updateScheduledCallTx(db: PrismaClient, title: string | undefined, startsAt: Date | undefined, endsAt: Date | undefined, channelId: string | undefined, metadata: Record<string, unknown> | undefined, callUpdatesChannel: string | null | undefined, callId: string, removeUserIds: string[] | undefined, addUserIds: string[] | undefined, invitedByUserId: string | undefined, externalInvitees: string[] | undefined, summaryTemplateId?: string | null, ringNotification?: CallRingNotification | null) {
   return transaction(['Call', 'CallParticipant'], 'updateScheduledCall: scheduled call update with participant add, remove and preview refresh must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (title !== undefined) updateData.title = title;
@@ -566,7 +566,22 @@ export function updateScheduledCallTx(db: PrismaClient, title: string | undefine
       });
     }
 
+    if (ringNotification !== undefined) {
+      await tx.callParticipant.updateMany({
+        where: { callId, isExternal: false },
+        data: { ringNotification },
+      });
+    }
+
     if (addUserIds && addUserIds.length > 0) {
+      // Without an explicit value, new invitees follow the organizer's row.
+      const addedRingNotification = ringNotification !== undefined
+        ? ringNotification
+        : (await tx.callParticipant.findFirst({
+            where: { callId, userId: updatedCall.createdByUserId },
+            select: { ringNotification: true },
+          }))?.ringNotification ?? null;
+
       await tx.callParticipant.createMany({
         data: addUserIds.map((userId) => ({
           id: uuidv4(),
@@ -577,6 +592,7 @@ export function updateScheduledCallTx(db: PrismaClient, title: string | undefine
           invitedAt: new Date(),
           response: InvitationResponse.INVITED,
           meetingStatus: MeetingStatus.PENDING,
+          ringNotification: addedRingNotification,
         })),
         skipDuplicates: true,
       });

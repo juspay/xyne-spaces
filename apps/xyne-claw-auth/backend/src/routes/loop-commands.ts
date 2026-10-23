@@ -7,6 +7,7 @@ import { getOrgId, getRequesterId, isClawAdmin } from "../middleware/agent-acl.j
 import { createLogger } from "../logger.js";
 import { LoopCommandValidationError, checkSequenceSteps, validateLoopCommand, type ValidatedLoopCommand } from "../lib/loop-command-defs.js";
 import { EXPERIMENT_PROVIDERS } from "../lib/experiment.js";
+import { loadLoopCommandStats } from "../lib/loop-command-stats.js";
 
 const log = createLogger("loop-commands");
 const router = Router();
@@ -66,6 +67,16 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
     take: 200,
   });
   ok(res, rows.map((r) => view(r, userId)));
+}));
+
+router.get("/stats", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const days = Math.min(90, Math.max(1, Number(req.query["days"]) || 30));
+  const commandId = typeof req.query["commandId"] === "string" ? req.query["commandId"] : undefined;
+  ok(res, { days, commands: await loadLoopCommandStats(orgId, userId, { days, ...(commandId ? { commandId } : {}) }) });
 }));
 
 router.get("/:id", asyncHandler(async (req: Request, res: Response) => {

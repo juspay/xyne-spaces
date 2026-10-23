@@ -2490,6 +2490,7 @@ model ExperimentRun {
   /// completion), which also meant `/experiment stop` could not reach them —
   /// a stopped run kept emitting checker output into the thread.
   checkerSessionIds  String[]            @default([])
+  epochSessionIds    String[]            @default([])
   finalReport        String?             @db.Text
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt

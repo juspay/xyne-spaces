@@ -13,6 +13,9 @@ import {
 } from "../../lib/api";
 import type { LoopCommandBody, LoopCommandRow, LoopCommandVersionInfo, LoopSequenceStep, LoopTemplateCatalogue, LoopTemplateInfo, SubagentDef } from "../../lib/api";
 import { Button } from "./ui/Button";
+import { LoopCommandsDashboard } from "./LoopCommandsDashboard";
+import { LoopDiagram } from "./loops/LoopDiagram";
+import { useNavigate } from "react-router-dom";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
 import { TextField } from "./ui/TextField";
@@ -121,6 +124,7 @@ function Chips({ options, selected, onToggle }: { options: Array<{ id: string; l
 }
 
 export function LoopCommandsPage() {
+  const navigate = useNavigate();
   const { show: showSnackbar } = useSnackbar();
   const [catalogue, setCatalogue] = useState<LoopTemplateCatalogue | null>(null);
   const [rows, setRows] = useState<LoopCommandRow[] | null>(null);
@@ -129,6 +133,7 @@ export function LoopCommandsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<LoopCommandRow | null>(null);
+  const [tab, setTab] = useState<"commands" | "dashboard">("commands");
   const [versions, setVersions] = useState<LoopCommandVersionInfo[] | null>(null);
 
   useEffect(() => {
@@ -232,12 +237,29 @@ export function LoopCommandsPage() {
             Build your own slash command from a loop template. It runs pass after pass in a thread, like /experiment, until its finish rule is met.
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => { setError(null); setDraft({ ...EMPTY }); }} leadingIcon={<PlusIcon size={14} />}>
-          New loop command
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => navigate("/v3/loop-commands/editor")}>Build a sequence visually</Button>
+          <Button variant="primary" size="sm" onClick={() => { setError(null); setDraft({ ...EMPTY }); }} leadingIcon={<PlusIcon size={14} />}>
+            New loop command
+          </Button>
+        </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+      <div className="flex shrink-0 gap-4 border-b border-xyne-border px-6">
+        {(["commands", "dashboard"] as const).map((k) => (
+          <button key={k} onClick={() => setTab(k)} className={`-mb-px border-b-2 py-2 text-[13px] ${tab === k ? "border-xyne-brand font-medium text-xyne-fg-primary" : "border-transparent text-xyne-fg-muted hover:text-xyne-fg-secondary"}`} data-id={`loop-tab-${k}`}>
+            {k === "commands" ? "Commands" : "Dashboard"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "dashboard" && (
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <LoopCommandsDashboard />
+        </div>
+      )}
+
+      <div className={`flex-1 space-y-4 overflow-y-auto px-6 py-5 ${tab === "commands" ? "" : "hidden"}`}>
         {error && !draft && <p className="text-[13px] text-xyne-error-fg">{error}</p>}
         {saved && (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-xyne-border bg-xyne-surface-subtle p-3 text-[13px]" data-id="loop-try">
@@ -294,6 +316,7 @@ export function LoopCommandsPage() {
                   <td className="px-3 py-2">
                     {r.mine && catalogue && (
                       <div className="flex justify-end gap-1.5">
+                        {isSequence(r) && <Button size="sm" variant="ghost" onClick={() => navigate(`/v3/loop-commands/editor?id=${r.id}`)}>Open in editor</Button>}
                         <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft(draftFrom(r, catalogue.templates)); }}>Edit</Button>
                         <Button size="sm" variant="ghost" onClick={() => void publish(r, !r.published)}>{r.published ? "Unpublish" : "Publish"}</Button>
                         <button type="button" aria-label={`Delete ${r.command}`} onClick={() => void remove(r)} className="px-1 text-xyne-fg-muted hover:text-xyne-error-fg">
@@ -359,6 +382,12 @@ export function LoopCommandsPage() {
               />
               <TextField label="Description" hint="One line, shown in /help" value={draft.description} placeholder="Hunt performance regressions" onChange={(e) => u({ description: e.target.value })} />
             </div>
+            {!t.composite && (
+              <details className="rounded-xl border border-xyne-border" open={!draft.id}>
+                <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-xyne-fg-secondary">How this loop runs</summary>
+                <div className="px-2 pb-2"><LoopDiagram template={t} height={300} /></div>
+              </details>
+            )}
             {t.composite && (
               <div className="space-y-2" data-id="loop-steps">
                 <p className="text-[12px] font-medium text-xyne-fg-secondary">
