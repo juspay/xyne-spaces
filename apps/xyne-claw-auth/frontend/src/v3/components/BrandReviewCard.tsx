@@ -20,7 +20,12 @@ import {
   type BrandSummary,
   type ChatAttachmentMeta,
 } from "../../lib/api";
-import { SpecimenPreview, resolveSpecimenPalette } from "./SpecimenPreview";
+import {
+  SpecimenPreview,
+  activePalette,
+  hasUsableDarkSet,
+  resolveSpecimenPalette,
+} from "./SpecimenPreview";
 
 /**
  * Review card for a brand extraction.
@@ -43,7 +48,6 @@ interface BrandFiles {
   summary: ChatAttachmentMeta | undefined;
   designMd: ChatAttachmentMeta | undefined;
   tokensCss: ChatAttachmentMeta | undefined;
-  /** Absent for a single-theme source, which is the common case. */
   tokensCssDark: ChatAttachmentMeta | undefined;
 }
 
@@ -110,8 +114,6 @@ export function BrandReviewCard({
   const [designMd, setDesignMd] = useState<string>("");
   const [designMdOpen, setDesignMdOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Starts light regardless of the host app's theme: the reviewer is judging
-  // this brand's light set, not their own editor preference.
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -155,9 +157,6 @@ export function BrandReviewCard({
       const tokensCss = files.tokensCss
         ? await fetchChatAttachmentText(files.tokensCss.id, userId)
         : "";
-      // Stored on the same row as a sibling column (XYNE-66829). A system saved
-      // without it is single-theme, which later runs treat as "no dark theme"
-      // rather than deriving one.
       const tokensCssDark = files.tokensCssDark
         ? await fetchChatAttachmentText(files.tokensCssDark.id, userId)
         : "";
@@ -223,19 +222,13 @@ export function BrandReviewCard({
 
   if (!summary) return null;
 
-  // A dark set and its provenance travel together: the contract allows one
-  // without the other, and a palette that cannot say where it came from is not
-  // worth a toggle the reviewer would have to trust blindly.
-  const darkColors = summary.colorsDark ?? [];
-  const hasDarkSet = darkColors.length > 0 && Boolean(summary.darkThemeSource);
-  const showingDark = hasDarkSet && dark;
+  const hasDarkSet = hasUsableDarkSet(summary);
+  const { colors: activeColors, showingDark } = activePalette(summary, dark);
 
-  const colors = sortColors(showingDark ? darkColors : summary.colors);
+  const colors = sortColors(activeColors);
   const headingFont = summary.fonts.find((font) => font.role === "heading") ?? summary.fonts[0];
   const bodyFont = summary.fonts.find((font) => font.role === "body") ?? headingFont;
   const steps = [...summary.typeScale].sort((a, b) => b.sizePx - a.sizePx).slice(0, 5);
-  // Drives the typography sample's own surface, so type is judged against the
-  // theme it will actually be read on rather than the host app's background.
   const typeSurface = resolveSpecimenPalette(colors, showingDark).resolved;
 
   return (
@@ -251,8 +244,6 @@ export function BrandReviewCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* Only rendered for a system that HAS both sets. A toggle that
-              switches to an empty palette would be a control that lies. */}
           {hasDarkSet && (
             <div
               role="group"
@@ -296,9 +287,6 @@ export function BrandReviewCard({
           <div className="text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
             Palette{hasDarkSet ? (showingDark ? " — dark" : " — light") : ""}
           </div>
-          {/* Where the dark set came from, shown rather than implied: a reviewer
-              who can see it was measured from prefers-color-scheme trusts it
-              differently than one shown a palette with no origin. */}
           {showingDark && (
             <div className="shrink-0 text-[10px] text-xyne-fg-muted">
               from {summary.darkThemeSource}
@@ -335,8 +323,6 @@ export function BrandReviewCard({
           <div
             className="mt-2 space-y-1 rounded-md px-2 py-1.5"
             style={
-              // Only themed once there is a dark set to compare against;
-              // otherwise the card keeps the host app's own surface.
               hasDarkSet
                 ? { backgroundColor: typeSurface.background, border: `1px solid ${typeSurface.border}` }
                 : undefined

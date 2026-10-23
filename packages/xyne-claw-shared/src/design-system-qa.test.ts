@@ -111,14 +111,6 @@ describe("checkDesignSystemCompliance", () => {
   });
 });
 
-/**
- * Both token sets, one palette (XYNE-66829).
- *
- * A themed artifact paints light AND dark values in the same file — the dark
- * ones under `@media (prefers-color-scheme: dark)` and `[data-theme="dark"]`.
- * Checking against the light set alone would report every dark token as a
- * violation, which is noise that buries the findings worth reading.
- */
 describe("checkDesignSystemCompliance — dark token set", () => {
   const DARK_TOKENS = `
 [data-theme="dark"] {
@@ -127,7 +119,6 @@ describe("checkDesignSystemCompliance — dark token set", () => {
 }
 `;
 
-  /** The shape a themed artifact actually has. */
   const THEMED_ARTIFACT = `
 <style>
   :root { color: #1a73e8; background: #ffffff; }
@@ -145,8 +136,6 @@ describe("checkDesignSystemCompliance — dark token set", () => {
   });
 
   it("reports those same dark values when only the light set is known", () => {
-    // The regression this parameter exists to prevent: identical artifact,
-    // no dark set, every dark token suddenly a violation.
     const got = checkDesignSystemCompliance(THEMED_ARTIFACT, TOKENS);
 
     expect(got.offPaletteColors).toEqual(["#60a5fa", "#0b1120"]);

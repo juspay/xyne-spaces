@@ -23,9 +23,6 @@ export interface ResolvedDesignSystem {
   name: string;
   designMd: string;
   tokensCss: string;
-  /** Empty when this system has only a light set — which is the common case,
-   *  and which readers must treat as "no dark theme" rather than substituting
-   *  the light set under a dark selector. */
   tokensCssDark: string;
   origin: DesignSystemOrigin;
 }

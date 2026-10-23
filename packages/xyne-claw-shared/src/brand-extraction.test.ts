@@ -197,11 +197,6 @@ describe("optional fields the card renders — a shape slip here crashes the thr
   });
 });
 
-/**
- * The dark set (XYNE-66829). Its hexes become inline style values the moment
- * the card's theme toggle is switched, so they are validated exactly as
- * strictly as the light set — a lesson `colors` already paid for.
- */
 describe("isBrandSummary — light and dark token sets", () => {
   const darkColors = [
     { hex: "#0B1120", token: "brand-background", role: "background" as const },
@@ -230,8 +225,6 @@ describe("isBrandSummary — light and dark token sets", () => {
   });
 
   it("holds colorsDark to the same rules as colors", () => {
-    // A three-digit hex, a bad role, a missing token and a string instead of an
-    // array would each reach the DOM or a .map() if only `colors` were checked.
     expect(isBrandSummary({ ...valid, colorsDark: [{ ...darkColors[0], hex: "#FFF" }] })).toBe(
       false,
     );
@@ -252,11 +245,6 @@ describe("isBrandSummary — light and dark token sets", () => {
     expect(isBrandSummary({ ...valid, colorsDark: [] })).toBe(true);
   });
 
-  /**
-   * Shape is enforced, pairing is not. Refusing an incomplete pair would blank
-   * a perfectly good light palette too, so the card decides that dark is
-   * unavailable — asserted here so nobody "tightens" this into a rejection.
-   */
   it("accepts a dark set with no provenance rather than refusing the whole payload", () => {
     expect(isBrandSummary({ ...valid, colorsDark: darkColors })).toBe(true);
     expect(isBrandSummary({ ...valid, darkThemeSource: "class" })).toBe(true);

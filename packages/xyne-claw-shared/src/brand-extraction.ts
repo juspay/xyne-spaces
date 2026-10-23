@@ -10,11 +10,6 @@
  *   tokens.css  — custom properties, consumed by generated artifacts
  *   brand.json  — this payload, for rendering the review card
  *
- * A fourth file, tokens.dark.css, rides along only when the source actually
- * carries a dark theme (XYNE-66829). Optional on purpose: most sources have one
- * theme, and deriving a dark palette by inverting a light one yields a system
- * that is subtly wrong everywhere it is later used.
- *
  * Keep this shape additive. The card tolerates unknown fields, but a renamed
  * one silently empties a section of the card rather than failing loudly.
  */
@@ -24,11 +19,8 @@
 export const BRAND_SUMMARY_FILENAME = "brand.json";
 export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
 export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
-/** Delivered only when `darkThemeSource` is set. */
 export const BRAND_TOKENS_DARK_CSS_FILENAME = "tokens.dark.css";
 
-/** How the source expressed its dark theme. Recorded so the card can say where
- *  a dark palette came from instead of presenting it as given. */
 export const BRAND_DARK_THEME_SOURCES = [
   "prefers-color-scheme",
   "class",
@@ -119,17 +111,7 @@ export interface BrandSummary {
   sourceCommit?: string;
   extractedAt: string;
   colors: BrandColor[];
-  /**
-   * The dark counterpart of `colors`, same roles and token names.
-   *
-   * Set only when `darkThemeSource` is too — the two travel together, and a
-   * dark palette with no stated provenance is indistinguishable from one the
-   * extractor invented. Type, spacing and radii are deliberately NOT duplicated:
-   * real sources vary colour between themes and keep the rest, so a second
-   * type scale would be noise the card has to explain.
-   */
   colorsDark?: BrandColor[];
-  /** Where the dark theme was found. Absent means the source had none. */
   darkThemeSource?: BrandDarkThemeSource;
   fonts: BrandFont[];
   typeScale: BrandTypeStep[];
@@ -166,8 +148,6 @@ const isOptionalString = (value: unknown): boolean =>
 const isOptionalNumber = (value: unknown): boolean =>
   value === undefined || typeof value === "number";
 
-/** Shared by `colors` and `colorsDark` so the two sets can never drift apart
- *  in how strictly they are checked. */
 const isColorList = (value: unknown): boolean =>
   Array.isArray(value) &&
   value.every(
@@ -207,13 +187,6 @@ export function isBrandSummary(value: unknown): value is BrandSummary {
 
   if (!isColorList(value["colors"])) return false;
 
-  // Validated exactly as strictly as `colors`: these hexes also become inline
-  // style values once the card's theme toggle is switched to dark.
-  //
-  // Shape is enforced, pairing is not. A dark palette with no `darkThemeSource`
-  // is incomplete rather than malformed, and refusing the payload would blank a
-  // perfectly good light palette too — so the card treats dark as available
-  // only when both are present and otherwise just omits the toggle.
   if (value["colorsDark"] !== undefined && !isColorList(value["colorsDark"])) return false;
   if (
     value["darkThemeSource"] !== undefined &&

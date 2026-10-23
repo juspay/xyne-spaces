@@ -53,13 +53,6 @@ export type DesignSystemPromptInjectionResult =
       injection: DesignSystemPromptInjection;
       origin: DesignSystemOriginLabel;
       name?: string;
-      /**
-       * Whether the dark token set reached the prompt (XYNE-66829).
-       * "absent" — the system has only a light set, so nothing was asked for.
-       * "oversized" — it has one, but both sets together blew the budget and
-       * the block was dropped. Reported so a run that quietly produced a
-       * single-theme artifact is explainable from the log.
-       */
       darkTokens: "injected" | "absent" | "oversized";
     }
   | { status: "absent" }
@@ -141,28 +134,8 @@ function fenceDesignSystem(designMd: string): string {
 
 const DESIGN_SYSTEM_TOKENS_FENCE_TAG = "design_system_tokens";
 
-/**
- * Budget for both token sets together.
- *
- * The API caps each set at 64k (routes/design-systems.ts), so two large sets
- * could otherwise dominate a run's context. Over budget the whole block is
- * dropped and the run continues on designMd alone — truncating CSS mid-rule
- * would hand the model a broken stylesheet, which is worse than none.
- */
 export const DESIGN_SYSTEM_TOKENS_MAX_CHARS = 24_000;
 
-/**
- * Ask for an artifact that actually switches themes.
- *
- * Same split as designMd: the directive is ours and sits OUTSIDE the fence,
- * while the token values are scraped, model-written data and sit inside it.
- *
- * The ordering rule is load-bearing CSS, not style advice. `:root` and
- * `[data-theme="dark"]` carry equal specificity, so whichever is declared last
- * wins. Emitting the media query AFTER the attribute selectors would let the OS
- * preference beat an explicit choice — precisely the bug a data-theme override
- * exists to prevent, and invisible to anyone testing on a light OS.
- */
 function fenceThemedTokens(tokensCss: string, tokensCssDark: string): string {
   const escape = (css: string): string => escapeFenceTags(css, DESIGN_SYSTEM_TOKENS_FENCE_TAG);
   return [
@@ -226,10 +199,6 @@ export function buildDesignSystemPromptInjection(
       : "agent"
     : "legacy";
 
-  // Only a system that actually HAS a dark set asks for themed output. Telling
-  // a single-theme run to produce one would contradict the extraction contract,
-  // which records a gap rather than inventing a palette — and a guessed dark
-  // theme is wrong in every artifact built from it afterwards.
   const tokensCss = typeof ref?.tokensCss === "string" ? ref.tokensCss.trim() : "";
   const tokensCssDark = typeof ref?.tokensCssDark === "string" ? ref.tokensCssDark.trim() : "";
   const hasBothSets = Boolean(tokensCss && tokensCssDark);

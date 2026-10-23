@@ -3195,8 +3195,6 @@ export interface BrandSummary {
   sourceCommit?: string;
   extractedAt: string;
   colors: BrandColor[];
-  /** The dark counterpart of `colors`, same tokens and roles. Present only
-   *  alongside `darkThemeSource` (XYNE-66829). */
   colorsDark?: BrandColor[];
   darkThemeSource?: "prefers-color-scheme" | "class" | "theme-file";
   fonts: BrandFont[];
@@ -3213,7 +3211,6 @@ export interface BrandSummary {
 export const BRAND_SUMMARY_FILENAME = "brand.json";
 export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
 export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
-/** Delivered only when the source carried a dark theme. */
 export const BRAND_TOKENS_DARK_CSS_FILENAME = "tokens.dark.css";
 
 /**
@@ -3278,7 +3275,6 @@ export interface DesignSystemRecord {
   name: string;
   designMd: string;
   tokensCss: string;
-  /** Empty when this system has only a light set. */
   tokensCssDark: string;
   assets: unknown;
   source: string;

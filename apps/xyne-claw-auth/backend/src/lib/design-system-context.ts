@@ -18,8 +18,6 @@ export interface DesignSystemRef {
   name: string;
   designMd: string;
   tokensCss: string;
-  /** Empty unless the system has a dark set. The runtime uses its presence to
-   *  decide whether to ask for themed output at all (XYNE-66829). */
   tokensCssDark: string;
   origin: string;
 }

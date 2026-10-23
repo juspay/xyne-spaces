@@ -11,8 +11,6 @@ const state = vi.hoisted(() => ({
   systems: [] as Array<Record<string, any>>,
   pins: [] as Array<Record<string, any>>,
   pinLookups: 0,
-  /** Last payload handed to prisma, so the CRUD block can assert what would be
-   *  written rather than re-reading a fake row back. */
   lastCreate: null as Record<string, any> | null,
   lastUpdate: null as Record<string, any> | null,
 }));
@@ -154,9 +152,6 @@ describe("designSystemRepository.resolveForAgent", () => {
   });
 
   it("resolves a single-theme system with an empty dark set, not undefined", async () => {
-    // The runtime branches on truthiness to decide whether to ask for themed
-    // output; undefined here would read the same, but an absent KEY would not
-    // survive the JSON round-trip onto agentConfig.designSystemRef.
     const got = await designSystemRepository.resolveForAgent(agent({ designSystemId: "ds-default" }));
 
     expect(got?.tokensCssDark).toBe("");
@@ -169,12 +164,6 @@ describe("designSystemRepository.resolveForAgent", () => {
   });
 });
 
-/**
- * Writes of the dark set (XYNE-66829). The column is NOT NULL with a default of
- * "", so every path has to supply a string — a create that omitted it would
- * take the DB default and look identical, which is exactly why the payload
- * handed to prisma is asserted rather than the row read back.
- */
 describe("designSystemRepository create/update — tokensCssDark", () => {
   beforeEach(() => {
     state.systems = [system({ id: "ds-1", tokensCssDark: "" })];
@@ -212,8 +201,6 @@ describe("designSystemRepository create/update — tokensCssDark", () => {
   });
 
   it("does not bump the version when the dark set is written unchanged", async () => {
-    // Re-saving an identical system must not make every consumer think the
-    // content moved on.
     await designSystemRepository.update("ds-1", "org-1", { tokensCssDark: "" });
 
     expect(state.lastUpdate?.["version"]).toBeUndefined();

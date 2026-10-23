@@ -1,26 +1,6 @@
 import { useMemo } from "react";
-import type { BrandColor, BrandFont, BrandTypeStep } from "../../lib/api";
+import type { BrandColor, BrandFont, BrandSummary, BrandTypeStep } from "../../lib/api";
 
-/**
- * A specimen of a design system rendered in one theme.
- *
- * Swatches alone do not show whether a system WORKS: a palette can look fine as
- * ten squares and still produce unreadable body text or an invisible border once
- * it is assembled. So this renders the real thing — button, field, card — from
- * the same tokens, which is also the only way a reviewer sees a dark set fail.
- *
- * Every value is inline-styled from the palette rather than themed with CSS
- * classes, because the host app has its own theme and must not leak into a
- * preview of someone else's brand.
- *
- * It lives next to the Brand Review Card rather than on a route of its own:
- * there is no design-system catalog page yet (XYNE-66820), and a specimen behind
- * an unreachable URL would be a feature nobody finds.
- */
-
-/** Neutral stand-ins, used ONLY when the extraction has no value for a role.
- *  Substitutions are listed in the footnote rather than passed off as brand
- *  values — an invented token is wrong everywhere it is later used. */
 const LIGHT_FALLBACK = {
   background: "#FFFFFF",
   surface: "#F8FAFC",
@@ -45,13 +25,9 @@ const ROLE_KEYS: RoleKey[] = ["background", "surface", "text", "muted", "border"
 
 export interface SpecimenPalette {
   resolved: Record<RoleKey, string>;
-  /** Roles the set did not define, so the card can say which values are
-   *  stand-ins instead of letting them read as extracted. */
   substituted: RoleKey[];
 }
 
-/** Resolve the roles a specimen needs from a flat colour list. Exported for the
- *  tests, which assert the substitution list rather than the pixels. */
 export function resolveSpecimenPalette(colors: BrandColor[], dark: boolean): SpecimenPalette {
   const fallback = dark ? DARK_FALLBACK : LIGHT_FALLBACK;
   const resolved = {} as Record<RoleKey, string>;
@@ -67,15 +43,30 @@ export function resolveSpecimenPalette(colors: BrandColor[], dark: boolean): Spe
     }
   }
 
-  // `accent` is optional in a specimen: with no accent the secondary button
-  // simply uses the border colour, which is what a one-colour brand looks like.
   return { resolved, substituted };
+}
+
+type ThemeableSummary = Pick<BrandSummary, "colors" | "colorsDark" | "darkThemeSource">;
+
+export function hasUsableDarkSet(summary: ThemeableSummary): boolean {
+  return (summary.colorsDark?.length ?? 0) > 0 && Boolean(summary.darkThemeSource);
+}
+
+export function activePalette(
+  summary: ThemeableSummary,
+  dark: boolean,
+): { colors: BrandColor[]; showingDark: boolean } {
+  const showingDark = hasUsableDarkSet(summary) && dark;
+  return { colors: showingDark ? (summary.colorsDark ?? []) : summary.colors, showingDark };
 }
 
 function fontStack(font: BrandFont | undefined): string | undefined {
   if (!font) return undefined;
   return `${JSON.stringify(font.family)}, ${(font.fallbacks ?? ["sans-serif"]).join(", ")}`;
 }
+
+const MAX_SPECIMEN_STEP_PX = 24;
+const SPECIMEN_STEP_COUNT = 3;
 
 export function SpecimenPreview({
   colors,
@@ -97,10 +88,8 @@ export function SpecimenPreview({
   const bodyFont = fonts.find((font) => font.role === "body") ?? headingFont;
   const accent = colors.find((color) => color.role === "accent")?.hex;
 
-  // Largest three steps, so the specimen shows the scale's shape without
-  // becoming a type catalog.
   const steps = useMemo(
-    () => [...typeScale].sort((a, b) => b.sizePx - a.sizePx).slice(0, 3),
+    () => [...typeScale].sort((a, b) => b.sizePx - a.sizePx).slice(0, SPECIMEN_STEP_COUNT),
     [typeScale],
   );
 
@@ -135,8 +124,7 @@ export function SpecimenPreview({
               className="truncate"
               style={{
                 fontFamily: fontStack(headingFont),
-                // Capped: a 96px display step would otherwise blow out the card.
-                fontSize: `${Math.min(step.sizePx, 24)}px`,
+                fontSize: `${Math.min(step.sizePx, MAX_SPECIMEN_STEP_PX)}px`,
                 ...(step.weight ? { fontWeight: step.weight } : {}),
               }}
             >
@@ -154,13 +142,7 @@ export function SpecimenPreview({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span
           className="inline-flex h-8 items-center rounded-md px-3 text-[12px] font-medium"
-          style={{
-            backgroundColor: resolved.primary,
-            // Brand primaries are mid-to-dark far more often than not, so the
-            // background colour is the safer label colour than the text token,
-            // which on a dark theme is near-white on near-white.
-            color: resolved.background,
-          }}
+          style={{ backgroundColor: resolved.primary, color: resolved.background }}
         >
           Primary action
         </span>
