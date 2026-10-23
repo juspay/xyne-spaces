@@ -12,9 +12,6 @@ RUN npm run build
 
 FROM public.ecr.aws/docker/library/nginx:stable-alpine AS runner
 
-# eMudhra emSign G3 CA compromise (Oct 2026): force the patched CA bundle (>= 20261020-r0).
-RUN apk upgrade --no-cache ca-certificates
-
 RUN rm /etc/nginx/conf.d/default.conf
 
 # Assets are built with /claw/ base path, serve from /claw/

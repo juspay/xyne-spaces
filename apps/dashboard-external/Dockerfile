@@ -60,9 +60,6 @@ RUN pnpm --filter xyne-spaces-dashboard-external run build
 # Stage 3: nginx — deployed without Istio mTLS for public access
 FROM nginx:alpine AS runner
 
-# eMudhra emSign G3 CA compromise (Oct 2026): force the patched CA bundle (>= 20261020-r0).
-RUN apk upgrade --no-cache ca-certificates
-
 RUN addgroup --system --gid 1001 frontend && \
     adduser --system --uid 1001 frontend
 

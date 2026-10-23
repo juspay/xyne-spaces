@@ -29,9 +29,9 @@ RUN pnpm --filter xyne-spaces-dashboard-edge deploy --legacy --prod /out/app
 # --- runtime -----------------------------------------------------------------
 FROM nginx:1.27-alpine AS runner
 # eMudhra emSign G3 CA compromise (Oct 2026): force the patched CA bundle (>= 20261020-r0).
-# Runtime Node is the Alpine apk build, so upgrade it too.
+# nodejs is installed fresh below, so it is already current; ca-certificates may be preinstalled.
 RUN apk add --no-cache nodejs gettext ca-certificates curl tini \
- && apk upgrade --no-cache ca-certificates nodejs \
+ && apk upgrade --no-cache ca-certificates \
  && addgroup -S -g 1001 edge && adduser -S -u 1001 -G edge edge \
  && mkdir -p /var/cache/edge /var/run/edge /etc/edge/rules \
  && chown -R edge:edge /var/cache/edge /var/run/edge /etc/edge
