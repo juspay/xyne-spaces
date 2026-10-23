@@ -196,6 +196,18 @@ export type {
   BrandAssetKind,
 } from "./brand-extraction.js";
 export {
+  normalizeColor,
+  extractBlock,
+  flattenStringEntries,
+  parseTailwindConfig,
+  parseCssCustomProperties,
+  colorVariables,
+  inferColorRole,
+  scanComponentPrimitives,
+  toBrandColors,
+} from "./brand-repo.js";
+export type { TailwindTokens, CssTokens, ComponentEvidence } from "./brand-repo.js";
+export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
   INBOUND_ATTACHMENT_FAMILIES,
