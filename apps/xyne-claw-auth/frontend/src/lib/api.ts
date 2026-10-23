@@ -3216,6 +3216,87 @@ export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
  * Returns null when the attachment is not a valid summary (422) — the card
  * then says so rather than rendering a half-understood payload.
  */
+// --- Contrast audit (XYNE-66828) -------------------------------------------
+//
+// Render-only mirrors of packages/xyne-claw-shared/src/wcag-contrast.ts. The
+// MATHS is not mirrored and must not be: the server computes every audit with
+// the canonical implementation, which is the only one under test. Re-auditing
+// an edited palette is a round trip (`auditContrastTokens`) for exactly that
+// reason.
+
+export type ContrastSlot =
+  | "background" | "surface" | "body" | "muted"
+  | "primary" | "onPrimary" | "onSurface" | "link";
+
+export interface ContrastRatings {
+  aaNormal: boolean;
+  aaLarge: boolean;
+  aaaNormal: boolean;
+  aaaLarge: boolean;
+}
+
+export interface ContrastSuggestion {
+  hex: string;
+  ratio: number;
+}
+
+/** `missing` means one side has no token, `invalid` that it has one whose value
+ *  is not a flat hex. Neither counts as a failure. */
+export type ContrastPairStatus = "pass" | "fail" | "missing" | "invalid";
+
+export interface ContrastPairResult {
+  id: string;
+  label: string;
+  status: ContrastPairStatus;
+  foreground: ContrastSlot;
+  background: ContrastSlot;
+  foregroundHex: string | null;
+  backgroundHex: string | null;
+  /** The custom property behind each side, without `--`. What Apply rewrites —
+   *  never the hex, since two tokens routinely share one colour. */
+  foregroundToken: string | null;
+  backgroundToken: string | null;
+  ratio: number | null;
+  ratings: ContrastRatings | null;
+  suggestion: ContrastSuggestion | null;
+  unresolved: ContrastSlot[];
+}
+
+export interface ContrastAudit {
+  pairs: ContrastPairResult[];
+  audited: number;
+  failing: number;
+  hasIssues: boolean;
+}
+
+/** What a list response carries: the verdict without the pair detail. The full
+ *  audit is a superset, so `hasIssues` reads the same on both. */
+export interface ContrastAuditCounts {
+  audited: number;
+  failing: number;
+  hasIssues: boolean;
+}
+
+/**
+ * Audit a palette that is still being edited.
+ *
+ * Takes the token CSS, not a slot map, because that is the artifact a saved
+ * DesignSystem stores and therefore the one its badge will be computed from.
+ * Auditing anything else lets the card and the saved system disagree — which
+ * they did: a token named outside the known slot list was checked on the card
+ * via its brand.json ROLE and then invisible once saved, so the warning badge
+ * vanished at exactly the moment it started to matter.
+ */
+export async function auditContrastTokens(input: {
+  tokensCss: string;
+}): Promise<ContrastAudit> {
+  const result = await request<{ success: true; data: ContrastAudit }>(
+    `${AUTH_API_URL}/api/v1/design-systems/contrast-audit`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return result.data;
+}
+
 export interface BrandSummaryResult {
   summary: BrandSummary;
   /** Set once this brand.json has been saved, so the card stays saved across
@@ -3281,6 +3362,10 @@ export interface DesignSystemRecord {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** XYNE-66828. The full audit on a single-row response, the counts alone on a
+   *  list — derived from `tokensCss` on every read, never stored, so it cannot
+   *  go stale against an edited palette. */
+  contrast?: ContrastAudit | ContrastAuditCounts;
 }
 
 export interface CreateDesignSystemInput {

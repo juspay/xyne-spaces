@@ -189,6 +189,19 @@ describe("GET /attachments/:id/brand-summary", () => {
     const res = await call("GET", "/attachments/att-valid/brand-summary");
     expect(res.body["savedDesignSystemId"]).toBe("ds-1");
   });
+
+  // XYNE-66828. The summary deliberately carries NO contrast audit. It used to,
+  // computed from brand.json colours, but a saved system is audited from its
+  // tokens.css and the two read a palette differently: a token named outside
+  // the known slot list was flagged on the card via its ROLE and then clean
+  // once saved, so the warning badge vanished at the moment it mattered. The
+  // card audits the token CSS it is about to store instead.
+  it("carries no contrast audit, so the card cannot disagree with the saved system", async () => {
+    const res = await call("GET", "/attachments/att-valid/brand-summary");
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty("contrast");
+    expect(res.body["data"]).toMatchObject({ name: "Stripe" });
+  });
 });
 
 describe("POST /attachments/:id/brand-saved", () => {
