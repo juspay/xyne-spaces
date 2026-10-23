@@ -217,12 +217,25 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
-      # Skips the suite for mobile-only merge queue entries.
+      # Skips the suite only when a PR or merge queue entry touches nothing but
+      # mobile and standalone claw code (neither is in the test stack); any other
+      # change runs it, including claw code inside backend/dashboard.
       - name: Check if affected
         id: affected
         uses: juspay/xyne-spaces/.github/actions/ci-affected@main
         with:
           package: xyne-automation
+          ignore-paths: >-
+            apps/mobile/
+            apps/xyne-claw/
+            apps/xyne-claw-auth/
+            packages/xyne-claw-shared/
+            packages/xyne-claw-mcp/
+            packages/xyne-claw-pi-plugin/
+            claw-deployments/
+            helm-charts/charts/xyne-claw/
+            helm-charts/charts/xyne-claw-auth/
+            helm-charts/charts/xyne-claw-auth-frontend/
 
       - uses: actions/setup-node@v5
         if: steps.affected.outputs.run == 'true'
