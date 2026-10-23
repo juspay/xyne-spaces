@@ -51,7 +51,36 @@ export type DesignSystemUpdate = Partial<Omit<DesignSystemInput, "name">> & {
   name?: string | undefined;
   /** Who is making this edit, credited on the version row. */
   updatedBy?: string | undefined;
+  /**
+   * The version the caller believes it is editing. When given, the write only
+   * lands if the row is still on it.
+   *
+   * The re-import flow shows a diff against a version and saves on approval,
+   * which is a read, a human pause, and then a write. Without this, a save in
+   * that window is overwritten silently AND the new version row's summary
+   * describes a transition from content that is no longer the previous version
+   * — the history would be wrong, not just the content.
+   */
+  expectedVersion?: number | undefined;
 };
+
+export type DesignSystemUpdateResult =
+  | { status: "updated"; row: DesignSystem }
+  | { status: "not-found" }
+  | { status: "conflict"; currentVersion: number };
+
+/** JSON equality that ignores key order, for deciding whether `assets` moved. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
+}
+
+const sameJson = (a: unknown, b: unknown): boolean => stableJson(a) === stableJson(b);
 
 const resolved = (row: DesignSystem, origin: DesignSystemOrigin): ResolvedDesignSystem => ({
   id: row.id,
@@ -111,26 +140,54 @@ export const designSystemRepository = {
    * transaction would let two concurrent edits pick the same number, and one of
    * them would die on the `[designSystemId, version]` unique constraint — which
    * is a real rejection from Postgres, not a theoretical one.
+   *
+   * The change summary is computed BEFORE the transaction opens. It diffs the
+   * two documents line by line, which costs the product of their line counts,
+   * and the routes accept 64k characters of token CSS — tens of thousands of
+   * short lines. Inside the transaction that work held a row lock while it ran,
+   * so one large save could pass Prisma's 5s interactive-transaction timeout and
+   * roll back a legitimate edit as a 500. Out here it holds nothing, and
+   * MAX_DIFF_CELLS bounds the work itself.
    */
   update: async (
     id: string,
     orgId: string,
     input: DesignSystemUpdate,
-  ): Promise<DesignSystem | null> => {
+  ): Promise<DesignSystemUpdateResult> => {
     const existing = await prisma.designSystem.findFirst({ where: { id, orgId } });
-    if (!existing) return null;
+    if (!existing) return { status: "not-found" };
+
+    const nextDesignMd = input.designMd ?? existing.designMd;
+    const nextTokensCss = input.tokensCss ?? existing.tokensCss;
+    // By value, not by presence. A form that posts every field on every save
+    // sends `assets` unchanged, and treating that as a change minted a version
+    // per click, each one summarised "No changes to DESIGN.md or tokens.css".
+    const assetsChanged =
+      input.assets !== undefined && !sameJson(input.assets ?? null, existing.assets);
     const contentChanged =
-      (input.designMd !== undefined && input.designMd !== existing.designMd) ||
-      (input.tokensCss !== undefined && input.tokensCss !== existing.tokensCss) ||
-      input.assets !== undefined;
-    // Captured before the write, not read off `existing` after it. The summary
-    // describes a transition, and anything that compares post-write state to
-    // itself reports "No changes" on an edit that plainly changed something.
-    const before = { designMd: existing.designMd, tokensCss: existing.tokensCss };
+      nextDesignMd !== existing.designMd || nextTokensCss !== existing.tokensCss || assetsChanged;
+
+    const changeSummary = !contentChanged
+      ? undefined
+      : (input.changeSummary ??
+        formatContentChangeSummary({
+          oldDesignMd: existing.designMd,
+          newDesignMd: nextDesignMd,
+          oldTokensCss: existing.tokensCss,
+          newTokensCss: nextTokensCss,
+        }));
     const editor = input.updatedBy ?? existing.createdBy;
+
     return prisma.$transaction(async (tx) => {
-      const updated = await tx.designSystem.update({
-        where: { id: existing.id },
+      // updateMany so `version` can join the filter: `update` needs a unique
+      // where, and this is how the write refuses to land on a row someone else
+      // has moved since `existing` was read.
+      const written = await tx.designSystem.updateMany({
+        where: {
+          id: existing.id,
+          orgId,
+          ...(input.expectedVersion === undefined ? {} : { version: input.expectedVersion }),
+        },
         data: {
           ...(input.name !== undefined ? { name: input.name } : {}),
           ...(input.designMd !== undefined ? { designMd: input.designMd } : {}),
@@ -143,7 +200,15 @@ export const designSystemRepository = {
           ...(contentChanged ? { version: { increment: 1 } } : {}),
         },
       });
-      if (!contentChanged) return updated;
+      if (written.count === 0) {
+        // Re-read rather than reporting `existing.version`, so the caller is
+        // told where the row actually is now and can diff against that.
+        const current = await tx.designSystem.findFirst({ where: { id: existing.id, orgId } });
+        if (!current) return { status: "not-found" };
+        return { status: "conflict", currentVersion: current.version };
+      }
+      const updated = await tx.designSystem.findUniqueOrThrow({ where: { id: existing.id } });
+      if (!contentChanged) return { status: "updated", row: updated };
       await tx.designSystemVersion.create({
         data: {
           orgId,
@@ -152,21 +217,14 @@ export const designSystemRepository = {
           designMd: updated.designMd,
           tokensCss: updated.tokensCss,
           ...(updated.assets === null ? {} : { assets: updated.assets as Prisma.InputJsonValue }),
-          changeSummary:
-            input.changeSummary ??
-            formatContentChangeSummary({
-              oldDesignMd: before.designMd,
-              newDesignMd: updated.designMd,
-              oldTokensCss: before.tokensCss,
-              newTokensCss: updated.tokensCss,
-            }),
+          ...(changeSummary === undefined ? {} : { changeSummary }),
           // Who made the edit, not who created the system. The caller supplies
           // it; falling back to the system's creator would credit the wrong
           // person for every edit anyone else makes.
           createdBy: editor,
         },
       });
-      return updated;
+      return { status: "updated", row: updated };
     });
   },
 

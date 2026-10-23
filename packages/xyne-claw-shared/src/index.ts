@@ -59,6 +59,7 @@ export {
   hashSkillContent,
   skillHashEquals,
   computeSkillDiff,
+  MAX_DIFF_CELLS,
   formatSkillDiffForCard,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,

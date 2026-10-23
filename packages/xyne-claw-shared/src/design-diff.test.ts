@@ -235,6 +235,31 @@ describe("formatContentChangeSummary", () => {
     );
   });
 
+  it("stays bounded on the largest token CSS the routes accept", () => {
+    // 64k characters of short lines is ~16k lines a side. Diffing that line by
+    // line is a 256M-cell table: seconds of CPU and gigabytes of memory, in a
+    // request, on a pod shared by every org. Measured on the unguarded differ,
+    // 8k lines a side already cost 518ms and 614MB.
+    const lines = 16_000;
+    const before = Array.from({ length: lines }, (_, i) => `--a${i}:1;`).join("\n");
+    const after = Array.from({ length: lines }, (_, i) => `--a${i}:2;`).join("\n");
+    expect(before.length).toBeGreaterThan(64_000 * 0.9);
+
+    const started = Date.now();
+    const summary = formatContentChangeSummary({
+      oldDesignMd: "# x",
+      newDesignMd: "# x",
+      oldTokensCss: before,
+      newTokensCss: after,
+    });
+    const elapsed = Date.now() - started;
+
+    // Says what moved in sizes rather than per-line counts, which is the honest
+    // answer when the comparison was refused.
+    expect(summary).toBe("tokens.css changed (16000 → 16000 lines)");
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
   it("stays honest when only the assets changed", () => {
     // An assets-only edit is still a new version, and claiming a file moved
     // would be a lie the history cannot back up.

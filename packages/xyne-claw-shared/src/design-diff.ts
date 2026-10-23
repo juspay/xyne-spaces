@@ -163,6 +163,10 @@ export function formatContentChangeSummary(params: {
   const lines = (before: string, after: string): string | null => {
     const diff = computeSkillDiff(before, after);
     if (!diff.hasChanges) return null;
+    // The differ refuses a table too large to build, so there are no per-line
+    // counts to report. Said as the sizes instead of guessed at — a summary is
+    // not worth stalling a pod for.
+    if (diff.tooLarge) return `changed (${diff.oldLineCount} → ${diff.newLineCount} lines)`;
     const counts: string[] = [];
     if (diff.added) counts.push(`+${diff.added}`);
     if (diff.removed) counts.push(`-${diff.removed}`);

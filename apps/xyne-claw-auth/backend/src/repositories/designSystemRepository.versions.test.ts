@@ -40,20 +40,33 @@ vi.mock("../db.js", () => {
         state.systems.push(row);
         return copy(row);
       }),
-      update: vi.fn(async (args: { where: { id: string }; data: Record<string, any> }) => {
+      findUniqueOrThrow: vi.fn(async (args: { where: { id: string } }) => {
         const row = state.systems.find((s) => s["id"] === args.where.id);
         if (!row) throw new Error("no such system");
-        for (const [key, value] of Object.entries(args.data)) {
-          // Mirrors Prisma's `{ increment: n }` so the version the snapshot is
-          // written under is the one the update actually produced.
-          if (value && typeof value === "object" && "increment" in value) {
-            row[key] = (row[key] ?? 0) + (value as { increment: number }).increment;
-          } else {
-            row[key] = value;
-          }
-        }
         return copy(row);
       }),
+      // Matches on every key in `where`, including `version`, which is how the
+      // optimistic-concurrency guard is expressed: a filtered update that
+      // matches nothing writes nothing and reports count 0.
+      updateMany: vi.fn(
+        async (args: { where: Record<string, any>; data: Record<string, any> }) => {
+          const matches = state.systems.filter((row) =>
+            Object.entries(args.where).every(([key, value]) => row[key] === value),
+          );
+          for (const row of matches) {
+            for (const [key, value] of Object.entries(args.data)) {
+              // Mirrors Prisma's `{ increment: n }` so the version the snapshot
+              // is written under is the one the update actually produced.
+              if (value && typeof value === "object" && "increment" in value) {
+                row[key] = (row[key] ?? 0) + (value as { increment: number }).increment;
+              } else {
+                row[key] = value;
+              }
+            }
+          }
+          return { count: matches.length };
+        },
+      ),
     },
     designSystemVersion: {
       create: vi.fn(async (args: { data: Record<string, any> }) => {
@@ -159,7 +172,8 @@ describe("designSystemRepository version snapshots", () => {
       updatedBy: "user-editor",
     });
 
-    expect(updated?.version).toBe(2);
+    expect(updated.status).toBe("updated");
+    expect(updated.status === "updated" && updated.row.version).toBe(2);
     // The snapshot holds what the system IS at v2, not what it was at v1. A
     // history whose newest row is the previous content cannot answer for the
     // version in use.
@@ -206,8 +220,8 @@ describe("designSystemRepository version snapshots", () => {
 
     const renamed = await designSystemRepository.update(created.id, ORG, { name: "Acme Ltd" });
 
-    expect(renamed?.name).toBe("Acme Ltd");
-    expect(renamed?.version).toBe(1);
+    expect(renamed.status === "updated" && renamed.row.name).toBe("Acme Ltd");
+    expect(renamed.status === "updated" && renamed.row.version).toBe(1);
     expect(versionsOf(created.id)).toHaveLength(1);
   });
 
@@ -234,14 +248,75 @@ describe("designSystemRepository version snapshots", () => {
     expect(latest?.["changeSummary"]).toBe("No changes to DESIGN.md or tokens.css");
   });
 
-  it("returns null and writes nothing for a system in another org", async () => {
+  it("adds no version when assets are re-sent unchanged", async () => {
+    // The form posts every field on every save. Treating `assets !== undefined`
+    // as a change minted a version per click, each one summarised "No changes to
+    // DESIGN.md or tokens.css".
+    const created = await designSystemRepository.create(ORG, "user-author", {
+      name: "Acme",
+      designMd: "# Acme",
+      tokensCss: ":root{}",
+      assets: { logo: { path: "a.png", width: 10 } },
+    });
+
+    await designSystemRepository.update(created.id, ORG, {
+      assets: { logo: { width: 10, path: "a.png" } },
+    });
+
+    expect(versionsOf(created.id)).toHaveLength(1);
+  });
+
+  it("still versions a real assets change", async () => {
+    const created = await designSystemRepository.create(ORG, "user-author", {
+      name: "Acme",
+      designMd: "# Acme",
+      tokensCss: ":root{}",
+      assets: { logo: { path: "a.png" } },
+    });
+
+    await designSystemRepository.update(created.id, ORG, { assets: { logo: { path: "b.png" } } });
+
+    expect(versionsOf(created.id)).toHaveLength(2);
+  });
+
+  it("refuses a write whose expectedVersion is stale, and writes nothing", async () => {
+    // The re-import flow reads a version, shows a diff, waits for a human, then
+    // saves. A save inside that window used to be overwritten silently — and the
+    // new version row's summary would describe a transition from content that
+    // was no longer the previous version, so the history itself would be wrong.
+    const created = await create();
+    await designSystemRepository.update(created.id, ORG, { designMd: "# Someone else" });
+
+    const stale = await designSystemRepository.update(created.id, ORG, {
+      designMd: "# My approval",
+      expectedVersion: 1,
+    });
+
+    expect(stale).toEqual({ status: "conflict", currentVersion: 2 });
+    expect(versionsOf(created.id)).toHaveLength(2);
+    expect(versionsOf(created.id)[1]?.["designMd"]).toBe("# Someone else");
+  });
+
+  it("accepts a write whose expectedVersion is current", async () => {
+    const created = await create();
+
+    const ok = await designSystemRepository.update(created.id, ORG, {
+      designMd: "# Mine",
+      expectedVersion: 1,
+    });
+
+    expect(ok.status).toBe("updated");
+    expect(ok.status === "updated" && ok.row.version).toBe(2);
+  });
+
+  it("returns not-found and writes nothing for a system in another org", async () => {
     const created = await create();
 
     const updated = await designSystemRepository.update(created.id, "org-2", {
       designMd: "# Stolen",
     });
 
-    expect(updated).toBeNull();
+    expect(updated.status).toBe("not-found");
     expect(versionsOf(created.id)).toHaveLength(1);
   });
 });
