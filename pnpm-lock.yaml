@@ -1629,6 +1629,34 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.8.9)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
 
+  apps/meet-bot:
+    dependencies:
+      '@livekit/rtc-node':
+        specifier: 0.13.32
+        version: 0.13.32
+      '@xmldom/xmldom':
+        specifier: 0.8.15
+        version: 0.8.15
+      playwright:
+        specifier: ^1.59.1
+        version: 1.63.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.1
+      xml-crypto:
+        specifier: 6.3.3
+        version: 6.3.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@20.8.9)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
+
   apps/site:
     dependencies:
       '@base-ui/react':
@@ -10420,6 +10448,10 @@ packages:
         optional: true
       link-preview-js:
         optional: true
+
+  '@xmldom/is-dom-node@1.0.1':
+    resolution: {integrity: sha512-CJDxIgE5I0FH+ttq/Fxy6nRpxP70+e2O048EPe85J2use3XKdatVM7dDVvFNjQudd9B49NPoZ+8PG49zj4Er8Q==}
+    engines: {node: '>= 16'}
 
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
@@ -20518,6 +20550,10 @@ packages:
     resolution: {integrity: sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg==}
     engines: {node: '>=20'}
 
+  xml-crypto@6.3.3:
+    resolution: {integrity: sha512-qJnp4Dv5tH8CPzXKitFcLiCxPcy3SnPVQ9eY4qKKsHahf7/Ri7zDwjWaBACarMkT0T6FP+LWzdibO+19b136rg==}
+    engines: {node: '>=16'}
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -20540,6 +20576,10 @@ packages:
   xmlhttprequest-ssl@2.1.2:
     resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
     engines: {node: '>=0.4.0'}
+
+  xpath@0.0.33:
+    resolution: {integrity: sha512-NNXnzrkDrAzalLhIUc01jO2mOzXGXh1JwPgkihcLLzw98c0WgYDmmjSh1Kl3wzaxSVWMuA+fe0WTWOBDWCBmNA==}
+    engines: {node: '>=0.6.0'}
 
   xregexp@3.2.0:
     resolution: {integrity: sha512-tWodXkrdYZPGadukpkmhKAbyp37CV5ZiFHacIVPhRZ4/sSt7qtOYHLv2dAqcPN0mBsViY2Qai9JkO7v2TBP6hg==}
@@ -22375,8 +22415,7 @@ snapshots:
       pprof-format: 2.3.1
       source-map: 0.7.6
 
-  '@datastructures-js/deque@1.0.8':
-    optional: true
+  '@datastructures-js/deque@1.0.8': {}
 
   '@date-fns/tz@1.5.0': {}
 
@@ -24644,7 +24683,6 @@ snapshots:
       '@livekit/rtc-ffi-bindings-linux-arm64-gnu': 0.12.68
       '@livekit/rtc-ffi-bindings-linux-x64-gnu': 0.12.68
       '@livekit/rtc-ffi-bindings-win32-x64-msvc': 0.12.68
-    optional: true
 
   '@livekit/rtc-node@0.13.32':
     dependencies:
@@ -24654,7 +24692,6 @@ snapshots:
       '@livekit/typed-emitter': 3.0.0
       pino: 9.14.0
       pino-pretty: 13.1.3
-    optional: true
 
   '@livekit/throws-transformer@0.1.8(typescript@5.9.3)':
     dependencies:
@@ -24668,8 +24705,7 @@ snapshots:
       '@types/dom-mediacapture-transform': 0.1.12
       livekit-client: 2.17.0(@types/dom-mediacapture-record@1.0.22)
 
-  '@livekit/typed-emitter@3.0.0':
-    optional: true
+  '@livekit/typed-emitter@3.0.0': {}
 
   '@lukeed/ms@2.0.2':
     optional: true
@@ -30673,6 +30709,8 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@xmldom/is-dom-node@1.0.1': {}
+
   '@xmldom/xmldom@0.8.15': {}
 
   '@xobotyi/scrollbar-width@1.9.5': {}
@@ -32805,8 +32843,7 @@ snapshots:
 
   dateformat@3.0.3: {}
 
-  dateformat@4.6.3:
-    optional: true
+  dateformat@4.6.3: {}
 
   dayjs@1.11.21: {}
 
@@ -34340,8 +34377,7 @@ snapshots:
   fast-copy@3.0.2:
     optional: true
 
-  fast-copy@4.0.4:
-    optional: true
+  fast-copy@4.0.4: {}
 
   fast-csv@4.3.6:
     dependencies:
@@ -35607,8 +35643,7 @@ snapshots:
 
   helmet@7.2.0: {}
 
-  help-me@5.0.0:
-    optional: true
+  help-me@5.0.0: {}
 
   hermes-estree@0.25.1: {}
 
@@ -36731,8 +36766,7 @@ snapshots:
       '@types/react': 19.2.17
       react: 19.2.3
 
-  joycon@3.1.1:
-    optional: true
+  joycon@3.1.1: {}
 
   jpeg-exif@1.1.4: {}
 
@@ -39202,7 +39236,6 @@ snapshots:
   pino-abstract-transport@3.0.0:
     dependencies:
       split2: 4.2.0
-    optional: true
 
   pino-pretty@11.3.0:
     dependencies:
@@ -39237,7 +39270,6 @@ snapshots:
       secure-json-parse: 4.1.0
       sonic-boom: 4.2.1
       strip-json-comments: 5.0.3
-    optional: true
 
   pino-std-serializers@6.2.2:
     optional: true
@@ -41700,8 +41732,7 @@ snapshots:
 
   strip-json-comments@3.1.1: {}
 
-  strip-json-comments@5.0.3:
-    optional: true
+  strip-json-comments@5.0.3: {}
 
   strip-literal@3.1.0:
     dependencies:
@@ -43441,6 +43472,12 @@ snapshots:
       is-wsl: 3.1.1
       powershell-utils: 0.1.0
 
+  xml-crypto@6.3.3:
+    dependencies:
+      '@xmldom/is-dom-node': 1.0.1
+      '@xmldom/xmldom': 0.8.15
+      xpath: 0.0.33
+
   xml-name-validator@5.0.0: {}
 
   xml-naming@0.3.0: {}
@@ -43452,6 +43489,8 @@ snapshots:
   xmlchars@2.2.0: {}
 
   xmlhttprequest-ssl@2.1.2: {}
+
+  xpath@0.0.33: {}
 
   xregexp@3.2.0: {}
 

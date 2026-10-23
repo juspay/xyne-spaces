@@ -21,6 +21,18 @@ export function isRecording(call: CallTypeCarrier | null | undefined): boolean {
   return call?.callType === CallType.HEADLESS;
 }
 
+/**
+ * Calls whose LiveKit room and transcript go through the self-contained note-taker
+ * pipeline (noteTakerWebhookController / noteTakerTranscriptService) rather than the
+ * channel-based one: recordings, and Google Meets the notetaker bot was sent into.
+ * Neither has a channel, a call message or more than one LiveKit participant.
+ */
+export function usesNoteTakerPipeline(
+  call: (CallTypeCarrier & { callOrigin?: CallOrigin | string | null }) | null | undefined,
+): boolean {
+  return isRecording(call) || call?.callOrigin === CallOrigin.MEET_LINK;
+}
+
 export function callSubject(call: CallTypeCarrier | null | undefined): 'recording' | 'call' {
   return isRecording(call) ? 'recording' : 'call';
 }

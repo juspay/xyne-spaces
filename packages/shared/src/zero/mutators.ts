@@ -10754,6 +10754,44 @@ export const mutators = defineMutators({
         }
       },
     ),
+    setMeetAutoJoin: defineMutator(
+      z.object({
+        id: z.string(),
+        // Which of my Google Meet calendar events Xyne Automatic joins; `null` turns it off.
+        meetAutoJoin: z.enum(['organized', 'all']).nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, meetAutoJoin, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            meetAutoJoin,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            channelSortOrder: ChannelSortOrder.RECENCY,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            meetAutoJoin,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
   },
 
   emailChannelPreference: {

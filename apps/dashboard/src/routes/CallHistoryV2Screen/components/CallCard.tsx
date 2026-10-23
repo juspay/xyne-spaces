@@ -39,6 +39,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import Tooltip from '../../../components/ui/Tooltip/Tooltip';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
+import { meetNotetakerStatusText } from '../../../utils/meetNotetaker';
 
 interface CallHistoryItemProps {
   call: Call;
@@ -277,7 +278,9 @@ export const CallCard = ({
           </div>
           <div className={cn('flex items-center shrink-0', isMobile ? 'gap-1.5' : 'gap-2.5')}>
             {isActiveState ? (
-              <span className='shrink-0 text-xs font-medium text-status-success'>Ongoing</span>
+              <span className='shrink-0 text-xs font-medium text-status-success'>
+                {meetNotetakerStatusText(call) ?? 'Ongoing'}
+              </span>
             ) : (
               formattedDuration && (
                 <span className='shrink-0 font-mono text-xs text-muted-foreground'>

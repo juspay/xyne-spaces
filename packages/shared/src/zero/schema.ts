@@ -637,6 +637,7 @@ export const userPreferenceTable = table('user_preferences')
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
     recordingDefaultSummaryTemplateId: string().optional(), // Recording summaries: used instead of the LLM pick ('default' = code-backed; null = auto-pick)
+    meetAutoJoin: string().optional(), // Xyne Automatic joins my Google Meet calendar events: 'organized' | 'all' (null = off)
     createdAt: number(),
     updatedAt: number(),
   })

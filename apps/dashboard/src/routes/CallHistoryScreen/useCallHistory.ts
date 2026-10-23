@@ -6,6 +6,7 @@ import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
 import { CallType, CallStatus, ChannelScopeType, MeetingStatus } from '@xyne/shared';
+import { isMeetNotetakerCall } from '../../utils/meetNotetaker';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -441,6 +442,12 @@ export function useCallHistory(
   };
 
   const handleCallRowClick = (call: Call): void => {
+    // The notetaker bot is the only one in a Meet notetaker call's room; there is
+    // nothing to join or restart, so open its transcript and summary instead.
+    if (isMeetNotetakerCall(call)) {
+      void navigate(`/calls/${call.externalId}/detail`, { state: { call } });
+      return;
+    }
     if (canJoinCall(call)) {
       // Scheduled calls can be joined before their start time as well.
       handleJoinCall(call);

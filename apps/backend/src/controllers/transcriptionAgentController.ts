@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CallType, TicketStatusV2 } from '@xyne/shared';
+import { TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { usesNoteTakerPipeline } from '@/utils/callTypeUtils';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { TicketController } from './ticketController';
@@ -64,9 +65,10 @@ class TranscriptionAgentController {
       const { hasTranscript } = validationResult.data;
       logger.info(`[TranscriptReady] hasTranscript=${hasTranscript} for call ${callId}`);
 
-      // NOTE_TAKER (HEADLESS / "Xyne Oats") calls never have a channel or message —
-      // route straight to their own pipeline, skipping the message lookup entirely.
-      if (call.callType === CallType.HEADLESS) {
+      // NOTE_TAKER (HEADLESS / "Xyne Oats") calls and notetaker-bot Meets never have a
+      // channel or message — route straight to their own pipeline, skipping the message
+      // lookup entirely.
+      if (usesNoteTakerPipeline(call)) {
         await noteTakerTranscriptService.processTranscript(call, hasTranscript ?? true);
         res.json({ success: true, message: 'Note taker call processed' });
         return;

@@ -43,6 +43,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../machines/roomMachine';
+import { meetNotetakerStatusText } from '../../utils/meetNotetaker';
 
 interface CallHistoryItemProps {
   call: Call;
@@ -161,12 +162,15 @@ export const CallCard = ({
       : 'text-muted-foreground';
 
   // Get status text and color
-  const statusText = getStatusText(
-    isMissedCall,
-    didNotAnswer,
-    call.endedAt === null,
-    call.endedAt ? call.endedAt - call.startedAt : 0,
-  );
+  const notetakerStatusText = meetNotetakerStatusText(call);
+  const statusText =
+    notetakerStatusText ??
+    getStatusText(
+      isMissedCall,
+      didNotAnswer,
+      call.endedAt === null,
+      call.endedAt ? call.endedAt - call.startedAt : 0,
+    );
 
   const getCallTitle = () => {
     if (call.title) {
@@ -296,7 +300,7 @@ export const CallCard = ({
               </p>
             )}
             {call.status === CallStatus.ACTIVE ? (
-              <p className={cn('text-xs', iconColorClass)}>Ongoing</p>
+              <p className={cn('text-xs', iconColorClass)}>{notetakerStatusText ?? 'Ongoing'}</p>
             ) : (
               <div
                 className={cn(

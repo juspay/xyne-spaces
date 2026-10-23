@@ -215,6 +215,9 @@ const envSchema = Joi.object({
   // SAM Service Configuration
   SAM_BASE_URL: Joi.string().uri().default(''),
   SAM_API_KEY: Joi.string().allow('').default(''),
+  // Xyne Automatic Google Meet notetaker bot (apps/meet-bot). Off unless both are set.
+  MEET_BOT_URL: Joi.string().uri().allow('').default(''),
+  MEET_BOT_API_KEY: Joi.string().allow('').default(''),
   // LiveKit Configuration
   // The development key pair ships in LiveKit's own published sample config, so a
   // deployment that keeps it signs room tokens anyone can mint. Empty stays valid:
@@ -976,6 +979,10 @@ export const config = {
   sam: {
     baseUrl: envVars.SAM_BASE_URL,
     apiKey: envVars.SAM_API_KEY,
+  },
+  meetBot: {
+    url: envVars.MEET_BOT_URL as string,
+    apiKey: envVars.MEET_BOT_API_KEY as string,
   },
   livekit: {
     apiKey: envVars.LIVEKIT_API_KEY,

@@ -71,6 +71,11 @@ export interface TranscriptPanelTarget {
 
 export interface TranscriptSidePanelProps {
   transcript: string;
+  /**
+   * Name the speaker on every line. Defaults to doing so only when the transcript has
+   * more than one speaker (a recording is one person); calls pass true.
+   */
+  showSpeakers?: boolean;
   target?: TranscriptPanelTarget | null;
   openNonce?: number;
   isLoading?: boolean;
@@ -92,6 +97,7 @@ export interface TranscriptSidePanelProps {
 }
 
 export function TranscriptSidePanel({
+  showSpeakers: showSpeakersProp,
   transcript,
   target,
   openNonce = 0,
@@ -117,6 +123,11 @@ export function TranscriptSidePanel({
     [lines, markedTimestampsSeconds],
   );
   const targetHighlight = target?.highlight === 'marker' ? MARKER_HIGHLIGHT : CITATION_HIGHLIGHT;
+  // A recording has one speaker, so naming every line adds nothing; a meeting has several.
+  const showSpeakers = useMemo(
+    () => showSpeakersProp ?? new Set(lines.map(line => line.speaker).filter(Boolean)).size > 1,
+    [lines, showSpeakersProp],
+  );
 
   // Unparseable lines keep their raw text, so they stay searchable and readable.
   const getLineText = useCallback((line: TranscriptLine): string => line.text ?? line.raw, []);
@@ -404,9 +415,18 @@ export function TranscriptSidePanel({
                     index === targetIndex ? targetHighlight : 'hover:bg-muted/40',
                   )}
                 >
-                  {line.timestamp ? (
-                    <span className='mb-0.5 block font-mono text-xs text-muted-foreground'>
-                      {line.timestamp}
+                  {line.timestamp || (showSpeakers && line.speaker) ? (
+                    <span className='mb-0.5 flex items-baseline gap-2'>
+                      {line.timestamp ? (
+                        <span className='font-mono text-xs text-muted-foreground'>
+                          {line.timestamp}
+                        </span>
+                      ) : null}
+                      {showSpeakers && line.speaker ? (
+                        <span className='truncate text-xs font-semibold text-foreground'>
+                          {line.speaker}
+                        </span>
+                      ) : null}
                     </span>
                   ) : null}
                   <p className='text-sm leading-relaxed text-foreground/90'>

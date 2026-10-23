@@ -35,6 +35,7 @@ import {
 } from '@xyne/shared';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { format } from 'date-fns';
+import { useQuery } from '@tanstack/react-query';
 
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Switch } from '../../ui/Switch';
@@ -113,7 +114,9 @@ import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarAc
 import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
-import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { disconnectCalendar, getCalendarProvider } from '../../../services/clients/calendarApi';
+import { useMeetAutoJoin } from '../../../hooks/useMeetAutoJoin';
+import { useMeetNotetakerEnabled } from '../../../routes/CallHistoryScreen/MeetNotetakerDialog';
 import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -1087,8 +1090,50 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.updateCalendarVisibility}
       />
     </div>
+    <MeetAutoJoinSetting />
   </div>
 );
+
+/**
+ * Xyne Automatic joins my Google Meet calendar events by itself. Hidden when the Meet
+ * notetaker isn't set up; disabled until a Google Calendar is connected, since the
+ * worker finds meetings through the synced calendar.
+ */
+const MeetAutoJoinSetting: FC = () => {
+  const enabled = useMeetNotetakerEnabled();
+  const { meetAutoJoin, setMeetAutoJoin } = useMeetAutoJoin();
+  const { data: provider, isLoading } = useQuery({
+    queryKey: ['calendar-provider'],
+    queryFn: getCalendarProvider,
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+  if (!enabled) return null;
+  const connected = provider === 'GOOGLE';
+  return (
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Xyne Automatic notetaker</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          {connected || isLoading
+            ? 'Xyne Automatic joins your Google Meet calls when they start and adds the transcript and summary to Calls. Outside guests see it join; in external meetings the host admits it.'
+            : 'Connect your Google Calendar to let Xyne Automatic join your Google Meet calls.'}
+        </p>
+      </div>
+      <RadioGroup
+        value={meetAutoJoin}
+        onChange={value =>
+          setMeetAutoJoin(value === 'organized' || value === 'all' ? value : 'off')
+        }
+        disabled={!connected && meetAutoJoin === 'off'}
+      >
+        <Radio value='off'>Off</Radio>
+        <Radio value='organized'>Meetings I organize</Radio>
+        <Radio value='all'>All my meetings (except declined)</Radio>
+      </RadioGroup>
+    </div>
+  );
+};
 
 // ─── Password ───────────────────────────────────────────────────────────────
 const PasswordSection: FC = () => {

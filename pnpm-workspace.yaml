@@ -16,6 +16,7 @@ packages:
   - apps/xyne-claw
   - apps/xyne-claw-auth/backend
   - apps/xyne-claw-auth/frontend
+  - apps/meet-bot
 
   - packages/shared
   - packages/storage

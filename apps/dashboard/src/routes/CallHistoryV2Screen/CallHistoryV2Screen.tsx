@@ -6,6 +6,7 @@ import {
   PlusDefault as Plus,
   FilterFunnel,
   SearchDefault as SearchIcon,
+  VideoCallPlus,
 } from '@xyne/icons';
 import { format } from 'date-fns';
 import {
@@ -62,6 +63,7 @@ import { type InitialQueryData } from '../../components/Chat/ChatDirectory/Lexic
 import { CallHistorySearchPanel } from '../CallHistoryScreen/CallHistorySearchPanel';
 import { useCalendarSync } from '../../hooks/useCalendarSync';
 import { Button } from '../../components/ui/Button/Button';
+import { MeetNotetakerDialog, useMeetNotetakerEnabled } from '../CallHistoryScreen/MeetNotetakerDialog';
 import { Switch } from '../../components/ui/Switch';
 import { Popover } from '../../components/ui/Popover/Popover';
 import { buildDateGroupedRowsFromItems, findNearestVisibleItem } from '../../utils/dateGroupedList';
@@ -95,6 +97,8 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
+  const [isMeetNotetakerOpen, setIsMeetNotetakerOpen] = useState(false);
+  const meetNotetakerEnabled = useMeetNotetakerEnabled();
   const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
   const [recentCallFilter, setRecentCallFilter] = useState<RecentCallFilterV2>('all');
@@ -802,6 +806,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       <StartCallPill
         onInstantCall={() => setIsInstantCallModalOpen(true)}
         onScheduleCall={() => setIsScheduleModalOpen(true)}
+        {...(meetNotetakerEnabled && { onAddMeetNotetaker: () => setIsMeetNotetakerOpen(true) })}
       />
 
       <ParticipantsModal
@@ -838,6 +843,8 @@ const CallHistoryV2Screen = (): ReactElement => {
         onClose={() => setIsInstantCallModalOpen(false)}
         onSubmit={handleInstantCall}
       />
+
+      <MeetNotetakerDialog open={isMeetNotetakerOpen} onOpenChange={setIsMeetNotetakerOpen} />
 
       <CallExternalChatDialog
         open={!!externalChatCallId}
@@ -919,9 +926,15 @@ const NoFilteredCalls = ({
 interface StartCallPillProps {
   onInstantCall: () => void;
   onScheduleCall: () => void;
+  /** Present only when the Meet notetaker is enabled. */
+  onAddMeetNotetaker?: () => void;
 }
 
-const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): ReactElement => {
+const StartCallPill = ({
+  onInstantCall,
+  onScheduleCall,
+  onAddMeetNotetaker,
+}: StartCallPillProps): ReactElement => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -998,6 +1011,33 @@ const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): R
               </span>
             </span>
           </Button>
+          {onAddMeetNotetaker && (
+            <Button
+              variant='ghost'
+              size='inline'
+              aria-haspopup='dialog'
+              data-testid='add-meet-notetaker-option'
+              data-track-category='CALLS'
+              data-track-name='add-meet-notetaker'
+              onClick={() => {
+                setIsOpen(false);
+                onAddMeetNotetaker();
+              }}
+              className='w-full items-start gap-3 rounded-xl p-2.5 text-left'
+            >
+              <span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground'>
+                <VideoCallPlus className='size-4' />
+              </span>
+              <span className='min-w-0'>
+                <span className='block text-sm font-semibold tracking-tight text-foreground'>
+                  Add notetaker to a Google Meet
+                </span>
+                <span className='mt-0.5 block text-xs font-normal text-muted-foreground'>
+                  Xyne Automatic joins and takes notes.
+                </span>
+              </span>
+            </Button>
+          )}
         </div>
       </Popover>
     </div>

@@ -1,0 +1,29 @@
+{
+  "name": "meet-bot",
+  "license": "Apache-2.0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Xyne Automatic notetaker: joins a Google Meet in Chrome and streams its audio into a Xyne LiveKit call",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node --import tsx/esm src/main.ts",
+    "sso:setup": "tsx src/ssoSetup.ts",
+    "sso:check": "tsx src/ssoCheck.ts",
+    "try": "tsx src/try.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "0.13.32",
+    "@xmldom/xmldom": "0.8.15",
+    "playwright": "^1.59.1",
+    "tsx": "^4.19.0",
+    "xml-crypto": "6.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  }
+}

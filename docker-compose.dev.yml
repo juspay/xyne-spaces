@@ -244,6 +244,40 @@ services:
       - "host.containers.internal:host-gateway"
     restart: unless-stopped
 
+  # Xyne Automatic Google Meet notetaker bot (apps/meet-bot): a real browser on a
+  # virtual screen joins Meets and streams their audio into LiveKit. Same image as
+  # production. It signs its Google account in by itself with SSO: see
+  # apps/meet-bot/README.md (SSO_EMAIL in apps/meet-bot/.env, keys in apps/meet-bot/sso/).
+  meet-bot:
+    build:
+      context: .
+      dockerfile: apps/meet-bot/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-meet-bot
+    shm_size: '2gb'
+    env_file:
+      # MEET_BOT_API_KEY (same as the backend's) and tuning; optional so other
+      # developers can start everything without it.
+      - path: ./apps/meet-bot/.env
+        required: false
+    environment:
+      - PORT=3010
+      # The backend hands out localhost URLs; reach them from inside the container.
+      - BACKEND_URL_OVERRIDE=http://host.containers.internal:3001
+      - LIVEKIT_URL_OVERRIDE=ws://livekit:7880
+    # Live reload of the bot's source, like transcription-agent.
+    command: ["node_modules/.bin/tsx", "watch", "src/main.ts"]
+    ports:
+      - "${MEET_BOT_BIND_PORT:-3010}:3010"
+    volumes:
+      - ./apps/meet-bot/src:/repo/apps/meet-bot/src
+      # SSO signing key and certificate (pnpm --filter meet-bot sso:setup), read-only.
+      - ./apps/meet-bot/sso:/repo/apps/meet-bot/sso:ro
+    depends_on:
+      - livekit
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped
+
   # --- OpenTelemetry Collector ---
   otel-collector:
     image: mirror.gcr.io/otel/opentelemetry-collector-contrib:latest

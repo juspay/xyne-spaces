@@ -930,6 +930,7 @@ export default function CallDetailScreen(): ReactElement {
         {showTranscriptPanel && (
           <TranscriptSidePanel
             transcript={transcript.text ?? ''}
+            showSpeakers
             isLoading={transcript.isLoading}
             error={transcript.error ?? null}
             onRetry={transcript.retry}

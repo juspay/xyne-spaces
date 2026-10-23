@@ -450,6 +450,8 @@ export enum CallOrigin {
   CONVERSATION = 'CONVERSATION',
   GOOGLE_CALENDAR = 'GOOGLE_CALENDAR',
   MICROSOFT_CALENDAR = 'MICROSOFT_CALENDAR',
+  /** A Google Meet the Xyne Automatic notetaker bot was sent into from a pasted link. */
+  MEET_LINK = 'MEET_LINK',
 }
 
 // @ts-ignore TS1294

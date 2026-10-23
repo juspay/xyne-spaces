@@ -1,0 +1,5 @@
+# The SSO signing key: whoever has it can sign in as the bot. Never commit it.
+sso/
+# Left over from the old saved-login sign-in; delete them if you still have them.
+google-session*.json
+.chrome-profile/

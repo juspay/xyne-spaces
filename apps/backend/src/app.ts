@@ -163,6 +163,7 @@ import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
+import meetBotRoutes from '@/routes/meetBot';
 import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
 import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
@@ -401,6 +402,9 @@ export class App {
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
+
+    // Meet notetaker bot callbacks (API key auth - called by apps/meet-bot)
+    this.app.use('/api/meet-bot', meetBotRoutes);
 
     // SAM transcript ingestion route (API key auth - called by SAM/Pragati service)
     this.app.use('/api/sam/', samRoutes);

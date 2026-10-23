@@ -305,7 +305,16 @@ class NoteTakerWebhookController {
   private async handleRoomFinished(event: WebhookEvent): Promise<void> {
     const roomName = event.room?.name;
     if (!roomName) return;
+    await this.finishCall(roomName);
+  }
 
+  /**
+   * Ends the call and starts its transcript processing: what room_finished does.
+   * Also called directly when the Meet notetaker bot leaves its meeting, so the call
+   * ends then instead of when LiveKit closes the empty room (~30 s later). Safe to
+   * run twice: the second run finds the call already ENDED.
+   */
+  async finishCall(roomName: string): Promise<void> {
     const now = new Date();
     const result = await noteTakerCallRepository
       .handleRoomFinished({

@@ -7,6 +7,7 @@ import {
   LucideIcon,
   Phone,
   Plus,
+  Video,
 } from 'lucide-react';
 import {
   ReactElement,
@@ -20,6 +21,7 @@ import {
 import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
+import { MeetNotetakerDialog, useMeetNotetakerEnabled } from './MeetNotetakerDialog';
 import { useCallHistory } from './useCallHistory';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
@@ -102,6 +104,8 @@ const CallHistoryScreen = (): ReactElement => {
     endsAt: Date;
   } | null>(null);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
+  const [isMeetNotetakerOpen, setIsMeetNotetakerOpen] = useState(false);
+  const meetNotetakerEnabled = useMeetNotetakerEnabled();
   const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>(() =>
@@ -870,7 +874,10 @@ const CallHistoryScreen = (): ReactElement => {
           )}
         >
           {/* Action cards */}
-          <div className='grid grid-cols-2 gap-3' data-testid='new-call-button'>
+          <div
+            className={cn('grid grid-cols-2 gap-3', meetNotetakerEnabled && 'sm:grid-cols-3')}
+            data-testid='new-call-button'
+          >
             <button
               aria-haspopup='dialog'
               data-testid='start-instant-call-option'
@@ -914,6 +921,30 @@ const CallHistoryScreen = (): ReactElement => {
                 </p>
               </div>
             </button>
+            {meetNotetakerEnabled && (
+              <button
+                aria-haspopup='dialog'
+                data-testid='add-meet-notetaker-option'
+                onClick={() => setIsMeetNotetakerOpen(true)}
+                data-track-category='CALLS'
+                data-track-name='add-meet-notetaker'
+                data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
+                className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
+              >
+                <div className='size-6 rounded-md bg-emerald-600 flex items-center justify-center shrink-0'>
+                  <Video className='size-4 text-white' />
+                </div>
+                <div className='flex flex-col min-w-0 gap-0.5'>
+                  <p className='text-sm font-medium text-foreground'>
+                    <span className='sm:hidden'>Meet notetaker</span>
+                    <span className='hidden sm:inline'>Add notetaker to a Google Meet</span>
+                  </p>
+                  <p className='hidden sm:block text-xs text-muted-foreground'>
+                    Xyne Automatic joins and takes notes.
+                  </p>
+                </div>
+              </button>
+            )}
           </div>
 
           {/* UPCOMING section */}
@@ -1292,6 +1323,8 @@ const CallHistoryScreen = (): ReactElement => {
         title={confirmModalConfig.title}
         subtitle={confirmModalConfig.subtitle}
       />
+
+      <MeetNotetakerDialog open={isMeetNotetakerOpen} onOpenChange={setIsMeetNotetakerOpen} />
 
       <ScheduleCallModal
         isOpen={isScheduleModalOpen}

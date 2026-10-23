@@ -240,6 +240,14 @@ class WorkerService {
       const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
       await recordingCleanupQueue.initialize();
 
+      // Xyne Automatic joins opted-in users' Google Meet calendar events (every minute).
+      const { meetNotetakerService } = await import('@/services/meetNotetakerService');
+      if (meetNotetakerService.enabled) {
+        logger.info('Initializing Meet auto-join queue...');
+        const { meetAutoJoinQueue } = await import('@/queues/meetAutoJoinQueue');
+        await meetAutoJoinQueue.initialize();
+      }
+
       // HLS → MP4 stitch worker. Queue-based and CPU/disk-heavy (ffmpeg), so it
       // is isolated behind its own flag: deploy a dedicated stitch node by enabling
       // ONLY ENABLE_STITCH_WORKER. The API never consumes (enqueue is producer-only).
@@ -550,6 +558,9 @@ class WorkerService {
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
       }
+
+      const { meetAutoJoinQueue } = await import('@/queues/meetAutoJoinQueue');
+      await meetAutoJoinQueue.close();
 
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();

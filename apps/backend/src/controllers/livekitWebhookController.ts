@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { type Call } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
+import { usesNoteTakerPipeline } from '@/utils/callTypeUtils';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
@@ -188,12 +189,15 @@ export class LiveKitWebhookController {
     if (!roomName) return false;
 
     const call = await repositories.calls.findByExternalId(roomName);
-    if (call) return call.callType === CallType.HEADLESS;
+    if (call) return usesNoteTakerPipeline(call);
 
     if (!event.room?.metadata) return false;
     try {
       const metadata = JSON.parse(event.room.metadata) as Record<string, unknown>;
-      return metadata.callType === CallType.HEADLESS;
+      return usesNoteTakerPipeline({
+        callType: typeof metadata.callType === 'string' ? metadata.callType : null,
+        callOrigin: typeof metadata.callOrigin === 'string' ? metadata.callOrigin : null,
+      });
     } catch {
       return false;
     }

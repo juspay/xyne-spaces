@@ -19,6 +19,12 @@ export const FEATURES = [
   { id: "search", number: 7, label: "Search", hint: "vespa full-text search" },
   { id: "observability", number: 8, label: "Observability", hint: "otel-collector, victoriametrics, grafana" },
   { id: "flags", number: 9, label: "Feature Flags", hint: "superposition" },
+  {
+    id: "meet-notetaker",
+    number: 10,
+    label: "Meet Notetaker",
+    hint: "meet-bot (+ livekit, transcription-agent)",
+  },
 ];
 
 const featureIds = FEATURES.map((feature) => feature.id);
@@ -52,13 +58,13 @@ export function servicePortEntries(numbers) {
   if (has(3)) {
     entries.push({ port: envPort("YSWEET_BIND_PORT", 8080), label: "y-sweet" });
   }
-  if (has(4) || has(6)) {
+  if (has(4) || has(6) || has(10)) {
     entries.push(
       { port: envPort("LIVEKIT_HTTP_BIND_PORT", 7880), label: "livekit" },
       { port: envPort("LIVEKIT_HTTPS_BIND_PORT", 7881), label: "livekit" },
     );
   }
-  if (has(5)) {
+  if (has(5) || has(10)) {
     entries.push({
       port: envPort("TRANSCRIPTION_AGENT_BIND_PORT", 8001),
       label: "transcription-agent",
@@ -80,6 +86,9 @@ export function servicePortEntries(numbers) {
       port: envPort("SUPERPOSITION_BIND_PORT", 9999),
       label: "superposition",
     });
+  }
+  if (has(10)) {
+    entries.push({ port: envPort("MEET_BOT_BIND_PORT", 3010), label: "meet-bot" });
   }
   return entries;
 }

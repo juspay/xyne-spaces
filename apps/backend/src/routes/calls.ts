@@ -10,6 +10,7 @@ import { summaryTemplateController } from '@/controllers/summaryTemplateControll
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
 import { callBackgroundController } from '@/controllers/callBackgroundController';
+import { meetNotetakerController } from '@/controllers/meetNotetakerController';
 
 const router = Router();
 
@@ -23,6 +24,11 @@ router.post('/initiate', callController.initiateCall);
 // handler's lookups run at workspace scope. joinCall still checks the workspace itself.
 router.post('/join', workspaceScopedRoute, callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
+
+// Xyne Automatic notetaker for Google Meet links
+router.get('/meet-notetaker/availability', meetNotetakerController.availability);
+router.post('/meet-notetaker', meetNotetakerController.send);
+router.delete('/meet-notetaker/:callId', meetNotetakerController.stop);
 
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);

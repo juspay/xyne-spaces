@@ -200,6 +200,7 @@ FEATURE_LABELS=(
     "Search            (vespa full-text search)"
     "Observability     (otel-collector, victoriametrics, grafana)"
     "Feature Flags     (superposition)"
+    "Meet Notetaker    (meet-bot + livekit, transcription-agent)"
 )
 NUM_FEATURES=${#FEATURE_LABELS[@]}
 
@@ -333,6 +334,15 @@ if echo "$SELECTED_FEATURES" | grep -qw "9"; then
     ENABLE_FEATURE_FLAGS=1
     SERVICES="$SERVICES superposition"
 fi
+if echo "$SELECTED_FEATURES" | grep -qw "10"; then
+    ENABLE_MEET_BOT=1
+    # The bot streams into LiveKit and the agent transcribes it: useless alone.
+    ENABLE_CALLS=1
+    ENABLE_TRANSCRIPTION=1
+    echo "$SERVICES" | grep -qw livekit || SERVICES="$SERVICES livekit"
+    echo "$SERVICES" | grep -qw transcription-agent || SERVICES="$SERVICES transcription-agent"
+    SERVICES="$SERVICES meet-bot"
+fi
 
 # Build summary
 SELECTED_NAMES=""
@@ -347,6 +357,7 @@ for f in $(echo "$SELECTED_FEATURES" | tr ',' ' '); do
         7) SELECTED_NAMES="${SELECTED_NAMES}Search " ;;
         8) SELECTED_NAMES="${SELECTED_NAMES}Observability " ;;
         9) SELECTED_NAMES="${SELECTED_NAMES}Feature-Flags " ;;
+        10) SELECTED_NAMES="${SELECTED_NAMES}Meet-Notetaker " ;;
     esac
 done
 echo ""
@@ -365,8 +376,8 @@ export COMPOSE_PROFILES
 # =============================================================================
 # 4. Start the selected containers
 # =============================================================================
-# Compose pulls upstream images and builds only the three thin local ones
-# (postgres, livekit, transcription-agent) — and only when they are selected.
+# Compose pulls upstream images and builds only the thin local ones (postgres,
+# livekit, transcription-agent, meet-bot) — and only when they are selected.
 # --build is deliberate: without it compose reuses whatever image already carries
 # the tag, so a postgres image built from an older docker/init-db.sh keeps
 # initialising new volumes with the old script. The three images are a COPY on
@@ -940,6 +951,9 @@ if [ "$ENABLE_TRANSCRIPTION" = "1" ]; then
 fi
 if [ "$ENABLE_EGRESS" = "1" ]; then
     echo -e "  Call Recording:      ${GREEN}livekit-egress${NC}"
+fi
+if [ "${ENABLE_MEET_BOT:-0}" = "1" ]; then
+    echo -e "  Meet notetaker:      ${GREEN}localhost:3010${NC}"
 fi
 if [ "${START_VESPA:-0}" = "1" ]; then
     echo -e "  Vespa feed:          ${GREEN}localhost:8083${NC}"
