@@ -1,9 +1,11 @@
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { MARK_READ_REQUEST_MAX_CHANNELS } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
 import { logger, Event } from '../utils/logger';
 
 const FAILURE_MESSAGE = "Couldn't mark everything as read. Please try again.";
+const PARTIAL_FAILURE_MESSAGE = "Some channels couldn't be marked as read. Please try again.";
 
 /**
  * Marks a set of channels as read.
@@ -21,24 +23,43 @@ const FAILURE_MESSAGE = "Couldn't mark everything as read. Please try again.";
  * The single-channel path still uses the Zero mutator, where one channel's work is small
  * enough to be worth the instant optimistic clear.
  *
- * Resolves `true` when the server accepted the whole set, `false` (after a toast) otherwise.
+ * A set larger than the server accepts in one body is split into successive requests rather
+ * than refused, so no group is ever too big to mark read. Requests go one at a time: the
+ * overflow case is already unusual, and a burst of parallel bulk writes for one user buys
+ * nothing. In practice a single request covers any real sidebar group and the loop runs once.
+ *
+ * Resolves `true` when every batch was accepted, `false` (after a toast) otherwise. A
+ * partial failure still leaves the successful batches marked read — it reports rather than
+ * rolls back, because re-running is harmless (marking a read channel read is a no-op).
  */
 export function useMarkChannelsAsRead(): (channelIds: readonly string[]) => Promise<boolean> {
   return useCallback(async (channelIds: readonly string[]): Promise<boolean> => {
     const uniqueIds = [...new Set(channelIds)];
     if (uniqueIds.length === 0) return true;
 
-    try {
-      await apiInstance.post('/channels/mark-read', { channelIds: uniqueIds });
-      return true;
-    } catch (error) {
-      logger.error(Event.FRONTEND_ERROR, {
-        type: 'mark_channels_as_read_failed',
-        channelCount: uniqueIds.length,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      toast.error(FAILURE_MESSAGE);
-      return false;
+    const batches: string[][] = [];
+    for (let i = 0; i < uniqueIds.length; i += MARK_READ_REQUEST_MAX_CHANNELS) {
+      batches.push(uniqueIds.slice(i, i + MARK_READ_REQUEST_MAX_CHANNELS));
     }
+
+    let failed = 0;
+    for (const batch of batches) {
+      try {
+        await apiInstance.post('/channels/mark-read', { channelIds: batch });
+      } catch (error) {
+        failed += 1;
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'mark_channels_as_read_failed',
+          channelCount: batch.length,
+          batchIndex: batches.indexOf(batch),
+          batchCount: batches.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (failed === 0) return true;
+    toast.error(failed === batches.length ? FAILURE_MESSAGE : PARTIAL_FAILURE_MESSAGE);
+    return false;
   }, []);
 }
