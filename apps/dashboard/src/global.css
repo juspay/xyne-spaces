@@ -5920,7 +5920,6 @@ img.inline-emoji,
     background-color: hsl(var(--primary) / 0.08);
     outline-color: hsl(var(--primary) / 0.5);
   }
-  }
 }
 
 /* Code references (Wiki source links) carry their host's mark: GitHub blob links and Bitbucket Server browse links. */

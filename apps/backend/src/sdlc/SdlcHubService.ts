@@ -599,17 +599,46 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  /** An agent's markdown with its marked links built; code links follow the repository's base branch. */
-  private async linkedMarkdown(actor: SdlcActor, channelId: string, markdown: string, repoId: string | null | undefined, key: string): Promise<string> {
+  /** The repository an artifact's code links point at: the one named, else the one it is linked to, else the hub's only one. */
+  private async codeRepoId(channelId: string, repoId: string | null | undefined, canvasId?: string): Promise<string | null> {
+    if (repoId) return repoId;
+    const linked = canvasId
+      ? await this.prisma.sdlcEntityLink.findFirst({
+          where: { channelId, sourceType: 'CANVAS', sourceId: canvasId, targetType: 'REPOSITORY', relationType: SDLC_ARTIFACT_REPOSITORY_RELATION },
+          select: { targetId: true },
+          orderBy: { createdAt: 'asc' },
+        })
+      : null;
+    if (linked) return linked.targetId;
+    // With several repositories a bare path names none of them: it stays text.
+    const members = await this.prisma.sdlcEntityLink.findMany({
+      where: { channelId, targetType: 'REPOSITORY', relationType: SDLC_MEMBERSHIP_RELATION },
+      select: { targetId: true },
+      take: 2,
+    });
+    return members.length === 1 ? members[0]!.targetId : null;
+  }
+
+  /** An agent's markdown with its marked links built; code links pin the base branch's head at write time. */
+  private async linkedMarkdown(actor: SdlcActor, channelId: string, markdown: string, givenRepoId: string | null | undefined, key: string, canvasId?: string): Promise<string> {
+    const repoId = await this.codeRepoId(channelId, givenRepoId, canvasId);
     const repo = repoId
-      ? await this.prisma.repo.findFirst({ where: { id: repoId }, select: { url: true, canonicalUrl: true, baseBranch: true } })
+      ? await this.prisma.repo.findFirst({ where: { id: repoId }, select: { id: true, url: true, canonicalUrl: true, baseBranch: true } })
       : null;
     const branch = Array.isArray(repo?.baseBranch) && typeof repo.baseBranch[0] === 'string' ? repo.baseBranch[0] : 'HEAD';
+    // A failed provider call falls back to the branch so the write still saves.
+    const ref =
+      repo && markdown.includes(']()')
+        ? await sdlcVcs.resolveBaseBranchHead(repo.id).catch((error: unknown) => {
+            logger.warn(`[SDLC] base branch head of ${repo.id} not resolved, links follow ${branch}: ${error instanceof Error ? error.message : String(error)}`);
+            return branch;
+          })
+        : branch;
     return requireSdlcLinks({
       markdown,
       workspaceId: actor.workspaceId,
       channelId,
-      code: repo ? { url: repo.canonicalUrl ?? repo.url, ref: branch } : null,
+      code: repo ? { url: repo.canonicalUrl ?? repo.url, ref } : null,
       key,
     });
   }
@@ -622,9 +651,13 @@ export class SdlcHubService implements SdlcHub {
     markdown: string,
     extra: { title?: string | undefined; repoId?: string | undefined; relatedCanvasIds?: string[] | undefined } = {}
   ): Promise<SdlcArtifact> {
-    const repoId = extra.repoId
-      ?? (await this.prisma.sdlcArtifact.findUnique({ where: { artifactId: canvasId }, select: { repoId: true } }))?.repoId;
-    const content = await convertMarkdownToBlockNote(await this.linkedMarkdown(actor, channelId, markdown, repoId, `artifact:${canvasId}`));
+    const artifact = await this.prisma.sdlcArtifact.findUnique({ where: { artifactId: canvasId }, select: { repoId: true, artifactType: true } });
+    // Written here, a Wiki page would lose its commit pins, versions and code links: the Wiki knows none of that here.
+    if (artifact?.artifactType === 'WIKI') {
+      throw new AppError('Not saved: this is a Wiki page. Send the same write with kind "WIKI", channelId and the repoId of its Wiki.', 400);
+    }
+    const repoId = extra.repoId ?? artifact?.repoId;
+    const content = await convertMarkdownToBlockNote(await this.linkedMarkdown(actor, channelId, markdown, repoId, `artifact:${canvasId}`, canvasId));
     return commitAndSyncCanvasArtifact(
       () => writeArtifactContentTx(this, actor, channelId, canvasId, content, extra),
       syncToYSweet,

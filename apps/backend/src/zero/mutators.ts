@@ -131,7 +131,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
-import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
+import { SDLC_HUB_KNOWLEDGE_FOLDER, SDLC_WIKI_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
   ChannelPublishedEntityType,
@@ -10606,8 +10606,10 @@ export function createMutators(
           const canvasFolder = canvas.folderId
             ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
             : null;
+          // Hub admins edit Hub Knowledge and Wiki pages.
           const knowledgeChannel =
-            canvasFolder?.name === SDLC_HUB_KNOWLEDGE_FOLDER && canvasFolder.channelId
+            (canvasFolder?.name === SDLC_HUB_KNOWLEDGE_FOLDER || canvasFolder?.name === SDLC_WIKI_FOLDER) &&
+            canvasFolder.channelId
               ? await tx.run(zql.channels.where('id', canvasFolder.channelId).one())
               : null;
           const isHubKnowledge = knowledgeChannel?.type === ChannelType.SDLC;

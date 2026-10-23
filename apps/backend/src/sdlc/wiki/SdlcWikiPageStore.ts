@@ -50,11 +50,17 @@ export interface WikiPageEntry {
   canvasId: string;
   title: string;
   folderPath: string;
-  archived: boolean;
-  lastCommitSha: string | null;
-  /** Repository paths the page documents, from its "Relevant source files" section. */
-  sourcePaths: string[];
-  updatedAt: string;
+  /** Mermaid diagrams on the page. */
+  diagrams: number;
+  /** Only with includeArchived. */
+  archived?: boolean;
+}
+
+interface PagesFilter {
+  includeArchived?: boolean | undefined;
+  /** Only pages whose "Relevant source files" name one of these paths or a folder that holds one. */
+  changedPaths?: string[] | undefined;
+  canvasId?: string | undefined;
 }
 
 export type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
@@ -66,30 +72,51 @@ function splitFolderPath(folderPath: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** The paths listed under a page's "Relevant source files" heading. A commit window finds the pages its diff touches by them. */
-export function sourcePathsOf(markdown: string): string[] {
-  const lines = markdown.split('\n');
-  const start = lines.findIndex((line) => /^#{1,6}\s+relevant source files\s*$/i.test(line.trim()));
-  if (start === -1) return [];
-  const paths: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,6}\s/.test(line)) break;
-    const item = /^\s*[-*]\s+(.+?)\s*$/.exec(line)?.[1];
-    if (!item) continue;
-    // A linked item reads "[path](url)"; a path may hold brackets itself, as in "src/pages/[id].js".
-    const path = (item.startsWith('[') && item.includes('](') ? item.slice(1, item.lastIndexOf('](')) : item).replace(/^`|`$/g, '');
-    if (/^\S+$/.test(path)) paths.push(path);
-  }
-  return [...new Set(paths)];
+interface Block {
+  type?: string;
+  props?: { level?: number; language?: string };
+  content?: unknown;
+  children?: Block[];
 }
 
-function storedSourcePaths(value: string | null | undefined): string[] {
-  try {
-    const paths: unknown = JSON.parse(value ?? '[]');
-    return Array.isArray(paths) ? paths.filter((path): path is string => typeof path === 'string') : [];
-  } catch {
-    return [];
+function textOf(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((item: { text?: string; content?: unknown }) => item.text ?? textOf(item.content))
+    .join('');
+}
+
+/** The paths under a page's "Relevant source files" heading and its Mermaid diagram count, read from the stored blocks. */
+export function pageFacts(content: unknown): { sourcePaths: string[]; diagrams: number } {
+  const blocks: Block[] = [];
+  const walk = (list: unknown): void => {
+    if (!Array.isArray(list)) return;
+    for (const block of list as Block[]) {
+      blocks.push(block);
+      walk(block.children);
+    }
+  };
+  walk(content);
+  const sourcePaths: string[] = [];
+  let inSources = false;
+  for (const block of blocks) {
+    if (block.type === 'heading') {
+      inSources = /^relevant source files$/i.test(textOf(block.content).trim());
+    } else if (inSources && block.type === 'bulletListItem') {
+      const path = textOf(block.content).trim().replace(/^`|`$/g, '');
+      if (/^\S+$/.test(path)) sourcePaths.push(path);
+    }
   }
+  const diagrams = blocks.filter((block) => block.type === 'codeBlock' && block.props?.language === 'mermaid').length;
+  return { sourcePaths: [...new Set(sourcePaths)], diagrams };
+}
+
+/** A page path names a changed file itself, or a folder that holds it. */
+function touches(sourcePaths: string[], changedPaths: string[]): boolean {
+  return sourcePaths.some((source) => {
+    const folder = source.replace(/\/+$/, '');
+    return changedPaths.some((changed) => changed === folder || changed.startsWith(`${folder}/`));
+  });
 }
 
 const HUB_STEP_IDS: ReadonlySet<string> = new Set([HUB_GENERATOR_STEP_ID, HUB_CORRECTOR_STEP_ID]);
@@ -142,32 +169,33 @@ export function versionName(action: string, commitSha: string | undefined): stri
 export class SdlcWikiPageStore {
   constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
-  async listPages(input: WikiScopeInput & { includeArchived?: boolean }): Promise<WikiPageEntry[]> {
-    return this.pagesIn(await this.scope(input, true), input.includeArchived ?? false);
+  async listPages(input: WikiScopeInput & PagesFilter): Promise<WikiPageEntry[]> {
+    return this.pagesIn(await this.scope(input, true), input);
   }
 
-  private async pagesIn(scope: WikiScope, includeArchived: boolean): Promise<WikiPageEntry[]> {
+  // Reads every page's content: the stored blocks are the truth after a person edits a page.
+  private async pagesIn(scope: WikiScope, filter: PagesFilter): Promise<WikiPageEntry[]> {
     const tree = await this.tree(scope);
+    const ids = [...tree.canvasParents.keys()];
     const canvases = await this.prisma.canvas.findMany({
-      where: { id: { in: [...tree.canvasParents.keys()] }, channelId: scope.channelId },
-      select: {
-        id: true,
-        title: true,
-        updatedAt: true,
-        sdlcArtifact: { select: { artifactStatus: true, generationCommit: true, sourcePaths: true } },
-      },
+      where: { id: filter.canvasId ? filter.canvasId : { in: ids }, channelId: scope.channelId },
+      select: { id: true, title: true, content: true, sdlcArtifact: { select: { artifactStatus: true } } },
     });
+    const changedPaths = filter.changedPaths;
     return canvases
-      .map((canvas) => ({
-        canvasId: canvas.id,
-        title: canvas.title,
-        folderPath: tree.folderPath(tree.canvasParents.get(canvas.id)!),
-        archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED',
-        lastCommitSha: canvas.sdlcArtifact?.generationCommit ?? null,
-        sourcePaths: storedSourcePaths(canvas.sdlcArtifact?.sourcePaths),
-        updatedAt: canvas.updatedAt.toISOString(),
-      }))
-      .filter((page) => includeArchived || !page.archived)
+      .filter((canvas) => tree.canvasParents.has(canvas.id))
+      .filter((canvas) => filter.includeArchived || canvas.sdlcArtifact?.artifactStatus !== 'ARCHIVED')
+      .flatMap((canvas) => {
+        const facts = pageFacts(canvas.content);
+        if (changedPaths && !touches(facts.sourcePaths, changedPaths)) return [];
+        return [{
+          canvasId: canvas.id,
+          title: canvas.title,
+          folderPath: tree.folderPath(tree.canvasParents.get(canvas.id)!),
+          diagrams: facts.diagrams,
+          ...(filter.includeArchived ? { archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED' } : {}),
+        }];
+      })
       .sort((left, right) =>
         // Numeric: "10 Operations" comes after "2 Architecture".
         `${left.folderPath}/${left.title}`.localeCompare(`${right.folderPath}/${right.title}`, undefined, { numeric: true })
@@ -413,7 +441,7 @@ export class SdlcWikiPageStore {
     const content = await convertMarkdownToBlockNote(markdown);
     const actor = { workspaceId: scope.workspaceId, userId: scope.actorUserId };
     const canvasId = await commitAndSyncCanvasArtifact(
-      () => createTx(this, scope, { ...page, markdown }, content, typeFolderId, commitSha, actor, parentId, sourcePathsOf(markdown)),
+      () => createTx(this, scope, { ...page, markdown }, content, typeFolderId, commitSha, actor, parentId),
       syncToYSweet,
       scope.actorUserId
     );
@@ -447,7 +475,7 @@ export class SdlcWikiPageStore {
     const content = await convertMarkdownToBlockNote(markdown);
     // Wiki canvases give the hub read-only access, so sync as the creator, who can edit.
     await commitAndSyncCanvasArtifact(
-      () => editTx(this, existing, page, content, scope, markdown, commitSha, sourcePathsOf(markdown)),
+      () => editTx(this, existing, page, content, scope, markdown, commitSha),
       (canvasId, blocks) => syncToYSweet(canvasId, blocks, existing.createdBy),
       existing.createdBy
     );
@@ -488,7 +516,7 @@ export class SdlcWikiPageStore {
   }
 
   private async entry(scope: WikiScope, canvasId: string): Promise<WikiPageEntry> {
-    const page = (await this.pagesIn(scope, true)).find((candidate) => candidate.canvasId === canvasId);
+    const [page] = await this.pagesIn(scope, { includeArchived: true, canvasId });
     if (!page) throw new AppError('Wiki page not found in this scope', 404);
     return page;
   }

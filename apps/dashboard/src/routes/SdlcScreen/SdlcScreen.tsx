@@ -130,6 +130,7 @@ import {
   readWikiViews,
   recordWikiView,
   wikiLandingPage,
+  withoutWikiNumber,
 } from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
 import { SdlcWikiRunDialog } from './SdlcWikiRunDialog';
@@ -454,6 +455,9 @@ export default function SdlcScreen(): ReactElement {
     kind: SdlcDocumentKind;
   } | null>(null);
   const [artifactFolderPath, setArtifactFolderPath] = useState('');
+  // A page or section added from the Wiki tree: its number goes before the typed title.
+  const [wikiNumber, setWikiNumber] = useState<{ number: string; section: boolean } | null>(null);
+  const [wikiEditing, setWikiEditing] = useState(false);
   // Each with its title, from the search hit or the artifact it was started from.
   const [relatedCanvases, setRelatedCanvases] = useState<Array<{ id: string; title: string }>>([]);
   const relatedCanvasIds = useMemo(
@@ -785,6 +789,10 @@ export default function SdlcScreen(): ReactElement {
     const row = canvasRowOf(openCanvasRow);
     return row && row.id === selectedCanvasId ? (hubArtifactOf(row) ?? undefined) : undefined;
   }, [openCanvasRow, selectedCanvasId, hubArtifactOf]);
+  // Edit mode belongs to the Wiki: leaving it ends the edit.
+  useEffect(() => {
+    if (section !== 'wiki') setWikiEditing(false);
+  }, [section]);
   // Adding and archiving hub documents is admin-only; the server enforces it too.
   const isHubAdmin = useMemo(
     () =>
@@ -2322,6 +2330,7 @@ export default function SdlcScreen(): ReactElement {
     setRelatedListOpen(false);
     setRelatedChipsExpanded(false);
     setArtifactFolderPath('');
+    setWikiNumber(null);
   };
 
   // What was typed into a hub document dialog dismissed by Escape or a click outside,
@@ -2362,18 +2371,24 @@ export default function SdlcScreen(): ReactElement {
   const relatedArtifactsForPayload = (): Array<{ canvasId: string; title: string }> =>
     relatedCanvases.map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
+  // A section is a folder with its own page of the same name.
+  // A title typed with its own number keeps it.
+  const numberedWikiTitle = (title: string): string =>
+    wikiNumber && !/^\d+(?:\.\d+)*\s/.test(title) ? `${wikiNumber.number} ${title}` : title;
+
   const createArtifact = (): void => {
     if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
     const title = artifactTitle.trim();
     const direction = artifactAiPrompt.trim();
     const folderPath = artifactFolderPath.trim();
     const related = relatedArtifactsForPayload();
+    const wikiTitle = numberedWikiTitle(title);
     const query =
       artifactDialog.kind === 'wiki'
         ? buildSdlcWikiPageCreationPrompt({
-            title,
+            title: wikiTitle,
             ...(wikiScopeRepo && { repositoryName: wikiScopeRepo.name, repoId: wikiScopeRepo.id }),
-            ...(folderPath && { folderPath }),
+            ...(wikiNumber?.section ? { folderPath: wikiTitle } : folderPath && { folderPath }),
             ...(direction && { direction }),
           })
         : buildSdlcArtifactCreationPrompt({
@@ -2407,14 +2422,15 @@ export default function SdlcScreen(): ReactElement {
     // The folder page this was started from, before anything is awaited.
     const startedOn = openFolderId;
     if (folder.kind === 'wiki') {
-      const folderPath = artifactFolderPath.trim();
+      const wikiTitle = numberedWikiTitle(title);
+      const folderPath = wikiNumber?.section ? wikiTitle : artifactFolderPath.trim();
       const wikiResponse = await apiInstance.post<{ artifact: { canvasId: string } }>(
         '/sdlc/claw/artifacts',
         {
           artifactType: 'WIKI',
           channelId: channel.id,
-          title,
-          markdown: `# ${title}\n`,
+          title: wikiTitle,
+          markdown: `# ${wikiTitle}\n`,
           ...(wikiScopeRepo && { repoId: wikiScopeRepo.id }),
           ...(folderPath && { folderPath }),
         },
@@ -2626,7 +2642,11 @@ export default function SdlcScreen(): ReactElement {
     setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
   };
 
-  const openHubDocumentCreate = (kind: 'knowledge' | 'wiki'): void => {
+  const openHubDocumentCreate = (
+    kind: 'knowledge' | 'wiki',
+    /** From the Wiki tree: the folder to add to, and the number to put before the title. */
+    place?: { folderPath?: string; number?: string; section?: boolean },
+  ): void => {
     clearArtifactDialogFields();
     const target =
       kind === 'knowledge'
@@ -2639,6 +2659,8 @@ export default function SdlcScreen(): ReactElement {
       setArtifactAiPrompt(draft.prompt);
       setArtifactFolderPath(draft.folderPath);
     }
+    if (place?.folderPath !== undefined) setArtifactFolderPath(place.folderPath);
+    if (place?.number) setWikiNumber({ number: place.number, section: Boolean(place.section) });
     setArtifactDialog(target);
   };
 
@@ -3065,7 +3087,7 @@ export default function SdlcScreen(): ReactElement {
           )}
         </div>
 
-        {artifactDialogKind === 'wiki' && (
+        {artifactDialogKind === 'wiki' && !wikiNumber?.section && (
           <div className='flex flex-col gap-1.5'>
             <div className='flex items-baseline gap-1.5'>
               <label htmlFor='sdlc-wiki-folder-path' className='text-[12.5px] font-medium'>
@@ -4003,10 +4025,15 @@ export default function SdlcScreen(): ReactElement {
                   activeCanvasId={selectedCanvasId}
                   showArchived={showArchivedWiki}
                   canManage={isHubAdmin}
+                  editing={wikiEditing}
+                  onEditingChange={setWikiEditing}
                   onSelectScope={folderId => openWikiScope(folderId)}
                   onShowArchivedChange={setShowArchivedWiki}
                   onOpen={page => openWikiPage(page.canvasId)}
-                  onCreatePage={() => openHubDocumentCreate('wiki')}
+                  onAddPage={place => openHubDocumentCreate('wiki', place)}
+                  onAddSection={number =>
+                    openHubDocumentCreate('wiki', { folderPath: '', number, section: true })
+                  }
                   onArchivePage={(page, archived) =>
                     archiveArtifact(page.canvasId, archived, page.title)
                   }
@@ -4332,6 +4359,9 @@ export default function SdlcScreen(): ReactElement {
                       showAskAiAction={false}
                       showViewOnly
                       pinnedOutline={section === 'wiki' && !showRightPanel}
+                      // The Wiki reads as a docs site until an admin turns on Edit.
+                      readOnly={section === 'wiki' && !(wikiEditing && isHubAdmin)}
+                      {...(section === 'wiki' && { formatTitle: withoutWikiNumber })}
                       notFoundNoun={hubDocumentNoun}
                       notFoundBackLabel={`Back to ${SECTIONS.find(item => item.id === section)?.label ?? 'the hub'}`}
                       onNotFoundBack={closeOpenCanvas}

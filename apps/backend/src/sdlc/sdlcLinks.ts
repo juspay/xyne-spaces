@@ -5,7 +5,8 @@ import { logger } from '@/utils/logger';
 
 /**
  * Links in SDLC artifacts an agent writes. The agent marks every link and the server builds the URL:
- * - `[path]()`, `[path:10-42]()`: a file, or lines of it, in the artifact's repository.
+ * - `[path]()`, `[path:10-42]()`: a file, or lines of it, in the artifact's repository; `@sha` at the end, as in
+ *   `[path:10-42@abc1234]()`, pins that commit instead of the artifact's revision.
  * - `[commit abc1234]()`: a commit.
  * - `[Any text](canvas:<canvasId>)`: another artifact in this hub, by the id the list and create tools return.
  * Nothing unmarked is ever turned into a link, and anything that cannot be resolved rejects the write.
@@ -18,7 +19,7 @@ export interface SdlcCodeTarget {
 }
 
 interface CodeLinks {
-  file: (path: string, from?: string, to?: string) => string;
+  file: (path: string, from?: string, to?: string, ref?: string) => string;
   commit: (sha: string) => string;
   /** A URL into this repository's code or commits, which the agent must write as a marker instead. */
   isCode: (href: string) => boolean;
@@ -37,7 +38,7 @@ export function codeLinks(target: SdlcCodeTarget): CodeLinks | null {
     .split('/')
     .filter(Boolean);
   const encode = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
-  const ref = encodeURIComponent(target.ref);
+  const at = (ref?: string): string => encodeURIComponent(ref ?? target.ref);
   if (url.hostname === 'github.com' && parts.length === 2) {
     const repo = `${url.origin}/${parts.join('/')}`;
     return {
@@ -45,8 +46,8 @@ export function codeLinks(target: SdlcCodeTarget): CodeLinks | null {
         /^\/(?:blob|tree|commit|blame)\//.test(href.slice(repo.length)) &&
         href.startsWith(`${repo}/`),
       // GitHub redirects a folder's blob link to its tree.
-      file: (path, from, to) =>
-        `${repo}/blob/${ref}/${encode(path)}${from ? `#L${from}${to ? `-L${to}` : ''}` : ''}`,
+      file: (path, from, to, ref) =>
+        `${repo}/blob/${at(ref)}/${encode(path)}${from ? `#L${from}${to ? `-L${to}` : ''}` : ''}`,
       commit: (sha) => `${repo}/commit/${sha}`,
     };
   }
@@ -55,8 +56,8 @@ export function codeLinks(target: SdlcCodeTarget): CodeLinks | null {
     const repo = `${url.origin}/projects/${parts[1]!.toUpperCase()}/repos/${parts[2]}`;
     return {
       isCode: (href) => href.startsWith(`${repo}/browse`) || href.startsWith(`${repo}/commits/`),
-      file: (path, from, to) =>
-        `${repo}/browse/${encode(path)}?at=${ref}${from ? `#${from}${to ? `-${to}` : ''}` : ''}`,
+      file: (path, from, to, ref) =>
+        `${repo}/browse/${encode(path)}?at=${at(ref)}${from ? `#${from}${to ? `-${to}` : ''}` : ''}`,
       commit: (sha) => `${repo}/commits/${sha}`,
     };
   }
@@ -69,6 +70,8 @@ const CODE_MARKER = new RegExp(String.raw`\[${LABEL}\]\(\)`, 'g');
 const CANVAS_MARKER = new RegExp(String.raw`\[${LABEL}\]\(canvas:([A-Za-z0-9_-]+)\)`, 'g');
 const ANY_LINK = new RegExp(String.raw`\[${LABEL}\]\(([^)\s]+)\)`, 'g');
 const FENCE = /^(?:```|~~~)/;
+// path, path:10 or path:10-42, each with an optional @sha.
+const FILE_LABEL = /^(\S+?)(?::(\d+)(?:-(\d+))?)?(?:@([0-9a-f]{7,40}))?$/i;
 // The italic lines form earlier pages hold, as the canvas exports it: [path ](url)*[10-42](url)*.
 const LINES_LINK = new RegExp(
   String.raw`\[${LABEL} \]\((https?:[^)\s]+)\)\*\[(\d+(?:-\d+)?)\]\(\2\)\*`,
@@ -79,12 +82,17 @@ const LINES_LINK = new RegExp(
 function codeLink(label: string, links: CodeLinks): string | null {
   const commit = /^commit ([0-9a-f]{7,40})$/i.exec(label);
   if (commit) return `[${label}](${links.commit(commit[1]!.toLowerCase())})`;
-  const lines = /^(\S+?):(\d+)(?:-(\d+))?$/.exec(label);
-  if (lines) {
-    const [, path, from, to] = lines;
-    return `[${path}:${from}${to ? `-${to}` : ''}](${links.file(path!, from, to)})`;
-  }
-  return /^\S+$/.test(label) ? `[${label}](${links.file(label)})` : null;
+  const file = FILE_LABEL.exec(label);
+  if (!file) return null;
+  const [, path, from, to, sha] = file;
+  const text = `${path}${from ? `:${from}${to ? `-${to}` : ''}` : ''}`;
+  return `[${text}](${links.file(path!, from, to, sha?.toLowerCase())})`;
+}
+
+/** The pinned commit of a code link the server built, for its marker's `@sha`. */
+function pinnedSha(href: string): string | null {
+  const ref = /\/blob\/([^/]+)\//.exec(href)?.[1] ?? /[?&]at=([^&#]+)/.exec(href)?.[1];
+  return ref && /^[0-9a-f]{7,40}$/i.test(ref) ? ref : null;
 }
 
 /** Where a hub artifact opens, as the SDLC screen addresses it; no discussion panel. */
@@ -151,8 +159,19 @@ export async function resolveSdlcLinks(
         .replace(/[\s,;]/g, '') !== ''
     ) {
       problems.push(
-        `${where}: a "Sources:" line holds only code references, such as Sources: [src/a.ts:10-42](), [README.md]().`
+        `${where}: a "Sources:" line holds only code references, such as Sources: [src/a.ts:10-42](), [app/server/]().`
       );
+    }
+    if (/^\s*Sources:/i.test(line)) {
+      for (const [marker, label] of line.matchAll(CODE_MARKER)) {
+        const file = FILE_LABEL.exec(label!.trim());
+        // A file is a path whose last part has a dot: app/server/ and Dockerfile need no range.
+        if (file && !file[2] && /\.[^/]*$/.test(file[1]!.split('/').pop()!)) {
+          problems.push(
+            `${where}: ${marker} needs a line range, such as [${file[1]}:12-40]().`
+          );
+        }
+      }
     }
 
     return line
@@ -211,7 +230,10 @@ export function sdlcLinkMarkers(markdown: string): string {
   return markdown
     .replace(
       LINES_LINK,
-      (_link, path: string, _href: string, lines: string) => `[${path.trim()}:${lines}]()`
+      (_link, path: string, href: string, lines: string) => {
+        const sha = pinnedSha(href);
+        return `[${path.trim()}:${lines}${sha ? `@${sha}` : ''}]()`;
+      }
     )
     .replace(ANY_LINK, (link, label: string, href: string) => {
       const canvas = /\/sdlc\/[^?#]+\?(?:[^#]*&)?canvas=([A-Za-z0-9_-]+)/.exec(href);
@@ -220,6 +242,8 @@ export function sdlcLinkMarkers(markdown: string): string {
         /^https?:\/\/[^/]+\/(?:.+\/blob\/[^/]+\/|projects\/[^/]+\/repos\/[^/]+\/browse\/.+[?&]at=|.+\/commits?\/[0-9a-f]{7,40}$)/i.test(
           href
         );
-      return code ? `[${label}]()` : link;
+      if (!code) return link;
+      const sha = /^commit /i.test(label) ? null : pinnedSha(href);
+      return `[${label}${sha ? `@${sha}` : ''}]()`;
     });
 }
