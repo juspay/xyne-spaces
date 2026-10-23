@@ -5,6 +5,8 @@ export interface XyneAIAgent {
   name: string;
   color: string;
   instantAgent?: boolean;
+  /** The agent's Spaces bot user, whose avatar channels show for it. */
+  botUserId?: string;
 }
 
 export interface XyneAIModel {
