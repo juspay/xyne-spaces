@@ -196,6 +196,26 @@ export type {
   BrandAssetKind,
 } from "./brand-extraction.js";
 export {
+  DESIGN_EXPORT_FORMATS,
+  EMPTY_DESIGN_TOKEN_SET,
+  designExportFilename,
+  designTokensFromBrandSummary,
+  designTokensFromTokensCss,
+  exportDesignSystem,
+  exportDesignTokens,
+  exportTokensCss,
+  isDesignExportFormat,
+  slugifyTokenName,
+} from "./design-export.js";
+export type {
+  DesignColorToken,
+  DesignExportFormat,
+  DesignFontToken,
+  DesignScaleToken,
+  DesignTokenSet,
+  DesignTypeToken,
+} from "./design-export.js";
+export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
   INBOUND_ATTACHMENT_FAMILIES,
