@@ -21,6 +21,7 @@ export interface McpCatalogEntry {
   isGateway: boolean;
   scope: McpScope;
   selectable: boolean;
+  ownedKeys: ReadonlySet<string>;
 }
 
 function metaString(server: McpServer, key: string): string | undefined {
@@ -66,12 +67,25 @@ export function buildMcpCatalog(
   if (!availableTools) return [];
   const serverByType = new Map(servers.map(server => [server.type, server]));
 
+  const keyOwner = new Map<string, string>();
+  for (const integration of availableTools.integrations) {
+    for (const tool of [...integration.readTools, ...integration.writeTools]) {
+      if (!keyOwner.has(tool.slug)) keyOwner.set(tool.slug, integration.slug);
+      if (tool.name && !keyOwner.has(tool.name)) keyOwner.set(tool.name, integration.slug);
+    }
+  }
+
   return availableTools.integrations
     .filter(integration => integration.kind === 'mcp' || integration.kind === 'gateway')
     .map(integration => {
       const isGateway = integration.kind === 'gateway';
       const server = serverByType.get(integration.slug);
       const tools = [...integration.readTools, ...integration.writeTools];
+      const ownedKeys = new Set(
+        tools
+          .flatMap(tool => [tool.slug, tool.name])
+          .filter(key => key && keyOwner.get(key) === integration.slug),
+      );
       return {
         slug: integration.slug,
         label: integration.label,
@@ -84,12 +98,15 @@ export function buildMcpCatalog(
         isGateway,
         scope: connectorScope(server),
         selectable: tools.length > 0,
+        ownedKeys,
       };
     });
 }
 
-export function toolSelectionKey(entry: McpCatalogEntry, tool: IntegrationToolEntry): string {
-  return entry.isGateway ? tool.slug : tool.name;
+function ownedKeysOf(entry: McpCatalogEntry, tools: readonly IntegrationToolEntry[]): Set<string> {
+  return new Set(
+    tools.flatMap(tool => [tool.slug, tool.name]).filter(key => entry.ownedKeys.has(key)),
+  );
 }
 
 function gatewayServiceOf(entry: McpCatalogEntry): string | null {
@@ -108,7 +125,8 @@ export function isToolSelected(
   entry: McpCatalogEntry,
   tool: IntegrationToolEntry,
 ): boolean {
-  if (selection.direct.includes(toolSelectionKey(entry, tool))) return true;
+  if (entry.ownedKeys.has(tool.slug) && selection.direct.includes(tool.slug)) return true;
+  if (entry.ownedKeys.has(tool.name) && selection.direct.includes(tool.name)) return true;
   const service = gatewayServiceOf(entry);
   return !!service && (selection.gateway ?? []).includes(service);
 }
@@ -141,8 +159,9 @@ export function setToolsSelected(
 
   const service = gatewayServiceOf(entry);
   if (!service) {
-    const touched = new Set(tools.map(tool => tool.name));
-    const rest = base.direct.filter(key => !touched.has(key));
+    const owned = ownedKeysOf(entry, tools);
+    const touched = new Set(tools.map(tool => tool.slug).filter(slug => entry.ownedKeys.has(slug)));
+    const rest = base.direct.filter(key => !owned.has(key));
     return { ...base, direct: next ? [...rest, ...touched] : rest };
   }
 

@@ -354,6 +354,9 @@ export interface DraftAgentSpec {
    *  only — deliberately NOT part of the identity, so it never renders on a
    *  re-drawn card after the decision. */
   summary?: string;
+  /** The user approved committing this setup as it stands — surfaced on the card
+   *  data for builders that own their own create/save. */
+  commit?: boolean;
 }
 
 /**

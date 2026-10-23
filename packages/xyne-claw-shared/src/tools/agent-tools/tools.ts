@@ -231,6 +231,12 @@ export const updateAgentTool: ToolDefinition = {
           "Read the current list first and send the whole intended set. Omit to leave the tools untouched.",
       },
       summary: { type: "string", description: "Short note on what is changing and why — shown to the approver alongside the change." },
+      commit: {
+        type: "boolean",
+        description:
+          "Set true ONLY when the user's latest message plainly approves saving the agent as it already stands — 'save it', 'yes, apply that', 'looks right, keep it'. " +
+          "A request to add, remove or change anything is NOT approval, however enthusiastic. When unsure, omit this and ask.",
+      },
     },
     required: ["slug"],
   },

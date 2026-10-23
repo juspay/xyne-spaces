@@ -1191,6 +1191,7 @@ export const router = createBrowserRouter(
                       ),
                     },
                     { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                    { path: 'library/agent/create/:slug', element: <AIAgentCreateScreen /> },
                     { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
                     { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                     { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },

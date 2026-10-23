@@ -1,8 +1,9 @@
+import type { KbCollectionNode } from '@/services/claw/clawKnowledgeBaseTypes';
+import type { Skill } from '@/services/claw/clawSkillsTypes';
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { buildBuiltinCatalog } from '../../shared/pickers/builtin/builtinCatalog';
-import { buildMcpCatalog } from '../../shared/pickers/mcp/mcpCatalog';
-import { MAX_SUBAGENTS } from './agentDraftPatch';
+import { buildMcpCatalog, isEntryEnabled } from '../../shared/pickers/mcp/mcpCatalog';
 
 const MAX_DIGEST_CHARS = 16_000;
 
@@ -34,10 +35,16 @@ function renderSections(sections: CatalogGroup[][]): string[][] {
   return sections.map(groups => groups.map(group => renderGroup(group, 1)));
 }
 
-export function buildCatalogDigest(catalog: AvailableTools | null | undefined): string[] {
+export function buildCatalogDigest(
+  catalog: AvailableTools | null | undefined,
+  skills?: readonly Skill[] | null,
+  collections?: readonly KbCollectionNode[] | null,
+): string[] {
   if (!catalog) return [];
 
   const subagents = catalog.subagents.map(subagent => `  ${subagent.name}`);
+  const skillNames = (skills ?? []).map(skill => `  ${skill.name}`);
+  const collectionNames = (collections ?? []).map(node => `  ${node.name}`);
 
   const builtins: CatalogGroup[] = buildBuiltinCatalog(catalog)
     .filter(group => group.tools.length > 0)
@@ -58,19 +65,27 @@ export function buildCatalogDigest(catalog: AvailableTools | null | undefined): 
     'CATALOGUE — these are the only grantable ids. Copy them exactly; anything',
     'else is dropped. An id absent here does not exist for this workspace.',
     ...section('Subagents (grant by name):', subagents),
-    ...section('Connected products (grant the individual tool ids):', productLines),
+    ...section(
+      'Integrations — the NAME before each colon is what `mcps` accepts (copy it exactly); the ids after it are individual tools for `tools`:',
+      productLines,
+    ),
     ...section('Built-in tools (grant the individual tool ids):', builtinLines),
+    ...section('Skills — attach by name via `skills`:', skillNames),
+    ...section(
+      'Knowledge collections — attach by name via `knowledge.collections`:',
+      collectionNames,
+    ),
   ];
 }
 
-export function buildSeedQuery(draft: WizardState, intent: string): string {
-  const name = draft.name.trim();
-  const subject = name || 'this agent';
-  const purpose = intent.trim() ? ` — ${intent.trim()}` : '';
-  return `Set up “${subject}”${purpose}`;
+function attachedMcps(state: WizardState, catalog: AvailableTools | null | undefined): string[] {
+  if (!catalog) return [];
+  return buildMcpCatalog(catalog, [])
+    .filter(entry => isEntryEnabled(state.tools, entry))
+    .map(entry => entry.label);
 }
 
-function draftSummary(draft: WizardState, intent: string): string[] {
+function draftSummary(draft: WizardState, mcps: string[]): string[] {
   const tools = [
     ...draft.tools.subagents,
     ...draft.tools.direct,
@@ -79,12 +94,18 @@ function draftSummary(draft: WizardState, intent: string): string[] {
   ];
   return [
     '[Agent draft — the user is building this right now. It has NOT been created.]',
-    `What the user asked for: ${intent.trim() || '(not given)'}`,
     `Name: ${draft.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(draft) || '(unset)'}`,
     `Description: ${draft.description.trim() || '(unset)'}`,
     `Instructions: ${draft.systemPrompt.trim() || '(unset)'}`,
+    `Subagents: ${draft.tools.subagents.join(', ') || '(none)'}`,
+    `MCPs attached: ${mcps.join(', ') || '(none)'}`,
     `Tools: ${tools.join(', ') || '(none)'}`,
+    '',
+    'Those lines are the CURRENT state — read them before you answer. Do not',
+    'claim an MCP, subagent or tool is attached unless it is listed above, and',
+    'do not assume something you added earlier survived: the user removes things',
+    'by hand too.',
   ];
 }
 
@@ -107,15 +128,21 @@ function unsavedFields(saved: WizardState, draft: WizardState): string[] {
   return changed;
 }
 
-function savedSummary(saved: WizardState, draft: WizardState, intent: string): string[] {
+function savedSummary(saved: WizardState, draft: WizardState, mcps: string[]): string[] {
   const unsaved = unsavedFields(saved, draft);
   return [
     '[Agent saved — this is what is stored right now.]',
-    `What the user asked for: ${intent.trim() || '(not given)'}`,
     `Name: ${saved.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(saved) || '(unset)'}`,
     `Description: ${saved.description.trim() || '(unset)'}`,
+    `Subagents: ${saved.tools.subagents.join(', ') || '(none)'}`,
+    `MCPs attached: ${mcps.join(', ') || '(none)'}`,
     `Tools: ${toolNames(saved).join(', ') || '(none)'}`,
+    '',
+    'Those lines are the CURRENT state — read them before you answer. Do not',
+    'claim an MCP, subagent or tool is attached unless it is listed above, and',
+    'do not assume something you added earlier survived: the user removes things',
+    'by hand too.',
     '',
     'Saved instructions — anchor promptEdits against THIS text, character for',
     'character. It is what the server will search; the form may differ.',
@@ -128,11 +155,25 @@ function savedSummary(saved: WizardState, draft: WizardState, intent: string): s
 }
 
 const STANDING_TASK = [
-  'Your standing task: write the instructions and choose the tools this agent',
-  'needs, working from what the user asked for. Instructions start EMPTY on',
-  'purpose — the one line above is the brief, not a draft prompt, and it is',
-  'yours to turn into a real one. Do not describe the setup as a placeholder',
-  'or ask the user to write it for you.',
+  'Your standing task: name this agent, write its instructions and choose the',
+  'tools it needs. The setup starts EMPTY on purpose — the user tells you what',
+  'they want in chat, and turning that into a real configuration is your job,',
+  'not theirs. Do not describe the setup as a placeholder or ask the user to',
+  'write it for you.',
+  '',
+  'The conversation opens with a bare request for help that names no job —',
+  '"Help me set up an agent". That is a greeting, not a brief. Answer it with',
+  'one short, friendly question asking what the agent should do, and propose',
+  'NOTHING until they tell you. Do not invent a generic assistant, do not list',
+  'what you could build, and do not call a tool on that turn.',
+  '',
+  'Once they describe the job, act on it. Ask again only when you could not',
+  'pick tools without the answer — a thin brief is still enough to propose a',
+  'sensible starting point the user can correct.',
+  '',
+  'Name it the way a colleague would refer to it: short, concrete, title case',
+  '("PR Reviewer", "Release Notes", "Support Triage"). Not "Agent for reviewing',
+  'pull requests", and not a restatement of the request.',
 ];
 
 const HOW_TO_NAME_TOOLS = [
@@ -150,10 +191,21 @@ const HOW_TO_NAME_TOOLS = [
   'for, with nothing to show it happened. Use `tools` for subagents, built-ins',
   'and individual tool slugs only.',
   '',
-  `This draft keeps at most ${MAX_SUBAGENTS} subagents — propose more and the`,
-  'extras are dropped without being granted. Never report a capability you',
-  'could not fit: reach for an MCP or individual tool slugs instead, or say',
-  'which subagent you would trade away and let the user choose.',
+  'An integration listed under "MCPs attached" already brings its whole tool',
+  'set. Keep its name in `mcps` and do NOT copy its individual tool ids into',
+  '`tools` — that list is long, it adds nothing, and re-typing it is how ids',
+  "get lost. Granting a subagent for a system never removes that system's MCP",
+  'or tools; the two coexist.',
+  '',
+  '`skills` and `knowledge.collections` REPLACE their lists rather than adding',
+  'to them, so always send the complete intended set — everything already',
+  'attached, plus what you are adding, minus only what the user asked to drop.',
+  'Send a partial list and the rest are removed without being mentioned.',
+  '',
+  'There is no cap on how many subagents, MCPs or tools this agent can hold.',
+  'When the user asks for one, add it and leave everything else alone — never',
+  'drop or swap an existing capability to "make room", and never tell them you',
+  'had to trade one away.',
 ];
 
 const SELECTION_DISCIPLINE = [
@@ -198,15 +250,36 @@ const HOW_TO_PROPOSE = [
   'Your proposal is applied to this draft only — it creates nothing, and the',
   'user saves it themselves when they are happy. Do not call create-agent or',
   'update-agent: there is no saved agent yet, and they would bypass the form.',
-  'After the proposal, reply with one or two plain sentences saying what you',
-  'changed and why. Do not narrate tool calls or context lookups.',
-  'Describe only what you actually granted. Do not say the agent can read a',
-  'repository, search a system or post anywhere unless a tool you granted',
-  'does that — claiming a capability it does not hold is worse than saying',
-  'the setup is partial.',
-  'The setup is NOT saved. Approving fills the form on the left; the user',
-  'still has to press "Create agent" themselves. Never tell them it is saved,',
-  'created or live — say it is ready for them to review and save.',
+  'ALWAYS send `summary`. The call ENDS your turn — you do not get to reply',
+  'afterwards, so `summary` is the only thing the user reads from you. Omit it',
+  'and they get a blank stand-in that tells them nothing. One or two plain',
+  'sentences on what you changed and why; no tool names, no narration.',
+  '',
+  '`summary` must describe the setup you are ACTUALLY sending in this call.',
+  'Before you write it, re-read your own `tools` and `mcps` arrays and name',
+  'only what is in them. A capability you decided against, or could not fit,',
+  'is not in the setup no matter how reasonable it sounded — saying you added',
+  'it is the worst outcome here, because the user believes it and finds out',
+  'later. If the user asked for something by name and you are not granting it,',
+  'say so plainly in `summary` and give the reason.',
+  'The setup is NOT saved. Your proposal fills in the panel on the left, and',
+  'the user creates it when they are happy with it. Never tell them it is',
+  'saved, created or live — say it is ready for them to review and create.',
+  '',
+  'They can also just tell you to do it. When their latest message plainly',
+  'approves the setup as it already stands — "create it", "yes, go ahead",',
+  '"looks good, make it" — send `commit: true` with your proposal and the',
+  'panel creates it for them.',
+  '',
+  'Approval is the ONLY thing that sets `commit`. A request to add, remove or',
+  'change something is not approval, however enthusiastic — do that change and',
+  'leave `commit` out. When you cannot tell which they meant, leave it out and',
+  'ask: a draft they wanted committed costs one sentence, an agent created',
+  'before they were ready is theirs to find and delete.',
+  '',
+  'Setting `commit` does NOT let you report the outcome. Your turn ends before',
+  'the panel acts and you will not learn whether it worked, so say what you are',
+  'creating, never that it is created. The panel tells them the result.',
 ];
 
 function howToUpdate(slug: string): string[] {
@@ -223,8 +296,17 @@ function howToUpdate(slug: string): string[] {
     'For promptEdits, anchor on the "Saved instructions" block above and nothing',
     'else — that is the text the server searches. Quote it exactly, including',
     'punctuation and line breaks. Anything listed as unsaved is not in it yet.',
-    'The change is applied to the setup on the left for the user to review; they',
-    'press the button themselves to save it. Nothing you call writes directly.',
+    'The change lands on the setup on the left as an UNSAVED edit. The user',
+    'presses "Save changes" there, or tells you to — when their latest message',
+    'plainly approves saving what is already there ("save it", "yes, apply',
+    'that"), send `commit: true` and the panel saves it for them.',
+    '',
+    'Approval is the ONLY thing that sets `commit`. A request to add, remove or',
+    'change something is not approval — make the change and leave `commit` out.',
+    'When you cannot tell, leave it out and ask.',
+    '',
+    'Setting `commit` does NOT let you report the outcome. Your turn ends before',
+    'the panel acts, so say what you are saving, never that it is saved.',
     'After it, reply with one or two plain sentences saying what you changed and',
     'why. Do not narrate tool calls or context lookups.',
     'Describe only what you actually granted. Do not say the agent can read a',
@@ -243,18 +325,21 @@ const STAY_IN_CHARACTER = [
 
 export function buildHiddenContext(
   draft: WizardState,
-  intent: string,
   catalog?: AvailableTools | null,
+  skills?: readonly Skill[] | null,
+  collections?: readonly KbCollectionNode[] | null,
   createdSlug?: string | null,
   saved?: WizardState | null,
 ): string {
   return [
-    ...(saved ? savedSummary(saved, draft, intent) : draftSummary(draft, intent)),
+    ...(saved
+      ? savedSummary(saved, draft, attachedMcps(saved, catalog))
+      : draftSummary(draft, attachedMcps(draft, catalog))),
     '',
     ...STANDING_TASK,
     '',
     ...HOW_TO_NAME_TOOLS,
-    ...buildCatalogDigest(catalog),
+    ...buildCatalogDigest(catalog, skills, collections),
     '',
     ...SELECTION_DISCIPLINE,
     '',

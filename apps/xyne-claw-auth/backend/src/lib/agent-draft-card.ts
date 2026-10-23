@@ -180,6 +180,7 @@ export function draftSpecFromCreateAgentParams(params: Record<string, unknown>):
     ...(memory ? { memory } : {}),
     ...(scope === "personal" || scope === "global" ? { scope } : {}),
     ...(str("summary") ? { summary: str("summary") as string } : {}),
+    ...(params["commit"] === true || params["commit"] === "true" ? { commit: true } : {}),
   };
 }
 

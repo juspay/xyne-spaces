@@ -135,6 +135,8 @@ interface XyneAIEmptyStateProps {
    * column they dominate a panel meant to sit quietly beside five others.
    */
   hideSuggestions?: boolean;
+  title?: string;
+  subtitle?: string;
   starters?: readonly ActionDefinition[];
   onSelectStarter?: (action: ActionDefinition) => void;
 }
@@ -147,6 +149,8 @@ interface XyneAIEmptyStateProps {
 export const XyneAIEmptyState = ({
   onSelect = () => {},
   hideSuggestions = false,
+  title,
+  subtitle,
   starters = [],
   onSelectStarter = () => {},
 }: XyneAIEmptyStateProps): ReactElement => {
@@ -156,8 +160,13 @@ export const XyneAIEmptyState = ({
         <div className='flex flex-col items-center gap-4'>
           <Spark className='size-12' />
           <h2 className='text-center text-[15px] font-semibold leading-[24px] tracking-[-0.3px] text-muted-foreground'>
-            What can Xyne help you with?
+            {title ?? 'What can Xyne help you with?'}
           </h2>
+          {subtitle && (
+            <p className='-mt-2 max-w-[280px] text-center text-[13px] leading-[20px] text-muted-foreground/70'>
+              {subtitle}
+            </p>
+          )}
         </div>
       </div>
     );

@@ -28,6 +28,7 @@ export interface FlowContextValue {
 
 export interface FlowDraftScope {
   claims: (flow: FlowDefinition) => boolean;
+  hidesCard?: (flow: FlowDefinition) => boolean;
   onCardSeen?: (flow: FlowDefinition) => void;
   valuesForSubmit?: (flow: FlowDefinition, actionId: string) => Record<string, unknown> | null;
   onApplied: (actionId: string, flow: FlowDefinition) => void;

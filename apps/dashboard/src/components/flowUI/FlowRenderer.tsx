@@ -180,6 +180,9 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   const draftScope = useFlowDraftScope();
   const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
 
+  const draftHidesFlow =
+    draftClaimsFlow && validatedFlow !== null && (draftScope?.hidesCard?.(validatedFlow) ?? false);
+
   const claimedScreenId = draftClaimsFlow ? (validatedFlow?.screenId ?? null) : null;
   const seenFlowRef = useRef<FlowDefinition | null>(null);
   seenFlowRef.current = validatedFlow;
@@ -475,6 +478,8 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   if (!validatedFlow) {
     return <div className='animate-pulse bg-muted h-32 rounded-lg' />;
   }
+
+  if (draftHidesFlow) return null;
 
   // A trailing row or button is the screen's action bar; anything else at the
   // end is ordinary content and stays in the body.

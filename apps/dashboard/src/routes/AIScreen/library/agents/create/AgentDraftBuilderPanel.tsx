@@ -6,12 +6,21 @@ import type { PendingAction } from '@/components/Chat/XyneAISidebar/utils/XyneAI
 import { FlowDraftScopeContext, type FlowDraftScope } from '@/components/flowUI/FlowContext';
 import { EDITS_STATE_KEY } from '@/components/flowUI/nodes/agent/useDraftAgentEditor';
 import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
+import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
+import { useClawSkills } from '@/hooks/useClawSkills';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 import { wizardStateFromAgent } from './agentDraft';
-import { buildHiddenContext, buildSeedQuery } from './agentBuilderPrompt';
-import { bareToolSlug, paramsToDraftPatch, type DraftPatchContext } from './agentDraftPatch';
+import { buildHiddenContext } from './agentBuilderPrompt';
+import {
+  bareToolSlug,
+  paramsToDraftPatch,
+  wantsCommit,
+  type DraftPatchContext,
+} from './agentDraftPatch';
 import { BUILDER_DRIVER_SLUG } from '../detail/AgentBuilderPanel';
+
+const KICKOFF_QUERY = 'Help me set up an agent';
 
 const DRAFT_TOOLS = new Set(['create-agent', 'update-agent']);
 
@@ -67,45 +76,49 @@ function parseFlowParams(raw: unknown): Record<string, unknown> | null {
 
 interface AgentDraftBuilderPanelProps {
   draft: WizardState;
-  intent: string;
   onApplyPatch: (patch: Partial<WizardState>) => void;
   onBusyChange?: (busy: boolean) => void;
   onAgentCreated?: (slug: string) => void;
   createdSlug?: string | null;
   savedAgent?: Agent | undefined;
   onRequestSave?: () => Promise<void>;
+  onRequestCommit?: () => Promise<void>;
 }
 
 export function AgentDraftBuilderPanel({
   draft,
-  intent,
   onApplyPatch,
   onBusyChange,
   onAgentCreated,
   createdSlug,
   savedAgent,
   onRequestSave,
+  onRequestCommit,
 }: AgentDraftBuilderPanelProps): ReactElement {
   const { data: catalog, isPending: catalogPending } = useClawAvailableTools();
+  const { data: skills } = useClawSkills();
+  const { data: kbTree } = useClawKnowledgeBaseTree();
+  const skillsRef = useRef(skills);
+  skillsRef.current = skills;
+  const kbRef = useRef(kbTree?.collections);
+  kbRef.current = kbTree?.collections;
 
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
 
-  const intentRef = useRef(intent);
-  intentRef.current = intent;
-
-  const seed = useMemo(
-    () =>
-      catalogPending
-        ? null
-        : { query: buildSeedQuery(draftRef.current, intentRef.current), nonce: Date.now() },
-    [catalogPending],
-  );
-
   const createdSlugRef = useRef(createdSlug);
   createdSlugRef.current = createdSlug;
+
+  const openedOnSavedAgent = useRef(createdSlug !== null && createdSlug !== undefined);
+  const seed = useMemo(
+    () =>
+      catalogPending || openedOnSavedAgent.current
+        ? null
+        : { query: KICKOFF_QUERY, nonce: Date.now() },
+    [catalogPending],
+  );
 
   const savedState = useMemo(
     () => (savedAgent ? wizardStateFromAgent(savedAgent) : null),
@@ -120,8 +133,9 @@ export function AgentDraftBuilderPanel({
     () =>
       buildHiddenContext(
         draftRef.current,
-        intentRef.current,
         catalogRef.current,
+        skillsRef.current,
+        kbRef.current,
         createdSlugRef.current,
         savedStateRef.current,
       ),
@@ -130,12 +144,11 @@ export function AgentDraftBuilderPanel({
 
   const applyProposal = useCallback(
     (params: Record<string, unknown>, context: DraftPatchContext = {}): void => {
-      const { patch, problems } = paramsToDraftPatch(
-        params,
-        draftRef.current,
-        catalogRef.current,
-        context,
-      );
+      const { patch, problems } = paramsToDraftPatch(params, draftRef.current, catalogRef.current, {
+        ...context,
+        ...(skillsRef.current ? { skillCatalog: skillsRef.current } : {}),
+        ...(kbRef.current ? { kbCollections: kbRef.current } : {}),
+      });
 
       problems.forEach(problem => toast.warning(problem, { duration: Infinity }));
 
@@ -147,6 +160,18 @@ export function AgentDraftBuilderPanel({
       onApplyPatch(patch);
     },
     [onApplyPatch],
+  );
+
+  const commitIfApproved = useCallback(
+    (approved: boolean): void => {
+      if (!approved || !onRequestCommit) return;
+      void Promise.resolve()
+        .then(() => onRequestCommit())
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : 'Could not apply that to the agent');
+        });
+    },
+    [onRequestCommit],
   );
 
   const onInterceptPendingAction = useCallback(
@@ -167,6 +192,7 @@ export function AgentDraftBuilderPanel({
         if (data['actionType'] !== 'write') return false;
         return typeof data['tool'] === 'string' && DRAFT_TOOLS.has(bareToolSlug(data['tool']));
       },
+      hidesCard: (): boolean => true,
       onCardSeen: (flow: FlowDefinition): void => {
         if (seenCardsRef.current.has(flow.screenId)) return;
         seenCardsRef.current.add(flow.screenId);
@@ -174,6 +200,7 @@ export function AgentDraftBuilderPanel({
         const cardParams = agentCardParams(flow);
         if (cardParams) {
           applyProposal(cardParams);
+          commitIfApproved(wantsCommit((flow.data ?? {})['commit']));
           return;
         }
 
@@ -181,7 +208,9 @@ export function AgentDraftBuilderPanel({
         const tool = typeof data['tool'] === 'string' ? bareToolSlug(data['tool']) : '';
         if (!DRAFT_TOOLS.has(tool)) return;
         const params = parseFlowParams(data['params']);
-        if (params) applyProposal(params, patchContextFor(tool, savedStateRef.current));
+        if (!params) return;
+        applyProposal(params, patchContextFor(tool, savedStateRef.current));
+        commitIfApproved(wantsCommit(params['commit']));
       },
       valuesForSubmit: (flow: FlowDefinition, actionId: string): Record<string, unknown> | null => {
         if (actionId !== AGENT_CARD_APPROVE || agentCardParams(flow) === null) return null;
@@ -215,7 +244,7 @@ export function AgentDraftBuilderPanel({
         });
       },
     }),
-    [applyProposal, onAgentCreated, onRequestSave],
+    [applyProposal, commitIfApproved, onAgentCreated, onRequestSave],
   );
 
   return (
@@ -232,7 +261,13 @@ export function AgentDraftBuilderPanel({
             hiddenContext={hiddenContext}
             onInterceptPendingAction={onInterceptPendingAction}
             {...(onBusyChange ? { onStreamingChange: onBusyChange } : {})}
-            composerPlaceholder='Ask Xyne AI to update this agent…'
+            emptyStateTitle='What would you like to create today?'
+            emptyStateSubtitle='Describe the job and I’ll set the agent up on the left.'
+            composerPlaceholder={
+              createdSlug
+                ? 'Change this agent — add a tool, rewrite its instructions…'
+                : 'Describe what this agent should do…'
+            }
             showAgentHeader
             hideAgentName
             roomyContent

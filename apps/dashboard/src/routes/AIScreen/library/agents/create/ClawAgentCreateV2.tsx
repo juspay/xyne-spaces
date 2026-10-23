@@ -11,12 +11,18 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { PencilEditLine } from '@xyne/icons';
 import { ChevronLeft, Loader2 } from 'lucide-react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/Button/index';
 import { Popover } from '@/components/ui/Popover';
 import { AgentColorRow } from './AgentColorRow';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
-import { useCreateClawAgent } from '@/hooks/useCreateClawAgent';
+import {
+  AgentConfigAttachError,
+  useCreateClawAgent,
+  type WizardSubmission,
+} from '@/hooks/useCreateClawAgent';
 import {
   INITIAL_WIZARD_STATE,
   effectiveSlug,
@@ -27,6 +33,7 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { wizardStateFromAgent } from './agentDraft';
 import { useSaveClawAgent } from './useSaveClawAgent';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
+import { Pill } from '../../shared/primitives/Pill';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { BuiltinCapabilityRow } from '../../shared/pickers/builtin/BuiltinCapabilityRow';
 import { KnowledgeCapabilityRow } from '../../shared/pickers/knowledge/KnowledgeCapabilityRow';
@@ -36,8 +43,31 @@ import { SubagentCapabilityRow } from '../../shared/pickers/subagent/SubagentCap
 import { CallableAgentCapabilityRow } from '../../shared/pickers/callableAgent/CallableAgentCapabilityRow';
 
 const PROMPT_MIN_HEIGHT = 72;
-const PROMPT_MAX_HEIGHT = 420;
 const PROMPT_FLASH_MS = 1400;
+
+const PROMPT_MARKDOWN: Components = {
+  h1: ({ children }) => (
+    <h1 className='mt-5 text-base font-semibold text-foreground first:mt-0'>{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className='mt-5 text-sm font-semibold text-foreground first:mt-0'>{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className='mt-4 text-sm font-medium text-foreground first:mt-0'>{children}</h3>
+  ),
+  p: ({ children }) => <p className='mt-2 first:mt-0'>{children}</p>,
+  ul: ({ children }) => <ul className='mt-2 list-disc space-y-1 pl-5 first:mt-0'>{children}</ul>,
+  ol: ({ children }) => <ol className='mt-2 list-decimal space-y-1 pl-5 first:mt-0'>{children}</ol>,
+  strong: ({ children }) => <strong className='font-semibold text-foreground'>{children}</strong>,
+  code: ({ children }) => (
+    <code className='rounded bg-muted px-1 py-0.5 text-[13px]'>{children}</code>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className='mt-2 border-l-2 border-border pl-3 text-muted-foreground'>
+      {children}
+    </blockquote>
+  ),
+};
 
 function comparable(state: WizardState): string {
   return JSON.stringify([
@@ -51,6 +81,36 @@ function comparable(state: WizardState): string {
     state.selectedKbScope,
     state.selectedKbResources,
   ]);
+}
+
+function submissionFrom(state: WizardState): WizardSubmission {
+  return {
+    slug: effectiveSlug(state),
+    name: state.name.trim(),
+    description: state.description.trim(),
+    systemPrompt: state.systemPrompt.trim(),
+    color: state.color,
+    kbScope: state.selectedKbScope,
+    knowledgeBase: state.selectedKbResources,
+    tools: state.tools,
+    skillIds: state.selectedSkillIds,
+    research: {
+      productId: state.researchAgentProductId,
+      repositoryId: state.researchAgentRepositoryId,
+    },
+  };
+}
+
+function grantedCount(state: WizardState): number {
+  const { subagents, direct, custom, gateway, callableAgents } = state.tools;
+  return (
+    subagents.length +
+    direct.length +
+    custom.length +
+    gateway.length +
+    callableAgents.length +
+    state.selectedSkillIds.length
+  );
 }
 
 interface DraftErrors {
@@ -67,7 +127,11 @@ interface ClawAgentCreateV2Props {
   instructionsPatchNonce?: number;
   hideBack?: boolean;
   hideSubmit?: boolean;
+  showDraftHeader?: boolean;
+  created?: boolean;
+  onCreated?: (slug: string) => void;
   registerSave?: (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => void;
+  registerCommit?: (commit: (() => Promise<void>) | null) => void;
 }
 
 const ClawAgentCreateV2 = ({
@@ -78,7 +142,11 @@ const ClawAgentCreateV2 = ({
   instructionsPatchNonce = 0,
   hideBack = false,
   hideSubmit = false,
+  showDraftHeader = false,
+  created = false,
+  onCreated,
   registerSave,
+  registerCommit,
 }: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
@@ -106,12 +174,14 @@ const ClawAgentCreateV2 = ({
     [onDraftChange],
   );
 
+  const [promptEditing, setPromptEditing] = useState(false);
+
   useLayoutEffect(() => {
     const el = promptRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT), PROMPT_MAX_HEIGHT)}px`;
-  }, [state.systemPrompt]);
+    el.style.height = `${Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT)}px`;
+  }, [state.systemPrompt, promptEditing]);
 
   useLayoutEffect(() => {
     const el = descriptionRef.current;
@@ -142,7 +212,8 @@ const ClawAgentCreateV2 = ({
   );
   const edited = savedComparable === null || comparable(state) !== savedComparable;
 
-  const createMutation = useCreateClawAgent();
+  const createMutation = useCreateClawAgent({ redirect: onCreated === undefined });
+  const isCreated = isEdit || created;
   const saveMutation = useSaveClawAgent(agent, { redirectOnSuccess: !registerSave });
 
   const errors = useMemo<DraftErrors>(() => {
@@ -156,6 +227,13 @@ const ClawAgentCreateV2 = ({
     }
     return next;
   }, [state.name, state.systemPrompt, slug, nameCheck.nameError, nameCheck.slugError]);
+
+  const untouched =
+    !isEdit &&
+    state.name.trim().length === 0 &&
+    state.description.trim().length === 0 &&
+    state.systemPrompt.trim().length === 0 &&
+    grantedCount(state) === 0;
 
   const visibleErrors: DraftErrors = showErrors
     ? errors
@@ -190,7 +268,48 @@ const ClawAgentCreateV2 = ({
     return (): void => registerSave(null);
   }, [registerSave, saveFromForm]);
 
+  const { mutateAsync: createAgent, isPending: creating } = createMutation;
+  const committingRef = useRef(false);
+  const commitFromForm = useCallback(async (): Promise<void> => {
+    if (committingRef.current || creating || saveMutation.saving) return;
+    const { state: current, errors: currentErrors } = liveRef.current;
+    if (Object.keys(currentErrors).length > 0) {
+      setShowErrors(true);
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      throw new Error(
+        isCreated
+          ? 'Fix the highlighted fields before saving this agent.'
+          : 'Fix the highlighted fields before creating this agent.',
+      );
+    }
+    setShowErrors(false);
+    committingRef.current = true;
+    try {
+      if (isEdit) {
+        await saveAgent(current);
+        return;
+      }
+      if (isCreated) {
+        throw new Error('This agent is still loading after being created — try saving again.');
+      }
+      const createdAgent = await createAgent(submissionFrom(current));
+      onCreated?.(createdAgent.slug);
+    } catch (err) {
+      if (err instanceof AgentConfigAttachError) onCreated?.(err.slug);
+      throw err;
+    } finally {
+      committingRef.current = false;
+    }
+  }, [createAgent, creating, isCreated, isEdit, onCreated, saveAgent, saveMutation.saving]);
+
+  useEffect(() => {
+    if (!registerCommit) return;
+    registerCommit(commitFromForm);
+    return (): void => registerCommit(null);
+  }, [registerCommit, commitFromForm]);
+
   const handleSubmit = (): void => {
+    if (committingRef.current) return;
     if (Object.keys(errors).length > 0) {
       setShowErrors(true);
       scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -201,39 +320,49 @@ const ClawAgentCreateV2 = ({
       void saveMutation.save(state);
       return;
     }
-    createMutation.mutate({
-      slug,
-      name: state.name.trim(),
-      description: state.description.trim(),
-      systemPrompt: state.systemPrompt.trim(),
-      color: state.color,
-      kbScope: state.selectedKbScope,
-      knowledgeBase: state.selectedKbResources,
-      tools: state.tools,
-      skillIds: state.selectedSkillIds,
-      research: {
-        productId: state.researchAgentProductId,
-        repositoryId: state.researchAgentRepositoryId,
-      },
-    });
+    createMutation.mutate(
+      submissionFrom(state),
+      onCreated
+        ? {
+            onSuccess: (created: Agent) => onCreated(created.slug),
+            onError: (err: Error) => {
+              if (err instanceof AgentConfigAttachError) onCreated(err.slug);
+            },
+          }
+        : undefined,
+    );
   };
 
   return (
     <div className='flex h-full min-h-0 flex-col' data-component='ClawAgentCreateV2'>
       <div ref={scrollRef} className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
-        <div className={cn('mx-auto flex w-full max-w-[720px] flex-col px-6', !hideBack && 'pt-6')}>
-          <div className='sticky top-0 z-10 flex flex-col gap-10 bg-background pb-8 pt-6'>
-            {!hideBack && (
-              <button
-                type='button'
-                onClick={() => void navigate(leavePath)}
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: back'
-                className='-ml-1.5 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              >
-                <ChevronLeft className='size-4' aria-hidden />
-                Back
-              </button>
+        <div
+          className={cn(
+            'mx-auto flex w-full max-w-[720px] flex-col px-6',
+            !hideBack && !showDraftHeader && 'pt-6',
+          )}
+        >
+          <div
+            className={cn(
+              'sticky top-0 z-10 flex flex-col gap-10 bg-background pb-8',
+              showDraftHeader ? 'pt-12' : 'pt-6',
+            )}
+          >
+            {(!hideBack || showDraftHeader) && (
+              <div className='flex w-full items-center gap-3'>
+                {!hideBack && (
+                  <button
+                    type='button'
+                    onClick={() => void navigate(leavePath)}
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: back'
+                    className='-ml-1.5 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                  >
+                    <ChevronLeft className='size-4' aria-hidden />
+                    Back
+                  </button>
+                )}
+              </div>
             )}
 
             <div className='flex w-full items-start gap-4'>
@@ -360,7 +489,43 @@ const ClawAgentCreateV2 = ({
                     <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
                   </p>
                 )}
+
+                {showDraftHeader && (
+                  <span className='w-fit'>
+                    <Pill tone={isCreated ? 'success' : 'warning'}>
+                      {isCreated ? 'Created' : 'Draft · not created yet'}
+                    </Pill>
+                  </span>
+                )}
               </div>
+
+              {showDraftHeader && (
+                <div className='shrink-0'>
+                  {!isCreated ? (
+                    <Button
+                      onClick={handleSubmit}
+                      disabled={busy || untouched}
+                      loading={createMutation.isPending}
+                      className='rounded-xl'
+                      data-track-category='Claw Agents'
+                      data-track-name='Create agent v2: create'
+                    >
+                      Create agent
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleSubmit}
+                      disabled={busy || !edited}
+                      loading={saveMutation.saving}
+                      className='rounded-xl'
+                      data-track-category='Claw Agents'
+                      data-track-name='Create agent v2: save changes'
+                    >
+                      Save changes
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -453,23 +618,52 @@ const ClawAgentCreateV2 = ({
                 Instructions
               </label>
 
-              <textarea
-                id='agent-v2-prompt'
-                ref={promptRef}
-                rows={1}
-                value={state.systemPrompt}
-                onChange={e => update({ systemPrompt: e.target.value })}
-                placeholder='Ai drafted instructions will be updated here...'
-                aria-invalid={visibleErrors.systemPrompt !== undefined}
-                aria-describedby={visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined}
-                style={{ minHeight: PROMPT_MIN_HEIGHT, maxHeight: PROMPT_MAX_HEIGHT }}
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: prompt'
-                className={cn(
-                  '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-y-auto rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-none',
-                  promptFlash && 'bg-primary/5',
-                )}
-              />
+              {!promptEditing && state.systemPrompt.trim().length > 0 ? (
+                <div
+                  role='button'
+                  tabIndex={0}
+                  onClick={() => setPromptEditing(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setPromptEditing(true);
+                    }
+                  }}
+                  title='Click to edit'
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: edit prompt'
+                  className={cn(
+                    '-mx-2 w-[calc(100%+1rem)] cursor-text rounded-lg px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500',
+                    promptFlash && 'bg-primary/5',
+                  )}
+                >
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={PROMPT_MARKDOWN}>
+                    {state.systemPrompt}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <textarea
+                  id='agent-v2-prompt'
+                  ref={promptRef}
+                  rows={1}
+                  autoFocus={promptEditing}
+                  value={state.systemPrompt}
+                  onChange={e => update({ systemPrompt: e.target.value })}
+                  onBlur={() => setPromptEditing(false)}
+                  placeholder='Ai drafted instructions will be updated here...'
+                  aria-invalid={visibleErrors.systemPrompt !== undefined}
+                  aria-describedby={
+                    visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined
+                  }
+                  style={{ minHeight: PROMPT_MIN_HEIGHT }}
+                  data-track-category='Claw Agents'
+                  data-track-name='Create agent v2: prompt'
+                  className={cn(
+                    '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-hidden rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-none',
+                    promptFlash && 'bg-primary/5',
+                  )}
+                />
+              )}
 
               {visibleErrors.systemPrompt && (
                 <p id='agent-v2-prompt-error' className='text-xs text-destructive'>
