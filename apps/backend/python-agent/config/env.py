@@ -185,9 +185,9 @@ class Config:
             chutes_stt_base_url=os.getenv("CHUTES_STT_BASE_URL"),
             chutes_stt_api_key=os.getenv("CHUTES_STT_API_KEY"),
 
-            # STT Provider Configuration (google, azure, or deepgram, default: azure)
-            stt_model=os.getenv("STT_MODEL", "azure").lower(),
-            voice_input_stt_model=os.getenv("VOICE_INPUT_STT_MODEL", os.getenv("STT_MODEL", "azure")).lower(),
+            # STT Provider Configuration (google, azure, or deepgram, default: google)
+            stt_model=os.getenv("STT_MODEL", "google").lower(),
+            voice_input_stt_model=os.getenv("VOICE_INPUT_STT_MODEL", os.getenv("STT_MODEL", "google")).lower(),
             google_voice_credentials_json=os.getenv("GOOGLE_VOICE_CREDENTIALS_JSON"),
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
             google_stt_stream_model=os.getenv("GOOGLE_STT_STREAM_MODEL", "chirp_2"),

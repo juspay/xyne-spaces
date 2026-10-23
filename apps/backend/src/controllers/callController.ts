@@ -6,6 +6,8 @@ import {
   getHostControls,
   isAgentParticipant,
   isHumanParticipant,
+  DEFAULT_STT_MODEL,
+  resolveRecreatedRoomSttModel,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
@@ -512,7 +514,7 @@ export class CallController {
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
-          sttModel: sttModel || 'google',
+          sttModel: sttModel || DEFAULT_STT_MODEL,
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
@@ -779,7 +781,7 @@ export class CallController {
         channelId: channel.id,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
-        sttModel: sttModel || 'google',
+        sttModel: sttModel || DEFAULT_STT_MODEL,
         createdBy: userId,
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
@@ -1021,23 +1023,9 @@ export class CallController {
 
         const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
-        // Prepare room metadata
-        // The transcription agent picks its STT engine from room metadata (`sttModel`)
-        // and falls back to its own STT_MODEL env default (azure) when the key is
-        // missing. Rooms recreated here (scheduled calls, rooms that hit emptyTimeout)
-        // must carry the same keys as rooms created in initiateCall, otherwise the
-        // agent silently transcribes with Azure Whisper instead of Google.
-        // Precedence: live room (deleted above) > persisted call record > google.
-        let liveRoomSttModel: unknown;
-        try {
-          liveRoomSttModel = roomInfo?.metadata ? JSON.parse(roomInfo.metadata).sttModel : undefined;
-        } catch {
-          liveRoomSttModel = undefined;
-        }
-        const persistedSttModel = (activeCall.metadata as Record<string, unknown> | null)?.sttModel;
-        const roomSttModel = [liveRoomSttModel, persistedSttModel].find(
-          (m): m is string => typeof m === 'string' && m !== '',
-        ) ?? 'google';
+        // Prepare room metadata. Recreated rooms must carry `sttModel` like initiateCall's,
+        // or the agent falls back to its own env default instead of the call's choice.
+        const roomSttModel = resolveRecreatedRoomSttModel(callId, roomInfo?.metadata, activeCall.metadata);
 
         const roomMetadata = JSON.stringify({
           channelId: channel.id,

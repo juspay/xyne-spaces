@@ -167,6 +167,30 @@ function parseRoomMetadata(
   return {};
 }
 
+/** STT engine every call falls back to when none was chosen. */
+export const DEFAULT_STT_MODEL = 'google';
+
+/**
+ * STT engine for a room being recreated. The transcription agent only reads
+ * room metadata, so the choice has to be carried over: live room (about to be
+ * deleted) > call record > default.
+ */
+export function resolveRecreatedRoomSttModel(
+  roomName: string,
+  liveRoomMetadata: string | undefined,
+  callMetadata: unknown,
+): string {
+  const live = parseRoomMetadata(roomName, liveRoomMetadata, 'resolve_stt_model').sttModel;
+  const persisted =
+    callMetadata && typeof callMetadata === 'object' && !Array.isArray(callMetadata)
+      ? (callMetadata as { sttModel?: unknown }).sttModel
+      : undefined;
+  return (
+    [live, persisted].find((m): m is string => typeof m === 'string' && m !== '') ??
+    DEFAULT_STT_MODEL
+  );
+}
+
 export class LiveKitService {
   private static instance: LiveKitService;
   private roomService: RoomServiceClient;

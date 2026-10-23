@@ -5,7 +5,7 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
+import { livekitService, DEFAULT_STT_MODEL } from '@/services/liveKitService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -243,7 +243,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       channelId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
-      sttModel: 'google',
+      sttModel: DEFAULT_STT_MODEL,
       createdBy: initiatorUserId,
       ...(allInvitedUserIds.length > 0 && { invitedUserIds: allInvitedUserIds }),
     });
