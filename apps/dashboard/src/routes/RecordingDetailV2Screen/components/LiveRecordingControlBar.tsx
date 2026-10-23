@@ -411,7 +411,10 @@ const RecordedTimelineBar = ({
   // Once stitching has given up (or never applied) and there is still no audio to
   // load, the recording simply has no playable audio (e.g. older recordings) — show
   // an alert-triangle instead of a spinner that would otherwise never resolve.
-  const showAudioUnavailable = !onLoadAudio && !isStitching && isAudioUnavailable;
+  // The same goes for audio that is stitched but whose media failed to load or timed
+  // out (e.g. expired) — clicking again retries.
+  const showAudioUnavailable =
+    (!onLoadAudio && !isStitching && isAudioUnavailable) || playback.isUnavailable;
   const audioControlLabel = video.isOpen
     ? 'Playing in the video player'
     : isStitching
