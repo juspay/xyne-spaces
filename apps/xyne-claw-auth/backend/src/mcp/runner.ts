@@ -494,7 +494,7 @@ const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 const userToolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const userToolListInflight = new Map<string, Promise<McpToolInfo[]>>();
 
-const MCP_LIST_TOOLS_CUTOFF_MS = Number(process.env["MCP_LIST_TOOLS_CUTOFF_MS"] ?? 8_000);
+const MCP_LIST_TOOLS_CUTOFF_MS = Number(process.env["MCP_LIST_TOOLS_CUTOFF_MS"] ?? 1_000);
 const MCP_LIST_TOOLS_BACKOFF_MS = Number(process.env["MCP_LIST_TOOLS_BACKOFF_MS"] ?? 300_000);
 const toolListSkipUntil = new Map<string, number>();
 
