@@ -8,6 +8,8 @@ import {
   exportTokensCss,
   isDesignExportFormat,
   slugifyTokenName,
+  EMPTY_DESIGN_TOKEN_SET,
+  type DesignColorToken,
   type DesignExportFormat,
 } from "./design-export.js";
 import type { BrandSummary } from "./brand-extraction.js";
@@ -358,6 +360,117 @@ describe("the token CSS entry point", () => {
     const second = designTokensFromTokensCss(exportTokensCss(TOKENS_CSS, "css-vars"));
     expect(second.colors).toEqual(first.colors);
     expect(second.fonts).toEqual(first.fonts);
+  });
+});
+
+describe("real-world token CSS", () => {
+  it("converts rem and em type sizes instead of reading off the number", () => {
+    // `Number.parseFloat("0.875rem")` was 0.875, exported as `0.875px` — a
+    // Tailwind config with microscopic type, and most token files use rem.
+    const tokens = designTokensFromTokensCss(":root{--text-sm:0.875rem;--text-lg:1.5rem;--text-xs:12px}");
+    expect(tokens.typeScale).toEqual([
+      { key: "sm", sizePx: 14 },
+      { key: "lg", sizePx: 24 },
+      { key: "xs", sizePx: 12 },
+    ]);
+    expect(JSON.parse(exportTokensCss(":root{--text-sm:0.875rem}", "tailwind")).fontSize).toEqual({
+      sm: "14px",
+    });
+  });
+
+  it("refuses a length it cannot read rather than taking its leading number", () => {
+    const tokens = designTokensFromTokensCss(
+      ":root{--text-fluid:clamp(1rem, 2vw, 2rem);--text-pct:120%;--text-ok:18px}",
+    );
+    expect(tokens.typeScale).toEqual([{ key: "ok", sizePx: 18 }]);
+  });
+
+  it("does not let --font-weight-* claim the body font slot", () => {
+    // It matched the `^font` prefix and defaulted to `body` as the stack
+    // ["700"], and first-wins then dropped the real --font-body after it.
+    const tokens = designTokensFromTokensCss(
+      ":root{--font-weight-bold:700;--font-line-height-tight:1.1;--font-body:Inter, sans-serif}",
+    );
+    expect(tokens.fonts).toEqual([{ key: "body", stack: ["Inter", "sans-serif"] }]);
+  });
+
+  it("still reads a family-prefixed font token", () => {
+    expect(designTokensFromTokensCss(":root{--font-family-base:Inter, sans-serif}").fonts).toEqual([
+      { key: "body", stack: ["Inter", "sans-serif"] },
+    ]);
+  });
+
+  it("exports only the top-level :root, not a dark-scheme override", () => {
+    // Reading declarations from anywhere in the file exported the override as
+    // a second colour, `primary-2`, so the download carried a phantom token.
+    // Dark variants are XYNE-66829's.
+    const tokens = designTokensFromTokensCss(
+      ":root{--brand-primary:#2563EB}" +
+        "@media (prefers-color-scheme: dark){:root{--brand-primary:#60A5FA}}" +
+        ".dark{--brand-primary:#1D4ED8}",
+    );
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+  });
+
+  it("reads a Tailwind v4 @theme block, which is top level too", () => {
+    expect(designTokensFromTokensCss("@theme{--color-primary:#2563EB}").colors).toEqual([
+      { key: "primary", hex: "#2563EB" },
+    ]);
+  });
+
+  it("ignores a nested block inside a theme block", () => {
+    const tokens = designTokensFromTokensCss(
+      "@theme{--color-primary:#2563EB;@keyframes spin{from{--color-primary:#FF0000}}}",
+    );
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+  });
+
+  it("does not let a /* inside a string swallow the rest of the file", () => {
+    // The strip ran the unterminated comment to end of file and every token
+    // after it disappeared. Model-written CSS can contain this without anyone
+    // trying.
+    const tokens = designTokensFromTokensCss(
+      ':root{--brand-primary:#2563EB;--label:"/*";--space-4:16px}',
+    );
+    expect(tokens.colors).toEqual([{ key: "primary", hex: "#2563EB" }]);
+    expect(tokens.spacing).toEqual([{ key: "4", value: "16px" }]);
+  });
+
+  it("keeps the same type-step key whichever artifact the system arrived as", () => {
+    const fromSummary = JSON.parse(
+      exportDesignSystem({ ...SUMMARY, typeScale: [{ name: "font-size-h1", sizePx: 48 }] }, "tailwind"),
+    ).fontSize;
+    const fromCss = JSON.parse(exportTokensCss(":root{--font-size-h1:48px}", "tailwind")).fontSize;
+    expect(Object.keys(fromSummary)).toEqual(["h1"]);
+    expect(Object.keys(fromCss)).toEqual(["h1"]);
+  });
+});
+
+describe("the CSS export cannot be broken out of", () => {
+  it("drops a value that would end its own declaration", () => {
+    // The CSS entry point cannot produce this, but brand.json can: a
+    // model-written radius wrote a whole extra rule into the downloaded file.
+    const hostile = {
+      ...SUMMARY,
+      radii: [{ token: "radius-md", value: "4px;} body{display:none" }],
+    };
+    const css = exportDesignSystem(hostile, "css-vars");
+    expect(css).not.toContain("display:none");
+    expect(css).not.toContain("--radius-md");
+    // The rest of the system still exports.
+    expect(css).toContain("--color-primary: #0B5FFF;");
+  });
+
+  it("strips a comment terminator out of the system name", () => {
+    const css = exportDesignSystem({ ...SUMMARY, name: "Acme */ evil" }, "css-vars");
+    expect(css.split("\n")[0]).toBe("/* Acme  evil */");
+  });
+});
+
+describe("EMPTY_DESIGN_TOKEN_SET", () => {
+  it("is frozen all the way down, so a caller cannot mutate the shared constant", () => {
+    expect(() => (EMPTY_DESIGN_TOKEN_SET.colors as DesignColorToken[]).push({ key: "x", hex: "#000000" })).toThrow();
+    expect(EMPTY_DESIGN_TOKEN_SET.colors).toEqual([]);
   });
 });
 

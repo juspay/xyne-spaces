@@ -9,6 +9,14 @@
  * alternative — a formatter per format per source — is eight code paths that
  * drift.
  *
+ * What the token-CSS path deliberately does NOT export, because no format here
+ * has a safe representation for it: `hsl()`/`rgb()` functions, `var()`
+ * references, 8-digit hex with alpha, bare HSL triples (`--primary: 221 83%
+ * 53%`), and any length that is not plain px/rem/em (`clamp()`, `calc()`). They
+ * are skipped silently — a consumer that needs to tell the user "3 tokens were
+ * not exported" should collect that at the call site; adding a `skipped` array
+ * to the public shape here was judged not worth it without one.
+ *
  * Roles are mapped to the names a consumer actually writes in code. There is no
  * `secondary` or `neutral` in `BRAND_COLOR_ROLES`, so `accent` becomes
  * `secondary` and `muted` becomes `neutral`: a Tailwind config with
@@ -69,14 +77,16 @@ export interface DesignTokenSet {
   shadows: DesignScaleToken[];
 }
 
+/** Frozen all the way down: a shallow freeze left `.colors` mutable, so a
+ *  caller pushing into it changed the shared constant for everyone. */
 export const EMPTY_DESIGN_TOKEN_SET: DesignTokenSet = Object.freeze({
-  colors: [],
-  fonts: [],
-  typeScale: [],
-  radii: [],
-  spacing: [],
-  shadows: [],
-});
+  colors: Object.freeze<DesignColorToken[]>([]),
+  fonts: Object.freeze<DesignFontToken[]>([]),
+  typeScale: Object.freeze<DesignTypeToken[]>([]),
+  radii: Object.freeze<DesignScaleToken[]>([]),
+  spacing: Object.freeze<DesignScaleToken[]>([]),
+  shadows: Object.freeze<DesignScaleToken[]>([]),
+}) as DesignTokenSet;
 
 /**
  * Role to the name a consumer writes in code.
@@ -115,7 +125,10 @@ const ROLE_ORDER: readonly BrandColorRole[] = [
 
 /** Namespaces that say where a token lives rather than what it is, so
  *  `--brand-primary` and `--color-primary` both export as `primary`. This is
- *  also what makes a css-vars export re-import as the same set. */
+ *  also what lets a css-vars export re-import as the same COLOURS, FONTS,
+ *  FONT SIZES and scales — not as the same set. The `--leading-*`,
+ *  `--weight-*` and `--tracking-*` lines it writes have no classifier, so they
+ *  are export-only and a round trip loses them. */
 const TOKEN_NAMESPACES = /^(brand|color|colour|colors|clr|theme|palette|ds|token|tokens)-/;
 
 /** `Primary Light` → `primary-light`, `primaryLight` → `primary-light`,
@@ -230,8 +243,13 @@ export function designTokensFromBrandSummary(summary: BrandSummary): DesignToken
   const typeTaken = new Set<string>();
   const typeScale: DesignTypeToken[] = [];
   for (const step of summary.typeScale) {
-    const key = slugifyTokenName(step.name);
-    if (!key || !Number.isFinite(step.sizePx)) continue;
+    const slug = slugifyTokenName(step.name);
+    if (!slug || !Number.isFinite(step.sizePx)) continue;
+    // Stripped here too. CATEGORY_PREFIXES claimed both entry points did this,
+    // but the summary path did not, so a step named `font-size-h1` exported as
+    // `fontSize: { "font-size-h1" }` from brand.json and as `{ h1 }` from the
+    // same system's token CSS.
+    const key = stripCategory(slug, CATEGORY_PREFIXES.typeScale);
     typeScale.push({
       key: uniqueKey(key, typeTaken),
       sizePx: step.sizePx,
@@ -253,38 +271,129 @@ export function designTokensFromBrandSummary(summary: BrandSummary): DesignToken
 }
 
 /**
- * Strip `/* … *\/` comments in one pass.
+ * Strip `/* … *\/` comments in one pass, skipping quoted strings.
  *
  * Deliberately not a regex. `/\/\*[\s\S]*?\*\//g` restarts its lazy scan at every
  * `/*` and runs it to the end of the input, so a file holding many unclosed
  * ones costs quadratic time — CodeQL's js/polynomial-redos. A saved system's
  * token CSS is model-written, so that is reachable input.
  *
- * An unterminated comment runs to end of file, which is what the CSS spec says
- * and what a browser does. The regex left that text in place, where the parse
- * below read commented-out declarations as live.
+ * Quote-aware because it has to be: `content: "/*"` opened a comment that then
+ * ran to end of file and silently ate every token after it. An unterminated
+ * comment outside a string still runs to the end, which is what the CSS spec
+ * says and what a browser does — the regex left that text in place, where the
+ * parse read commented-out declarations as live.
  *
- * The same scanner exists in brand-repo.ts (XYNE-66819). Both are deliberate
- * copies while these PRs are independent; they fold into one module once the
- * design-systems series has landed.
+ * The same scanner exists in brand-repo.ts (XYNE-66819), which needs the same
+ * quote fix. Both are deliberate copies while these PRs are independent; they
+ * fold into one module once the design-systems series has landed.
  */
 function stripCssComments(css: string): string {
   let out = "";
-  let from = 0;
-  for (;;) {
-    const start = css.indexOf("/*", from);
-    if (start === -1) return out + css.slice(from);
-    out += `${css.slice(from, start)} `;
-    const end = css.indexOf("*/", start + 2);
-    if (end === -1) return out;
-    from = end + 2;
+  let index = 0;
+  let quote: string | null = null;
+  while (index < css.length) {
+    const char = css[index] as string;
+    if (quote) {
+      out += char;
+      if (char === "\\" && index + 1 < css.length) {
+        out += css[index + 1];
+        index += 2;
+        continue;
+      }
+      if (char === quote) quote = null;
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      out += char;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && css[index + 1] === "*") {
+      const end = css.indexOf("*/", index + 2);
+      out += " ";
+      if (end === -1) return out;
+      index = end + 2;
+      continue;
+    }
+    out += char;
+    index += 1;
   }
+  return out;
+}
+
+/**
+ * The declarations of every top-level `:root` (and Tailwind v4 `@theme`) block,
+ * concatenated.
+ *
+ * Scoped on purpose. Reading declarations from anywhere in the file exported a
+ * `prefers-color-scheme: dark` override as a SECOND colour — `primary` and
+ * `primary-2` — so a download carried phantom tokens nobody authored. Dark
+ * variants are XYNE-66829's; until then only the light set is exported.
+ *
+ * Nested blocks inside the matched block (a `@media` inside `@theme`, keyframe
+ * stops) are skipped too: a value inside one is not a theme token.
+ */
+function topLevelThemeDeclarations(css: string): string {
+  const out: string[] = [];
+  let index = 0;
+  // A forward walk at depth 0 only. Testing the text between the keyword and
+  // its brace was not enough: the `:root` INSIDE
+  // `@media (prefers-color-scheme: dark) { :root { … } }` has clean selector
+  // text too, so the dark override still came through as `primary-2`. What
+  // matters is that the block itself is top level.
+  while (index < css.length) {
+    const open = css.indexOf("{", index);
+    if (open === -1) break;
+    const selector = css.slice(index, open);
+    let depth = 0;
+    let close = open;
+    for (; close < css.length; close += 1) {
+      if (css[close] === "{") depth += 1;
+      else if (css[close] === "}") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    if (/:root|@theme/.test(selector)) {
+      // Top level of THIS block: a nested rule's declarations are not tokens.
+      const body = css.slice(open + 1, close);
+      out.push(body.replace(/\{[^{}]*\}/g, " ").replace(/[^;{}]*\{/g, " "));
+    }
+    index = close + 1;
+  }
+  return out.join(";\n");
 }
 
 /** The value runs to the `;` or `}` that ends it, and is trimmed in code. A
  *  trailing `\s*(?:;|$)` would have competed with `([^;{}]+)` for the same
  *  spaces — the second half of the same ReDoS. */
 const CSS_DECLARATION = /--([a-z0-9][a-z0-9_-]*)\s*:\s*([^;{}]*)/gi;
+
+/** Root font size, for converting `rem` and `em`. The browser default, and
+ *  what every design system this exports from assumes. */
+const ROOT_FONT_PX = 16;
+
+/**
+ * A CSS length in px, or null when it is not a plain length.
+ *
+ * `Number.parseFloat` read `0.875rem` as `0.875` and the export wrote
+ * `0.875px` — a Tailwind config with microscopic type, and most real token
+ * files are in `rem`. Anything that is not a bare px/rem/em length —
+ * `clamp()`, `calc()`, a percentage — is refused rather than having its
+ * leading number read off.
+ */
+function parseLengthPx(value: string): number | null {
+  const match = /^(-?(?:\d+\.?\d*|\.\d+))(px|rem|em)?$/.exec(value.trim());
+  if (!match) return null;
+  const size = Number.parseFloat(match[1] as string);
+  if (!Number.isFinite(size)) return null;
+  const unit = match[2];
+  if (unit === "rem" || unit === "em") return size * ROOT_FONT_PX;
+  return size;
+}
 
 /** Which group a custom property belongs in, from the name alone. Order
  *  matters: `--font-size-lg` is a type step, not a font family. */
@@ -335,7 +444,7 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
   const shadowKeys = new Set<string>();
   const seenFonts = new Set<DesignFontToken["key"]>();
 
-  for (const match of stripCssComments(css).matchAll(CSS_DECLARATION)) {
+  for (const match of topLevelThemeDeclarations(stripCssComments(css)).matchAll(CSS_DECLARATION)) {
     const rawName = match[1];
     const rawValue = match[2];
     if (!rawName || !rawValue) continue;
@@ -352,8 +461,13 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
       case "fonts": {
         // `--font-heading: Inter, system-ui` — split the stack back apart so
         // Tailwind gets an array and CSS gets the same string it came from.
-        const slot = FONT_KEYS[key.replace(/^font-?/, "")] ?? "body";
-        if (seenFonts.has(slot)) break;
+        //
+        // Only a real font slot counts. Defaulting to `body` meant
+        // `--font-weight-bold: 700` landed there as the stack `["700"]`, and
+        // first-wins then dropped the actual `--font-body` that followed it.
+        // `--font-line-height-*` and `--font-letter-spacing-*` did the same.
+        const slot = FONT_KEYS[key.replace(/^font-?/, "").replace(/^family-?/, "")];
+        if (!slot || seenFonts.has(slot)) break;
         const stack = value
           .split(",")
           .map((part) => part.trim().replace(/^["']|["']$/g, ""))
@@ -364,8 +478,8 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
         break;
       }
       case "typeScale": {
-        const sizePx = Number.parseFloat(value);
-        if (!Number.isFinite(sizePx)) break;
+        const sizePx = parseLengthPx(value);
+        if (sizePx === null) break;
         const stepKey = stripCategory(key, CATEGORY_PREFIXES.typeScale);
         typeScale.push({ key: uniqueKey(stepKey, typeKeys), sizePx });
         break;
@@ -453,9 +567,25 @@ function toTailwind(tokens: DesignTokenSet): string {
 
 /** A `:root` block. Font stacks are joined here — the CSS half of the one real
  *  difference between these formats. */
+/**
+ * A value that cannot end its own declaration.
+ *
+ * The CSS entry point can't produce one — its regex stops at `;{}` — but the
+ * brand.json path can: a model-written radius of `4px;} body{display:none`
+ * wrote a whole extra rule into the file the user downloads. Refused rather
+ * than escaped, because there is no legitimate token value containing these.
+ */
+const isSafeCssValue = (value: string): boolean => !/[;{}]/.test(value);
+
+/** A star followed by a slash would close the header comment early, so it is
+ *  removed from a system name before the name goes in one. */
+const commentSafe = (value: string): string => value.replace(/\*+\//g, "").trim();
+
 function toCssVars(tokens: DesignTokenSet): string {
   const lines: string[] = [];
-  const push = (name: string, value: string) => lines.push(`  --${name}: ${value};`);
+  const push = (name: string, value: string) => {
+    if (isSafeCssValue(value)) lines.push(`  --${name}: ${value};`);
+  };
 
   for (const color of tokens.colors) push(`color-${color.key}`, color.hex);
   for (const font of tokens.fonts) push(`font-${font.key}`, font.stack.join(", "));
@@ -471,7 +601,8 @@ function toCssVars(tokens: DesignTokenSet): string {
   for (const item of tokens.spacing) push(`space-${item.key}`, item.value);
   for (const item of tokens.shadows) push(`shadow-${item.key}`, item.value);
 
-  const header = tokens.name ? `/* ${tokens.name} */\n` : "";
+  const safeName = tokens.name ? commentSafe(tokens.name) : "";
+  const header = safeName ? `/* ${safeName} */\n` : "";
   return `${header}:root {\n${lines.join("\n")}${lines.length > 0 ? "\n" : ""}}\n`;
 }
 
