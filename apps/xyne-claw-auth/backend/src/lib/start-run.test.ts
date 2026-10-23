@@ -21,7 +21,7 @@ vi.mock("xyne-claw-shared", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
 }));
 
-const { startRun } = await import("./start-run.js");
+const { startRun, withServerOwnedDesignSystemRef } = await import("./start-run.js");
 
 describe("startRun validation failures", () => {
   const input = (body: Record<string, unknown>) => ({
@@ -87,5 +87,72 @@ describe("startRun validation failures", () => {
       status: 403,
       error: "This token does not have the runs:write scope",
     });
+  });
+});
+
+/**
+ * XYNE-66827. The design system ref decides the CSS branded into downloaded
+ * PDFs and inlined into email drafts sent from the user's own mailbox, so where
+ * it comes from is a security property, not a detail.
+ *
+ * Delete this block with the function when XYNE-66821 lands.
+ */
+describe("withServerOwnedDesignSystemRef", () => {
+  const resolved = {
+    id: "ds-trusted",
+    name: "Trusted",
+    designMd: "# Trusted",
+    tokensCss: ":root{--brand-primary:#0B5FFF}",
+    origin: "conversation" as const,
+  };
+  const spoofed = {
+    id: "ds-attacker",
+    name: "Attacker",
+    designMd: "# Attacker",
+    tokensCss: ":root{--brand-primary:#FF0000}",
+    origin: "agent" as const,
+  };
+
+  it("replaces a caller-supplied ref with the resolved one", () => {
+    const out = withServerOwnedDesignSystemRef(
+      { designSystemRef: spoofed, other: "kept" },
+      resolved,
+    );
+    expect(out["designSystemRef"]).toEqual(resolved);
+    expect(out["other"]).toBe("kept");
+  });
+
+  it("drops a caller-supplied ref entirely when nothing resolves", () => {
+    // The hole this closes: the ref was only ever SET on a hit, so with no
+    // stored system a spoofed ref survived into the tool context and branded
+    // the run.
+    const out = withServerOwnedDesignSystemRef({ designSystemRef: spoofed }, null);
+    expect(out).not.toHaveProperty("designSystemRef");
+  });
+
+  it("carries the resolved ref when the caller supplied none", () => {
+    expect(
+      withServerOwnedDesignSystemRef({}, resolved)["designSystemRef"],
+    ).toEqual(resolved);
+  });
+
+  it("sets no key at all when there is no system and no spoof", () => {
+    expect(withServerOwnedDesignSystemRef({ a: 1 }, null)).toEqual({ a: 1 });
+  });
+
+  it("copies only the five ref fields, so nothing else rides along", () => {
+    const out = withServerOwnedDesignSystemRef({}, {
+      ...resolved,
+      // A field a future ResolvedDesignSystem might carry but the wire shape
+      // must not.
+      secret: "do not forward",
+    } as unknown as typeof resolved);
+    expect(Object.keys(out["designSystemRef"] as object).sort()).toEqual([
+      "designMd",
+      "id",
+      "name",
+      "origin",
+      "tokensCss",
+    ]);
   });
 });
