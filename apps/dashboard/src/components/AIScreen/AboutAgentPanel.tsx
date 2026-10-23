@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactElement, type ReactNode } from 'react';
-import { BarChart3, Bug, ChevronDown, Settings2 } from 'lucide-react';
+import { Bug, ChevronDown, Settings2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useClawAgentDetail } from '../../hooks/useClawAgentDetail';
 import { listConversationRuns } from '../../services/claw/clawRunsService';
@@ -14,11 +14,10 @@ import {
 import { agentIdentity } from '../Chat/XyneAISidebar/utils/XyneAIUtils';
 import { cn } from '../../utils/classNames';
 import { Popover } from '../ui/Popover';
+import { TruncatedTooltip } from '../ui/Tooltip/TruncatedTooltip';
 import { Link } from '../ui/WorkspaceLink';
 import { AgentGlyph } from './AIAgentSelector';
 import { useAgentDirectory } from './ConversationAgents';
-
-const VISIBLE_TOOLS = 8;
 
 interface AboutAgentPanelProps {
   agentSlug: string;
@@ -103,8 +102,7 @@ function AboutAgentContent({
     refetchInterval: running ? 5000 : false,
   });
 
-  const tools = agent?.tools ?? [];
-  const hiddenTools = tools.length - VISIBLE_TOOLS;
+  const description = agent?.description || 'No description set yet.';
 
   return (
     <div data-testid='about-agent-panel' className='flex flex-col'>
@@ -131,9 +129,14 @@ function AboutAgentContent({
           {agentLoading ? (
             <div className='mt-1 h-3 w-40 animate-pulse rounded bg-muted' />
           ) : (
-            <p className='mt-0.5 line-clamp-2 text-xs text-muted-foreground'>
-              {agent?.description || 'No description set yet.'}
-            </p>
+            <TruncatedTooltip content={description} side='bottom'>
+              <p
+                data-testid='about-agent-description'
+                className='mt-0.5 line-clamp-2 text-xs text-muted-foreground'
+              >
+                {description}
+              </p>
+            </TruncatedTooltip>
           )}
         </div>
       </div>
@@ -150,27 +153,6 @@ function AboutAgentContent({
         />
       </Section>
 
-      {tools.length > 0 && (
-        <Section title={`Tools (${tools.length})`}>
-          <div data-testid='about-agent-tools' className='flex flex-wrap gap-1'>
-            {tools.slice(0, VISIBLE_TOOLS).map(t => (
-              <span
-                key={t.id}
-                title={t.tool.description || t.tool.name}
-                className='max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground'
-              >
-                {t.tool.name}
-              </span>
-            ))}
-            {hiddenTools > 0 && (
-              <span className='rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground'>
-                +{hiddenTools} more
-              </span>
-            )}
-          </div>
-        </Section>
-      )}
-
       <div className='flex flex-col gap-0.5 border-t border-border p-1.5'>
         <PanelAction
           icon={<Bug className='size-4' aria-hidden />}
@@ -181,17 +163,9 @@ function AboutAgentContent({
           testId='about-agent-debugger'
         />
         <PanelLink
-          icon={<BarChart3 className='size-4' aria-hidden />}
-          label='Activity'
-          hint='All runs of this agent'
-          to={agentPagePath(agentSlug, 'activity')}
-          onClick={onNavigate}
-          testId='about-agent-activity'
-        />
-        <PanelLink
           icon={<Settings2 className='size-4' aria-hidden />}
           label='Configure agent'
-          hint='Persona, tools, knowledge'
+          hint='Settings, tools and runs'
           to={agentPagePath(agentSlug, 'persona')}
           onClick={onNavigate}
           testId='about-agent-configure'
