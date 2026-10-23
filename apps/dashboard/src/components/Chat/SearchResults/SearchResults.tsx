@@ -83,8 +83,9 @@ import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWit
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar, buildFilterSummary, sortSummary } from './SearchFilterBar';
-import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
-import { parseSearchFilters } from '../../../utils/searchFilterParser';
+import { SearchQueryInput, holdsUnsettledFilter, type QueryToken } from './SearchQueryInput';
+import type { QuickSwitchTarget } from './filters/useQuerySuggestions';
+import { parseSearchFilters, withoutNameFilters } from '../../../utils/searchFilterParser';
 import {
   useAllVisibleChannels,
   useAllChannels,
@@ -135,6 +136,7 @@ import { toast } from 'sonner';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
 import { SearchFeedbackPopover, useCanPostSearchFeedback } from '../SearchFeedback';
@@ -286,6 +288,9 @@ const SearchResults = (): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const query = searchParams.get('query')?.trim() ?? '';
+  // The current query, for callbacks that must stay stable (handleSearchComplete).
+  const queryRef = useRef(query);
+  queryRef.current = query;
   // Opened on what was typed as Cmd+K grew into it (see TYPED_QUERY_STATE_KEY).
   const locationState: unknown = useLocation().state;
   const typedQuery = !!(locationState as Record<string, unknown> | null)?.[TYPED_QUERY_STATE_KEY];
@@ -426,6 +431,19 @@ const SearchResults = (): ReactElement => {
   // up). It lands a render later, by when the user may have typed on: its arrival is not an
   // outside change, so it must not reset the box or the search to it.
   const ownQueryWriteRef = useRef<string | null>(null);
+  // The same write once the URL sync has stripped its filter syntax (desiredSearch): the box's own
+  // text too, so it doesn't reset the box (dropping `after:…` and anything typed after it).
+  // Null when stripping changes nothing. Cleared when it arrives or something else does.
+  const ownStrippedWriteRef = useRef<string | null>(null);
+  // A query this page is about to write from the box's text: both forms are its own.
+  const expectOwnWrite = useCallback((text: string): void => {
+    ownQueryWriteRef.current = text;
+    const stripped = parseSearchFilters(text).searchText.trim();
+    ownStrippedWriteRef.current = stripped === text ? null : stripped;
+  }, []);
+  // The box's text the results on screen were fetched for, without unpicked names (which never
+  // filter anything): what a recent saves. Null when the URL changed from elsewhere.
+  const recentQueryRef = useRef<string | null>(null);
   // The URL follows the results: the hook hands back the query these were fetched for, so the
   // address bar is shareable without anyone pressing Enter. Stable (it only reads refs): the hook
   // lists it as a search-effect dep, and a new function each render looped an empty search.
@@ -440,10 +458,16 @@ const SearchResults = (): ReactElement => {
       // compared the same way, but the URL gets what the box holds, filters and all.
       const boxText = searchTextRef.current.trim();
       if (searchedQuery.trim() !== parseSearchFilters(boxText).searchText.trim()) return;
-      ownQueryWriteRef.current = boxText;
+      // Nor while the box holds a filter that isn't settled (`from:Alice Smith` demoted to be
+      // corrected, a bare `board:`, a date still being picked): the URL sync would strip that
+      // text, and the box would follow it. Recents meanwhile use what was searched.
+      // Typed filters included (`bug board:eng`), so a recent re-runs the same search.
+      recentQueryRef.current = withoutNameFilters(boxText);
+      if (holdsUnsettledFilter(boxText)) return;
+      if (boxText !== queryRef.current) expectOwnWrite(boxText);
       handleQuerySubmitRef.current(boxText);
     },
-    [],
+    [expectOwnWrite],
   );
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
@@ -517,11 +541,22 @@ const SearchResults = (): ReactElement => {
   const localResultsPending = localResultsShown && hasLocalQuery && isLocalSearchPending;
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
-  const queryIsOwnWrite = ownQueryWriteRef.current === query;
+  const queryIsOwnWrite =
+    ownQueryWriteRef.current === query || ownStrippedWriteRef.current === query;
   useEffect(() => {
-    const ownWrite = ownQueryWriteRef.current === query;
-    ownQueryWriteRef.current = null;
-    if (!ownWrite) setText(query);
+    const raw = ownQueryWriteRef.current === query;
+    const stripped = ownStrippedWriteRef.current === query;
+    // The raw write arrives first and the stripped one after it; anything else ends both.
+    if (raw) {
+      ownQueryWriteRef.current = null;
+    } else {
+      ownQueryWriteRef.current = null;
+      ownStrippedWriteRef.current = null;
+    }
+    if (!raw && !stripped) {
+      recentQueryRef.current = null;
+      setText(query);
+    }
     setSelectedPanel(null);
     setSelected([]);
     setRelevantIds(() => new Set());
@@ -880,6 +915,14 @@ const SearchResults = (): ReactElement => {
     [query, setSearchParams],
   );
   handleQuerySubmitRef.current = handleQuerySubmit;
+  // Enter in the box: its text is the page's own write, raw and stripped.
+  const submitFromBox = useCallback(
+    (next: string): void => {
+      if (next && next !== query) expectOwnWrite(next);
+      handleQuerySubmit(next);
+    },
+    [query, expectOwnWrite, handleQuerySubmit],
+  );
 
   /**
    * Identity key of the last query saved as a recent. Opening several results from one search fires
@@ -889,12 +932,15 @@ const SearchResults = (): ReactElement => {
   const lastSavedKeyRef = useRef<string | null>(null);
 
   const saveCurrentSearchAsRecent = useCallback((): void => {
-    const identityKey = identityKeyFor({ text: query, filterChips: activeFilterChips });
+    // The box's text the opened results were fetched for; the URL's query has its typed filter
+    // syntax stripped, or lags while the box holds an unsettled filter.
+    const text = recentQueryRef.current ?? query;
+    const identityKey = identityKeyFor({ text, filterChips: activeFilterChips });
     if (identityKey === lastSavedKeyRef.current) return;
     lastSavedKeyRef.current = identityKey;
 
     saveCurrentSearchQuery(authContext.workspaceId ?? '', currentUserId, {
-      text: query,
+      text,
       filterChips: activeFilterChips,
       tab: docTypeToTabType(filters.docType),
       onlyMyChannels: filters.onlyMyChannels,
@@ -1046,8 +1092,19 @@ const SearchResults = (): ReactElement => {
     },
     [paintSelection],
   );
-  useEffect(() => selectResult(carriedResultId), [carriedResultId, selectResult]);
-  resetSelectionRef.current = (): void => selectResult(null);
+  // The card the arrows picked: the only pick Enter on the page itself opens, wherever the
+  // pointer is.
+  const keyPickRef = useRef<string | null>(null);
+  useEffect(() => {
+    // The palette's carried highlight may be its resting first row or one under the pointer, so
+    // it isn't a key pick: Enter from the box opens it, Enter from the page waits for the arrows.
+    keyPickRef.current = null;
+    selectResult(carriedResultId);
+  }, [carriedResultId, selectResult]);
+  resetSelectionRef.current = (): void => {
+    keyPickRef.current = null;
+    selectResult(null);
+  };
 
   // "Search now opens in full page" — owed on the first open after the default switched.
   const [announcingFullPage, setAnnouncingFullPage] = useState(false);
@@ -1081,11 +1138,19 @@ const SearchResults = (): ReactElement => {
     settled: !isSearchPending && !isLoading && !localResultsPending,
   };
 
-  // ↑/↓ move the selection; Enter opens it only after the arrows were used (until then Enter in the
-  // query box runs the search). An open typeahead keeps the arrows (it prevents them first).
+  // What Enter in the query box opens (see the keys effect below); the box asks through this.
+  const openHighlightedRef = useRef<() => boolean>(() => false);
+  const openHighlightedFromBox = useCallback((): boolean => openHighlightedRef.current(), []);
+  // The box threw its edit away (Escape, Clear): the pick goes with it, as a new edit's does.
+  const resetSelectionFromBox = useCallback((): void => resetSelectionRef.current(), []);
+  // Compare mode keeps the cards inert with CSS only, which a synthetic click goes through.
+  const compareModeRef = useRef(compareMode);
+  compareModeRef.current = compareMode;
+
+  // ↑/↓ move the selection and Enter opens the highlighted card, as in the palette. An open
+  // typeahead keeps both (the query box handles them before they get here).
   useEffect(() => {
     if (isMobile) return;
-    let navigating = false;
     const cards = (): HTMLElement[] =>
       Array.from(document.querySelectorAll<HTMLElement>(`[${RESULT_CARD_ATTR}]`));
     const selectedCard = (list: HTMLElement[]): number =>
@@ -1118,23 +1183,73 @@ const SearchResults = (): ReactElement => {
       event.altKey ||
       isDialogOpenOverPage() ||
       !forTheCards(event.target);
-    // Capture, so Enter reaches here before the query box turns it into a search.
-    const onEnter = (event: KeyboardEvent): void => {
-      // An IME's Enter confirms the composition; it is not a pick.
-      if (event.key !== 'Enter' || event.isComposing || !navigating || ignored(event)) return;
-      // Focus moved into a card (Tab): Enter is for that card, not the arrows' pick — and a native
-      // control inside it keeps its own Enter.
-      const focusedCard =
-        event.target instanceof Element ? event.target.closest(`[${RESULT_CARD_ATTR}]`) : null;
-      if (focusedCard && (event.target as Element).closest('button, a[href], input, textarea')) {
-        return;
+    // The highlighted card, opened as a click on it would. From the box (`atRest`) it is the one
+    // the arrows or the pointer picked, or one carried over from the palette, else the first card
+    // once the search has settled — the palette's resting Enter opens its first row; until then
+    // the highlight can still be the last search's, so nothing opens. From the page itself only a
+    // pick made with the keys counts.
+    const openHighlighted = ({ atRest }: { atRest: boolean }): boolean => {
+      if (compareModeRef.current) return false;
+      const shown = shownResultIdRef.current;
+      if (!shown) return false;
+      if (atRest) {
+        const picked = selectionRef.current === shown;
+        if (!picked && !selectionContextRef.current.settled) return false;
+      } else if (keyPickRef.current !== shown) {
+        return false;
       }
       const list = cards();
-      const target = (focusedCard ?? list[selectedCard(list)])?.firstElementChild;
-      if (!(target instanceof HTMLElement)) return;
+      const target = list[selectedCard(list)]?.firstElementChild;
+      if (!(target instanceof HTMLElement)) return false;
+      target.click();
+      return true;
+    };
+    // The query box: Enter there is the palette's Enter (the box gives its typeahead Enter first).
+    openHighlightedRef.current = (): boolean =>
+      !isDialogOpenOverPage() && openHighlighted({ atRest: true });
+    // Enter with focus on a card or the page itself. Capture, ahead of the page's other Enter
+    // handlers; the query box routes its own (above).
+    const onEnter = (event: KeyboardEvent): void => {
+      if (event.key !== 'Enter') return;
+      // An IME's Enter confirms the composition (keyCode 229 covers Safari's); it is not a pick.
+      // Nor is Shift+Enter or a held Enter's repeats.
+      if (event.isComposing || event.keyCode === 229 || event.shiftKey || event.repeat) return;
+      if (ignored(event)) return;
+      if (event.target instanceof Element && event.target.id === FULL_PAGE_QUERY_INPUT_ID) return;
+      // Focus moved into a card (Tab): Enter is for that card, not the arrows' pick — and a
+      // control inside it (a link, a mention chip) keeps its own Enter. The card's opener (its
+      // first element) is no such control: most have no Enter of their own.
+      const focusedCard =
+        event.target instanceof Element ? event.target.closest(`[${RESULT_CARD_ATTR}]`) : null;
+      const control =
+        event.target instanceof Element ? event.target.closest(FOCUSABLE_CONTROL) : null;
+      if (
+        focusedCard &&
+        control &&
+        focusedCard.contains(control) &&
+        control !== focusedCard.firstElementChild
+      ) {
+        return;
+      }
+      if (focusedCard) {
+        // Compare mode keeps the cards inert.
+        if (compareModeRef.current) {
+          // Inert, including a card whose opener is a native button with its own Enter.
+          event.preventDefault();
+          return;
+        }
+        const target = focusedCard.firstElementChild;
+        if (!(target instanceof HTMLElement)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        target.click();
+        return;
+      }
+      // From the page itself only a card the arrows picked opens — not the resting first one, nor
+      // one under the pointer: nothing on the page says Enter is for the results.
+      if (!openHighlighted({ atRest: false })) return;
       event.preventDefault();
       event.stopPropagation();
-      target.click();
     };
     // Bubble, so an open typeahead in the query box gets the arrows first (it prevents them).
     const onArrow = (event: KeyboardEvent): void => {
@@ -1148,15 +1263,15 @@ const SearchResults = (): ReactElement => {
       const card = list[next];
       if (!card) return;
       event.preventDefault();
-      navigating = true;
-      selectResult(card.getAttribute(RESULT_CARD_ATTR));
+      keyPickRef.current = card.getAttribute(RESULT_CARD_ATTR);
+      selectResult(keyPickRef.current);
       card.scrollIntoView({ block: 'nearest' });
     };
-    // Editing the query in any way (typing, Delete, a paste, IME) hands Enter back to the search,
-    // and is a new search for the selection.
+    // Editing the query in any way (typing, Delete, a paste, IME) is a new search: the pick goes,
+    // and Enter waits for the new results to settle on their first card.
     const onQueryEdit = (event: Event): void => {
       if (event.target instanceof Element && queryBoxRef.current?.contains(event.target)) {
-        navigating = false;
+        keyPickRef.current = null;
         selectResult(null);
       }
     };
@@ -1165,6 +1280,7 @@ const SearchResults = (): ReactElement => {
     window.addEventListener('input', onQueryEdit, true);
     window.addEventListener('pointerdown', onPointerDown, true);
     return (): void => {
+      openHighlightedRef.current = (): boolean => false;
       window.removeEventListener('keydown', onEnter, true);
       window.removeEventListener('keydown', onArrow);
       window.removeEventListener('input', onQueryEdit, true);
@@ -1245,10 +1361,17 @@ const SearchResults = (): ReactElement => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [query]);
 
+  // A quick switch waiting for the box's emptied search to become the current one (openTarget).
+  const pendingOpenRef = useRef<QuickSwitchTarget | null>(null);
+  const openTargetNowRef = useRef<(target: QuickSwitchTarget) => void>(() => undefined);
+
   // Close any open panel and refresh the async race key whenever the search or filters change
   useEffect(() => {
     fullSearchKeyRef.current = fullSearchKey;
     setSelectedPanel(null);
+    const pending = pendingOpenRef.current;
+    pendingOpenRef.current = null;
+    if (pending) openTargetNowRef.current(pending);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
@@ -1302,6 +1425,35 @@ const SearchResults = (): ReactElement => {
       })();
     },
     [allChannelsForNav, currentUserId],
+  );
+  // `@person` / `#channel` picked in an otherwise empty box: the palette's quick switch, opened
+  // beside the results as a click on its card would. The box has just been emptied, so the search
+  // is committed empty first and the panel opens once that search is the current one — a panel
+  // opened before it would be closed by the change.
+  const openTargetNow = useCallback(
+    (target: QuickSwitchTarget): void => {
+      if (target.kind === 'user') openUserDm(target.id);
+      else setSelectedPanel({ kind: 'channel', channelId: target.id });
+    },
+    [openUserDm],
+  );
+  openTargetNowRef.current = openTargetNow;
+  const openTarget = useCallback(
+    (target: QuickSwitchTarget, rank: number): void => {
+      // Logged as a result open, as the palette's quick switch is.
+      onResultClick(
+        { id: target.id, type: target.kind } as DisplaySearchResult,
+        rank,
+        target.kind === 'channel' ? target.id : undefined,
+      );
+      if (!query) {
+        openTargetNow(target);
+        return;
+      }
+      pendingOpenRef.current = target;
+      handleQuerySubmit('');
+    },
+    [query, openTargetNow, handleQuerySubmit, onResultClick],
   );
   // Metrics for a result open. `rank` is the card's 1-indexed position within its section,
   // the same meaning cmdK's rankPosition has. Message cards open through context handlers
@@ -1396,7 +1548,9 @@ const SearchResults = (): ReactElement => {
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
-        <div className='pt-4 flex items-center gap-2'>
+        {/* The window's drag strip in the desktop app, as AppNavigator is on every other screen: the
+            row's empty space moves the window, its controls opt out so they keep their clicks. */}
+        <div className='pt-4 flex items-center gap-2' style={APP_DRAG_STYLE}>
           {/* This page is only ever arrived at from somewhere — the cmd+K palette, or a
               link out of it — and it is the one screen that renders no AppNavigator, so it
               had no in-app way back at all. Going back lands on the palette's own history
@@ -1405,6 +1559,7 @@ const SearchResults = (): ReactElement => {
             type='button'
             aria-label='Back'
             onClick={() => void navigate(-1)}
+            style={APP_NO_DRAG_STYLE}
             className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
             data-track-category='SEARCH_RESULTS'
             data-track-name='GO_BACK'
@@ -1419,27 +1574,31 @@ const SearchResults = (): ReactElement => {
             type='button'
             aria-label='Forward'
             onClick={() => void navigate(1)}
+            style={APP_NO_DRAG_STYLE}
             className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
             data-track-category='SEARCH_RESULTS'
             data-track-name='GO_FORWARD'
           >
             <ArrowRight size={16} />
           </button>
-          <div ref={queryBoxRef} className='flex-1 min-w-0'>
+          <div ref={queryBoxRef} className='flex-1 min-w-0' style={APP_NO_DRAG_STYLE}>
             <SearchQueryInput
               query={query}
               queryIsOwnWrite={queryIsOwnWrite}
               tokens={queryTokens}
               filters={filters}
               onFiltersChange={handleFiltersChange}
-              onSubmit={handleQuerySubmit}
+              onSubmit={submitFromBox}
               onLiveChange={setText}
+              onOpenSelection={openHighlightedFromBox}
+              onOpenTarget={openTarget}
+              onResetSelection={resetSelectionFromBox}
               autoFocus={!isMobile}
               focusRequest={searchFocusRequest}
             />
           </div>
           {!isMobile && (
-            <div className='relative shrink-0'>
+            <div className='relative shrink-0' style={APP_NO_DRAG_STYLE}>
               <Tooltip content={<span>Collapse to modal</span>} side='bottom'>
                 <button
                   type='button'

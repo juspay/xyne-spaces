@@ -123,7 +123,7 @@ export function parseSearchFilters(text: string) {
   }
 
   // Strip from:/in:/assignee: and any trailing text (handled as filter chips, not text filters)
-  searchText = searchText.replace(/\b(from|in|assignee):\s*\S*/gi, '').trim();
+  searchText = withoutNameFilters(searchText);
 
   // Clean incomplete filter patterns (`priority` omitted on purpose — see note above).
   searchText = searchText
@@ -194,6 +194,41 @@ export function hasIncompleteType(types: string[]): boolean {
  */
 export function getBackendTypes(types: string[]): string[] {
   return types.filter(t => BACKEND_TYPES.includes(t));
+}
+
+// A person or channel filter's prefix: set only by picking, never parsed from text.
+const NAME_FILTER_PREFIX = /\b(?:from|in|assignee):/i;
+const NAME_FILTERS_GLOBAL = /\b(?:from|in|assignee):\s*\S*/gi;
+
+/** The text with every `from:`/`in:`/`assignee:` and the word after it taken out. */
+export function withoutNameFilters(text: string): string {
+  return text.replace(NAME_FILTERS_GLOBAL, '').trim();
+}
+
+/**
+ * Every `from:`/`in:`/`assignee:` with a name typed after it that no pick has resolved: its prefix
+ * and where its name ends — the next `word:` or the end of the text, as far as the typeahead reads
+ * the name (`from:Arjun Rao` ends after `Rao`).
+ */
+export function findUnresolvedNames(
+  text: string,
+): Array<{ prefix: 'from:' | 'in:' | 'assignee:'; end: number }> {
+  return [...text.matchAll(/\b(from|in|assignee):\s*\S.*?(?=\s+\S+:|$)/gi)].map(match => ({
+    prefix: `${(match[1] ?? '').toLowerCase()}:` as 'from:' | 'in:' | 'assignee:',
+    end: (match.index ?? 0) + match[0].length,
+  }));
+}
+
+/**
+ * Filter syntax `parseSearchFilters` drops without turning it into a filter: a `from:`/`in:`/
+ * `assignee:` (with or without a name), or a filter prefix with nothing after it yet. Text
+ * holding either loses that part on its way through the URL.
+ */
+export function hasDroppedFilterSyntax(text: string): boolean {
+  return (
+    NAME_FILTER_PREFIX.test(text) ||
+    /\b(?:board|tags|before|after|on|range|stage|status|type):\s*$/i.test(text)
+  );
 }
 
 const INCOMPLETE_MENTION_FILTER_REGEX = /\b(from|in|assignee):\S+/gi;

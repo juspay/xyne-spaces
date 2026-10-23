@@ -12,7 +12,9 @@ import { ArrowUpDown, Check, ChevronDown, Hash, SlidersHorizontal, User, X } fro
 import { Button } from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
-import { useUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useUsers, useUsersById } from '../../../hooks/useUsers';
+import { capEachSection, useMentionCandidates } from '../../../search/useMentionCandidates';
+import { TYPEAHEAD_LIST_MAX } from '../../../search/mentionCandidates';
 import { useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -276,12 +278,30 @@ export function SearchFilterBar({
   const [fromQuery, setFromQuery] = useState('');
   const [inQuery, setInQuery] = useState('');
 
-  const fromUsers = useUserSearch(fromQuery, 20) ?? [];
   const allChannels = useAllVisibleChannels();
   const allUsers = useUsers();
   const { userID: currentUserId } = useAuthContextValues();
 
   const knownChannelsForLabels = useAllChannels();
+
+  // The same people and channels the palette's `from:` and `in:` list for what's typed, in its
+  // order (search/useMentionCandidates). From toggles people, so it lists them as outside Desk.
+  // Each list is only worked out while its popover is open.
+  const { candidates: fromCandidates } = useMentionCandidates(fromOpen ? `from:${fromQuery}` : '', {
+    deskTab: false,
+  });
+  const usersById = useUsersById();
+  const fromUsers = useMemo(
+    () =>
+      fromCandidates
+        .slice(0, TYPEAHEAD_LIST_MAX)
+        .map(candidate => usersById.get(candidate.id))
+        .filter((user): user is (typeof allUsers)[number] => Boolean(user)),
+    [fromCandidates, usersById],
+  );
+  const { candidates: inCandidates } = useMentionCandidates(inOpen ? `in:${inQuery}` : '', {
+    deskTab: filters.docType === 'desk',
+  });
 
   // The mode pills the row ends with, in registry order.
   const toggleEntries = useMemo(
@@ -289,15 +309,22 @@ export function SearchFilterBar({
     [filters.docType],
   );
 
+  const channelsById = useMemo(
+    () => new Map(knownChannelsForLabels.map(channel => [channel.id, channel])),
+    [knownChannelsForLabels],
+  );
   const filteredChannels = useMemo(() => {
-    const q = inQuery.toLowerCase().trim();
-    if (!q) return allChannels.slice(0, 20);
-    return allChannels.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
-  }, [allChannels, inQuery]);
+    return capEachSection(
+      inCandidates.filter(candidate => candidate.kind === 'channel'),
+      TYPEAHEAD_LIST_MAX,
+    )
+      .map(candidate => channelsById.get(candidate.id))
+      .filter((channel): channel is Channel => Boolean(channel));
+  }, [inCandidates, channelsById]);
 
   /**
    * Applied options first, then the rest, so the popover can rule a line under what's
-   * already on. An applied option is always present even when the query or the 20-row cap
+   * already on. An applied option is always present even when the query or the list's cap
    * wouldn't return it — otherwise a filter you can see on the chip vanishes from the list
    * that's supposed to let you turn it off.
    */
@@ -314,14 +341,17 @@ export function SearchFilterBar({
 
   const inOptions = useMemo(() => {
     const selected = filters.inChannelIds
-      .map(id => filteredChannels.find(c => c.id === id) ?? allChannels.find(c => c.id === id))
+      .map(
+        id =>
+          filteredChannels.find(c => c.id === id) ?? knownChannelsForLabels.find(c => c.id === id),
+      )
       .filter((c): c is (typeof filteredChannels)[number] => Boolean(c));
     const selectedIds = new Set(selected.map(c => c.id));
     return {
       selectedCount: selected.length,
       list: [...selected, ...filteredChannels.filter(c => !selectedIds.has(c.id))],
     };
-  }, [filters.inChannelIds, filteredChannels, allChannels]);
+  }, [filters.inChannelIds, filteredChannels, knownChannelsForLabels]);
 
   const isTypeActive = filters.docType !== 'all';
   const isFromActive = filters.fromUserIds.length > 0;
@@ -646,7 +676,7 @@ export function SearchFilterBar({
                         <div className='my-1 border-t border-border' />
                       )}
                       <ChannelFilterItem
-                        channel={channel as unknown as Channel}
+                        channel={channel}
                         currentUserId={currentUserId}
                         selected={filters.inChannelIds.includes(channel.id)}
                         highlighted={inNav.activeIndex === i}

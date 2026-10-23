@@ -7,13 +7,14 @@ import { ReactElement, useState, useMemo, useCallback } from 'react';
 import { Check, ChevronDown, Hash, X } from 'lucide-react';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { cn } from '../../../../utils/classNames';
-import { useUserSearch, useUsers } from '../../../../hooks/useUsers';
+import { useUsers, useUsersById } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useUserGroupSearch } from '@xyne/shared/hooks';
+import { capEachSection, useMentionCandidates } from '../../../../search/useMentionCandidates';
+import { TYPEAHEAD_LIST_MAX } from '../../../../search/mentionCandidates';
 import { useAllChannels, useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { useAuthContextValues } from '../../../../hooks/useAuth';
-import { isDMChannel, resolveChannelLabel } from '../../ChatDirectory/ChatDirectory.utils';
+import { resolveChannelLabel } from '../../ChatDirectory/ChatDirectory.utils';
 import { ChannelScopeType } from '@xyne/shared';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
@@ -198,15 +199,30 @@ export function PeopleTokenField({
   onChange,
   placeholder,
   track,
+  syntax = 'from:',
 }: {
   selected: string[];
   onChange: (next: string[]) => void;
   placeholder: string;
   track: string;
+  /** The filter's prefix (`from:`, `with:`, `assignee:`): the field lists what the palette's does. */
+  syntax?: string | undefined;
 }): ReactElement {
   const [query, setQuery] = useState('');
-  const matches = useUserSearch(query, 20) ?? [];
+  // Worked out once something is typed: the suggestions only show then.
+  const { candidates } = useMentionCandidates(query.trim() ? `${syntax}${query}` : '', {
+    deskTab: false,
+  });
   const allUsers = useUsers();
+  const usersById = useUsersById();
+  const matches = useMemo(
+    () =>
+      candidates
+        .slice(0, TYPEAHEAD_LIST_MAX)
+        .map(candidate => usersById.get(candidate.id))
+        .filter((user): user is (typeof allUsers)[number] => Boolean(user)),
+    [candidates, usersById],
+  );
   const labelFor = (id: string): string => {
     const user = allUsers.find(u => u.id === id);
     // Desk chips carry an address rather than a user id — show it as-is.
@@ -233,18 +249,22 @@ export function ChannelTokenField({
   placeholder,
   track,
   excludeDMs = false,
+  deskTab = false,
 }: {
   selected: string[];
   onChange: (next: string[]) => void;
   placeholder: string;
   track: string;
   excludeDMs?: boolean;
+  /** On the Desk tab the palette's `in:` lists email channels only; so does this field. */
+  deskTab?: boolean;
 }): ReactElement {
   const [query, setQuery] = useState('');
   const allChannels = useAllVisibleChannels();
-  // Suggestions come from the visible set, but a *selected* channel may sit outside it
-  // (a DM, or one the user has since left) — resolve names against every known channel so
-  // a carried-over filter never shows a raw id.
+  // Suggestions come from the palette's channel pool (below); these two only resolve labels.
+  // A *selected* channel may sit outside the visible set (a DM, or one the user has since left),
+  // so names resolve against every known channel too and a carried-over filter never shows a
+  // raw id.
   const knownChannels = useAllChannels();
   const allUsers = useUsers();
   const { userID: currentUserId } = useAuthContextValues();
@@ -257,13 +277,20 @@ export function ChannelTokenField({
     const channel = knownChannels.find(c => c.id === id) ?? allChannels.find(c => c.id === id);
     return channel ? nameOf(channel) : id;
   };
-  const matches = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    const pool = excludeDMs ? allChannels.filter(c => !isDMChannel(c.scopeType)) : allChannels;
-    // Match on the resolved label, so typing a person's name finds their DM.
-    const list = q ? pool.filter(c => nameOf(c).toLowerCase().includes(q)) : pool;
-    return list.slice(0, 20).map(c => ({ id: c.id, label: nameOf(c) }));
-  }, [allChannels, query, excludeDMs, nameOf]);
+  // What the palette's `in:` (or channels-only `in:#`) lists for the query, in its order.
+  const { candidates } = useMentionCandidates(
+    query.trim() ? `${excludeDMs ? 'in:#' : 'in:'}${query}` : '',
+    { deskTab },
+  );
+  const matches = useMemo(
+    () =>
+      // Only channels: a prefix typed into the field (`from:al`) would list people.
+      capEachSection(
+        candidates.filter(c => c.kind === 'channel'),
+        TYPEAHEAD_LIST_MAX,
+      ).map(c => ({ id: c.id, label: c.name })),
+    [candidates],
+  );
   return (
     <TokenBox
       selected={selected}
@@ -335,8 +362,10 @@ export function MentionTargetsField({
   track: string;
 }): ReactElement {
   const [query, setQuery] = useState('');
-  const userMatches = useUserSearch(query, 10) ?? [];
-  const userGroupMatches = useUserGroupSearch(query, 10) ?? [];
+  // What the palette's `mentions:` lists for the query: people, user-groups, then channels.
+  const { candidates } = useMentionCandidates(query.trim() ? `mentions:${query}` : '', {
+    deskTab: false,
+  });
   const allUsers = useUsers();
   const allUserGroups = useUserGroups();
   const allChannels = useAllVisibleChannels();
@@ -351,13 +380,6 @@ export function MentionTargetsField({
     [allChannels, knownChannels, currentUserId, allUsers],
   );
 
-  // A DM is never `#`-referenced in a message, so it can't be a channel mention.
-  const channelMatches = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    const pool = allChannels.filter(c => !isDMChannel(c.scopeType));
-    return (q ? pool.filter(c => c.name?.toLowerCase().includes(q)) : pool).slice(0, 10);
-  }, [allChannels, query]);
-
   const labelFor = (id: string): string => {
     const channel = channelLabel(id);
     if (channel) return channel;
@@ -367,11 +389,14 @@ export function MentionTargetsField({
     return user ? getUserDisplayName(user) : id;
   };
 
-  const options = [
-    ...userMatches.map(u => ({ id: u.id, label: `@${getUserDisplayName(u)}` })),
-    ...channelMatches.map(c => ({ id: c.id, label: `#${c.name}` })),
-    ...userGroupMatches.map(g => ({ id: g.id, label: `@${g.alias ?? g.name}` })),
-  ];
+  // Only what a mention can be: a prefix typed into the field (`on:`) would list other kinds.
+  // `mentions:` already lists at most 20 of each.
+  const options = candidates
+    .filter(c => c.kind === 'person' || c.kind === 'userGroup' || c.kind === 'channel')
+    .map(c => ({
+      id: c.id,
+      label: c.kind === 'channel' ? `#${c.name}` : `@${c.name}`,
+    }));
 
   // Ids only — the two channel hooks return slightly different row shapes. A picked id is
   // classified back to its field: a known channel, then a known group, else a person.
