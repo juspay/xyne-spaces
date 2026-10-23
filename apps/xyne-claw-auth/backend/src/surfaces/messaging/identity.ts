@@ -25,7 +25,7 @@ import {
 } from "./number-verification.js";
 import { normalizePhoneDigits } from "./phone.js";
 import { listChannels, type AnyChannelPlugin } from "./plugin.js";
-import { getSurface, isVerifiedByAnotherUser, linkVerifiedSender, listOrgAccounts, toChannelAccount } from "./store.js";
+import { getSurface, isLinkedToAnotherUser, linkVerifiedSender, listOrgAccounts, toChannelAccount } from "./store.js";
 
 const log = createLogger("channel-identity");
 
@@ -36,8 +36,7 @@ export async function resolveIdentity(input: {
 }): Promise<string | null> {
   // A number belongs to a person, not to one assistant: whichever account on
   // this channel they message, it is the same them. Rows written before that
-  // (keyed to one account) still count — once verified. An unverified link is
-  // just somebody's say-so, so it answers to nobody until its owner proves it.
+  // (keyed to one account) still count.
   const identity = await prisma.userSurfaceIdentity.findFirst({
     where: {
       surfaceId: input.surfaceId,
@@ -45,7 +44,6 @@ export async function resolveIdentity(input: {
       orgId: input.orgId,
       status: "ACTIVE",
       userId: { not: null },
-      verifiedAt: { not: null },
     },
     orderBy: { linkedAt: "desc" },
     select: { id: true, userId: true },
@@ -75,7 +73,7 @@ export interface LinkedNumber {
 
 /** Durable trace of every change to who a number runs as. Never throws. */
 export function auditNumberLink(input: {
-  event: Extract<AgentAuditEvent, "CHANNEL_NUMBER_LINKED" | "CHANNEL_NUMBER_UNLINKED" | "CHANNEL_NUMBER_RECLAIMED">;
+  event: Extract<AgentAuditEvent, "CHANNEL_NUMBER_LINKED" | "CHANNEL_NUMBER_UNLINKED">;
   actorUserId: string;
   channel: string;
   orgId: string;
@@ -105,9 +103,9 @@ function parsePhone(plugin: AnyChannelPlugin, phone: string): { senderId: string
 /**
  * "This number is mine" — step one. Sends a one-time code to the number from
  * the org's business number; nothing is linked until it comes back
- * (confirmNumber). Refused up front when someone else has already verified
- * the number: verified wins, and only an admin can unlink it. Somebody else's
- * unverified claim does not block — the real owner reclaims it by verifying.
+ * (confirmNumber). Refused up front when the number is already linked to
+ * someone else, which keeps an existing link from being taken over and leaves
+ * unlinking to an admin.
  */
 export async function requestNumberCode(input: {
   plugin: AnyChannelPlugin;
@@ -118,7 +116,7 @@ export async function requestNumberCode(input: {
 }): Promise<{ expiresAt: Date }> {
   const { senderId, digits } = parsePhone(input.plugin, input.phone);
 
-  if (await isVerifiedByAnotherUser({ surfaceId: input.surfaceId, senderId, orgId: input.orgId, userId: input.userId })) {
+  if (await isLinkedToAnotherUser({ surfaceId: input.surfaceId, senderId, orgId: input.orgId, userId: input.userId })) {
     // Deliberately does not say to whom.
     throw new LinkError(409, "That number is already linked to someone else. An admin has to unlink it first.");
   }
@@ -169,8 +167,6 @@ export async function requestNumberCode(input: {
  * links the number to the caller on every channel that can see it: the
  * person proved they hold the phone, not one channel's view of it, and the
  * code is single-use so a second channel could not check it again anyway.
- * Another user's unverified claim on the number is replaced and audited as a
- * reclaim.
  */
 export async function confirmNumber(input: {
   plugin: AnyChannelPlugin;
@@ -207,7 +203,7 @@ export async function confirmNumber(input: {
 
     const link = await linkVerifiedSender({ surfaceId: surface.id, senderId, orgId: input.orgId, userId: input.userId });
     if (!link.ok) {
-      log.warn(`[identity] verified number held by someone else channel=${plugin.key} sender=${senderId} user=${input.userId}`);
+      log.warn(`[identity] number already linked to someone else channel=${plugin.key} sender=${senderId} user=${input.userId}`);
       if (plugin.key === input.plugin.key) refused = true;
       continue;
     }
@@ -220,18 +216,6 @@ export async function confirmNumber(input: {
       senderId,
       description: `Verified and linked a ${plugin.displayName} number`,
     });
-    for (const previousUserId of link.displacedUserIds) {
-      log.warn(`[identity] number reclaimed channel=${plugin.key} sender=${senderId} from=${previousUserId} by=${input.userId}`);
-      await auditNumberLink({
-        event: "CHANNEL_NUMBER_RECLAIMED",
-        actorUserId: input.userId,
-        channel: plugin.key,
-        orgId: input.orgId,
-        senderId,
-        description: `Reclaimed a ${plugin.displayName} number from an unverified link`,
-        metadata: { previousUserId, newUserId: input.userId },
-      });
-    }
     if (plugin.key === input.plugin.key) ours = { senderId, sendTo: null, linkedAt: link.linkedAt };
   }
   if (refused || !ours) {

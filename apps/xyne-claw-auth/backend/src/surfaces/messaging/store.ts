@@ -98,20 +98,14 @@ export async function listRunnableAccounts(channels: MessagingChannelKey[]): Pro
     .filter((account) => account.config.desiredState === "running" && account.config.connState !== "logged_out");
 }
 
-/** The oldest running account on this number, in any org the sender has linked (and verified) their number in. */
+/** The oldest running account on this number, in any org the sender has linked their number in. */
 export async function findAccountOnNumberForSender(input: {
   surfaceId: string;
   selfId: string;
   senderId: string;
 }): Promise<ChannelAccount | null> {
   const identities = await prisma.userSurfaceIdentity.findMany({
-    where: {
-      surfaceId: input.surfaceId,
-      surfaceUserId: input.senderId,
-      status: "ACTIVE",
-      userId: { not: null },
-      verifiedAt: { not: null },
-    },
+    where: { surfaceId: input.surfaceId, surfaceUserId: input.senderId, status: "ACTIVE", userId: { not: null } },
     select: { orgId: true },
   });
   if (identities.length === 0) return null;
@@ -331,25 +325,14 @@ export function authStateFor(connectedSurfaceId: string): AuthStateStore {
 
 // ── identities ──
 
-export type VerifiedLink =
-  | {
-      ok: true;
-      linkedAt: Date;
-      /** Other users whose unverified claim on this number was replaced. */
-      displacedUserIds: string[];
-    }
-  | { ok: false; reason: "verified_elsewhere" };
+export type VerifiedLink = { ok: true; linkedAt: Date } | { ok: false; reason: "linked_elsewhere" };
 
 /**
  * Link a sender id to a user for the whole org, once they have proved the
  * number is theirs (number-verification.ts). Keyed by org rather than by
  * account, so one link is recognised by every account on the channel.
- *
- * Verified wins: anyone else's unverified claim on the number — the org row
- * or a legacy per-account one — is replaced, and who it was is handed back
- * for the audit log. Somebody else's VERIFIED link is never overwritten; that
- * stays an admin's call. One transaction, so a concurrent verification by
- * someone else cannot slip in between the check and the write.
+ * Somebody else's link on the number is never overwritten — unlinking it is
+ * an admin's call. Upsert so re-verifying your own number is idempotent.
  */
 export async function linkVerifiedSender(input: {
   surfaceId: string;
@@ -357,50 +340,34 @@ export async function linkVerifiedSender(input: {
   orgId: string;
   userId: string;
 }): Promise<VerifiedLink> {
+  if (await isLinkedToAnotherUser(input)) return { ok: false, reason: "linked_elsewhere" };
   const now = new Date();
-  const sameNumber = { surfaceId: input.surfaceId, orgId: input.orgId, surfaceUserId: input.senderId };
-  return prisma.$transaction(async (tx) => {
-    const others = await tx.userSurfaceIdentity.findMany({
-      where: { ...sameNumber, userId: { not: input.userId } },
-      select: { userId: true, status: true, verifiedAt: true },
-    });
-    if (others.some((row) => row.status === "ACTIVE" && row.verifiedAt)) {
-      return { ok: false, reason: "verified_elsewhere" } as const;
-    }
-    // Legacy per-account rows of other users go; the org row is taken over
-    // by the upsert below.
-    await tx.userSurfaceIdentity.deleteMany({
-      where: { ...sameNumber, userId: { not: input.userId }, surfaceWorkspaceId: { not: input.orgId } },
-    });
-    const row = await tx.userSurfaceIdentity.upsert({
-      where: {
-        surfaceId_surfaceWorkspaceId_surfaceUserId: {
-          surfaceId: input.surfaceId,
-          surfaceWorkspaceId: input.orgId,
-          surfaceUserId: input.senderId,
-        },
-      },
-      create: {
+  const row = await prisma.userSurfaceIdentity.upsert({
+    where: {
+      surfaceId_surfaceWorkspaceId_surfaceUserId: {
         surfaceId: input.surfaceId,
         surfaceWorkspaceId: input.orgId,
         surfaceUserId: input.senderId,
-        orgId: input.orgId,
-        userId: input.userId,
-        status: "ACTIVE",
-        linkedAt: now,
-        lastSeenAt: now,
-        verifiedAt: now,
       },
-      update: { orgId: input.orgId, userId: input.userId, status: "ACTIVE", linkedAt: now, verifiedAt: now },
-      select: { linkedAt: true },
-    });
-    const displacedUserIds = [...new Set(others.flatMap((other) => (other.userId ? [other.userId] : [])))];
-    return { ok: true, linkedAt: row.linkedAt ?? now, displacedUserIds } as const;
+    },
+    create: {
+      surfaceId: input.surfaceId,
+      surfaceWorkspaceId: input.orgId,
+      surfaceUserId: input.senderId,
+      orgId: input.orgId,
+      userId: input.userId,
+      status: "ACTIVE",
+      linkedAt: now,
+      lastSeenAt: now,
+    },
+    update: { orgId: input.orgId, userId: input.userId, status: "ACTIVE", linkedAt: now },
+    select: { linkedAt: true },
   });
+  return { ok: true, linkedAt: row.linkedAt ?? now };
 }
 
-/** Is this number held by someone else with a verified link? */
-export async function isVerifiedByAnotherUser(input: {
+/** Is this number already linked to someone else in the org? */
+export async function isLinkedToAnotherUser(input: {
   surfaceId: string;
   senderId: string;
   orgId: string;
@@ -413,7 +380,6 @@ export async function isVerifiedByAnotherUser(input: {
       orgId: input.orgId,
       status: "ACTIVE",
       userId: { not: input.userId },
-      verifiedAt: { not: null },
     },
     select: { id: true },
   });
@@ -424,7 +390,7 @@ export async function isVerifiedByAnotherUser(input: {
 export function listIdentitiesForUser(input: { surfaceId: string; userId: string; orgId: string }) {
   return prisma.userSurfaceIdentity.findMany({
     where: { surfaceId: input.surfaceId, userId: input.userId, orgId: input.orgId, status: "ACTIVE" },
-    select: { surfaceWorkspaceId: true, surfaceUserId: true, linkedAt: true, lastSeenAt: true, verifiedAt: true },
+    select: { surfaceWorkspaceId: true, surfaceUserId: true, linkedAt: true, lastSeenAt: true },
     orderBy: { linkedAt: "desc" },
   });
 }

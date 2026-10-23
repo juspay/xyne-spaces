@@ -100,5 +100,5 @@ export const RATE_LIMITED_TEXT =
   "That's a lot at once — I've paused on the last few. Give me a minute and send it again.";
 
 export const NOT_LINKED_TEXT =
-  "Your number isn't linked to a Xyne Claw user yet, or hasn't been verified. Sign in to Xyne Claw and add this number — we'll send a code here to confirm it's yours — and I'll know who you are next time.";
+  "Your number isn't linked to a Xyne Claw user yet. Sign in to Xyne Claw and add this number — we'll send a code here to confirm it's yours — and I'll know who you are next time.";
 

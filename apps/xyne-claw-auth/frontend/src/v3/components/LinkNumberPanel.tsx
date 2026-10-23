@@ -31,8 +31,6 @@ function formatNumber(senderId: string): string {
 interface Mine {
   display: string;
   entries: Array<{ channel: MessagingChannelKey; senderId: string }>;
-  /** False while any channel still holds a link made before verification. */
-  verified: boolean;
 }
 
 /** A code is on its way to `phone`; `channel` is the route that sent it. */
@@ -69,7 +67,7 @@ export function LinkNumberPanel({
     const results = await Promise.all(
       channels.map((key) =>
         listMyChannelNumbers(key)
-          .then((rows) => rows.map((row) => ({ channel: key, senderId: row.senderId, verified: row.verified })))
+          .then((rows) => rows.map((row) => ({ channel: key, senderId: row.senderId })))
           .catch(() => []),
       ),
     );
@@ -78,9 +76,8 @@ export function LinkNumberPanel({
     const byDisplay = new Map<string, Mine>();
     for (const entry of results.flat()) {
       const display = formatNumber(entry.senderId);
-      const mine = byDisplay.get(display) ?? { display, entries: [], verified: true };
-      mine.entries.push({ channel: entry.channel, senderId: entry.senderId });
-      mine.verified &&= entry.verified;
+      const mine = byDisplay.get(display) ?? { display, entries: [] };
+      mine.entries.push(entry);
       byDisplay.set(display, mine);
     }
     setLinked([...byDisplay.values()]);
@@ -250,24 +247,10 @@ export function LinkNumberPanel({
               key={mine.display}
               className="flex items-center justify-between gap-2 rounded-md border border-xyne-border-subtle px-2.5 py-1.5 text-[12px]"
             >
-              <span className="font-mono text-xyne-fg-primary">
-                {mine.display}
-                {!mine.verified && <span className="ml-2 font-sans text-[11px] text-xyne-fg-muted">Not verified</span>}
-              </span>
-              <span className="flex items-center gap-3">
-                {!mine.verified && (
-                  <button
-                    onClick={() => void sendCode(mine.display)}
-                    disabled={busy}
-                    className="text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary disabled:opacity-60"
-                  >
-                    Verify
-                  </button>
-                )}
-                <button onClick={() => void unlink(mine)} className="text-[11px] text-xyne-fg-muted hover:text-xyne-error-fg">
-                  Unlink
-                </button>
-              </span>
+              <span className="font-mono text-xyne-fg-primary">{mine.display}</span>
+              <button onClick={() => void unlink(mine)} className="text-[11px] text-xyne-fg-muted hover:text-xyne-error-fg">
+                Unlink
+              </button>
             </li>
           ))}
         </ul>

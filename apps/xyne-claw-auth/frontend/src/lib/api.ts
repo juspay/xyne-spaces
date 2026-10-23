@@ -8367,9 +8367,6 @@ export interface LinkedChannelNumber {
   senderId: string;
   linkedAt: string;
   lastSeenAt: string | null;
-  /** False for a link made before numbers were verified: it does nothing
-   *  until its owner confirms a code sent to it. */
-  verified: boolean;
 }
 
 export interface ChannelNumberLink {

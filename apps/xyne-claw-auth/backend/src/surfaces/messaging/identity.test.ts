@@ -3,10 +3,7 @@ import type { AnyChannelPlugin } from "./plugin.js";
 
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
-const findFirst = vi.fn();
-vi.mock("../../db.js", () => ({
-  prisma: { userSurfaceIdentity: { findFirst, update: vi.fn(() => Promise.resolve()) } },
-}));
+vi.mock("../../db.js", () => ({ prisma: { userSurfaceIdentity: {} } }));
 
 const writeAuditLog = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("../../lib/audit.js", () => ({ writeAuditLog }));
@@ -36,14 +33,14 @@ vi.mock("./plugin.js", () => ({ listChannels: () => [cloud, personal] }));
 
 const store = vi.hoisted(() => ({
   getSurface: vi.fn(async (key: string) => ({ id: `surface-${key}`, status: "ACTIVE" })),
-  isVerifiedByAnotherUser: vi.fn(async () => false),
+  isLinkedToAnotherUser: vi.fn(async () => false),
   linkVerifiedSender: vi.fn(),
   listOrgAccounts: vi.fn(async () => [{ config: { displayId: "+1 555 555 0100" } }]),
   toChannelAccount: (row: unknown) => row,
 }));
 vi.mock("./store.js", () => store);
 
-const { confirmNumber, requestNumberCode, resolveIdentity, LinkError } = await import("./identity.js");
+const { confirmNumber, requestNumberCode, LinkError } = await import("./identity.js");
 
 // Obviously fake numbers (555-01xx is reserved for fiction).
 const PHONE = "+1 555 555 0123";
@@ -62,21 +59,11 @@ async function rejection(promise: Promise<unknown>): Promise<InstanceType<typeof
 
 beforeEach(() => {
   vi.clearAllMocks();
-  store.isVerifiedByAnotherUser.mockResolvedValue(false);
-  store.linkVerifiedSender.mockResolvedValue({ ok: true, linkedAt, displacedUserIds: [] });
+  store.isLinkedToAnotherUser.mockResolvedValue(false);
+  store.linkVerifiedSender.mockResolvedValue({ ok: true, linkedAt });
   verification.findCodeSender.mockResolvedValue({ plugin: cloud, account: { id: "biz" } });
   verification.issueCode.mockResolvedValue({ ok: true, code: "424242", expiresAt: new Date(Date.now() + 600_000) });
   verification.sendCode.mockResolvedValue({ ok: true });
-});
-
-describe("resolveIdentity", () => {
-  it("only answers to verified links, so an old face-value claim runs as nobody", async () => {
-    findFirst.mockResolvedValue(null);
-    expect(await resolveIdentity({ surfaceId: "s", senderId: DIGITS, orgId: "org-test" })).toBeNull();
-    expect(findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ verifiedAt: { not: null } }) }),
-    );
-  });
 });
 
 describe("requestNumberCode", () => {
@@ -88,8 +75,8 @@ describe("requestNumberCode", () => {
     expect(store.linkVerifiedSender).not.toHaveBeenCalled();
   });
 
-  it("refuses a number someone else has verified, before sending anything", async () => {
-    store.isVerifiedByAnotherUser.mockResolvedValue(true);
+  it("refuses a number already linked to someone else, before sending anything", async () => {
+    store.isLinkedToAnotherUser.mockResolvedValue(true);
     const err = await rejection(requestNumberCode({ ...base, surfaceId: "surface-whatsapp-cloud" }));
     expect(err.status).toBe(409);
     expect(verification.issueCode).not.toHaveBeenCalled();
@@ -166,23 +153,9 @@ describe("confirmNumber", () => {
     expect(events).toEqual(["CHANNEL_NUMBER_LINKED", "CHANNEL_NUMBER_LINKED"]);
   });
 
-  it("reclaims a number someone else claimed without verifying, and audits who lost it", async () => {
+  it("never takes over somebody else's link", async () => {
     verification.checkCode.mockResolvedValue({ outcome: "ok" });
-    store.linkVerifiedSender.mockResolvedValue({ ok: true, linkedAt, displacedUserIds: ["user-claimer"] });
-    await confirmNumber({ ...base, code: "424242" });
-    expect(writeAuditLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "CHANNEL_NUMBER_RECLAIMED",
-        actorUserId: "user-owner",
-        targetId: DIGITS,
-        metadata: expect.objectContaining({ previousUserId: "user-claimer", newUserId: "user-owner", orgId: "org-test" }),
-      }),
-    );
-  });
-
-  it("never takes over somebody else's verified link", async () => {
-    verification.checkCode.mockResolvedValue({ outcome: "ok" });
-    store.linkVerifiedSender.mockResolvedValue({ ok: false, reason: "verified_elsewhere" });
+    store.linkVerifiedSender.mockResolvedValue({ ok: false, reason: "linked_elsewhere" });
     expect((await rejection(confirmNumber({ ...base, code: "424242" }))).status).toBe(409);
     expect(writeAuditLog).not.toHaveBeenCalled();
   });

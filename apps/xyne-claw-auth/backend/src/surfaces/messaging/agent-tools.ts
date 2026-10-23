@@ -340,14 +340,7 @@ export async function findNotifyTarget(userId: string, orgId?: string | null): P
   if (!userId) return null;
   const identities = await prisma.userSurfaceIdentity
     .findMany({
-      // Verified numbers only: an unverified link may be somebody else's phone.
-      where: {
-        userId,
-        status: "ACTIVE",
-        verifiedAt: { not: null },
-        surface: { key: "whatsapp-cloud" },
-        ...(orgId ? { orgId } : {}),
-      },
+      where: { userId, status: "ACTIVE", surface: { key: "whatsapp-cloud" }, ...(orgId ? { orgId } : {}) },
       select: { orgId: true, surfaceUserId: true },
       orderBy: { lastSeenAt: { sort: "desc", nulls: "last" } },
     })

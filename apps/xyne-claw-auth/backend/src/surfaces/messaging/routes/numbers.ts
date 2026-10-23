@@ -13,8 +13,7 @@
  * number they @mention in a group.
  *
  * Every route is org-scoped to the caller's session and only ever touches the
- * caller's own identity rows — apart from a confirmed code, which may replace
- * somebody else's UNVERIFIED claim on the same number (a reclaim, audited).
+ * caller's own identity rows.
  */
 import { Router, type Request, type Response } from "express";
 import { getOrgId, getRequesterId } from "../../../middleware/agent-acl.js";
@@ -57,8 +56,7 @@ function sendLinkError(res: Response, err: unknown): void {
   throw err;
 }
 
-/** The numbers the caller has linked on this channel. `verified: false` is a
- *  link made before verification existed: it does nothing until confirmed. */
+/** The numbers the caller has linked on this channel. */
 router.get("/my-numbers", async (req: Request, res: Response) => {
   const caller = callerOf(req, res);
   if (!caller) return;
@@ -66,21 +64,17 @@ router.get("/my-numbers", async (req: Request, res: Response) => {
   if (!surfaceId) return;
   const identities = await listIdentitiesForUser({ surfaceId, userId: caller.userId, orgId: caller.orgId });
   // Links made before they were per-person can repeat a number once per
-  // account; the person has one number, so show it once — verified if any
-  // of its rows is.
-  const byNumber = new Map<string, (typeof identities)[number]>();
-  for (const identity of identities) {
-    const seen = byNumber.get(identity.surfaceUserId);
-    if (!seen || (!seen.verifiedAt && identity.verifiedAt)) byNumber.set(identity.surfaceUserId, identity);
-  }
+  // account; the person has one number, so show it once.
+  const seen = new Set<string>();
   res.json({
     success: true,
-    numbers: [...byNumber.values()].map((identity) => ({
-      senderId: identity.surfaceUserId,
-      linkedAt: identity.linkedAt,
-      lastSeenAt: identity.lastSeenAt,
-      verified: identity.verifiedAt !== null,
-    })),
+    numbers: identities
+      .filter((identity) => !seen.has(identity.surfaceUserId) && seen.add(identity.surfaceUserId))
+      .map((identity) => ({
+        senderId: identity.surfaceUserId,
+        linkedAt: identity.linkedAt,
+        lastSeenAt: identity.lastSeenAt,
+      })),
   });
 });
 
