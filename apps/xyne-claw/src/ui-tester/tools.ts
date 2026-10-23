@@ -1,7 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { buildSandboxStoreKey, getSandboxSession, sandboxConversationIdFromMeta } from "xyne-claw-shared";
+import { buildSandboxStoreKey, getSandboxSession, sandboxConversationIdFromMeta, type DecideQuestion } from "xyne-claw-shared";
 import { xor } from "../xor.js";
+import { recordDebug } from "../citations.js";
 import { createLogger } from "../logger.js";
 import { metric } from "../metrics.js";
 import { DOM_AUDIT_SOURCE, ENDPOINT_TYPES_SOURCE, HARNESS_SOURCE } from "./harness.js";
@@ -9,7 +10,11 @@ import {
   buildQuestions,
   formatReport,
   judgeVariation,
+  standardQuestionsFrom,
+  CONFIDENT,
   type CustomCheck,
+  type StandardKey,
+  type StandardQuestion,
   type VariationResult,
   type VariationVerdict,
 } from "./checks.js";
@@ -29,9 +34,10 @@ export const UI_TESTER_SANDBOX_TOOL_NAMES = new Set([
 ]);
 
 const MAX_VARIATIONS = 30;
+const MAX_DELIVER = 24;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const VISUAL_CONCURRENCY = 8;
-const VISUAL_STATE = "Screenshot of a page in a web application.";
+export const VISUAL_STATE = "Screenshot of a page in a web application.";
 
 type SandboxSession = NonNullable<ReturnType<typeof getSandboxSession>>;
 
@@ -72,14 +78,20 @@ async function screenshotDataUrl(session: SandboxSession, path: string): Promise
   }
 }
 
-async function judgeAll(session: SandboxSession, results: VariationResult[], visual: boolean, signal?: AbortSignal): Promise<VariationVerdict[]> {
+async function judgeAll(
+  session: SandboxSession,
+  results: VariationResult[],
+  visual: boolean,
+  standard: Record<StandardKey, StandardQuestion>,
+  signal?: AbortSignal,
+): Promise<VariationVerdict[]> {
   return mapLimit(results, VISUAL_CONCURRENCY, async (r) => {
-    if (!visual || !r.screenshot) return judgeVariation(r, visual ? null : {});
+    if (!visual || !r.screenshot) return judgeVariation(r, visual ? null : {}, standard);
     const image = await screenshotDataUrl(session, r.screenshot);
     const answers = image
-      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r), purpose: "ui-tester", signal })
+      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r, standard), purpose: "ui-tester", signal, cache: true })
       : null;
-    return judgeVariation(r, answers);
+    return judgeVariation(r, answers, standard);
   });
 }
 
@@ -144,11 +156,52 @@ const SPEC_DESCRIPTION = [
   "- every variation can have title (shown on the video's opening card and caption, and in the report) and description (one line under the title card) — write them for a human watching the video, e.g. title \"Footer on the last page\", description \"230 runs, Next clicked until disabled\".",
   "- variations: [{id, title?, description?, path, viewport?:{width,height}, theme?:'light'|'dark', localStorage?, mocks?:[{match, method?, status?, json?, body?, delayMs?}], steps?:[{click}|{fill:[selector,value]}|{press}|{hover}|{waitFor}|{wait}], shotAfterMs?, fullPage?, expect?:{content?:'data'|'empty'|'error'|'loading'|'blank', errors?:'none'|'banner'|'toast'|'both', background?:'light'|'dark'}, checks?:[{id, question, options:{key:description}, expect?}]}]",
   "- mock.match: substring of pathname+query, or 're:<regex>'.",
+  "- expectText / rejectText: arrays of exact strings (or 're:<regex>') that MUST / MUST NOT appear in the page's visible text, checked in the DOM after the steps. Use these for any exact wording or numbers — the visual classifier cannot read small text reliably.",
   "- step selectors are Playwright selectors: CSS, text=Visible label, role=button[name=\"Save\"], [data-id=...]. A failed step is reported as a page error.",
   "- mock.json may contain {\"$repeat\": N, \"$item\": {...}} to generate N items; inside $item, \"{{i}}\" is the index (a number when it is the whole string, e.g. \"{{i+1}}\", \"{{i*37}}\") and is substituted inside longer strings (\"run-{{i}}\").",
 ].join("\n");
 
-export function buildUiTesterTools(meta: Record<string, string>): ToolDefinition[] {
+async function resolveSourceDir(session: SandboxSession, raw: string): Promise<{ dir: string | null; note: string }> {
+  const quoted = JSON.stringify(raw);
+  const exists = await session.commands.run(`test -d ${quoted} && echo yes || echo no`, 15_000).catch(() => null);
+  if (exists?.stdout?.trim() === "yes") return { dir: raw, note: "" };
+  const segs = raw.split("/").filter(Boolean);
+  const suffix = segs.slice(-4).join("/");
+  if (!suffix) return { dir: null, note: `sourceDir ${raw} does not exist in the sandbox.` };
+  const found = await session.commands
+    .run(`find / -maxdepth 9 -type d -path ${JSON.stringify(`*/${suffix}`)} -not -path "*/node_modules/*" -not -path "/proc/*" 2>/dev/null | head -1`, 60_000)
+    .catch(() => null);
+  const dir = found?.stdout?.trim().split("\n")[0] || null;
+  return dir
+    ? { dir, note: `sourceDir ${raw} is not a sandbox path; used ${dir} (the same directory inside the sandbox).` }
+    : { dir: null, note: `sourceDir ${raw} does not exist in the sandbox and no directory ending in ${suffix} was found — pass the path as it exists inside the sandbox (run pwd there).` };
+}
+
+function deliverables(verdicts: VariationVerdict[]): string[] {
+  const videos = verdicts.map((v) => v.video).filter((x): x is string => Boolean(x));
+  const shots = verdicts.filter((v) => v.verdict !== "pass" && v.screenshot).map((v) => v.screenshot!);
+  return [...videos, ...shots].slice(0, MAX_DELIVER);
+}
+
+export function visualStats(verdicts: VariationVerdict[]) {
+  const answers = verdicts.flatMap((v) => Object.values(v.visual));
+  return {
+    items: verdicts.filter((v) => Object.keys(v.visual).length > 0).length,
+    answers: answers.length,
+    unsure: answers.filter((a) => a.choice === null || (a.confidence ?? 0) < CONFIDENT).length,
+    unavailable: verdicts.filter((v) => v.findings.some((f) => f.message.startsWith("visual check unavailable"))).length,
+    cached: 0,
+    failedExpect: 0,
+  };
+}
+
+export interface UiTesterToolOptions {
+  deliver?: ToolDefinition | undefined;
+  checks?: DecideQuestion[] | undefined;
+}
+
+export function buildUiTesterTools(meta: Record<string, string>, options: UiTesterToolOptions = {}): ToolDefinition[] {
+  const standard = standardQuestionsFrom(options.checks);
   const runVariations: ToolDefinition = {
     name: "ui-test-variations",
     label: "Test UI variations",
@@ -167,11 +220,12 @@ export function buildUiTesterTools(meta: Record<string, string>): ToolDefinition
         spec: { type: "object", description: "The run spec described above." },
         runName: { type: "string", description: "Short name for the run directory (letters, digits, - and _)." },
         visual: { type: "boolean", description: "Run the xor visual checks on each screenshot (default true)." },
+        deliver: { type: "boolean", description: "Deliver every video and the screenshots of failing/unsure variations to the thread (default true)." },
       },
       required: ["spec"],
     }),
-    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
-      const p = (params ?? {}) as { spec?: unknown; runName?: unknown; visual?: unknown };
+    async execute(toolCallId: string, params: unknown, signal?: AbortSignal) {
+      const p = (params ?? {}) as { spec?: unknown; runName?: unknown; visual?: unknown; deliver?: unknown };
       let spec = p.spec as Record<string, unknown> | undefined;
       if (typeof p.spec === "string") {
         try {
@@ -211,15 +265,37 @@ export function buildUiTesterTools(meta: Record<string, string>): ToolDefinition
           return text(`Error: the harness failed (exit ${result.exitCode}). ${String(head?.["error"] ?? "").slice(0, 600)}\nstderr: ${(result.stderr ?? "").slice(-800)}`);
         }
         const summary = JSON.parse((await session.files.read(`${outDir}/summary.json`)).toString("utf8")) as { results: VariationResult[] };
-        const verdicts = await judgeAll(session, summary.results, p.visual !== false, signal);
-        const contracts = typeof spec["sourceDir"] === "string" && spec["sourceDir"]
-          ? await endpointContracts(session, runDir, spec["sourceDir"], summary.results)
-          : "";
+        const verdicts = await judgeAll(session, summary.results, p.visual !== false, standard, signal);
+        let contracts = "";
+        if (typeof spec["sourceDir"] === "string" && spec["sourceDir"]) {
+          const resolved = await resolveSourceDir(session, spec["sourceDir"]);
+          contracts = resolved.dir ? await endpointContracts(session, runDir, resolved.dir, summary.results) : "";
+          if (resolved.note) contracts = `\n\nNote: ${resolved.note}${contracts}`;
+        }
+        let delivered = "";
+        const files = p.deliver === false ? [] : deliverables(verdicts);
+        if (files.length > 0 && options.deliver) {
+          try {
+            const res = await (options.deliver.execute as unknown as (id: string, params: unknown) => Promise<{ content?: Array<{ text?: string }> }>)(
+              `ui-tester-deliver-${Date.now()}`,
+              { sessionId: session.id, paths: files },
+            );
+            const msg = res?.content?.map((c) => c.text ?? "").join(" ").trim() ?? "";
+            delivered = /^error/i.test(msg)
+              ? `\n\nDelivery failed: ${msg.slice(0, 300)}`
+              : `\n\nDelivered ${files.length} file(s) to the thread: ${files.map((f) => f.split("/").pop()).join(", ")}. Do not deliver them again.`;
+          } catch (err) {
+            delivered = `\n\nDelivery failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 300)} — deliver ${files.join(", ")} with sandbox-deliver-files.`;
+          }
+        } else if (files.length > 0) {
+          delivered = `\n\nNot delivered yet — call sandbox-deliver-files with: ${files.join(", ")}`;
+        }
         await session.files.write(`${outDir}/verdicts.json`, Buffer.from(JSON.stringify(verdicts, null, 2), "utf8"));
         const counts = verdicts.reduce((m, v) => ((m[v.verdict] = (m[v.verdict] ?? 0) + 1), m), {} as Record<string, number>);
         metric.count("ui_tester_run", { variations: verdicts.length, fail: counts["fail"] ?? 0, unsure: counts["unsure"] ?? 0 });
+        recordDebug(toolCallId, { xor: visualStats(verdicts) });
         log.info(`[ui-tester] ${verdicts.length} variations in ${Date.now() - started}ms fail=${counts["fail"] ?? 0} unsure=${counts["unsure"] ?? 0}`);
-        return text(`${formatReport(verdicts)}${contracts}\n\nRun directory: ${runDir} (summary.json, verdicts.json, <id>.png in out/).`);
+        return text(`${formatReport(verdicts)}${contracts}${delivered}\n\nRun directory: ${runDir} (summary.json, verdicts.json, <id>.png in out/).`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return text(`Error: ui-test-variations failed: ${msg.slice(0, 500)}`);
@@ -256,7 +332,7 @@ export function buildUiTesterTools(meta: Record<string, string>): ToolDefinition
       const session = sessionFor(meta);
       if (!session) return text(NO_SANDBOX);
       const results: VariationResult[] = shots.map((s) => ({ id: s.split("/").pop() ?? s, screenshot: s, checks }));
-      const verdicts = await judgeAll(session, results, true, signal);
+      const verdicts = await judgeAll(session, results, true, standard, signal);
       const detail = verdicts.map((v) => `${v.id}: ${Object.entries(v.visual).map(([k, a]) => `${k}=${a.choice}(${a.confidence})`).join(" ")}`).join("\n");
       return text(`${formatReport(verdicts)}\n\nRaw answers:\n${detail}`);
     },

@@ -719,7 +719,22 @@ export interface BuiltQuery {
   /** Validated rank profile (undefined → let queryDirect auto-pick: default_native
    *  for free-text, unranked for filter-only/grouping). */
   rankProfile?: string;
+  /** Vespa presentation.summary to fetch hits with (undefined → the schema's `default`). */
+  summary?: string;
 }
+
+/**
+ * Document-summary per schema for `select *` hits. `default` carries every summary
+ * field of the schema — on file that includes chunks_summary, the whole document body,
+ * for every hit. `claw` (lean plus a few fields, see each .sd file) holds just what
+ * transformHit reads. Schemas not listed keep `default`.
+ */
+const SUMMARY_BY_SOURCE: Record<string, string> = {
+  chat_message: "claw",
+  ticket: "claw",
+  mail: "claw",
+  file: "claw",
+};
 
 /**
  * Builds the AND-able clause list for ONE area (retrieval primitive, base
@@ -733,6 +748,11 @@ export interface BuiltQuery {
  * makes "sort by X" or "groupBy X" ambiguous, so federated callers don't get
  * them) and stay in buildYqlFromParams.
  */
+/** The lexical retrieval clause for default_native: userInput over each schema's
+ *  `default_native` fieldset. Exported so callers that swap the rank profile after
+ *  building (search-eval-vespa) can restore plain `userInput(@query)`. */
+export const DEFAULT_NATIVE_USER_INPUT = '({defaultIndex:"default_native"}userInput(@query))';
+
 function buildAreaClauses(
   area: SearchArea,
   areaName: string,
@@ -759,12 +779,19 @@ function buildAreaClauses(
     // default_native has a global-phase rerank Vespa refuses to sort under),
     // so `e` is never supplied and the vector clause would break.
     const scored = emb.length > 0 && params.rankProfile !== "unranked" && !params.sort?.by;
+    // default_native (and unranked) match the query against the schema's
+    // `default_native` fieldset — only the fields default_native scores, no
+    // fuzzy/id/date fields. Any other explicit profile (search evals' tunable,
+    // default_fuzzy, ...) may score fields outside it, so keeps `default`.
+    const lexical = !params.rankProfile || params.rankProfile === "default_native" || params.rankProfile === "unranked"
+      ? DEFAULT_NATIVE_USER_INPUT
+      : "userInput(@query)";
     if (scored) {
       const targetHits = Math.max(params.hits ?? 20, 100);
       const nn = emb.map(f => `({targetHits:${targetHits}} nearestNeighbor(${f}, e))`).join(" or ");
-      clauses.push(`(userInput(@query) or ${nn})`);
+      clauses.push(`(${lexical} or ${nn})`);
     } else {
-      clauses.push("userInput(@query)");
+      clauses.push(lexical);
     }
   }
 
@@ -957,7 +984,14 @@ export function buildYqlFromParams(
     rankProfile = hasSort ? "unranked" : "default_native";
   }
 
-  return { yql, query, ...(rankProfile ? { rankProfile } : {}) };
+  // A column projection keeps `default`: its picked columns need not be in the class.
+  // Mail's body is only claw_chunks there, which is empty unless default_native computed
+  // its summary-features, so an unranked (filter-only/sorted) mail query keeps `default` too.
+  const summary = projection !== "*" || (source === "mail" && rankProfile !== "default_native")
+    ? undefined
+    : SUMMARY_BY_SOURCE[source];
+
+  return { yql, query, ...(rankProfile ? { rankProfile } : {}), ...(summary ? { summary } : {}) };
 }
 
 export interface FederatedBuiltQuery {

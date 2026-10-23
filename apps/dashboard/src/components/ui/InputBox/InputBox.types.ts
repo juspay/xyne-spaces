@@ -29,6 +29,8 @@ export interface InputBoxProps {
   ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
   onCancel?: () => void;
+  /** Edit composers retain their content until the parent confirms the save. */
+  clearOnSend?: boolean;
   mentionItems?: import('@xyne/shared').MentionResult[];
   voiceMentionItems?: import('@xyne/shared').MentionResult[];
   onMentionSearch?: (query: string) => void;

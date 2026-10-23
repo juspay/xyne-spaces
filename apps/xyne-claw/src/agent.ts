@@ -1,3 +1,4 @@
+import { detectStall, firstTokenLimitMs } from "./stall-check.js";
 import {
   createAgentSession,
   AuthStorage,
@@ -89,6 +90,7 @@ import { isSafeId } from "./safe-id.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { LlmTurnRecorder, type LlmCallStat } from "./llm-turn-stats.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
 import { installAwakeningInbox } from "./awakening-inbox.js";
@@ -276,12 +278,27 @@ export interface LatencyMetrics {
   toolMs: number;
 }
 
+/** Outcome of the citation-reflection pass, when the agent has it enabled. */
+export interface CitationReflectionOutcome {
+  outcome: "already_cited" | "no_citeable_sources" | "fixed_after_nudge" | "still_uncited" | "aborted";
+  initialCited: boolean;
+  sourcesWereCiteable: boolean;
+  finalCited: boolean;
+  rounds: number;
+}
+
 export interface RunResult {
   readonly text: string;
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly latency?: LatencyMetrics;
+  /** Absent when citationReflection is disabled or the run produced structured output. */
+  readonly citationReflection?: CitationReflectionOutcome;
+  /** Per-LLM-call series, parent calls plus tagged subagent calls. */
+  readonly llmCalls?: LlmCallStat[];
+  /** Model this run was configured with after every override resolved. */
+  readonly model?: string;
   readonly attachments?: Attachment[];
   readonly reasoning?: string;
   /** The run's thinking, text and tool calls in the order they happened. */
@@ -429,16 +446,14 @@ export class ProviderStallError extends Error {
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly partialText: string;
+  /** Latency up to the stall, so stalled runs still count in latency percentiles. */
+  readonly latency?: LatencyMetrics;
+  readonly llmCalls?: LlmCallStat[];
 
   constructor(
     public readonly provider: string,
     public readonly idleMs: number,
-    progress?: {
-      toolsUsed: string[];
-      toolInvocations: ToolInvocation[];
-      tokenUsage: TokenUsage;
-      partialText: string;
-    },
+    progress?: AbortProgress,
   ) {
     super(`Provider ${provider} stalled: no stream activity for ${idleMs}ms`);
     this.name = "ProviderStallError";
@@ -446,6 +461,8 @@ export class ProviderStallError extends Error {
     this.toolInvocations = [...(progress?.toolInvocations ?? [])];
     this.tokenUsage = { ...(progress?.tokenUsage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) };
     this.partialText = progress?.partialText ?? "";
+    if (progress?.latency) this.latency = progress.latency;
+    if (progress?.llmCalls?.length) this.llmCalls = progress.llmCalls;
   }
 }
 
@@ -473,6 +490,19 @@ export class ProviderTerminalError extends Error {
   }
 }
 
+const REFUSAL_TURN_ERROR = "An unknown error occurred";
+
+export function isRefusalTurnError(provider: string | undefined, detail: string): boolean {
+  return provider === "claude" && detail.trim() === REFUSAL_TURN_ERROR;
+}
+
+export class ProviderRefusalError extends Error {
+  constructor(public readonly provider: string) {
+    super(`Provider ${provider} declined to answer this conversation (stop_reason refusal)`);
+    this.name = "ProviderRefusalError";
+  }
+}
+
 /**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
@@ -486,6 +516,7 @@ export class ProviderTerminalError extends Error {
  * substrings here can't turn a user stop into a fallback.
  */
 export function isTransientProviderError(err: unknown): boolean {
+  if (err instanceof ProviderRefusalError) return false;
   if (err instanceof ProviderStallError) return true;
   if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
@@ -535,24 +566,33 @@ export function isProviderFallbackEligibleError(err: unknown): boolean {
   );
 }
 
+/** What an aborted run had done when it stopped. respond-to-user, propose-plan and emit_brief END runs by aborting, so this is their only telemetry. */
+export interface AbortProgress {
+  toolsUsed: string[];
+  toolInvocations: ToolInvocation[];
+  tokenUsage: TokenUsage;
+  partialText: string;
+  latency?: LatencyMetrics | undefined;
+  llmCalls?: LlmCallStat[] | undefined;
+}
+
 export class RunCancelledError extends Error {
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];
   readonly tokenUsage: TokenUsage;
   readonly partialText: string;
+  readonly latency?: LatencyMetrics;
+  readonly llmCalls?: LlmCallStat[];
 
-  constructor(message: string, payload: {
-    toolsUsed: string[];
-    toolInvocations: ToolInvocation[];
-    tokenUsage: TokenUsage;
-    partialText: string;
-  }) {
+  constructor(message: string, payload: AbortProgress) {
     super(message);
     this.name = "RunCancelledError";
     this.toolsUsed = payload.toolsUsed;
     this.toolInvocations = payload.toolInvocations;
     this.tokenUsage = payload.tokenUsage;
     this.partialText = payload.partialText;
+    if (payload.latency) this.latency = payload.latency;
+    if (payload.llmCalls?.length) this.llmCalls = payload.llmCalls;
   }
 }
 
@@ -588,13 +628,24 @@ const PARENT_PARALLELISM_PREAMBLE = [
   "",
 ].join("\n");
 
-function buildUserDetails(userId: string, userName?: string, userEmail?: string): string {
+export function buildUserDetails(
+  userId: string,
+  userName?: string,
+  userEmail?: string,
+  spaces?: { userId?: string | undefined; workspaceId?: string | undefined },
+): string {
   const lines = [
     "## Current User",
     `- **Name:** ${userName ?? "unknown"}`,
   ];
   if (userEmail) lines.push(`- **Email:** ${userEmail}`);
-  lines.push("", "To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the `spaces-whoami` tool first.");
+  if (spaces?.userId) {
+    lines.push(`- **Spaces user ID:** ${spaces.userId}`);
+    if (spaces.workspaceId) lines.push(`- **Spaces workspace ID:** ${spaces.workspaceId}`);
+    lines.push("", "Use this Spaces user ID directly for filtering tools (assignedTo, from, createdBy, participants). You do not need to call `spaces-whoami` to look it up.");
+  } else {
+    lines.push("", "To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the `spaces-whoami` tool first.");
+  }
   return lines.join("\n");
 }
 
@@ -1790,6 +1841,8 @@ export interface RunTaskOptions {
   context?: string | undefined;
   userName?: string | undefined;
   userEmail?: string | undefined;
+  spacesUserId?: string | undefined;
+  spacesWorkspaceId?: string | undefined;
   customTools?: ToolDefinition[] | undefined;
   systemPromptOverride?: string | undefined;
   cwd?: string | undefined;
@@ -1849,6 +1902,9 @@ export interface RunTaskOptions {
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
   twinDeliverRef?: TwinDeliverRef | undefined;
+  /** True once ask-user-question posted a card: the run must end and wait for
+   *  the answer run, so no further turns and no auto-continue nudge. */
+  questionPosted?: (() => boolean) | undefined;
   /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
@@ -2009,6 +2065,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     context,
     userName,
     userEmail,
+    spacesUserId,
+    spacesWorkspaceId,
     customTools,
     systemPromptOverride,
     cwd,
@@ -2033,6 +2091,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     modelSettings,
     structuredOutputRef,
     twinDeliverRef,
+    questionPosted,
     mode,
     planContinuation,
     agentHandoff,
@@ -2285,7 +2344,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // tool_use per turn, and 4 sequential subagent calls cost 4× wall-clock.
   const personaSuffix = twinPersona ? `\n\n${twinPersona}` : "";
   const personaSystemPrompt = systemPromptOverride
-    ? `${PARENT_PARALLELISM_PREAMBLE}${systemPromptOverride}${personaSuffix}\n\n${buildUserDetails(userId, userName, userEmail)}`
+    ? `${PARENT_PARALLELISM_PREAMBLE}${systemPromptOverride}${personaSuffix}\n\n${buildUserDetails(userId, userName, userEmail, { userId: spacesUserId, workspaceId: spacesWorkspaceId })}`
     : undefined;
 
   // Pi v0.75: DefaultResourceLoaderOptions.agentDir is now REQUIRED (with
@@ -2582,8 +2641,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   installMidTurnCompaction(session);
   // Digital Twin: end the loop right after the first accepted twin_deliver.
   // Installed after mid-turn compaction so it chains that stop hook.
-  if (twinDeliverRef) {
-    installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
+  if (twinDeliverRef || questionPosted) {
+    installStopAfterDelivery(session.agent, () => twinDeliverRef?.value !== undefined || questionPosted?.() === true);
   }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
   // directly-assignable property of the same name on the Agent. Semantics
@@ -2689,6 +2748,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // is our TTFT signal. message_end closes the turn.
   let turnStartedAt: number | null = runStartedAt;
   let firstDeltaAt: number | null = null;
+  // TTFT of the CURRENT turn (the run-level accumulator keeps only the first).
+  let turnTtftMs: number | null = null;
+  const llmTurnRecorder = new LlmTurnRecorder();
   // LLM stall watchdog: fall back instead of hanging forever when a provider
   // call makes no progress (the silent-drop failure mode). `modelActive` is true
   // only while we're awaiting/receiving model output (NOT during tool execution,
@@ -2701,6 +2763,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   let modelActive = false;
   const stallController = new AbortController();
   const STALL_TIMEOUT_MS = Number(process.env["AGENT_STALL_TIMEOUT_MS"] ?? 120_000);
+  const FIRST_TOKEN_STALL_MS = firstTokenLimitMs(provider);
+  let awaitingFirstTokenSince: number | null = null;
+  let stallIdleMs: number | null = null;
   let stallWatchdog: ReturnType<typeof setInterval> | null = null;
   let turnStreamChars = 0;
   let turnStreamThinkingChars = 0;
@@ -3123,6 +3188,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     lastActivityAt = Date.now();
     if (event.type === "turn_start") {
       modelActive = true; // awaiting/receiving model output until message_end
+      awaitingFirstTokenSince = Date.now();
       llmCallSeq += 1;
       pushDebugEvent("session_prompt", {
         kind: currentPromptKind,
@@ -3139,6 +3205,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Don't carry turnStartedAt forward — the next turn begins on tool_end.
       turnStartedAt = null;
       firstDeltaAt = null;
+      awaitingFirstTokenSince = null;
       // Tools can legitimately run for minutes — pause the stall watchdog so a
       // slow tool isn't mistaken for a hung model.
       modelActive = false;
@@ -3296,9 +3363,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const partId = TurnParts.partId(llmCallSeq, ame?.contentIndex);
       if (ame?.type === "thinking_end") turnParts.endReasoning(partId);
       if (ame && typeof ame.delta === "string" && ame.delta.length > 0) {
+        awaitingFirstTokenSince = null;
         if (firstDeltaAt == null && turnStartedAt != null) {
           firstDeltaAt = Date.now();
           const wait = firstDeltaAt - turnStartedAt;
+          turnTtftMs = wait;
           latency.llmWaitMs += wait;
           if (latency.firstTurnTtftMs == null) latency.firstTurnTtftMs = wait;
         }
@@ -3328,8 +3397,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "message_end") {
       flushStreamChunks(progressUrl, sessionId ?? conversationId ?? "unknown");
-      modelActive = false; // turn finished — next turn_start re-arms the watchdog
       const msg = (event as { message?: { role?: string; usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } } }).message;
+      if (msg?.role === "assistant") modelActive = false; // turn finished — next turn_start re-arms the watchdog
       if (msg?.role === "assistant" && msg.usage) {
         tokenUsage.input += msg.usage.input ?? 0;
         tokenUsage.output += msg.usage.output ?? 0;
@@ -3354,9 +3423,22 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           latency.streamTextChars += turnStreamTextChars;
           latency.streamCharsPerSec = Math.round(turnStreamChars / decodeSeconds);
         }
+        const called = msg as unknown as { model?: string; responseModel?: string; provider?: string; stopReason?: string };
+        llmTurnRecorder.record({
+          index: llmCallSeq,
+          ttftMs: turnTtftMs,
+          decodeMs: firstDeltaAt != null ? now - firstDeltaAt : 0,
+          usage: msg.usage,
+          streamChars: turnStreamChars,
+          ...(called.stopReason ? { stopReason: called.stopReason } : {}),
+          // responseModel is what the gateway actually served.
+          ...(called.responseModel ?? called.model ? { model: called.responseModel ?? called.model } : {}),
+          ...(called.provider ? { provider: called.provider } : {}),
+        });
         latency.llmTurns += 1;
         turnStartedAt = null;
         firstDeltaAt = null;
+        turnTtftMs = null;
         // HA: checkpoint the session to GCS after each assistant turn (debounced
         // + single-flight) and keep the conversation lock alive, so a pod death
         // mid-run loses ≈one turn, not the whole conversation.
@@ -3441,6 +3523,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       }, { turn: latency.llmTurns + 1 });
     }
     if (event.type === "compaction_end") {
+      llmTurnRecorder.markCompaction();
       const e = event as {
         aborted?: boolean;
         willRetry?: boolean;
@@ -3465,6 +3548,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (event.type === "auto_retry_start") {
       const e = event as { attempt?: number; maxAttempts?: number; errorMessage?: string };
+      llmTurnRecorder.markRetry();
       latency.llmRetries += 1;
       if (e.errorMessage) latency.lastRetryReason = e.errorMessage.slice(0, 200);
       // A retry restarts the current turn — re-arm the wait window so the
@@ -3488,21 +3572,40 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   });
 
-  const buildCancelledError = (): RunCancelledError => new RunCancelledError("Run cancelled by user", {
+  // Shared by the success path and both abort builders.
+  const snapshotLatency = (): LatencyMetrics => {
+    const totalMs = Date.now() - runStartedAt;
+    const toolMs = toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0);
+    const tokensPerSec = latency.llmDecodeMs > 0 && tokenUsage.output > 0
+      ? Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000))
+      : undefined;
+    return {
+      totalMs,
+      llmDecodeMs: latency.llmDecodeMs,
+      llmWaitMs: latency.llmWaitMs,
+      llmTotalMs: latency.llmWaitMs + latency.llmDecodeMs,
+      llmTurns: latency.llmTurns,
+      llmRetries: latency.llmRetries,
+      ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
+      ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
+      ...(tokensPerSec != null ? { tokensPerSec } : {}),
+      toolMs,
+    };
+  };
+  const snapshotAbortProgress = (): AbortProgress => ({
     toolsUsed: [...toolsUsed],
     toolInvocations: [...toolInvocations],
     tokenUsage: { ...tokenUsage },
     partialText: streamedText,
+    latency: snapshotLatency(),
+    llmCalls: llmTurnRecorder.snapshot(),
   });
+  const buildCancelledError = (): RunCancelledError =>
+    new RunCancelledError("Run cancelled by user", snapshotAbortProgress());
   const buildProviderStallError = (): ProviderStallError => new ProviderStallError(
     provider ?? "spaces",
-    Date.now() - lastActivityAt,
-    {
-      toolsUsed: [...toolsUsed],
-      toolInvocations: [...toolInvocations],
-      tokenUsage: { ...tokenUsage },
-      partialText: streamedText,
-    },
+    stallIdleMs ?? Date.now() - lastActivityAt,
+    snapshotAbortProgress(),
   );
 
   // On cancel we must call session.abort() — it stops the agent loop and
@@ -3623,16 +3726,27 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Start the stall watchdog (cleared in the finally at runTask's end). Fires
   // only while awaiting/receiving model output (modelActive) so slow tools and
   // idle turn-boundaries don't trip it. STALL_TIMEOUT_MS=0 disables it.
-  if (STALL_TIMEOUT_MS > 0) {
+  if (STALL_TIMEOUT_MS > 0 || FIRST_TOKEN_STALL_MS > 0) {
     stallWatchdog = setInterval(() => {
       if (stallController.signal.aborted || abortSignal?.aborted || !modelActive) return;
-      const idle = Date.now() - lastActivityAt;
-      if (idle > STALL_TIMEOUT_MS) {
-        log.warn(`[agent] LLM stall (provider=${provider ?? "spaces"}): no model activity for ${Math.round(idle / 1000)}s — aborting attempt so the fallback chain can advance`);
-        metric.count("agent_llm_stall", { provider: provider ?? "spaces" });
+      const stall = detectStall({
+        now: Date.now(),
+        lastActivityAt,
+        awaitingFirstTokenSince,
+        idleLimitMs: STALL_TIMEOUT_MS,
+        firstTokenLimitMs: FIRST_TOKEN_STALL_MS,
+      });
+      if (stall) {
+        stallIdleMs = stall.waitedMs;
+        log.warn(
+          stall.kind === "first-token"
+            ? `[agent] LLM stall (provider=${provider ?? "spaces"}): no first token after ${Math.round(stall.waitedMs / 1000)}s — aborting attempt so the fallback chain can advance`
+            : `[agent] LLM stall (provider=${provider ?? "spaces"}): no model activity for ${Math.round(stall.waitedMs / 1000)}s — aborting attempt so the fallback chain can advance`,
+        );
+        metric.count("agent_llm_stall", { provider: provider ?? "spaces", kind: stall.kind });
         stallController.abort();
       }
-    }, Math.min(15_000, STALL_TIMEOUT_MS));
+    }, FIRST_TOKEN_STALL_MS > 0 ? 5_000 : Math.min(15_000, STALL_TIMEOUT_MS));
   }
 
   const attachmentContext = fileAttachments?.length
@@ -3684,7 +3798,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           log.info(`[agent] Copilot resume repaired ${repaired} dangling respond-to-user tool_use block(s) before prompting`);
         }
       }
-      const userDetails = buildUserDetails(userId, userName, userEmail);
+      const userDetails = buildUserDetails(userId, userName, userEmail, { userId: spacesUserId, workspaceId: spacesWorkspaceId });
       const followUp = `${userDetails}${contextBlock}\n\n## User Reply\n${task}`;
       recordPrompt(followUp, "resume", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(followUp, images?.length ? { images } : undefined));
@@ -3922,6 +4036,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // invocations carry the tokens in their returned text, not in metadata.
   // Deliberately skipped for: structured-output runs (JSON, not citable prose),
   // and honest "nothing found" answers (no tool returned a token → no nag).
+  let citationReflectionOutcome: CitationReflectionOutcome | undefined;
   if (citationReflection && !structuredOutputRef) {
     // A well-formed citation token is `[clf-<toolCallId>#<chunk>]`. The id is a
     // FULL tool-call id whose charset varies by provider (`functions.x:2`,
@@ -3980,6 +4095,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
 
     const finalCited = CITE_RE.test(extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "");
+    citationReflectionOutcome = {
+      outcome: outcome as CitationReflectionOutcome["outcome"],
+      initialCited,
+      sourcesWereCiteable,
+      finalCited,
+      rounds,
+    };
     pushDebugEvent("citation_reflection", {
       phase: "result",
       outcome,
@@ -4107,7 +4229,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : 0;
   // A twin run's only output is twin_deliver (enforced by the reflection stage
   // above); an auto-continue nudge would reopen a finished delivery.
-  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef;
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef && !questionPosted?.();
 
   let text = computeFinalText();
   let answerAssessment: AnswerAssessment | null = null;
@@ -4243,24 +4365,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   // ── Finalize latency ────────────────────────────────────────────────
-  const totalMs = Date.now() - runStartedAt;
-  const toolMs = toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0);
-  const llmTotalMs = latency.llmWaitMs + latency.llmDecodeMs;
-  const tokensPerSec = latency.llmDecodeMs > 0 && tokenUsage.output > 0
-    ? Math.round(tokenUsage.output / (latency.llmDecodeMs / 1000))
-    : undefined;
-  const latencyMetrics: LatencyMetrics = {
-    totalMs,
-    llmDecodeMs: latency.llmDecodeMs,
-    llmWaitMs: latency.llmWaitMs,
-    llmTotalMs,
-    llmTurns: latency.llmTurns,
-    llmRetries: latency.llmRetries,
-    ...(latency.lastRetryReason ? { lastRetryReason: latency.lastRetryReason } : {}),
-    ...(latency.firstTurnTtftMs != null ? { firstTurnTtftMs: latency.firstTurnTtftMs } : {}),
-    ...(tokensPerSec != null ? { tokensPerSec } : {}),
-    toolMs,
-  };
+  const latencyMetrics = snapshotLatency();
+  const { totalMs, toolMs, llmTotalMs, tokensPerSec } = latencyMetrics;
   // Run-level summary line — pairs with the existing `[run] Completed:` line
   // in routes/run.ts but lives here too so persistent-session resumes (which
   // skip some of the run.ts wrapping) still emit it.
@@ -4294,10 +4400,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       provider: provider ?? "spaces",
       agentSlug: progressMeta?.agentSlug ?? "unknown",
     });
+    if (isRefusalTurnError(provider, lastTurnErrorDetail)) {
+      throw new ProviderRefusalError(provider ?? "spaces");
+    }
     throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
   }
   const parts = turnParts.finish();
-  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(parts.length > 0 ? { parts } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
+  const llmCallSeries = llmTurnRecorder.snapshot();
+  return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(parts.length > 0 ? { parts } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}), ...(citationReflectionOutcome ? { citationReflection: citationReflectionOutcome } : {}), ...(llmCallSeries ? { llmCalls: llmCallSeries } : {}), ...(model.id ? { model: model.id } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
     // pinging after the agent finishes — including on thrown errors.

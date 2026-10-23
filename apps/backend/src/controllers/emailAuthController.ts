@@ -3,6 +3,7 @@ import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { UserSessionService } from '../services/userSessionService';
+import { authSessionService } from '../services/authSessionService';
 import { UserService } from '../services/userService';
 import { jwtService } from '../services/jwtService';
 import {
@@ -476,6 +477,12 @@ export class EmailAuthController {
         res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
           ...cookieBase,
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
+        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
+        await authSessionService.issueOnLogin(req, res, {
+          orgMemberId: workspaceUser.orgMemberId,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);

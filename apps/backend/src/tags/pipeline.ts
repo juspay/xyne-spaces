@@ -7,7 +7,7 @@ import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
 import { buildQuestions, generateJevTags, runShadowTagGeneration } from './generators/xorShadow';
 import { AgentsConfig } from '@/agents/config';
-import { isPrivateJevConfigured } from '@/services/queryIntent/jevClient';
+import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
@@ -396,7 +396,7 @@ export class TagGenerationPipeline extends EventEmitter {
 
     const context = await buildContext(sourceId, sourceType);
     let consumeJev = false;
-    if (sourceType === DESK_EMAIL_SOURCE_TYPE && isPrivateJevConfigured()) {
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE && isPrivateDecisionEngineConfigured()) {
       const cacConfig = await AgentsConfig.fetch();
       consumeJev = cacConfig.shadowTagGenerationEnabled && cacConfig.tagGenerationJevEnabled;
     }

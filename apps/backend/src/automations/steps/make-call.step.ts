@@ -5,13 +5,14 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
-import { livekitService, DEFAULT_STT_MODEL } from '@/services/liveKitService';
+import { livekitService } from '@/services/liveKitService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { resolveCallSttRouting } from '@/services/callSttRouting';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -239,11 +240,12 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     // before DB commit leaves no call row, and a crash after commit leaves a
     // valid room. The only downside is a transient orphan room if the DB
     // transaction rolls back; it auto-expires via LiveKit's emptyTimeout.
+    const sttRouting = await resolveCallSttRouting({ workspaceId });
     const roomMetadata = JSON.stringify({
       channelId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
-      sttModel: DEFAULT_STT_MODEL,
+      ...sttRouting,
       createdBy: initiatorUserId,
       ...(allInvitedUserIds.length > 0 && { invitedUserIds: allInvitedUserIds }),
     });

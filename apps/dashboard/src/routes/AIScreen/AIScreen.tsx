@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Upload } from 'lucide-react';
 import { SidebarLeftOpen } from '@xyne/icons';
 import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
@@ -38,6 +39,9 @@ import { isLocalDiffArtifact } from '../../components/AIScreen/Workspace/LocalDi
 import {
   WorkspacePane,
   useConversationArtifacts,
+  DeliveredArtifactsContext,
+  indexDeliveredArtifacts,
+  type DeliveredArtifacts,
   type WorkspaceAppMode,
   type WorkspaceOpenRequest,
 } from '../../components/AIScreen/Workspace';
@@ -45,6 +49,7 @@ import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
+import { moveV2ConversationToProject } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { ASSISTANT_PANEL_ATTR } from '../../components/Assistant/buddy/constants';
 import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
@@ -280,6 +285,11 @@ const AIScreen = (): ReactElement => {
     // Keep the other direction's ref in step, so this externally-driven change
     // is not then re-announced as a state change.
     lastPushedSession.current = sessionFromUrl;
+    // Back, Forward or a pasted link opens a chat the user did not start from a
+    // project row. Without this, the project they picked earlier would still be
+    // pending and the next conversation id to arrive — this existing chat —
+    // would be filed into it.
+    setPendingProjectId(null);
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
@@ -414,19 +424,28 @@ const AIScreen = (): ReactElement => {
     };
   }, []);
 
-  const handleCreateChat = useCallback((): void => {
-    setActiveSessionId('');
-    setInitialQuery('');
-    setInitialAttachments(undefined);
-    setInitialExtras(undefined);
-    setChatKey(prev => prev + 1);
-    setShowChatView(false); // Return to landing page
-    resetAssistant();
-  }, [resetAssistant]);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const attemptedFileIdsRef = useRef<Set<string>>(new Set());
+
+  const handleCreateChat = useCallback(
+    (projectId?: string): void => {
+      setPendingProjectId(projectId ?? null);
+      attemptedFileIdsRef.current = new Set();
+      setActiveSessionId('');
+      setInitialQuery('');
+      setInitialAttachments(undefined);
+      setInitialExtras(undefined);
+      setChatKey(prev => prev + 1);
+      setShowChatView(false); // Return to landing page
+      resetAssistant();
+    },
+    [resetAssistant],
+  );
 
   const handleSelectSession = useCallback(
     (sessionId: string): void => {
       if (sessionId === activeSessionId) return;
+      setPendingProjectId(null);
       setActiveSessionId(sessionId);
       setInitialQuery('');
       setInitialAttachments(undefined);
@@ -525,6 +544,21 @@ const AIScreen = (): ReactElement => {
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
       setActiveSessionId(sessionId);
+      if (pendingProjectId && !attemptedFileIdsRef.current.has(sessionId)) {
+        attemptedFileIdsRef.current.add(sessionId);
+        const projectId = pendingProjectId;
+        void moveV2ConversationToProject(sessionId, projectId)
+          .then(() => {
+            setPendingProjectId(null);
+            invalidateV2Sessions();
+          })
+          .catch((error: unknown) => {
+            const status = (error as { response?: { status?: number } })?.response?.status;
+            if (status !== 404) {
+              toast.error('Chat created, but could not be added to the project');
+            }
+          });
+      }
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
       // page reload or a navigate-away-and-back. No agent here on purpose:
@@ -533,7 +567,7 @@ const AIScreen = (): ReactElement => {
       // thread's session loader mid-conversation.
       invalidateV2Sessions();
     },
-    [invalidateV2Sessions],
+    [invalidateV2Sessions, pendingProjectId],
   );
 
   const handleAccount = useCallback((): void => {
@@ -681,6 +715,18 @@ const AIScreen = (): ReactElement => {
       requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
     [requestWorkspace],
   );
+  const deliveredIndex = useMemo(
+    () => indexDeliveredArtifacts(conversationArtifacts),
+    [conversationArtifacts],
+  );
+  const openDeliveredArtifact = useCallback(
+    (artifactId: string) => openWorkspaceTab('artifacts', artifactId),
+    [openWorkspaceTab],
+  );
+  const deliveredArtifacts = useMemo<DeliveredArtifacts>(
+    () => ({ ...deliveredIndex, open: openDeliveredArtifact }),
+    [deliveredIndex, openDeliveredArtifact],
+  );
   const autoOpenWorkspace = useCallback(
     (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => {
       if (!workspaceAutoOpenRef.current) return;
@@ -788,24 +834,26 @@ const AIScreen = (): ReactElement => {
                 </div>
               )}
               {showChatView ? (
-                <AIChatThread
-                  ref={chatThreadRef}
-                  key={chatKey}
-                  sessionId={activeSessionId || undefined}
-                  initialQuery={initialQuery}
-                  initialAttachments={initialAttachments}
-                  initialExtras={initialExtras}
-                  initialTrigger={initialTrigger}
-                  onSetMobileSidebarOpen={setMobileSidebarOpen}
-                  onConversationChange={handleConversationChange}
-                  onAppChange={handleAppChange}
-                  onToggleSidebar={handleToggleSidebar}
-                  sidebarCollapsed={sidebarCollapsed}
-                  onAgentChange={handleAgentChange}
-                  onContextChange={handleContextChange}
-                  onInitialQueryConsumed={handleInitialQueryConsumed}
-                  assistant={assistant}
-                />
+                <DeliveredArtifactsContext.Provider value={deliveredArtifacts}>
+                  <AIChatThread
+                    ref={chatThreadRef}
+                    key={chatKey}
+                    sessionId={activeSessionId || undefined}
+                    initialQuery={initialQuery}
+                    initialAttachments={initialAttachments}
+                    initialExtras={initialExtras}
+                    initialTrigger={initialTrigger}
+                    onSetMobileSidebarOpen={setMobileSidebarOpen}
+                    onConversationChange={handleConversationChange}
+                    onAppChange={handleAppChange}
+                    onToggleSidebar={handleToggleSidebar}
+                    sidebarCollapsed={sidebarCollapsed}
+                    onAgentChange={handleAgentChange}
+                    onContextChange={handleContextChange}
+                    onInitialQueryConsumed={handleInitialQueryConsumed}
+                    assistant={assistant}
+                  />
+                </DeliveredArtifactsContext.Provider>
               ) : (
                 /* Landing page – centred greeting + composer. Context rises
                    into the gap between them and a longer message grows the

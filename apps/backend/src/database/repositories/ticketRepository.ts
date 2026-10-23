@@ -9,6 +9,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import {
   BaseTicketType,
+  FLOW_STAGE_NAMES,
   isReleaseTicket,
   TicketStatusV2,
   TicketPriority,
@@ -387,6 +388,7 @@ export class TicketRepository {
               statusV2: newStatusV2,
               updatedBy: updatedBy,
               updatedAt: new Date(),
+              ...(statusChanged ? { statusUpdatedAt: new Date() } : {}),
             },
           });
         guardedUpdatedTicket = options.requiredActiveFlowRootId
@@ -539,6 +541,7 @@ export class TicketRepository {
     if (
       newStatusV2 === TicketStatusV2.COMPLETED &&
       oldStatusV2 !== TicketStatusV2.COMPLETED &&
+      newStageName !== FLOW_STAGE_NAMES.SKIPPED &&
       flowSnapshot?.gate?.type === 'confirmation'
     ) {
       await prisma.ticketActivity.create({
@@ -572,7 +575,8 @@ export class TicketRepository {
         boardId: true,
         stageName: true,
         updatedBy: true,
-        board: { select: { boardType: true } },
+        metadata: true,
+        board: { select: { boardType: true, flowPlan: true } },
       }
     });
   }
@@ -894,6 +898,9 @@ export class TicketRepository {
         : null;
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+    if (fields.statusV2 !== undefined && fields.statusV2 !== previousStatus) {
+      data.statusUpdatedAt = data.updatedAt;
+    }
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
     if (fields.description !== undefined) {

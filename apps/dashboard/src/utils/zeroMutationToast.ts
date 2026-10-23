@@ -21,6 +21,15 @@ type ZeroMutationResult = {
  * Returns `true` when the mutation succeeded and `false` otherwise, so callers
  * that need a success side effect (success toast, navigation) can gate on it.
  */
+export async function settleMutation(mutation: ZeroMutationResult): Promise<boolean> {
+  try {
+    const result = await mutation.server;
+    return result?.type !== 'error';
+  } catch {
+    return false;
+  }
+}
+
 export async function surfaceMutationError(
   mutation: ZeroMutationResult,
   fallback = 'Something went wrong. Please try again.',

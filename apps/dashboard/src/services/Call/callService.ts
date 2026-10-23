@@ -2,7 +2,13 @@ import { apiInstance } from '../clients/apiClient';
 import type { SdlcCallLink } from '@xyne/shared';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
-import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
+import {
+  CallType,
+  MeetingStatus,
+  type HostControls,
+  CalendarVisibility,
+  type CallRingNotification,
+} from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 
 // ============================================================================
@@ -73,6 +79,8 @@ export interface ScheduleCallRequest {
     timezone?: string;
   };
   notifyParticipantsByEmail?: boolean;
+  /** DISABLED stops participants ringing when the call starts; null or omitted rings. */
+  ringNotification?: CallRingNotification | null;
 }
 
 export interface ScheduleCallResponse {
@@ -97,6 +105,7 @@ export interface CreateRecurringSeriesRequest {
   externalInvitees?: string[];
   invitation?: ScheduleCallRequest['invitation'];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification | null;
 }
 
 export interface CreateRecurringSeriesResponse {
@@ -114,6 +123,7 @@ export interface UpdateScheduleCallRequest {
   callUpdatesChannel?: string;
   externalInvitees?: string[];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification | null;
 }
 
 export interface UpdateRecurringSeriesRequest {
@@ -129,6 +139,7 @@ export interface UpdateRecurringSeriesRequest {
   callUpdatesChannel?: string;
   externalInvitees?: string[];
   notifyParticipantsByEmail?: boolean;
+  ringNotification?: CallRingNotification | null;
 }
 
 export interface ApiErrorResponse {
@@ -587,6 +598,7 @@ export class CallService {
             invitation: data.invitation,
           }),
         ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
+        ...(data.ringNotification && { ringNotification: data.ringNotification }),
       });
 
       return response.data;
@@ -632,6 +644,7 @@ export class CallService {
         externalInvitees: data.externalInvitees,
         invitation: data.invitation,
         ...(data.notifyParticipantsByEmail && { notifyParticipantsByEmail: true }),
+        ...(data.ringNotification && { ringNotification: data.ringNotification }),
       });
 
       return response.data;
@@ -817,15 +830,16 @@ export class CallService {
   /**
    * Fetch the list of Pulse organisations.
    * Used to let users reassign a merchant in the Pulse actionables UI.
+   * The backend only returns the list to members of a Pulse-enabled channel.
    */
-  async fetchPulseOrgs(): Promise<
-    Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>
-  > {
+  async fetchPulseOrgs(
+    channelId: string,
+  ): Promise<Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>> {
     try {
       const response = await apiInstance.get<{
         success: boolean;
         orgs: Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>;
-      }>('/calls/pulse-orgs');
+      }>('/calls/pulse-orgs', { params: { channelId } });
       return response.data.orgs;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.data) {
@@ -898,15 +912,36 @@ export class CallService {
     to: Date,
   ): Promise<{
     calendarVisibility: CalendarVisibility;
-    calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+    calls: {
+      startsAt: number;
+      endsAt: number | null;
+      id?: string;
+      title?: string;
+      status?: string;
+      isRecurring?: boolean;
+    }[];
   }> {
     const response = await apiInstance.get<{
       calendarVisibility: CalendarVisibility;
-      calls: { startsAt: number; endsAt: number | null; id?: string; title?: string }[];
+      calls: {
+        startsAt: number;
+        endsAt: number | null;
+        id?: string;
+        title?: string;
+        status?: string;
+        isRecurring?: boolean;
+      }[];
     }>(`/calls/user/${userId}/scheduled`, {
       params: { from: from.toISOString(), to: to.toISOString() },
     });
     return response.data;
+  }
+
+  async getOtherUserCallParticipants(userId: string, callId: string): Promise<string[]> {
+    const response = await apiInstance.get<{ participantIds: string[] }>(
+      `/calls/user/${userId}/scheduled/${callId}/participants`,
+    );
+    return response.data.participantIds;
   }
 }
 

@@ -55,10 +55,6 @@ export const InlineTagGroups = ({ groups }: { groups: TagGroup[] }): JSX.Element
   <div className='flex items-center gap-x-3 gap-y-1.5 flex-wrap'>
     {groups.map(group => (
       <div key={group.category} className='flex items-center gap-1 flex-wrap'>
-        <span
-          className='size-1.5 rounded-full shrink-0'
-          style={{ backgroundColor: safeColor(group.color) }}
-        />
         <span className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0'>
           {group.category}
         </span>

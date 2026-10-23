@@ -5,6 +5,7 @@ import { jwtService } from '../services/jwtService';
 import { logger as baseLogger } from '../utils/logger';
 import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
+import { authSessionService } from '../services/authSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
@@ -227,14 +228,20 @@ class AuthV2Middleware {
       });
 
       // Generate new token - role is fetched fresh from DB, not stored in JWT
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-      });
+      const accessTokenLifetimeSeconds = jwtService.getAccessTokenLifetimeSeconds(
+        session.refreshTokenExpiry
+      );
+      const customToken = jwtService.generateToken(
+        {
+          sub: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          picture: session.user.picture,
+          workspaceId: session.user.workspaceId,
+          memberId: session.user.orgMemberId,
+        },
+        accessTokenLifetimeSeconds
+      );
 
       const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
 
@@ -254,7 +261,7 @@ class AuthV2Middleware {
           secure: isProduction,
           sameSite: 'strict',
           path: '/',
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: accessTokenLifetimeSeconds * 1000,
         });
         
         res.cookie('xyne_last_workspace', targetWorkspaceId, {
@@ -265,6 +272,14 @@ class AuthV2Middleware {
           maxAge: session.refreshTokenExpiry.getTime() - Date.now(),
         });
       }
+
+      // Attach the device's org-scoped auth session (xs cookie) when missing.
+      // Never throws; a failure here must not fail the refresh.
+      await authSessionService.ensureOnRefresh(req, res, {
+        orgMemberId: session.user.orgMemberId,
+        orgId: session.user.orgMember?.orgId,
+        workspaceId: session.user.workspaceId ?? undefined,
+      });
 
       // Attach user to request so downstream handlers work
       // Safe non-null assertion: orgMember exists via FK constraint

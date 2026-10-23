@@ -21,6 +21,7 @@ import {
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import { NOTE_TEXT_MAX_CHARS, NOTE_TURNS_MAX, noteParentId, noteTurnsOf, replyRunning } from "../lib/chat-notes.js";
 import {
   agentFacets,
   buildAgentHandoff,
@@ -48,9 +49,17 @@ import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
+import { brandAttachmentsRouter } from "./brand-attachments.js";
+import {
+  chatProjectsRouter,
+  prepareProjectMove,
+  resolveProjectScope,
+  type PreparedProjectMove,
+} from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
+import { resolveProjectInstructions } from "../lib/project-context.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -59,6 +68,7 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { clawMetricsFields } from "../repositories/agentRunRepository.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -809,6 +819,13 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
     ...(workspaceId ? { workspaceId } : {}),
   };
 }
+
+// Chat projects (routes/chat-projects.ts). Mounted here, ahead of every
+// `/:slug/...` route below, so `/chat/projects*` is resolved before any
+// slug pattern gets a chance at it.
+router.use(chatProjectsRouter);
+// Brand-extraction attachment routes (routes/brand-attachments.ts).
+router.use(brandAttachmentsRouter);
 
 // Multer for attachment uploads (memory buffers → GCS)
 const uploadMiddleware = multer({
@@ -2162,6 +2179,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           [
             resolvedContext.promptPrefix || "",
             typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+            // A harness run builds its own context and never reaches
+            // prepareRun, so a project's instructions have to be added here or
+            // they never arrive.
+            await resolveProjectInstructions(
+              conversationId,
+              [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+              agent.orgId,
+            ) ?? "",
             designSelectionInstruction,
           ]
             .filter(Boolean)
@@ -2603,7 +2628,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, attachments, llmCitations, provider, model, fastMode } = req.body as {
     result?: string;
     status?: string;
     error?: string;
@@ -2676,8 +2701,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(model ? { model } : {}),
         toolsUsed: toolsUsed ?? [],
         ...(chatMessageId ? { chatMessageId } : {}),
-        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
-        ...(tokenUsage ? { tokenUsage } : {}),
+        ...clawMetricsFields(req.body as Record<string, unknown>),
         ...(fastMode !== undefined ? { fastMode } : {}),
       });
     } catch (err) {
@@ -2941,6 +2965,70 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
       ...(turn.parts ? { parts: turn.parts } : {}),
     });
+  }
+});
+
+// POST /agents/:slug/chat/:convId/notes — append turns the dashboard answered
+// itself (Buddy acting on screen) as finished messages, so they show in the
+// history like any other turn. No run: the agent's session never sees them, and
+// the rows are chained after the reply the user is on (`parentId`, else the
+// latest), so the next turn continues that path and resumes the same session.
+router.post("/:slug/chat/:convId/notes", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    const { slug, convId } = req.params;
+    // Direct chats only: a Spaces thread id is shared with other users' turns.
+    if (!isDirectChatConversation(convId)) {
+      res.status(400).json({ success: false, error: "Only direct chats take notes" });
+      return;
+    }
+    const turns = noteTurnsOf(req.body);
+    if (!turns) {
+      res.status(400).json({
+        success: false,
+        error: `turns must be 1-${NOTE_TURNS_MAX} non-empty request/reply pairs of up to ${NOTE_TEXT_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+
+    const existing = await chatMessageRepository.findByConversation(convId);
+    const aliases = new Set(getRequesterAliases(req));
+    if (existing.length > 0 && !existing.some((m) => aliases.has(m.userId))) {
+      res.status(404).json({ success: false, error: "Conversation not found" });
+      return;
+    }
+    if (replyRunning(existing)) {
+      res.status(409).json({ success: false, error: "A reply is still running" });
+      return;
+    }
+
+    // The caller's own rows only: someone else's reply in the thread is no parent for these.
+    const parentId = noteParentId(
+      existing.filter((m) => aliases.has(m.userId)),
+      (req.body as { parentId?: unknown }).parentId,
+    );
+    const ids = await chatMessageRepository.appendTurns({
+      conversationId: convId,
+      agentSlug: slug,
+      userId,
+      orgId: agent.orgId,
+      parentId,
+      turns,
+    });
+    log.info(`[agent-chat/notes] conv=${convId} slug=${slug} rows=${ids.length}`);
+    res.json({ success: true, conversationId: convId, parentId, messageIds: ids });
+  } catch (err) {
+    log.error(`[agent-chat/notes] ${req.params.convId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    res.status(500).json({ success: false, error: "Failed to save notes" });
   }
 });
 
@@ -3918,9 +4006,13 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       return;
     }
 
-    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
-    if (title === undefined && pinned === undefined) {
-      res.status(400).json({ success: false, error: "title or pinned is required" });
+    const { title, pinned, projectId } = (req.body ?? {}) as {
+      title?: unknown;
+      pinned?: unknown;
+      projectId?: unknown;
+    };
+    if (title === undefined && pinned === undefined && projectId === undefined) {
+      res.status(400).json({ success: false, error: "title, pinned or projectId is required" });
       return;
     }
     if (title !== undefined && (typeof title !== "string" || !title.trim())) {
@@ -3929,6 +4021,11 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     }
     if (pinned !== undefined && typeof pinned !== "boolean") {
       res.status(400).json({ success: false, error: "pinned must be a boolean" });
+      return;
+    }
+    // null unfiles the chat; a string moves it. Absent leaves it where it is.
+    if (projectId !== undefined && projectId !== null && (typeof projectId !== "string" || !projectId.trim())) {
+      res.status(400).json({ success: false, error: "projectId must be a non-empty string or null" });
       return;
     }
 
@@ -3949,6 +4046,38 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       return;
     }
 
+    // Everything is resolved BEFORE the first write. A move used to run after
+    // setTitle/setPinned, so a bad project id saved the title and then answered
+    // 404 — and the dashboard's optimistic update rolls back on that 404,
+    // reverting a title the server had actually kept.
+    const movingProject = projectId === null || typeof projectId === "string";
+    let move: PreparedProjectMove | undefined;
+    if (movingProject) {
+      // Only a direct chat can be filed. A Spaces thread lists one row PER
+      // AGENT while membership is keyed by conversation alone, so filing one
+      // row would silently file every agent's row in that thread — and once
+      // XYNE-66810 injects project instructions, they would reach runs inside
+      // a channel thread rather than the user's own chats.
+      if (!directChat) {
+        res.status(400).json({
+          success: false,
+          error: "Only direct chats can be moved into a project",
+        });
+        return;
+      }
+      move = await prepareProjectMove({
+        conversationId: req.params.convId,
+        ownerUserId: owned.userId,
+        ownerOrgId: owned.orgId,
+        aliases: userAliases,
+        projectId,
+      });
+      if (move.status === "project-not-found") {
+        res.status(404).json({ success: false, error: "Project not found" });
+        return;
+      }
+    }
+
     const target = {
       conversationId: req.params.convId,
       userId: owned.userId,
@@ -3964,15 +4093,28 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
     if (typeof pinned === "boolean") {
       await chatConversationMetaRepository.setPinned({ ...target, pinned });
     }
+    // Membership is written under `owned.userId` — the id this conversation's
+    // own rows use — so the move is found again on read.
+    if (move?.status === "ok") {
+      await move.apply();
+    }
 
     const meta = await chatConversationMetaRepository.find({
       conversationId: req.params.convId,
       userId: owned.userId,
       agentSlug: target.agentSlug,
     });
+    const filedIn = await chatProjectRepository.projectIdsForConversations(
+      [req.params.convId],
+      userAliases,
+    );
     res.json({
       success: true,
-      data: { title: meta?.title ?? null, pinned: meta?.pinned ?? false },
+      data: {
+        title: meta?.title ?? null,
+        pinned: meta?.pinned ?? false,
+        projectId: filedIn.get(req.params.convId) ?? null,
+      },
     });
   } catch (err) {
     log.error("[agent-chat] patch conversation error:", err);
@@ -4061,8 +4203,42 @@ async function sendConversationList(
       : CONVERSATION_PAGE_SIZE;
     const query = opts.paged ? singleQueryParam(req, "q")?.toLowerCase() : undefined;
 
+    // orgId for project lookups: the header, else the listed user's own record.
+    // Resolved at most once per request.
+    let cachedOrgId: string | null | undefined;
+    const resolveOrgId = async (): Promise<string | undefined> => {
+      if (cachedOrgId === undefined) {
+        const header = getOrgId(req);
+        cachedOrgId = header
+          ?? (await prisma.user
+            .findFirst({ where: { id: { in: userIds } }, select: { orgId: true } })
+            .catch(() => null))?.orgId
+          ?? null;
+      }
+      return cachedOrgId ?? undefined;
+    };
+
+    // `?projectId=<id>` narrows to one project, `?projectId=none` to unfiled
+    // chats. Both become a conversationId set applied INSIDE the aggregate
+    // below, so cursor pagination still walks a complete, correctly ordered
+    // list — unlike `q`, which is matched in memory after the fact and so
+    // cannot page past the first screenful of matches.
+    const projectParam = opts.paged ? singleQueryParam(req, "projectId") : undefined;
+    const scoped = await resolveProjectScope({
+      projectParam,
+      userIds,
+      orgId: projectParam && projectParam !== "none" ? await resolveOrgId() : undefined,
+    });
+    if (scoped.status === "project-not-found") {
+      res.status(404).json({ success: false, error: "Project not found" });
+      return;
+    }
+    const scope = scoped.scope;
+
     // One aggregate for the whole history; titles and pins only for what is sent.
-    const all = conversationEntries(await chatMessageRepository.conversationAgentGroupsForUser(userIds));
+    const all = conversationEntries(
+      await chatMessageRepository.conversationAgentGroupsForUser(userIds, scope),
+    );
     const { agentSlug } = opts;
     const entries = agentSlug ? all.filter((entry) => entry.agentSlugs.includes(agentSlug)) : all;
     const resolve = async (list: ConversationEntry[]): Promise<ConversationListRow[]> => {
@@ -4078,7 +4254,13 @@ async function sendConversationList(
           log.error("[agent-chat] conversation title fallback failed:", err);
           return [];
         });
-      return buildConversationList({ entries: list, meta, firstUserMessages });
+      const projectIds = await chatProjectRepository
+        .projectIdsForConversations([...new Set(list.map((entry) => entry.conversationId))], userIds)
+        .catch((err) => {
+          log.error("[agent-chat] conversation project lookup failed:", err);
+          return new Map<string, string>();
+        });
+      return buildConversationList({ entries: list, meta, firstUserMessages, projectIds });
     };
 
     if (!opts.paged) {
@@ -4100,7 +4282,26 @@ async function sendConversationList(
       const selected = selectPage(entries, { isPinned: (entry) => pinned.has(entryMetaKey(entry)), limit, cursor });
       page = { items: await resolve(selected.items), nextCursor: selected.nextCursor };
     }
-    res.json({ success: true, data: page.items, nextCursor: page.nextCursor, agents: agentFacets(all) });
+    // Sidebar counts. Same source as `chatCount` on GET /chat/projects, so the
+    // two cannot disagree, and deliberately NOT narrowed by `scope` — the
+    // sidebar shows every project's total while one of them is being viewed.
+    const countsOrgId = await resolveOrgId();
+    const projectCounts = countsOrgId
+      ? Object.fromEntries(
+          await chatProjectRepository.countsByProject(userIds, countsOrgId).catch((err) => {
+            log.error("[agent-chat] project counts failed:", err);
+            return new Map<string, number>();
+          }),
+        )
+      : {};
+
+    res.json({
+      success: true,
+      data: page.items,
+      nextCursor: page.nextCursor,
+      agents: agentFacets(all),
+      projectCounts,
+    });
   } catch (err) {
     log.error("[agent-chat] conversations error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });

@@ -43,6 +43,8 @@ interface BarCustomizerProps {
   resetLabel?: string;
   /** App ids to mark as "Published" in the Shown list. */
   publishedAppIds?: ReadonlySet<string>;
+  maxShown?: number;
+  apps?: boolean;
 }
 
 /**
@@ -61,6 +63,8 @@ export const BarCustomizer = ({
   publish,
   resetLabel,
   publishedAppIds,
+  maxShown,
+  apps = true,
 }: BarCustomizerProps): ReactElement => {
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
@@ -85,6 +89,7 @@ export const BarCustomizer = ({
     () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
     [ids],
   );
+  const full = maxShown !== undefined && shown.length >= maxShown;
   const appsFull =
     [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
 
@@ -115,7 +120,13 @@ export const BarCustomizer = ({
       };
     }
     const builtIn = builtInById.get(id);
-    return builtIn ? { icon: builtIn.icon, label: builtIn.label } : null;
+    return builtIn
+      ? {
+          icon: builtIn.icon,
+          label: builtIn.label,
+          ...(builtIn.hint !== undefined && { hint: builtIn.hint }),
+        }
+      : null;
   };
 
   return (
@@ -130,7 +141,9 @@ export const BarCustomizer = ({
           (confirmingReset ? (
             <div className='mt-2 flex items-center gap-2 text-xs'>
               <span className='text-muted-foreground'>
-                Discard your order and your own apps here?
+                {apps
+                  ? 'Discard your order and your own apps here?'
+                  : 'Go back to the default layout?'}
               </span>
               <Button
                 variant='destructive'
@@ -171,7 +184,14 @@ export const BarCustomizer = ({
       </div>
 
       <section className='space-y-2'>
-        <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Shown</p>
+        <div className='flex items-baseline justify-between gap-3'>
+          <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Shown</p>
+          {maxShown !== undefined && (
+            <span className='text-xs tabular-nums text-muted-foreground'>
+              {shown.length} of {maxShown}
+            </span>
+          )}
+        </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={shown} strategy={verticalListSortingStrategy}>
             <div className='flex flex-col gap-1.5'>
@@ -198,9 +218,14 @@ export const BarCustomizer = ({
 
       {available.length > 0 && (
         <section className='space-y-2'>
-          <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-            Available
-          </p>
+          <div className='flex items-baseline justify-between gap-3'>
+            <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+              Available
+            </p>
+            {full && (
+              <span className='text-xs text-muted-foreground'>Remove one to add another</span>
+            )}
+          </div>
           <div className='flex flex-col gap-1.5'>
             {available.map(item => (
               <div
@@ -210,12 +235,16 @@ export const BarCustomizer = ({
                 <div className='flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground'>
                   {item.icon}
                 </div>
-                <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-                  {item.label}
-                </p>
+                <div className='min-w-0 flex-1'>
+                  <p className='truncate text-sm font-medium text-foreground'>{item.label}</p>
+                  {item.hint && (
+                    <p className='truncate text-xs text-muted-foreground'>{item.hint}</p>
+                  )}
+                </div>
                 <Button
                   variant='ghost'
                   size='sm'
+                  disabled={full}
                   onClick={() => store.add(item.id)}
                   data-track-category={trackCategory}
                   data-track-name='AddBarItem'
@@ -230,41 +259,47 @@ export const BarCustomizer = ({
         </section>
       )}
 
-      <section className='space-y-2'>
-        <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Apps</p>
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={() => setPickerOpen(true)}
-          data-track-category={trackCategory}
-          data-track-name='OpenAppPicker'
-        >
-          <Plus className='size-4' />
-          Add app
-        </Button>
-        <p className='text-xs text-muted-foreground'>
-          Apps you saved from an AI chat, or that were published to this workspace. Up to{' '}
-          {MAX_APPS_PER_BAR} per bar.
-        </p>
-      </section>
+      {apps && (
+        <>
+          <section className='space-y-2'>
+            <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+              Apps
+            </p>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setPickerOpen(true)}
+              data-track-category={trackCategory}
+              data-track-name='OpenAppPicker'
+            >
+              <Plus className='size-4' />
+              Add app
+            </Button>
+            <p className='text-xs text-muted-foreground'>
+              Apps you saved from an AI chat, or that were published to this workspace. Up to{' '}
+              {MAX_APPS_PER_BAR} per bar.
+            </p>
+          </section>
 
-      <AppPickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        addedAppIds={addedAppIds}
-        isFull={appsFull}
-        {...(publishedAppIds ? { publishedAppIds } : {})}
-        onToggle={(app, next) => {
-          if (!next) {
-            store.remove(appItemId(app.id));
-            return;
-          }
-          setAppSnapshot(app.id, { title: app.title, icon: app.icon });
-          store.add(appItemId(app.id));
-        }}
-        trackCategory={trackCategory}
-        {...(publish ? { publish } : {})}
-      />
+          <AppPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            addedAppIds={addedAppIds}
+            isFull={appsFull}
+            {...(publishedAppIds ? { publishedAppIds } : {})}
+            onToggle={(app, next) => {
+              if (!next) {
+                store.remove(appItemId(app.id));
+                return;
+              }
+              setAppSnapshot(app.id, { title: app.title, icon: app.icon });
+              store.add(appItemId(app.id));
+            }}
+            trackCategory={trackCategory}
+            {...(publish ? { publish } : {})}
+          />
+        </>
+      )}
     </div>
   );
 };

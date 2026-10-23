@@ -5,7 +5,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus,  RecurringCallSeriesStatus, CalendarVisibility, CallVisibility, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, CallStatus,  RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -281,6 +281,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        ringNotification,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
 
@@ -333,7 +334,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId));
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId, ringNotification));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -418,6 +419,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        ringNotification,
       } = ScheduleCallSchema.parse(req.body);
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
@@ -469,7 +471,7 @@ export class ScheduleCallController {
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
 
-      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId);
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId, ringNotification);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {
@@ -609,7 +611,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail, ringNotification } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -640,7 +642,8 @@ export class ScheduleCallController {
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
           normalizedExternalInvitees !== undefined ||
-          summaryTemplateId !== undefined,
+          summaryTemplateId !== undefined ||
+          ringNotification !== undefined,
         targetUserIds,
         // findParticipants already excludes external invitees.
         loadParticipants: () => repositories.calls.findParticipants(call.id),
@@ -757,6 +760,7 @@ export class ScheduleCallController {
         callUpdatesChannel: newCallUpdatesChannel,
         externalInvitees: normalizedExternalInvitees,
         summaryTemplateId,
+        ringNotification,
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.externalId} resolvedChannelId=${resolvedChannelId}`);
@@ -932,7 +936,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail, ringNotification } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -967,7 +971,8 @@ export class ScheduleCallController {
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
           normalizedExternalInvitees !== undefined ||
-          summaryTemplateId !== undefined,
+          summaryTemplateId !== undefined ||
+          ringNotification !== undefined,
         targetUserIds,
         loadParticipants: () =>
           repositories.recurringCallParticipants.findInternalParticipants(series.id),
@@ -1083,7 +1088,7 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] seriesUpdate payload=${JSON.stringify(seriesUpdate)}`);
 
-      const updatedSeries = await updateRecurringSeriesTx(db, seriesId, seriesUpdate, recurringParticipantUserIds, series, userId, req, normalizedExternalInvitees);
+      const updatedSeries = await updateRecurringSeriesTx(db, seriesId, seriesUpdate, recurringParticipantUserIds, series, userId, req, normalizedExternalInvitees, ringNotification);
 
       logger.info(`[updateRecurringSeries] source transaction committed | newChannelId=${updatedSeries.channelId}`);
 
@@ -1244,6 +1249,14 @@ export class ScheduleCallController {
               externalInvitees: normalizedExternalInvitees,
             });
           }
+        }
+
+        // After the participant sync above, so invitees it just added are covered too.
+        if (ringNotification !== undefined) {
+          await repositories.calls.setInternalParticipantsRingNotification(
+            allScheduledInstances.map((i) => i.id),
+            ringNotification,
+          );
         }
 
         // Title / time / participant edits cascaded above; mirror them out.
@@ -1542,7 +1555,7 @@ export class ScheduleCallController {
       // calls the requester is also on, which is not the set this endpoint exists to show.
       // Workspace membership is checked above; the projection below still governs disclosure.
       const calls = await withWorkspaceScope(() =>
-        repositories.calls.getScheduledCallsForUser(userId!, fromDate, toDate),
+        repositories.calls.getCalendarCallsForUser(userId!, fromDate, toDate),
       );
 
       const busySlots = calls.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt }));
@@ -1552,17 +1565,66 @@ export class ScheduleCallController {
         return;
       }
 
-      // PUBLIC calendar: allowlist projection. A call whose own visibility is not PUBLIC
-      // (null is treated as PRIVATE everywhere it's read) is reduced to a busy slot.
-      const safeCalls = calls.map(c =>
-        c.visibility !== CallVisibility.PUBLIC
-          ? { id: c.id, startsAt: c.startsAt, endsAt: c.endsAt, isRecurring: c.isRecurring, status: c.status }
-          : { id: c.id, title: c.title, startsAt: c.startsAt, endsAt: c.endsAt, isRecurring: c.isRecurring, status: c.status },
-      );
+      // PUBLIC calendar: the owner's calendar setting alone decides disclosure, so every
+      // call shows its title. Participants are fetched per call, when one is opened.
+      // Allowlist projection — nothing beyond these fields leaves.
+      const safeCalls = calls.map(c => ({
+        id: c.id,
+        title: c.title,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        isRecurring: c.isRecurring,
+        status: c.status,
+      }));
       res.json({ success: true, calendarVisibility: CalendarVisibility.PUBLIC, calls: safeCalls });
     } catch (error) {
       logger.error('Failed to fetch other user scheduled calls:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch scheduled calls' });
+    }
+  };
+
+  // GET /api/calls/user/:userId/scheduled/:callId/participants
+  getOtherUserCallParticipants = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const requesterId = req.user?.id;
+      if (!requesterId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { userId, callId } = req.params;
+
+      const targetUser = await repositories.users.findById(userId!);
+      if (!targetUser) {
+        res.status(404).json({ success: false, error: 'User not found' });
+        return;
+      }
+
+      if (targetUser.workspaceId !== req.user!.workspaceId!) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
+      // A private calendar shows only busy slots, so it never discloses who is on a call.
+      if (targetUser.calendarVisibility === CalendarVisibility.PRIVATE) {
+        res.status(403).json({ success: false, error: 'Calendar is private' });
+        return;
+      }
+
+      // Workspace scope for the same reason as getOtherUserScheduledCalls; the query
+      // itself only matches a call that is on the target user's calendar.
+      const participantIds = await withWorkspaceScope(() =>
+        repositories.calls.getCalendarCallParticipantIds(callId!, userId!),
+      );
+      if (!participantIds) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      res.json({ success: true, participantIds });
+    } catch (error) {
+      logger.error('Failed to fetch other user call participants:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch call participants' });
     }
   };
 }

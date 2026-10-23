@@ -330,11 +330,13 @@ export async function gcsUploadDebugRunWithRetries(
  * was sitting right there. The marker encodes the real storeKey in its own
  * object name, so discovery becomes a list instead of a guess.
  */
+const DEBUG_INDEX_BODY = Buffer.from("{}");
+
 export async function gcsPutDebugIndex(indexRelPath: string): Promise<boolean> {
   const client = getStorage();
   if (!client) return false;
   try {
-    await client.uploadFileV2(Buffer.alloc(0), {
+    await client.uploadFileV2(DEBUG_INDEX_BODY, {
       path: `${DEBUG_RUN_PREFIX}/${indexRelPath}`,
       contentType: "application/json",
       timeoutMs: STORAGE_TIMEOUT_MS,
@@ -487,6 +489,51 @@ export async function gcsListDebugRuns(storeKey: string): Promise<string[] | nul
  * /run body (`gcsRef`). Returns null on error/disabled so the caller can decide
  * whether the attachment is droppable.
  */
+const ATTACHMENT_PREFIX = "claw-attachments";
+
+function attachmentPrefix(conversationKey: string): string {
+  return `${ATTACHMENT_PREFIX}/${conversationKey}/`;
+}
+
+export async function gcsUploadConversationAttachment(
+  conversationKey: string,
+  relPath: string,
+  data: Buffer,
+): Promise<boolean> {
+  const client = getStorage();
+  if (!client) return false;
+  try {
+    await client.uploadFileV2(data, {
+      path: `${attachmentPrefix(conversationKey)}${relPath}`,
+      contentType: "application/octet-stream",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] attachment upload failed for ${conversationKey}/${relPath}:`, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+export async function gcsListConversationAttachments(
+  conversationKey: string,
+): Promise<Array<{ relPath: string; objectName: string; size: number }> | null> {
+  const client = getStorage();
+  if (!client) return [];
+  const prefix = attachmentPrefix(conversationKey);
+  try {
+    const files = await client.listFiles(prefix);
+    return files
+      .map((f) => ({ relPath: f.name.slice(prefix.length), objectName: f.name, size: Number(f.size ?? 0) }))
+      .filter((f) => f.relPath.length > 0);
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] attachment listing failed for ${conversationKey}:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 export async function gcsDownloadObject(objectName: string): Promise<Buffer | null> {
   const client = getStorage();
   if (!client) return null;

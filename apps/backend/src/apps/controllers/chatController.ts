@@ -9,7 +9,7 @@ import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/u
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
-import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY } from '@xyne/shared';
+import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
@@ -328,10 +328,7 @@ export class ChatController {
         // Inner text = notification/preview fallback (shown when the widget
         // isn't rendered). Prefer flow.data.fallbackText, then the flow title,
         // else a generic label — never worse than the old hardcoded "Flow JSON".
-        const fbRaw = (flowResult.data.data as Record<string, unknown> | undefined)?.['fallbackText'];
-        const flowFallback = encodeHtmlAttr(
-          (typeof fbRaw === 'string' && fbRaw.trim() ? fbRaw : flowResult.data.title) || 'Flow JSON',
-        );
+        const flowFallback = encodeHtmlAttr(flowFallbackLabel(flowResult.data));
         content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
         isMarkdown = false;
       } else if (markdownText) {
@@ -565,10 +562,7 @@ export class ChatController {
         const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
         // Inner text = notification/preview fallback (see postMessage above).
-        const fbRaw = (flowResult.data.data as Record<string, unknown> | undefined)?.['fallbackText'];
-        const flowFallback = encodeHtmlAttr(
-          (typeof fbRaw === 'string' && fbRaw.trim() ? fbRaw : flowResult.data.title) || 'Flow JSON',
-        );
+        const flowFallback = encodeHtmlAttr(flowFallbackLabel(flowResult.data));
         content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);

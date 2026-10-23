@@ -14,6 +14,9 @@ import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
 import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
+/** Most participants a single LiveKit room can hold. Keep in sync with the LiveKit server config's room.max_participants. */
+export const LIVEKIT_ROOM_MAX_PARTICIPANTS = 500;
+
 /** Open-ended role/slot name ('default', 'test', or any future canary arm) — not a fixed enum. */
 type TranscriptionAgentRole = string;
 const DEFAULT_TRANSCRIPTION_AGENT_ROLE = 'default';
@@ -167,30 +170,6 @@ function parseRoomMetadata(
   return {};
 }
 
-/** STT engine every call falls back to when none was chosen. */
-export const DEFAULT_STT_MODEL = 'google';
-
-/**
- * STT engine for a room being recreated. The transcription agent only reads
- * room metadata, so the choice has to be carried over: live room (about to be
- * deleted) > call record > default.
- */
-export function resolveRecreatedRoomSttModel(
-  roomName: string,
-  liveRoomMetadata: string | undefined,
-  callMetadata: unknown,
-): string {
-  const live = parseRoomMetadata(roomName, liveRoomMetadata, 'resolve_stt_model').sttModel;
-  const persisted =
-    callMetadata && typeof callMetadata === 'object' && !Array.isArray(callMetadata)
-      ? (callMetadata as { sttModel?: unknown }).sttModel
-      : undefined;
-  return (
-    [live, persisted].find((m): m is string => typeof m === 'string' && m !== '') ??
-    DEFAULT_STT_MODEL
-  );
-}
-
 export class LiveKitService {
   private static instance: LiveKitService;
   private roomService: RoomServiceClient;
@@ -242,12 +221,12 @@ export class LiveKitService {
     try {
       await this.roomService.createRoom({
         name: options.name,
-        maxParticipants: options.maxParticipants || 100,
+        maxParticipants: options.maxParticipants || LIVEKIT_ROOM_MAX_PARTICIPANTS,
         emptyTimeout: options.emptyTimeout || 120,
         metadata: options.metadata,
       });
 
-      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || 120}`);
+      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || LIVEKIT_ROOM_MAX_PARTICIPANTS}, empty_timeout=${options.emptyTimeout || 120}`);
     } catch (error) {
       logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -19,6 +20,7 @@ import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
+import { PER_CALL_AUTH_SERVER_TYPES, spacesCallAuthMeta } from "./spaces-call-auth.js";
 const log = createLogger("runner");
 
 /**
@@ -79,6 +81,7 @@ interface McpSession {
    *  the cached child's env, and evict on mismatch. xyne-spaces uses this
    *  on every call; other server types currently only spawn once. */
   spawnedToken?: string;
+  spawnedIdentity?: string;
   /** Wall-clock ms of the last getOrCreateSession() hit. Drives idle eviction
    *  so the cache (and its spawned child processes) doesn't grow unbounded —
    *  the leak that OOM'd claw-auth. Stamped on every create AND reuse. */
@@ -94,6 +97,16 @@ const sessions = new Map<string, McpSession>();
 // plus un-cleaned-up failed connects grew claw-auth to ~100 node children /
 // 44 GiB → kubelet eviction (2026-06-14).
 const inflight = new Map<string, Promise<Client>>();
+
+interface ResolvedSession {
+  client: Client;
+  credentials: Record<string, unknown>;
+}
+
+function spawnIdentity(credentials: Record<string, unknown>): string {
+  const { sessionId: _sessionId, ...rest } = credentials;
+  return credentialFingerprint(rest);
+}
 
 /**
  * Global per-call timeout for MCP requests (10 minutes). Applied around
@@ -234,7 +247,7 @@ async function getOrCreateSession(
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
-): Promise<Client> {
+): Promise<ResolvedSession> {
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -328,20 +341,25 @@ async function getOrCreateSession(
           ? (credentials["apiKey"] as string)
           : undefined;
 
+  const perCallAuth = PER_CALL_AUTH_SERVER_TYPES.has(serverType);
+  const identity = perCallAuth ? spawnIdentity(credentials) : undefined;
   const existing = sessions.get(key);
   if (existing) {
     // For xyne-spaces, the token rotates frequently (refresh-flow) so the
     // child must be respawned with the new env every time the token changes.
     // For other server types, creds rarely change between calls — but if they
     // do (e.g. user re-enters Bitbucket token), the same eviction kicks in.
-    if (incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken) {
-      log.info(`[mcp/runner] evicting stale cached session for ${key} (token rotated)`);
+    const stale = perCallAuth
+      ? existing.spawnedIdentity !== identity
+      : Boolean(incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken);
+    if (stale) {
+      log.info(`[mcp/runner] evicting stale cached session for ${key} (${perCallAuth ? "identity changed" : "token rotated"})`);
       sessions.delete(key);
       await existing.transport.close().catch(() => {});
     } else {
       log.info(`[mcp/runner] reusing cached session for ${key}`);
       existing.lastUsedAt = Date.now(); // keep alive — only idle sessions are swept
-      return existing.client;
+      return { client: existing.client, credentials };
     }
   }
 
@@ -350,13 +368,13 @@ async function getOrCreateSession(
   const pending = inflight.get(key);
   if (pending) {
     log.info(`[mcp/runner] awaiting in-flight spawn for ${key}`);
-    return pending;
+    return { client: await pending, credentials };
   }
 
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, identity)
     .finally(() => inflight.delete(key));
   inflight.set(key, spawnPromise);
-  return spawnPromise;
+  return { client: await spawnPromise, credentials };
 }
 
 /** Spawn + connect a fresh MCP session. Always reaps the child on connect
@@ -367,6 +385,7 @@ async function spawnSession(
   serverType: string,
   credentials: Record<string, unknown>,
   incomingToken: string | undefined,
+  identity: string | undefined,
 ): Promise<Client> {
   const definition = await resolveConnectorDefinition(serverType);
   if (!definition) {
@@ -419,7 +438,10 @@ async function spawnSession(
 
   const client = new Client(
     { name: "xyne-claw-auth", version: "0.1.0" },
-    { jsonSchemaValidator: passThroughSchemaValidator },
+    {
+      jsonSchemaValidator: passThroughSchemaValidator,
+      capabilities: { tasks: {} },
+    },
   );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0], {
@@ -443,6 +465,7 @@ async function spawnSession(
     transport,
     lastUsedAt: Date.now(),
     ...(incomingToken ? { spawnedToken: incomingToken } : {}),
+    ...(identity !== undefined ? { spawnedIdentity: identity } : {}),
   });
   return client;
 }
@@ -450,31 +473,108 @@ async function spawnSession(
 const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
   "xyne-spaces",
   "xyne-spaces-app-tools",
+  "xyne-workflows",
+  "xyne-dashboard",
   "heisenberg",
   "research-agent-mcp",
+  "google",
+  "microsoft",
+  "jenkins",
+  "reddit",
+  "twitter",
+  "x-news",
+  "linkedin-rapidapi",
+  "bitbot",
+  "query-routing",
 ]);
-const TOOL_LIST_CACHE_TTL_MS = Number(process.env["MCP_TOOL_LIST_CACHE_TTL_MS"] ?? 10 * 60 * 1000);
 const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
+
+const userToolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
+const userToolListInflight = new Map<string, Promise<McpToolInfo[]>>();
+
+const MCP_LIST_TOOLS_CUTOFF_MS = Number(process.env["MCP_LIST_TOOLS_CUTOFF_MS"] ?? 8_000);
+const MCP_LIST_TOOLS_BACKOFF_MS = Number(process.env["MCP_LIST_TOOLS_BACKOFF_MS"] ?? 300_000);
+const toolListSkipUntil = new Map<string, number>();
 
 export function clearToolListCache(): void {
   toolListCache.clear();
   toolListInflight.clear();
+  userToolListCache.clear();
+  userToolListInflight.clear();
+  toolListSkipUntil.clear();
 }
 
-async function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
-  const cached = toolListCache.get(serverType);
-  if (cached && Date.now() - cached.at < TOOL_LIST_CACHE_TTL_MS) return cached.tools;
-  const inflight = toolListInflight.get(serverType);
+const ROTATING_CREDENTIAL_FIELD = /token|secret|password|expires|refresh|cookie/i;
+
+function credentialFingerprint(credentials: Record<string, unknown>): string {
+  const stable = Object.keys(credentials)
+    .filter((k) => !ROTATING_CREDENTIAL_FIELD.test(k))
+    .sort()
+    .map((k) => [k, typeof credentials[k] === "object" ? JSON.stringify(credentials[k]) : String(credentials[k])]);
+  return createHash("sha256").update(JSON.stringify(stable)).digest("hex").slice(0, 16);
+}
+
+function dropUserToolLists(matches: (key: string) => boolean): void {
+  for (const key of [...userToolListCache.keys()]) if (matches(key)) userToolListCache.delete(key);
+  for (const key of [...userToolListInflight.keys()]) if (matches(key)) userToolListInflight.delete(key);
+  for (const key of [...toolListSkipUntil.keys()]) if (matches(key)) toolListSkipUntil.delete(key);
+}
+
+type ToolListCache = Map<string, { tools: McpToolInfo[]; at: number }>;
+
+function refreshToolList(
+  cache: ToolListCache,
+  inflightMap: Map<string, Promise<McpToolInfo[]>>,
+  key: string,
+  fetchTools: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const inflight = inflightMap.get(key);
   if (inflight) return inflight;
   const started = fetchTools()
     .then((tools) => {
-      if (tools.length > 0) toolListCache.set(serverType, { tools, at: Date.now() });
+      if (tools.length > 0 && inflightMap.get(key) === started) cache.set(key, { tools, at: Date.now() });
       return tools;
     })
-    .finally(() => toolListInflight.delete(serverType));
-  toolListInflight.set(serverType, started);
+    .finally(() => {
+      if (inflightMap.get(key) === started) inflightMap.delete(key);
+    });
+  inflightMap.set(key, started);
   return started;
+}
+
+function cachedToolList(
+  cache: ToolListCache,
+  inflightMap: Map<string, Promise<McpToolInfo[]>>,
+  key: string,
+  fetchTools: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const cached = cache.get(key);
+  if (cached) return Promise.resolve(cached.tools);
+  return refreshToolList(cache, inflightMap, key, fetchTools);
+}
+
+function userToolList(key: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  return cachedToolList(userToolListCache, userToolListInflight, key, fetchTools);
+}
+
+function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  return cachedToolList(toolListCache, toolListInflight, serverType, fetchTools);
+}
+
+const MISSING_TOOL_ERROR = /unknown tool|tool\b.*\bnot found|no such tool/i;
+
+function forgetToolList(
+  userId: string,
+  serverType: string,
+  agentSlug: string | undefined,
+  credentials: Record<string, unknown>,
+  lane: SessionLane | undefined,
+): void {
+  toolListCache.delete(serverType);
+  toolListInflight.delete(serverType);
+  const prefix = `${sessionKey(userId, serverType, agentSlug, credentials, lane)}#`;
+  dropUserToolLists((key) => key.startsWith(prefix));
 }
 
 export async function listToolsForUser(
@@ -483,12 +583,20 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
-  options: { fresh?: boolean; lane?: SessionLane } = {},
+  options: { fresh?: boolean; lane?: SessionLane; cutoff?: boolean } = {},
 ): Promise<McpServerTools> {
   const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
-  const useShared =
-    !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
-  const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
+  let tools: McpToolInfo[];
+  if (options.fresh) {
+    tools = await fetchTools();
+  } else {
+    const shared = SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+    const key = shared
+      ? serverType
+      : `${sessionKey(userId, serverType, agentSlug, credentials, options.lane)}#${credentialFingerprint(credentials)}`;
+    const list = () => (shared ? sharedToolList(key, fetchTools) : userToolList(key, fetchTools));
+    tools = options.cutoff ? await withListCutoff(serverType, key, list) : await list();
+  }
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
@@ -498,6 +606,42 @@ export async function listToolsForUser(
   return { serverType, serverName, tools, writeTools };
 }
 
+export class McpToolListUnavailableError extends Error {}
+
+function cachedListFor(key: string): McpToolInfo[] | undefined {
+  return (toolListCache.get(key) ?? userToolListCache.get(key))?.tools;
+}
+
+async function withListCutoff(
+  serverType: string,
+  key: string,
+  list: () => Promise<McpToolInfo[]>,
+): Promise<McpToolInfo[]> {
+  const cached = cachedListFor(key);
+  if (cached) return cached;
+  const skipUntil = toolListSkipUntil.get(key);
+  if (skipUntil && skipUntil > Date.now()) {
+    throw new McpToolListUnavailableError(`${serverType} skipped: tool listing failed or timed out recently`);
+  }
+  const listing = list();
+  listing.then(
+    () => toolListSkipUntil.delete(key),
+    () => toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cutoff = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      toolListSkipUntil.set(key, Date.now() + MCP_LIST_TOOLS_BACKOFF_MS);
+      reject(new McpToolListUnavailableError(`${serverType} tool listing exceeded ${MCP_LIST_TOOLS_CUTOFF_MS}ms; continuing without it`));
+    }, MCP_LIST_TOOLS_CUTOFF_MS);
+  });
+  try {
+    return await Promise.race([listing, cutoff]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchToolsFromServer(
   userId: string,
   serverType: string,
@@ -505,7 +649,7 @@ async function fetchToolsFromServer(
   agentSlug?: string,
   lane?: SessionLane,
 ): Promise<McpToolInfo[]> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
+  const { client } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -624,6 +768,38 @@ function extractAttachments(
   return out;
 }
 
+type McpToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
+
+async function invokeToolCall(
+  client: Client,
+  serverType: string,
+  args: Parameters<Client["callTool"]>[0],
+): Promise<McpToolCallResult> {
+  const options = { timeout: MCP_REQUEST_TIMEOUT_MS, signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) };
+  const serverTasks = Boolean(client.getServerCapabilities()?.tasks?.requests?.tools?.call);
+  if (!serverTasks) return client.callTool(args, undefined, options);
+
+  let taskId: string | undefined;
+  try {
+    for await (const message of client.experimental.tasks.callToolStream(args, undefined, options)) {
+      if (message.type === "taskCreated") {
+        taskId = message.task.taskId;
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} created task=${taskId} status=${message.task.status}`);
+      } else if (message.type === "taskStatus") {
+        log.info(`[mcp/task] server=${serverType} tool=${args.name} task=${message.task.taskId} status=${message.task.status}`);
+      } else if (message.type === "result") {
+        return message.result;
+      } else if (message.type === "error") {
+        throw message.error;
+      }
+    }
+    throw new Error(`MCP task for ${serverType}/${args.name} ended without a result`);
+  } catch (err) {
+    if (taskId) await client.experimental.tasks.cancelTask(taskId).catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function callTool(
   userId: string,
   serverType: string,
@@ -634,14 +810,22 @@ export async function callTool(
   lane?: SessionLane,
   instance?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const { client, credentials: resolved } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const callMeta = PER_CALL_AUTH_SERVER_TYPES.has(serverType) ? spacesCallAuthMeta(resolved) : undefined;
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
-  const result = await client.callTool({ name: tool, arguments: params }, undefined, {
-    timeout: MCP_REQUEST_TIMEOUT_MS,
-    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-  });
+  const result = await invokeToolCall(
+    client,
+    serverType,
+    { name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) },
+  )
+    .catch((err: unknown) => {
+      if (MISSING_TOOL_ERROR.test(err instanceof Error ? err.message : String(err))) {
+        forgetToolList(userId, serverType, agentSlug, credentials, lane);
+      }
+      throw err;
+    });
 
   if ("content" in result && Array.isArray(result.content)) {
     const items = result.content as Array<Record<string, unknown>>;
@@ -659,6 +843,7 @@ export async function callTool(
       .join("\n");
 
     if ("isError" in result && result.isError === true) {
+      if (MISSING_TOOL_ERROR.test(text)) forgetToolList(userId, serverType, agentSlug, credentials, lane);
       const error = new Error(text || "MCP tool returned an error") as Error & { httpStatus?: number };
       // Tools may report the upstream HTTP status in `_meta.httpStatus`
       // (see withToolErrors in xyne-spaces-tools.ts); carry it so callers
@@ -719,6 +904,7 @@ export async function evictSession(userId: string, serverType: string, agentSlug
   // suffix of the same form: key + ':' + ':app'); nested server types cannot
   // false-match since the character after the type in the prefix is ':'.
   const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:`));
+  dropUserToolLists((candidate) => candidate.startsWith(`${key}#`) || candidate.startsWith(`${key}:`));
   for (const candidate of keys) {
     const scopedSession = sessions.get(candidate);
     if (!scopedSession) continue;
@@ -731,6 +917,7 @@ export async function evictSession(userId: string, serverType: string, agentSlug
 
 export async function evictAllSessionsForUser(userId: string): Promise<void> {
   const prefix = `${userId}:`;
+  dropUserToolLists((candidate) => candidate.startsWith(prefix));
   const evictions: Promise<void>[] = [];
   for (const [key, session] of sessions) {
     if (key.startsWith(prefix)) {
@@ -739,6 +926,35 @@ export async function evictAllSessionsForUser(userId: string): Promise<void> {
     }
   }
   await Promise.all(evictions);
+}
+
+function sessionServerType(key: string): string {
+  return key.split("#")[0]?.split(":")[1] ?? "";
+}
+
+export async function restartMcpServers(serverType?: string): Promise<{ sessions: number; toolLists: number }> {
+  const matches = (key: string) => !serverType || sessionServerType(key) === serverType;
+  let toolLists = 0;
+  for (const key of [...toolListCache.keys()]) {
+    if (serverType && key !== serverType) continue;
+    toolListCache.delete(key);
+    toolListInflight.delete(key);
+    toolLists++;
+  }
+  for (const key of [...userToolListCache.keys()]) if (matches(key)) toolLists++;
+  dropUserToolLists(matches);
+  if (serverType) toolListSkipUntil.delete(serverType);
+  else toolListSkipUntil.clear();
+  if (!serverType) toolListInflight.clear();
+  const closing: Promise<void>[] = [];
+  for (const [key, session] of sessions) {
+    if (!matches(key)) continue;
+    sessions.delete(key);
+    closing.push(session.transport.close().catch(() => {}));
+  }
+  await Promise.all(closing);
+  log.info(`[mcp/runner] restart ${serverType ?? "all servers"}: closed ${closing.length} session(s), dropped ${toolLists} tool list(s)`);
+  return { sessions: closing.length, toolLists };
 }
 
 export function hasAdapter(serverType: string): boolean {

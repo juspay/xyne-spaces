@@ -1,0 +1,71 @@
+# Posting thread root <messageAlias> with text <baseText> in channel <channelAlias> for user <userAlias>
+* Navigating to channel <channelAlias> for user <userAlias>
+* generating net-new message details <messageAlias> with text <baseText> in channel <channelAlias> for user <userAlias>
+* Sending stored message <messageAlias> in channel <channelAlias> for user <userAlias>
+
+# Opening thread on stored message <messageAlias> in channel <channelAlias> for user <userAlias>
+* clicking hover action "[data-testid='hover-action-reply-in-thread']" on stored user <userAlias> channel <channelAlias> message <messageAlias> in "[data-testid='chat-message-list']"
+* waiting for "[data-testid='thread-panel'] [data-testid='message-input']" to appear
+
+# Opening thread on stored message <messageAlias> in dm <dmAlias> for user <userAlias>
+* clicking hover action "[data-testid='hover-action-reply-in-thread']" on stored user <userAlias> dm <dmAlias> message <messageAlias> in "[data-testid='chat-message-list']"
+* waiting for "[data-testid='thread-panel'] [data-testid='message-input']" to appear
+
+# Opening thread from reply count on stored message <messageAlias> in channel <channelAlias> for user <userAlias>
+* clicking on "button[aria-label^='View thread']" on stored user <userAlias> channel <channelAlias> message <messageAlias> in "[data-testid='chat-message-list']"
+* waiting for "[data-testid='thread-panel'] [data-testid='message-input']" to appear
+
+# Opening channel thread on stored user <rootUserAlias> message <messageAlias> in channel <channelAlias> for user <userAlias>
+* Navigating to channel <channelAlias> for user <userAlias>
+* clicking on "button[aria-label='Scroll to bottom'][data-track-category='CHAT_LIST']" if visible
+* waiting for stored user <rootUserAlias> channel <channelAlias> message <messageAlias> to appear in virtuoso list
+* Opening thread on stored message <messageAlias> in channel <channelAlias> for user <rootUserAlias>
+
+# Sending stored reply <messageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* typing stored user <userAlias> channel <channelAlias> message <messageAlias> in "[data-testid='thread-panel'] [data-testid='message-input']"
+* waiting for "[data-testid='thread-panel'] [data-testid='send-message-button']" to be enabled
+* clicking on "[data-testid='thread-panel'] [data-testid='send-message-button']"
+* Verifying stored message <messageAlias> in channel <channelAlias> for user <userAlias> is visible in open thread
+
+# Sending stored reply <messageAlias> in dm <dmAlias> for user <userAlias> in open thread
+* typing stored user <userAlias> dm <dmAlias> message <messageAlias> in "[data-testid='thread-panel'] [data-testid='message-input']"
+* waiting for "[data-testid='thread-panel'] [data-testid='send-message-button']" to be enabled
+* clicking on "[data-testid='thread-panel'] [data-testid='send-message-button']"
+* Verifying stored message <messageAlias> in dm <dmAlias> for user <userAlias> is visible in open thread
+
+# Verifying stored message <messageAlias> in channel <channelAlias> for user <userAlias> is visible in open thread
+* verifying stored user <userAlias> channel <channelAlias> message <messageAlias> is visible in "[data-testid='thread-panel'] [data-component='ThreadList']"
+
+# Verifying stored message <messageAlias> in dm <dmAlias> for user <userAlias> is visible in open thread
+* verifying stored user <userAlias> dm <dmAlias> message <messageAlias> is visible in "[data-testid='thread-panel'] [data-component='ThreadList']"
+
+# Opening more actions for stored message <messageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* clicking hover action "[data-testid='hover-action-more']" on stored user <userAlias> channel <channelAlias> message <messageAlias> in "[data-testid='thread-panel']"
+* waiting for "[data-testid='hover-action-copy-message']" to appear
+
+# Editing stored thread message <messageAlias> to <updatedMessageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* Opening more actions for stored message <messageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* clicking on "[data-testid='hover-action-edit-message']"
+* clearing "[data-testid='thread-panel'] [data-testid='message-input']"
+* typing stored user <userAlias> channel <channelAlias> message <updatedMessageAlias> in "[data-testid='thread-panel'] [data-testid='message-input']"
+* clicking on "[data-testid='thread-panel'] [data-testid='send-message-button']"
+* Verifying stored message <updatedMessageAlias> in channel <channelAlias> for user <userAlias> is visible in open thread
+
+# Deleting stored thread message <messageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* Opening more actions for stored message <messageAlias> in channel <channelAlias> for user <userAlias> in open thread
+* clicking on "[data-testid='hover-action-delete-message']"
+* clicking on "[data-testid='confirm-delete-message']"
+* waiting for zero sync to settle fast
+
+# Closing thread panel
+* clicking on "[data-testid='thread-panel'] button[aria-label='Close thread panel' i]"
+* waiting for "[data-testid='thread-panel']" to disappear
+
+# Opening threads page sorted by most recent
+* navigating via sidebar to "chat"
+* clicking on "[data-testid='open-threads-button']"
+* clicking on "button[data-track-name='SORT_MOST_RECENT']"
+
+# Attaching fixture file <fileName> to the open thread reply
+* attaching fixture file <fileName> to "[data-testid='thread-panel'] input[type='file']"
+* waiting for attachment <fileName> to finish uploading

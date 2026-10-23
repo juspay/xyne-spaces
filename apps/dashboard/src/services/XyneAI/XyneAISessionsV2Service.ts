@@ -35,6 +35,8 @@ interface ClawConversationSummary {
   agentSlug: string;
   /** Every agent that answered, in first-use order. */
   agentSlugs: string[];
+  /** Null when unfiled; absent from backends older than XYNE-66809. */
+  projectId?: string | null;
 }
 
 interface ClawConversationListResponse {
@@ -42,6 +44,7 @@ interface ClawConversationListResponse {
   data: ClawConversationSummary[];
   nextCursor?: string | null;
   agents?: AgentConversationCount[];
+  projectCounts?: Record<string, number>;
 }
 
 /** An agent in the user's history and how many conversations it is in. */
@@ -59,6 +62,9 @@ export interface V2ConversationListQuery {
   cursor?: string | null;
   /** Rows per page; the server defaults to 50. */
   limit?: number;
+  /** A project id to list, or `'none'` for unfiled chats. Filtered server-side
+   *  inside the query, so paging stays correct. */
+  projectId?: string | null;
 }
 
 export interface V2ConversationPage {
@@ -67,6 +73,9 @@ export interface V2ConversationPage {
   nextCursor: string | null;
   /** Every agent in the history — the agent filter's options. */
   agents: AgentConversationCount[];
+  /** Chats per project, keyed by project id. Not narrowed by `projectId`:
+   *  the sidebar shows every project's total while one of them is open. */
+  projectCounts: Record<string, number>;
 }
 
 interface ClawChatMessage {
@@ -140,12 +149,13 @@ export async function fetchV2Conversations(
   if (query.q) params.set('q', query.q);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
+  if (query.projectId) params.set('projectId', query.projectId);
   const response = await apiInstance.get<ClawConversationListResponse>(
     `/xyne-ai/v2/conversations?${params.toString()}`,
   );
 
   if (!response.data.success || !response.data.data) {
-    return { conversations: [], nextCursor: null, agents: [] };
+    return { conversations: [], nextCursor: null, agents: [], projectCounts: {} };
   }
 
   return {
@@ -162,9 +172,11 @@ export async function fetchV2Conversations(
       messages: [],
       agentSlug: conv.agentSlug,
       agentSlugs: conv.agentSlugs,
+      projectId: conv.projectId ?? null,
     })),
     nextCursor: response.data.nextCursor ?? null,
     agents: response.data.agents ?? [],
+    projectCounts: response.data.projectCounts ?? {},
   };
 }
 
@@ -391,7 +403,7 @@ export const MANUAL_CHAT_TITLE_MAX_CHARS = 100;
 
 export async function updateV2Conversation(
   conversationId: string,
-  patch: { title?: string; pinned?: boolean },
+  patch: { title?: string; pinned?: boolean; projectId?: string | null },
   agentSlug?: string | null,
 ): Promise<void> {
   const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
@@ -399,6 +411,131 @@ export async function updateV2Conversation(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
     patch,
   );
+}
+
+/**
+ * File a chat into a project, or unfile it with `null`.
+ *
+ * Deliberately a named call rather than `updateV2Conversation({ projectId })`:
+ * `null` is meaningful here and must reach the wire, so it must never be
+ * dropped by a caller spreading an optional object.
+ */
+export async function moveV2ConversationToProject(
+  conversationId: string,
+  projectId: string | null,
+  agentSlug?: string | null,
+): Promise<void> {
+  await updateV2Conversation(conversationId, { projectId }, agentSlug);
+}
+
+// --- Chat projects ---------------------------------------------------------
+
+export interface ChatProject {
+  id: string;
+  name: string;
+  icon: string | null;
+  instructions: string;
+  instructionsEnabled: boolean;
+  spacesProjectId: string | null;
+  defaultAgentSlug: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Chats the caller has in this project. Absent on the update response. */
+  chatCount?: number;
+  /** Only on a single-project fetch. */
+  conversationIds?: string[];
+}
+
+export interface ChatProjectInput {
+  name?: string;
+  icon?: string | null;
+  instructions?: string;
+  instructionsEnabled?: boolean;
+  spacesProjectId?: string | null;
+  defaultAgentSlug?: string | null;
+}
+
+interface ChatProjectResponse<T> {
+  success: boolean;
+  data: T;
+}
+
+const CHAT_PROJECTS_URL = '/xyne-ai/v2/chat-projects';
+
+export async function fetchV2ChatProjects(): Promise<ChatProject[]> {
+  const response = await apiInstance.get<ChatProjectResponse<ChatProject[]>>(CHAT_PROJECTS_URL);
+  return response.data.success ? (response.data.data ?? []) : [];
+}
+
+export async function fetchV2ChatProject(projectId: string): Promise<ChatProject> {
+  const response = await apiInstance.get<ChatProjectResponse<ChatProject>>(
+    `${CHAT_PROJECTS_URL}/${encodeURIComponent(projectId)}`,
+  );
+  return response.data.data;
+}
+
+export async function createV2ChatProject(input: ChatProjectInput): Promise<ChatProject> {
+  const response = await apiInstance.post<ChatProjectResponse<ChatProject>>(
+    CHAT_PROJECTS_URL,
+    input,
+  );
+  return response.data.data;
+}
+
+export async function updateV2ChatProject(
+  projectId: string,
+  input: ChatProjectInput,
+): Promise<ChatProject> {
+  const response = await apiInstance.patch<ChatProjectResponse<ChatProject>>(
+    `${CHAT_PROJECTS_URL}/${encodeURIComponent(projectId)}`,
+    input,
+  );
+  return response.data.data;
+}
+
+export async function deleteV2ChatProject(projectId: string): Promise<void> {
+  await apiInstance.delete(`${CHAT_PROJECTS_URL}/${encodeURIComponent(projectId)}`);
+}
+
+export async function reorderV2ChatProjects(projectIds: string[]): Promise<number> {
+  const response = await apiInstance.put<ChatProjectResponse<{ reordered: number }>>(
+    `${CHAT_PROJECTS_URL}/reorder`,
+    { projectIds },
+  );
+  return response.data.data?.reordered ?? 0;
+}
+
+export interface ConversationNote {
+  request: string;
+  reply: string;
+}
+
+/** The rows a save made: user then assistant per turn, the first hung under `parentId`. */
+export interface SavedConversationNotes {
+  conversationId: string;
+  parentId: string | null;
+  messageIds: string[];
+}
+
+/**
+ * Saves turns Buddy answered on screen into a direct chat (`chat-…`) as
+ * finished messages, so they show in the history. No run: the agent never
+ * sees them. `parentId` is the reply the user is on, so the notes follow it.
+ * Rejects with a 409 while a reply in that chat is still running.
+ */
+export async function saveV2ConversationNotes(
+  conversationId: string,
+  turns: readonly ConversationNote[],
+  agentSlug?: string | null,
+  parentId?: string,
+): Promise<SavedConversationNotes> {
+  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
+  const { data } = await apiInstance.post<SavedConversationNotes>(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/notes${query}`,
+    { turns, ...(parentId ? { parentId } : {}) },
+  );
+  return data;
 }
 
 /**

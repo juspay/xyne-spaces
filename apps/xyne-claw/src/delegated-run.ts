@@ -9,6 +9,7 @@
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 import type { LatencyMetrics, TokenUsage, ToolInvocation } from "./debug/index.js";
+import type { LlmCallStat } from "./llm-turn-stats.js";
 
 const log = createLogger("delegated-run");
 
@@ -38,6 +39,8 @@ export interface DelegatedRunFinish {
   toolInvocations?: ToolInvocation[] | undefined;
   tokenUsage?: TokenUsage | undefined;
   latency?: LatencyMetrics | undefined;
+  /** Per-LLM-call series for the callee's own loop. */
+  llmCalls?: LlmCallStat[] | undefined;
 }
 
 async function post(path: string, body: unknown): Promise<void> {

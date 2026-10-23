@@ -5,12 +5,13 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus,  MessageArtifactStatus } from '@xyne/shared';
+import { CallOrigin, CallRingNotification, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus,  MessageArtifactStatus } from '@xyne/shared';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
+import { CALENDAR_CALL_ORIGINS } from '@/utils/callTypeUtils';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
@@ -150,7 +151,7 @@ export interface CallAdminListFilters {
   /** SELF tier: only calls this user created or participates in. */
   participantUserId?: string;
   statuses?: CallStatus[];
-  callType?: CallType;
+  callTypes?: CallType[];
   /** Case-insensitive title match, or an exact externalId. */
   search?: string;
   /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
@@ -175,6 +176,8 @@ export interface CreateCallWithParticipantsInput {
   endsAt: Date;
   targetUserIds?: string[];
   participantInviters?: Record<string, string>;
+  ringNotification?: CallRingNotification; // Applied to every internal participant (one-time calls)
+  participantRingNotifications?: Record<string, CallRingNotification | null>; // Per user, from the series rows (recurring instances)
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
@@ -549,7 +552,11 @@ export class CallRepository {
     filters: CallAdminListFilters,
     options: { limit: number; cursor?: { startedAt: Date; id: string } },
   ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
-    const conditions: Prisma.CallWhereInput[] = [{ workspaceId: filters.workspaceId }];
+    const conditions: Prisma.CallWhereInput[] = [
+      { workspaceId: filters.workspaceId },
+      // Calendar-imported calls belong to that calendar, not Xyne, so there is nothing here to repair.
+      { callOrigin: { notIn: [...CALENDAR_CALL_ORIGINS] } },
+    ];
 
     if (filters.participantUserId) {
       conditions.push({
@@ -560,7 +567,7 @@ export class CallRepository {
       });
     }
     if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
-    if (filters.callType) conditions.push({ callType: filters.callType });
+    if (filters.callTypes?.length) conditions.push({ callType: { in: filters.callTypes } });
     if (filters.search) {
       // Support pastes a call id as often as a title, so match either.
       conditions.push({
@@ -688,21 +695,31 @@ export class CallRepository {
     queueCallVespaDelete(id, { source: 'CallRepository.delete' });
   }
 
-  async getScheduledCallsForUser(userId: string, from: Date, to: Date) {
+  async getCalendarCallsForUser(userId: string, from: Date, to: Date) {
     return DatabaseClient.getInstance().call.findMany({
       where: {
         participants: { some: { userId } },
-        status: CallStatus.SCHEDULED,
-        startsAt: { gte: from, lte: to },
-      },
-      include: {
-        participants: {
-          where: { isExternal: false },
-          select: { userId: true, meetingStatus: true },
-        },
+        status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
+        startsAt: { lt: to },
+        OR: [{ endsAt: { gt: from } }, { endsAt: null, startsAt: { gte: from } }],
       },
       orderBy: { startsAt: 'asc' },
     });
+  }
+
+  /** Internal participants of one call on `userId`'s calendar; null if it is not on it. */
+  async getCalendarCallParticipantIds(callId: string, userId: string): Promise<string[] | null> {
+    const call = await DatabaseClient.getInstance().call.findFirst({
+      where: {
+        id: callId,
+        participants: { some: { userId } },
+        status: { in: [CallStatus.SCHEDULED, CallStatus.ENDED] },
+      },
+      select: {
+        participants: { where: { isExternal: false }, select: { userId: true } },
+      },
+    });
+    return call ? call.participants.map(p => p.userId) : null;
   }
 
   async findParticipant(callId: string, userId: string): Promise<CallParticipant | null> {
@@ -829,6 +846,7 @@ export class CallRepository {
         respondedAt: userId === params.createdByUserId ? new Date() : null,
         joinedAt: null,
         leftAt: null,
+        ringNotification: params.participantRingNotifications?.[userId] ?? params.ringNotification ?? null,
       })),
     });
 
@@ -1612,6 +1630,18 @@ export class CallRepository {
    * `invitedByUserId` is stamped on the newly added rows — it is the editor, not necessarily
    * the organizer, so a participant who added someone can later be allowed to remove them.
    */
+  /** Set the ring-on-start option on every internal participant of these calls. */
+  async setInternalParticipantsRingNotification(
+    callIds: string[],
+    ringNotification: CallRingNotification | null,
+  ): Promise<void> {
+    if (callIds.length === 0) return;
+    await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: { callId: { in: callIds }, isExternal: false },
+      data: { ringNotification },
+    });
+  }
+
   async updateScheduledCall(params: {
     callId: string;
     title?: string;
@@ -1625,11 +1655,12 @@ export class CallRepository {
     callUpdatesChannel?: string | null;
     externalInvitees?: string[];
     summaryTemplateId?: string | null;
+    ringNotification?: CallRingNotification | null;
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees, summaryTemplateId } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees, summaryTemplateId, ringNotification } = params;
     const db = DatabaseClient.getInstance();
 
-    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId);
+    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId, ringNotification);
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
     queueScheduledCallPillSync(callId, updatedCall.externalId, 'callRepository.updateScheduledCall');
@@ -1731,6 +1762,18 @@ export class CallRepository {
     return row as { response: InvitationResponse | null } | null;
   }
 
+  /** Participants currently in the call, for the public lobby's "N in this call" line. */
+  async countInCallParticipants(callId: string): Promise<number> {
+    return await DatabaseClient.getInstance().callParticipant.count({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+        joinedAt: { not: null },
+        leftAt: null,
+      },
+    });
+  }
+
   async findExternalParticipantById(params: {
     participantId: string;
     callId: string;
@@ -1773,6 +1816,7 @@ export class CallRepository {
         ...(params.displayName && { displayName: params.displayName }),
         response: InvitationResponse.ACCEPTED,
         joinedAt: null,
+        leftAt: null,
       },
     });
     queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryAcceptExternalParticipantSession });

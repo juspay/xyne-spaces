@@ -30,11 +30,18 @@ export interface StoredMessage {
 
 export interface StoredConversation extends StoredEntity {
   messages: Record<string, StoredMessage>;
+  /** Set by the channel description steps; read back via `user:<alias>.channels.<alias>.description`. */
+  description?: string;
 }
 
 export interface StoredProject extends StoredEntity {
   code?: string;
   description?: string;
+}
+
+/** A mentionable user group (team). `alias` is what `@` mentions show. */
+export interface StoredUserGroup extends StoredEntity {
+  alias: string;
 }
 
 export interface StoredTicket {
@@ -59,6 +66,7 @@ export interface StoredUser {
   channels: Record<string, StoredConversation>;
   dms: Record<string, StoredConversation>;
   tickets: Record<string, StoredTicket>;
+  userGroups?: Record<string, StoredUserGroup>;
 }
 
 function cloneValue<T>(value: T): T {

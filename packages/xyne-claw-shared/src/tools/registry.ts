@@ -27,6 +27,7 @@ import * as postmanSbx from "./postman-sbx/index.js";
 import * as todo from "./todo/index.js";
 import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
+import * as xorTools from "./xor/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as conversationFork from "./conversation-fork/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
@@ -93,6 +94,11 @@ register(google.googleDriveSearch);
 register(google.googleDriveCreateFolder);
 register(google.googleDriveUpload);
 register(google.googleDriveShare);
+register(google.googleDriveUpdateDescription);
+register(google.googleDriveListFileLabels);
+register(google.googleDriveLabelsList);
+register(google.googleDriveLabelsGet);
+register(google.googleDriveModifyLabels);
 register(google.googleSheetsCreate);
 register(google.googleSheetsUpdate);
 register(google.googleSheetsAppend);
@@ -228,6 +234,8 @@ register(orchestrator.proposeAgentCallTool);
 // Agent-introspection tools — definitions only; executed claw-auth-side (see
 // xyne-claw-shared/src/tools/agent-introspect/tools.ts header).
 for (const t of agentIntrospect.AGENT_INTROSPECT_TOOL_DEFS) register(t);
+
+register(xorTools.xorDecideTool);
 
 // Register sandbox tools
 register(sandbox.sandboxCreate);

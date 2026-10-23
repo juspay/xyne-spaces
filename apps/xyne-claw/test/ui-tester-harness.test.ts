@@ -37,7 +37,7 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
     writeFileSync(join(dir, "spec.json"), JSON.stringify({
       baseUrl: `http://127.0.0.1:${port}`, outDir: join(dir, "out"),
       variations: [
-        { id: "ok", title: "Two items render", description: "total 2, both names visible", path: "/", video: true, steps: [{ wait: 200 }, { click: "role=button[name=\"Nope\"]" }], mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
+        { id: "ok", expectText: ["Total: 2", "re:alpha.*beta"], rejectText: ["Total: 3"], title: "Two items render", description: "total 2, both names visible", path: "/", video: true, steps: [{ wait: 200 }, { click: "role=button[name=\"Nope\"]" }], mocks: [{ match: "/api/v1/items", json: { total: 2, items: [{ name: "alpha" }, { name: "beta" }] } }] },
         { id: "broken", path: "/", viewport: { width: 390, height: 700 }, mocks: [{ match: "/api/v1/items", json: { items: [{ name: "a very wide item", wide: true }] } }] },
         { id: "error", path: "/", mocks: [{ match: "/api/v1/items", status: 500, json: { error: "boom" } }] },
         { id: "unmocked", path: "/" },
@@ -67,6 +67,11 @@ describe.skipIf(!hasPlaywright)("ui-tester harness (real browser)", () => {
       expect(existsSync(byId.ok.video)).toBe(true);
       expect(byId.broken.video).toBeNull();
       expect(byId.ok.title).toBe("Two items render");
+      expect(byId.ok.textChecks).toEqual([
+        { text: "Total: 2", kind: "expect", ok: true },
+        { text: "re:alpha.*beta", kind: "expect", ok: true },
+        { text: "Total: 3", kind: "reject", ok: true },
+      ]);
       expect(byId.broken.title).toBe("broken");
       expect(byId.ok.pageErrors.join(" ")).toMatch(/visible buttons\/links: Reload/);
       expect(typeof summary.warmUpMs).toBe("number");

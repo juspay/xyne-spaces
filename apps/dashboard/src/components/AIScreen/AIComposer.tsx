@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { commandsForSurface } from '@xyne/shared/commands';
-import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
+import { fetchClawAgentModels, warmClawAgent } from '../../services/clawAgentModelsService';
 import { useVoiceHost } from '../Voice/voiceSession';
 import { VoiceStage } from '../Voice/VoiceStage';
 import type { StreamState } from '../../services/XyneAI';
@@ -27,7 +27,7 @@ import {
   type ContextSelections,
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
-import type { UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import type { Message, UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { SANDBOX_MODE_OPTIONS, useSandboxMode } from './SandboxModeSwitch';
 import { useDesignStudio } from './Workspace/design/designStudioContext';
@@ -39,6 +39,10 @@ import {
   useSelectedAgent,
 } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
+import {
+  readFastModePreference,
+  writeFastModePreference,
+} from '../../services/XyneAI/fastModePreference';
 import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
 import { buddy } from '../Assistant/buddy';
@@ -117,6 +121,10 @@ interface AIComposerProps {
    *  downward), 'bottom' in a chat. See the Composer's `anchor`. */
   anchor?: 'top' | 'bottom';
   voiceStageHost: HTMLElement | null;
+  /** The chat voice mode is in, shown as its transcript; without it, only what is said there. */
+  voiceMessages?: readonly Message[] | undefined;
+  voiceChatTitle?: string | undefined;
+  lastUserMessage?: string | undefined;
 }
 
 interface XyneAIConfigResponse {
@@ -163,6 +171,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onContextChange,
     anchor = 'bottom',
     voiceStageHost,
+    voiceMessages,
+    voiceChatTitle,
+    lastUserMessage,
   },
   ref,
 ): ReactElement {
@@ -234,6 +245,21 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const instant = selectedAgent?.instantAgent === true;
 
   const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const [fastMode, setFastMode] = useState(
+    () => seed.fast || readFastModePreference(modelAgentSlug),
+  );
+  const fastModeAgentSlug = useRef(modelAgentSlug);
+  useEffect(() => {
+    if (fastModeAgentSlug.current === modelAgentSlug) return;
+    fastModeAgentSlug.current = modelAgentSlug;
+    setFastMode(readFastModePreference(modelAgentSlug));
+  }, [modelAgentSlug]);
+  const effectiveFastMode = fastMode && !instant;
+  const toggleFastMode = (): void => {
+    const next = !fastMode;
+    setFastMode(next);
+    writeFastModePreference(modelAgentSlug, next);
+  };
   const {
     data: agentModelsData,
     isPlaceholderData: modelsArePreviousAgent,
@@ -246,6 +272,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   });
   // Reset the pin/thinking picks when the AGENT changes — but not on mount,
   // where they may be seeded from initialExtras (landing → chat handoff).
+  useEffect(() => {
+    warmClawAgent(modelAgentSlug);
+  }, [modelAgentSlug]);
   const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
     if (prevModelAgentSlug.current === modelAgentSlug) return;
@@ -305,6 +334,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           ? 'local-harness'
           : modelPinProvider,
       thinkingLevel: effectiveThinkingLevel,
+      fast: effectiveFastMode,
       sandboxMode,
     }),
     [
@@ -323,6 +353,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       sandboxMode,
       modelPinProvider,
       effectiveThinkingLevel,
+      effectiveFastMode,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -345,6 +376,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     model: null,
     modelProvider: null,
     thinkingLevel: null,
+    fast: false,
   });
 
   const handleFilesAdded = useCallback(
@@ -735,7 +767,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           createPortal(
             <div className='absolute inset-0 z-30 bg-background'>
               <div className='mx-auto flex h-full max-w-xl'>
-                <VoiceStage studioMode={voiceStudioMode} />
+                <VoiceStage
+                  studioMode={voiceStudioMode}
+                  messages={voiceMessages}
+                  chatTitle={voiceChatTitle}
+                />
               </div>
             </div>,
             voiceStageHost,
@@ -760,6 +796,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         onValueChange={setValue}
         {...(placeholder ? { placeholder } : {})}
         {...(autoFocus ? { autoFocus } : {})}
+        {...(lastUserMessage ? { lastUserMessage } : {})}
         isStreaming={pending || buddyWorking}
         anchor={anchor}
         onSubmit={submit}
@@ -868,6 +905,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           loading: modelsArePreviousAgent || modelsLoading,
           disabled: pending,
         }}
+        fast={instant ? null : { enabled: fastMode, onToggle: toggleFastMode, disabled: pending }}
         onEnterVoiceMode={() => setVoiceMode(true)}
         onFilesPasted={files => void handleFilesAdded(files)}
       />

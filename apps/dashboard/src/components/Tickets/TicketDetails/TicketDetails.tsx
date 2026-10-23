@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback, useContext } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -81,7 +81,7 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel, useAllChannels } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels, useChannelParticipation } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -166,6 +166,7 @@ import {
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
 import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
+import { ThreadNavigationContext } from '../../Chat/ThreadNavigationContext';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -462,7 +463,7 @@ const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
 const EXPANDED_HEADER_HEIGHT = 56;
 
-// Debounce window for title/description auto-save while the user is typing.
+// Debounce window for title auto-save while the user is typing.
 const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
 
 interface TicketDetailsProps {
@@ -596,6 +597,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
+  const { openRelatedTicket } = useContext(ThreadNavigationContext);
+  const navigateToTicket = onNavigateToTicket ?? openRelatedTicket;
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const navigationType = useNavigationType();
@@ -1203,6 +1206,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
+
+  // A release opens in the release view of the SDLC hub that owns its board's release
+  // config. Only hub members can read that config edge, so others get a disabled button.
+  const isRelease = !!ticket && isReleaseTicket(ticket.ticketType as BaseTicketType);
+  const [releaseConfig] = useCachedQuery(
+    queries.releaseConfigByMainBoardId({ boardId: ticket?.boardId ?? '' }),
+    { enabled: isRelease && !!ticket?.boardId },
+  );
+  const releaseHubId = releaseConfig?.channelId ?? '';
+  const releaseHubParticipation = useChannelParticipation(releaseHubId);
+  const canOpenReleaseView = !!releaseHubId && !!releaseHubParticipation;
 
   const allChannels = useAllChannels();
   const channelTypeMap = useMemo(
@@ -2222,22 +2236,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
-
-  // Debounced auto-save while editing the description (no subject side effect, so
-  // it applies to all ticket types).
-  useEffect(() => {
-    if (!ticket || !editingDescription) return;
-    const next = descriptionValue.trim();
-    if (next === resolveTicketDescription(ticket)) return;
-    const ticketId = ticket.id;
-    const timeoutId = setTimeout(() => {
-      void applyTicketUpdate(
-        { id: ticketId, description: next, updatedAt: Date.now() },
-        'Failed to update description',
-      );
-    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
-    return (): void => clearTimeout(timeoutId);
-  }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
 
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
@@ -3408,10 +3406,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </span>
 
         {link ? (
-          onNavigateToTicket ? (
+          navigateToTicket ? (
             <button
               type='button'
-              onClick={() => onNavigateToTicket(relatedTicket!.id!)}
+              onClick={() => navigateToTicket(relatedTicket!.id!)}
               className='min-w-0 flex-1 truncate text-left text-[13.5px] font-semibold text-foreground hover:underline'
               data-track-category='Tickets'
               data-track-name='NavigateToRelatedTicket'
@@ -3507,8 +3505,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     }
 
-    if (onNavigateToTicket) {
-      onNavigateToTicket(mappedTicketId);
+    if (navigateToTicket) {
+      navigateToTicket(mappedTicketId);
     } else {
       setMappedTicketId(mappedTicketId);
     }
@@ -3541,6 +3539,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
+        if (openRelatedTicket) {
+          openRelatedTicket(mappedTicketId);
+          return;
+        }
         if (mappedTicket) {
           const channelType = channelTypeMap.get(mappedTicket.channelId);
           if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
@@ -3721,6 +3723,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
 
     const navigateToParentTicket = (): void => {
+      if (openRelatedTicket) {
+        openRelatedTicket(parentTicket.id);
+        return;
+      }
       const channelType = channelTypeMap.get(parentTicket.channelId);
       if (isDeskChannelType(channelType) && parentTicket.xyneId) {
         const pathParts = location.pathname.split('/');
@@ -3742,8 +3748,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     };
 
     const openParentTicket = (): void => {
-      if (onNavigateToTicket) {
-        onNavigateToTicket(parentTicket.id);
+      if (navigateToTicket) {
+        navigateToTicket(parentTicket.id);
       } else {
         setMappedTicketId(parentTicket.id);
       }
@@ -5505,19 +5511,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </DetailSection>
 
-        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+        {ticket && isRelease && (
           <div className='mt-4'>
             <button
               type='button'
+              disabled={!canOpenReleaseView}
+              title={
+                canOpenReleaseView
+                  ? undefined
+                  : "Only members of this release's SDLC hub can open the release view"
+              }
               onClick={() =>
-                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
-                  state: { returnToUrl: location.pathname + location.search },
-                })
+                void navigate(
+                  `/sdlc/${releaseHubId}/releases?${new URLSearchParams({ release: ticket.id, discussion: '1', chat: 'conversations' }).toString()}`,
+                )
               }
               data-track-category='Tickets'
               data-track-name='OpenReleaseViewFromTicket'
               data-testid='open-release-view-button'
-              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
             >
               <span className='inline-flex items-center gap-3'>
                 <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>

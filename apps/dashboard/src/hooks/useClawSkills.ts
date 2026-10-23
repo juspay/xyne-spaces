@@ -15,7 +15,8 @@ export const useClawSkills = (): UseQueryResult<Skill[], Error> => {
     queryKey: ['claw-skills', user?.id],
     queryFn: () => listSkills(user!.id),
     enabled: !!user?.id,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 };
 

@@ -106,10 +106,19 @@ export default class ProjectSteps {
       },
       { userId: user.id, userEmail: user.email, skipOnboarding: !setAsNewUser }
     );
-    await page.goto(`${config.dashboard.baseUrl}/`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+    try {
+      await page.goto(`${config.dashboard.baseUrl}/`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+    } catch (error) {
+      // The app can start its own redirect before this load commits, which aborts
+      // the goto; the redirect still lands in the app, so wait for it instead.
+      if (!String(error).includes('net::ERR_ABORTED')) {
+        throw error;
+      }
+      await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+    }
 
     const previous = testContext.storedUsers.get(userAlias);
     const storedUser: StoredUser = {
@@ -125,6 +134,7 @@ export default class ProjectSteps {
       channels: previous?.channels ?? {},
       dms: previous?.dms ?? {},
       tickets: previous?.tickets ?? {},
+      userGroups: previous?.userGroups ?? {},
     };
 
     testContext.storedUsers.set(userAlias, storedUser);
@@ -293,6 +303,62 @@ export default class ProjectSteps {
 
     const page = testContext.activePage;
     await page.getByText(channel.name, { exact: false }).first().click();
+  }
+
+  // Channel info "About" tab must be open. Stores the new name so later steps check against it.
+  @Step('renaming stored user <userAlias> channel <channelAlias> to a net-new name')
+  public async renameStoredChannel(userAlias: string, channelAlias: string): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    const channel = getStoredUser(userAlias).channels[channelAlias];
+    assert.ok(channel?.name, `Expected stored channel "${channelAlias}" for user "${userAlias}".`);
+
+    const newName = `${channel.name}-renamed`;
+    const page = testContext.activePage;
+    await page.locator("[data-testid='channel-rename-edit']").click();
+    await page.locator("[data-testid='channel-rename-input']").fill(newName);
+    await page.locator("[data-testid='channel-rename-save']").click();
+    await page.locator("[data-testid='channel-rename-input']").waitFor({ state: 'hidden' });
+    channel.name = newName;
+  }
+
+  // Channel info "About" tab must be open. Stores the description for the assertion step.
+  @Step('setting a net-new description on stored user <userAlias> channel <channelAlias>')
+  public async setStoredChannelDescription(userAlias: string, channelAlias: string): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    const channel = getStoredUser(userAlias).channels[channelAlias];
+    assert.ok(channel, `Expected stored channel "${channelAlias}" for user "${userAlias}".`);
+
+    const description = `Channel description ${buildRandomSuffix()}`;
+    const page = testContext.activePage;
+    await page.locator("[data-testid='channel-description-edit']").click();
+    await page.locator("[data-testid='channel-description-input']").fill(description);
+    await page.locator("[data-testid='channel-description-save']").click();
+    await page.locator("[data-testid='channel-description-input']").waitFor({ state: 'hidden' });
+    channel.description = description;
+  }
+
+  // Opens channel info if needed. The member row's actions menu only shows on hover.
+  @Step('removing stored user <userAlias> from the open channel')
+  public async removeStoredUserFromOpenChannel(userAlias: string): Promise<void> {
+    assertValidUserAlias(userAlias);
+    const userId = getStoredUser(userAlias).id;
+    assert.ok(userId, `No stored id for user "${userAlias}"; log the user in first.`);
+
+    const page = testContext.activePage;
+    const membersTab = page.locator("[data-testid='channel-info-members-tab']");
+    if (!(await membersTab.isVisible())) {
+      await page.locator("[data-testid='channel-info-trigger']").click();
+    }
+    await membersTab.click();
+    const row = page.locator(`[data-testid='channel-member-${userId}']`);
+    await row.waitFor({ state: 'visible' });
+    await row.hover();
+    await page.locator(`[data-testid='channel-member-actions-${userId}']`).click();
+    await page.locator("[data-testid='channel-member-remove']").click();
+    await page.locator("[data-testid='confirm-remove-member']").click();
+    await row.waitFor({ state: 'hidden' });
   }
 
   @Step('selecting stored project <projectAlias> for user <userAlias> in dropdown')

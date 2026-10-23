@@ -2,10 +2,19 @@ import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/r
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
-import { createSkill, replaceSkillFiles } from '../services/claw/clawSkillsService';
+import {
+  createSkill,
+  replaceSkillFiles,
+  submitSkillRequest,
+} from '../services/claw/clawSkillsService';
 import type { PendingSkillFile } from '../services/claw/clawSkillFileUtils';
 import type { Skill } from '../services/claw/clawSkillsTypes';
 import { apiInstance } from '../services/clients/apiClient';
+
+interface CreatedSkill {
+  skill: Skill;
+  sentForApproval: boolean;
+}
 
 export interface SkillCreateSubmission {
   slug: string;
@@ -23,7 +32,7 @@ export interface SkillCreateSubmission {
 export const useCreateClawSkill = (
   /** Set when the form is shown inside a hub: link the skill there and stay on the page. */
   hub?: { channelId: string; onCreated: () => void },
-): UseMutationResult<Skill, Error, SkillCreateSubmission> => {
+): UseMutationResult<CreatedSkill, Error, SkillCreateSubmission> => {
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
@@ -31,7 +40,7 @@ export const useCreateClawSkill = (
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
 
-  return useMutation<Skill, Error, SkillCreateSubmission>({
+  return useMutation<CreatedSkill, Error, SkillCreateSubmission>({
     mutationFn: async s => {
       if (!userId) throw new Error('Not signed in');
       const skill = await createSkill(
@@ -57,23 +66,33 @@ export const useCreateClawSkill = (
         );
       }
 
-      if (hub) {
-        try {
-          await apiInstance.post(
-            `/sdlc/channels/${encodeURIComponent(hub.channelId)}/knowledge/skills`,
-            { skillId: skill.id },
-          );
-        } catch {
-          toast.error('Skill created, but it could not be linked to the hub.');
-        }
+      if (!hub) return { skill, sentForApproval: false };
+      try {
+        await apiInstance.post(
+          `/sdlc/channels/${encodeURIComponent(hub.channelId)}/knowledge/skills`,
+          { skillId: skill.id },
+        );
+      } catch {
+        toast.error('Skill created, but it could not be linked to the hub.');
+        return { skill, sentForApproval: false };
       }
-
-      return skill;
+      try {
+        // A new skill is personal, and hub runs load only global ones.
+        await submitSkillRequest(skill.slug, userId);
+      } catch {
+        toast.error(
+          'Skill added, but the approval request was not sent. Send it from its row menu.',
+        );
+        return { skill, sentForApproval: false };
+      }
+      return { skill, sentForApproval: true };
     },
-    onSuccess: skill => {
+    onSuccess: ({ skill, sentForApproval }) => {
       void queryClient.invalidateQueries({ queryKey: ['claw-skills'] });
       void queryClient.invalidateQueries({ queryKey: ['sdlc-hub-knowledge'] });
-      toast.success('Skill created');
+      // A failed hub step already said so in its own toast.
+      if (sentForApproval) toast.success('Skill created and sent to a claw admin for approval');
+      else if (!hub) toast.success('Skill created');
       if (hub) hub.onCreated();
       else void navigate(`${libraryPath}/skill/${skill.slug}`);
     },

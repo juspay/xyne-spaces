@@ -6,7 +6,7 @@ import { db } from '@/database/client';
 import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { PendingChannelData } from '@/integrations/routes/google-auth';
 import { logger } from '@/utils/logger';
-import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
+import { BoardType, ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
 
 
 export function getAuthCallbackTx(cd: PendingChannelData, network: Awaited<ReturnType<typeof GoogleService.prepareExternalSourceNetwork>>, emailAddress: any) {
@@ -85,7 +85,7 @@ export function getAuthCallbackTx(cd: PendingChannelData, network: Awaited<Retur
     });
 
     const boards = await tx.board.findMany({
-      where: { projectId: cd.projectId },
+      where: { projectId: cd.projectId, boardType: { not: BoardType.RELEASE } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

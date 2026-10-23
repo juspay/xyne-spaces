@@ -12,10 +12,18 @@ type Found = { query: string; matches?: WorkerMatch[] };
 
 /**
  * Cmd+K people search. The fuzzy match runs in web workers so long queries don't stall typing;
- * results are the same as `useUserSearch`.
+ * results are the same as `useUserSearch`. `isPending` is true while there is a query but
+ * the workers haven't answered one yet, so `users` is still the unfiltered list.
+ * `query` is the query `users` answers ('' until the workers answer one), which can trail the
+ * one passed in. `pool` narrows the search to those users (e.g. active only); it defaults to everyone.
  */
-export function useWorkerUserSearch(query: string, limit: number): User[] {
-  const users = useUsers();
+export function useWorkerUserSearch(
+  query: string,
+  limit: number,
+  pool?: User[],
+): { users: User[]; query: string; isPending: boolean } {
+  const allUsers = useUsers();
+  const users = pool ?? allUsers;
   const [found, setFound] = useState<Found | null>(null);
   const workerRef = useRef<FuseWorker<UserDoc> | null>(null);
 
@@ -69,7 +77,7 @@ export function useWorkerUserSearch(query: string, limit: number): User[] {
   // Ranked here rather than stored, so user updates re-rank in the same render. Until the
   // workers answer, the previous query's results stay on screen.
   const hasQuery = query.trim() !== '';
-  return useMemo(() => {
+  const ranked = useMemo(() => {
     if (!hasQuery || !found) return searchUsers(users, '', limit);
     if (!found.matches) return searchUsers(users, found.query, limit);
     const byId = new Map(users.map(user => [user.id, user]));
@@ -79,4 +87,5 @@ export function useWorkerUserSearch(query: string, limit: number): User[] {
     });
     return searchUsers(users, found.query, limit, fuseMatches);
   }, [users, hasQuery, limit, found]);
+  return { users: ranked, query: found?.query ?? '', isPending: hasQuery && !found };
 }

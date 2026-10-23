@@ -12,6 +12,7 @@ export interface BarBuiltIn {
   id: string;
   label: string;
   icon: ReactNode;
+  hint?: string;
 }
 
 // One hook per bar so the in-bar "+" and Preferences offer exactly the same

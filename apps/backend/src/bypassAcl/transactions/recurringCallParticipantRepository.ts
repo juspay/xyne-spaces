@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma } from '@prisma/client';
-import { InvitationResponse, MeetingStatus } from '@xyne/shared';
+import { InvitationResponse, MeetingStatus, type CallRingNotification } from '@xyne/shared';
 import { normalizeUserIds } from '@/database/repositories/recurringCallParticipantRepository';
 import type { RecurringCallParticipantRepository } from '@/database/repositories/recurringCallParticipantRepository';
 import { normalizeEmailList } from '@/utils/email';
@@ -10,6 +10,8 @@ import { normalizeEmailList } from '@/utils/email';
    * `invitedByUserId` is the editor and is stamped only on rows that did not exist before —
    * a participant who added someone must stay credited so they can remove them later, and
    * everyone else's original inviter must survive an edit by someone other than the organizer.
+   * `ringNotification` likewise survives the rewrite: when omitted, existing rows keep theirs
+   * and new rows take the organizer's, so an edit that doesn't touch it never resets it.
    */
 export async function replaceInternalParticipants(self: RecurringCallParticipantRepository, params: {
     recurringSeriesId: string;
@@ -17,16 +19,22 @@ export async function replaceInternalParticipants(self: RecurringCallParticipant
     invitedByUserId?: string;
     userIds: string[];
     workspaceId: string;
+    ringNotification?: CallRingNotification | null;
     tx?: Prisma.TransactionClient;
   }): Promise<void> {
-    const { recurringSeriesId, organizerId, invitedByUserId, userIds, workspaceId, tx } = params;
+    const { recurringSeriesId, organizerId, invitedByUserId, userIds, workspaceId, ringNotification, tx } = params;
     const client = self.client(tx);
     const participantUserIds = normalizeUserIds(userIds, organizerId);
     const now = new Date();
 
-    const existingInviters = new Map(
-      (await self.findInternalParticipants(recurringSeriesId, tx)).map(p => [p.userId, p.invitedBy]),
-    );
+    const existingParticipants = await self.findInternalParticipants(recurringSeriesId, tx);
+    const existingInviters = new Map(existingParticipants.map(p => [p.userId, p.invitedBy]));
+    const existingRingNotifications = new Map(existingParticipants.map(p => [p.userId, p.ringNotification]));
+    const ringNotificationFor = (userId: string): string | null =>
+      ringNotification !== undefined ? ringNotification :
+      (existingRingNotifications.has(userId)
+        ? existingRingNotifications.get(userId)!
+        : existingRingNotifications.get(organizerId) ?? null);
 
     await client.recurringCallParticipant.deleteMany({
       where: {
@@ -48,6 +56,7 @@ export async function replaceInternalParticipants(self: RecurringCallParticipant
         meetingStatus: userId === organizerId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
         respondedAt: userId === organizerId ? now : null,
         isExternal: false,
+        ringNotification: ringNotificationFor(userId),
       })),
       skipDuplicates: true,
     });

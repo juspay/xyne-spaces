@@ -1,15 +1,16 @@
 import { Request, Response } from 'express';
 import {
   livekitService,
+  LIVEKIT_ROOM_MAX_PARTICIPANTS,
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
   isAgentParticipant,
   isHumanParticipant,
-  DEFAULT_STT_MODEL,
-  resolveRecreatedRoomSttModel,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
+import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
+import { activityTrackingService } from '@/services/activityTrackingService';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -49,11 +50,18 @@ import {
   NotificationType,
   RecordingType,
   AttachmentEntityType,
+  Platform,
   SUPPORTED_TRANSCRIPT_LANGUAGES,
   ORIGINAL_TRANSCRIPT_LANGUAGE,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
-import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import {
+  CallVespaFeedSource,
+  queueCallVespaFeed,
+  queueRecordingTranscriptDelete,
+  queueTranscriptFieldsUpdate,
+  type TranscriptDocField,
+} from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
@@ -63,6 +71,7 @@ import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { resolveCallSttRouting, resolveRecreatedRoomSttRouting } from '@/services/callSttRouting';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
@@ -512,9 +521,14 @@ export class CallController {
         const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
+        const sttRouting = await resolveCallSttRouting({
+          requestedModel: sttModel,
+          workspaceId: req.user!.workspaceId,
+          email: userEmail,
+        });
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
-          sttModel: sttModel || DEFAULT_STT_MODEL,
+          ...sttRouting,
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
@@ -527,7 +541,7 @@ export class CallController {
         stage = 'livekit_room_creation';
         await livekitService.createRoom({
           name: callExternalId,
-          maxParticipants: 100,
+          maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });
@@ -777,11 +791,16 @@ export class CallController {
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
+      const sttRouting = await resolveCallSttRouting({
+        requestedModel: sttModel,
+        workspaceId: req.user!.workspaceId,
+        email: userEmail,
+      });
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
-        sttModel: sttModel || DEFAULT_STT_MODEL,
+        ...sttRouting,
         createdBy: userId,
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
@@ -793,7 +812,7 @@ export class CallController {
       stage = 'livekit_room_creation';
       await livekitService.createRoom({
         name: callExternalId,
-        maxParticipants: 100,
+        maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
         emptyTimeout: 120,
         metadata: roomMetadata,
       });
@@ -1023,14 +1042,19 @@ export class CallController {
 
         const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
-        // Prepare room metadata. Recreated rooms must carry `sttModel` like initiateCall's,
-        // or the agent falls back to its own env default instead of the call's choice.
-        const roomSttModel = resolveRecreatedRoomSttModel(callId, roomInfo?.metadata, activeCall.metadata);
+        // Prepare room metadata. A recreated room is a new room, so it needs the same STT routing
+        // initiateCall gives one, or the agent falls back to its own env default.
+        const sttRouting = await resolveRecreatedRoomSttRouting({
+          roomName: callId,
+          liveRoomMetadata: roomInfo?.metadata,
+          callMetadata: activeCall.metadata,
+          workspaceId: activeCall.workspaceId,
+        });
 
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           createdBy: activeCall.createdByUserId,
-          sttModel: roomSttModel,
+          ...sttRouting,
           ...(activeCall.callType && { callType: activeCall.callType }),
           ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
           ...(joinAgentName && { agentName: joinAgentName }),
@@ -1039,7 +1063,7 @@ export class CallController {
         // Create LiveKit room
         await livekitService.createRoom({
           name: callId,
-          maxParticipants: 100,
+          maxParticipants: LIVEKIT_ROOM_MAX_PARTICIPANTS,
           emptyTimeout: 120,
           metadata: roomMetadata,
         });
@@ -1729,6 +1753,11 @@ export class CallController {
           ? { summaryTemplateId: input.summaryTemplateId }
           : {}),
       });
+
+      const changedFields: TranscriptDocField[] = [];
+      if (input.title) changedFields.push('fileName');
+      if (resolvedLabels) changedFields.push('labels');
+      void queueTranscriptFieldsUpdate(call, changedFields);
 
       // For headless recordings, update the system message content
       if (input.title) {
@@ -2529,6 +2558,8 @@ export class CallController {
               data: {
                 response: InvitationResponse.INVITED,
                 ringStatus: RingStatus.CALLING,
+                // An explicit invite rings even if the call was scheduled not to.
+                ringNotification: null,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,
@@ -3296,6 +3327,17 @@ export class CallController {
         return;
       }
 
+      // Deleting mid-recording only removes the DB rows: the LiveKit room, egress and
+      // transcription agent keep running, every later webhook 404s on "Call not found",
+      // and the audio + transcript end up orphaned in storage. Refuse until it has ended.
+      if (call.status === CallStatus.ACTIVE) {
+        res.status(409).json({
+          success: false,
+          error: 'Recording is still in progress. Stop it before deleting.',
+        });
+        return;
+      }
+
       await this.deleteHeadlessRecordingCascade(call);
 
       logger.info(`User ${userId} deleted HEADLESS recording ${callId}`);
@@ -3307,7 +3349,9 @@ export class CallController {
     }
   };
 
-  private deleteHeadlessRecordingCascade = async (call: { id: string; externalId: string }): Promise<void> => {
+  private deleteHeadlessRecordingCascade = async (
+    call: { id: string; externalId: string; metadata: Prisma.JsonValue | null; createdByUserId: string },
+  ): Promise<void> => {
     const db = DatabaseClient.getInstance();
     const callId = call.externalId;
 
@@ -3357,6 +3401,34 @@ export class CallController {
       logger.info(`Updated messages in conversation ${conversation.conversationId} for deleted recording ${callId}`);
     }
 
+    // Note-taker recordings started from a thread are not found by the lookup above:
+    // their anchor lives in an existing discussion thread and is addressed by id from
+    // call.metadata. Only that one message is touched — an updateMany on the thread
+    // would overwrite the user's own messages.
+    const anchor = await noteTakerCallRepository.markThreadAnchorDeleted(call);
+    if (anchor?.removed) {
+      logger.info(`Removed thread anchor message for deleted recording ${callId}`);
+      // Same MESSAGE.DELETED event MessagesSideEffectHandler.onDelete emits for a user
+      // delete, so surface-link and nudge cleanup see this removal too. Best-effort.
+      void activityTrackingService.saveActivityEvent({
+        user_id: call.createdByUserId,
+        session_id: `recording-delete-${callId}`,
+        event_category: 'MESSAGE',
+        event_name: 'DELETED',
+        url: '',
+        trigger_type: 'SYSTEM',
+        platform: Platform.WEB,
+        timestamp: Date.now(),
+        context_metadata: { messageId: anchor.messageId, conversationId: anchor.conversationId },
+      });
+    } else if (anchor) {
+      logger.warn(`Thread anchor left in place for deleted recording ${callId}`, {
+        reason: anchor.reason,
+        messageId: anchor.messageId,
+        conversationId: anchor.conversationId,
+      });
+    }
+
     // Delete activities
     await db.activity.deleteMany({
       where: {
@@ -3378,6 +3450,8 @@ export class CallController {
 
     // Delete the call record
     await repositories.calls.delete(call.id);
+    // That drops the call doc; the recording's transcript doc goes separately.
+    void queueRecordingTranscriptDelete(call);
   };
 
 
@@ -3421,7 +3495,7 @@ export class CallController {
           createdByUserId: userId,
           callType: CallType.HEADLESS,
         },
-        select: { id: true, externalId: true },
+        select: { id: true, externalId: true, status: true, metadata: true, createdByUserId: true },
       });
 
       const ownedByExternalId = new Map(owned.map(c => [c.externalId, c]));
@@ -3436,13 +3510,20 @@ export class CallController {
         }
       }
 
+      // Same rule as the single delete: an in-progress recording is not deletable yet.
+      const deletable = owned.filter(call => {
+        if (call.status !== CallStatus.ACTIVE) return true;
+        failed.push({ callId: call.externalId, reason: 'Recording is still in progress' });
+        return false;
+      });
+
       // Delete each owned recording independently so one failure doesn't abort the rest.
       const results = await Promise.allSettled(
-        owned.map(call => this.deleteHeadlessRecordingCascade(call)),
+        deletable.map(call => this.deleteHeadlessRecordingCascade(call)),
       );
 
       results.forEach((result, index) => {
-        const call = owned[index]!;
+        const call = deletable[index]!;
         if (result.status === 'fulfilled') {
           deleted.push(call.externalId);
         } else {
@@ -3698,12 +3779,37 @@ export class CallController {
   };
 
   /**
-   * GET /api/calls/pulse-orgs
+   * GET /api/calls/pulse-orgs?channelId=...
    * Return the list of Pulse organisations so the frontend can let users
    * reassign a merchant without exposing Pulse credentials to the browser.
+   * Only members of a channel in PULSE_ENABLED_CHANNELS may read the list.
    */
-  getPulseOrgs = async (_req: Request, res: Response): Promise<void> => {
+  getPulseOrgs = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const channelId = typeof req.query['channelId'] === 'string' ? req.query['channelId'].trim() : '';
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'channelId is required' });
+      return;
+    }
+
+    if (!config.pulse.enabledChannels.includes(channelId)) {
+      res.status(403).json({ success: false, error: 'Pulse is not enabled for this channel' });
+      return;
+    }
+
     try {
+      const isMember = await repositories.channelParticipants.isParticipant(channelId, userId);
+      if (!isMember) {
+        res.status(403).json({ success: false, error: 'Not a member of this channel' });
+        return;
+      }
+
       const { pulseService } = await import('@/services/pulseService');
       const orgs = await pulseService.fetchOrgList();
 

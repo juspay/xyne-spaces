@@ -26,6 +26,7 @@ import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
+import { AgentProactivityConfig } from '../Proactivity/AgentProactivityConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
 import ScheduledMessagesTab from '../AboutChannel/ScheduledMessagesTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
@@ -420,6 +421,7 @@ const Info = ({
         {isParticipant && !isDM && !isGroupDM && (
           <button
             onClick={handleLeaveChannel}
+            data-testid='channel-leave-button'
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
@@ -441,7 +443,11 @@ const Info = ({
             About
           </Tabs.Trigger>
           {!isDM && (
-            <Tabs.Trigger value='members' className={tabTriggerClass('members')}>
+            <Tabs.Trigger
+              value='members'
+              data-testid='channel-info-members-tab'
+              className={tabTriggerClass('members')}
+            >
               Members {humanMemberCount}
             </Tabs.Trigger>
           )}
@@ -548,6 +554,19 @@ const Info = ({
                   canManage={canManageAiPreferences}
                 />
               </div>
+              <div className='mt-3 flex flex-col gap-0.5'>
+                <div className='text-[15px] font-semibold text-foreground'>Agents</div>
+                <p className='text-[13px] leading-[140%] text-muted-foreground'>
+                  Let agents in this channel reply to questions on their own.
+                </p>
+              </div>
+              <div className='rounded-[12px] border border-border bg-card'>
+                <AgentProactivityConfig
+                  channelId={channel.id}
+                  mode={channel.agentProactivityMode}
+                  canManage={canManageAiPreferences}
+                />
+              </div>
             </div>
           </Tabs.Content>
         )}
@@ -642,7 +661,7 @@ const ParticipantListItem = ({
 
   const popoverStyle = `w-full flex items-center gap-x-1 p-2 cursor-pointer hover:bg-accent rounded-md pr-6`;
   return (
-    <div className='px-4 group'>
+    <div className='px-4 group' data-testid={`channel-member-${participant.userId}`}>
       <div className='flex items-center py-3 px-2 gap-3 transition-colors relative group-hover:bg-accent rounded-lg'>
         <Avatar userId={participant.userId} size='md' showActiveStatus={true} />
         <div className='flex-1 min-w-0'>
@@ -683,6 +702,7 @@ const ParticipantListItem = ({
               onOpenChange={setIsPopoverOpen}
               trigger={
                 <div
+                  data-testid={`channel-member-actions-${participant.userId}`}
                   className='w-[24px] h-[24px] rounded-[4px] flex items-center justify-center cursor-pointer'
                   style={{ pointerEvents: 'auto' }}
                 >
@@ -729,6 +749,7 @@ const ParticipantListItem = ({
                       onRemove(participant.userId, getUserDisplayName(user) || 'this user')
                     }
                     data-track-category='CHAT_INFO'
+                    data-testid='channel-member-remove'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
@@ -1042,6 +1063,7 @@ const ChannelMembers = ({
             <Button
               variant='destructive'
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
+              data-testid='confirm-remove-member'
               data-track-category='CHAT_INFO'
               data-track-name='CONFIRM_REMOVE_PARTICIPANT'
               data-track-metadata={JSON.stringify({

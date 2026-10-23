@@ -34,7 +34,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useSubagentDetail } from "../hooks/useSubagentDetail";
 import {
   listSkills,
@@ -44,8 +44,9 @@ import {
   disableSubagent,
   addSubagentShare,
   removeSubagentShare,
+  ApiError,
 } from "../../lib/api";
-import type { AvailableTools, Skill, SubagentShareEntry } from "../../lib/api";
+import type { AvailableTools, Skill, SubagentCheck, SubagentEvalReport, SubagentSample, SubagentShareEntry } from "../../lib/api";
 import { useSnackbar } from "./ui/Snackbar";
 import { SubagentEditHeader } from "./subagents/SubagentEditHeader";
 import { SubagentEditSkeleton } from "./subagents/SubagentEditSkeleton";
@@ -55,6 +56,10 @@ import { SubagentKnowledgeTab } from "./subagents/SubagentKnowledgeTab";
 import { SubagentToolsTab } from "./subagents/SubagentToolsTab";
 import { SubagentContributorsTab } from "./subagents/SubagentContributorsTab";
 import { SubagentMcpTabV3 } from "./subagents/SubagentMcpTabV3";
+import { ChecksEditor } from "./subagents/ChecksEditor";
+import { ChecksEvalPanel } from "./subagents/ChecksEvalPanel";
+import { Button } from "./ui/Button";
+import { Switch } from "./ui/Switch";
 import { Tabs, type TabItem } from "./ui/Tabs";
 
 /* ── helpers ───────────────────────────────────────────────────────── */
@@ -74,7 +79,7 @@ function normalizeToolsInput(input: string): string[] {
 
 /* ── tab IDs ───────────────────────────────────────────────────────── */
 
-type SubagentTopTabId = "persona" | "knowledge" | "tools" | "mcp" | "contributors";
+type SubagentTopTabId = "persona" | "knowledge" | "tools" | "checks" | "mcp" | "contributors";
 
 /* ── props ─────────────────────────────────────────────────────────── */
 
@@ -120,6 +125,13 @@ export function SubagentEditPageV3({
   const [draftDirectTools, setDraftDirectTools] = useState("");
   const [draftCustomTools, setDraftCustomTools] = useState("");
   const [draftSkillIds, setDraftSkillIds] = useState<string[]>([]);
+  const [draftFast, setDraftFast] = useState(false);
+  const [draftChecks, setDraftChecks] = useState<SubagentCheck[]>([]);
+  const [checksValid, setChecksValid] = useState(true);
+  const [draftSamples, setDraftSamples] = useState<SubagentSample[]>([]);
+  const [evalReport, setEvalReport] = useState<SubagentEvalReport | null>(null);
+  const [gateBlock, setGateBlock] = useState<string | null>(null);
+  const [draftsFor, setDraftsFor] = useState<string | null>(null);
 
   /* ── available skills ──────────────────────────────────────────── */
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
@@ -133,7 +145,8 @@ export function SubagentEditPageV3({
   const [toolsLoading, setToolsLoading] = useState(true);
 
   /* ── UI state ──────────────────────────────────────────────────── */
-  const [activeTab, setActiveTab] = useState<SubagentTopTabId>("persona");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SubagentTopTabId>(searchParams.get("tab") === "checks" ? "checks" : "persona");
   const [saving, setSaving] = useState(false);
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [addingShare, setAddingShare] = useState(false);
@@ -151,6 +164,13 @@ export function SubagentEditPageV3({
     setDraftDirectTools((subagent.tools?.direct ?? []).join("\n"));
     setDraftCustomTools((subagent.tools?.custom ?? []).join("\n"));
     setDraftSkillIds((subagent.skills ?? []).map((s) => s.id));
+    setDraftFast(subagent.fast === true);
+    setDraftChecks(subagent.checks ?? []);
+    setChecksValid(true);
+    setDraftSamples(subagent.samples ?? []);
+    setEvalReport(subagent.evalReport ?? null);
+    setGateBlock(null);
+    setDraftsFor(subagent.name);
   }, [subagent?.name]);
 
   /* ── fetch skills ──────────────────────────────────────────────── */
@@ -192,9 +212,15 @@ export function SubagentEditPageV3({
         (subagent.progressLabels?.join("|") ?? "") ||
       draftDirectTools !== origDirect ||
       draftCustomTools !== origCustom ||
-      !sameSet(draftSkillIds, origSkillIds)
+      !sameSet(draftSkillIds, origSkillIds) ||
+      draftFast !== (subagent.fast === true) ||
+      JSON.stringify(draftChecks) !== JSON.stringify(subagent.checks ?? []) ||
+      JSON.stringify(draftSamples) !== JSON.stringify(subagent.samples ?? [])
     );
   }, [
+    draftFast,
+    draftChecks,
+    draftSamples,
     subagent,
     draftDescription,
     draftSystemPrompt,
@@ -207,8 +233,13 @@ export function SubagentEditPageV3({
   ]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (force = false) => {
     if (!subagent || saving || !dirty) return;
+    if (!checksValid) {
+      setActiveTab("checks");
+      showSnackbar({ variant: "error", title: "Fix the checks before saving" });
+      return;
+    }
     setSaving(true);
     try {
       const direct = normalizeToolsInput(draftDirectTools);
@@ -228,10 +259,20 @@ export function SubagentEditPageV3({
         },
         skillIds:
           draftSkillIds.length > 0 ? draftSkillIds : undefined,
+        fast: draftFast,
+        checks: draftChecks.length > 0 ? draftChecks : null,
+        samples: draftSamples.length > 0 ? draftSamples : null,
+        ...(force ? { force: true } : {}),
       });
+      setGateBlock(null);
       setSubagent(updated);
       showSnackbar({ variant: "success", title: "Subagent saved" });
     } catch (err) {
+      if (err instanceof ApiError && err.code === "EVAL_REGRESSION") {
+        setGateBlock(err.message);
+        setActiveTab("checks");
+        return;
+      }
       showSnackbar({
         variant: "error",
         title: "Failed to save subagent",
@@ -253,6 +294,10 @@ export function SubagentEditPageV3({
     draftDirectTools,
     draftCustomTools,
     draftSkillIds,
+    draftFast,
+    draftChecks,
+    checksValid,
+    draftSamples,
     showSnackbar,
   ]);
 
@@ -367,6 +412,7 @@ export function SubagentEditPageV3({
     { id: "persona", label: "Persona" },
     { id: "knowledge", label: "Knowledge" },
     { id: "tools", label: "Tools" },
+    { id: "checks", label: draftChecks.length > 0 ? `Checks (${draftChecks.length})` : "Checks" },
     { id: "mcp", label: "MCP" },
     {
       id: "contributors",
@@ -387,7 +433,7 @@ export function SubagentEditPageV3({
         dirty={dirty}
         saving={saving}
         canEdit={canEdit}
-        onSave={handleSave}
+        onSave={() => void handleSave()}
         onToggleEnabled={handleToggleEnabled}
         onBack={() => navigate("/v3/subagents")}
       />
@@ -445,6 +491,48 @@ export function SubagentEditPageV3({
               draftCustomTools={draftCustomTools}
               onDraftCustomToolsChange={setDraftCustomTools}
             />
+          )}
+
+          {activeTab === "checks" && (
+            <div className="space-y-4">
+              {gateBlock && (
+                <div className="flex items-start justify-between gap-3 rounded-xl border border-xyne-border-error bg-xyne-surface p-3 text-[13px] text-xyne-error-fg" data-id="eval-gate-block">
+                  <span>{gateBlock}</span>
+                  <Button size="sm" variant="destructive" onClick={() => void handleSave(true)} disabled={saving}>
+                    Save anyway
+                  </Button>
+                </div>
+              )}
+              <label className="flex items-start gap-3 rounded-xl border border-xyne-border bg-xyne-surface p-3" data-id="fast-subagent-toggle">
+                <Switch checked={draftFast} onChange={setDraftFast} disabled={!canEdit} ariaLabel="Fast subagent" />
+                <span>
+                  <span className="block text-[13px] font-medium text-xyne-fg-primary">Fast subagent (cheap model + xor checks)</span>
+                  <span className="block text-[12px] text-xyne-fg-muted">
+                    Runs on the fast model with low thinking and always gets the xor-decide tool. These checks are added to its prompt as a ready question bank.
+                  </span>
+                </span>
+              </label>
+              {draftsFor === subagent.name && <ChecksEditor
+                key={subagent.name}
+                checks={draftChecks}
+                onChange={(checks, valid) => {
+                  setDraftChecks(checks);
+                  setChecksValid(valid);
+                }}
+                samples={draftSamples}
+                onSamplesChange={setDraftSamples}
+                canEdit={canEdit}
+              />}
+              <ChecksEvalPanel
+                subagentName={subagent.name}
+                canEdit={canEdit}
+                sampleCount={(subagent.samples ?? []).length}
+                dirty={dirty}
+                checksVersion={subagent.checksVersion}
+                report={evalReport}
+                onReport={setEvalReport}
+              />
+            </div>
           )}
 
           {activeTab === "mcp" && (

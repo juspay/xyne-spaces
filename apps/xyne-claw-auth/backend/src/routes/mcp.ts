@@ -14,7 +14,7 @@ import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, 
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { type Citation } from "xyne-claw-shared";
+import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import {
   channelAgentTools,
@@ -84,6 +84,7 @@ import { findUnresolvedConfiguredServers, visibleConnectors, type UnresolvedConf
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { loadKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { checkProactivityCall, isProactivityRun, SPACES_SERVERS as SPACES_SERVER_TYPES } from "../agent-proactivity/tool-policy.js";
 import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
@@ -1248,8 +1249,212 @@ async function buildMcpResolutionEntries(args: {
     entries.push({ type: "user", serverType: NOTIFY_SERVER_TYPE, serverName: "WhatsApp", enforcementType: "virtual" });
   }
 
+  // A proactivity run uses only what the agent itself was given: drop personal and
+  // org-wide fallback connectors, so an unprompted answer never shows more than
+  // tagging the agent would. The call route enforces the same (agent-proactivity/).
+  if (isProactivityRun(runCtx?.triggerSource)) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i]!.type !== "agent" && !SPACES_SERVER_TYPES.has(entries[i]!.serverType)) entries.splice(i, 1);
+    }
+  }
+
   log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
   return { entries, automationAppSwap, runCtx };
+}
+
+interface McpListingContext {
+  userId: string;
+  sessionId: string;
+  agentSlug: string | undefined;
+  spacesAppId: string | undefined;
+  purpose: "run" | "warm";
+}
+
+async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId, purpose }: McpListingContext) {
+  const listingStartedAt = Date.now();
+  const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
+  const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
+  const strictAgentToolsConfig = isStrictAgentToolsEnabled()
+    ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, sessionId, spacesAppId, userId)
+    : undefined;
+  const tenantUniqueId = resolveGatewayTenantForRequest();
+
+  const { entries, automationAppSwap, runCtx } = await buildMcpResolutionEntries({
+    userId,
+    sessionId: sessionId,
+    agentSlug,
+    spacesAppId,
+    sessionAgentTools,
+  });
+
+  // Servers whose ONLY credentials live on one of the agent's custom
+  // subagents. Without this the group never reaches the run, the subagent
+  // resolves to 0 tools and gets skipped. Existing user/agent/global sources
+  // win — the call-time pin in credentials-loader already routes the
+  // subagent's own calls to its own identity.
+  let subagentListingEntries: SubagentMcpListingEntry[] = [];
+  if (sessionAgentTools) {
+    try {
+      subagentListingEntries = await loadSubagentMcpListingEntries({
+        orgId: sessionAgentOrgId,
+        subagentNames: sessionAgentTools.toolsConfig?.subagents ?? [],
+        existingServerTypes: new Set(entries.map((e) => e.serverType)),
+      });
+    } catch (err) {
+      log.error(`[mcp/tools] subagent connection listing failed for agent=${sessionAgentTools.slug}:`, err);
+    }
+    if (subagentListingEntries.length > 0) {
+      log.info(
+        `[mcp/tools] subagent-sourced servers agent=${sessionAgentTools.slug} ` +
+        `${subagentListingEntries.map((e) => `${e.serverType}<-${e.subagentName}`).join(",")}`,
+      );
+    }
+  }
+
+  // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
+  // Skipped under the automation app-mode swap — that path must NOT re-list the
+  // user xyne-spaces server (with app creds) that the swap just removed.
+  const hasSpacesConnection = entries.some((e) => e.serverType === "xyne-spaces" && e.type !== "user");
+  const appTokenToolsPromise: Promise<Awaited<ReturnType<typeof listToolsForUser>> | null> =
+    !hasSpacesConnection && !automationAppSwap
+      ? (async () => {
+          const appCreds = await getAppTokenCredentials(userId);
+          if (!appCreds) return null;
+          return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds, undefined, { cutoff: true });
+        })().catch((err) => {
+          log.error("[mcp/tools] App token fallback failed:", err);
+          return null;
+        })
+      : Promise.resolve(null);
+
+  const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+  const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
+  if (prefilterSkips.size > 0) {
+    log.info(
+      `[mcp/tools] prefilter agent=${sessionAgentTools?.slug ?? "-"} ` +
+      `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
+    );
+  }
+
+  const listingPhaseStartedAt = Date.now();
+  const serverMs: Array<[string, number]> = [];
+  const subagentResultsPromise = Promise.allSettled(
+    subagentListingEntries.map(async (entry) => {
+      if (!(await hasConnectorDefinition(entry.serverType))) return null;
+      const serverTools = await listToolsForUser(
+        userId,
+        entry.serverType,
+        entry.serverName,
+        entry.credentials,
+        agentSlug,
+        { cutoff: true },
+      );
+      return {
+        ...serverTools,
+        sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
+      } satisfies McpServerTools;
+    }),
+  );
+  const results = await Promise.allSettled(
+    listingEntries.map(async (entry) => {
+      const entryStartedAt = Date.now();
+      try {
+        return await listEntryTools(entry);
+      } finally {
+        serverMs.push([entry.serverType, Date.now() - entryStartedAt]);
+      }
+    }),
+  );
+  async function listEntryTools(entry: ListEntry) {
+    if (!(await hasConnectorDefinition(entry.serverType))) return null;
+    const effective = entry.serverType === "slack"
+      ? await loadEffectiveCredentialsWithSpacesFallback(
+          userId,
+          entry.serverType,
+          agentSlug,
+          sessionAgentOrgId,
+          sessionId,
+        )
+      : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
+    if (!effective) return null;
+    const serverTools = await listToolsForUser(
+      userId,
+      entry.serverType,
+      entry.serverName,
+      effective.credentials,
+      agentSlug,
+      { cutoff: true },
+    );
+    return { entry, serverTools };
+  }
+
+  const data = results
+    .filter(
+      (
+        r,
+      ): r is PromiseFulfilledResult<{
+        entry: ListEntry;
+        serverTools: Awaited<ReturnType<typeof listToolsForUser>>;
+      } | null> => r.status === "fulfilled",
+    )
+    .map((r) => r.value)
+    .filter(
+      (v): v is { entry: ListEntry; serverTools: Awaited<ReturnType<typeof listToolsForUser>> } =>
+        v !== null,
+    )
+    .map((v) => v.serverTools);
+
+  const errors = results
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+
+  if (errors.length > 0) {
+    log.error("[mcp/tools] Some servers failed to list tools:", errors);
+  }
+
+  const [appTokenToolsResult, subagentResults] = await Promise.all([appTokenToolsPromise, subagentResultsPromise]);
+  const slowest = serverMs.reduce<[string, number] | null>((max, cur) => (!max || cur[1] > max[1] ? cur : max), null);
+  log.info(
+    `[mcp/${purpose === "warm" ? "warm" : "tools"}] timing agent=${agentSlug ?? "-"} setupMs=${listingPhaseStartedAt - listingStartedAt} ` +
+    `listMs=${Date.now() - listingPhaseStartedAt} servers=${listingEntries.length} subagentServers=${subagentListingEntries.length}` +
+    (slowest ? ` slowest=${slowest[0]}:${slowest[1]}ms` : ""),
+  );
+
+  if (appTokenToolsResult) {
+    data.push(appTokenToolsResult);
+  }
+
+  if (subagentListingEntries.length > 0) {
+    for (const result of subagentResults) {
+      if (result.status === "rejected") {
+        log.error("[mcp/tools] subagent-sourced server failed to list tools:", result.reason);
+        continue;
+      }
+      if (result.value) data.push(result.value);
+    }
+  }
+
+  return {
+    data,
+    entries,
+    automationAppSwap,
+    subagentListingEntries,
+    sessionAgentOrgId,
+    sessionAgentTools,
+    strictAgentToolsConfig,
+    tenantUniqueId,
+  };
+}
+
+export async function warmMcpToolLists(userId: string, agentSlug: string): Promise<number> {
+  const { data } = await listContextMcpServers({
+    userId,
+    sessionId: `warm-${crypto.randomUUID()}`,
+    agentSlug,
+    spacesAppId: undefined,
+    purpose: "warm",
+  });
+  return data.length;
 }
 
 router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, res: Response) => {
@@ -1257,148 +1462,16 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const userId = req.session!.userId;
     const agentSlug = req.session?.agentSlug;
     const spacesAppId = req.session?.spacesAppId;
-    const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
-    const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
-    const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId, userId)
-      : undefined;
-    const tenantUniqueId = resolveGatewayTenantForRequest();
-
-    const { entries, automationAppSwap, runCtx } = await buildMcpResolutionEntries({
-      userId,
-      sessionId: req.params.sessionId,
-      agentSlug,
-      spacesAppId,
+    const {
+      data,
+      entries,
+      automationAppSwap,
+      subagentListingEntries,
+      sessionAgentOrgId,
       sessionAgentTools,
-    });
-
-    // Servers whose ONLY credentials live on one of the agent's custom
-    // subagents. Without this the group never reaches the run, the subagent
-    // resolves to 0 tools and gets skipped. Existing user/agent/global sources
-    // win — the call-time pin in credentials-loader already routes the
-    // subagent's own calls to its own identity.
-    let subagentListingEntries: SubagentMcpListingEntry[] = [];
-    if (sessionAgentTools) {
-      try {
-        subagentListingEntries = await loadSubagentMcpListingEntries({
-          orgId: sessionAgentOrgId,
-          subagentNames: sessionAgentTools.toolsConfig?.subagents ?? [],
-          existingServerTypes: new Set(entries.map((e) => e.serverType)),
-        });
-      } catch (err) {
-        log.error(`[mcp/tools] subagent connection listing failed for agent=${sessionAgentTools.slug}:`, err);
-      }
-      if (subagentListingEntries.length > 0) {
-        log.info(
-          `[mcp/tools] subagent-sourced servers agent=${sessionAgentTools.slug} ` +
-          `${subagentListingEntries.map((e) => `${e.serverType}<-${e.subagentName}`).join(",")}`,
-        );
-      }
-    }
-
-    // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
-    // Skipped under the automation app-mode swap — that path must NOT re-list the
-    // user xyne-spaces server (with app creds) that the swap just removed.
-    const hasSpacesConnection = entries.some((e) => e.serverType === "xyne-spaces" && e.type !== "user");
-    let appTokenToolsResult: Awaited<ReturnType<typeof listToolsForUser>> | null = null;
-    if (!hasSpacesConnection && !automationAppSwap) {
-      const appCreds = await getAppTokenCredentials(userId);
-      if (appCreds) {
-        try {
-          appTokenToolsResult = await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
-        } catch (err) {
-          log.error("[mcp/tools] App token fallback failed:", err);
-        }
-      }
-    }
-
-    const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
-    const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
-    if (prefilterSkips.size > 0) {
-      log.info(
-        `[mcp/tools] prefilter agent=${sessionAgentTools?.slug ?? "-"} ` +
-        `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
-      );
-    }
-
-    const results = await Promise.allSettled(
-      listingEntries.map(async (entry) => {
-        if (!(await hasConnectorDefinition(entry.serverType))) return null;
-        const effective = entry.serverType === "slack"
-          ? await loadEffectiveCredentialsWithSpacesFallback(
-              userId,
-              entry.serverType,
-              agentSlug,
-              sessionAgentOrgId,
-              req.params.sessionId,
-            )
-          : await loadEffectiveCredentials(userId, entry.serverType, agentSlug, undefined, sessionAgentOrgId);
-        if (!effective) return null;
-        const serverTools = await listToolsForUser(
-          userId,
-          entry.serverType,
-          entry.serverName,
-          effective.credentials,
-          agentSlug,
-        );
-        return { entry, serverTools };
-      }),
-    );
-
-    const data = results
-      .filter(
-        (
-          r,
-        ): r is PromiseFulfilledResult<{
-          entry: ListEntry;
-          serverTools: Awaited<ReturnType<typeof listToolsForUser>>;
-        } | null> => r.status === "fulfilled",
-      )
-      .map((r) => r.value)
-      .filter(
-        (v): v is { entry: ListEntry; serverTools: Awaited<ReturnType<typeof listToolsForUser>> } =>
-          v !== null,
-      )
-      .map((v) => v.serverTools);
-
-    const errors = results
-      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-      .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
-
-    if (errors.length > 0) {
-      log.error("[mcp/tools] Some servers failed to list tools:", errors);
-    }
-
-    // Add app token fallback result if available
-    if (appTokenToolsResult) {
-      data.push(appTokenToolsResult);
-    }
-
-    if (subagentListingEntries.length > 0) {
-      const subagentResults = await Promise.allSettled(
-        subagentListingEntries.map(async (entry) => {
-          if (!(await hasConnectorDefinition(entry.serverType))) return null;
-          const serverTools = await listToolsForUser(
-            userId,
-            entry.serverType,
-            entry.serverName,
-            entry.credentials,
-            agentSlug,
-          );
-          return {
-            ...serverTools,
-            sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
-          } satisfies McpServerTools;
-        }),
-      );
-      for (const result of subagentResults) {
-        if (result.status === "rejected") {
-          log.error("[mcp/tools] subagent-sourced server failed to list tools:", result.reason);
-          continue;
-        }
-        if (result.value) data.push(result.value);
-      }
-    }
+      strictAgentToolsConfig,
+      tenantUniqueId,
+    } = await listContextMcpServers({ userId, sessionId: req.params.sessionId, agentSlug, spacesAppId, purpose: "run" });
 
     // Add gateway tools selected in the agent config as extra MCP groups.
     // This is additive: legacy MCP loading remains unchanged.
@@ -1762,6 +1835,51 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
+    // A proactivity run (an answer nobody tagged the agent for) is read-only, reads only
+    // the room and public channels in Spaces, and uses only the agent's own connectors.
+    // Checked before everything below, so no later branch can widen it.
+    const { getSession: getRunSession } = await import("./webhook.js");
+    const proactivityCtx = await getRunSession(req.params.sessionId).catch(() => null);
+    let callParams = params ?? {};
+    if (isProactivityRun(proactivityCtx?.triggerSource)) {
+      const definitions = await Promise.all(
+        [serverType, ...(serverType === "xyne-spaces-app-tools" ? ["xyne-spaces"] : [])].map((type) =>
+          resolveConnectorDefinition(type).catch(() => undefined),
+        ),
+      );
+      const isWriteTool = definitions.some((definition) =>
+        definition?.writePolicy
+          ? isWriteToolUnderPolicy(definition.writePolicy, tool)
+          : (definition?.writeTools?.includes(tool) ?? false),
+      );
+      const isAgentConnector = sessionAgentTools?.id
+        ? Boolean(
+            await prisma.agentMcpConnection.findFirst({
+              where: { agentId: sessionAgentTools.id, mcpServer: { type: serverType } },
+              select: { id: true },
+            }),
+          )
+        : false;
+      const verdict = await checkProactivityCall({
+        serverType,
+        tool,
+        params: callParams,
+        isWriteTool,
+        isAgentConnector,
+        roomChannelId: proactivityCtx?.channelId ?? "",
+        bot:
+          proactivityCtx?.spacesAppUserId && proactivityCtx.workspaceId
+            ? { userId: proactivityCtx.spacesAppUserId, workspaceId: proactivityCtx.workspaceId }
+            : null,
+      });
+      if (!verdict.allow) {
+        log.info(`[mcp/call] proactivity run refused ${serverType}/${tool} session=${req.params.sessionId}`);
+        res.json({ success: true, data: { content: verdict.message, isError: true } });
+        return;
+      }
+      callParams = verdict.params;
+    }
+
     const callServerName = strictAgentToolsConfig
       ? await resolveServerNameForMcpCall(serverType, backendId)
       : serverType;
@@ -2049,7 +2167,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // Reads from Redis keyed by the URL sessionId (set in /run). If nothing was
     // attached, this is a no-op fast path.
     const attachedItems = await loadAttachedContextForSession(req.params.sessionId);
-    let effectiveParams = injectAttachedContextDefaults(serverType, tool, params ?? {}, attachedItems);
+    let effectiveParams = injectAttachedContextDefaults(serverType, tool, callParams, attachedItems);
 
     // xyne-dashboard: force-set the run's dashboard scalars (stored in /run,
     // see mcp/run-scalars.ts). Authoritative — overwrites anything the model
@@ -2107,6 +2225,12 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         },
       });
       return;
+    }
+
+    // Filing a personal canvas into a hub widens its audience: only an approved (signed "ask") call may.
+    // Keyed on tool only: automation runs reach the same handler as xyne-spaces-app-tools.
+    if (tool === SDLC_TOOL_NAMES.writeArtifact) {
+      effectiveParams = { ...effectiveParams, adoptApproved: effectivePermission === "ask" };
     }
 
     if (effectivePermission === "ask") {

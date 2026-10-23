@@ -11,7 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
+import { runWithContext, tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
@@ -22,7 +22,6 @@ import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
-import jiraCompatRoutes, { JIRA_COMPAT_MOUNT } from '@/routes/jiraCompat';
 import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
@@ -108,7 +107,10 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import vespaSearchRoutes, {
+  discussionTitleRouter,
+  relatedContextRouter,
+} from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
@@ -154,6 +156,7 @@ import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
 import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
+import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -177,6 +180,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -222,6 +226,10 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import channelsDeskRoutes from '@/routes/channelsDesks';
+import proactivityRoutes from '@/routes/proactivity';
+import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
+import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
+import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
 
 
 export class App {
@@ -335,26 +343,6 @@ export class App {
 
     this.app.use('/migrate/api/migration', migrationRoutes);
 
-    // JIRA-compatibility facade (public, read-only): lets Bitbucket linkify
-    // Spaces ticket keys (e.g. TTS-0001) and route /browse/<KEY> to the Spaces
-    // ticket instead of Atlassian JIRA. Mounted UNDER the existing per-workspace
-    // Bitbucket webhook path (the only path the ingress forwards), so the
-    // Application Link base URL is <host>/api/webhooks/bitbucket/<workspaceId>
-    // and Bitbucket appends /rest/* and /browse/*.
-    //
-    // Ordering matters: this must stay BEFORE the /api/webhooks raw-body mount.
-    // The shim defines only GET routes, so the webhook POST /bitbucket/:workspaceId
-    // matches no route here (Express matches method AND path) and falls through to
-    // the HMAC-verified handler below. Deliberately NO express.raw — buffering the
-    // body here would leave the webhook's raw parser with an empty stream and break
-    // its HMAC check. Endpoints are unauthenticated (Bitbucket is external, no
-    // client cert) and workspace-scoped; restrict to Bitbucket egress IPs at the
-    // ingress if the project-code / ticket-title exposure is a concern.
-    this.app.use(JIRA_COMPAT_MOUNT,
-      webhookLimiter,
-
-      jiraCompatRoutes);
-
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
       express.raw({ type: 'application/json' }),
@@ -392,6 +380,7 @@ export class App {
       logger.info('Public SDK API mounted at /api/sdk');
     }
     this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
+    this.app.use('/api/proactivity', proactivityRoutes);
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
@@ -679,6 +668,81 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
+    // An agent's draft for an unprompted answer. Acked first: claw-auth must not wait
+    // on the check before posting.
+    // For claw-auth's proactive runs, answered as the agent's bot with its own channel
+    // access: where the run's reads land, and which channels a routing card may learn
+    // from. Any failure means no.
+    this.app.post('/api/internal/proactivity/room-allows', validateS2SKey, async (req: Request, res: Response) => {
+      const { userId, workspaceId, roomChannelId, refs } = (req.body ?? {}) as Record<string, unknown>;
+      const valid =
+        Array.isArray(refs) &&
+        refs.every(
+          (r) =>
+            r &&
+            ['channel', 'conversation', 'message', 'ticket'].includes((r as RoomRef).kind) &&
+            typeof (r as RoomRef).id === 'string',
+        );
+      if (typeof userId !== 'string' || typeof workspaceId !== 'string' || typeof roomChannelId !== 'string' || !valid) {
+        res.status(400).json({ allowed: false });
+        return;
+      }
+      try {
+        const allowed = await runWithContext({ userId, workspaceId }, () =>
+          roomAllows(roomChannelId, refs as RoomRef[]),
+        );
+        res.json({ allowed });
+      } catch (error) {
+        logger.error('[Proactivity] room check failed', { error });
+        res.status(500).json({ allowed: false });
+      }
+    });
+    this.app.post('/api/internal/proactivity/public-channels', validateS2SKey, async (req: Request, res: Response) => {
+      const { userId, workspaceId, channelIds } = (req.body ?? {}) as Record<string, unknown>;
+      if (
+        typeof userId !== 'string' ||
+        typeof workspaceId !== 'string' ||
+        !Array.isArray(channelIds) ||
+        !channelIds.every((id) => typeof id === 'string')
+      ) {
+        res.status(400).json({ channelIds: [] });
+        return;
+      }
+      try {
+        const ids = await runWithContext({ userId, workspaceId }, () =>
+          publicChannels((channelIds as string[]).slice(0, 500)),
+        );
+        res.json({ channelIds: ids });
+      } catch (error) {
+        logger.error('[Proactivity] public channels lookup failed', { error });
+        res.status(500).json({ channelIds: [] });
+      }
+    });
+    this.app.post(
+      '/api/internal/proactivity/draft/:episodeId/:agentSlug',
+      validateS2SKey,
+      (req: Request, res: Response) => {
+        // Into the worker's queue, so a restarting API pod can't lose the draft.
+        const context = decodeDraftContext(req.query.context);
+        if (!context) {
+          logger.warn('[Proactivity] draft without its context', { params: req.params });
+          res.json({ success: true });
+          return;
+        }
+        void proactiveEpisodeQueue
+          .schedule(
+            {
+              type: 'draft',
+              episodeId: String(req.params.episodeId),
+              agentSlug: String(req.params.agentSlug),
+              result: (req.body ?? {}) as DraftResult,
+              context,
+            },
+            Date.now(),
+          )
+          .finally(() => res.json({ success: true }));
+      },
+    );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
     // resolves the gate from it.
@@ -706,6 +770,11 @@ export class App {
       `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
       validateS2SKey,
       handleClawCallAiCallback,
+    );
+    this.app.post(
+      '/api/internal/desk-canvas/callback/:canvasId',
+      validateS2SKey,
+      handleDeskThreadCanvasCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
@@ -839,6 +908,11 @@ export class App {
     // Vespa search routes (auth required)
     // Ahead of the general mount, so a lookup is answered here and nothing else runs.
     this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
+    this.app.use(
+      '/api/vespaSearch/discussion-title',
+      authMiddleware.authenticate,
+      discussionTitleRouter
+    );
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
@@ -1197,6 +1271,11 @@ export class App {
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
+
+    if (config.decisionEval.enabled) {
+      logger.info('Initializing decision evaluation queue (producer)...');
+      await decisionEvaluationQueue.initialize();
+    }
 
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');

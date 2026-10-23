@@ -44,7 +44,7 @@ overrides:
   deepmerge-ts: 8.0.0
   defu: 6.1.7
   diff@8: 8.0.3
-  dompurify@3: 3.4.13
+  dompurify@3: 3.4.17
   effect: 3.22.0
   engine.io@6: 6.6.10
   express-rate-limit: 8.5.2
@@ -60,7 +60,7 @@ overrides:
   flatted: 3.4.2
   form-data@2: 2.5.6
   form-data@4: 4.0.6
-  handlebars@4: 4.7.9
+  handlebars@4: 4.7.10
   happy-dom: 20.8.9
   hono: 4.13.5
   immutable: 4.3.9
@@ -78,13 +78,13 @@ overrides:
   minimatch@3: 3.1.5
   minimatch@5: 5.1.9
   minimatch@9: 9.0.9
-  monaco-editor>dompurify: 3.4.13
+  monaco-editor>dompurify: 3.4.17
   morgan: 1.12.0
   multer: 2.3.0
   nanoid@3: 3.3.18
   nanoid@4: 5.1.16
   nanoid@5: 5.1.16
-  next: 16.3.8
+  next: 16.4.2
   node-forge: 1.4.0
   nodemailer: 9.1.0
   path-to-regexp@0: 0.1.13
@@ -106,7 +106,7 @@ overrides:
   systeminformation: 5.31.17
   tar@6: 7.5.20
   tar@7: 7.5.21
-  tinypool@2: 2.1.2
+  tinypool: 2.2.0
   tmp: 0.2.7
   tough-cookie@2: 4.1.3
   underscore: 1.13.8
@@ -284,8 +284,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/cache
       '@xyne/connector-sdk':
-        specifier: 0.1.3
-        version: 0.1.3(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))
+        specifier: 0.1.4
+        version: 0.1.4(@xyne/workflow-sdk@3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))
       '@xyne/secrets-vault':
         specifier: workspace:*
         version: link:../../packages/secrets-vault
@@ -299,8 +299,8 @@ importers:
         specifier: 1.6.0
         version: 1.6.0(typescript@5.9.3)
       '@xyne/workflow-sdk':
-        specifier: 3.2.51
-        version: 3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
+        specifier: 3.2.57
+        version: 3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
       '@y-sweet/sdk':
         specifier: ^0.9.1
         version: 0.9.1
@@ -728,8 +728,11 @@ importers:
         specifier: ^1.1.6
         version: 1.2.0
       '@livekit/track-processors':
-        specifier: ^0.7.2
-        version: 0.7.2(@types/dom-mediacapture-transform@0.1.12)(livekit-client@2.17.0(@types/dom-mediacapture-record@1.0.22))
+        specifier: ^0.8.2
+        version: 0.8.2(@types/dom-mediacapture-transform@0.1.12)(livekit-client@2.17.0(@types/dom-mediacapture-record@1.0.22))
+      '@mediapipe/tasks-vision':
+        specifier: 0.10.14
+        version: 0.10.14
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -971,11 +974,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@xyne/workflow-sdk':
-        specifier: 3.2.51
-        version: 3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
+        specifier: 3.2.57
+        version: 3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
       '@xyne/workflow-ui':
-        specifier: 1.3.51
-        version: 1.3.51(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.30.6(@tiptap/pm@3.30.6))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)
+        specifier: 1.3.57
+        version: 1.3.57(77b6782bff3ba8a110fde615d240e212)
       '@y-sweet/client':
         specifier: ^0.9.1
         version: 0.9.1(yjs@13.6.31)
@@ -1010,8 +1013,8 @@ importers:
         specifier: ^0.3.7
         version: 0.3.7
       dompurify:
-        specifier: 3.4.13
-        version: 3.4.13
+        specifier: 3.4.17
+        version: 3.4.17
       driver.js:
         specifier: ^1.4.0
         version: 1.8.0
@@ -1654,10 +1657,10 @@ importers:
         version: 9.2.4
       fumadocs-core:
         specifier: ^16.6.0
-        version: 16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6)
+        version: 16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6)
       fumadocs-mdx:
         specifier: ^14.2.7
-        version: 14.3.2(@types/mdast@4.0.4)(@types/mdx@2.0.14)(@types/react@19.2.17)(fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6))(mdast-util-directive@3.1.0)(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react@19.2.3)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 14.3.2(@types/mdast@4.0.4)(@types/mdx@2.0.14)(@types/react@19.2.17)(fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6))(mdast-util-directive@3.1.0)(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react@19.2.3)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.23.1)(yaml@2.9.0))
       maath:
         specifier: ^0.10.8
         version: 0.10.8(@types/three@0.185.1)(three@0.182.0)
@@ -1665,8 +1668,8 @@ importers:
         specifier: ^12.34.0
         version: 12.43.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       next:
-        specifier: 16.3.8
-        version: 16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
+        specifier: 16.4.2
+        version: 16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -2409,8 +2412,8 @@ importers:
         specifier: ^0.15.2
         version: 0.15.2
       playwright:
-        specifier: ^1.59.1
-        version: 1.62.0
+        specifier: 1.63.0
+        version: 1.63.0
       pptxgenjs:
         specifier: ^4.0.1
         version: 4.0.1
@@ -2449,8 +2452,8 @@ importers:
         specifier: 1.31.0
         version: 1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@xyne/spaces-sdk':
-        specifier: ^0.1.3
-        version: 0.1.3
+        specifier: 0.2.0-next.0
+        version: 0.2.0-next.0
       emoji-datasource:
         specifier: ^16.0.0
         version: 16.0.0
@@ -2483,8 +2486,8 @@ importers:
         specifier: ^1.6.30
         version: 1.6.35
       '@playwright/test':
-        specifier: 1.59.1
-        version: 1.59.1
+        specifier: 1.63.0
+        version: 1.63.0
       '@types/node':
         specifier: ^24.6.1
         version: 24.13.3
@@ -5272,8 +5275,8 @@ packages:
     peerDependencies:
       typescript: '>=4.7.0'
 
-  '@livekit/track-processors@0.7.2':
-    resolution: {integrity: sha512-lzARBKTbBwqycdR/SwTu6//N0l20BzfDd7grxCXl07676SwRApNtZAK1GJjL1m3dCM3KBqH1aVxjMpNcbOw5uQ==}
+  '@livekit/track-processors@0.8.2':
+    resolution: {integrity: sha512-e7mBsNMR7Ond4IyJ4afZ2azAdbd9SwQTUQgJvJBySp9M9UlObXjp/H9oKyV5UttBUjTS1h0O7SksN4PJIjYScg==}
     peerDependencies:
       '@types/dom-mediacapture-transform': ^0.1.9
       livekit-client: ^1.12.0 || ^2.1.0
@@ -5780,56 +5783,56 @@ packages:
       '@emnapi/core': ^2.0.0-alpha.3
       '@emnapi/runtime': ^2.0.0-alpha.3
 
-  '@next/env@16.3.8':
-    resolution: {integrity: sha512-Al9zqHVV7TJv0eFuOU4U7Lvv74PTih4Ch63sk2xCIpSTkE3udFnaOcnzP2lQVymiL7yS9Cj2iClUXlR3EQ5sEw==}
+  '@next/env@16.4.2':
+    resolution: {integrity: sha512-nTUTFH7G5/J/fmpkjVLegOkqyKOP0CEsJcMsyO4UCYeN1su+YMW/MfaSErnJskL7XM+UDK6aTvslxsRCyya/sA==}
 
   '@next/eslint-plugin-next@16.1.6':
     resolution: {integrity: sha512-/Qq3PTagA6+nYVfryAtQ7/9FEr/6YVyvOtl6rZnGsbReGLf0jZU6gkpr1FuChAQpvV46a78p4cmHOVP8mbfSMQ==}
 
-  '@next/swc-darwin-arm64@16.3.8':
-    resolution: {integrity: sha512-2JPRMh2nmQG5CiL7cXGL9AGwnPWJQ//cTtAUCT+w511QHk79SYz3LGv/pc5X643B/WEO0rvu3Yww0hqwt3kgeA==}
+  '@next/swc-darwin-arm64@16.4.2':
+    resolution: {integrity: sha512-ONkhFvZNFWlsEHOM/81AtxdyuJP2KRYKYR0JxPwvcu1AuPMMMgcL+wW2luldJvMtZwKtUxoSkCychW5wIeoYSw==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  '@next/swc-darwin-x64@16.3.8':
-    resolution: {integrity: sha512-GZtCCOBKJ4leVIT/Th0llWKhD1ca92lzbQiS5R5ON9QkoiFnilFsebDae1JU2a3HWoKMEmEZWGs1AGLavVM72Q==}
+  '@next/swc-darwin-x64@16.4.2':
+    resolution: {integrity: sha512-luPCMbOsCoaF+kXJEUjmjmOZg1lC3BflhmUu+ZmW4tBu2vW/4AXak8JBFvePizGkxVmNiAw/r9ra+6UviCWtWQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  '@next/swc-linux-arm64-gnu@16.3.8':
-    resolution: {integrity: sha512-O659ygeQYqneJ1fBKMpFxIFqYkYswu8IAS1OCKK/4f3ZgJJm1dRz4fVJZRi/kLLWjnBKnebOePA4WNv+sV1pVA==}
+  '@next/swc-linux-arm64-gnu@16.4.2':
+    resolution: {integrity: sha512-xhwFTAncJyaCNy5KqKKuKaIIdCy1/1ZV1s5S1G0hhT7wGMkDTlfJ6aQbfRFnIG/s3/kDrxQ8aycVe+c5QnP8ow==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  '@next/swc-linux-arm64-musl@16.3.8':
-    resolution: {integrity: sha512-dSjKSyWpzxoO1d3DIZZcP4XJcNaKeLmxQMFOiYl5vuBRMmweIqnAhty8tAmRsvTss779cK1FtYnDMj40e4TQlg==}
+  '@next/swc-linux-arm64-musl@16.4.2':
+    resolution: {integrity: sha512-T1PNmfbPcxr5ndtWUL/3wQtLXsz808lq6sc2GrNT5k2oquF7UyqZddHSuAewHVsWsGXe6nsl9HoN1YNriVjuSg==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  '@next/swc-linux-x64-gnu@16.3.8':
-    resolution: {integrity: sha512-lbqOuz3RPRcv+o9msNsJw5x4+Y1ZwPTs6vmL6DCf7i0fZfvng/F59wyeDwqHIvV0mK//RBy/jJkZ+nCKsSMXjQ==}
+  '@next/swc-linux-x64-gnu@16.4.2':
+    resolution: {integrity: sha512-N9cDUOCGtkJG5PNKDFZUF3xXndrJJcpLp121uAGjIGvO/U2p9tfdNOM9htj7+5f72l0m8rMw/cvYacUJBQoudg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  '@next/swc-linux-x64-musl@16.3.8':
-    resolution: {integrity: sha512-+316WswI8ScVgZeUd+1KGaXkHhaYQzCjvH/05TZSpJ8zBizb1a4G7DtO7F12jcBIqMOtsz9ji1t48fmKtzqsGA==}
+  '@next/swc-linux-x64-musl@16.4.2':
+    resolution: {integrity: sha512-yY2uh1YhX6ufuYy2FCbw1dqblbhI57GLYAJfCkqD9auTv6pLrH67Uccjc3QMKBeCYAG6lkgu08ExmX1bbjejjQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  '@next/swc-win32-arm64-msvc@16.3.8':
-    resolution: {integrity: sha512-ji0gd4kMYUxO+1fJBIbiBVRCjzG/lloiyCccnlebvb1ZJ5qXCPZqYg4Jl1DrrixnWNMKylzgpmMWx0yNDYXlzw==}
+  '@next/swc-win32-arm64-msvc@16.4.2':
+    resolution: {integrity: sha512-j/ArWRIHpMMB6wYLMhr2puTguBt70lNU/Cmjl9p6dTDE8DGknYJMP9PdwPk2dqpCNL/KIX9yfngDvIesxJPmsg==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [win32]
 
-  '@next/swc-win32-x64-msvc@16.3.8':
-    resolution: {integrity: sha512-WcTlaKt/TWkh5kUjdJcUmB1XgZ+1c6fz4Y9fDHL73YNSdGaUWjceeWrrlwF0nv19iABYWC4iAq1oX1w4Bn0vfg==}
+  '@next/swc-win32-x64-msvc@16.4.2':
+    resolution: {integrity: sha512-AA4edyWHDko3NCSo0x6GomsdgFb0oR1J3MXU1b5xt6FRFg4AucrMPW3S0hCe/9onU0O1BbpGQBsqo1r0Gneu1g==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
@@ -7066,6 +7069,11 @@ packages:
   '@playwright/test@1.59.1':
     resolution: {integrity: sha512-PG6q63nQg5c9rIi4/Z5lR5IVF7yU5MqmKaPOe0HSc0O2cX1fPi96sUQu5j7eo4gKCkB2AnNGoWt7y4/Xx3Kcqg==}
     engines: {node: '>=18'}
+    hasBin: true
+
+  '@playwright/test@1.63.0':
+    resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
+    engines: {node: '>=20'}
     hasBin: true
 
   '@pnpm/config.env-replace@1.1.0':
@@ -10459,14 +10467,14 @@ packages:
   '@xyflow/system@0.0.79':
     resolution: {integrity: sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA==}
 
-  '@xyne/connector-sdk@0.1.3':
-    resolution: {integrity: sha512-tcYWYj0vaK3JSCLzoeFFszNGPc1AjTGi1RL+xhGd9i2mVKCQlwa6bTODL705bv5LBLmXe7UJ3ttXMSi8U/Bn3g==}
+  '@xyne/connector-sdk@0.1.4':
+    resolution: {integrity: sha512-dMVQhuHv9L3egl3S2pa5Q0XwSvCQqwF9RJWZCCYpAwOkK7PcJ2gJA/7fw2/2LqJT6NzH8j/pTTIx16kMOuk+4g==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@xyne/workflow-sdk': 3.2.39
 
-  '@xyne/spaces-sdk@0.1.3':
-    resolution: {integrity: sha512-D7h/H3J6PI3wV8q/XCbnyc8YTNCtc6hDZL7ycrKW9ocMVwqUsnGSI+RrwrsGELUFBLHNTwzcTDechAtop1reDg==}
+  '@xyne/spaces-sdk@0.2.0-next.0':
+    resolution: {integrity: sha512-UncMUfpmczG5IqvQ5sH1mU5ynwewwIKebv+9eXzEbsM03q5nX5KNNL/zY6btBt12PejBegi/FKL9QX7Ns4hmvQ==}
     engines: {node: '>=18.0.0'}
 
   '@xyne/vespa-ts@1.6.0':
@@ -10474,8 +10482,8 @@ packages:
     peerDependencies:
       typescript: ^5
 
-  '@xyne/workflow-sdk@3.2.51':
-    resolution: {integrity: sha512-4AsemtqopyOjDzhqghKGFAZL6TYPlVk5dzeq7IfMszSQf52Ed6Sm1/B8O9UlInAOuaY+0A8tUenephaXgvm91A==}
+  '@xyne/workflow-sdk@3.2.57':
+    resolution: {integrity: sha512-YM/r2W6991IeGGkUPiVatk/8JqVUSddbwhNK7hqtxtBE7RcLIvO3G9CYfhsGg1Rj2KZOWDqv/llPcWxaQzMDmg==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@earendil-works/pi-agent-core': '>=0.79.0'
@@ -10492,12 +10500,18 @@ packages:
       typebox:
         optional: true
 
-  '@xyne/workflow-ui@1.3.51':
-    resolution: {integrity: sha512-K3b19MLn6Q3bIwjBDa+mHqMdtPQM54FyQolEj1Z2ptEVt/UPg2a5AmmsojFr3xMCAEPkYpTsZNb5qKaX7Yby2w==}
+  '@xyne/workflow-ui@1.3.57':
+    resolution: {integrity: sha512-vujJS4fYmBMOjG88p4plpwl48dQcF94crcdj4ZhxBGXCxUCncWFXRd8muWwJq5dfPLblwdt8wE8Z+VDu6WyMjg==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
+      '@codemirror/autocomplete': '>=6.20.0'
+      '@codemirror/lang-javascript': '>=6.2.0'
+      '@codemirror/state': '>=6.0.0'
+      '@codemirror/theme-one-dark': '>=6.1.0'
+      '@codemirror/view': '>=6.43.0'
       '@tanstack/react-query': '>=5.0.0'
-      '@xyne/workflow-sdk': '>=3.2.1'
+      '@uiw/react-codemirror': '>=4.25.0'
+      '@xyne/workflow-sdk': '>=3.2.54'
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
 
@@ -12565,8 +12579,8 @@ packages:
     resolution: {integrity: sha512-gYzvtM72ZtxQO0T048kd6HWSbbGCNOUwcnfQ01cqIJ4X2IYKFFHZ5mKvrQETcFXxsRObZulDaKmy//R7TPtsBg==}
     engines: {node: '>=20.19.0'}
 
-  dompurify@3.4.13:
-    resolution: {integrity: sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ==}
+  dompurify@3.4.17:
+    resolution: {integrity: sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==}
 
   domutils@3.2.2:
     resolution: {integrity: sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==}
@@ -13719,7 +13733,7 @@ packages:
       algoliasearch: 5.x.x
       flexsearch: '*'
       lucide-react: '*'
-      next: 16.3.8
+      next: 16.4.2
       react: ^19.2.0
       react-dom: ^19.2.0
       react-router: 7.18.2
@@ -13772,7 +13786,7 @@ packages:
       '@types/react': '*'
       fumadocs-core: ^15.0.0 || ^16.0.0
       mdast-util-directive: '*'
-      next: 16.3.8
+      next: 16.4.2
       react: ^19.2.0
       vite: 6.x.x || 7.x.x || 8.x.x
     peerDependenciesMeta:
@@ -14097,8 +14111,8 @@ packages:
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
 
-  handlebars@4.7.9:
-    resolution: {integrity: sha512-4E71E0rpOaQuJR2A3xDZ+GM1HyWYv1clR58tC8emQNeQe3RH7MAzSbat+V0wG78LQBo6m6bzSG/L4pBuCsgnUQ==}
+  handlebars@4.7.10:
+    resolution: {integrity: sha512-P5VJMVM7qgBn6vjXMw8WG9uVI+ncf2pi72j4de4yz5ZULLj2RGqLYaKOYGsgyrViQ0tePOVlN1tDCCXXtFqXKg==}
     engines: {node: '>=0.4.7'}
     hasBin: true
 
@@ -15257,6 +15271,10 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  jsonata@2.2.2:
+    resolution: {integrity: sha512-XDFH2PuaAXv0AXJEWwElXbqADmKFGKMLMkFb+qOz0EhjQW2EIJ6pgtordLU+4u3IVERyBfqy6bi6kZKEncvRqA==}
+    engines: {node: '>= 8'}
 
   jsonfile@4.0.0:
     resolution: {integrity: sha512-m6F1R3z8jjlf2imQHS2Qez5sjKWQzbuuhuJ/FKYFRZvPE3PuHcSMVZzfsLhGVOkfd20obL5SWEBew5ShlquNxg==}
@@ -16442,8 +16460,8 @@ packages:
   next-tick@1.1.0:
     resolution: {integrity: sha512-CXdUiJembsNjuToQvxayPZF9Vqht7hewsvy2sOWafLvi2awflj9mOC6bHIg50orX8IJvWKY9wYQ/zB2kogPslQ==}
 
-  next@16.3.8:
-    resolution: {integrity: sha512-U7QEZaTini6wKrb8A8hqLLqYQyCetegKjCpJOyxk642vWoMoU1x5PyZCJFvgYgiptA8xc5j/9xYlZFO7w9Sjmw==}
+  next@16.4.2:
+    resolution: {integrity: sha512-r+oBJojfefUjOiWkBhXgLS+igxX/7BWyK59uHnyOyplMSLtBZ+QLP3okrdYTbrfrbrmNTVWLBPaHDX9KRaIt3w==}
     engines: {node: '>=20.9.0'}
     hasBin: true
     peerDependencies:
@@ -17340,8 +17358,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright-core@1.62.0:
-    resolution: {integrity: sha512-nsNRyq0r2zsG8AcRHWknc9QRA5XCueC7gWMrs+Gx2tlZn9hcl8zudfh00lhJPY1DE7NmZ6bDsT9g2yey8mXljA==}
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -17350,8 +17368,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright@1.62.0:
-    resolution: {integrity: sha512-Z14dG305dgaLu6foB1TXQagFiW8JfSUIUaUuPaKQ6NtBPKF1P/qXcqfh6c6K/icPqdy37JmjbiBXf6JNg6Sylw==}
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -19460,12 +19478,8 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
-  tinypool@1.1.1:
-    resolution: {integrity: sha512-Zba82s87IFq9A9XmjiX5uZA/ARWDrB03OHlq+Vw1fSdt0I+4/Kutwy8BP4Y/y/aORMo61FQ0vIb5j44vSo5Pkg==}
-    engines: {node: ^18.0.0 || >=20.0.0}
-
-  tinypool@2.1.2:
-    resolution: {integrity: sha512-9YodfrxS9g9IbFr/KOjE5bAeJ0p61n3bW6mqvy0jtoeKd1kTW1Cxm0oulm6KX2lyM9Gl6WIe8nEbY7LWv5ZJww==}
+  tinypool@2.2.0:
+    resolution: {integrity: sha512-jBrmx4lYmaC9k/mgPbylxs7kBUxHtD8256up+HjLaDFfXScKJQyil+SWXSvhAtT7XHo+yTVlpB81PGmHP8oLSQ==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
   tinyrainbow@2.0.0:
@@ -24644,7 +24658,7 @@ snapshots:
       typescript: 5.9.3
     optional: true
 
-  '@livekit/track-processors@0.7.2(@types/dom-mediacapture-transform@0.1.12)(livekit-client@2.17.0(@types/dom-mediacapture-record@1.0.22))':
+  '@livekit/track-processors@0.8.2(@types/dom-mediacapture-transform@0.1.12)(livekit-client@2.17.0(@types/dom-mediacapture-record@1.0.22))':
     dependencies:
       '@mediapipe/tasks-vision': 0.10.14
       '@types/dom-mediacapture-transform': 0.1.12
@@ -25218,34 +25232,34 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@next/env@16.3.8': {}
+  '@next/env@16.4.2': {}
 
   '@next/eslint-plugin-next@16.1.6':
     dependencies:
       fast-glob: 3.3.1
 
-  '@next/swc-darwin-arm64@16.3.8':
+  '@next/swc-darwin-arm64@16.4.2':
     optional: true
 
-  '@next/swc-darwin-x64@16.3.8':
+  '@next/swc-darwin-x64@16.4.2':
     optional: true
 
-  '@next/swc-linux-arm64-gnu@16.3.8':
+  '@next/swc-linux-arm64-gnu@16.4.2':
     optional: true
 
-  '@next/swc-linux-arm64-musl@16.3.8':
+  '@next/swc-linux-arm64-musl@16.4.2':
     optional: true
 
-  '@next/swc-linux-x64-gnu@16.3.8':
+  '@next/swc-linux-x64-gnu@16.4.2':
     optional: true
 
-  '@next/swc-linux-x64-musl@16.3.8':
+  '@next/swc-linux-x64-musl@16.4.2':
     optional: true
 
-  '@next/swc-win32-arm64-msvc@16.3.8':
+  '@next/swc-win32-arm64-msvc@16.4.2':
     optional: true
 
-  '@next/swc-win32-x64-msvc@16.3.8':
+  '@next/swc-win32-x64-msvc@16.4.2':
     optional: true
 
   '@nexus2520/bitbucket-mcp-server@2.0.4(@cfworker/json-schema@4.1.1)(debug@4.4.3)(zod@4.3.6)':
@@ -26755,6 +26769,10 @@ snapshots:
   '@playwright/test@1.59.1':
     dependencies:
       playwright: 1.59.1
+
+  '@playwright/test@1.63.0':
+    dependencies:
+      playwright: 1.63.0
 
   '@pnpm/config.env-replace@1.1.0': {}
 
@@ -29452,7 +29470,7 @@ snapshots:
 
   '@types/dompurify@3.2.0':
     dependencies:
-      dompurify: 3.4.13
+      dompurify: 3.4.17
 
   '@types/draco3d@1.4.10': {}
 
@@ -30696,12 +30714,12 @@ snapshots:
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
 
-  '@xyne/connector-sdk@0.1.3(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))':
+  '@xyne/connector-sdk@0.1.4(@xyne/workflow-sdk@3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8))':
     dependencies:
-      '@xyne/workflow-sdk': 3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
+      '@xyne/workflow-sdk': 3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
       zod: 3.25.76
 
-  '@xyne/spaces-sdk@0.1.3': {}
+  '@xyne/spaces-sdk@0.2.0-next.0': {}
 
   '@xyne/vespa-ts@1.6.0(typescript@5.9.3)':
     dependencies:
@@ -30709,8 +30727,9 @@ snapshots:
       typescript: 5.9.3
       zod: 4.3.6
 
-  '@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)':
+  '@xyne/workflow-sdk@3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)':
     dependencies:
+      jsonata: 2.2.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
     optionalDependencies:
@@ -30719,8 +30738,9 @@ snapshots:
       '@earendil-works/pi-coding-agent': 0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76)
       typebox: 1.3.8
 
-  '@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)':
+  '@xyne/workflow-sdk@3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)':
     dependencies:
+      jsonata: 2.2.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
     optionalDependencies:
@@ -30729,10 +30749,11 @@ snapshots:
       '@earendil-works/pi-coding-agent': 0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6)
       typebox: 1.3.8
 
-  '@xyne/workflow-ui@1.3.51(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.30.6(@tiptap/pm@3.30.6))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)':
+  '@xyne/workflow-ui@1.3.57(77b6782bff3ba8a110fde615d240e212)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/lang-javascript': 6.2.5
+      '@codemirror/state': 6.7.1
       '@codemirror/theme-one-dark': 6.1.3
       '@codemirror/view': 6.43.7
       '@tanstack/react-query': 5.90.19(react@19.2.3)
@@ -30743,7 +30764,7 @@ snapshots:
       '@tiptap/starter-kit': 2.27.2
       '@uiw/react-codemirror': 4.25.11(@babel/runtime@7.29.7)(@codemirror/autocomplete@6.20.3)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.7)(codemirror@6.0.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@xyflow/react': 12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@xyne/workflow-sdk': 3.2.51(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
+      '@xyne/workflow-sdk': 3.2.57(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.31.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
       clsx: 2.1.1
       docx-preview: 0.3.7
       lucide-react: 0.456.0(react@19.2.3)
@@ -30762,15 +30783,9 @@ snapshots:
       tiptap-markdown: 0.8.10(@tiptap/core@3.30.6(@tiptap/pm@3.30.6))
       unist-util-visit: 5.1.0
     transitivePeerDependencies:
-      - '@babel/runtime'
-      - '@codemirror/language'
-      - '@codemirror/lint'
-      - '@codemirror/search'
-      - '@codemirror/state'
       - '@tiptap/core'
       - '@types/react'
       - '@types/react-dom'
-      - codemirror
       - immer
       - react-is
       - redux
@@ -32229,7 +32244,7 @@ snapshots:
     dependencies:
       conventional-commits-filter: 2.0.7
       dateformat: 3.0.3
-      handlebars: 4.7.9
+      handlebars: 4.7.10
       json-stringify-safe: 5.0.1
       lodash: 4.18.1
       meow: 8.1.2
@@ -32240,7 +32255,7 @@ snapshots:
   conventional-changelog-writer@7.0.1:
     dependencies:
       conventional-commits-filter: 4.0.0
-      handlebars: 4.7.9
+      handlebars: 4.7.10
       json-stringify-safe: 5.0.1
       meow: 12.1.1
       semver: 7.8.5
@@ -33083,7 +33098,7 @@ snapshots:
     dependencies:
       domelementtype: 3.0.0
 
-  dompurify@3.4.13:
+  dompurify@3.4.17:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -34823,7 +34838,7 @@ snapshots:
       mkdirp: 0.5.6
       rimraf: 2.7.1
 
-  fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6):
+  fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6):
     dependencies:
       '@orama/orama': 3.1.18
       estree-util-value-to-estree: 3.5.0
@@ -34850,7 +34865,7 @@ snapshots:
       '@types/mdast': 4.0.4
       '@types/react': 19.2.17
       lucide-react: 0.544.0(react@19.2.3)
-      next: 16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
+      next: 16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       react-router: 7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -34858,14 +34873,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  fumadocs-mdx@14.3.2(@types/mdast@4.0.4)(@types/mdx@2.0.14)(@types/react@19.2.17)(fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6))(mdast-util-directive@3.1.0)(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react@19.2.3)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.23.1)(yaml@2.9.0)):
+  fumadocs-mdx@14.3.2(@types/mdast@4.0.4)(@types/mdx@2.0.14)(@types/react@19.2.17)(fumadocs-core@16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6))(mdast-util-directive@3.1.0)(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react@19.2.3)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@mdx-js/mdx': 3.1.1
       '@standard-schema/spec': 1.1.0
       chokidar: 5.0.0
       esbuild: 0.28.1
       estree-util-value-to-estree: 3.5.0
-      fumadocs-core: 16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6)
+      fumadocs-core: 16.13.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.544.0(react@19.2.3))(next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0))(react-dom@19.2.3(react@19.2.3))(react-router@7.18.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(zod@4.3.6)
       js-yaml: 4.3.2
       mdast-util-mdx: 3.0.0
       mdast-util-to-markdown: 2.1.2
@@ -34883,7 +34898,7 @@ snapshots:
       '@types/mdx': 2.0.14
       '@types/react': 19.2.17
       mdast-util-directive: 3.1.0
-      next: 16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
+      next: 16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0)
       react: 19.2.3
       vite: 7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.51.0)(tsx@4.23.1)(yaml@2.9.0)
     transitivePeerDependencies:
@@ -35343,7 +35358,7 @@ snapshots:
 
   hachure-fill@0.5.2: {}
 
-  handlebars@4.7.9:
+  handlebars@4.7.10:
     dependencies:
       minimist: 1.2.8
       neo-async: 2.6.2
@@ -36216,7 +36231,7 @@ snapshots:
 
   isomorphic-dompurify@2.36.0(@noble/hashes@2.2.0):
     dependencies:
-      dompurify: 3.4.13
+      dompurify: 3.4.17
       jsdom: 28.1.0(@noble/hashes@2.2.0)
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -36851,6 +36866,8 @@ snapshots:
       minimist: 1.2.8
 
   json5@2.2.3: {}
+
+  jsonata@2.2.2: {}
 
   jsonfile@4.0.0:
     optionalDependencies:
@@ -37768,7 +37785,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.21
-      dompurify: 3.4.13
+      dompurify: 3.4.17
       es-toolkit: 1.50.0
       katex: 0.16.47
       khroma: 2.1.0
@@ -38193,7 +38210,7 @@ snapshots:
 
   monaco-editor@0.54.0:
     dependencies:
-      dompurify: 3.4.13
+      dompurify: 3.4.17
       marked: 14.0.0
 
   morgan@1.12.0:
@@ -38333,9 +38350,9 @@ snapshots:
 
   next-tick@1.1.0: {}
 
-  next@16.3.8(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0):
+  next@16.4.2(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(sass@1.51.0):
     dependencies:
-      '@next/env': 16.3.8
+      '@next/env': 16.4.2
       '@swc/helpers': 0.5.23
       baseline-browser-mapping: 2.11.6
       caniuse-lite: 1.0.30001806
@@ -38344,16 +38361,16 @@ snapshots:
       react-dom: 19.2.3(react@19.2.3)
       styled-jsx: 5.1.6(react@19.2.3)
     optionalDependencies:
-      '@next/swc-darwin-arm64': 16.3.8
-      '@next/swc-darwin-x64': 16.3.8
-      '@next/swc-linux-arm64-gnu': 16.3.8
-      '@next/swc-linux-arm64-musl': 16.3.8
-      '@next/swc-linux-x64-gnu': 16.3.8
-      '@next/swc-linux-x64-musl': 16.3.8
-      '@next/swc-win32-arm64-msvc': 16.3.8
-      '@next/swc-win32-x64-msvc': 16.3.8
+      '@next/swc-darwin-arm64': 16.4.2
+      '@next/swc-darwin-x64': 16.4.2
+      '@next/swc-linux-arm64-gnu': 16.4.2
+      '@next/swc-linux-arm64-musl': 16.4.2
+      '@next/swc-linux-x64-gnu': 16.4.2
+      '@next/swc-linux-x64-musl': 16.4.2
+      '@next/swc-win32-arm64-msvc': 16.4.2
+      '@next/swc-win32-x64-msvc': 16.4.2
       '@opentelemetry/api': 1.9.1
-      '@playwright/test': 1.59.1
+      '@playwright/test': 1.63.0
       sass: 1.51.0
       sharp: 0.35.5(@types/node@20.19.43)
     transitivePeerDependencies:
@@ -38771,7 +38788,7 @@ snapshots:
 
   oxfmt@0.45.0:
     dependencies:
-      tinypool: 2.1.2
+      tinypool: 2.2.0
     optionalDependencies:
       '@oxfmt/binding-android-arm-eabi': 0.45.0
       '@oxfmt/binding-android-arm64': 0.45.0
@@ -39292,7 +39309,7 @@ snapshots:
 
   playwright-core@1.59.1: {}
 
-  playwright-core@1.62.0: {}
+  playwright-core@1.63.0: {}
 
   playwright@1.59.1:
     dependencies:
@@ -39300,11 +39317,9 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.2
 
-  playwright@1.62.0:
+  playwright@1.63.0:
     dependencies:
-      playwright-core: 1.62.0
-    optionalDependencies:
-      fsevents: 2.3.2
+      playwright-core: 1.63.0
 
   plist@3.1.0:
     dependencies:
@@ -39407,7 +39422,7 @@ snapshots:
       '@posthog/core': 1.46.8
       '@posthog/types': 1.402.1
       core-js: 3.50.0
-      dompurify: 3.4.13
+      dompurify: 3.4.17
       fflate: 0.4.9
       preact: 10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0))
       query-selector-shadow-dom: 1.0.1
@@ -42079,9 +42094,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.5)
       picomatch: 4.0.5
 
-  tinypool@1.1.1: {}
-
-  tinypool@2.1.2: {}
+  tinypool@2.2.0: {}
 
   tinyrainbow@2.0.0: {}
 
@@ -42208,7 +42221,7 @@ snapshots:
     dependencies:
       bs-logger: 0.2.6
       fast-json-stable-stringify: 2.1.0
-      handlebars: 4.7.9
+      handlebars: 4.7.10
       jest: 29.7.0(@types/node@20.19.43)(ts-node@10.9.2(@types/node@20.19.43)(typescript@5.9.3))
       json5: 2.2.3
       lodash.memoize: 4.1.2
@@ -42228,7 +42241,7 @@ snapshots:
     dependencies:
       bs-logger: 0.2.6
       fast-json-stable-stringify: 2.1.0
-      handlebars: 4.7.9
+      handlebars: 4.7.10
       jest: 29.7.0(@types/node@22.20.1)
       json5: 2.2.3
       lodash.memoize: 4.1.2
@@ -43073,7 +43086,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 0.3.2
       tinyglobby: 0.2.17
-      tinypool: 1.1.1
+      tinypool: 2.2.0
       tinyrainbow: 2.0.0
       vite: 7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
       vite-node: 3.2.4(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
@@ -43117,7 +43130,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 0.3.2
       tinyglobby: 0.2.17
-      tinypool: 1.1.1
+      tinypool: 2.2.0
       tinyrainbow: 2.0.0
       vite: 7.3.6(@types/node@24.13.3)(jiti@1.21.7)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
       vite-node: 3.2.4(@types/node@24.13.3)(jiti@1.21.7)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
@@ -43161,7 +43174,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 0.3.2
       tinyglobby: 0.2.17
-      tinypool: 1.1.1
+      tinypool: 2.2.0
       tinyrainbow: 2.0.0
       vite: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
       vite-node: 3.2.4(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)

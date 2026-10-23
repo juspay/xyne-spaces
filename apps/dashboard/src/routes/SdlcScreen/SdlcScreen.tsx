@@ -22,7 +22,6 @@ import {
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
-  BookOpen,
   Bot,
   Boxes,
   Check,
@@ -33,6 +32,7 @@ import {
   ExternalLink,
   FileText,
   Folder,
+  FolderGit2,
   GitBranch,
   Layers,
   Phone,
@@ -46,12 +46,12 @@ import {
   Rocket,
   Search,
   Server,
-  ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
   Upload,
   Workflow,
   X,
+  Zap,
 } from 'lucide-react';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { Tabs } from '../../components/ui/Tabs';
@@ -116,6 +116,7 @@ import {
 } from '../../utils/electronApp';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
+import { TicketNounContext, type TicketNoun } from '../../contexts/TicketNounContext';
 import {
   buildSdlcArtifactCreationPrompt,
   buildSdlcWikiPageCreationPrompt,
@@ -131,8 +132,8 @@ import {
 import { useSdlcWikiData } from './useSdlcWikiData';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcReleases } from './SdlcReleases/SdlcReleases';
-import { SdlcReleaseBreadcrumb, SdlcReleaseThread } from './SdlcReleases/SdlcReleaseDetail';
-import { useReleaseThreadAccess } from './SdlcReleases/useSdlcReleases';
+import { SdlcReleaseBreadcrumb } from './SdlcReleases/SdlcReleaseDetail';
+import { SdlcTicketThread, useTicketThreadAccess } from './SdlcTicketThread';
 import { ThreadNavigationContext } from '../../components/Chat/ThreadNavigationContext';
 import LibraryV2 from '../AIScreen/library/LibraryV2';
 import { EnvironmentsView } from '../AIScreen/environments/EnvironmentsView';
@@ -261,10 +262,12 @@ type Section =
 
 const StableCanvasScreen = memo(CanvasScreen);
 
+const ISSUE_NOUN: TicketNoun = { singular: 'issue', plural: 'issues' };
+
 const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: typeof Boxes }> = [
   { id: 'overview', label: 'Overview', icon: Boxes },
-  { id: 'wiki', label: 'Wiki', icon: BookOpen },
-  { id: 'knowledge', label: 'Hub Knowledge', icon: ShieldCheck },
+  { id: 'wiki', label: 'Repositories', icon: FolderGit2 },
+  { id: 'knowledge', label: 'Skills', icon: Zap },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'releases', label: 'Releases', icon: Rocket },
@@ -331,12 +334,12 @@ type SdlcDocumentKind = 'artifact' | 'knowledge' | 'wiki';
 const HUB_DOCUMENT_HINT: Record<SdlcDocumentKind, string> = {
   artifact: 'Adding to this hub',
   knowledge:
-    'Agents in this hub see it by name. Pin it for everyone to have every run read it in full.',
-  wiki: 'Adding to the Wiki you are viewing',
+    'Agents in this hub see its title. Set it to Always read to have every run read it in full.',
+  wiki: 'Adding to the research you are viewing',
 };
 
 function AddItemHeaderIcon({ kind }: { kind: SdlcDocumentKind }): ReactElement {
-  const Icon = kind === 'knowledge' ? ShieldCheck : kind === 'wiki' ? BookOpen : FileText;
+  const Icon = kind === 'knowledge' ? Zap : kind === 'wiki' ? FolderGit2 : FileText;
   return <Icon className='size-5 shrink-0 text-primary/70' />;
 }
 
@@ -384,6 +387,8 @@ export default function SdlcScreen(): ReactElement {
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const openReleaseId = section === 'releases' ? routeSearchParams.get('release') : null;
+  // An issue, or a ticket linked from one, open in the side panel rather than a page.
+  const panelTicketId = routeSearchParams.get('ticket');
   // In the URL, as a channel's tab is, so a link or a reload lands on the same tab. Not
   // `tab`: the channel's conversation panel beside it reads that one.
   const trackTab: TrackTab =
@@ -1240,12 +1245,18 @@ export default function SdlcScreen(): ReactElement {
       ? { type: conversationOwner.sourceType, id: conversationOwner.sourceId }
       : null;
   const releaseThreadId = selectedCanvasId ? null : openReleaseId;
-  const releaseThreadAvailable = useReleaseThreadAccess(releaseThreadId);
+  const releaseThreadAvailable = useTicketThreadAccess(releaseThreadId);
+  // The panel shows another ticket while on a release: offer the way back to its thread.
+  const canReturnToReleaseThread =
+    releaseThreadAvailable &&
+    Boolean(releaseThreadId && panelTicketId && panelTicketId !== releaseThreadId);
+  // A ticket's thread opens for anyone, as its page does; a non-member gets the join bar.
   const chatPanelAvailable =
     Boolean(discussionOwner && discussionSurface) ||
     Boolean(section === 'tracks' && selectedTrack) ||
     Boolean(hubCallThreadOwner) ||
-    releaseThreadAvailable;
+    releaseThreadAvailable ||
+    Boolean(panelTicketId);
   const showRightPanel = rightPanelOpen && chatPanelAvailable;
   const canvasDiscussionScope = useMemo<DiscussionScope | null>(
     () => (discussionOwner ? { ownerIds: [discussionOwner.canvasId] } : null),
@@ -1283,9 +1294,8 @@ export default function SdlcScreen(): ReactElement {
   );
   const hubWorkflowId = knowledgeWorkflowShown ? (hubWorkflowLink?.workflow?.id ?? null) : null;
   const state = useHubWorkflow(hubWorkflowId);
-  const knowledgeRunning = state.phase === 'RUNNING';
-  useHubWorkflowFinishedToast('Hub Knowledge', state);
-  useHubWorkflowFinishedToast('Wiki', wikiState);
+  useHubWorkflowFinishedToast('Skills', state);
+  useHubWorkflowFinishedToast('Deep research', wikiState);
 
   const readyCount = knowledgeDocs.filter(
     canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE',
@@ -1358,7 +1368,7 @@ export default function SdlcScreen(): ReactElement {
     withDiscussion?: boolean;
   }
 
-  const openReleaseTicket = useCallback(
+  const openTicketPage = useCallback(
     (ticketId: string): void =>
       navigateWithinSdlc(`/sdlc/${channelId}/tickets/${ticketId}`, '', {
         returnToUrl: `${location.pathname}${location.search}`,
@@ -1376,9 +1386,37 @@ export default function SdlcScreen(): ReactElement {
     [channelId, openReleaseId, navigateWithinSdlc],
   );
 
+  // `null` shows the page's own thread again, the release's on a release.
+  const openPanelTicket = useCallback(
+    (ticketId: string | null): void => {
+      const next = new URLSearchParams(location.search);
+      if (ticketId) next.set('ticket', ticketId);
+      else next.delete('ticket');
+      next.set('discussion', '1');
+      next.set('chat', 'conversations');
+      next.delete('conversation');
+      next.delete('selectedTab');
+      void navigate(`${location.pathname}?${next.toString()}`);
+    },
+    [location.pathname, location.search, navigate],
+  );
+
+  const closePanelTicket = useCallback((): void => {
+    const next = new URLSearchParams(location.search);
+    next.delete('ticket');
+    next.set('discussion', '0');
+    next.delete('chat');
+    void navigate(`${location.pathname}?${next.toString()}`, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+
+  // Expanding a ticket goes to its SDLC page; a ticket linked from it opens in the panel.
+  const panelThreadNavigation = useMemo(
+    () => ({ openTicket: openTicketPage, openRelatedTicket: openPanelTicket }),
+    [openTicketPage, openPanelTicket],
+  );
   const releaseThreadNavigation = useMemo(
-    () => ({ openTicket: openReleaseTicket, openCanvas: openReleaseCanvas }),
-    [openReleaseTicket, openReleaseCanvas],
+    () => ({ ...panelThreadNavigation, openCanvas: openReleaseCanvas }),
+    [panelThreadNavigation, openReleaseCanvas],
   );
 
   const openRelease = (releaseId: string): void => {
@@ -1602,8 +1640,8 @@ export default function SdlcScreen(): ReactElement {
             <Button
               size='icon'
               variant='ghost'
-              aria-label='Create ticket'
-              title='Create ticket'
+              aria-label='Create issue'
+              title='Create issue'
               onClick={() => {
                 setCreateTicketSource('sdlc_header');
                 setCreateTicketOpen(true);
@@ -1920,7 +1958,7 @@ export default function SdlcScreen(): ReactElement {
   closeCanvasRef.current = closeCanvas;
   const closeOpenCanvas = useCallback((): void => closeCanvasRef.current(), []);
   const hubDocumentNoun =
-    section === 'wiki' ? 'Wiki page' : section === 'knowledge' ? 'Knowledge File' : 'Document';
+    section === 'wiki' ? 'Research page' : section === 'knowledge' ? 'Knowledge file' : 'Document';
   const openArtifactArchived =
     Boolean(selectedWikiPage?.archived) ||
     canvases.find(canvas => canvas.id === selectedCanvasId)?.sdlcArtifact?.artifactStatus ===
@@ -2153,6 +2191,7 @@ export default function SdlcScreen(): ReactElement {
     /** Outline where the page has its own primary action beside it. */
     startVariant: 'default' | 'outline' = 'default',
     cancelLabel = 'Cancel',
+    buttonClassName?: string,
   ): { status: ReactElement; button: ReactElement } => {
     const running = workflow.phase === 'RUNNING';
     const busyKey = `hub-workflow:${label}`;
@@ -2182,6 +2221,7 @@ export default function SdlcScreen(): ReactElement {
           <Button
             size='sm'
             variant={running ? 'outline' : startVariant}
+            className={buttonClassName}
             loading={busy === busyKey}
             disabled={busy === busyKey}
             onClick={() =>
@@ -2211,32 +2251,13 @@ export default function SdlcScreen(): ReactElement {
       </div>
     );
   };
-  const wikiEmptyRun = workflowParts('Wiki', wikiState, 'Generate Wiki', 'default', 'Cancel run');
-
-  const renderWorkflowHeader = (input: {
-    icon: typeof Boxes;
-    title: string;
-    description: string;
-    /** Either the workflow the page runs, or its own actions. */
-    workflow?: HubWorkflow;
-    actions?: ReactNode;
-  }): ReactElement => {
-    const Icon = input.icon;
-    return (
-      <div className='mb-6 flex items-center justify-between gap-6 border-b pb-5'>
-        <div className='flex min-w-0 flex-1 items-center gap-3'>
-          <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-sm'>
-            <Icon size={19} />
-          </div>
-          <div className='min-w-0'>
-            <h2 className='text-xl font-semibold tracking-tight'>{input.title}</h2>
-            <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
-          </div>
-        </div>
-        {input.actions ?? (input.workflow && renderWorkflowControls(input.title, input.workflow))}
-      </div>
-    );
-  };
+  const wikiEmptyRun = workflowParts(
+    'Deep research',
+    wikiState,
+    'Run deep research',
+    'default',
+    'Cancel run',
+  );
 
   useEffect(() => {
     if (sdlcChatTab !== 'ai') return;
@@ -2562,8 +2583,8 @@ export default function SdlcScreen(): ReactElement {
     clearArtifactDialogFields();
     const target =
       kind === 'knowledge'
-        ? { id: knowledgeFolderId ?? '', name: 'Knowledge File', kind }
-        : { id: wikiScope?.folderId ?? '', name: 'Wiki page', kind };
+        ? { id: knowledgeFolderId ?? '', name: 'Knowledge file', kind }
+        : { id: wikiScope?.folderId ?? '', name: 'Research page', kind };
     const draft = dismissedHubDraft.current;
     dismissedHubDraft.current = null;
     if (draft && draft.kind === kind && draft.id === target.id) {
@@ -2948,6 +2969,12 @@ export default function SdlcScreen(): ReactElement {
     return true;
   };
 
+  // The New knowledge file form shares the Skills page dialogs' shell; other kinds keep theirs.
+  const newDocDialog = !addItemParent && artifactDialogKind === 'knowledge';
+  // Sentence case, as "New skill" is; artifact type names keep their own case.
+  const newDialogTitle = newDocDialog
+    ? 'New knowledge file'
+    : `New ${artifactDialog?.name ?? 'document'}`;
   const artifactDetailsStep = (
     <form
       className='flex flex-1 flex-col'
@@ -2965,7 +2992,10 @@ export default function SdlcScreen(): ReactElement {
     >
       <div className='flex flex-col gap-4 pb-5 pt-1'>
         <div className='flex flex-col gap-1.5'>
-          <label htmlFor='sdlc-artifact-title' className='text-[12.5px] font-medium'>
+          <label
+            htmlFor='sdlc-artifact-title'
+            className={cn('font-medium', newDocDialog ? 'text-sm' : 'text-[12.5px]')}
+          >
             Title
           </label>
           <Input
@@ -2974,7 +3004,7 @@ export default function SdlcScreen(): ReactElement {
             autoFocus
             value={artifactTitle}
             onChange={event => setArtifactTitle(event.target.value)}
-            className='h-[38px] text-[13.5px]'
+            className={newDocDialog ? 'h-9' : 'h-[38px] text-[13.5px]'}
             placeholder='Clear, outcome-focused title'
             aria-invalid={artifactTitleMissing}
             aria-describedby={artifactTitleMissing ? 'sdlc-artifact-title-error' : undefined}
@@ -3185,9 +3215,13 @@ export default function SdlcScreen(): ReactElement {
           )}
         </div>
 
-        <div className='flex flex-col gap-1.5'>
+        {/* The Skills page has Create with AI for that; this path is the blank knowledge file. */}
+        <div className={cn('flex flex-col gap-1.5', newDocDialog && 'hidden')}>
           <div className='flex items-baseline gap-1.5'>
-            <label htmlFor='sdlc-artifact-ai-prompt' className='text-[12.5px] font-medium'>
+            <label
+              htmlFor='sdlc-artifact-ai-prompt'
+              className={cn('font-medium', newDocDialog ? 'text-sm' : 'text-[12.5px]')}
+            >
               Direction for Ask AI
             </label>
             <span className='text-xs text-muted-foreground'>optional</span>
@@ -3196,7 +3230,7 @@ export default function SdlcScreen(): ReactElement {
             id='sdlc-artifact-ai-prompt'
             value={artifactAiPrompt}
             onChange={event => setArtifactAiPrompt(event.target.value)}
-            className='h-[74px] min-h-0 resize-none text-[13.5px]'
+            className={cn('h-[74px] min-h-0 resize-none', !newDocDialog && 'text-[13.5px]')}
             placeholder='e.g. focus on retry semantics and the ledger contract; skip the mobile flow.'
             data-track-category='SdlcHub'
             data-track-name='ArtifactAiPromptChanged'
@@ -3205,47 +3239,78 @@ export default function SdlcScreen(): ReactElement {
         </div>
       </div>
 
-      <div className='sticky bottom-0 -mx-6 mt-auto flex items-center gap-2.5 rounded-b-lg border-t border-border bg-background px-6 py-3.5'>
-        <button
-          type='button'
-          onClick={resetArtifactDialog}
-          className='text-[12.5px] text-muted-foreground hover:text-foreground'
-          data-track-category='SdlcHub'
-          data-track-name='ArtifactDialogCancelled'
-        >
-          Cancel
-        </button>
-        <div className='ml-auto flex items-center gap-2'>
-          <Button
+      <div
+        className={cn(
+          'mt-auto flex items-center gap-2.5',
+          // The New knowledge file footer sits on the dialog surface, as HubDialog's do.
+          newDocDialog
+            ? 'justify-end pb-6 pt-2'
+            : 'sticky bottom-0 -mx-6 rounded-b-lg border-t border-border bg-background px-6 py-3.5',
+        )}
+      >
+        {!newDocDialog && (
+          <button
             type='button'
-            variant='outline'
-            className='h-[34px]'
-            loading={busy === 'artifact'}
-            onClick={() => {
-              if (artifactSubmitBlocked()) return;
-              void call(
-                'artifact',
-                () => Promise.resolve(createArtifact()),
-                'Creation request sent to Ask AI',
-              );
-            }}
+            onClick={resetArtifactDialog}
+            className='text-[12.5px] text-muted-foreground hover:text-foreground'
             data-track-category='SdlcHub'
-            data-track-name='ArtifactAskAiCreated'
+            data-track-name='ArtifactDialogCancelled'
           >
-            <Sparkles />
-            Ask AI to create
-          </Button>
+            Cancel
+          </button>
+        )}
+        <div className='ml-auto flex items-center gap-2'>
+          {newDocDialog && (
+            <Button
+              type='button'
+              variant='outline'
+              onClick={resetArtifactDialog}
+              data-track-category='SdlcHub'
+              data-track-name='ArtifactDialogCancelled'
+            >
+              Cancel
+            </Button>
+          )}
+          {!newDocDialog && (
+            <Button
+              type='button'
+              variant='outline'
+              className='h-[34px]'
+              loading={busy === 'artifact'}
+              onClick={() => {
+                if (artifactSubmitBlocked()) return;
+                void call(
+                  'artifact',
+                  () => Promise.resolve(createArtifact()),
+                  'Creation request sent to Ask AI',
+                );
+              }}
+              data-track-category='SdlcHub'
+              data-track-name='ArtifactAskAiCreated'
+            >
+              <Sparkles />
+              Ask AI to create
+            </Button>
+          )}
           {/* The primary action in every hub create dialog: AI is the opt-in. */}
           <Button
             type='submit'
-            className='h-[34px]'
             loading={busy === 'artifact-blank'}
-            title='Create an empty document with just the title — no AI'
+            {...(!newDocDialog && {
+              className: 'h-[34px]',
+              title: 'Create an empty document with just the title — no AI',
+            })}
             data-track-category='SdlcHub'
             data-track-name='BlankArtifactCreated'
           >
-            <Pencil />
-            Write it myself
+            {newDocDialog ? (
+              'Create'
+            ) : (
+              <>
+                <Pencil />
+                Write it myself
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -3874,7 +3939,7 @@ export default function SdlcScreen(): ReactElement {
               <SdlcExplorerHeader
                 open={railOpen}
                 collapsed={railCollapsed}
-                trackName={wikiExplorerShown ? 'Wiki' : (selectedTrack?.name ?? 'Track')}
+                trackName={wikiExplorerShown ? 'Repositories' : (selectedTrack?.name ?? 'Track')}
                 onToggleRail={toggleRail}
                 onBack={
                   wikiExplorerShown
@@ -4066,6 +4131,20 @@ export default function SdlcScreen(): ReactElement {
               {/* Empty while the discussion panel holds these: gone then, so the header's
                   gap doesn't leave a hole at the end of the bar. */}
               <div className='flex shrink-0 items-center gap-1.5 empty:hidden'>
+                {canReturnToReleaseThread && showRightPanel ? (
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    className='size-7 rounded-lg'
+                    aria-label='Release chat'
+                    title='Back to the release chat'
+                    onClick={() => openPanelTicket(null)}
+                    data-track-category='SdlcHub'
+                    data-track-name='ReleaseThreadReopened'
+                  >
+                    <MessageCircle className='size-4' />
+                  </Button>
+                ) : null}
                 {selectedCanvasId && !openFolder && isElectronApp() && !isDocumentWindow ? (
                   <Button
                     size='icon'
@@ -4207,7 +4286,7 @@ export default function SdlcScreen(): ReactElement {
                       showViewOnly
                       pinnedOutline={section === 'wiki' && !showRightPanel}
                       notFoundNoun={hubDocumentNoun}
-                      notFoundBackLabel={`Back to ${section === 'wiki' ? 'the Wiki' : (SECTIONS.find(item => item.id === section)?.label ?? 'the hub')}`}
+                      notFoundBackLabel={`Back to ${SECTIONS.find(item => item.id === section)?.label ?? 'the hub'}`}
                       onNotFoundBack={closeOpenCanvas}
                     />
                   </div>
@@ -4219,10 +4298,12 @@ export default function SdlcScreen(): ReactElement {
               ) : section === 'releases' ? (
                 <SdlcReleases
                   projectId={channel.projectId ?? null}
+                  channelId={channel.id}
+                  channelName={channel.name}
                   repositories={channelRepos}
                   openReleaseId={openReleaseId}
                   onOpenRelease={openRelease}
-                  onOpenTicket={openReleaseTicket}
+                  onOpenTicket={openPanelTicket}
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
@@ -4230,13 +4311,82 @@ export default function SdlcScreen(): ReactElement {
                 <div className='min-h-0 flex-1 overflow-auto bg-background'>
                   <LibraryV2 channelId={channelId} />
                 </div>
+              ) : section === 'knowledge' ? (
+                // Its own scroll, so the toolbar can stick; the hub pages' wide width and padding.
+                <div className='min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]'>
+                  <div className='mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 pb-8 pt-8'>
+                    <SdlcKnowledgeSection
+                      generateControl={renderWorkflowControls(
+                        'Skills',
+                        state,
+                        // Says where it writes from. Docs written by hand are not a run.
+                        state.runId ? 'Update from repositories' : 'Generate from repositories',
+                        'outline',
+                        'Cancel',
+                        'h-10',
+                      )}
+                      channelName={channel.name}
+                      channelId={channel.id}
+                      isHubAdmin={isHubAdmin}
+                      generating={state.phase === 'RUNNING'}
+                      files={knowledgeDocs.map(canvas => ({
+                        id: canvas.id,
+                        title: canvas.title,
+                        status:
+                          canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
+                            ? 'archived'
+                            : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
+                              ? 'generating'
+                              : 'ready',
+                      }))}
+                      showArchived={showArchivedKnowledge}
+                      onShowArchivedChange={setShowArchivedKnowledge}
+                      filesLoaded={
+                        knowledgeDocs.length > 0 ||
+                        // No folder counts as none only once the hub itself has arrived in full.
+                        (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
+                          'complete'
+                      }
+                      // A Knowledge File opens for reading, as a Wiki page does: Discussions
+                      // opens from its button. Not through openCanvas, which carries the panel over.
+                      onOpenFile={canvasId => {
+                        setRelatedSourceId(null);
+                        void navigate(
+                          `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
+                        );
+                      }}
+                      onArchiveFile={(canvasId, archived) =>
+                        archiveArtifact(
+                          canvasId,
+                          archived,
+                          knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
+                        )
+                      }
+                      onNewFile={() => openHubDocumentCreate('knowledge')}
+                      onCreateWithAi={draft => {
+                        const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
+                        const saveAs = {
+                          file: `Save it as ${asFile}.`,
+                          skill: 'Save it as a skill: call create-skill.',
+                          auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
+                        }[draft.kind];
+                        askSdlcAssistant(
+                          `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
+                            `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
+                          undefined,
+                          true,
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
               ) : section === 'environments' ? (
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
                   <EnvironmentsView
                     key={channelId}
                     channelId={channelId}
                     hubRepoIds={channelRepos.map(repo => repo.id)}
-                    onAddRepository={() => setHubDialog('manage')}
+                    onAddRepository={isHubAdmin ? () => setHubDialog('manage') : undefined}
                   />
                 </div>
               ) : (
@@ -4258,18 +4408,21 @@ export default function SdlcScreen(): ReactElement {
                     onScroll={event => setTrackPageScrolled(event.currentTarget.scrollTop > 0)}
                     className={cn(
                       'min-h-0 flex-1 overflow-auto bg-background p-7',
+                      // The hub pages' horizontal padding.
+                      (section === 'overview' || section === 'wiki') && 'px-8',
                       // Under the tabs. Files fills the tab and scrolls its own rows,
                       // which fade out at the bottom edge, so no gap is left under it.
                       onTrackPage && 'flex flex-col pt-4',
                       onTrackPage && (trackTab === 'files' || trackTab === 'calls') && 'pb-0',
                       // The ticket board brings its own header, padding and scrolling.
                       onTrackPage && trackTab === 'tickets' && 'p-0',
+                      section === 'tickets' && 'flex flex-col p-0',
                       // The hub's calls fill the page and scroll their own rows.
                       section === 'calls' && 'flex flex-col pb-0',
                     )}
                   >
                     {section === 'overview' && (
-                      <section>
+                      <section className='mx-auto max-w-6xl'>
                         <h1 className='mb-5 text-2xl font-semibold tracking-tight'>
                           {channel.name}
                         </h1>
@@ -4287,7 +4440,7 @@ export default function SdlcScreen(): ReactElement {
                         <div className='rounded-xl border bg-background p-5'>
                           <div className='flex items-center justify-between gap-6'>
                             <div className='min-w-0'>
-                              <h2 className='text-base font-semibold'>Hub Knowledge</h2>
+                              <h2 className='text-base font-semibold'>Skills</h2>
                               <p className='mt-1 text-sm text-muted-foreground'>
                                 Create and approve repository guides used by SDLC Assistant.
                               </p>
@@ -4295,100 +4448,17 @@ export default function SdlcScreen(): ReactElement {
                                 {readyCount} document{readyCount === 1 ? '' : 's'} ready
                               </p>
                             </div>
-                            {renderWorkflowControls('Hub Knowledge', state)}
+                            {renderWorkflowControls('Skills', state)}
                           </div>
                         </div>
                         <div className='mt-5 overflow-hidden rounded-xl border bg-background'>
-                          <Metric
-                            label='Hub Knowledge ready'
-                            value={String(readyCount)}
-                            icon={ShieldCheck}
-                          />
+                          <Metric label='Skills ready' value={String(readyCount)} icon={Zap} />
                         </div>
                         <SdlcActivityPreview key={channel.id} channelId={channel.id} />
                       </section>
                     )}
 
                     {section === 'tracks' && renderTrack()}
-
-                    {section === 'knowledge' && (
-                      <section className='mx-auto max-w-6xl'>
-                        <SdlcKnowledgeSection
-                          renderHeader={actions =>
-                            renderWorkflowHeader({
-                              icon: ShieldCheck,
-                              title: 'Hub Knowledge',
-                              description: 'What agents know in this hub.',
-                              actions,
-                            })
-                          }
-                          generateControl={renderWorkflowControls(
-                            'Hub Knowledge',
-                            state,
-                            // Names what it writes, as the Wiki run button does. Files written by hand are not a run.
-                            state.runId ? 'Update Knowledge Files' : 'Generate Knowledge Files',
-                            'outline',
-                          )}
-                          channelId={channel.id}
-                          isHubAdmin={isHubAdmin}
-                          files={knowledgeDocs.map(canvas => ({
-                            id: canvas.id,
-                            title: canvas.title,
-                            status:
-                              canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
-                                ? 'archived'
-                                : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
-                                  ? 'generating'
-                                  : 'ready',
-                          }))}
-                          showArchived={showArchivedKnowledge}
-                          onShowArchivedChange={setShowArchivedKnowledge}
-                          emptyFilesText={
-                            knowledgeRunning
-                              ? 'Hub Knowledge generation is in progress.'
-                              : isHubAdmin
-                                ? 'No Knowledge Files yet. Press Generate Knowledge Files above to write them from the repositories, or use Add to write one.'
-                                : 'No Knowledge Files yet. A hub admin can generate or add them.'
-                          }
-                          filesLoaded={
-                            knowledgeDocs.length > 0 ||
-                            // No folder counts as none only once the hub itself has arrived in full.
-                            (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
-                              'complete'
-                          }
-                          // A Knowledge File opens for reading, as a Wiki page does: Discussions
-                          // opens from its button. Not through openCanvas, which carries the panel over.
-                          onOpenFile={canvasId => {
-                            setRelatedSourceId(null);
-                            void navigate(
-                              `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
-                            );
-                          }}
-                          onArchiveFile={(canvasId, archived) =>
-                            archiveArtifact(
-                              canvasId,
-                              archived,
-                              knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
-                            )
-                          }
-                          onNewFile={() => openHubDocumentCreate('knowledge')}
-                          onCreateWithAi={draft => {
-                            const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
-                            const saveAs = {
-                              file: `Save it as ${asFile}.`,
-                              skill: 'Save it as a skill: call create-skill.',
-                              auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
-                            }[draft.kind];
-                            askSdlcAssistant(
-                              `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
-                                `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
-                              undefined,
-                              true,
-                            );
-                          }}
-                        />
-                      </section>
-                    )}
 
                     {section === 'wiki' &&
                       (wikiScope ? (
@@ -4413,9 +4483,9 @@ export default function SdlcScreen(): ReactElement {
                           repoUrls={new Map(channelRepos.map(repo => [repo.id, repo.url]))}
                           canManage={isHubAdmin}
                           runControl={renderWorkflowControls(
-                            'Wiki',
+                            'Deep research',
                             wikiState,
-                            wikiAllPages.length > 0 ? 'Update Wiki' : 'Generate Wiki',
+                            wikiAllPages.length > 0 ? 'Update deep research' : 'Run deep research',
                           )}
                           onSelectScope={folderId => openWikiScope(folderId)}
                           onAddRepository={() => setHubDialog('manage')}
@@ -4430,9 +4500,13 @@ export default function SdlcScreen(): ReactElement {
                         <EmptyCard text='Select an artifact type from the sidebar.' />
                       ))}
                     {section === 'tickets' && (
-                      <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                        <KanbanBoardScreen channelId={channel.id} />
-                      </div>
+                      <section className='flex min-h-0 flex-1 flex-col'>
+                        <KanbanBoardScreen
+                          channelId={channel.id}
+                          noun={ISSUE_NOUN}
+                          onOpenTicket={ticket => openPanelTicket(ticket.id)}
+                        />
+                      </section>
                     )}
                     {section === 'calls' && (
                       // Every call in the hub, as a track's Calls tab lists its own. A
@@ -4470,104 +4544,111 @@ export default function SdlcScreen(): ReactElement {
               </Separator>
               <Panel id={SDLC_CHAT_PANEL_ID} defaultSize='38%' minSize='360px' maxSize='55%'>
                 <EntityLinkContext.Provider value={entityLinkScope}>
-                  {activeFolderDiscussion ? (
-                    <SdlcChatPanel
-                      key={`item-${activeFolderDiscussion.type}-${activeFolderDiscussion.id}`}
-                      channelId={channel.id}
-                      discussion={{
-                        ...(repo && { repoId: repo.id }),
-                        ownerType: activeFolderDiscussion.type,
-                        ownerId: activeFolderDiscussion.id,
-                      }}
-                      discussionScope={itemDiscussionScope ?? NO_DISCUSSIONS}
-                      selectedConversationId={selectedDiscussionConversationId}
-                      threadOnly={threadOnly}
-                      headerRule={!onTrackPage}
-                      onSelectConversation={selectDiscussionConversation}
-                      onAskAI={openSdlcAssistant}
-                      onClose={closeConversations}
-                      listActions={panelScopeActions('panel')}
-                      title={activeFolderDiscussion.name}
-                      renderConversationBadge={renderItemConversationBadge}
-                      scopeHeader={{
-                        name: activeFolderDiscussion.name,
-                        icon: discussionScopeIcon(activeFolderDiscussion),
-                        // Every item's conversations sit inside the track's, however
-                        // they were reached, so each has the same way back out.
-                        onExit: openConversations,
-                        ...(!isOpenOnPage(activeFolderDiscussion) && {
-                          onOpen: () =>
-                            openDiscussedItem(activeFolderDiscussion, activeFolderDiscussion.name),
-                        }),
-                      }}
-                      threadSubject={threadSubject}
-                    />
-                  ) : panelCanvasOwner && discussionSurface ? (
-                    <SdlcChatPanel
-                      key={`discussion-${panelCanvasOwner.canvasId}`}
-                      channelId={channel.id}
-                      discussion={{
-                        ...(repo && { repoId: repo.id }),
-                        ownerType: 'CANVAS',
-                        ownerId: panelCanvasOwner.canvasId,
-                        surfaceType: discussionSurface.type,
-                        surfaceId: discussionSurface.id,
-                      }}
-                      discussionScope={canvasDiscussionScope ?? NO_DISCUSSIONS}
-                      selectedConversationId={selectedDiscussionConversationId}
-                      threadOnly={threadOnly}
-                      headerRule={!onTrackPage}
-                      onSelectConversation={selectDiscussionConversation}
-                      onAskAI={openSdlcAssistant}
-                      onClose={closeConversations}
-                      listActions={panelScopeActions('panel')}
-                      title={panelCanvasOwner.title}
-                      threadSubject={threadSubject}
-                    />
-                  ) : hubCallThreadOwner ? (
-                    <SdlcChatPanel
-                      key='hub-call'
-                      channelId={channel.id}
-                      discussion={{
-                        ...(repo && { repoId: repo.id }),
-                        ownerType: hubCallThreadOwner.type,
-                        ownerId: hubCallThreadOwner.id,
-                      }}
-                      discussionScope={NO_DISCUSSIONS}
-                      selectedConversationId={selectedDiscussionConversationId}
-                      threadOnly
-                      onSelectConversation={selectDiscussionConversation}
-                      onAskAI={openSdlcAssistant}
-                      onClose={closeConversations}
-                      title={channel.name}
-                      threadSubject={threadSubject}
-                    />
-                  ) : section === 'tracks' && selectedTrack ? (
-                    <SdlcChatPanel
-                      key={`track-${selectedTrack.id}`}
-                      channelId={channel.id}
-                      discussion={{
-                        ...(repo && { repoId: repo.id }),
-                        ownerType: 'TRACK',
-                        ownerId: selectedTrack.id,
-                      }}
-                      discussionScope={trackDiscussionScope ?? NO_DISCUSSIONS}
-                      selectedConversationId={selectedDiscussionConversationId}
-                      threadOnly={threadOnly}
-                      headerRule={!onTrackPage}
-                      onSelectConversation={selectDiscussionConversation}
-                      onAskAI={openSdlcAssistant}
-                      onClose={closeConversations}
-                      listActions={panelScopeActions('panel')}
-                      title={selectedTrack.name}
-                      renderConversationBadge={renderFolderConversationBadge}
-                      threadSubject={threadSubject}
-                    />
-                  ) : releaseThreadAvailable && releaseThreadId ? (
-                    <ThreadNavigationContext.Provider value={releaseThreadNavigation}>
-                      <SdlcReleaseThread releaseId={releaseThreadId} onClose={closeConversations} />
-                    </ThreadNavigationContext.Provider>
-                  ) : null}
+                  <ThreadNavigationContext.Provider value={panelThreadNavigation}>
+                    {panelTicketId ? (
+                      <SdlcTicketThread ticketId={panelTicketId} onClose={closePanelTicket} />
+                    ) : activeFolderDiscussion ? (
+                      <SdlcChatPanel
+                        key={`item-${activeFolderDiscussion.type}-${activeFolderDiscussion.id}`}
+                        channelId={channel.id}
+                        discussion={{
+                          ...(repo && { repoId: repo.id }),
+                          ownerType: activeFolderDiscussion.type,
+                          ownerId: activeFolderDiscussion.id,
+                        }}
+                        discussionScope={itemDiscussionScope ?? NO_DISCUSSIONS}
+                        selectedConversationId={selectedDiscussionConversationId}
+                        threadOnly={threadOnly}
+                        headerRule={!onTrackPage}
+                        onSelectConversation={selectDiscussionConversation}
+                        onAskAI={openSdlcAssistant}
+                        onClose={closeConversations}
+                        listActions={panelScopeActions('panel')}
+                        title={activeFolderDiscussion.name}
+                        renderConversationBadge={renderItemConversationBadge}
+                        scopeHeader={{
+                          name: activeFolderDiscussion.name,
+                          icon: discussionScopeIcon(activeFolderDiscussion),
+                          // Every item's conversations sit inside the track's, however
+                          // they were reached, so each has the same way back out.
+                          onExit: openConversations,
+                          ...(!isOpenOnPage(activeFolderDiscussion) && {
+                            onOpen: () =>
+                              openDiscussedItem(
+                                activeFolderDiscussion,
+                                activeFolderDiscussion.name,
+                              ),
+                          }),
+                        }}
+                        threadSubject={threadSubject}
+                      />
+                    ) : panelCanvasOwner && discussionSurface ? (
+                      <SdlcChatPanel
+                        key={`discussion-${panelCanvasOwner.canvasId}`}
+                        channelId={channel.id}
+                        discussion={{
+                          ...(repo && { repoId: repo.id }),
+                          ownerType: 'CANVAS',
+                          ownerId: panelCanvasOwner.canvasId,
+                          surfaceType: discussionSurface.type,
+                          surfaceId: discussionSurface.id,
+                        }}
+                        discussionScope={canvasDiscussionScope ?? NO_DISCUSSIONS}
+                        selectedConversationId={selectedDiscussionConversationId}
+                        threadOnly={threadOnly}
+                        headerRule={!onTrackPage}
+                        onSelectConversation={selectDiscussionConversation}
+                        onAskAI={openSdlcAssistant}
+                        onClose={closeConversations}
+                        listActions={panelScopeActions('panel')}
+                        title={panelCanvasOwner.title}
+                        threadSubject={threadSubject}
+                      />
+                    ) : hubCallThreadOwner ? (
+                      <SdlcChatPanel
+                        key='hub-call'
+                        channelId={channel.id}
+                        discussion={{
+                          ...(repo && { repoId: repo.id }),
+                          ownerType: hubCallThreadOwner.type,
+                          ownerId: hubCallThreadOwner.id,
+                        }}
+                        discussionScope={NO_DISCUSSIONS}
+                        selectedConversationId={selectedDiscussionConversationId}
+                        threadOnly
+                        onSelectConversation={selectDiscussionConversation}
+                        onAskAI={openSdlcAssistant}
+                        onClose={closeConversations}
+                        title={channel.name}
+                        threadSubject={threadSubject}
+                      />
+                    ) : section === 'tracks' && selectedTrack ? (
+                      <SdlcChatPanel
+                        key={`track-${selectedTrack.id}`}
+                        channelId={channel.id}
+                        discussion={{
+                          ...(repo && { repoId: repo.id }),
+                          ownerType: 'TRACK',
+                          ownerId: selectedTrack.id,
+                        }}
+                        discussionScope={trackDiscussionScope ?? NO_DISCUSSIONS}
+                        selectedConversationId={selectedDiscussionConversationId}
+                        threadOnly={threadOnly}
+                        headerRule={!onTrackPage}
+                        onSelectConversation={selectDiscussionConversation}
+                        onAskAI={openSdlcAssistant}
+                        onClose={closeConversations}
+                        listActions={panelScopeActions('panel')}
+                        title={selectedTrack.name}
+                        renderConversationBadge={renderFolderConversationBadge}
+                        threadSubject={threadSubject}
+                      />
+                    ) : releaseThreadAvailable && releaseThreadId ? (
+                      <ThreadNavigationContext.Provider value={releaseThreadNavigation}>
+                        <SdlcTicketThread ticketId={releaseThreadId} onClose={closeConversations} />
+                      </ThreadNavigationContext.Provider>
+                    ) : null}
+                  </ThreadNavigationContext.Provider>
                 </EntityLinkContext.Provider>
               </Panel>
             </>
@@ -4587,14 +4668,16 @@ export default function SdlcScreen(): ReactElement {
 
       {createTicketOpen ? (
         <EntityLinkContext.Provider value={entityLinkScope}>
-          <CreateTicketModal
-            isOpen={createTicketOpen}
-            onClose={() => setCreateTicketOpen(false)}
-            channelId={channel.id}
-            projectId={channel.projectId ?? repo?.project?.id ?? ''}
-            trackSource={createTicketSource}
-            onTicketCreated={() => setCreateTicketOpen(false)}
-          />
+          <TicketNounContext.Provider value={ISSUE_NOUN}>
+            <CreateTicketModal
+              isOpen={createTicketOpen}
+              onClose={() => setCreateTicketOpen(false)}
+              channelId={channel.id}
+              projectId={channel.projectId ?? repo?.project?.id ?? ''}
+              trackSource={createTicketSource}
+              onTicketCreated={() => setCreateTicketOpen(false)}
+            />
+          </TicketNounContext.Provider>
         </EntityLinkContext.Provider>
       ) : null}
 
@@ -4869,12 +4952,13 @@ export default function SdlcScreen(): ReactElement {
           event.preventDefault();
           artifactTitleRef.current.focus();
         }}
-        title={addItemParent ? 'Add to folder' : `New ${artifactDialog?.name ?? 'document'}`}
-        className='max-w-[860px]'
+        title={addItemParent ? 'Add to folder' : newDialogTitle}
+        // A knowledge file has one field, so it takes the Skills page dialogs' width.
+        className={newDocDialog ? 'max-w-xl' : 'max-w-[860px]'}
       >
-        <div className='flex max-h-[78vh] min-h-[440px] flex-col'>
+        <div className={cn('flex max-h-[78vh] flex-col', !newDocDialog && 'min-h-[440px]')}>
           <div className='flex items-center gap-2.5 px-6 pt-5'>
-            {!addItemParent ? (
+            {newDocDialog ? null : !addItemParent ? (
               <AddItemHeaderIcon kind={artifactDialogKind} />
             ) : addItemParent.type === 'FOLDER' ? (
               <Folder className='size-5 shrink-0 fill-primary/25 text-primary/70' />
@@ -4882,17 +4966,27 @@ export default function SdlcScreen(): ReactElement {
               <Layers className='size-5 shrink-0 text-muted-foreground' />
             )}
             <div className='min-w-0 flex-1'>
-              <h2 className='truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]'>
+              <h2
+                className={cn(
+                  'truncate font-semibold',
+                  newDocDialog ? 'text-lg' : 'text-[17px] leading-tight tracking-[-0.01em]',
+                )}
+              >
                 {!addItemParent
-                  ? `New ${artifactDialog?.name ?? 'document'}`
+                  ? newDialogTitle
                   : addItemParent.type === 'FOLDER'
                     ? addItemParent.name
                     : (selectedTrack?.name ?? 'Track')}
               </h2>
-              <p className='text-[11.5px] text-muted-foreground'>
+              <p
+                className={cn(
+                  'text-muted-foreground',
+                  newDocDialog ? 'mt-1 text-sm' : 'text-[11.5px]',
+                )}
+              >
                 {!addItemParent
                   ? artifactDialogKind === 'wiki' && wikiScope
-                    ? `Adding to the ${wikiScope.name} Wiki`
+                    ? `Adding to the ${wikiScope.name} research`
                     : HUB_DOCUMENT_HINT[artifactDialogKind]
                   : addItemParent.type === 'FOLDER'
                     ? `Adding to this folder in ${selectedTrack?.name ?? 'the track'}`

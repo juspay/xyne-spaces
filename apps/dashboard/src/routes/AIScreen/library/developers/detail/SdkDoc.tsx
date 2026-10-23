@@ -25,7 +25,11 @@ const RESOURCES: { name: string; description: string }[] = [
   { name: 'messages', description: 'Messages, reactions, drafts and scheduled sends.' },
   { name: 'tickets', description: 'Tickets, sub-tickets, tags, references and approvals.' },
   { name: 'canvases', description: 'Canvases: content, sharing, comments, versions, folders.' },
-  { name: 'claw', description: 'Run Xyne Claw agents and read their results.' },
+  {
+    name: 'claw',
+    description:
+      'Xyne Claw: build agents, subagents and skills, stream or poll runs, memory, chat and schedules.',
+  },
 ];
 
 export function SdkDoc(): ReactElement {
@@ -38,7 +42,8 @@ const baseUrl = '${baseUrl}';
 // Prints a link and a short code; the user approves in the browser.
 const session = await xyneSsoLoginAndWait({ baseUrl, openBrowser: true });
 
-const sdk = createClient({ baseUrl, session });
+// The client renews the session by itself; save each renewal for next time.
+const sdk = createClient({ baseUrl, session, onSessionRefreshed: saveSession });
 const me = await sdk.users.me();
 console.log(\`Signed in as \${me.email}\`);`;
 
@@ -85,8 +90,9 @@ console.log(\`Signed in as \${me.email}\`);`;
             },
             {
               title: 'AI agents on demand',
-              body: 'Hand a task to a Xyne Claw agent and get its answer back, no extra credentials.',
-              example: "await sdk.claw.runAndWait({ agent: 'ask-ai', task: '…' });",
+              body: 'Stream a Xyne Claw agent’s answer as it is written, no extra credentials.',
+              example:
+                "for await (const e of sdk.claw.runStream({ agent: 'assistant', task: '…' })) {}",
             },
           ]}
         />
@@ -107,13 +113,15 @@ console.log(\`Signed in as \${me.email}\`);`;
           </Step>
           <Step n={3} title='Keep the session'>
             <Text>
-              <InlineCode>session</InlineCode> holds the user&apos;s session cookie and its{' '}
-              <InlineCode>expiresAt</InlineCode>. Store it securely and reuse it until it expires,
-              then sign in again. The SDK sends it as a <InlineCode>Cookie</InlineCode> header on
-              every request.
+              <InlineCode>session</InlineCode> holds the user&apos;s session cookie and a refresh
+              token. The client sends the cookie as a <InlineCode>Cookie</InlineCode> header and
+              renews it by itself, for as long as a Spaces browser login lasts. Each renewal
+              replaces the refresh token, so save every new session from{' '}
+              <InlineCode>onSessionRefreshed</InlineCode> and reuse the latest one next time.
             </Text>
             <Callout>
-              Treat the session like a password: it can do anything the user can, until it expires.
+              Treat the session like a password: it can do anything the user can. Sign out with{' '}
+              <InlineCode>xyneSsoLogout</InlineCode> to stop it being renewed.
             </Callout>
           </Step>
         </div>

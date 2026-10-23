@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CallStatus, CallType, MeetingStatus, RecurringCallSeriesStatus, RingStatus } from '@xyne/shared';
+import { CallRingNotification, CallStatus, CallType, MeetingStatus, RecurringCallSeriesStatus, RingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
@@ -112,6 +112,8 @@ export const ScheduleCallSchema = z.object({
   notifyParticipantsByEmail: z.boolean().optional(),
   // Pins the detailed-summary template so no LLM template selection runs for this call.
   summaryTemplateId: z.string().trim().min(1).optional(),
+  // DISABLED stops participants ringing when the call starts. Omitted is stored as null, which rings.
+  ringNotification: z.nativeEnum(CallRingNotification).optional(),
 }).refine(
   // A guest-only call has no channel or teammates; it is backed by the organizer's self-DM.
   (data) =>
@@ -172,6 +174,8 @@ export const RecurringScheduleCallSchema = z
     notifyParticipantsByEmail: z.boolean().optional(),
     // Pinned onto every instance of the series; see ScheduleCallSchema.summaryTemplateId.
     summaryTemplateId: z.string().trim().min(1).optional(),
+    // Stored on every series participant and copied onto each instance; see ScheduleCallSchema.
+    ringNotification: z.nativeEnum(CallRingNotification).optional(),
   })
   .refine(
     // A guest-only series has no channel or teammates; it is backed by the organizer's self-DM.
@@ -215,6 +219,8 @@ export const UpdateScheduleCallSchema = z
     notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
+    // Applied to every internal participant; null turns ringing back on, omitted leaves it alone.
+    ringNotification: z.nativeEnum(CallRingNotification).nullable().optional(),
   })
   .refine(
     (data) => !data.startsAt || !data.endsAt || data.startsAt < data.endsAt,
@@ -249,6 +255,8 @@ export const UpdateRecurringSeriesSchema = z
     notifyParticipantsByEmail: z.boolean().optional(),
     // null clears the pinned template (back to LLM selection).
     summaryTemplateId: z.string().trim().min(1).nullable().optional(),
+    // Applied to every internal participant; null turns ringing back on, omitted leaves it alone.
+    ringNotification: z.nativeEnum(CallRingNotification).nullable().optional(),
   })
   .refine(
     (data) => !data.startTime || !data.endTime || data.startTime !== data.endTime,
@@ -300,7 +308,7 @@ const adminListPaging = {
 export const CallAdminListCallsQuerySchema = z.object({
   ...adminListPaging,
   status: csvQueryList(z.nativeEnum(CallStatus)),
-  type: z.nativeEnum(CallType).optional(),
+  type: csvQueryList(z.nativeEnum(CallType)),
   summaryStatus: csvQueryList(z.enum(['pending', 'ready', 'failed'])),
   hasTranscript: z
     .enum(['true', 'false'])

@@ -12,7 +12,6 @@ import {
   type CollisionDetection,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
@@ -25,7 +24,7 @@ const channelCanvasCollisionDetection: CollisionDetection = args => {
 
 interface ChannelCanvasMoveDndProviderProps {
   children: React.ReactNode;
-  onMoveCanvas?: ((canvas: Canvas, folderId: string | null) => Promise<void>) | undefined;
+  onMoveCanvas?: ((canvas: Canvas, folderId: string | null) => void | Promise<void>) | undefined;
 }
 
 export const ChannelCanvasMoveDndProvider: React.FC<ChannelCanvasMoveDndProviderProps> = ({
@@ -35,7 +34,7 @@ export const ChannelCanvasMoveDndProvider: React.FC<ChannelCanvasMoveDndProvider
   const isMovingRef = useRef(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor),
   );
 
   const handleDragEnd = (event: DragEndEvent): void => {
@@ -48,7 +47,7 @@ export const ChannelCanvasMoveDndProvider: React.FC<ChannelCanvasMoveDndProvider
     }
 
     isMovingRef.current = true;
-    void onMoveCanvas(canvas, targetFolderId).finally(() => {
+    void Promise.resolve(onMoveCanvas(canvas, targetFolderId)).finally(() => {
       isMovingRef.current = false;
     });
   };
@@ -113,7 +112,7 @@ export const DraggableChannelCanvas: React.FC<DraggableChannelCanvasProps> = ({
         disabled ? null : (
           <button
             type='button'
-            className='flex shrink-0 cursor-grab items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-muted active:cursor-grabbing sm:hidden sm:group-hover:flex'
+            className='flex touch-none shrink-0 cursor-grab items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-muted active:cursor-grabbing'
             aria-label={`Move ${canvas.title || 'Untitled canvas'}`}
             title='Drag to move canvas'
             onClick={event => event.stopPropagation()}

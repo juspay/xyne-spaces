@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react';
 import { spacesBaseUrl } from '../developerTools';
+import { McpSignIn } from './McpSignIn';
 import {
   Callout,
   CodeBlock,
@@ -87,14 +88,79 @@ const TOOL_GROUPS: { label: string; tools: McpTool[] }[] = [
       { name: 'spaces_calls_list', description: 'Calls and meetings.' },
       { name: 'spaces_canvases_list', description: 'Canvases: design notes, RFCs, meeting notes.' },
       { name: 'spaces_canvas_get', description: 'One canvas, as markdown.' },
-      { name: 'spaces_claw_list_agents', description: 'Xyne Claw agents you can run.' },
-      { name: 'spaces_claw_get_run', description: 'Status and result of a Claw run.' },
       {
         name: 'spaces_notifications_mark_read',
         description: 'Mark a notification as read.',
         write: true,
       },
-      { name: 'spaces_claw_run', description: 'Hand a task to a Claw agent.', write: true },
+    ],
+  },
+  {
+    label: 'Xyne Claw agents',
+    tools: [
+      {
+        name: 'spaces_claw_list_agents',
+        description: 'Claw agents you can see, and which ones can be run.',
+      },
+      {
+        name: 'spaces_claw_agent_get',
+        description: 'One agent in full: prompt, model, tools, skills, connections, sharing.',
+      },
+      { name: 'spaces_claw_subagents', description: 'Subagents, or one in full.' },
+      { name: 'spaces_claw_skills', description: 'Skills, or one with its SKILL.md and files.' },
+      { name: 'spaces_claw_tools_search', description: 'Tools an agent can be given.' },
+      { name: 'spaces_claw_runs', description: 'Your run history, or a search over it.' },
+      {
+        name: 'spaces_claw_get_run',
+        description: 'One run: status, result, tools used, tokens, time.',
+      },
+      { name: 'spaces_claw_conversations', description: 'Your Claw chats, or one’s messages.' },
+      {
+        name: 'spaces_claw_memory',
+        description: 'What an agent remembers, or would recall for a question.',
+      },
+      { name: 'spaces_claw_schedules', description: 'Scheduled agent jobs.' },
+      {
+        name: 'spaces_claw_run',
+        description: 'Hand a task to a Claw agent and wait for the answer.',
+        write: true,
+      },
+      { name: 'spaces_claw_run_cancel', description: 'Stop a run.', write: true },
+      {
+        name: 'spaces_claw_agent_create',
+        description: 'Create an agent, with skills and tools attached.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_agent_update',
+        description: 'Change an agent and attach or detach skills and tools, in one call.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_agent_share',
+        description: 'Share, unshare or hand over an agent, by email.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_subagent_upsert',
+        description: 'Create or update a subagent.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_skill_upsert',
+        description: 'Create or update a skill and its files.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_schedule',
+        description: 'Schedule a task, or pause, resume, change or cancel one.',
+        write: true,
+      },
+      {
+        name: 'spaces_claw_delete',
+        description: 'Delete an agent, subagent, skill or scheduled job.',
+        write: true,
+      },
     ],
   },
 ];
@@ -104,6 +170,8 @@ const WRITE_COUNT = ALL_TOOLS.filter(tool => tool.write).length;
 
 const SERVER_NAME = 'xyne-spaces';
 const MCP_PACKAGE = '@xyne/spaces-mcp';
+/** Placeholder for the folder holding `node` and `npx`, e.g. /opt/homebrew/bin. */
+const NODE_BIN = '<node-folder>';
 const SETUP_OPTIONS = [
   'Claude Code',
   'Cursor',
@@ -204,13 +272,31 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
       </>
     );
   }
-  const config = JSON.stringify({ mcpServers: { [SERVER_NAME]: serverConfig(baseUrl) } }, null, 2);
+  // Apps opened from the Dock do not get the terminal's PATH, so `npx` alone is
+  // often not found. `npx` also starts `node` through PATH, so the full path
+  // to `npx` is not enough on its own: Node's folder goes on PATH as well.
+  const config = JSON.stringify(
+    {
+      mcpServers: {
+        [SERVER_NAME]: {
+          command: `${NODE_BIN}/npx`,
+          args: ['-y', MCP_PACKAGE],
+          env: { XYNE_SPACES_BASE_URL: baseUrl, PATH: `${NODE_BIN}:/usr/bin:/bin` },
+        },
+      },
+    },
+    null,
+    2,
+  );
   return (
     <>
+      <Text>Find the folder Node is installed in by running this in a terminal:</Text>
+      <CodeBlock code='dirname "$(which npx)"' trackName='Spaces MCP: copy find node folder' />
       <Text>
-        Add this to your client&apos;s MCP config and restart it. In Claude Desktop that is Settings
-        → Developer → Edit Config; for Windsurf, Zed or Continue it is the client&apos;s own MCP
-        config file.
+        Add the config below to your client&apos;s MCP config, replacing both{' '}
+        <InlineCode>{NODE_BIN}</InlineCode> with what that printed, then quit and reopen the client.
+        In Claude Desktop that is Settings → Developer → Edit Config; for Windsurf, Zed or Continue
+        it is the client&apos;s own MCP config file.
       </Text>
       <CodeBlock code={config} trackName='Spaces MCP: copy client config' />
     </>
@@ -238,7 +324,7 @@ export function McpDoc(): ReactElement {
           features={[
             {
               title: 'Catch up without opening Spaces',
-              body: 'Summarise a channel, a thread or your notifications while you stay in the editor.',
+              body: 'Summarise a channel, a thread or your notifications, or search everything you can see, while you stay in the editor.',
               example: '“What did I miss in #deployments since yesterday?”',
             },
             {
@@ -247,9 +333,10 @@ export function McpDoc(): ReactElement {
               example: '“Read XYNE-1234 and find the code it is about.”',
             },
             {
-              title: 'Search everything you can see',
-              body: 'Messages, tickets, canvases, emails, calls and people, ranked in one search.',
-              example: '“Find the RFC canvas about rate limiting.”',
+              title: 'Build and run Claw agents',
+              body: 'Hand work to a Claw agent, or create and tune agents, skills, subagents and schedules from the editor.',
+              example:
+                '“Make a release-notes agent with the changelog skill and run it every Friday.”',
             },
             {
               title: 'Close the loop (with writes on)',
@@ -275,29 +362,23 @@ export function McpDoc(): ReactElement {
             />
           </Step>
           <Step n={2} title='Sign in with Xyne SSO'>
-            <Text>
-              Ask your agent to run <InlineCode>spaces_login</InlineCode>. It opens an approval page
-              and shows a short code. Check the page shows the same code as your terminal, then
-              approve.
-            </Text>
-            <Callout tone='warning'>
-              Never approve a sign-in link someone else sent you: approving gives whoever started it
-              access to your account.
-            </Callout>
+            <McpSignIn />
           </Step>
           <Step n={3} title='Choose what it may do'>
             <Text>
-              It starts <strong>read-only</strong>. To let it send messages, create threads and
-              update tickets, add this to the server&apos;s <InlineCode>env</InlineCode> in your
-              client&apos;s MCP config (with Claude Code, add{' '}
-              <InlineCode>--env XYNE_SPACES_READONLY=0</InlineCode> to the command above), then
-              restart your agent:
+              It starts <strong>read-only</strong>. To let your agents send messages, create threads
+              and update tickets, run this in a terminal:
             </Text>
             <CodeBlock
-              code='"XYNE_SPACES_READONLY": "0"'
+              code={`npx -y ${MCP_PACKAGE} writes on`}
               trackName='Spaces MCP: copy enable writes'
             />
-            <Text>Writes are real and immediate, and other people see them.</Text>
+            <Text>
+              It applies to every agent on this computer, and agents already running pick it up
+              without a restart. <InlineCode>writes off</InlineCode> makes them read-only again, and{' '}
+              <InlineCode>writes</InlineCode> on its own shows the current setting. Writes are real
+              and immediate, and other people see them.
+            </Text>
           </Step>
         </div>
       </DocSection>

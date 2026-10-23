@@ -49,6 +49,7 @@ import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
 import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
 import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
+import { useSdlcResourceRoom } from './SdlcScreen/sdlcResourceChanged';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -105,6 +106,7 @@ import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/
 import { ActivityCalendarWeekView } from '../components/Activity/ActivityCalendarWeekView';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
+import { FullPageKeepAliveOutlet } from './FullPageKeepAliveOutlet';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
@@ -179,6 +181,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
+import { UserGroupDialog } from '../components/UserGroup/UserGroupDialog/UserGroupDialog';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { RoleManagementScreen } from './RoleManagementScreen';
@@ -193,6 +196,7 @@ import {
   MembersTab,
   RepositoryCredentialsTab,
   ToolbarTab,
+  AgentActivityTab,
 } from './WorkspaceManagementScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
@@ -515,6 +519,10 @@ const AppRoot = (): ReactElement => {
   // the host must not also render one (that would double it).
   const isSdlcRoute =
     /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
+  // Not inside the SDLC frame or a panel webview: they have no socket, and the host relays to the frame.
+  useSdlcResourceRoom(
+    !isInPanelWebview && /\/(sdlc|ai\/library|ai\/environments)(\/|$)/.test(location.pathname),
+  );
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -891,9 +899,13 @@ const AppRoot = (): ReactElement => {
                                     className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
                                     <AppSidebar />
-                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                    <main
+                                      className='flex-1 no-scrollbar overflow-auto'
+                                      // Cmd+K grows into this box as it expands to full page.
+                                      data-cmdk-full-page
+                                    >
                                       <EditWarningModal />
-                                      <Outlet />
+                                      <FullPageKeepAliveOutlet />
                                     </main>
                                     <SiteMap />
                                   </div>
@@ -916,9 +928,13 @@ const AppRoot = (): ReactElement => {
                             className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
                             <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
+                            <main
+                              className='flex-1 no-scrollbar overflow-auto'
+                              // Cmd+K grows into this box when it expands to full-page search.
+                              data-cmdk-full-page
+                            >
                               <EditWarningModal />
-                              <Outlet />
+                              <FullPageKeepAliveOutlet />
                             </main>
                             <SiteMap />
                           </div>
@@ -956,7 +972,7 @@ const AppRoot = (): ReactElement => {
                           {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
                           <BrowserPageLayer />
-                          <GlobalCommandMenu aiOverview ticketScreenScope />
+                          <GlobalCommandMenu aiOverview ticketScreenScope fullPageSearch />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -965,6 +981,7 @@ const AppRoot = (): ReactElement => {
                       )}
                       <AttachmentGalleryModal />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                       <AttachmentCitationPreview />
                       <ErrorReportModal
@@ -1808,6 +1825,7 @@ export const router = createBrowserRouter(
                         {
                           path: ':ticketId',
                           element: <Outlet />,
+                          children: [{ path: ':canvasId', element: <Outlet /> }],
                         },
                       ],
                     },
@@ -1888,6 +1906,16 @@ export const router = createBrowserRouter(
                         <OrganisationsSectionGuard section='toolbar'>
                           <OrganisationsPage>
                             <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'agent-activity',
+                      element: (
+                        <OrganisationsSectionGuard section='agent-activity'>
+                          <OrganisationsPage wide>
+                            <AgentActivityTab isActive />
                           </OrganisationsPage>
                         </OrganisationsSectionGuard>
                       ),
@@ -2096,6 +2124,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2150,6 +2179,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2179,6 +2209,7 @@ export const router = createBrowserRouter(
                       <CreateTicketWindow />
                     </div>
                     <AttachmentGalleryModal />
+                    <UserGroupDialog />
                   </EditProvider>
                 </InitialStateLoader>
               </ZeroFallbackProvider>

@@ -3,7 +3,7 @@ Cleanup manager - handles graceful shutdown when all participants leave
 """
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 
 from livekit import rtc
 from transcription import TranscriptionStorage
@@ -36,6 +36,8 @@ class CleanupManager:
         self.room = room
         self.conversation_store = conversation_store
         self.additional_storages: List[TranscriptionStorage] = additional_storages or []
+        # MultiUserTranscriber.drain: last turns still being transcribed and the final eval batch
+        self.transcriber_drain: Optional[Callable[[], Awaitable[None]]] = None
 
         # Idempotency: cleanup can be triggered from multiple paths (empty room,
         # SIGTERM shutdown callback, entrypoint finally). Only run once; concurrent
@@ -92,6 +94,9 @@ class CleanupManager:
             logger.error("storage_memory_release_failed", exc_info=True)
 
     async def _run_cleanup_steps(self):
+        # 0. Let the transcriber finish last turns, so the transcript is flushed and notified once
+        await self._drain_transcriber()
+
         # 1. Upload transcript to GCS (what we have so far)
         await self._flush_storage()
         
@@ -144,6 +149,14 @@ class CleanupManager:
                 logger.info(f"backend_webhook_retry | reason=transcript_updated")
             except Exception:
                 logger.error(f"backend_webhook_failed | stage=retry", exc_info=True)
+
+    async def _drain_transcriber(self):
+        if self.transcriber_drain is None:
+            return
+        try:
+            await self.transcriber_drain()
+        except Exception:
+            logger.error("transcriber_drain_failed", exc_info=True)
 
     async def _flush_storage(self):
         try:

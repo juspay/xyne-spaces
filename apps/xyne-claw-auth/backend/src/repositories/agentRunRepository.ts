@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
+import { persistRunStats, summarizeRun, type RunStatsTarget } from "../lib/tool-stats.js";
 import { createLogger } from "../logger.js";
 import { userIdFilter } from "./userIdFilter.js";
 
@@ -200,7 +201,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | "delegation" | MessagingChannelKey;
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | "app" | "delegation" | MessagingChannelKey;
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -243,6 +244,75 @@ export interface FinalizeRunInput {
    *  deterministically once branching introduces multiple assistant siblings. */
   chatMessageId?: string | null;
   fastMode?: boolean | null;
+  /** Run-level citation-reflection outcome; merged into `metadata.citationReflection`. */
+  citationReflection?: {
+    outcome?: string;
+    initialCited?: boolean;
+    sourcesWereCiteable?: boolean;
+    finalCited?: boolean;
+    rounds?: number;
+  };
+  /** Per-LLM-call series from claw, stored as-is (shape owned by xyne-claw's llm-turn-stats.ts). */
+  llmCalls?: unknown;
+  judge?: { backend?: string | null; calls?: number; failed?: number; compactionCalls?: number };
+}
+
+/** The metrics half of a claw terminal callback; `clawMetricsFields` is the single reader every finalize caller spreads. */
+export interface ClawMetricsPayload {
+  toolInvocations?: unknown;
+  tokenUsage?: FinalizeRunInput["tokenUsage"];
+  latency?: FinalizeRunInput["latency"];
+  citationReflection?: FinalizeRunInput["citationReflection"];
+  llmCalls?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  toolsUsed?: unknown;
+  judge?: FinalizeRunInput["judge"];
+}
+
+type ClawMetricsFields = Pick<
+  FinalizeRunInput,
+  "toolInvocations" | "tokenUsage" | "latency" | "citationReflection" | "llmCalls" | "provider" | "model" | "toolsUsed" | "judge"
+>;
+
+const nonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+// Non-empty, so a call site's own `toolsUsed ?? []` pick stays authoritative.
+const stringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string");
+
+/** Picks the fields a callback carried; absent stays ABSENT because finalize() writes a column only when its key is present. */
+export function clawMetricsFields(payload: ClawMetricsPayload | Record<string, unknown>): ClawMetricsFields {
+  const p = payload as ClawMetricsPayload;
+  return {
+    ...(p.toolInvocations !== undefined ? { toolInvocations: p.toolInvocations } : {}),
+    ...(p.tokenUsage ? { tokenUsage: p.tokenUsage } : {}),
+    ...(p.latency ? { latency: p.latency } : {}),
+    ...(p.citationReflection ? { citationReflection: p.citationReflection } : {}),
+    ...(p.llmCalls !== undefined ? { llmCalls: p.llmCalls } : {}),
+    // Type-guarded: handlers pass request bodies through unchecked.
+    ...(nonEmptyString(p.provider) ? { provider: p.provider } : {}),
+    ...(nonEmptyString(p.model) ? { model: p.model } : {}),
+    ...(stringArray(p.toolsUsed) ? { toolsUsed: p.toolsUsed } : {}),
+    ...(p.judge && typeof p.judge === "object" ? { judge: p.judge } : {}),
+  };
+}
+
+/** Matches xyne-claw's MAX_LLM_CALLS: the series a single run may store. */
+export const MAX_STORED_LLM_CALLS = 200;
+
+/**
+ * Caps the per-call series (first calls kept, like claw's merge) and reports the dropped count.
+ * `lastModel` backs up a callback that omitted `model`.
+ */
+export function prepareLlmCalls(llmCalls: unknown): { calls: unknown[] | undefined; dropped: number; lastModel: string | undefined } {
+  if (!Array.isArray(llmCalls) || llmCalls.length === 0) return { calls: undefined, dropped: 0, lastModel: undefined };
+  let lastModel: string | undefined;
+  for (let i = llmCalls.length - 1; i >= 0; i--) {
+    const m = (llmCalls[i] as { m?: unknown } | null)?.m;
+    if (nonEmptyString(m)) { lastModel = m; break; }
+  }
+  const dropped = Math.max(0, llmCalls.length - MAX_STORED_LLM_CALLS);
+  return { calls: dropped > 0 ? llmCalls.slice(0, MAX_STORED_LLM_CALLS) : llmCalls, dropped, lastModel };
 }
 
 /**
@@ -373,6 +443,55 @@ const RUN_LIST_SELECT = {
  *  search a lie for long prompts. 2000 x 100 rows is ~200 KB worst case. */
 const RUN_LIST_TASK_CAP = 2000;
 
+/** What finalize hands to recordRunStats once its transaction has committed. */
+interface PendingRunStats {
+  run: RunStatsTarget;
+  invocations: unknown[];
+  answer: string | null;
+  llmCalls: unknown[] | undefined;
+  toolsUsed: readonly string[] | null;
+  citationOutcome: string | null;
+}
+
+const inflightRunStats = new Set<Promise<void>>();
+
+/**
+ * Writes a finished run's metrics rows after finalize commits, outside its transaction and lock.
+ * Failures are logged, not thrown; the backfill writes any missing row.
+ * Summarises the MERGED invocations finalize stored; a run with no tools still gets an empty summary.
+ */
+function recordRunStats(sessionId: string, pending: PendingRunStats): void {
+  const write: Promise<void> = (async () => {
+    const summary = summarizeRun(pending.invocations, pending.answer);
+    await prisma.$transaction(
+      (tx) => persistRunStats(tx as unknown as Prisma.TransactionClient, [{
+        run: pending.run,
+        summary,
+        llmCalls: pending.llmCalls ? (stripNulDeep(pending.llmCalls) as unknown[]) : undefined,
+        toolsUsed: pending.toolsUsed,
+        citationOutcome: pending.citationOutcome,
+        invocations: pending.invocations,
+      }]),
+      { timeout: 10_000, maxWait: 5_000 },
+    );
+  })()
+    .catch((err: unknown) => {
+      log.warn(`[agent-run] metrics rows not written session=${sessionId}: ${err instanceof Error ? err.message : String(err)}`, {
+        event: "agent_run_stats_failed",
+        sessionId,
+      });
+    })
+    .finally(() => {
+      inflightRunStats.delete(write);
+    });
+  inflightRunStats.add(write);
+}
+
+/** Resolves once every metrics write finalize has started so far has settled. */
+export function settleRunStatsWrites(): Promise<void> {
+  return Promise.all([...inflightRunStats]).then(() => undefined);
+}
+
 export const agentRunRepository = {
   start: async (input: StartRunInput) => {
     // Stamp the agent's active prompt version so quality/latency can later be
@@ -490,14 +609,14 @@ export const agentRunRepository = {
     // to commit before reading `existing`, guaranteeing finalize sees every
     // persisted invocation. All DB ops use `tx`.
     await flushToolInvocations(sessionId);
-    return withSessionWriteLock(sessionId, async (tx) => {
+    const outcome = await withSessionWriteLock(sessionId, async (tx) => {
     let finalInvocations: unknown[] | undefined;
     // Always merge once the run is finalizing, even if the callback didn't
     // include its own toolInvocations — we still need to sweep stale
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { toolInvocations: true, userId: true, agentSlug: true },
+      select: { id: true, orgId: true, toolInvocations: true, toolsUsed: true, userId: true, agentSlug: true, metadata: true, model: true },
     });
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
@@ -537,22 +656,52 @@ export const agentRunRepository = {
       finalInvocations = merged;
     }
 
+    const cleanInvocations = finalInvocations !== undefined ? (stripNulDeep(finalInvocations) as unknown[]) : undefined;
+
+    const llm = prepareLlmCalls(input.llmCalls);
+    const modelBackstop = (input.model === undefined || input.model === null || input.model === "") && llm.lastModel
+      ? llm.lastModel
+      : undefined;
+
+    // Merge, never replace: start() and the callback path write their own keys here.
+    const metadataPatch: Record<string, unknown> = {
+      ...(input.citationReflection ? { citationReflection: input.citationReflection } : {}),
+      ...(llm.dropped > 0 ? { llmCallsDropped: llm.dropped } : {}),
+    };
+    const existingMetadata = existingRow?.metadata;
+    const mergedMetadata = Object.keys(metadataPatch).length > 0
+      ? {
+          ...(existingMetadata && typeof existingMetadata === "object" && !Array.isArray(existingMetadata)
+            ? (existingMetadata as Record<string, unknown>)
+            : {}),
+          ...metadataPatch,
+        }
+      : undefined;
+    const completedAt = new Date();
+
     const updated = await tx.agentRun.updateMany({
       where: { sessionId },
       data: {
         status: input.status,
+        ...(mergedMetadata ? { metadata: mergedMetadata as Prisma.InputJsonValue } : {}),
         ...(input.result !== undefined ? { result: input.result } : {}),
         ...(input.error !== undefined ? { error: input.error } : {}),
         ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
         ...(input.provider !== undefined ? { provider: input.provider } : {}),
-        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(modelBackstop ? { model: modelBackstop } : input.model !== undefined ? { model: input.model } : {}),
         ...(input.toolsUsed ? { toolsUsed: input.toolsUsed } : {}),
-        ...(finalInvocations !== undefined ? { toolInvocations: stripNulDeep(finalInvocations) as Prisma.InputJsonValue } : {}),
+        ...(cleanInvocations !== undefined ? { toolInvocations: cleanInvocations as Prisma.InputJsonValue } : {}),
         ...(input.tokenUsage ? {
           tokensIn: input.tokenUsage.input ?? null,
           tokensOut: input.tokenUsage.output ?? null,
           tokensCacheRead: input.tokenUsage.cacheRead ?? null,
           tokensCacheWrite: input.tokenUsage.cacheWrite ?? null,
+        } : {}),
+        ...(input.judge ? {
+          judgeBackend: input.judge.backend ?? null,
+          judgeCalls: input.judge.calls ?? null,
+          judgeFailed: input.judge.failed ?? null,
+          compactionCalls: input.judge.compactionCalls ?? null,
         } : {}),
         ...(input.latency ? {
           totalMs: input.latency.totalMs ?? null,
@@ -567,10 +716,28 @@ export const agentRunRepository = {
           lastRetryReason: input.latency.lastRetryReason ?? null,
         } : {}),
         ...(input.chatMessageId !== undefined ? { chatMessageId: input.chatMessageId } : {}),
-        completedAt: new Date(),
+        completedAt,
         currentToolLabel: null,
       },
     });
+    const stats: PendingRunStats | null = existingRow && updated.count > 0
+      ? {
+          run: {
+            id: existingRow.id,
+            orgId: existingRow.orgId,
+            userId: existingRow.userId,
+            agentSlug: existingRow.agentSlug,
+            completedAt,
+            error: input.error ?? null,
+            model: modelBackstop ?? input.model ?? existingRow.model ?? null,
+          },
+          invocations: cleanInvocations ?? [],
+          answer: input.result ?? null,
+          llmCalls: llm.calls,
+          toolsUsed: input.toolsUsed ?? existingRow.toolsUsed,
+          citationOutcome: input.citationReflection?.outcome ?? null,
+        }
+      : null;
     log.info(`[agent-run] end session=${sessionId} status=${input.status}`, {
       event: "agent_run_end",
       sessionId,
@@ -598,8 +765,10 @@ export const agentRunRepository = {
       `status=${sanitizeMetricValue(input.status)}`,
       `fastMode=${input.fastMode === true}`,
     ].join(" "));
-    return updated;
+    return { updated, stats };
     });
+    if (outcome.stats) recordRunStats(sessionId, outcome.stats);
+    return outcome.updated;
   },
 
   rate: (sessionId: string, userIds: string | string[], rating: "up" | "down", comment?: string | null) =>

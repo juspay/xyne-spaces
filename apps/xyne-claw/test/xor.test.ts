@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { xor, xorConfig, xorEnabled, XOR_TIMEOUT_MS, type XorQuestion } from "../src/xor.js";
+import { clearXorCache, xor, xorConfig, xorEnabled, XOR_TIMEOUT_MS, type XorQuestion } from "../src/xor.js";
 import {
   beginJudgeRun,
   collectJudgeExchanges,
@@ -16,7 +16,7 @@ const QUESTIONS: Record<string, XorQuestion> = {
 };
 
 const ENV_KEYS = [
-  "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND",
+  "XOR_URL", "XOR_API_KEY", "XOR_MODEL", "XOR_BACKEND", "XOR_VISION_URL", "XOR_VISION_MODEL",
   "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL",
   "JUDGE_LLM_URL", "JUDGE_LLM_API_KEY", "JUDGE_LLM_MODEL", "JUDGE_LLM_TIMEOUT_MS", "JUDGE_BACKEND",
   "LITELLM_URL", "LITELLM_API_KEY", "LITELLM_AUTOMATION_API_KEY", "LITELLM_MODEL", "LITELLM_FAST_MODEL",
@@ -39,6 +39,7 @@ isolateEnv(ENV_KEYS, { clear: true });
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  clearXorCache();
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -50,7 +51,7 @@ function enable(): void {
 
 describe("xorConfig", () => {
   it("is disabled with nothing configured", () => {
-    expect(xorConfig()).toMatchObject({ backend: "xor", url: "", key: "", model: "jev-latest" });
+    expect(xorConfig()).toMatchObject({ backend: "xor", url: "", key: "", model: "xor-latest" });
     expect(xorEnabled()).toBe(false);
   });
 
@@ -67,7 +68,7 @@ describe("xorConfig", () => {
     process.env["LITELLM_API_KEY"] = "k-lite";
     expect(xorConfig()).toEqual({
       backend: "xor",
-      url: "https://xor.internal/v1/systemone",
+      url: "https://xor.internal/v1/decisions",
       key: "k-xor",
       model: "xor-ft-v3",
       timeoutMs: XOR_TIMEOUT_MS,
@@ -78,18 +79,18 @@ describe("xorConfig", () => {
   it("falls back to OUR_NORMAL_JEV_* then OUR_JEV_*", () => {
     process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
     process.env["OUR_JEV_API_KEY"] = "k-ours";
-    expect(xorConfig()).toMatchObject({ url: "https://ourjev.internal/v1/systemone", key: "k-ours", model: "jev-latest" });
+    expect(xorConfig()).toMatchObject({ url: "https://ourjev.internal/v1/decisions", key: "k-ours", model: "xor-latest" });
 
     process.env["OUR_NORMAL_JEV_URL"] = "https://normal.internal/v1/systemone";
     process.env["OUR_NORMAL_JEV_API_KEY"] = "k-normal";
     process.env["OUR_NORMAL_JEV_MODEL"] = "normal-model";
-    expect(xorConfig()).toMatchObject({ url: "https://normal.internal/v1/systemone", key: "k-normal", model: "normal-model" });
+    expect(xorConfig()).toMatchObject({ url: "https://normal.internal/v1/decisions", key: "k-normal", model: "normal-model" });
   });
 
   it("serves xor through LiteLLM when no own URL/key is set", () => {
     process.env["LITELLM_URL"] = "https://litellm.internal/v1/";
     process.env["LITELLM_API_KEY"] = "k-lite";
-    expect(xorConfig()).toMatchObject({ url: "https://litellm.internal/v1/systemone", key: "k-lite", model: "jev-latest" });
+    expect(xorConfig()).toMatchObject({ url: "https://litellm.internal/v1/decisions", key: "k-lite", model: "xor-latest" });
     expect(xorEnabled()).toBe(true);
   });
 
@@ -122,7 +123,7 @@ describe("xor", () => {
     expect(answers?.["a"]?.noul).toBe(0.8);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
-    expect(url).toBe("https://xor.internal/v1/systemone");
+    expect(url).toBe("https://xor.internal/v1/decisions");
     expect(init.method).toBe("POST");
     expect(init.headers).toMatchObject({ Authorization: "Bearer k-xor", "Content-Type": "application/json" });
     expect(JSON.parse(String(init.body))).toEqual({ state: "state", model: "xor-ft-v3", questions: QUESTIONS });
@@ -249,17 +250,54 @@ describe("llm judge reply parsing", () => {
   });
 });
 
+describe("xor endpoint migration", () => {
+  it("moves the legacy systemone + jev-latest config to decisions + xor-latest, keeps custom models and the trained endpoint", () => {
+    process.env["OUR_NORMAL_JEV_URL"] = "https://grid.internal/v1/systemone";
+    process.env["OUR_NORMAL_JEV_MODEL"] = "jev-latest";
+    process.env["OUR_JEV_API_KEY"] = "k";
+    expect(xorConfig()).toMatchObject({ url: "https://grid.internal/v1/decisions", model: "xor-latest" });
+    process.env["XOR_MODEL"] = "xor-ft-v4";
+    expect(xorConfig().model).toBe("xor-ft-v4");
+    process.env["XOR_URL"] = "https://grid.internal/v1/systemone-custom";
+    process.env["XOR_MODEL"] = "jev-trained";
+    expect(xorConfig()).toMatchObject({ url: "https://grid.internal/v1/systemone-custom", model: "jev-trained" });
+  });
+});
+
 describe("xor images", () => {
   const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
-  it("sends images alongside the state", async () => {
+  it("sends text to decisions on xor-latest and images to decisions on xor-omni", async () => {
     enable();
     fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
-    const answers = await xor({ state: "screenshot", questions: QUESTIONS, purpose: "ui-tester", images: [PNG, PNG] });
+    const answers = await xor({ state: "screenshot", questions: QUESTIONS, purpose: "ui-tester", images: [PNG] });
     expect(answers?.["a"]?.noul).toBe(0.9);
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://ourjev.internal/v1/decisions");
     const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
-    expect(body.images).toEqual([PNG, PNG]);
-    expect(body.state).toBe("screenshot");
+    expect(body).toMatchObject({ model: "xor-omni", state: "screenshot", images: [PNG] });
+    await xor({ state: "text", questions: QUESTIONS, purpose: "plan-gate" });
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://ourjev.internal/v1/decisions");
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string).model).toBe("xor-latest");
+  });
+
+  it("lets XOR_VISION_URL / XOR_VISION_MODEL override the image route", async () => {
+    enable();
+    process.env["XOR_VISION_URL"] = "https://vision.internal/v1/decisions";
+    process.env["XOR_VISION_MODEL"] = "xor-omni-next";
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: [PNG] });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://vision.internal/v1/decisions");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).model).toBe("xor-omni-next");
+  });
+
+  it("sends text calls with value questions to xor-omni, since xor-latest has no value type", async () => {
+    enable();
+    fetchMock.mockResolvedValue(systemOneReply({ a: 0.9, b: 0.1 }));
+    await xor({ state: "Invoice INV-1 for 500", questions: { ...QUESTIONS, amount: { type: "value", instructions: "Amount?", dtype: "int" } }, purpose: "xor-decide" });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://ourjev.internal/v1/decisions");
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
+    expect(body.model).toBe("xor-omni");
+    expect(body).not.toHaveProperty("images");
   });
 
   it("omits the images field when there are none", async () => {
@@ -284,5 +322,44 @@ describe("xor images", () => {
     fetchMock.mockResolvedValue(chatReply({ a: 0.9, b: 0.1 }));
     expect(await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: [PNG] })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("xor cache and concurrency", () => {
+  it("answers an identical call from the cache, marks it, and still records it", async () => {
+    enable();
+    fetchMock.mockImplementation(async () => systemOneReply({ a: 0.9, b: 0.1 }));
+    const first = await xor({ state: "same", questions: QUESTIONS, purpose: "p", cache: true });
+    const second = await xor({ state: "same", questions: QUESTIONS, purpose: "p", cache: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+    const { isCachedAnswer } = await import("../src/xor.js");
+    expect(isCachedAnswer(first)).toBe(false);
+    expect(isCachedAnswer(second)).toBe(true);
+    await xor({ state: "different", questions: QUESTIONS, purpose: "p", cache: true });
+    await xor({ state: "same", questions: QUESTIONS, purpose: "p" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries once after a 429", async () => {
+    enable();
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 429 })).mockResolvedValueOnce(systemOneReply({ a: 0.9, b: 0.1 }));
+    const answers = await xor({ state: "rate limited", questions: QUESTIONS, purpose: "p" });
+    expect(answers?.["a"]?.noul).toBe(0.9);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never has more calls in flight than the cap", async () => {
+    enable();
+    const { xorInFlight } = await import("../src/xor.js");
+    let peak = 0;
+    fetchMock.mockImplementation(async () => {
+      peak = Math.max(peak, xorInFlight().active);
+      await new Promise((r) => setTimeout(r, 5));
+      return systemOneReply({ a: 0.9, b: 0.1 });
+    });
+    await Promise.all(Array.from({ length: 40 }, (_, i) => xor({ state: `s${i}`, questions: QUESTIONS, purpose: "p" })));
+    expect(peak).toBeLessThanOrEqual(xorInFlight().max);
+    expect(xorInFlight()).toMatchObject({ active: 0, waiting: 0 });
   });
 });

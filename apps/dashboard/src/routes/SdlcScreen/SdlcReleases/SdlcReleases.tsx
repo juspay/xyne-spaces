@@ -52,6 +52,8 @@ const isActivatableFocused = (): boolean => {
 
 export function SdlcReleases({
   projectId,
+  channelId,
+  channelName,
   repositories,
   openReleaseId,
   onOpenRelease,
@@ -60,7 +62,7 @@ export function SdlcReleases({
   onConnectRepository,
 }: SdlcReleasesProps): ReactElement {
   const [configOpen, setConfigOpen] = useState(false);
-  const { repos, loading } = useSdlcReleaseRepos(repositories, projectId);
+  const { repos, loading } = useSdlcReleaseRepos(repositories, projectId, channelId, channelName);
   const configuredRepos = useMemo(() => repos.filter(repo => repo.config), [repos]);
 
   const renderContent = (): ReactElement | null => {
@@ -259,7 +261,7 @@ function ReleaseList({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col overflow-hidden px-8 pt-7'>
-      <div className='mx-auto flex min-h-0 w-full max-w-[1074px] flex-1 flex-col gap-5'>
+      <div className='mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-5'>
         <div className='flex flex-col gap-1'>
           <h1 className='text-2xl font-bold tracking-[-0.02em] text-foreground'>Releases</h1>
           <p className='text-sm text-muted-foreground'>

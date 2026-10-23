@@ -6,6 +6,7 @@ import { connectionsRouter } from "../routes/connections.js";
 import { mcpRouter } from "../routes/mcp.js";
 import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
 import { awakeningRouter } from "../routes/awakening.js";
+import { agentProactivityRouter } from "../routes/agent-proactivity.js";
 import { runRouter } from "../routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "../routes/run-stream.js";
 import { usersRouter } from "../routes/users.js";
@@ -26,9 +27,11 @@ import { skillsRouter } from "../routes/skills.js";
 import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
+import loopCommandsRouter from "../routes/loop-commands.js";
 import sandboxRouter from "../routes/sandbox.js";
 import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
+import { extension } from "./extension.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { adminSandboxReposRouter } from "../routes/admin-sandbox-repos.js";
 import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js";
@@ -36,10 +39,15 @@ import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-intern
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
+// TEMPORARY — delete this import + its mount + the file once XYNE-66817's
+// backfill has run everywhere and `agent.config.designSystem` is dropped.
+import { adminBackfillDesignSystemsRouter } from "../routes/admin-backfill-design-systems.js";
 import { dashboardRouter } from "../routes/dashboard.js";
 import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
+import { agentWarmRouter, agentWarmInternalRouter } from "../routes/agent-warm.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
+import { designSystemsRouter } from "../routes/design-systems.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
 import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
 import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-shares.js";
@@ -69,6 +77,8 @@ import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/custo
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
 import { sentryRemoteOAuthRouter, sentryRemoteCallbackRouter } from "../routes/sentry-remote-oauth.js";
 import { mixpanelRemoteOAuthRouter, mixpanelRemoteCallbackRouter } from "../routes/mixpanel-remote-oauth.js";
+import { firefliesRemoteOAuthRouter, firefliesRemoteCallbackRouter } from "../routes/fireflies-remote-oauth.js";
+import { atlassianRemoteOAuthRouter, atlassianRemoteCallbackRouter } from "../routes/atlassian-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -80,6 +90,7 @@ import { settingsRouter } from "../routes/settings.js";
 import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
+import { metricsToolsRouter } from "../routes/metrics-tools.js";
 import { memoryRouter } from "../routes/memory.js";
 import { agentIndexRouter } from "../routes/agent-index.js";
 import { toolIndexRouter } from "../routes/tool-index.js";
@@ -194,17 +205,22 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
+  app.use(`${BASE}/loop-commands`, requireAuth, requireNoAccessToken, loopCommandsRouter);
   app.use(`${BASE}/sandbox-access`, requireUserAuth, sandboxAccessRouter); // sandbox-router → may this Spaces session open /claw-preview|code|term/<sandboxId>?
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
   app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
+  extension?.mount(app, { base: BASE, requireAuth, requireNoAccessToken });
   // TEMPORARY — delete this mount + the import above + the file after backfill.
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
+  app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillDesignSystemsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+  app.use(`${BASE}/agent-warm`, requireAuth, requireNoAccessToken, agentWarmRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
+  app.use(`${BASE}/design-systems`, requireAuth, requireNoAccessToken, designSystemsRouter);
   app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
   // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
   // own workspaceId claim turned into the cookie form requireAuth expects.
@@ -216,6 +232,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
   app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+  app.use(`${BASE}/internal/agent-warm`, requireStrictS2S, agentWarmInternalRouter);
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
@@ -285,6 +302,10 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, sentryRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, mixpanelRemoteOAuthRouter);
   app.use(BASE, mixpanelRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, firefliesRemoteOAuthRouter);
+  app.use(BASE, firefliesRemoteCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, atlassianRemoteOAuthRouter);
+  app.use(BASE, atlassianRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 
@@ -306,6 +327,7 @@ function mountRunAndWebhooks(app: Express): void {
   // Awakening: the result callback self-protects with requireStrictS2S and the
   // status route carries its own admin gate, so no mount-level auth here.
   app.use(BASE, awakeningRouter);
+  app.use(BASE, agentProactivityRouter);
   // No mount-level auth on /webhook by design: it mixes auth schemes per route.
   // POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
   // directly by Spaces and self-protects via verifySpacesSignature (per-agent
@@ -334,7 +356,8 @@ function mountWorkspace(app: Express): void {
   // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
   // /runs/:id). Reads pass with the scope; token writes are still rejected.
   app.use(`${BASE}/runs`, requireAuth, allowReadAccessToken("runs:read"), runsRouter);
-  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter);
+  // One chain so unhandled requests fall through without re-authenticating.
+  app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter, metricsToolsRouter);
   // Mount-level baseline auth (defense-in-depth): every memory route also has
   // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
   // future route that forgets it must still fail closed at the mount. requireAuth

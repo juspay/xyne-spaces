@@ -5,6 +5,7 @@
 import { type ChangeSectionsGroup, type RenderableFileGroup } from './ChangeCards';
 import { extractEnvVarsFromBag } from './envVars';
 import type { ReleaseStageOption } from './ReleaseStagePicker';
+import { repoWebUrl } from './repoVisual';
 import type { TicketStatusV2, VCSProviderType } from '@xyne/shared';
 
 // ─── Minimal input shapes (structural) ───────────────────────────────────────
@@ -52,7 +53,7 @@ export interface ReleaseChangeInput {
   application?:
     | {
         name: string;
-        repoUrl: string | null | undefined;
+        repo?: { url: string; canonicalUrl?: string | null } | null | undefined;
       }
     | null
     | undefined;
@@ -109,7 +110,7 @@ export function buildGroupedByApp(
 
   for (const c of releaseChanges ?? []) {
     const appName = c.application?.name ?? '—';
-    const repoUrl = c.application?.repoUrl ?? null;
+    const repoUrl = repoWebUrl(c.application?.repo);
     const groupKey = `${repoUrl ?? ''}|${appName}`;
     const filePath = c.filePath ?? '—';
     const fileKey = `${filePath}|${c.changeType}`;

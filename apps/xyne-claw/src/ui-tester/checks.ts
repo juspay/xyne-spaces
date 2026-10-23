@@ -1,57 +1,34 @@
+import { UI_TESTER_STANDARD_CHECKS, type DecideQuestion, type UiTesterStandardKey } from "xyne-claw-shared";
 import type { XorAnswer, XorQuestion } from "../xor.js";
 
 export const CONFIDENT = 0.7;
 
-export const STANDARD_QUESTIONS: Record<string, Extract<XorQuestion, { type: "choice" }>> = {
-  cut_off: {
-    type: "choice",
-    instructions: "Is any text, button or control cut off at the right edge of the screen?",
-    criteria: { no: "No, everything ends inside the screen", yes: "Yes, something is cut off at the right edge" },
-  },
-  overlap: {
-    type: "choice",
-    instructions: "Does any text or element overlap another element so that it is hard to read?",
-    criteria: { no: "No overlapping content", yes: "Yes, some content overlaps other content" },
-  },
-  errors: {
-    type: "choice",
-    instructions: "Which error indications are visible on the page?",
-    criteria: {
-      none: "No error message anywhere",
-      banner: "An inline error message or banner only",
-      toast: "Error toast notifications only",
-      both: "Both an inline error message and error toast notifications",
-    },
-  },
-  placeholders: {
-    type: "choice",
-    instructions: "Does any visible text contain programming placeholder values such as NaN, undefined, null or [object Object]?",
-    criteria: { no: "No such placeholder values are visible", yes: "At least one such placeholder value is visible" },
-  },
-  toasts: {
-    type: "choice",
-    instructions: "How many toast notifications are visible?",
-    criteria: { none: "No toast notifications", one: "Exactly one toast notification", several: "Several toast notifications, repeating the same message" },
-  },
-  content: {
-    type: "choice",
-    instructions: "What does the main content area show?",
-    criteria: {
-      data: "Real content or data (a list, table, form, cards or text)",
-      empty: "An empty state saying there is nothing to show yet",
-      error: "An error message instead of the content",
-      loading: "Loading placeholders (skeleton rows or a spinner)",
-      blank: "Nothing: the main area is blank",
-    },
-  },
-  background: {
-    type: "choice",
-    instructions: "What colour is the main page background?",
-    criteria: { light: "White or very light grey", dark: "Black or very dark grey" },
-  },
-};
+export type StandardQuestion = Extract<XorQuestion, { type: "choice" }> | Extract<XorQuestion, { type: "noul" }>;
 
-export type StandardKey = keyof typeof STANDARD_QUESTIONS;
+function toStandardQuestion(c: DecideQuestion): StandardQuestion | null {
+  if (c.type === "yesno") return { type: "noul", instructions: c.question };
+  if (c.type === "choice" && c.options && !Array.isArray(c.options)) return { type: "choice", instructions: c.question, criteria: c.options };
+  return null;
+}
+
+export const STANDARD_QUESTIONS: Record<UiTesterStandardKey, StandardQuestion> = Object.fromEntries(
+  UI_TESTER_STANDARD_CHECKS.map((c) => [c.id, toStandardQuestion(c as DecideQuestion)!]),
+) as Record<UiTesterStandardKey, StandardQuestion>;
+
+export function standardQuestionsFrom(checks: DecideQuestion[] | undefined): Record<UiTesterStandardKey, StandardQuestion> {
+  if (!checks || checks.length === 0) return STANDARD_QUESTIONS;
+  const out = { ...STANDARD_QUESTIONS };
+  for (const c of checks) {
+    const base = STANDARD_QUESTIONS[c.id as UiTesterStandardKey];
+    const next = toStandardQuestion(c);
+    if (!base || !next || base.type !== next.type) continue;
+    if (base.type === "choice" && next.type === "choice" && Object.keys(base.criteria).sort().join() !== Object.keys(next.criteria).sort().join()) continue;
+    out[c.id as UiTesterStandardKey] = next;
+  }
+  return out;
+}
+
+export type StandardKey = UiTesterStandardKey;
 
 export interface CustomCheck {
   id: string;
@@ -84,6 +61,7 @@ export interface VariationResult {
   video?: string | null;
   title?: string;
   themeApplied?: boolean | null;
+  textChecks?: Array<{ text: string; kind: "expect" | "reject"; ok: boolean }> | null;
   externalStubbed?: number;
   externalHosts?: string[];
   error?: string;
@@ -115,8 +93,8 @@ export interface VariationVerdict {
 
 const PROBLEM_WHEN: Partial<Record<StandardKey, string>> = { cut_off: "yes", overlap: "yes", placeholders: "yes", toasts: "several" };
 
-export function buildQuestions(result: VariationResult): Record<string, XorQuestion> {
-  const questions: Record<string, XorQuestion> = { ...STANDARD_QUESTIONS };
+export function buildQuestions(result: VariationResult, standard: Record<UiTesterStandardKey, StandardQuestion> = STANDARD_QUESTIONS): Record<string, XorQuestion> {
+  const questions: Record<string, XorQuestion> = { ...standard };
   for (const c of result.checks ?? []) {
     if (!c.id || !c.question || Object.keys(c.options ?? {}).length < 2) continue;
     questions[`custom_${c.id}`] = { type: "choice", instructions: c.question, criteria: c.options };
@@ -125,10 +103,21 @@ export function buildQuestions(result: VariationResult): Record<string, XorQuest
 }
 
 function pick(a: XorAnswer | undefined): { choice: string | null; confidence: number | null } {
+  if (typeof a?.noul === "number" && a.choice === undefined) {
+    return { choice: a.noul >= 0.5 ? "yes" : "no", confidence: Math.round(Math.abs(a.noul - 0.5) * 200) / 100 };
+  }
   return { choice: a?.choice ?? null, confidence: typeof a?.confidence === "number" ? Math.round(a.confidence * 100) / 100 : null };
 }
 
-export function judgeVariation(result: VariationResult, answers: Record<string, XorAnswer> | null): VariationVerdict {
+function optionLabel(q: StandardQuestion, key: string): string {
+  return q.type === "choice" ? q.criteria[key] ?? key : key;
+}
+
+export function judgeVariation(
+  result: VariationResult,
+  answers: Record<string, XorAnswer> | null,
+  standard: Record<UiTesterStandardKey, StandardQuestion> = STANDARD_QUESTIONS,
+): VariationVerdict {
   const findings: Finding[] = [];
   const add = (severity: Finding["severity"], source: Finding["source"], message: string) => findings.push({ severity, source, message });
 
@@ -149,6 +138,9 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
     if (expectedErrors && /status of [45]\d\d/.test(e)) continue;
     add("warn", "runtime", `console error: ${e}`);
   }
+  for (const t of result.textChecks ?? []) {
+    if (!t.ok) add("fail", "dom", t.kind === "expect" ? `expected text not on the page: "${t.text}"` : `text that must not appear is on the page: "${t.text}"`);
+  }
   if (result.theme === "dark" && result.themeApplied === false) add("warn", "fixture", "dark theme was requested but the page rendered light — set spec.themeStorageKey to the key the app reads (the probe's \"Theme storage keys\" line lists the ones found in the source)");
   if (result.apiRequests === 0 && !result.error) add("warn", "fixture", `no API request was intercepted on ${result.finalUrl ?? result.path ?? "the page"} — check baseUrl, path and apiPattern`);
   if ((result.unmatchedRequests?.length ?? 0) > 0) add("warn", "fixture", `requests served by the fallback mock (fixture may be missing): ${result.unmatchedRequests!.slice(0, 6).join(", ")}`);
@@ -162,8 +154,8 @@ export function judgeVariation(result: VariationResult, answers: Record<string, 
       const v = visual[key];
       if (!v || v.choice === null) continue;
       const confident = (v.confidence ?? 0) >= CONFIDENT;
-      const q = STANDARD_QUESTIONS[key];
-      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${q.criteria[bad] ?? bad} (confidence ${v.confidence})`);
+      const q = standard[key];
+      if (v.choice === bad && q) add(confident ? "fail" : "unsure", "visual", `${q.instructions} → ${optionLabel(q, bad)} (confidence ${v.confidence})`);
     }
     const blank = visual["content"];
     if (blank?.choice === "blank" && (blank.confidence ?? 0) >= CONFIDENT && result.expect?.content !== "blank") {

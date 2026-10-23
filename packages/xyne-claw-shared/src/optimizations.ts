@@ -101,8 +101,8 @@ export const OPTIMIZATIONS = {
   },
   jev_result_sift: {
     label: "Filter large tool results",
-    summary: "Large list results from search tools are filtered to the items relevant to this conversation before the agent reads them.",
-    detail: "The full result is always saved to a file first, and the agent can ask for the raw result on any call.",
+    summary: "The agent can ask for a large list result to be filtered to the items relevant to this conversation.",
+    detail: "Filtering happens only on calls that ask for it. The full result is always saved to a file first.",
     group: "context",
     defaultOn: false,
     scope: "agent",
@@ -161,14 +161,6 @@ export const OPTIMIZATIONS = {
     detail: "Adds one classifier call per answer and at most one extra turn. If Jev is unavailable, the answer is accepted as before.",
     group: "answering",
     defaultOn: false,
-    scope: "agent",
-  },
-  jev_mode_router: {
-    label: "Jev mode routing",
-    summary: "Plain-text messages are routed to /review, /learn or no mode by Jev when it is confident; otherwise the LLM router decides.",
-    detail: "Saves the LLM router call on clear-cut messages.",
-    group: "routing",
-    defaultOn: true,
     scope: "agent",
   },
   jev_goal_prefilter: {

@@ -300,6 +300,13 @@ export const shortcuts = {
     category: 'SDLC',
     preventDefault: true,
   },
+  'skills.closeCreate': {
+    keys: 'escape',
+    scope: 'global',
+    allowInInputs: true,
+    description: 'Close the empty Create skill page',
+    category: 'SDLC',
+  },
   'files.openInWindow': {
     keys: 'mod+enter',
     scope: 'sdlc-files',
@@ -710,6 +717,15 @@ export const shortcuts = {
     priority: 60,
     allowInInputs: true,
     description: 'Edit your last message',
+    category: 'Composer',
+  },
+  'composer.discussionTitle': {
+    keys: 'mod+alt+t',
+    scope: 'global',
+    allowInInputs: true,
+    priority: 100,
+    preventDefault: true,
+    description: 'Add or remove a discussion title',
     category: 'Composer',
   },
 

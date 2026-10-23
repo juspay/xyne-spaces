@@ -1241,6 +1241,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       data-testid={`chat-message-${message.messageId}`}
       data-show-avatar={showAvatar}
       data-message-id={message.messageId}
+      data-first-in-thread={(context === 'thread' && isFirstInThread) || undefined}
       data-hover-key={hoverToolbarKey}
       className={cn(
         isMobile && 'no-select-mobile',

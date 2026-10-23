@@ -86,6 +86,8 @@ export function runSource(run: { sessionId: string; parentSessionId: string | nu
     case "reflex":
     case "heartbeat":
     case "awakening":
+    // Answering without a mention: unattended like a wake, not a person's request.
+    case "proactivity":
       return "awakening";
     default:
       return "people";
