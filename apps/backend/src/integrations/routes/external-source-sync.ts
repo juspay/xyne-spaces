@@ -21,7 +21,7 @@ import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
@@ -148,12 +148,38 @@ async function ingestGmailMailbox(
   source: ExternalSource,
 ): Promise<IngestionResult[]> {
   const results: IngestionResult[] = [];
-  await syncMailboxSerially(source.id, async () => {
-    const current = await new ExternalSourceRepository().findById(source.id);
-    if (!current?.isActive) return;
-    results.push(...(await ingestExternalSource(workspaceId, adapter, sourceName, payload, current)));
-  });
+  await syncMailboxSerially(
+    source.id,
+    async () => {
+      const current = await new ExternalSourceRepository().findById(source.id);
+      if (!current?.isActive) return;
+      results.push(...(await ingestExternalSource(workspaceId, adapter, sourceName, payload, current)));
+    },
+    {
+      maxHoldMs: GMAIL_PUSH_MAX_HOLD_MS,
+      // The catch-up takes the lock on the worker and keeps going while pushes are pending.
+      onHoldLimit: async () => {
+        const watchHistoryId = gmailPushHistoryId(payload) ?? source.lastSyncCursor;
+        if (watchHistoryId) await enqueueCursorCatchup({ sourceId: source.id, watchHistoryId });
+      },
+    },
+  );
   return results;
+}
+
+// A busy mailbox can keep one push syncing; past this the rest moves to the worker, well inside
+// Pub/Sub's 600 s push deadline.
+const GMAIL_PUSH_MAX_HOLD_MS = 2 * 60_000;
+
+function gmailPushHistoryId(payload: unknown): string | undefined {
+  try {
+    const data = (payload as { message?: { data?: unknown } } | null)?.message?.data;
+    if (typeof data !== 'string') return undefined;
+    const { historyId } = JSON.parse(Buffer.from(data, 'base64').toString('utf-8')) as { historyId?: unknown };
+    return historyId == null ? undefined : String(historyId);
+  } catch {
+    return undefined;
+  }
 }
 
 router.use(
