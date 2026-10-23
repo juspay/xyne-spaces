@@ -51,6 +51,7 @@ const SyncIcon: PikaIcon = ({ size, className }) => (
 );
 const PlugIcon: PikaIcon = ({ size, className }) => (
   <Plug size={typeof size === 'number' ? size : 16} className={className} />
+);
 const AgentIcon: PikaIcon = ({ size, className }) => (
   <Bot size={typeof size === 'number' ? size : 16} className={className} />
 );
