@@ -1,8 +1,3 @@
-import {
-  parseTimeKeywords,
-  formatTimeRange,
-  type ParsedTimeQuery,
-} from '../utils/timeKeywordParser';
 import type vespaClient from '../client';
 import {
   type VespaSearchResponse,
@@ -109,9 +104,8 @@ interface SearchOptions {
    */
   privateQuery?: boolean;
   /**
-   * Search the query as plain text: words like "today" or "latest" stay search terms
-   * instead of turning into a time filter, and a query in double quotes is not an
-   * exact phrase. For prose, such as a draft, rather than a search someone typed.
+   * Search the query as plain text: a query in double quotes is not an exact phrase.
+   * For prose, such as a draft, rather than a search someone typed.
    */
   literalQuery?: boolean;
 }
@@ -327,7 +321,7 @@ export class SearchService {
 
       // Exact-match mode: the user wrapped the whole query in double quotes (e.g. "quarterly
       // report") to match it as a strict adjacent-term phrase (grammar:"phrase" + rules.off),
-      // with no fuzzy/semantic broadening. Detect on the raw query, before any keyword stripping.
+      // with no fuzzy/semantic broadening. Detect on the raw query.
       const rawTrimmedQuery = query?.trim() ?? '';
       const isExactMatch =
         !literalQuery &&
@@ -336,24 +330,13 @@ export class SearchService {
         rawTrimmedQuery.endsWith('"') &&
         rawTrimmedQuery.slice(1, -1).trim().length > 0;
 
-      // Parse time keywords from query — skipped for exact match so a quoted word like
-      // "yesterday" is searched literally instead of being consumed as a time filter.
-      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch || literalQuery ? '' : query);
-      const searchQuery = isExactMatch
-        ? rawTrimmedQuery.slice(1, -1).trim()
-        : parsedQuery.cleanedQuery || query;
-      const freshnessWeight = parsedQuery.config?.freshnessWeight ?? 0.0;
-      const filteringWeight = parsedQuery.config?.filteringWeight ?? 0.0;
-      const timeRangeStart = parsedQuery.config?.timeRange.from ?? 0;
-      const timeRangeEnd = parsedQuery.config?.timeRange.to ?? Date.now();
-
-      if (parsedQuery.hasTimeKeyword && parsedQuery.config) {
-        this.logger.info(
-          `Time keyword detected: "${parsedQuery.config.keyword}" - ` +
-          `FreshnessWeight: ${freshnessWeight}, FilteringWeight: ${filteringWeight}, ` +
-          `Range: ${formatTimeRange(parsedQuery.config.timeRange)}`
-        );
-      }
+      // Words like "today", "latest" or "last week" stay in the searched text. They used to be
+      // cut out and turned into a time range, but `personalized` never reads that range and
+      // chat_message's `default_native` stopped reading it, so the words were simply lost.
+      // An explicit date filter (createdRange) still filters by time. The time inputs
+      // (time_from, time_to, freshness_weight, filtering_weight) are no longer sent; Vespa
+      // reads an unsent input as 0, which gives every time bonus 0.
+      const searchQuery = isExactMatch ? rawTrimmedQuery.slice(1, -1).trim() : query;
 
       // Get schemas for the apps
       const appSchemaMap = this.yqlBuilder.getAppSchemaMapping(app);
@@ -467,10 +450,6 @@ export class SearchService {
           timeout: '30s',
           ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
           ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
-          "input.query(freshness_weight)": freshnessWeight,
-          "input.query(filtering_weight)": filteringWeight,
-          "input.query(time_from)": timeRangeStart,
-          "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
           "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
           tracelevel: 0,
@@ -712,7 +691,6 @@ export class SearchService {
         exactDuration,
         fallbackDuration,
         totalDuration,
-        hasTimeKeyword: parsedQuery.hasTimeKeyword,
       });
       return response;
 
