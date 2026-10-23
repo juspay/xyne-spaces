@@ -59,3 +59,24 @@ export class AffinityService {
     return this.weights.userWeights[userId] ?? 0;
   }
 }
+
+// The app's one AffinityService. It needs the app's HttpClient, so each app creates it and
+// registers it at startup; shared rankers (rankUsers, rankChannelsByAffinity, …) then read the
+// same weights the app's hooks load, and callers never pass affinity in.
+let registeredAffinityService: AffinityService | null = null;
+
+export function registerAffinityService(service: AffinityService): void {
+  registeredAffinityService = service;
+}
+
+/**
+ * The registered app service, as the rankers, `useAffinityCallback` and `useMentionSearch` read it.
+ * Weights are 0 until an app registers one, the same as an AffinityService whose weights have not
+ * loaded yet.
+ */
+export const affinityService = {
+  prefetch: (): Promise<void> => registeredAffinityService?.prefetch() ?? Promise.resolve(),
+  getUserWeight: (userId: string): number => registeredAffinityService?.getUserWeight(userId) ?? 0,
+  getChannelWeight: (channelId: string): number =>
+    registeredAffinityService?.getChannelWeight(channelId) ?? 0,
+};
