@@ -76,11 +76,12 @@ describe("scheduled job card", () => {
     expect(text).toBe(
       [
         "**🗓 Pokémon of the day** · scheduled job",
-        "Last run: ✅ Succeeded · 23 Oct, 09:00 UTC",
-        "Next run: 24 Oct, 09:00 UTC",
-        "Recent: ✅ 23 Oct, 09:00 · ❌ 22 Oct, 09:00",
-        "[Latest output](https://x/y)",
-        "_Each run replies in this thread._",
+        "",
+        "- Last run: ✅ Succeeded · 23 Oct, 09:00 UTC",
+        "- Next run: 24 Oct, 09:00 UTC",
+        "- Recent: ✅ 23 Oct, 09:00 · ❌ 22 Oct, 09:00",
+        "",
+        "[Latest output](https://x/y) · _Each run replies in this thread._",
       ].join("\n"),
     );
   });
@@ -94,7 +95,7 @@ describe("scheduled job card", () => {
     });
     expect(text).toContain("Last run: ❌ Failed · 23 Oct, 09:00 UTC — quota x");
     expect(text).toContain("Next run: —");
-    expect(text.split("\n")[1]!.length).toBeLessThan(220);
+    expect(text.split("\n")[2]!.length).toBeLessThan(220);
     expect(text).not.toContain("Recent:");
   });
 

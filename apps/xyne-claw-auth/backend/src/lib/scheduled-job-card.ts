@@ -90,26 +90,28 @@ export function jobCardText(input: {
   nextRunAt: Date | null;
   latestOutputUrl: string | null;
 }): string {
-  const lines = [`**🗓 ${input.name}** · scheduled job`];
+  const rows: string[] = [];
   const last = input.history[0];
   if (last) {
     const when = last.at ? ` · ${formatCardTime(last.at)}` : "";
     const why = last.status === "failed" && last.error?.trim() ? ` — ${oneLine(last.error, ERROR_PREVIEW_CHARS)}` : "";
-    lines.push(`Last run: ${runIcon(last.status)} ${runLabel(last.status)}${when}${why}`);
+    rows.push(`Last run: ${runIcon(last.status)} ${runLabel(last.status)}${when}${why}`);
   } else {
-    lines.push("Last run: —");
+    rows.push("Last run: —");
   }
-  lines.push(`Next run: ${input.nextRunAt ? formatCardTime(input.nextRunAt) : "—"}`);
+  rows.push(`Next run: ${input.nextRunAt ? formatCardTime(input.nextRunAt) : "—"}`);
   if (input.history.length > 1) {
-    lines.push(
+    rows.push(
       `Recent: ${input.history
         .map((run) => `${runIcon(run.status)} ${run.at ? formatCardTime(run.at).replace(" UTC", "") : "—"}`)
         .join(" · ")}`,
     );
   }
-  if (input.latestOutputUrl) lines.push(`[Latest output](${input.latestOutputUrl})`);
-  lines.push("_Each run replies in this thread._");
-  return lines.join("\n");
+  const footer = [
+    ...(input.latestOutputUrl ? [`[Latest output](${input.latestOutputUrl})`] : []),
+    "_Each run replies in this thread._",
+  ].join(" · ");
+  return [`**🗓 ${input.name}** · scheduled job`, rows.map((row) => `- ${row}`).join("\n"), footer].join("\n\n");
 }
 
 async function readRef(jobId: string): Promise<JobCardRef | null> {
