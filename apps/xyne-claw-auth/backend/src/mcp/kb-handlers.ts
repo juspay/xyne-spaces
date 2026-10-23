@@ -542,6 +542,8 @@ interface VespaCollectionHit {
   title?: string;
   subtitle?: string;
   context?: string;
+  /** The matched chunks, best first; `index` is the chunk's position in the file. */
+  chunks?: Array<{ index?: number; text?: string }>;
   searchContext?: {
     docId?: string;
     collectionId?: string;
@@ -773,7 +775,15 @@ export async function handleKbSearch(args: {
     ? data.data.groups.flatMap(g => g.results ?? [])
     : (data.data.results ?? []);
 
-  type Hit = { fileId: string; name: string; path?: string; collectionId: string; collectionName: string; snippet?: string };
+  type Hit = {
+    fileId: string;
+    name: string;
+    path?: string;
+    collectionId: string;
+    collectionName: string;
+    snippet?: string;
+    chunks?: Array<{ index?: number; text: string }>;
+  };
   const hits: Hit[] = [];
   const seen = new Set<string>();
   let droppedNoIds = 0;
@@ -804,6 +814,9 @@ export async function handleKbSearch(args: {
     }
     seen.add(itemId);
     const fileMeta = ctx.filesById.get(itemId);
+    const chunks = (r.chunks ?? [])
+      .filter((c): c is { index?: number; text: string } => typeof c?.text === "string" && c.text.trim() !== "")
+      .map((c) => ({ ...(Number.isInteger(c.index) ? { index: c.index } : {}), text: c.text }));
     hits.push({
       fileId: itemId,
       name: r.title || fileMeta?.name || itemId,
@@ -813,6 +826,7 @@ export async function handleKbSearch(args: {
       collectionId,
       collectionName: r.subtitle || fileMeta?.collectionName || collectionId,
       ...(typeof r.context === "string" && r.context.trim() ? { snippet: r.context.trim() } : {}),
+      ...(chunks.length > 0 ? { chunks } : {}),
     });
     if (hits.length >= limit) break;
   }
@@ -844,10 +858,14 @@ export async function handleKbSearch(args: {
         (h.path ? `path="${escapeXmlAttr(h.path)}" ` : "") +
         `collection="${escapeXmlAttr(h.collectionName)}" cite="[clf-__TOOL_CALL_ID__#${i}]">`,
     );
-    if (h.snippet) {
-      // Strip highlight tags, then any stray `<`/`>` a nested tag left behind.
-      const snippet = h.snippet.replace(/<\/?[^>]+>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").slice(0, KB_SNIPPET_MAX_CHARS);
-      lines.push(`    <snippet>${escapeXmlText(snippet)}</snippet>`);
+    if (h.chunks) {
+      // One element per matched chunk, best first; `idx` is what kb-get-chunks' startChunkIndex takes.
+      for (const c of h.chunks) {
+        const idx = c.index !== undefined ? ` idx="${c.index}"` : "";
+        lines.push(`    <chunk${idx}>${escapeXmlText(snippetText(c.text, KB_CHUNK_MAX_CHARS))}</chunk>`);
+      }
+    } else if (h.snippet) {
+      lines.push(`    <snippet>${escapeXmlText(snippetText(h.snippet, KB_SNIPPET_MAX_CHARS))}</snippet>`);
     }
     lines.push(`  </hit>`);
     citations.push(fileCitation(ctx, h.fileId, h.name, h.collectionId, i));
@@ -908,9 +926,18 @@ function collectAllowedVespaDocIds(ctx: KbResolution, folderId: string): string[
  */
 const LIST_FILES_MAX_ROWS = 400;
 
-/** Max characters of a kb-search hit's snippet (its matched chunks) shown to the model:
+/** Max characters of a kb-search hit's fallback snippet shown to the model:
  *  one Docling chunk, ~500 tokens at ~4 chars/token. */
 const KB_SNIPPET_MAX_CHARS = 2000;
+
+/** Max characters of each matched chunk in a kb-search hit. Up to 3 per hit, so a hit stays
+ *  near one Docling chunk in total while every matched chunk still shows. */
+const KB_CHUNK_MAX_CHARS = 700;
+
+/** Search text as the model sees it: highlight / markup tags dropped, whitespace collapsed, capped. */
+function snippetText(s: string, maxChars: number): string {
+  return s.replace(/<\/?[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
 
 export async function handleKbListFiles(args: {
   userId: string;
