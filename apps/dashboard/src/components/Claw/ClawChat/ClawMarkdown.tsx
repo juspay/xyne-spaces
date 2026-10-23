@@ -1,11 +1,18 @@
 import { useMemo } from 'react';
-import type { ReactElement, ReactNode, AnchorHTMLAttributes, HTMLAttributes } from 'react';
+import type {
+  ReactElement,
+  ReactNode,
+  AnchorHTMLAttributes,
+  HTMLAttributes,
+  ImgHTMLAttributes,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import type { Components } from 'react-markdown';
 import type { Element } from 'hast';
 import { cn } from '../../../utils/classNames';
+import { GuardedMarkdownImage } from '../../../utils/markdownImageGuard';
 import {
   buildClawCitationToolNumbers,
   linkifyAndGroupClawCitations,
@@ -49,6 +56,9 @@ function ClawMarkdownLink({
 }
 
 const components: Components = {
+  img: (
+    props: ImgHTMLAttributes<HTMLImageElement> & { node?: Element | undefined },
+  ): ReactElement => <GuardedMarkdownImage {...props} />,
   p: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <p className='mb-2 whitespace-pre-wrap break-words last:mb-0'>{children}</p>
   ),

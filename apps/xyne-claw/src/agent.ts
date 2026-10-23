@@ -4,13 +4,13 @@ import {
   AuthStorage,
   SessionManager,
   ModelRegistry,
-  DefaultResourceLoader,
   type CreateAgentSessionOptions,
   type ToolDefinition,
   type SessionEntry,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
+import { BUNDLED_SKILLS_DIR, createHardenedResourceLoader } from "./pi-resource-loader.js";
 import { createLogger } from "./logger.js";
 import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
@@ -2258,8 +2258,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   void isRegenerate;
 
   // If skills provided, materialize them to disk and add their directory as
-  // an additional skill path so pi's DefaultResourceLoader picks them up.
-  const additionalSkillPaths: string[] = [...(extraSkillPaths ?? [])];
+  // an additional skill path so pi's resource loader picks them up. The
+  // bundled skills are listed first: the hardened loader no longer discovers
+  // them through agentDir (see pi-resource-loader.ts).
+  const additionalSkillPaths: string[] = [BUNDLED_SKILLS_DIR, ...(extraSkillPaths ?? [])];
   if (skills && skills.length > 0 && sessionId) {
     const skillsDir = await writeSessionSkills(sessionId, skills);
     if (skillsDir) {
@@ -2350,12 +2352,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Pi v0.75: DefaultResourceLoaderOptions.agentDir is now REQUIRED (with
   // exactOptionalPropertyTypes). Default to ~/.pi/agent when caller didn't
   // configure one — same path the SDK uses when AuthStorage.create() runs.
-  const resourceLoader = new DefaultResourceLoader({
+  // workingDir is the agent's own writable workspace, so nothing in it may be
+  // discovered as code or prompt: the hardened loader takes only these inputs.
+  const resourceLoader = createHardenedResourceLoader({
     cwd: workingDir,
     agentDir: PATHS.agentDir ?? `${process.env["HOME"] ?? "."}/.pi/agent`,
     extensionFactories: extensions,
-    ...(additionalSkillPaths.length > 0 ? { additionalSkillPaths } : {}),
-    ...(personaSystemPrompt ? { systemPrompt: personaSystemPrompt } : {}),
+    additionalSkillPaths,
+    systemPrompt: personaSystemPrompt,
   });
   await resourceLoader.reload();
 

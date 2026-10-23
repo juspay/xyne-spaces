@@ -15,9 +15,9 @@ import {
   AuthStorage,
   SessionManager,
   ModelRegistry,
-  DefaultResourceLoader,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { createHardenedResourceLoader } from "./pi-resource-loader.js";
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
@@ -1087,7 +1087,9 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // agentDir is required on v0.75 DefaultResourceLoaderOptions under
         // exactOptionalPropertyTypes. Pi defaults the SDK to ~/.pi/agent.
-        const childResourceLoader = new DefaultResourceLoader({
+        // Same hardened loader as the parent (pi-resource-loader.ts): no file
+        // discovery, only what is passed here.
+        const childResourceLoader = createHardenedResourceLoader({
           cwd: process.cwd(),
           agentDir: `${process.env["HOME"] ?? "."}/.pi/agent`,
           // Same compaction policy the parent installs (agent.ts): the fresh-start
@@ -1096,7 +1098,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           // huge spaces-search/tool results with no user/assistant cut point in the
           // keep-recent budget, so without this they re-compact almost immediately.
           extensionFactories: [compactionExtension],
-          ...(childSkillsDir ? { additionalSkillPaths: [childSkillsDir] } : {}),
+          additionalSkillPaths: childSkillsDir ? [childSkillsDir] : [],
         });
         await childResourceLoader.reload();
 

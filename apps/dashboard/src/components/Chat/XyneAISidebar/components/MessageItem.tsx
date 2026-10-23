@@ -30,6 +30,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
+import { GuardedMarkdownImage } from '../../../../utils/markdownImageGuard';
 import {
   StreamingMarkdownBlocks,
   rehypeStreamWordFade,
@@ -1815,7 +1816,9 @@ const MessageContent = ({
   const sidebarMarkdownComponents = useMemo<Components>(() => {
     return {
       ...markdownComponents,
-      img: props => <ImageWithDownload {...props} />,
+      img: props => (
+        <GuardedMarkdownImage {...props} renderAllowed={p => <ImageWithDownload {...p} />} />
+      ),
     };
   }, [markdownComponents]);
 
@@ -2261,7 +2264,9 @@ const SummarizerContent = ({
   const sidebarMarkdownComponents = useMemo<Components>(() => {
     return {
       ...markdownComponents,
-      img: props => <ImageWithDownload {...props} />,
+      img: props => (
+        <GuardedMarkdownImage {...props} renderAllowed={p => <ImageWithDownload {...p} />} />
+      ),
     };
   }, [markdownComponents]);
 

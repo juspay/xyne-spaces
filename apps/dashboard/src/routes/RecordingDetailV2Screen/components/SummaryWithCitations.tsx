@@ -2,6 +2,7 @@ import { type ReactElement, type ReactNode, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Clock } from 'lucide-react';
+import { GuardedMarkdownImage } from '../../../utils/markdownImageGuard';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import Popover from '../../../components/ui/Popover';
 import type { CitationSegment } from '../../../services/Recording/recordingService';
@@ -286,6 +287,7 @@ export function SummaryWithCitations({
               {processChildrenWithCitations(children, segmentMap, handleCitationClick, 'li')}
             </li>
           ),
+          img: props => <GuardedMarkdownImage {...props} />,
         }}
       >
         {aiSummary}

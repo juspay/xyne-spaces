@@ -27,6 +27,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
+import { GUARDED_IMAGE_MARKDOWN_COMPONENTS } from '../../utils/markdownImageGuard';
 import remarkGfm from 'remark-gfm';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -541,7 +542,12 @@ export default function RecordingDetailScreen(): ReactElement {
               <h2 className='text-lg font-semibold text-foreground'>AI Summary</h2>
             </div>
             <div className='bot-markdown-content-call-summary' style={{ marginLeft: '10px' }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{recording.aiSummary}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={GUARDED_IMAGE_MARKDOWN_COMPONENTS}
+              >
+                {recording.aiSummary}
+              </ReactMarkdown>
             </div>
           </div>
         )}
