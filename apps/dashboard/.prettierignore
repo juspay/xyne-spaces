@@ -2,3 +2,9 @@
 # lines of float arrays, which then fails format:check on every rebuild and buries
 # real changes in review. It is a build artifact, not source.
 src/services/onDeviceIntent/prototypes.json
+
+# Upstream design systems copied verbatim from github.com/nexu-io/open-design
+# under Apache-2.0. Reformatting them would break the byte-for-byte claim in
+# starters/ATTRIBUTION.md and amount to modifying someone else's licensed file
+# to satisfy our own style.
+src/components/AIScreen/DesignSystems/starters/open-design/
