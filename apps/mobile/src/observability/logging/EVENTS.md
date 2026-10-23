@@ -474,13 +474,13 @@ this event existed, a device that never registered left no trace anywhere, so
 
 | Field              | Meaning                                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `outcome`          | `registered` · `already_registered` · `register_failed` · `permission_denied` · `token_unavailable`                                    |
-| `stage`            | `permission` · `token` · `register` — the boot step that produced the outcome                                                          |
+| `outcome`          | `registered` · `already_registered` · `register_failed` · `permission_denied` · `token_unavailable` · `boot_failed`                    |
+| `stage`            | `permission` · `token` · `register` · `boot` (a step threw) — the boot step that produced the outcome                                  |
 | `trigger`          | `start` (sign-in / app start) · `foreground` (recovery on return to app) · `token_refresh`                                             |
 | `platform`         | `ios` · `android`                                                                                                                      |
 | `permissionStatus` | OS notification permission at the time, read without prompting: `authorized` · `provisional` · `denied` · `not_determined` · `unknown` |
 | `deviceId`         | The app's random per-install id (same value the backend logs on `[FCM] registerToken`), or `null`. Not a push token                    |
-| `error`            | Short redacted error for `register_failed`, otherwise `null`. Never contains tokens                                                    |
+| `error`            | Short redacted error for `register_failed` and `boot_failed`, otherwise `null`. Never contains tokens                                  |
 
 `registered` means the backend answered this attempt with success.
 `already_registered` means the same token was already sent this session, so no
@@ -488,8 +488,9 @@ request was made.
 
 **When:** Once per boot of `NotificationService` (`start` or `foreground`), and
 on every FCM token rotation. `permission_denied` / `token_unavailable` mean the
-boot stopped early; it is retried automatically when the app returns to the
-foreground with permission granted.
+boot stopped early, and `boot_failed` means a boot step threw; all three are
+retried automatically when the app returns to the foreground with permission
+granted. `token_unavailable` is also retried as soon as FCM issues a token.
 
 **Typical level:** `info`
 
@@ -499,7 +500,8 @@ foreground with permission granted.
 
 **Purpose:** Proves the foreground retry ran, and records why it did or did not
 act. Sent only when the device is blocked or its registration is unconfirmed, so
-healthy sessions emit nothing.
+healthy sessions emit nothing. A check that acts is always sent; one that found
+nothing to do (`none`) is sent once per session.
 
 **Fields:**
 

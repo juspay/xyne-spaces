@@ -9,6 +9,8 @@ import {
   describeRegistrationError,
   isForegroundTransition,
   isPermissionGranted,
+  needsForegroundRecovery,
+  shouldReportRecovery,
   type ForegroundRecoveryInput,
 } from '@/src/notifications/bootRecoveryPolicy';
 
@@ -63,6 +65,23 @@ describe('notification boot recovery policy', (): void => {
     assert.equal(decideForegroundRecovery({ ...base, phase: 'idle' }), 'none');
   });
 
+  it('looks at a foreground only while blocked or unconfirmed, never mid-boot', (): void => {
+    assert.equal(needsForegroundRecovery('blocked', false), true);
+    assert.equal(needsForegroundRecovery('blocked', true), true);
+    assert.equal(needsForegroundRecovery('listening', false), true);
+    assert.equal(needsForegroundRecovery('listening', true), false);
+    // The iOS permission dialog moves the app inactive -> active while booting.
+    assert.equal(needsForegroundRecovery('booting', false), false);
+    assert.equal(needsForegroundRecovery('idle', false), false);
+  });
+
+  it('logs every check that acts, but a check that found nothing only once', (): void => {
+    assert.equal(shouldReportRecovery('none', false), true);
+    assert.equal(shouldReportRecovery('none', true), false);
+    assert.equal(shouldReportRecovery('reboot', true), true);
+    assert.equal(shouldReportRecovery('retry_registration', true), true);
+  });
+
   it('treats only background/inactive -> active as a foreground transition', (): void => {
     assert.equal(isForegroundTransition('background', 'active'), true);
     assert.equal(isForegroundTransition('inactive', 'active'), true);
@@ -111,6 +130,27 @@ describe('NotificationService boot wiring', (): void => {
       SERVICE_SOURCE,
       /if \(!fcmToken\) \{\s*this\.blockBoot\('token_unavailable', trigger\);/,
     );
+  });
+
+  it('records a boot step that throws as blocked, so it can be retried', (): void => {
+    assert.match(
+      SERVICE_SOURCE,
+      /if \(isCurrentLifecycle\(\) && this\.bootPhase === 'booting'\) \{\s*this\.blockBoot\('boot_failed', trigger/,
+    );
+  });
+
+  it('waits for a late FCM token while blocked on one, and stops waiting on stop()', (): void => {
+    assert.match(SERVICE_SOURCE, /if \(reason === 'token_unavailable'\) this\.waitForToken\(\);/);
+    const stop = SERVICE_SOURCE.slice(SERVICE_SOURCE.indexOf('  stop(): void {'));
+    assert.match(stop.slice(0, stop.indexOf('\n  }\n')), /this\.detachTokenWait\(\);/);
+  });
+
+  it('never prompts when a late token re-runs the boot', (): void => {
+    const reboot = SERVICE_SOURCE.slice(SERVICE_SOURCE.indexOf('private async rebootIfPermitted'));
+    const body = reboot.slice(0, reboot.indexOf('\n  }\n'));
+    assert.match(body, /readNotificationPermissionStatus\(\)/);
+    assert.match(body, /isPermissionGranted\(permissionStatus\) !== true\) return;/);
+    assert.doesNotMatch(body, /requestNotificationPermission\(\)/);
   });
 
   it('never prompts for permission during foreground recovery', (): void => {

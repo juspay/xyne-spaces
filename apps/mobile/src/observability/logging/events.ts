@@ -317,8 +317,9 @@ type AppLogEvents = {
       | 'already_registered'
       | 'register_failed'
       | 'permission_denied'
-      | 'token_unavailable';
-    stage: 'permission' | 'token' | 'register';
+      | 'token_unavailable'
+      | 'boot_failed';
+    stage: 'permission' | 'token' | 'register' | 'boot';
     trigger: 'start' | 'foreground' | 'token_refresh';
     platform: 'ios' | 'android';
     permissionStatus: 'authorized' | 'provisional' | 'denied' | 'not_determined' | 'unknown';

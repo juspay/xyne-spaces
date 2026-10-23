@@ -18,7 +18,7 @@
  */
 export type NotificationBootPhase = 'idle' | 'booting' | 'blocked' | 'listening';
 
-export type NotificationBootBlockReason = 'permission_denied' | 'token_unavailable';
+export type NotificationBootBlockReason = 'permission_denied' | 'token_unavailable' | 'boot_failed';
 
 export type ForegroundRecoveryAction = 'none' | 'reboot' | 'retry_registration';
 
@@ -39,6 +39,31 @@ export type ForegroundRecoveryInput = Readonly<{
    */
   permissionGranted: boolean | null;
 }>;
+
+/**
+ * Whether a foreground check has anything to look at. Only a blocked boot, or
+ * a finished boot whose token the backend never accepted. In particular not a
+ * boot still running — the iOS permission dialog itself moves the app
+ * inactive → active mid-boot.
+ */
+export function needsForegroundRecovery(
+  phase: NotificationBootPhase,
+  registrationConfirmed: boolean,
+): boolean {
+  return phase === 'blocked' || (phase === 'listening' && !registrationConfirmed);
+}
+
+/**
+ * Whether to log a foreground check. Anything that acts is always logged; a
+ * check that found nothing to do is logged once per session, so a user who
+ * keeps notifications off does not add an event on every return to the app.
+ */
+export function shouldReportRecovery(
+  action: ForegroundRecoveryAction,
+  idleCheckAlreadyReported: boolean,
+): boolean {
+  return action !== 'none' || !idleCheckAlreadyReported;
+}
 
 /** What to do when the app returns to the foreground. */
 export function decideForegroundRecovery(input: ForegroundRecoveryInput): ForegroundRecoveryAction {
