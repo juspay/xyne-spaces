@@ -15,6 +15,7 @@ import {
   unfenceSession,
   warmOwnershipClient,
 } from "./run-ownership.js";
+import { inspectAffinity, recordAffinity, publishPodCapacity, AFFINITY_DEFER_MS } from "./conversation-affinity.js";
 import { startRunControlSubscriber } from "./run-control.js";
 import { RUN_TIMED_OUT, maxRunMs, raceRunDeadline } from "./run-deadline.js";
 import { createLogger } from "./logger.js";
@@ -256,6 +257,12 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         await job.moveToDelayed(Date.now() + pressureBackoffMs(job), token);
         throw new DelayedError();
       }
+      const conversationId = typeof job.data.conversationId === "string" ? job.data.conversationId : "";
+      if (conversationId && (await inspectAffinity(conversationId, Date.now() - job.timestamp)) === "defer") {
+        metric.count("run_queue_affinity_defer", { agent, session: sessionId });
+        await job.moveToDelayed(Date.now() + AFFINITY_DEFER_MS, token);
+        throw new DelayedError();
+      }
       const ownerToken = createOwnerToken();
       const { status, holder } = await inspectOwner(sessionId, ownerToken);
       if (status === "alive-other") {
@@ -278,6 +285,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         }
         metric.observe("run_queue_automation_wait_ms", Math.max(0, Date.now() - job.timestamp), { agent, active: activeAutomationRuns() });
       }
+      if (conversationId) await recordAffinity(conversationId);
       try {
         return await runClaimedJob(job, token, sessionId, agent, ownerToken, status === "dead-other" ? holder : null);
       } finally {
@@ -310,6 +318,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
 
   let pressurePaused = false;
   setInterval(() => {
+    void publishPodCapacity(!drainPaused && !pressurePaused && getActiveRunCount() < concurrency && !isUnderPressure());
     if (drainPaused) return;
     if (!pressurePaused && overHighWater()) {
       pressurePaused = true;
