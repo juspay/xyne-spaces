@@ -27,6 +27,7 @@ import {
 } from '../../components/AIScreen/AIComposer';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
+import { pendingProjectFromUrl } from '../../components/AIScreen/ProjectHome/projectHome.utils';
 import { CitationDocsProvider, useCitationDocs } from '../../components/AIScreen/citationDocs';
 import {
   DesignStudioProvider,
@@ -288,15 +289,27 @@ const AIScreen = (): ReactElement => {
     // Back, Forward or a pasted link opens a chat the user did not start from a
     // project row. Without this, the project they picked earlier would still be
     // pending and the next conversation id to arrive — this existing chat —
-    // would be filed into it.
-    setPendingProjectId(null);
+    // would be filed into it. Through the same rule as the initial state: a
+    // link naming a project must not refile the existing chat it opens.
+    setPendingProjectId(pendingProjectFromUrl(routeSessionId, location.search));
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
     setInitialAttachments(undefined);
     setChatKey(prev => prev + 1);
     resetAssistant();
-  }, [sessionFromUrl, activeSessionId, resetAssistant]);
+  }, [sessionFromUrl, activeSessionId, routeSessionId, location.search, resetAssistant]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const params = new URLSearchParams(location.search);
+    if (!params.has('projectId')) return;
+    params.delete('projectId');
+    const query = params.toString();
+    void navigate(`/${workspaceId}/ai/chat/${routeSessionId ?? 'new'}${query ? `?${query}` : ''}`, {
+      replace: true,
+    });
+  }, [location.search, workspaceId, routeSessionId, navigate]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -424,7 +437,9 @@ const AIScreen = (): ReactElement => {
     };
   }, []);
 
-  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(() =>
+    pendingProjectFromUrl(routeSessionId, window.location.search),
+  );
   const attemptedFileIdsRef = useRef<Set<string>>(new Set());
 
   const handleCreateChat = useCallback(
@@ -544,7 +559,11 @@ const AIScreen = (): ReactElement => {
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
       setActiveSessionId(sessionId);
-      if (pendingProjectId && !attemptedFileIdsRef.current.has(sessionId)) {
+      if (
+        pendingProjectId &&
+        sessionId.startsWith('chat-') &&
+        !attemptedFileIdsRef.current.has(sessionId)
+      ) {
         attemptedFileIdsRef.current.add(sessionId);
         const projectId = pendingProjectId;
         void moveV2ConversationToProject(sessionId, projectId)

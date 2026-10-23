@@ -17,6 +17,10 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
 import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
+import {
+  toClawChatProjectKnowledge,
+  type ClawChatProjectKnowledge,
+} from './clawProjectKnowledgeDto';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -1741,6 +1745,15 @@ export interface ClawChatProjectInput {
   defaultAgentSlug?: string | null;
 }
 
+
+export { toClawChatProjectKnowledge, type ClawChatProjectKnowledge };
+
+export interface ClawChatProjectKnowledgeInput {
+  type: string;
+  refId: string;
+  title?: string;
+}
+
 const CHAT_PROJECTS_PATH = '/claw/api/v1/agent-chat/chat/projects';
 
 /** One hop to claw-auth, with its status preserved on failure. */
@@ -1764,6 +1777,10 @@ async function clawProjectRequest<T>(
     const errorText = await response.text();
     logger.error(`[ClawAgentService] ${failure} failed: ${response.status} ${errorText}`);
     throw new ClawRequestError(clawErrorMessage(errorText) ?? failure, response.status);
+  }
+
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    return { success: true } as T;
   }
 
   return (await response.json()) as T;
@@ -1891,6 +1908,54 @@ export async function revokeClawDesignShare(
     `${DESIGN_SHARES_PATH}/${encodeURIComponent(shareId)}`,
     { method: 'DELETE' },
     'Failed to revoke design share'
+  );
+}
+
+function knowledgePath(projectId: string, knowledgeId?: string): string {
+  const base = `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}/knowledge`;
+  return knowledgeId === undefined ? base : `${base}/${encodeURIComponent(knowledgeId)}`;
+}
+
+export async function listClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string
+): Promise<{ success: boolean; data: ClawChatProjectKnowledge[] }> {
+  const response = await clawProjectRequest<{ success: boolean; data?: unknown[] }>(
+    req,
+    knowledgePath(projectId),
+    { method: 'GET' },
+    'Failed to list project knowledge'
+  );
+  return {
+    success: response.success,
+    data: (response.data ?? []).map(toClawChatProjectKnowledge),
+  };
+}
+
+export async function addClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string,
+  input: ClawChatProjectKnowledgeInput
+): Promise<{ success: boolean; data: ClawChatProjectKnowledge }> {
+  const response = await clawProjectRequest<{ success: boolean; data?: unknown }>(
+    req,
+    knowledgePath(projectId),
+    { method: 'POST', body: input },
+    'Failed to attach project knowledge'
+  );
+  return { success: response.success, data: toClawChatProjectKnowledge(response.data) };
+}
+
+export async function deleteClawProjectKnowledge(
+  req: { headers?: { cookie?: string }; userId: string },
+  projectId: string,
+  knowledgeId: string
+): Promise<{ success: boolean; data: { id: string; deleted: boolean } }> {
+  return clawProjectRequest(
+    req,
+    knowledgePath(projectId, knowledgeId),
+    { method: 'DELETE' },
+    'Failed to detach project knowledge'
   );
 }
 

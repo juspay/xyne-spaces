@@ -506,6 +506,45 @@ export async function reorderV2ChatProjects(projectIds: string[]): Promise<numbe
   return response.data.data?.reordered ?? 0;
 }
 
+export const CHAT_PROJECT_KNOWLEDGE_TYPES = [
+  'file',
+  'kb_collection',
+  'channel',
+  'ticket',
+  'canvas',
+] as const;
+
+export type ChatProjectKnowledgeType = (typeof CHAT_PROJECT_KNOWLEDGE_TYPES)[number];
+
+export interface ChatProjectKnowledge {
+  id: string;
+  projectId: string;
+  type: ChatProjectKnowledgeType;
+  refId: string;
+  title: string;
+  mimeType: string | null;
+  size: number | null;
+  createdAt: string;
+}
+
+export async function fetchV2ChatProjectKnowledge(
+  projectId: string,
+): Promise<ChatProjectKnowledge[]> {
+  const response = await apiInstance.get<ChatProjectResponse<ChatProjectKnowledge[]>>(
+    `${CHAT_PROJECTS_URL}/${encodeURIComponent(projectId)}/knowledge`,
+  );
+  return response.data.success ? (response.data.data ?? []) : [];
+}
+
+export async function deleteV2ChatProjectKnowledge(
+  projectId: string,
+  knowledgeId: string,
+): Promise<void> {
+  await apiInstance.delete(
+    `${CHAT_PROJECTS_URL}/${encodeURIComponent(projectId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+  );
+}
+
 export interface ConversationNote {
   request: string;
   reply: string;

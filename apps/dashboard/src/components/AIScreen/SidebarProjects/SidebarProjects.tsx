@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronBigDown, FolderPlus } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { useV2ChatProjects } from '../../../hooks/useAskAISessionsV2';
@@ -16,6 +17,8 @@ export function SidebarProjects({
   onCreateChatInProject,
 }: SidebarProjectsProps): ReactElement {
   const { projects } = useV2ChatProjects();
+  const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [sectionOpen, setSectionOpen] = useState(true);
   const [expandedIds, setExpandedIds] = useState<string[]>(() => readExpandedProjectIds(userId));
   const [dialogKind, setDialogKind] = useState<ProjectDialogKind | null>(null);
@@ -32,6 +35,14 @@ export function SidebarProjects({
       expandedIds.filter(id => projects.some(project => project.id === id)),
     );
   }, [userId, expandedIds, projects]);
+
+  const onOpenProject = useCallback(
+    (projectId: string): void => {
+      const base = workspaceId ? `/${workspaceId}/ai` : '/ai';
+      void navigate(`${base}/projects/${encodeURIComponent(projectId)}`);
+    },
+    [navigate, workspaceId],
+  );
 
   const toggleProject = useCallback((projectId: string): void => {
     setExpandedIds(previous =>
@@ -101,6 +112,7 @@ export function SidebarProjects({
                   project={project}
                   isExpanded={isExpanded}
                   onToggle={() => toggleProject(project.id)}
+                  onOpen={() => onOpenProject(project.id)}
                   onRename={() => openDialog('rename', project)}
                   onDelete={() => openDialog('delete', project)}
                   onNewChat={() => onCreateChatInProject(project.id)}

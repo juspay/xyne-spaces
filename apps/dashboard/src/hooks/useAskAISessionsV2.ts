@@ -18,8 +18,11 @@ import {
 import {
   createV2ChatProject,
   deleteV2ChatProject,
+  fetchV2ChatProjectKnowledge,
   fetchV2ChatProjects,
   fetchV2Conversations,
+  deleteV2ChatProjectKnowledge,
+  type ChatProjectKnowledge,
   moveV2ConversationToProject,
   reorderV2ChatProjects,
   updateV2ChatProject,
@@ -347,6 +350,48 @@ export function useV2ChatProjects({ enabled = true }: { enabled?: boolean } = {}
 }
 
 const NO_PROJECTS: ChatProject[] = [];
+
+const NO_KNOWLEDGE: ChatProjectKnowledge[] = [];
+
+export const v2ChatProjectKnowledgeKey = (projectId: string): readonly string[] => [
+  'xyne-ai-v2-chat-project-knowledge',
+  projectId,
+];
+
+export function useV2ChatProjectKnowledge(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  const key = v2ChatProjectKnowledgeKey(projectId ?? '');
+  const result = useQuery({
+    queryKey: key,
+    queryFn: () => fetchV2ChatProjectKnowledge(projectId as string),
+    enabled: Boolean(projectId),
+    staleTime: 30_000,
+  });
+
+  const detach = useCallback(
+    async (knowledgeId: string): Promise<void> => {
+      if (!projectId) return;
+      const previous = queryClient.getQueryData<ChatProjectKnowledge[]>(key);
+      queryClient.setQueryData<ChatProjectKnowledge[]>(key, (items): ChatProjectKnowledge[] =>
+        (items ?? []).filter(item => item.id !== knowledgeId),
+      );
+      try {
+        await deleteV2ChatProjectKnowledge(projectId, knowledgeId);
+      } catch (error) {
+        queryClient.setQueryData(key, previous);
+        throw error;
+      }
+    },
+    [projectId, queryClient, key],
+  );
+
+  return {
+    knowledge: result.data ?? NO_KNOWLEDGE,
+    isLoading: result.isLoading,
+    isError: result.isError,
+    detach,
+  };
+}
 
 /**
  * Project writes that show instantly and roll back on failure.
