@@ -7,8 +7,6 @@
  * Pure so it can be tested in node.
  */
 
-import { CallOrigin, ChannelScopeType } from '@xyne/shared';
-
 import { isAiAgentIdentity } from './callIdentity';
 
 /** Mirrors `RingStatus` in @xyne/shared. Absent from older shared pins, hence strings. */
@@ -124,15 +122,4 @@ export function resolveCallTitle(params: {
   const names = formatParticipantNames(params.otherNames);
   if (names) return names;
   return params.fallback ?? 'Call';
-}
-
-/**
- * A call started from a public channel: it rings nobody and never pops the incoming-call screen,
- * so its invitees read "Invited" rather than a ring status (dashboard rule).
- */
-export function isBroadcastChannelCall(
-  channelScope: string | null | undefined,
-  callOrigin: string | null | undefined,
-): boolean {
-  return channelScope === ChannelScopeType.DEFAULT && callOrigin === CallOrigin.CHANNEL;
 }
