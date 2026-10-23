@@ -333,7 +333,9 @@ export class SearchService {
       // Words like "today", "latest" or "last week" stay in the searched text. They used to be
       // cut out and turned into a time range, but `personalized` never reads that range and
       // chat_message's `default_native` stopped reading it, so the words were simply lost.
-      // An explicit date filter (createdRange) still filters by time.
+      // An explicit date filter (createdRange) still filters by time. The time inputs
+      // (time_from, time_to, freshness_weight, filtering_weight) are no longer sent; Vespa
+      // reads an unsent input as 0, which gives every time bonus 0.
       const searchQuery = isExactMatch ? rawTrimmedQuery.slice(1, -1).trim() : query;
 
       // Get schemas for the apps
@@ -448,11 +450,6 @@ export class SearchService {
           timeout: '30s',
           ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
           ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
-          // No time range: time_from 0 sends every profile down its no-range branch.
-          "input.query(freshness_weight)": 0.0,
-          "input.query(filtering_weight)": 0.0,
-          "input.query(time_from)": 0,
-          "input.query(time_to)": Date.now(),
           "ranking.listFeatures": true,
           "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
           tracelevel: 0,
