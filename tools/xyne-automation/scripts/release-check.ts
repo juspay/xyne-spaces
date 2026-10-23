@@ -4,6 +4,7 @@
 // ran it — the evidence to attach to the release ticket before promoting to preprod/prod.
 //
 // Usage: pnpm release:check [--modules=chat,calls] [--parallel=N] [--allow-dirty]
+// In CI: Actions → "Release check" → Run workflow (.github/workflows/release-check.yml).
 import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -75,7 +76,8 @@ if (unknown.length > 0) {
 const branch = git('branch', '--show-current') || '(detached HEAD)';
 // Same 9-char hash the runner uses to name its artifact folder.
 const commit = git('rev-parse', '--short=9', 'HEAD');
-const runBy = git('config', 'user.name') || 'unknown';
+// In GitHub Actions, the person who clicked "Run workflow" (CI has no git user).
+const runBy = process.env.GITHUB_ACTOR || git('config', 'user.name') || 'unknown';
 const uncommittedFiles = gitRaw('status', '--porcelain', '--untracked-files=no')
   .split('\n')
   .filter(Boolean)

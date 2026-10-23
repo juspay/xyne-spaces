@@ -23,6 +23,13 @@ export interface RecordDeliveredArtifactsArgs {
   allowDesignShare?: boolean;
 }
 
+export interface DeliveredDesignShare {
+  designShareUrl: string | null;
+  designShareId: string | null;
+}
+
+const NO_DESIGN_SHARE: DeliveredDesignShare = { designShareUrl: null, designShareId: null };
+
 export function deliveredDesignCommand(task: string | null | undefined): string | null {
   return task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1] ?? null;
 }
@@ -35,9 +42,9 @@ function findDeliveredHtml(attachments: DeliveredAttachment[]): DeliveredAttachm
 
 export async function recordDeliveredArtifacts(
   args: RecordDeliveredArtifactsArgs,
-): Promise<{ designShareUrl: string | null }> {
+): Promise<DeliveredDesignShare> {
   const { conversationId, userId, orgId, messageId, task, attachments } = args;
-  if (!conversationId || !userId || attachments.length === 0) return { designShareUrl: null };
+  if (!conversationId || !userId || attachments.length === 0) return NO_DESIGN_SHARE;
 
   const isSpec = /^\/spec(?:\s|$)/.test(task?.trimStart().toLowerCase() ?? "");
   const isReview = /^\/review(?:\s|$)/.test(task?.trimStart().toLowerCase() ?? "");
@@ -102,9 +109,9 @@ export async function recordDeliveredArtifacts(
   }
 
   const command = deliveredDesignCommand(task);
-  if (!command || !orgId || args.allowDesignShare === false) return { designShareUrl: null };
+  if (!command || !orgId || args.allowDesignShare === false) return NO_DESIGN_SHARE;
   const html = findDeliveredHtml(attachments);
-  if (!html) return { designShareUrl: null };
+  if (!html) return NO_DESIGN_SHARE;
 
   try {
     const title = html.originalFilename.replace(/\.html?$/i, "");
@@ -128,9 +135,9 @@ export async function recordDeliveredArtifacts(
       },
     );
     log.info(`[delivered-artifacts] design share ready shareId=${share.id} conv=${conversationId}`);
-    return { designShareUrl: link };
+    return { designShareUrl: link, designShareId: share.id };
   } catch (err) {
     log.warn(`[delivered-artifacts] design share publish failed (non-fatal): ${errMsg(err)}`);
-    return { designShareUrl: null };
+    return NO_DESIGN_SHARE;
   }
 }

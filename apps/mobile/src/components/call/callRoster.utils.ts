@@ -18,6 +18,8 @@ export interface RosterParticipantLike {
   joinedAt?: number | null;
   /** RingStatus written by the backend: CALLING → RINGING (device confirmed) or BUSY. */
   ringStatus?: string | null;
+  /** CallRingNotification in @xyne/shared: DISABLED when a scheduled call was set not to ring. */
+  ringNotification?: string | null;
   displayName?: string | null;
   isExternal?: boolean | null;
 }
@@ -52,8 +54,8 @@ export function getRingStatusLabel(ringStatus: RingStatusValue): string {
 
 /**
  * Invitees still being rung: INVITED, never joined, not already in the LiveKit room (the DB lags
- * the join by a webhook round-trip), and not the viewer. External email invitees are never rung,
- * so they don't get a tile.
+ * the join by a webhook round-trip), and not the viewer. External email invitees, and invitees of a
+ * call scheduled not to ring, are never rung, so they don't get a tile.
  *
  * Callers must only use this for 1:1 DM calls — the dashboard shows ring status in the people list
  * everywhere else.
@@ -71,6 +73,7 @@ export function getRingingInvitees(params: {
         p.response === 'INVITED' &&
         (p.joinedAt === null || p.joinedAt === undefined) &&
         p.isExternal !== true &&
+        p.ringNotification !== 'DISABLED' &&
         p.userId !== currentUserId &&
         !isAiAgentIdentity(p.userId) &&
         !connectedIdentities.has(p.userId),

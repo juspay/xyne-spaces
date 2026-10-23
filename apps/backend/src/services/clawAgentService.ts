@@ -1837,6 +1837,63 @@ export async function reorderClawChatProjects(
   );
 }
 
+const DESIGN_SHARES_PATH = '/claw/api/v1/design-shares';
+
+export interface ClawDesignShare {
+  id: string;
+  title: string;
+  attachmentId: string;
+  conversationId: string;
+  sharePath: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  viewCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClawDesignShareInput {
+  attachmentId: string;
+  conversationId: string;
+  title?: string;
+}
+
+export async function publishClawDesignShare(
+  req: { headers?: { cookie?: string }; userId: string },
+  input: ClawDesignShareInput
+): Promise<{ success: boolean; data: ClawDesignShare }> {
+  return clawProjectRequest(
+    req,
+    DESIGN_SHARES_PATH,
+    { method: 'POST', body: { ...input, expiresInDays: null } },
+    'Failed to publish design'
+  );
+}
+
+export async function getClawDesignShare(
+  req: { headers?: { cookie?: string }; userId: string },
+  conversationId: string
+): Promise<{ success: boolean; data: ClawDesignShare | null }> {
+  return clawProjectRequest(
+    req,
+    `${DESIGN_SHARES_PATH}/conversation/${encodeURIComponent(conversationId)}`,
+    { method: 'GET' },
+    'Failed to load design share'
+  );
+}
+
+export async function revokeClawDesignShare(
+  req: { headers?: { cookie?: string }; userId: string },
+  shareId: string
+): Promise<{ success: boolean }> {
+  return clawProjectRequest(
+    req,
+    `${DESIGN_SHARES_PATH}/${encodeURIComponent(shareId)}`,
+    { method: 'DELETE' },
+    'Failed to revoke design share'
+  );
+}
+
 /**
  * Ceiling for the debug-bundle proxy hop. claw-auth already bounds its own hop
  * to xyne-claw at 45s, so anything slower than this is a stalled connection,

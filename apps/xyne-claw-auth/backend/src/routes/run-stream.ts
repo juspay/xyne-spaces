@@ -33,6 +33,7 @@ import { gcsService } from "../services/storageService.js";
 import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
+import { personalProviderDispatch, resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcHubContextForUser, resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -855,16 +856,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ? rawThinkingLevel
       : undefined;
     const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
-    const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
-    const resolvedProviderConfigs =
-      resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
-        ? resolvedProviders.providerConfigs
-        : (providerConfigs as Record<string, unknown> | undefined);
-    const resolvedProviderOrder =
-      resolvedProviders && resolvedProviders.providerOrder.length > 0
-        ? resolvedProviders.providerOrder
-        : undefined;
     const pinnedOverride = (providerOverride ?? undefined) as { provider?: string; model?: string } | undefined;
     const harnessPinned = pinnedOverride?.provider === "local-harness";
     const serverPinned =
@@ -873,9 +864,37 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       Boolean(pinnedOverride?.model);
     const forwardedProviderOverride = harnessPinned ? undefined : providerOverride;
 
-    const rawPersonalProvider = CONFIG.localHarnessEnabled
-      ? (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider
-      : undefined;
+    const personalConfigProvider = (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider;
+    const rawPersonalProvider = CONFIG.localHarnessEnabled ? personalConfigProvider : undefined;
+    const personalDispatch =
+      !harnessPinned &&
+      !serverPinned &&
+      personalConfigProvider &&
+      personalConfigProvider !== "spaces" &&
+      !isLocalHarnessProvider(personalConfigProvider)
+        ? personalProviderDispatch(
+            await resolveProvidersForDispatch({
+              targetUserId: userId,
+              agent: { id: agentRow.id, orgId, slug },
+              agentRow,
+              speed: effectiveSpeed,
+            }).catch(() => null),
+          )
+        : undefined;
+    const resolvedProviders = personalDispatch
+      ? null
+      : await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
+    const resolvedProvider = personalDispatch?.provider ?? resolvedProviders?.provider ?? (provider as string | undefined);
+    const resolvedProviderConfigs =
+      personalDispatch?.providerConfigs ??
+      (resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
+        ? resolvedProviders.providerConfigs
+        : (providerConfigs as Record<string, unknown> | undefined));
+    const resolvedProviderOrder =
+      personalDispatch?.providerOrder ??
+      (resolvedProviders && resolvedProviders.providerOrder.length > 0
+        ? resolvedProviders.providerOrder
+        : undefined);
     const rawAgentProviderOrder = (agentRow.config as Record<string, unknown> | null)?.["providerOrder"];
     const agentConfiguredProviderOrder: string[] = Array.isArray(rawAgentProviderOrder)
       ? rawAgentProviderOrder.filter((p): p is string => typeof p === "string")

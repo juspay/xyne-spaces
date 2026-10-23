@@ -17,6 +17,7 @@ import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { redisService } from "../redis.js";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
@@ -895,7 +896,20 @@ export async function callTool(
   return { content: JSON.stringify(result) };
 }
 
+export const MCP_EVICT_CHANNEL = "claw:mcp:evict";
+
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
+  try {
+    await evictSessionLocal(userId, serverType, agentSlug);
+  } finally {
+    await redisService
+      .getConnection()
+      .publish(MCP_EVICT_CHANNEL, JSON.stringify({ userId, serverType, ...(agentSlug ? { agentSlug } : {}) }))
+      .then(() => {}, () => {});
+  }
+}
+
+export async function evictSessionLocal(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
   // Match the base key AND every scoping suffix — ":ws:…" (Spaces workspace),
   // ":team:…" (Slack), "::app" (app lane) and their combinations — because a
