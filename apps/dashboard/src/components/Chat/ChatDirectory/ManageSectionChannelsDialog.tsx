@@ -75,11 +75,14 @@ export const ManageSectionChannelsDialog = ({
       ? channels
       : channels.filter(c => getDMSearchableName(c, userMap, userID).toLowerCase().includes(q));
     return [...base].sort((a, b) => {
-      const aSelected = selected.has(a.id) ? 0 : 1;
-      const bSelected = selected.has(b.id) ? 0 : 1;
-      return aSelected - bSelected;
+      // Sort by the section's membership when the dialog opened, not the live
+      // selection, so toggling a checkbox doesn't reorder rows (and appear to
+      // jump the scroll position back to the top).
+      const aInSection = original.has(a.id) ? 0 : 1;
+      const bInSection = original.has(b.id) ? 0 : 1;
+      return aInSection - bInSection;
     });
-  }, [channels, filter, selected, userMap, userID]);
+  }, [channels, filter, original, userMap, userID]);
 
   const allSelected = channels.length > 0 && channels.every(c => selected.has(c.id));
 
