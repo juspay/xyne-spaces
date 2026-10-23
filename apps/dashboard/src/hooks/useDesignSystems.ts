@@ -14,8 +14,12 @@ import {
 
 const DESIGN_SYSTEMS_KEY = ['xyne-ai-design-systems'] as const;
 
+/** Prefix shared by every conversation's pin query, so all of them can be
+ *  refreshed at once when a system is renamed or deleted. */
+const CONVERSATION_DESIGN_SYSTEM_KEY = ['xyne-ai-conversation-design-system'] as const;
+
 export const conversationDesignSystemKey = (conversationId: string): readonly string[] => [
-  'xyne-ai-conversation-design-system',
+  ...CONVERSATION_DESIGN_SYSTEM_KEY,
   conversationId,
 ];
 
@@ -39,8 +43,12 @@ export function useDesignSystems({ enabled = true }: { enabled?: boolean } = {})
 export function useDesignSystemActions() {
   const queryClient = useQueryClient();
 
+  // The per-chat pin is cached separately, one query per conversation, and it
+  // holds its own copy of the system's name. Refreshing only the list left a
+  // composer chip naming a system that had just been renamed — or deleted.
   const invalidate = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: DESIGN_SYSTEMS_KEY });
+    void queryClient.invalidateQueries({ queryKey: CONVERSATION_DESIGN_SYSTEM_KEY });
   }, [queryClient]);
 
   const remove = useMutation({

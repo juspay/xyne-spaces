@@ -17,7 +17,7 @@ function Swatch({ color }: { color: TokenColor }): ReactElement {
     <div className='min-w-0'>
       <div
         className='h-14 w-full rounded-md border border-border'
-        style={{ background: color.hex ?? color.value }}
+        style={{ backgroundColor: color.hex ?? color.value }}
         aria-hidden
       />
       <div className='mt-1.5 truncate text-[11px] font-medium text-foreground'>
@@ -40,7 +40,7 @@ function SampleComponents({ tokens }: { tokens: DesignTokens }): ReactElement {
   const fontStack = tokens.fonts[0]?.stack ?? 'inherit';
 
   const frame: CSSProperties = {
-    background: surface,
+    backgroundColor: surface,
     color: text,
     borderColor: border,
     borderRadius: radius,
@@ -52,7 +52,7 @@ function SampleComponents({ tokens }: { tokens: DesignTokens }): ReactElement {
       <div className='flex flex-wrap items-center gap-3'>
         <button
           type='button'
-          style={{ background: primary, borderRadius: radius, color: surface }}
+          style={{ backgroundColor: primary, borderRadius: radius, color: surface }}
           className='px-3 py-1.5 text-sm font-medium'
           data-track-category='XyneAI'
           data-track-name='DESIGN_SYSTEM_SPECIMEN_SAMPLE'
@@ -76,7 +76,7 @@ function SampleComponents({ tokens }: { tokens: DesignTokens }): ReactElement {
         aria-label='Specimen input'
         data-track-category='XyneAI'
         data-track-name='DESIGN_SYSTEM_SPECIMEN_SAMPLE'
-        style={{ borderColor: border, borderRadius: radius, color: text, background: surface }}
+        style={{ borderColor: border, borderRadius: radius, color: text, backgroundColor: surface }}
         className='mt-3 w-full border px-3 py-1.5 text-sm'
       />
 
