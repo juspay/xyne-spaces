@@ -5,7 +5,7 @@
  */
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
-import { CallOrigin, CallStatus, InvitationResponse } from '@xyne/shared';
+import { CallOrigin, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -123,9 +123,9 @@ export function hasPreviewParticipantJoined(
 
 /** Total participants: live rows for an active call, the denormalized count otherwise. */
 export function getCallParticipantCount(call: {
-  status?: string | null;
-  participantCount?: number | null;
-  participants?: readonly unknown[] | null;
+  status?: string | null | undefined;
+  participantCount?: number | null | undefined;
+  participants?: readonly unknown[] | null | undefined;
 }): number {
   if (call.status === CallStatus.ACTIVE) {
     return call.participants?.length ?? call.participantCount ?? 0;
@@ -216,4 +216,46 @@ export function isScheduledCallJoinable(call: {
   if (call.status === CallStatus.ACTIVE) return true;
 
   return Date.now() >= call.startsAt;
+}
+
+type UpcomingCall = { status: string; startsAt?: number | null };
+
+/**
+ * A call keeps status SCHEDULED after it starts (people can rejoin), so the start time decides.
+ * Not `startedAt`: that column is required on every call row, so it is set before the call starts.
+ */
+export function isScheduledCallUpcoming(call: UpcomingCall): boolean {
+  if (call.status !== CallStatus.SCHEDULED) return false;
+  return !call.startsAt || call.startsAt > Date.now();
+}
+
+export function isScheduledCallManageable(
+  call: UpcomingCall & { organizerId?: string | null; createdByUserId: string },
+  currentUserId: string | undefined,
+): boolean {
+  if (!currentUserId || !isScheduledCallUpcoming(call)) return false;
+
+  const organizerUserId = call.organizerId ?? call.createdByUserId;
+  return organizerUserId === currentUserId;
+}
+
+export function canEditScheduledCallParticipants(
+  call: UpcomingCall & {
+    organizerId?: string | null;
+    createdByUserId: string;
+    channelId?: string | null;
+  },
+  currentUserId: string | undefined,
+  visibleChannels: readonly { id: string; scopeType: ChannelScopeType }[],
+): boolean {
+  if (!currentUserId || !isScheduledCallUpcoming(call) || !call.channelId) return false;
+  if (isScheduledCallManageable(call, currentUserId)) return false;
+  if (visibleChannels.length === 0) return false;
+
+  const channel = visibleChannels.find(c => c.id === call.channelId);
+  return (
+    !channel ||
+    channel.scopeType === ChannelScopeType.DM ||
+    channel.scopeType === ChannelScopeType.GROUP_DM
+  );
 }

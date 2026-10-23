@@ -13,7 +13,13 @@ import { useRegisterTabScrollToTop } from '@/src/hooks/useRegisterTabScrollToTop
 import { useTabHeaderScrollY } from '@/src/components/tab-pager/tab-pager-context';
 import { useTabPageFocusEffect, useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
 import { CallsFab } from '@/src/components/call/calls-fab';
-import { InstantCallSheet } from '@/src/components/call/instant-call-sheet';
+import { useMountWhileOpen } from '@/src/features/global-search/hooks/use-mount-while-open';
+import { PeopleSheet } from '@/src/features/schedule-call/components/PeopleSheet';
+import {
+  NO_PARTICIPANTS,
+  type ScheduleCallParticipants,
+} from '@/src/features/schedule-call/hooks/useScheduleCallForm';
+import { useInstantCall } from '@/src/hooks/useInstantCall';
 import { useZero } from '@/src/hooks/useZero';
 import { mutators } from '@/src/zero/mutators';
 import { useDeferredLiveData } from '@/src/hooks/useDeferredLiveData';
@@ -212,7 +218,6 @@ const CallsScreen = (): ReactElement => {
     }, [scrollListToTop]),
   );
   const zero = useZero();
-  const router = useRouter();
   const isFocused = useTabPageIsFocused();
   const [hasFirstLayout, setHasFirstLayout] = useState(false);
   const liveDataEnabled = useDeferredLiveData({
@@ -244,7 +249,18 @@ const CallsScreen = (): ReactElement => {
   const [selectedCall, setSelectedCall] = useState<CallDisplayData | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isInstantCallOpen, setIsInstantCallOpen] = useState(false);
-  const [shouldMountCallSheets, setShouldMountCallSheets] = useState(false);
+  const router = useRouter();
+  // The Instant Call sheet exists only while it is open or closing. Left mounted it keeps a full
+  // fullscreen sheet (its user list and channel subscriptions) alive under the call list,
+  // re-rendering it on every user/channel update and republishing it to the portal host on every
+  // render of this screen, which is what made this list laggy.
+  const instantCallSheet = useMountWhileOpen(
+    isInstantCallOpen,
+    useCallback((): void => setIsInstantCallOpen(false), []),
+  );
+  const { startCall } = useInstantCall();
+  // Who Start call was tapped for; the call begins once the sheet has finished closing.
+  const pendingInstantCall = useRef<ScheduleCallParticipants | null>(null);
   const [shouldLoadRemoteAvatars, setShouldLoadRemoteAvatars] = useState(false);
 
   const handleLayout = useCallback(() => {
@@ -265,21 +281,16 @@ const CallsScreen = (): ReactElement => {
   }, [isFocused, liveDataEnabled, zero]);
 
   useEffect(() => {
-    if (!isFocused || (shouldMountCallSheets && shouldLoadRemoteAvatars)) {
+    if (!isFocused || shouldLoadRemoteAvatars) {
       return;
     }
 
     const task = InteractionManager.runAfterInteractions(() => {
-      if (!shouldMountCallSheets) {
-        setShouldMountCallSheets(true);
-      }
-      if (!shouldLoadRemoteAvatars) {
-        setShouldLoadRemoteAvatars(true);
-      }
+      setShouldLoadRemoteAvatars(true);
     });
 
     return (): void => task.cancel();
-  }, [isFocused, shouldLoadRemoteAvatars, shouldMountCallSheets]);
+  }, [isFocused, shouldLoadRemoteAvatars]);
 
   // Row press: a finished call opens the full call detail screen (summary,
   // timeline, transcript); live and scheduled calls keep the quick-actions sheet.
@@ -295,6 +306,23 @@ const CallsScreen = (): ReactElement => {
     },
     [router],
   );
+  // Stable refs so the memoised CallsFab (and its Portal push) skips live-data re-renders.
+  const openInstantCall = useCallback(() => setIsInstantCallOpen(true), []);
+  const applyInstantCall = useCallback((picked: ScheduleCallParticipants) => {
+    pendingInstantCall.current = picked;
+  }, []);
+  // Once the close animation has finished: unmount, then start the call if one was confirmed.
+  const { onDismiss: dismissInstantCall } = instantCallSheet.sheetProps;
+  const onInstantCallDismiss = useCallback(() => {
+    dismissInstantCall();
+    const picked = pendingInstantCall.current;
+    pendingInstantCall.current = null;
+    if (picked) {
+      startCall(picked);
+      router.push('/(protected)/native-call');
+    }
+  }, [dismissInstantCall, router, startCall]);
+  const openScheduleCall = useCallback(() => router.push('/(protected)/schedule-call'), [router]);
 
   // Handler for avatar press - same destination as the row
   const handleAvatarPress = handleCallPress;
@@ -432,13 +460,21 @@ const CallsScreen = (): ReactElement => {
 
       {isFocused && (
         <CallsFab
-          onPress={() => setIsInstantCallOpen(true)}
+          onStartCall={openInstantCall}
+          onScheduleCall={openScheduleCall}
           isHidden={isInstantCallOpen || isDetailsOpen}
         />
       )}
 
-      {(shouldMountCallSheets || isInstantCallOpen) && (
-        <InstantCallSheet isOpen={isInstantCallOpen} onClose={() => setIsInstantCallOpen(false)} />
+      {instantCallSheet.shouldRender && (
+        <PeopleSheet
+          {...instantCallSheet.sheetProps}
+          onDismiss={onInstantCallDismiss}
+          participants={NO_PARTICIPANTS}
+          onApply={applyInstantCall}
+          title='Start an instant call'
+          confirmLabel='Start call'
+        />
       )}
 
       {selectedCall ? (
