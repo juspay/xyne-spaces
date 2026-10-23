@@ -14,7 +14,6 @@ RUN cargo build --release --locked --bin server
 FROM ${BASE_REGISTRY}/debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && apt-get install -y --only-upgrade ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin streamgres \
     && mkdir -p /app /var/lib/streamgres /var/lib/xyne-sync \
