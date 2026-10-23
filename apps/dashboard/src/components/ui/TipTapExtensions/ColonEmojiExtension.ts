@@ -3,6 +3,7 @@ import { Extension, InputRule } from '@tiptap/core';
 import { Plugin } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { findCustomEmoji, findUnicodeEmoji } from '../../../utils/emojiLookup';
+import { recordEmojiUse } from '../../../utils/frequentEmojis';
 import { unifiedToNative } from '../../../utils/emojiSearch';
 import type { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
 
@@ -19,6 +20,15 @@ function createInlineEmojiNode(emojiName: string, customEmoji: EmojiPickerEmoji)
 }
 
 /**
+ * The token the frequent-emoji store tracks this insert under — `custom:<emojiId>:<name>`
+ * with the emoji's first alias (the same token reactions record), so aliases typed by the
+ * user still count as the same emoji.
+ */
+function customUsageToken(customEmoji: EmojiPickerEmoji, typedName: string): string {
+  return `custom:${customEmoji.id}:${customEmoji.names[0] ?? typedName}`;
+}
+
+/**
  * Insert an emoji (custom or unicode) into the editor
  * Returns true if emoji was inserted, false otherwise
  */
@@ -28,6 +38,7 @@ function insertEmoji(
   customEmojis: EmojiPickerEmoji[],
   startPos: number,
   endPos: number,
+  recordUsage?: (token: string) => void,
 ): boolean {
   const customEmoji = findCustomEmoji(emojiName, customEmojis);
 
@@ -39,6 +50,7 @@ function insertEmoji(
           .delete(startPos, endPos)
           .insert(startPos, inlineEmoji.create(createInlineEmojiNode(emojiName, customEmoji))),
       );
+      recordUsage?.(customUsageToken(customEmoji, emojiName));
       return true;
     }
   }
@@ -47,6 +59,7 @@ function insertEmoji(
   if (unicodeEmoji) {
     const emojiChar = unifiedToNative(unicodeEmoji.unified);
     view.dispatch(view.state.tr.delete(startPos, endPos).insertText(emojiChar, startPos));
+    recordUsage?.(emojiChar);
     return true;
   }
 
@@ -55,6 +68,7 @@ function insertEmoji(
 
 export const ColonEmojiExtension = Extension.create<{
   getCustomEmojis: () => EmojiPickerEmoji[];
+  getFrequentEmojiScope: () => string;
 }>({
   name: 'colonEmoji',
 
@@ -77,6 +91,10 @@ export const ColonEmojiExtension = Extension.create<{
                 range.to,
                 inlineEmoji.create(createInlineEmojiNode(emojiName, customEmoji)),
               );
+              recordEmojiUse(
+                this.options.getFrequentEmojiScope(),
+                customUsageToken(customEmoji, emojiName),
+              );
             }
             return;
           }
@@ -85,6 +103,7 @@ export const ColonEmojiExtension = Extension.create<{
           if (unicodeEmoji) {
             const emojiChar = unifiedToNative(unicodeEmoji.unified);
             state.tr.insertText(emojiChar, range.from, range.to);
+            recordEmojiUse(this.options.getFrequentEmojiScope(), emojiChar);
           }
         },
       }),
@@ -93,6 +112,7 @@ export const ColonEmojiExtension = Extension.create<{
 
   addProseMirrorPlugins() {
     const getCustomEmojis = this.options.getCustomEmojis;
+    const getFrequentEmojiScope = this.options.getFrequentEmojiScope;
 
     return [
       new Plugin({
@@ -110,7 +130,9 @@ export const ColonEmojiExtension = Extension.create<{
             const { state } = view;
             const { from, to } = state.selection;
 
-            return insertEmoji(view, emojiName, getCustomEmojis(), from, to);
+            return insertEmoji(view, emojiName, getCustomEmojis(), from, to, token =>
+              recordEmojiUse(getFrequentEmojiScope(), token),
+            );
           },
         },
       }),
