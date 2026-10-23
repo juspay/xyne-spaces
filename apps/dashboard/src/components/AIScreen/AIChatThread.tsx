@@ -106,6 +106,11 @@ import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import {
+  DeliveredArtifactChip,
+  splitDeliveredAttachments,
+  useDeliveredArtifacts,
+} from './Workspace/deliveredArtifacts';
 import { FlowScreenManager } from '../flowUI/FlowScreenManager';
 import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
 import {
@@ -1023,10 +1028,16 @@ function ChatMessageBubble({
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
   // Everything an assistant message attached EXCEPT its React artifacts, which
   // MessageReactArtifacts renders as the app itself.
-  const botAttachments = useMemo(
-    () => (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
-    [message.attachments],
-  );
+  const deliveredArtifacts = useDeliveredArtifacts();
+  const { botAttachments, botArtifacts } = useMemo(() => {
+    if (isUser) return { botAttachments: [], botArtifacts: [] };
+    const split = splitDeliveredAttachments(
+      message.id,
+      (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
+      deliveredArtifacts,
+    );
+    return { botAttachments: split.attachments, botArtifacts: split.artifacts };
+  }, [isUser, message.id, message.attachments, deliveredArtifacts]);
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   const passage = isUser ? message.pageSelection : undefined;
@@ -1324,6 +1335,18 @@ function ChatMessageBubble({
               row under every generated app — the raw bytes of the thing sitting
               directly above it. `toArtifactRef` is the same predicate that
               component selects on, so the two can never disagree. */}
+          {!isUser && botArtifacts.length > 0 && deliveredArtifacts && (
+            <div className='mt-2 space-y-2'>
+              {botArtifacts.map(artifact => (
+                <DeliveredArtifactChip
+                  key={artifact.id}
+                  artifact={artifact}
+                  onOpen={deliveredArtifacts.open}
+                />
+              ))}
+            </div>
+          )}
+
           {!isUser && botAttachments.length > 0 && (
             <div className='mt-2 space-y-2'>
               {botAttachments.map((attachment, index) => (

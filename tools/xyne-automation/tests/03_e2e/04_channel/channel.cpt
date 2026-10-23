@@ -5,7 +5,7 @@
 * waiting for network to be idle
 * waiting for "[data-testid='chat-list-loading']" to disappear
 
-# Creating channel <channelAlias> for user <userAlias> in project <projectAlias>
+# Opening new channel form for channel <channelAlias> for user <userAlias> in project <projectAlias>
 * ensuring project <projectAlias> exists in fixture for user <userAlias>
 * navigating via sidebar to "chat"
 * waiting for "[data-testid='create-new-channel']" to appear
@@ -15,9 +15,36 @@
 * clicking on "[data-testid='project-select-trigger']"
 * selecting stored project <projectAlias> for user <userAlias> in dropdown
 * typing stored user <userAlias> channel <channelAlias> field "name" in "[data-testid='channel-name-input']"
+
+# Submitting new channel form for channel <channelAlias> for user <userAlias>
 * waiting for "[data-testid='create-channel-button']" to be enabled
 * clicking on "[data-testid='create-channel-button']"
 * waiting for "[data-testid='add-channel-dialog']" to disappear
 * capturing created channel details for user <userAlias> channel <channelAlias>
 * clicking on selector "[role='dialog'] button" with text "Cancel" if visible
 * waiting for "[data-testid='channel-info-trigger']" to appear
+
+# Creating channel <channelAlias> for user <userAlias> in project <projectAlias>
+* Opening new channel form for channel <channelAlias> for user <userAlias> in project <projectAlias>
+* Submitting new channel form for channel <channelAlias> for user <userAlias>
+
+# Creating public channel <channelAlias> for user <userAlias> in project <projectAlias>
+* Opening new channel form for channel <channelAlias> for user <userAlias> in project <projectAlias>
+* clicking on "[data-testid='channel-visibility-public'] [role='radio']"
+* Submitting new channel form for channel <channelAlias> for user <userAlias>
+
+# Adding user <userAlias> to the open channel
+* clicking on "[data-testid='channel-info-trigger']"
+* clicking on "[data-testid='add-people-button']"
+* typing stored user <userAlias> field "email" in "[data-testid='user-search-input']"
+* clicking on stored user <userAlias> field "name" in "[data-testid='user-search-results']"
+* clicking on "[data-testid='add-people-submit']"
+* waiting for zero sync to settle fast
+* clicking on "button[aria-label='Close channel info']" if visible
+* waiting for "button[aria-label='Close channel info']" to disappear
+
+# Searching Browse channels for channel <channelAlias> of user <userAlias>
+* Navigating to chat
+* clicking on "[data-testid='browse-channels-button']"
+* waiting for "[data-testid='browse-channels-page']" to appear
+* typing stored user <userAlias> channel <channelAlias> field "name" in "[data-testid='browse-channels-search']"
