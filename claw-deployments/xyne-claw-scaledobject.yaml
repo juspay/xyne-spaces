@@ -35,8 +35,6 @@ spec:
   # => 15 * RUN_QUEUE_CONCURRENCY(40) = 600 gives ample headroom.
   minReplicaCount: 5
   maxReplicaCount: 15
-  pollingInterval: 15
-  cooldownPeriod: 300
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
