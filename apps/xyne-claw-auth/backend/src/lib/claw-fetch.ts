@@ -1,5 +1,6 @@
 import { CONFIG } from "../config.js";
 import { streamDispatcher } from "./consume-claw-stream.js";
+import { resolveClawRunBaseUrl } from "./claw-run-target.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("run");
@@ -34,17 +35,23 @@ function isConnectionRefusedClassError(err: unknown): boolean {
   return codes.includes("ECONNREFUSED") || codes.includes("EAI_AGAIN");
 }
 
-export async function fetchClawRunWithRetry(init: RequestInit, label: string): Promise<globalThis.Response> {
+export async function fetchClawRunWithRetry(
+  init: RequestInit,
+  label: string,
+  conversationId?: string,
+): Promise<globalThis.Response> {
+  let base = (await resolveClawRunBaseUrl(conversationId)) ?? CONFIG.xyneClawUrl;
   let retried = false;
   for (;;) {
     try {
-      const response = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+      const response = await fetch(`${base}/run`, {
         ...init,
         // `dispatcher` is an undici extension not in the DOM RequestInit type.
         dispatcher: streamDispatcher,
       } as unknown as RequestInit);
       if (response.status === 503 && !retried) {
         retried = true;
+        base = CONFIG.xyneClawUrl;
         log.warn(`[run] proxy: retrying claw /run once after 503 (${label})`);
         await sleep(RUN_RETRY_DELAY_MS);
         continue;
@@ -53,6 +60,7 @@ export async function fetchClawRunWithRetry(init: RequestInit, label: string): P
     } catch (err) {
       if (!retried && isConnectionRefusedClassError(err)) {
         retried = true;
+        base = CONFIG.xyneClawUrl;
         log.warn(
           `[run] proxy: retrying claw /run once after ${collectErrorCodes(err).join(",") || "connection refusal"} (${label})`,
         );
