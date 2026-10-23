@@ -24,6 +24,7 @@ import type {
 
 const ERROR_BODY_LIMIT = 2048;
 const ERROR_TYPE = /^[a-z0-9_.-]{1,64}$/i;
+const OVER_OPTION_LIMIT = /\b\d+\.\.\d+ options, got \d+\b/;
 
 /** Hostname of the endpoint for logs, or undefined when the URL doesn't parse. */
 const hostOf = (url: string): string | undefined => {
@@ -58,7 +59,11 @@ const readErrorType = async (response: Response): Promise<string> => {
     return 'html';
   }
   try {
-    const type = (JSON.parse(text) as { error?: { type?: unknown } } | null)?.error?.type;
+    const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+    // Jev and XOR refuse a choice past their option limit with a plain message ("action: 2..64
+    // options, got 120"): named, so the log says why without carrying the body.
+    if (typeof error === 'string' && OVER_OPTION_LIMIT.test(error)) return 'options_over_limit';
+    const type = (error as { type?: unknown } | null | undefined)?.type;
     return typeof type === 'string' && ERROR_TYPE.test(type) ? type : 'unknown';
   } catch {
     return 'unknown';
