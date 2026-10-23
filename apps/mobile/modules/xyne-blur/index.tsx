@@ -16,6 +16,11 @@ export type BlurSurfaceProps = Omit<ViewProps, 'children'> & {
    * and the frost everywhere else.
    */
   material?: BlurMaterial;
+  /**
+   * Fades the surface in from its top edge, reaching full strength this far
+   * down. 0 or unset for none.
+   */
+  fadeHeight?: number;
   /** Corner radius of the shape the surface is clipped to. Glass bends light along it. */
   cornerRadius?: number;
   ref?: Ref<unknown>;

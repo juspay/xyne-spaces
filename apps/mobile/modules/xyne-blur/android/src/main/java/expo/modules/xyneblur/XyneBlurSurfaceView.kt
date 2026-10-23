@@ -3,9 +3,14 @@ package expo.modules.xyneblur
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
 import android.graphics.RuntimeShader
+import android.graphics.Shader
 import android.os.Build
 import android.util.Log
 import android.view.View
@@ -37,6 +42,9 @@ import kotlin.math.roundToInt
  *
  * Before API 31 there is no `RenderEffect`, and the surface is the solid
  * background colour under the tint.
+ *
+ * [fadeHeight] fades the whole surface in from its top edge, so the blur
+ * seems to build up towards the bottom (see [XyneBlurSpec.Fade]).
  *
  * [Material.GLASS] swaps the frost for liquid glass (see [XyneBlurSpec.Glass]):
  * a sharper capture, refracted through the surface's rounded rim by a shader,
@@ -88,6 +96,27 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
       field = value
       if (glass != null) invalidate()
     }
+
+  /**
+   * How far below the top edge the surface reaches full strength, in px; 0 for
+   * no fade. Above that it is masked by the fade gradient.
+   */
+  var fadeHeight: Float = 0f
+    set(value) {
+      if (field == value) return
+      field = value
+      fadePaint.shader =
+        if (value > 0f) {
+          LinearGradient(0f, 0f, 0f, value, FADE_COLORS, null, Shader.TileMode.CLAMP)
+        } else {
+          null
+        }
+      invalidate()
+    }
+
+  /** Keeps what is under it only as far as the gradient is opaque. */
+  private val fadePaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
 
   private val density = resources.displayMetrics.density
 
@@ -145,6 +174,10 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
     // children would otherwise let `drawColor` cover the whole screen.
     val saved = canvas.save()
     canvas.clipRect(0, 0, width, height)
+    // The fade: the surface goes into a layer of its own, so the mask
+    // drawn over it at the end cuts into the surface and nothing beneath.
+    val fading = fadePaint.shader != null
+    if (fading) canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
 
     val tint = Color.argb(
       (Color.alpha(tintColor) * tintAlpha).roundToInt().coerceIn(0, 255),
@@ -174,6 +207,7 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
       if (Color.alpha(tint) != 0) canvas.drawColor(tint)
     }
 
+    if (fading) canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fadePaint)
     canvas.restoreToCount(saved)
   }
 
@@ -395,6 +429,8 @@ class XyneBlurSurfaceView(context: Context, appContext: AppContext) : ExpoView(c
 
   private companion object {
     const val TAG = "XyneBlur"
+
+    val FADE_COLORS = XyneBlurSpec.Fade.ALPHAS.map { Color.argb(it, 0, 0, 0) }.toIntArray()
 
     fun isAncestor(candidate: View, view: View): Boolean {
       var parent = view.parent

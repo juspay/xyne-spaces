@@ -16,7 +16,7 @@ function isSharedRadius(value: number | SharedValue<number>): value is SharedVal
   return typeof value === 'object' && 'get' in value;
 }
 
-/** Half the edge stroke: how far Telegram moves each stroke's shape inward. */
+/** Half the edge stroke: how far each stroke's shape is moved inward. */
 const EDGE_HALF = SURFACE_EDGE_WIDTH / 2;
 
 /**
@@ -25,9 +25,9 @@ const EDGE_HALF = SURFACE_EDGE_WIDTH / 2;
  * elsewhere: the screen behind it shows through under the bar's own colour.
  * The glass follows the surface's corner radius, animated or not.
  *
- * Edged as Telegram edges its main tabs: no border, but a stroke along the top
- * and a darker one along the bottom, drawn inside the glass, plus a tight drop
- * shadow. See `EdgeStroke` for why the strokes fade out down the sides.
+ * Edged without a border: a stroke along the top and a darker one along the
+ * bottom, drawn inside the glass, plus a tight drop shadow. See `EdgeStroke`
+ * for why the strokes fade out down the sides.
  */
 export function GlassMaterial({
   children,
@@ -59,7 +59,7 @@ export function GlassMaterial({
         style={[StyleSheet.absoluteFill, styles.clip, radiusStyle]}
       >
         <ChromeBlur variant='bar' color={palette.background} cornerRadius={borderRadius} />
-        {/* Part of the glass, as in Telegram: under the tabs, over the blur. */}
+        {/* Part of the glass: under the tabs, over the blur. */}
         <EdgeStroke edge='top' color={palette.edgeTop} radiusStyle={edgeRadiusStyle} />
         <EdgeStroke edge='bottom' color={palette.edgeBottom} radiusStyle={edgeRadiusStyle} />
         {children}
@@ -75,8 +75,7 @@ type EdgeStrokeProps = {
 };
 
 /**
- * One of the glass's two edge strokes, drawn the way Telegram's
- * `BlurredBackgroundDrawable.drawStroke` draws it.
+ * One of the glass's two edge strokes.
  *
  * The stroke runs around the surface's rounded shape moved half a stroke
  * inward from its edge (down for the top stroke, up for the bottom one) and

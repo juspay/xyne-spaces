@@ -64,7 +64,7 @@ internal object XyneBlurSpec {
   }
 
   /**
-   * Liquid glass — Telegram's look for its floating tabs.
+   * Liquid glass, for the bar's floating pieces.
    *
    * Glass is clear, not frosted: what it shows is only lightly softened, and
    * the effect comes from the rim, which bends the content behind it the way a
@@ -135,6 +135,22 @@ internal object XyneBlurSpec {
         return half4(tint) + below * (1.0 - half(tint.a));
       }
     """
+  }
+
+  /**
+   * The fade along a surface's top edge, as behind the bottom bar.
+   *
+   * The surface is drawn whole, then masked: invisible at the top edge, full
+   * strength [fadeHeight] below it and all the way down from there. The blur is
+   * the same everywhere; only how much of it shows changes, which is what reads
+   * as a blur that builds up.
+   */
+  object Fade {
+    /**
+     * The mask: black at these alphas, evenly spaced from the top edge to the
+     * fade height, and opaque from there down.
+     */
+    val ALPHAS = intArrayOf(0x00, 0x60, 0xB0, 0xE8, 0xFF)
   }
 
   /** The radius to use on a copy shrunk by [downscale] for a given full-size radius. */

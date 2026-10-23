@@ -23,6 +23,10 @@ public final class XyneBlurModule: Module {
         view.setMaterial(material)
       }
 
+      Prop("fadeHeight") { (view: XyneBlurSurfaceView, height: Double?) in
+        view.setFadeHeight(CGFloat(max(height ?? 0, 0)))
+      }
+
       Prop("cornerRadius") { (view: XyneBlurSurfaceView, radius: Double?) in
         view.setCornerRadius(CGFloat(max(radius ?? 0, 0)))
       }

@@ -31,6 +31,10 @@ class XyneBlurModule : Module() {
       }
 
       // In dp, like every other length React hands over.
+      Prop("fadeHeight") { view: XyneBlurSurfaceView, height: Float? ->
+        view.fadeHeight = (height ?: 0f).coerceAtLeast(0f) * view.resources.displayMetrics.density
+      }
+
       Prop("cornerRadius") { view: XyneBlurSurfaceView, radius: Float? ->
         view.cornerRadius = (radius ?: 0f).coerceAtLeast(0f) * view.resources.displayMetrics.density
       }
