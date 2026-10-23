@@ -41,6 +41,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
+import { gatewayJobs } from '@/gateway';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
@@ -350,6 +351,11 @@ class WorkerService {
         logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
       }
 
+      if (appConfig.gatewayWorkerHandlers.length > 0) {
+        logger.info(`Starting gateway worker for ${appConfig.gatewayWorkerHandlers.join(', ')}...`);
+        gatewayJobs.startProcessing(appConfig.gatewayWorkerHandlers);
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         logger.info('Starting team intelligence worker...');
         await teamIntelligenceWorker.start();
@@ -575,6 +581,10 @@ class WorkerService {
         await googleCalendarSyncQueue.close();
         await microsoftCalendarSyncQueue.close();
         await callCalendarPushQueue.close();
+      }
+
+      if (appConfig.gatewayWorkerHandlers.length > 0) {
+        await gatewayJobs.close();
       }
 
       if (appConfig.enableTeamIntelligenceWorker) {

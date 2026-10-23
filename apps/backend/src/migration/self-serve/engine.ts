@@ -30,6 +30,7 @@ import {
 import type { SlackMessage } from '@/migration/slack/utils/extractConversation';
 import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
+import { buildSlackChannelSourceName } from '@/migration/slack/slackMigrationSource';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
 import { listChannelFiles } from '@/migration/slack/channelFiles';
 import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migration/slack/channelLinks';
@@ -723,7 +724,7 @@ export class SlackMigrationEngine {
 
     const ingestInput = {
       slackMessages: messages,
-      externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
+      externalSourceName: buildSlackChannelSourceName(channelId, isChannel),
       channelId,
       workspaceId: job.workspaceId,
       botToken: 'slack-migration-offline',

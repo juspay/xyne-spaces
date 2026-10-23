@@ -47,6 +47,17 @@ const SPAN_TAG = /<span[^<>]*>/g;
 const MENTION_TYPE = /data-mention-type=["'](user|group)["']/;
 const MENTION_USER_ID = /data-user-id=(["'])([^"']+)\1/;
 
+/** Swaps each user mention's id through `map`; a mention whose id maps to nothing stays as plain text. */
+export function mapUserMentionIds(htmlContent: string, map: (userId: string) => string | undefined): string {
+  if (!htmlContent.includes('data-mention-type')) return htmlContent;
+  return htmlContent.replace(SPAN_TAG, (tag: string) => {
+    if (MENTION_TYPE.exec(tag)?.[1] !== 'user') return tag;
+    const userId = MENTION_USER_ID.exec(tag)?.[2];
+    const mapped = userId ? map(userId) : undefined;
+    return mapped ? tag.replace(MENTION_USER_ID, `data-user-id="${mapped}"`) : '<span>';
+  });
+}
+
 /**
  * Guests may only mention people in the channel. Any other mention, and any group mention,
  * loses its mention tag and stays as plain text, so participants, notifications and

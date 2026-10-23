@@ -9,7 +9,7 @@ import {
   UserShield,
   UserThree,
 } from '@xyne/icons';
-import { Bot, Mail, UserCheck } from 'lucide-react';
+import { Bot, Mail, Plug, RefreshCw, UserCheck } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useUserGroups } from '../../hooks/useUserGroup';
@@ -45,6 +45,12 @@ const MailIcon: PikaIcon = ({ size, className }) => (
 );
 const GuestIcon: PikaIcon = ({ size, className }) => (
   <UserCheck size={typeof size === 'number' ? size : 16} className={className} />
+);
+const SyncIcon: PikaIcon = ({ size, className }) => (
+  <RefreshCw size={typeof size === 'number' ? size : 16} className={className} />
+);
+const PlugIcon: PikaIcon = ({ size, className }) => (
+  <Plug size={typeof size === 'number' ? size : 16} className={className} />
 );
 const AgentIcon: PikaIcon = ({ size, className }) => (
   <Bot size={typeof size === 'number' ? size : 16} className={className} />
@@ -115,6 +121,29 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
         label: 'Agent activity',
         description: 'What agents decided when nobody tagged them',
         icon: AgentIcon,
+      },
+    ],
+  },
+  {
+    key: 'slack-mirror',
+    label: 'Slack Mirror',
+    icon: SyncIcon,
+    description: 'Sync channels with Slack: review requests and manage the connection.',
+    showsWorkspaceName: true,
+    sections: [
+      {
+        key: 'slack-mirror-requests',
+        label: 'Requests',
+        fullLabel: 'Slack sync requests',
+        description: "Approve or reject channel admins' sync requests",
+        icon: SyncIcon,
+      },
+      {
+        key: 'slack-mirror-connection',
+        label: 'Connection',
+        fullLabel: 'Slack connection',
+        description: 'The Slack app this workspace syncs with',
+        icon: PlugIcon,
       },
     ],
   },

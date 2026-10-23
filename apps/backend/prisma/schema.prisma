@@ -2944,6 +2944,14 @@ model ExternalSource {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Gateway (Xyne Mirror): these columns and the spacesIdentifier index; null on every older row
+  recordType      String?                   // CONNECTION (a provider account) or PAIR (provider resource ⇄ Spaces resource)
+  recordParentId  String?                   // PAIR: its CONNECTION row's id
+  recordStateReason String?                 // why the record stopped, e.g. PROVIDER_AUTH, CHANNEL_GONE; null when fine
+  spacesIdentifier String?                  // PAIR: the Spaces resource it maps to, e.g. a channel id
+  description     String?
+  createdBy       String?
+
   @@index([workspaceId, sourceType])
   @@index([boardId])
   @@index([ownerUserId])
@@ -2951,6 +2959,7 @@ model ExternalSource {
   @@index([channelId])
   @@index([externalIdentifier])
   @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@index([workspaceId, spacesIdentifier])
   @@map("external_sources")
   @@schema("workflow")
 }
