@@ -1,7 +1,11 @@
 import { useObserve, useValue } from '@legendapp/state/react';
 import { useCallback, type ReactElement } from 'react';
 import { Text, View } from 'react-native';
-import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedRef,
+  useScrollOffset,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
 
@@ -35,15 +39,18 @@ function EmptyState({ isFiltering }: { isFiltering: boolean }): ReactElement {
  * flat items. The set is the channels a person has joined, not the unbounded
  * conversation history DMs pages through, and collapsed groups mount no rows.
  */
-export function ChannelsList(): ReactElement {
+export function ChannelsList({
+  scrollOffset,
+}: {
+  scrollOffset: SharedValue<number>;
+}): ReactElement {
   const { isEmpty, isFiltering } = useChannelRows();
   const groups = useValue(channelGroups$);
   const bottomInset = useFabClearance();
 
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
-  // Tracked on the UI thread; only the button reads it.
-  const scrollOffset = useSharedValue(0);
+  // Tracked on the UI thread; the pull-down shell reads it too.
   useScrollOffset(scrollRef, scrollOffset);
   const scrollToTop = useCallback(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -63,6 +70,7 @@ export function ChannelsList(): ReactElement {
     <View className='flex-1 bg-spaces-background'>
       <Animated.ScrollView
         ref={scrollRef}
+        bounces={false}
         keyboardDismissMode='on-drag'
         keyboardShouldPersistTaps='handled'
         showsVerticalScrollIndicator={false}

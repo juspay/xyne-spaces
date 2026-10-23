@@ -1,16 +1,22 @@
 import { type ReactElement } from 'react';
 import { View } from 'react-native';
+import { useSharedValue } from 'react-native-reanimated';
+
+import { QuickActionsFab } from '@/src/features/quick-actions';
+import { PullDownSearchShell, ScreenHeader } from '@/src/features/screen-header';
 
 import { DmsList } from './dms-list';
-import { QuickActionsFab } from '@/src/features/quick-actions';
-import { ScreenHeader } from '@/src/features/screen-header';
 
 export function DmsScreen(): ReactElement {
+  const scrollOffset = useSharedValue(0);
+
   return (
-    <View className='flex-1 bg-spaces-background'>
-      <ScreenHeader title='DMs' searchTab='chats' />
-      <DmsList />
-      <QuickActionsFab tab='dms' />
-    </View>
+    <PullDownSearchShell tab='chats' scrollOffset={scrollOffset}>
+      <View className='flex-1 bg-spaces-background'>
+        <ScreenHeader title='DMs' searchTab='chats' />
+        <DmsList scrollOffset={scrollOffset} />
+        <QuickActionsFab tab='dms' />
+      </View>
+    </PullDownSearchShell>
   );
 }

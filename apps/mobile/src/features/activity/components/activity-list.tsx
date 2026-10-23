@@ -3,7 +3,7 @@ import { AnimatedLegendList } from '@legendapp/list/reanimated';
 import { type LegendListRef } from '@legendapp/list/react-native';
 import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { View, type LayoutChangeEvent } from 'react-native';
-import { useSharedValue } from 'react-native-reanimated';
+import type { SharedValue } from 'react-native-reanimated';
 import { useUniwind } from 'uniwind';
 
 import { ActivityLoadingSkeleton } from '@/src/components/activity';
@@ -96,7 +96,11 @@ function ListEmpty({
   return <ListEmptyState {...content} />;
 }
 
-export function ActivityList(): ReactElement {
+export function ActivityList({
+  scrollOffset,
+}: {
+  scrollOffset: SharedValue<number>;
+}): ReactElement {
   const isFocused = useTabPageIsFocused();
   const [hasFirstLayout, setHasFirstLayout] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -113,8 +117,7 @@ export function ActivityList(): ReactElement {
 
   const listRef = useRef<LegendListRef>(null);
 
-  // Written by the list on the UI thread; only the button reads it.
-  const scrollOffset = useSharedValue(0);
+  // Written by the list on the UI thread; the pull-down shell reads it too.
   const sharedValues = useMemo(() => ({ scrollOffset }), [scrollOffset]);
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollToOffset?.({ offset: 0, animated: true });
@@ -176,6 +179,7 @@ export function ActivityList(): ReactElement {
           onScroll={scroll.onScroll}
           scrollEventThrottle={16}
           onScrollBeginDrag={scroll.onScrollBeginDrag}
+          bounces={false}
           onScrollEndDrag={scroll.onScrollEndDrag}
           onMomentumScrollBegin={scroll.onMomentumScrollBegin}
           onMomentumScrollEnd={scroll.onMomentumScrollEnd}
