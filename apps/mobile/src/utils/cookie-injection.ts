@@ -13,11 +13,13 @@ import {
   isAuthScopeCurrent,
 } from '@/src/services/authSessionLifecycle';
 import {
+  AUTH_SESSION_COOKIE,
   GOOGLE_ACCESS_TOKEN_COOKIE,
   USER_SESSION_ID_COOKIE,
   XYNE_SESSION_COOKIE,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
+import { mirrorRefreshSessionTokenFromJar } from '@/src/services/refreshTokenStore';
 
 const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
 
@@ -147,6 +149,16 @@ async function injectCookiesFromResponseUnsafe(
     } catch (err) {
       console.warn('[CookieInjection] Error persisting cookie:', err);
     }
+  }
+
+  // A response that (re)issued a refresh-session cookie also updates the
+  // SecureStore mirror used to restore a lost jar.
+  const carriedRefreshSessionCookie = cookieHeaders.some(h => {
+    const name = extractCookieName(h);
+    return name === AUTH_SESSION_COOKIE || name === USER_SESSION_ID_COOKIE;
+  });
+  if (carriedRefreshSessionCookie && isCurrent()) {
+    await mirrorRefreshSessionTokenFromJar(origin);
   }
 
   // iOS: sync to WKWebView store. Only the session cookies the WebView actually

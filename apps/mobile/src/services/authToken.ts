@@ -2,6 +2,8 @@ import { API_ORIGIN } from '../config';
 import { decodeAuthJwtClaims, isTokenExpiringSoon } from './authJwtClaims';
 import type { AuthJwtClaims } from './authJwtClaims';
 import { refreshAuthSession } from './AuthServices';
+import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
+import { setTransportAuthTokenProvider } from '@/src/utils/mtlsHttpClient';
 import {
   getCookieValueFromJar,
   GOOGLE_ACCESS_TOKEN_COOKIE,
@@ -303,3 +305,55 @@ export async function buildAuthenticatedHeaders(
 
   return headers;
 }
+
+/**
+ * Transport-level bearer resolution for requests whose call site did not pass
+ * an explicit token. Cached per (session generation, active workspace) so the
+ * per-request cost is a memory read; single-flight so a cold-start burst
+ * resolves (and refreshes) exactly once.
+ */
+interface CachedTransportToken {
+  token: string;
+  workspaceId: string | undefined;
+  generation: number;
+}
+
+let cachedTransportToken: CachedTransportToken | null = null;
+let transportTokenInFlight: Promise<string | null> | null = null;
+
+export async function getTransportAuthToken(): Promise<string | null> {
+  if (isStoredAuthTokenSignedOut()) {
+    cachedTransportToken = null;
+    return null;
+  }
+
+  const generation = getAuthSessionGeneration();
+  const workspaceId = getActiveWorkspaceId() ?? undefined;
+
+  const cached = cachedTransportToken;
+  if (
+    cached &&
+    cached.generation === generation &&
+    cached.workspaceId === workspaceId &&
+    !isTokenExpiringSoon(cached.token, 60)
+  ) {
+    return cached.token;
+  }
+
+  transportTokenInFlight ??= (async (): Promise<string | null> => {
+    try {
+      const resolved = await resolveAccessToken(
+        workspaceId ? { preferredWorkspaceId: workspaceId } : {},
+      );
+      if (resolved.token) {
+        cachedTransportToken = { token: resolved.token, workspaceId, generation };
+      }
+      return resolved.token;
+    } finally {
+      transportTokenInFlight = null;
+    }
+  })();
+  return transportTokenInFlight;
+}
+
+setTransportAuthTokenProvider(getTransportAuthToken);

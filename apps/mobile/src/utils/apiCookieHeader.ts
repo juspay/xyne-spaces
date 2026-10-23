@@ -3,6 +3,8 @@ import CookieManager from '@react-native-cookies/cookies';
 export const GOOGLE_ACCESS_TOKEN_COOKIE = 'google_access_token';
 export const USER_SESSION_ID_COOKIE = 'user_session_id';
 export const XYNE_SESSION_COOKIE = 'xyne_session';
+/** Org-scoped auth session (refresh token) cookie. */
+export const AUTH_SESSION_COOKIE = 'xs';
 export const XYNE_LAST_WORKSPACE_COOKIE = 'xyne_last_workspace';
 
 function cookieEntryToValue(
@@ -33,7 +35,13 @@ export async function getSessionIdFromJar(origin: string): Promise<string | unde
   if (xyneSessionId) {
     return xyneSessionId;
   }
-  return getCookieValueFromJar(origin, USER_SESSION_ID_COOKIE);
+  const legacySessionId = await getCookieValueFromJar(origin, USER_SESSION_ID_COOKIE);
+  if (legacySessionId) {
+    return legacySessionId;
+  }
+  // Org-scoped auth session cookie — the only session marker once the legacy
+  // user_sessions flow is retired.
+  return getCookieValueFromJar(origin, AUTH_SESSION_COOKIE);
 }
 
 /**

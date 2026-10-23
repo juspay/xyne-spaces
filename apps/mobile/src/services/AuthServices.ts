@@ -13,6 +13,7 @@ import {
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
+import { restoreRefreshSessionTokenToJar } from './refreshTokenStore';
 import { CommunityJoinResultStatus } from './CommunityServices';
 import {
   classifyRemoteLogoutResponse,
@@ -1562,7 +1563,10 @@ async function performRefreshTokenFromSessionCookie(
   if (!isAuthScopeCurrent(generation, operation)) {
     return undefined;
   }
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
+  // A lost jar is restorable from the SecureStore mirror; only give up when
+  // neither holds a session cookie.
+  const sessionId =
+    (await getSessionIdFromJar(API_ORIGIN)) ?? (await restoreRefreshSessionTokenToJar(API_ORIGIN));
   if (!sessionId) {
     return undefined;
   }
@@ -1703,7 +1707,10 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
   const activeWorkspaceIdAtStart = getActiveWorkspaceId();
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
+  // A lost jar is restorable from the SecureStore mirror; only give up when
+  // neither holds a session cookie.
+  const sessionId =
+    (await getSessionIdFromJar(API_ORIGIN)) ?? (await restoreRefreshSessionTokenToJar(API_ORIGIN));
   if (!sessionId || !isAuthScopeCurrent(generation, operation)) {
     return { ok: false, kind: 'no_session_cookie' };
   }

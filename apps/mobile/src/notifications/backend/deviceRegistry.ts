@@ -6,6 +6,7 @@ import {
 } from '@/src/services/NotificationServices';
 import { isMtlsRequestError } from '@/src/services/apiClient';
 import { getString, setString } from '@/src/services/localStorage';
+import { logger } from '@/src/utils/logger';
 // Reads the persisted VoIP token (MMKV, sync). We must resend it on iOS so this
 // registration does NOT wipe the VoIP token the call setup stored — the backend
 // overwrites voipToken to null when it isn't included in the register call.
@@ -55,6 +56,14 @@ function getExistingDeviceId(): string | undefined {
   return existing || undefined;
 }
 
+// The device key every request already carries as x-device-id — the backend keys
+// push tokens to the auth session row stored under it. The notification-scoped id
+// is only a fallback for the window before the logger has initialized.
+function getDeviceKey(): string {
+  const deviceKey = logger.getClientSessionId().trim();
+  return deviceKey || getOrCreateDeviceId();
+}
+
 // Sends this device's FCM token to the backend so it knows where to deliver
 // pushes for the signed-in user. Safe to call repeatedly; it dedupes.
 export async function registerDeviceWithBackend(
@@ -86,7 +95,7 @@ export async function registerDeviceWithBackend(
   await registerMobilePushToken(authToken, {
     fcmToken,
     platform,
-    deviceId: getOrCreateDeviceId(),
+    deviceId: getDeviceKey(),
     ...(voipToken ? { voipToken } : {}),
   });
   // Logout or a notification-service stop may have invalidated this request
@@ -154,7 +163,9 @@ export async function unregisterDeviceWithBackend(authToken: string): Promise<vo
   const isCurrent = (): boolean => isAuthScopeCurrent(generation, operation);
   try {
     if (authToken.trim() && isCurrent()) {
-      const deviceId = getExistingDeviceId();
+      // Unregister under the same key the registration used: the x-device-id
+      // device key, falling back to the legacy notification-scoped id.
+      const deviceId = logger.getClientSessionId().trim() || getExistingDeviceId();
       if (!deviceId) {
         throw new Error('Cannot unregister push notifications without a device binding.');
       }

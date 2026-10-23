@@ -50,6 +50,7 @@ import {
   markStoredAuthTokenSignedOut,
   persistAuthToken,
 } from '../services/authToken';
+import { deleteStoredRefreshSessionToken } from '../services/refreshTokenStore';
 import { useSessionTokenKeepAlive } from '../hooks/useSessionTokenKeepAlive';
 import { mmkvStorageAdapter } from '../services/mmkvStorageAdapter';
 import { clearCustomEmojiCache } from '../services/customEmojiCache';
@@ -513,6 +514,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
             deleteStoredAuthToken(generation, operation, {
               onDeleted: (): Promise<void> => clearNativeAuthContext(generation, operation),
             }),
+        },
+        {
+          stage: 'delete_refresh_session_token',
+          run: (): Promise<void> => deleteStoredRefreshSessionToken(),
         },
         {
           stage: 'clear_global_auth_token',
@@ -1692,6 +1697,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
               deleteStoredAuthToken(generation, operation, {
                 onDeleted: (): Promise<void> => clearNativeAuthContext(generation, operation),
               }),
+          },
+          {
+            stage: 'delete_refresh_session_token_before_remote_logout',
+            run: (): Promise<void> => deleteStoredRefreshSessionToken(),
           },
           {
             stage: 'unregister_push_device',
