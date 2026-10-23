@@ -59,17 +59,22 @@ describe("stripUnrenderedCitationTokens", () => {
 });
 
 describe("renderChartBlocks", () => {
-  it("turns a real chart block into a readable table", () => {
-    expect(renderChartBlocks(REAL_CHART)).toBe(
+  it("keeps a chart Spaces can draw, like the real donut chart", () => {
+    expect(renderChartBlocks(REAL_CHART)).toBe(REAL_CHART);
+  });
+
+  it("turns a chart Spaces can't draw into a table instead of a stuck spinner", () => {
+    const funnel = REAL_CHART.replace("DONUT_CHART", "FUNNEL");
+    expect(renderChartBlocks(funnel)).toBe(
       "**adfs / afd / test** — placeholder/test entries\n\n" +
         "**30 agents by scope**\n\n| Item | Value |\n|---|---|\n| Personal agents | 17 |\n| Global (workspace-wide) agents | 13 |\n\n" +
         "Everything is currently enabled. Want me to open up the full config for any of these?",
     );
+    const untitled = '```chart\n{"visualType":"BAR_CHART","data":[{"day":"Mon","runs":3,"failed":1},{"day":"Tue","runs":5,"failed":0}]}\n```';
+    expect(renderChartBlocks(untitled)).toBe("| day | runs | failed |\n|---|---|---|\n| Mon | 3 | 1 |\n| Tue | 5 | 0 |");
   });
 
-  it("renders multi-column rows and drops blocks it cannot read", () => {
-    const multi = '```chart\n{"data":[{"day":"Mon","runs":3,"failed":1},{"day":"Tue","runs":5,"failed":0}]}\n```';
-    expect(renderChartBlocks(multi)).toBe("| day | runs | failed |\n|---|---|---|\n| Mon | 3 | 1 |\n| Tue | 5 | 0 |");
+  it("drops a chart block it cannot read at all", () => {
     expect(renderChartBlocks("Before\n\n```chart\n{not json\n```\n\nAfter")).toBe("Before\n\nAfter");
   });
 });
