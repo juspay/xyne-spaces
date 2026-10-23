@@ -31,6 +31,7 @@ import {
   getCanvasUrl,
   getCanvasById,
 } from '../services/canvasService.js';
+import { CanvasDuplicateError, duplicateCanvas } from '../services/canvasDuplicateService.js';
 const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
 const CANVAS_LABEL_CATEGORY = 'generic';
 
@@ -51,6 +52,10 @@ const CanvasLabelBodySchema = z.object({
 
 const CanvasLabelIdsBodySchema = z.object({
   labelIds: z.array(z.string().min(1)).min(1).max(MAX_CANVAS_LABELS_PER_REQUEST),
+});
+
+const DuplicateCanvasBodySchema = z.object({
+  fromVersionId: z.string().min(1).optional(),
 });
 
 const normalizeCanvasLabelName = (name: string): string => name.trim().replace(/\s+/g, ' ');
@@ -737,6 +742,46 @@ export class CanvasController {
     } catch (error) {
       logger.error('[CANVAS-CREATE] Error:', error);
       res.status(500).json({ error: 'Failed to create canvas' });
+    }
+  };
+
+  /**
+   * POST /api/canvas/:canvasId/duplicate
+   * Body: { fromVersionId?: string }
+   *
+   * Copies the canvas, or one of its saved versions, into a new collaborative
+   * canvas owned by the caller.
+   */
+  duplicateCanvas = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { canvasId } = req.params;
+      const parsedBody = DuplicateCanvasBodySchema.safeParse(req.body ?? {});
+      if (!canvasId || !parsedBody.success) {
+        res.status(400).json({ error: 'Invalid request' });
+        return;
+      }
+
+      const result = await duplicateCanvas({
+        sourceCanvasId: canvasId,
+        userId,
+        workspaceId,
+        ...(parsedBody.data.fromVersionId ? { fromVersionId: parsedBody.data.fromVersionId } : {}),
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      if (error instanceof CanvasDuplicateError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      logger.error('[CANVAS-DUPLICATE] Error:', error);
+      res.status(500).json({ error: 'Failed to duplicate canvas' });
     }
   };
 

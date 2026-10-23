@@ -108,6 +108,8 @@ export interface StorageService {
   getObject(path: string): Promise<ObjectRead | null>;
   listFiles(prefix: string): Promise<ListedFile[]>;
   listPrefixes(prefix: string): Promise<string[]>;
+  /** Copy an object to a new path in the same bucket, keeping its content type and metadata. */
+  copyFile(sourcePath: string, destinationPath: string): Promise<void>;
   moveFile(sourcePath: string, destinationPath: string): Promise<void>;
   ensureBucketExists(): Promise<void>;
   checkBucketExists(): Promise<void>;

@@ -11,7 +11,11 @@ import { diffWordsWithSpace, type Change } from 'diff';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useZero } from '../hooks/useZero';
+import { useAuth } from '../hooks/useAuth';
 import { mutators } from '../zero/mutators';
+import { logger, Event } from './logger';
+import { canvasService, type DuplicateCanvasResponse } from '../services/Canvas/canvasService';
+import { useCanvasServerDuplicateEnabled } from '../components/Canvas/canvasServerDuplicateCacConfig';
 
 export type CanvasContentDiffPart = {
   type: 'same' | 'added' | 'removed';
@@ -31,6 +35,7 @@ type CopyableCanvasVersion = {
 };
 
 type CopyableCanvas = {
+  id?: string;
   title?: string | null;
   channelId?: string | null;
   folderId?: string | null;
@@ -63,6 +68,7 @@ export type CanvasVersionCopyResult = {
   folderId?: string;
   projectId?: string;
   visibility?: CanvasVisibility;
+  isCollaborative?: boolean;
   createdAt: number;
 };
 
@@ -399,6 +405,8 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
   handleMakeCopyVersion: (version: TVersion) => Promise<void>;
 } => {
   const z = useZero();
+  const { user } = useAuth();
+  const isServerDuplicateEnabled = useCanvasServerDuplicateEnabled(user?.email);
   const [copyingVersionId, setCopyingVersionId] = useState<string | undefined>(undefined);
 
   const handleMakeCopyVersion = useCallback(
@@ -408,6 +416,47 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
         return;
       }
       if (!canvas) return;
+
+      if (isServerDuplicateEnabled && canvas.id) {
+        setCopyingVersionId(version.id);
+        try {
+          const result = await canvasService.duplicateCanvas(canvas.id, {
+            fromVersionId: version.id,
+          });
+          const { canvas: copy } = result;
+
+          const notice = getCanvasDuplicateNotice(result);
+          toast.success('Canvas copy created', notice ? { description: notice } : undefined);
+          onCreated({
+            id: copy.id,
+            title: copy.title,
+            // The content lives in Y-Sweet; the row stays empty.
+            content: [],
+            ...(copy.channelId ? { channelId: copy.channelId } : {}),
+            ...(copy.folderId ? { folderId: copy.folderId } : {}),
+            ...(copy.projectId ? { projectId: copy.projectId } : {}),
+            visibility: copy.visibility,
+            isCollaborative: true,
+            createdAt: copy.createdAt,
+          });
+        } catch (error) {
+          logger.error(Event.CANVAS_CREATE_FAILED, {
+            sourceCanvasId: canvas.id,
+            versionId: version.id,
+            operation: 'duplicate_version',
+            error: error instanceof Error ? error.message : String(error),
+          });
+          toast.error('Copy failed', {
+            description: getCanvasDuplicateErrorMessage(
+              error,
+              'Could not create a canvas copy from this version.',
+            ),
+          });
+        } finally {
+          setCopyingVersionId(undefined);
+        }
+        return;
+      }
 
       const newCanvasId = uuidv4();
       const canvasTitle = canvas.title?.trim() || 'Untitled Canvas';
@@ -458,10 +507,36 @@ export const useCanvasVersionCopy = <TVersion extends CopyableCanvasVersion>({
         setCopyingVersionId(undefined);
       }
     },
-    [canvas, isBlocked, onBlocked, onCreated, z],
+    [canvas, isBlocked, isServerDuplicateEnabled, onBlocked, onCreated, z],
   );
 
   return { copyingVersionId, handleMakeCopyVersion };
+};
+
+/** What a server-side duplicate could not do as asked, for the success toast. */
+export const getCanvasDuplicateNotice = ({
+  skippedAttachmentCount,
+  placedInPersonalRoot,
+}: DuplicateCanvasResponse): string | undefined => {
+  const notes = [
+    placedInPersonalRoot ? 'It was saved to your personal canvases.' : null,
+    skippedAttachmentCount > 0
+      ? `${skippedAttachmentCount} ${skippedAttachmentCount === 1 ? 'file' : 'files'} could not be copied.`
+      : null,
+  ].filter(Boolean);
+
+  return notes.length > 0 ? notes.join(' ') : undefined;
+};
+
+/**
+ * Why a server-side duplicate failed, as the server explained it (already in
+ * progress, too many files, timed out, unsupported content, rate limited), or
+ * `fallback` when the response carries no explanation, such as a gateway timeout.
+ */
+export const getCanvasDuplicateErrorMessage = (error: unknown, fallback: string): string => {
+  const message = (error as { response?: { data?: { error?: unknown } } } | null)?.response?.data
+    ?.error;
+  return typeof message === 'string' && message.length > 0 ? message : fallback;
 };
 
 export const useCanvasVersionCopyCreatedHandler = <TCanvas, TContent, TPreviewVersion>({
@@ -500,16 +575,17 @@ export const useCanvasVersionCopyCreatedHandler = <TCanvas, TContent, TPreviewVe
         createdBy: userId || '',
         visibility: copy.visibility || CanvasVisibility.PRIVATE,
         isTemplate: false,
-        isCollaborative: false,
+        isCollaborative: copy.isCollaborative ?? false,
         isStarred: false,
         createdAt: copy.createdAt,
         updatedAt: copy.createdAt,
         lastEditedAt: copy.createdAt,
         ...(userId ? { lastEditedBy: userId } : {}),
         accessLevel: CanvasRole.OWNER,
-        ...(sourceCanvas?.folder ? { folder: sourceCanvas.folder } : {}),
-        ...(sourceCanvas?.channel ? { channel: sourceCanvas.channel } : {}),
-        ...(sourceCanvas?.project ? { project: sourceCanvas.project } : {}),
+        // A server copy can land outside the source's location.
+        ...(copy.folderId && sourceCanvas?.folder ? { folder: sourceCanvas.folder } : {}),
+        ...(copy.channelId && sourceCanvas?.channel ? { channel: sourceCanvas.channel } : {}),
+        ...(copy.projectId && sourceCanvas?.project ? { project: sourceCanvas.project } : {}),
       } as TCanvas;
 
       editorRef.current = null;
