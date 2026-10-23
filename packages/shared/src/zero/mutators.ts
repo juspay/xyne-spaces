@@ -1,6 +1,7 @@
 import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
 import {
   ChannelRole,
+  AgentProactivityMode,
   ChannelType,
   ChannelVisibility,
   MessageType,
@@ -995,6 +996,32 @@ export const mutators = defineMutators({
         const row = rows.find(r => r.entityId === appId);
         if (!row) return;
         await tx.mutate.channel_published_tabs.delete({ id: row.id });
+      },
+    ),
+    updateAgentProactivityMode: defineMutator(
+      z.object({
+        channelId: z.string(),
+        mode: z.nativeEnum(AgentProactivityMode),
+      }),
+      async ({ tx, ctx, args: { channelId, mode } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        // Never DMs: an unprompted answer lands where everyone in the room reads it.
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Can only update this setting for default channels');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (channel.createdBy !== ctx.userID && (!participant || participant.role !== ChannelRole.ADMIN)) {
+          throw new Error('Only channel admins or the owner can change how agents answer');
+        }
+
+        await tx.mutate.channels.update({ id: channelId, agentProactivityMode: mode });
       },
     ),
     updateShowTicketsTabTicketsInChat: defineMutator(
@@ -10826,6 +10853,7 @@ export const mutators = defineMutators({
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
         metricsGuestVisibility: z.string().optional().nullable(),
+        metricsMinAccess: z.nativeEnum(AccessType).optional().nullable(),
         appWebhookDeliveryEnabled: z.boolean().optional(),
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
@@ -10857,6 +10885,7 @@ export const mutators = defineMutators({
           metricsEnabled,
           frtStageNames,
           metricsGuestVisibility,
+          metricsMinAccess,
           appWebhookDeliveryEnabled,
           deskReportEnabled,
           deskReportAgentSlug,
@@ -10882,6 +10911,7 @@ export const mutators = defineMutators({
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
             ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
+            ...(metricsMinAccess !== undefined ? { metricsMinAccess } : {}),
             ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
@@ -10916,6 +10946,7 @@ export const mutators = defineMutators({
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
             metricsGuestVisibility: metricsGuestVisibility ?? null,
+            metricsMinAccess: metricsMinAccess ?? null,
             appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,

@@ -159,6 +159,20 @@ impl Storage for Sources {
         }
     }
 
+    /// The exact count from the mirror when it holds every table of the
+    /// tree, Postgres's estimate otherwise.
+    async fn estimate(&self, query: &MultiTableReadQuery, cap: u64) -> Result<u64, StorageError> {
+        if query
+            .tables()
+            .into_iter()
+            .all(|table| self.is_cached(table))
+        {
+            self.memory.count(query, cap).await
+        } else {
+            self.pg.estimate(query, cap).await
+        }
+    }
+
     /// Both sources move.
     fn advance(&self, feed: Lsn) {
         self.memory.advance(feed);

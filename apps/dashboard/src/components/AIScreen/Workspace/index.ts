@@ -5,6 +5,14 @@ export {
   type WorkspaceAppMode,
 } from './WorkspacePane';
 export { useConversationArtifacts } from './useConversationArtifacts';
+export {
+  DeliveredArtifactsContext,
+  DeliveredArtifactChip,
+  indexDeliveredArtifacts,
+  splitDeliveredAttachments,
+  useDeliveredArtifacts,
+  type DeliveredArtifacts,
+} from './deliveredArtifacts';
 export { safeHttpUrl } from './safeHttpUrl';
 export { useWorkspacePageTools } from './useWorkspacePageTools';
 export {

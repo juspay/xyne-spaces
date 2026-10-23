@@ -6,7 +6,9 @@ import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { getSpacesAuthForUser } from "./spaces-db.js";
 import { spacesUserIdForClawUser } from "./users-jit.js";
-import { spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError, spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
+import { agentRequestRepository } from "../repositories/index.js";
+import { writeAuditLog } from "./audit.js";
 
 const log = createLogger("sdlc-repository-context");
 
@@ -137,6 +139,8 @@ export interface SdlcHubKnowledge {
   documents: Array<{ title: string; markdown: string }>;
   files: Array<{ canvasId: string; title: string }>;
   skills: Array<{ skillId: string; pinned: boolean }>;
+  /** Undefined outside a hub, and from a Spaces that predates it. */
+  isHubAdmin?: boolean;
 }
 
 export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<SdlcHubKnowledge | undefined> {
@@ -148,7 +152,12 @@ export async function loadSdlcHubKnowledge(channelId: string, userId: string): P
     { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId }), signal: AbortSignal.timeout(5_000) },
     auth,
   )) as Partial<SdlcHubKnowledge>;
-  return { documents: response.documents ?? [], files: response.files ?? [], skills: response.skills ?? [] };
+  return {
+    documents: response.documents ?? [],
+    files: response.files ?? [],
+    skills: response.skills ?? [],
+    ...(typeof response.isHubAdmin === "boolean" ? { isHubAdmin: response.isHubAdmin } : {}),
+  };
 }
 
 // Every listed file is a prompt line in every hub run.
@@ -182,17 +191,16 @@ export function renderSdlcHubKnowledge(
 
 type HubRunSkill = Prisma.SkillGetPayload<{ include: { files: true } }>;
 
-/** Which Linked Skills one user's run may load: a global one reaches every member, a personal one only its owner. */
-export function hubRunSkillWhere(skillIds: string[], userId: string, orgId: string): Prisma.SkillWhereInput {
-  return { id: { in: skillIds }, orgId, enabled: true, OR: [{ scope: "global" }, { ownerUserId: userId }] };
+/** Which Linked Skills a hub run may load: global ones only. A personal one waits for a claw admin's approval, its owner's runs included. */
+export function hubRunSkillWhere(skillIds: string[], orgId: string): Prisma.SkillWhereInput {
+  return { id: { in: skillIds }, orgId, enabled: true, scope: "global" };
 }
 
-/** What a hub adds to one user's run: the Hub Knowledge text and the Linked Skills they may load. */
+/** What a hub adds to one user's run: the Hub Knowledge text and the Linked Skills it may load. */
 export async function loadHubRunContext(
   channelId: string,
-  // Hub membership is keyed by the Spaces user id, skill ownership by the Claw one.
+  // Hub membership is keyed by the Spaces user id.
   spacesUserId: string,
-  userId: string,
   orgId: string,
 ): Promise<{ text?: string; skills: HubRunSkill[] }> {
   const hub = await loadSdlcHubKnowledge(channelId, spacesUserId);
@@ -203,7 +211,7 @@ export async function loadHubRunContext(
       ? []
       : await prisma.skill
           .findMany({
-            where: hubRunSkillWhere(hub.skills.map((skill) => skill.skillId), userId, orgId),
+            where: hubRunSkillWhere(hub.skills.map((skill) => skill.skillId), orgId),
             include: { files: true },
           })
           // The Knowledge Files still reach the run when the skill lookup fails.
@@ -212,22 +220,52 @@ export async function loadHubRunContext(
             return [] as HubRunSkill[];
           });
   const pinnedIds = new Set(hub.skills.filter((skill) => skill.pinned).map((skill) => skill.skillId));
-  const text = renderSdlcHubKnowledge(hub, skills.filter((skill) => pinnedIds.has(skill.id)));
+  const knowledge = renderSdlcHubKnowledge(hub, skills.filter((skill) => pinnedIds.has(skill.id)));
+  const role =
+    hub.isHubAdmin === undefined
+      ? undefined
+      : `The user in this run is ${hub.isHubAdmin ? "a" : "not a"} hub admin.`;
+  const text = [role, knowledge].filter(Boolean).join("\n\n");
   // Pinned skills stay in `skills` too: the text carries their body, the skill entry their files.
   return { ...(text ? { text } : {}), skills };
 }
 
-/** Links a skill made during a hub run to that hub. Spaces ignores a channel that is not a hub. */
+/**
+ * Links a skill made during a hub run to that hub, then asks a claw admin to make it global: until then
+ * no hub run loads it. A non-admin's skill, or one made outside a hub, stays personal with no request.
+ */
 export async function linkSdlcHubSkill(channelId: string, userId: string, skillId: string): Promise<void> {
   const auth = s2sAuth();
   if (!auth) return;
   // Spaces checks hub membership by the Spaces user id. Callers pass it when they have it; a Claw id is converted.
   const actorUserId = await spacesUserIdForClawUser(userId);
-  await spacesFetch(
+  const result = (await spacesFetch(
     "/api/internal/sdlc/agent/hub-skill",
     { method: "POST", body: JSON.stringify({ channelId, actorUserId, skillId }), signal: AbortSignal.timeout(5_000) },
     auth,
-  );
+  ).catch((err: unknown) => {
+    if (err instanceof SpacesApiError && err.status === 403) return { linked: false };
+    throw err;
+  })) as { linked?: boolean };
+  if (!result.linked) return;
+  // The same request "Share with everyone" sends, from the owner, at most one pending.
+  const skill = await prisma.skill.findUnique({ where: { id: skillId } });
+  if (!skill?.ownerUserId || skill.scope === "global") return;
+  if (await agentRequestRepository.findPendingSkill(skill.id)) return;
+  await agentRequestRepository.create({
+    targetType: "skill",
+    skillId: skill.id,
+    skillSlug: skill.slug,
+    requestType: "push_to_global",
+    requesterId: skill.ownerUserId,
+    orgId: skill.orgId,
+  });
+  await writeAuditLog({
+    actorUserId: skill.ownerUserId,
+    eventType: "REQUEST_CREATED",
+    targetId: skill.id,
+    description: `push_to_global request for skill "${skill.name}"`,
+  });
 }
 
 /** Tells Spaces an agent got its bot user, so an SDLC hub it was created in adds it right away. */

@@ -53,6 +53,8 @@ export const TIMING = {
   showBeforeClickMs: 350,
   pointMs: 6_000,
   settleQuietMs: 250,
+  /** A click that ends the walk shows (an address or tab change) within this. */
+  landMaxMs: 400,
   settleMaxMs: 2_500,
   /** A page may load in parts: it has to hold still this long. */
   pageQuietMs: 700,
@@ -78,6 +80,8 @@ export const SELECTORS = {
   busy: '[aria-busy="true"]',
   /** The ways around the app: never cut off by LIMITS.controls, whatever else fills the page. */
   navigation: 'nav, [role="navigation"], [role="tablist"]',
+  /** The hidden list of every page (AppSidebar/SiteMap.tsx): the app's, wherever it sits. */
+  siteMap: 'nav[aria-label="Site map"]',
   /** Toggles, tabs and choices: pressing one does something, even when it also opens a popup. */
   selectable:
     '[aria-pressed], [role="tab"], [role="switch"], [role="checkbox"], [role="option"], [role="menuitemradio"], [role="menuitemcheckbox"]',
@@ -116,7 +120,8 @@ export const CHECK_OPTIONS = [
 ];
 
 export const MESSAGES = {
-  opened: (what: string): string => `Opened ${what}.`,
+  // A control named for what it does ("Open conversation with Om") is said once: "Opened conversation with Om."
+  opened: (what: string): string => `Opened ${what.replace(/^(?:open|go to|view|show)\s+/i, '')}.`,
   done: (what: string): string => `Done: ${what}.`,
   clicked: (what: string): string => `Clicked ${what}.`,
   gone: (what: string): string => `I couldn't find ${what} on this page anymore.`,

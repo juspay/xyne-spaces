@@ -2,7 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent } from './redisService';
+import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent, SdlcResourceChangedEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
@@ -234,6 +234,12 @@ class WebSocketService {
 
     void this.setupLabelUnreadCountsSubscription();
 
+    void redisService
+      .subscribeToSdlcResourceChanged(({ workspaceId, kind }: SdlcResourceChangedEvent) => {
+        this.io?.to(`sdlc-resources:${workspaceId}`).emit('sdlc_resource_changed', { kind });
+      })
+      .catch((error) => logger.error('[SDLC-RESOURCES] Subscription setup failed:', error));
+
     logger.info('WebSocket server initialized');
   }
 
@@ -293,6 +299,14 @@ class WebSocketService {
     // conversations it renders whenever it may have missed live events (after a subscribe
     // ack, a reconnect, or the tab becoming visible). Replaces HTTP rehydrate + polling.
     socket.on('agent_progress_sync', afterSetup((data: AgentProgressSyncData) => this.handleAgentProgressSync(socket, data)));
+
+    // Only sockets with an SDLC or Library page open get resource pushes; the room is the socket's own workspace.
+    socket.on('subscribe_to_sdlc_resources', afterSetup(async () => {
+      if (socket.workspaceId) socket.join(`sdlc-resources:${socket.workspaceId}`);
+    }));
+    socket.on('unsubscribe_from_sdlc_resources', afterSetup(async () => {
+      if (socket.workspaceId) socket.leave(`sdlc-resources:${socket.workspaceId}`);
+    }));
 
     // Cancel any pending offline job (user reconnected within grace period)
     const wasPendingOffline = await presenceCleanupQueue.cancelOfflineJob(userId);
@@ -432,7 +446,7 @@ class WebSocketService {
       await this.handleTypingStop(socket, data.sessionId);
     });
 
-    // subscribe_to_channels / agent_progress_sync are registered at the top of this method.
+    // subscribe_to_channels / agent_progress_sync / sdlc resource rooms are registered at the top of this method.
     markSetupDone();
 
     // Single-channel add/remove subscription events remain disabled — no client emits

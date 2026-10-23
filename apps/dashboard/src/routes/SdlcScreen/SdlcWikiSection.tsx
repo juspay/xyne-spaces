@@ -485,7 +485,7 @@ export function SdlcWikiHome(props: {
     .map(page => ({ page, detail: formatRelativeTime(Date.parse(page.updatedAt)) }));
 
   return (
-    <section className='mx-auto max-w-5xl'>
+    <section className='mx-auto max-w-6xl'>
       <h3 className='text-center text-lg font-medium'>
         Which repository would you like to understand?
       </h3>

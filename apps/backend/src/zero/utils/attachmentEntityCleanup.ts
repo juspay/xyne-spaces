@@ -2,6 +2,7 @@ import type { Transaction } from '@rocicorp/zero';
 import { AttachmentEntityType, type Schema } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
+import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditionService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
@@ -29,6 +30,9 @@ async function deleteEntityAttachmentsByType(
           }
           if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
             await deleteHeicRenditions(url);
+          }
+          if (isVideoMimetype(attachment.mimetype)) {
+            await deleteVideoRenditions(url);
           }
         }
       } catch (error) {
@@ -90,6 +94,9 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
         }
         if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
           await deleteHeicRenditions(attachment.url);
+        }
+        if (isVideoMimetype(attachment.mimetype)) {
+          await deleteVideoRenditions(attachment.url);
         }
       }
     } catch (error) {

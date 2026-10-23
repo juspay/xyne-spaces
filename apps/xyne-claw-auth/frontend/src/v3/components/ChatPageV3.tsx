@@ -82,6 +82,8 @@ import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { DesignSystemSheet } from "./DesignSystemSheet";
+import { BrandReviewCard } from "./BrandReviewCard";
+import { CardErrorBoundary } from "./CardErrorBoundary";
 import { DesignGallery } from "./DesignGallery";
 import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
@@ -1938,6 +1940,16 @@ function MessageThread({
                     <span className="ml-1 inline-block h-3 w-1 translate-y-[1px] animate-pulse bg-xyne-fg-muted" />
                   )}
                 </div>
+              )}
+
+              {/* A /brand run delivers brand.json alongside the files; the
+                  card renders nothing when it is absent, so every other run is
+                  unaffected. Above the file list because the review, not the
+                  downloads, is the point of that run. */}
+              {msg.attachments && msg.attachments.length > 0 && (
+                <CardErrorBoundary label="brand-review-card">
+                  <BrandReviewCard attachments={msg.attachments} userId={userId} />
+                </CardErrorBoundary>
               )}
 
               {msg.attachments && msg.attachments.length > 0 && (

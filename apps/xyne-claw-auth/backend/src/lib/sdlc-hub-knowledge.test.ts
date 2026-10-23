@@ -37,12 +37,12 @@ describe("renderSdlcHubKnowledge", () => {
 });
 
 describe("hubRunSkillWhere", () => {
-  it("keeps a run to enabled skills of its org that are global or the user's own", () => {
-    expect(hubRunSkillWhere(["s1"], "user_1", "org_1")).toEqual({
+  it("keeps a run to enabled global skills of its org, so an unapproved one reaches no run", () => {
+    expect(hubRunSkillWhere(["s1"], "org_1")).toEqual({
       id: { in: ["s1"] },
       orgId: "org_1",
       enabled: true,
-      OR: [{ scope: "global" }, { ownerUserId: "user_1" }],
+      scope: "global",
     });
   });
 });

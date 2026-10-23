@@ -147,6 +147,19 @@ export const sdkSsoPollLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/** Per-IP limiter for SDK SSO refresh and sign-out: a client refreshes about once a day, so this only stops a loop or guessing. */
+export const sdkSsoRefreshLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req): string => ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    error: 'rate_limited',
+    message: 'Too many refresh requests. Please try again later.',
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /** Per-user limiter for Ask AI routing (one Jev call per typed message). */
 export const assistantRouteLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute

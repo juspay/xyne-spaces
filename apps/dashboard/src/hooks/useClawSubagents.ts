@@ -39,7 +39,8 @@ export const useClawSubagents = (): UseQueryResult<SubagentDef[], Error> => {
     queryKey: clawSubagentsKey(userId),
     queryFn: () => listClawSubagents(userId!),
     enabled: !!userId,
-    staleTime: 30 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 };
 

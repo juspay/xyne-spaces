@@ -41,6 +41,7 @@ export * from './utils/recordingAccess';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';
+export * from './utils/flowCardLabel';
 export * from './utils/ticketMetadata';
 export * from './utils/ticketDescription';
 export * from './utils/fileTypes';

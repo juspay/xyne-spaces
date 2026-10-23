@@ -2239,6 +2239,13 @@ model SubagentDefinition {
   /// NULL or missing keys = inherit all instances of that server type
   /// from the parent agent (Stance A — today's behavior).
   mcpInstanceMap   Json?
+  fast             Boolean                 @default(false)
+  checks           Json?
+  checksVersion    Int                     @default(0)
+  samples          Json?
+  model            String?
+  budget           Json?
+  evalReport       Json?
   /// Creator / owner. NULL only for legacy or admin-seeded rows. The CRUD
   /// route fills this with the requester's userId on create and uses it as
   /// the ACL anchor (owner + shares + admin can edit; everyone reads).
@@ -2462,6 +2469,10 @@ model ExperimentRun {
   /// end-experiment stays locked until the open-conjecture frontier is exhausted).
   /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
   kind               String              @default("experiment")
+  commandId          String?
+  commandVersion     Int?
+  sequenceId         String?
+  sequenceStep       Int?
   status             String              @default("running") /// running | finishing | done | aborted
   epoch              Int                 @default(1)
   deadlineAt         DateTime
@@ -2479,6 +2490,7 @@ model ExperimentRun {
   /// completion), which also meant `/experiment stop` could not reach them —
   /// a stopped run kept emitting checker output into the thread.
   checkerSessionIds  String[]            @default([])
+  epochSessionIds    String[]            @default([])
   finalReport        String?             @db.Text
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -3368,7 +3380,8 @@ model ChatProject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items ChatProjectItem[]
+  items     ChatProjectItem[]
+  knowledge ChatProjectKnowledge[]
 
   @@index([ownerUserId, sortOrder])
   @@index([orgId])
@@ -3400,6 +3413,42 @@ model ChatProjectItem {
   @@index([userId])
   @@index([orgId])
   @@map("chat_project_items")
+}
+
+/// A file, KB collection or Spaces entity attached to a project, injected as
+/// context into every run in that project (XYNE-66810).
+model ChatProjectKnowledge {
+  id        String @id @default(cuid())
+  projectId String
+  /// Copied from the parent ChatProject row, never read from the request body.
+  orgId         String
+  addedByUserId String
+
+  /// file | kb_collection | channel | ticket | canvas
+  type String
+  /// Attachment id, collection id, or Spaces entity id.
+  refId String
+  title String
+
+  /// Bucket-relative GCS path, for `file` only.
+  ///
+  /// Deliberately stored instead of a foreign key to ChatAttachment: that row
+  /// cascades away with its ChatMessage, which would take the project's
+  /// knowledge with it. Nothing deletes the GCS object itself, so the path
+  /// stays readable after the attachment row is gone.
+  storagePath String?
+  mimeType    String?
+  size        Int?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+
+  project ChatProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, type, refId])
+  @@index([projectId, createdAt])
+  @@index([orgId])
+  @@map("chat_project_knowledge")
 }
 
 /// An org's brand as its own record. Supersedes the free-text
@@ -3453,4 +3502,148 @@ model ChatConversationDesignSystem {
   @@index([designSystemId])
   @@index([orgId])
   @@map("chat_conversation_design_systems")
+}
+
+/// One row per fast subagent call (custom `fast` subagents and ui-tester), copied from the
+/// wrapper invocation's debug.fastSubagent when the parent run's stats are written.
+model FastSubagentCall {
+  id             String   @id @default(cuid())
+  runId          String
+  orgId          String
+  agentSlug      String
+  subagentName   String
+  toolCallId     String
+  completedAt    DateTime
+  durationMs     Int
+  isError        Boolean
+  fast           Boolean
+  model          String?
+  parentModel    String?
+  tokensIn       Int
+  tokensOut      Int
+  tokensCacheRead  Int     @default(0)
+  tokensCacheWrite Int     @default(0)
+  turns          Int
+  fallbacks      Int
+  xorCalls       Int
+  xorItems       Int
+  xorAnswers     Int
+  xorUnsure      Int
+  xorUnavailable Int
+  xorCached      Int
+  quotaBlocked   Int
+
+  @@unique([runId, toolCallId])
+  @@index([orgId, subagentName, completedAt])
+  @@index([completedAt])
+  @@map("fast_subagent_calls")
+}
+
+/// Confident xor answers sampled from fast subagent calls for a human to mark right or wrong.
+model XorReviewSample {
+  id           String    @id @default(cuid())
+  orgId        String
+  subagentName String
+  runId        String
+  item         String    @db.Text
+  questionId   String
+  question     String    @db.Text
+  value        String
+  confidence   Float
+  verdict      String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([orgId, subagentName, verdict])
+  @@index([runId])
+  @@map("xor_review_samples")
+}
+
+/// Drift alert for a fast subagent; unique per hour bucket so every pod's sweeper can insert safely.
+model FastSubagentAlert {
+  id             String    @id @default(cuid())
+  orgId          String
+  subagentName   String
+  kind           String
+  bucket         String
+  baseline       Float
+  current        Float
+  samples        Int
+  message        String    @db.Text
+  createdAt      DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  @@unique([orgId, subagentName, kind, bucket])
+  @@index([orgId, createdAt])
+  @@map("fast_subagent_alerts")
+}
+
+/// A loop command a user built from a template (LOOP_TEMPLATES in xyne-claw-shared).
+/// Drafts run only for their creator; published ones run for anyone in the org.
+model LoopCommandDefinition {
+  id                 String   @id @default(cuid())
+  orgId              String
+  name               String
+  description        String
+  template           String
+  instruction        String   @db.Text
+  skills             String[] @default([])
+  subagents          String[] @default([])
+  provider           String?
+  modelId            String?
+  maxDurationMinutes Int
+  maxPasses          Int?
+  deliverable        String?
+  judgeQuestion      String?  @db.Text
+  steps              Json?
+  version            Int      @default(1)
+  published          Boolean  @default(false)
+  enabled            Boolean  @default(true)
+  createdByUserId    String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId, published])
+  @@map("loop_command_definitions")
+}
+
+/// Every saved state of a loop command, so a change can be rolled back.
+model LoopCommandVersion {
+  id              String   @id @default(cuid())
+  orgId           String
+  commandId       String
+  version         Int
+  snapshot        Json
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  @@unique([commandId, version])
+  @@index([orgId, commandId])
+  @@map("loop_command_versions")
+}
+
+/// One run of a sequence loop command: its steps (snapshotted at start) run one experiment at a time.
+model LoopSequenceRun {
+  id             String    @id @default(cuid())
+  orgId          String
+  commandId      String
+  commandName    String
+  commandVersion Int
+  conversationId String
+  channelId      String
+  agentSlug      String
+  userId         String
+  focus          String?   @db.Text
+  steps          Json
+  stepIndex      Int       @default(0)
+  currentRunId   String?
+  status         String    @default("running")
+  createdAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  @@index([orgId, commandId, createdAt])
+  @@index([conversationId, status])
+  @@map("loop_sequence_runs")
 }

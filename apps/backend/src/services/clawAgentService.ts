@@ -16,6 +16,7 @@ import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
+import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -28,6 +29,7 @@ export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
 export interface ClawRunRequest {
   userId: string;
+  approvedAction?: ClawApprovedAction;
   /**
    * Verified Spaces workspace for this raw, workspace-scoped user id. Claw
    * uses it with x-spaces-user-id to resolve the exact surface identity.
@@ -134,6 +136,7 @@ export interface ClawRunRequest {
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  speed?: 'fast' | 'standard';
   studioMode?: 'design';
   sandboxMode?: 'local' | 'remote' | 'container';
   designArtifactAttachmentId?: string;
@@ -319,6 +322,8 @@ export interface S2SClawAgent {
   ownerUserId?: string | null;
   /** Set on a user-scoped list: ownerUserId is a Claw id, which Spaces cannot compare. */
   ownedByScopeUser?: boolean;
+  /** What routing reads to pick it for a channel question nobody tagged: the owner's text or the generated card. */
+  proactivity?: { description: string | null } | null;
 }
 
 export interface S2SRunAgentRequest {
@@ -536,6 +541,10 @@ function normalizeAttachmentsForRun(
 function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
   const parts: string[] = [];
 
+  if (req.approvedAction) {
+    parts.push(approvedActionInstructions(req.approvedAction));
+  }
+
   if (req.researchContext) {
     parts.push(
       `You have access to the query-codebase and review-pull-request tools for codebase analysis. ` +
@@ -638,6 +647,7 @@ export async function runClawAgentStream(
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
+    ...(request.speed && { speed: request.speed }),
     ...(request.studioMode && { studioMode: request.studioMode }),
     ...(request.sandboxMode && { sandboxMode: request.sandboxMode }),
     ...(request.designArtifactAttachmentId && {
