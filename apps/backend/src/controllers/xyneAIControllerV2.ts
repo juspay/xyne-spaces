@@ -46,6 +46,7 @@ import {
   getClawDesignShare,
   revokeClawDesignShare,
   listClawDesignSystems,
+  createClawDesignSystem,
   getClawDesignSystem,
   updateClawDesignSystem,
   deleteClawDesignSystem,
@@ -1588,6 +1589,20 @@ export class XyneAIControllerV2 {
       res.json(await listClawDesignSystems({ headers: req.headers, userId }));
     } catch (error) {
       this.projectFailure(res, 'listDesignSystems', error);
+    }
+  };
+
+  createDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    try {
+      const created = await createClawDesignSystem(
+        { headers: req.headers, userId },
+        (req.body ?? {}) as Record<string, unknown>
+      );
+      res.status(201).json(created);
+    } catch (error) {
+      this.projectFailure(res, 'createDesignSystem', error);
     }
   };
 

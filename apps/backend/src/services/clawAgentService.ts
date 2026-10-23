@@ -1860,6 +1860,18 @@ export async function listClawDesignSystems(req: {
   );
 }
 
+export async function createClawDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  input: Record<string, unknown>
+): Promise<{ success: boolean; data: ClawDesignSystem }> {
+  return clawProjectRequest(
+    req,
+    DESIGN_SYSTEMS_PATH,
+    { method: 'POST', body: input },
+    'Failed to create design system'
+  );
+}
+
 export async function getClawDesignSystem(
   req: { headers?: { cookie?: string }; userId: string },
   id: string

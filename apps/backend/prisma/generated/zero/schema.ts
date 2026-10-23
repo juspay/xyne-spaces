@@ -87,6 +87,7 @@ export const ticketTable = table("tickets")
     conversationId: string(),
     messageId: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
     priority: string(),
@@ -120,6 +121,7 @@ export const ticketDescriptionTable = table("ticket_descriptions")
     ticketId: string(),
     workspaceId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     description: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -132,6 +134,7 @@ export const subTicketTable = table("sub_tickets")
     title: string(),
     description: string().optional(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     mappedTicketId: string().optional(),
     createdBy: string(),
     updatedBy: string(),
@@ -146,6 +149,7 @@ export const subTicketTable = table("sub_tickets")
 export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -155,6 +159,7 @@ export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
 export const ticketAssignmentTable = table("ticket_assignments")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     ticketId: string(),
     userId: string().optional(),
@@ -175,12 +180,14 @@ export const ticketActivityTable = table("ticket_activities")
     activityType: string(),
     value: json(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
   })
   .primaryKey("id");
 
 export const ticketEntityMappingTable = table("ticket_entity_mappings")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     ticketId: string(),
     entityType: string(),
@@ -191,6 +198,7 @@ export const ticketEntityMappingTable = table("ticket_entity_mappings")
 export const ticketTagTable = table("ticket_tags")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     name: string(),
     ticketId: string(),
@@ -212,6 +220,7 @@ export const ticketTagMappingTable = table("ticket_tag_mappings")
     workspaceId: string(),
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     tagId: string(),
     tagName: string(),
     createdAt: number(),
@@ -233,6 +242,7 @@ export const ticketExportTable = table("ticket_exports")
 export const ticketReferenceMappingTable = table("ticket_reference_mappings")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
@@ -246,6 +256,7 @@ export const ticketReferenceMappingTable = table("ticket_reference_mappings")
 export const ticketStageEtaTable = table("ticket_stage_eta")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -264,6 +275,7 @@ export const workflowTable = table("workflows")
     id: string(),
     ticketId: string().optional(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     context: string().optional(),
     status: string(),
     workflowName: string().optional(),
@@ -283,6 +295,7 @@ export const workflowTable = table("workflows")
 export const workflowExecutionTable = table("workflow_executions")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     workflowId: string(),
     workflowType: string().optional(),
@@ -304,6 +317,7 @@ export const workflowExecutionTable = table("workflow_executions")
 export const workflowExecutionStateTable = table("workflow_execution_states")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     context: string().optional(),
@@ -329,6 +343,7 @@ export const workflowMappingTable = table("workflow_mappings")
 export const workflowExecutionLockTable = table("workflow_execution_locks")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     workerId: string(),
@@ -344,6 +359,7 @@ export const workflowExecutionUsersTable = table("workflow_execution_users")
     id: string(),
     userId: string(),
     workflowExecutionId: string(),
+    channelConnectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -352,6 +368,7 @@ export const workflowExecutionUsersTable = table("workflow_execution_users")
 export const workflowStepTable = table("workflow_steps")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     stepExecutorType: string(),
@@ -373,6 +390,7 @@ export const workflowKnowledgeTable = table("workflow_knowledge")
     workspaceId: string(),
     id: string(),
     workflowExecutionId: string(),
+    channelConnectId: string().optional(),
     checkpointId: string(),
     learningType: string(),
     title: string(),
@@ -422,6 +440,7 @@ export const agentStepTable = table("agent_steps")
 export const externalStepResponseTable = table("external_step_responses")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     workflowExecutionId: string(),
     workflowStepId: string(),
@@ -513,6 +532,37 @@ export const userSessionTable = table("user_sessions")
   })
   .primaryKey("id");
 
+export const authSessionTable = table("auth_sessions")
+  .columns({
+    id: string(),
+    orgMemberId: string(),
+    orgId: string(),
+    refreshToken: string(),
+    deviceKey: string(),
+    status: string(),
+    platform: string(),
+    refreshTokenExpiry: number(),
+    deviceInfo: string().optional(),
+    fcmToken: string().optional(),
+    voipToken: string().optional(),
+    revokedAt: number().optional(),
+    revokeReason: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const authSessionWorkspaceAccessTable = table("auth_session_workspace_access")
+  .columns({
+    id: string(),
+    authSessionId: string(),
+    workspaceId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const userTable = table("users")
   .columns({
     id: string(),
@@ -557,6 +607,7 @@ export const userPreferenceTable = table("user_preferences")
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
+    recordingDefaultSummaryTemplateId: string().optional(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -581,6 +632,7 @@ export const userSkillTable = table("user_skills")
 export const scheduledMessageTable = table("scheduled_messages")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     title: string(),
     messageContent: string(),
@@ -599,6 +651,7 @@ export const scheduledMessageTable = table("scheduled_messages")
 export const callMessageTable = table("call_messages")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     callId: string(),
     participantId: string(),
@@ -646,6 +699,9 @@ export const boardComplexityScoreTable = table("board_complexity_scores")
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -790,6 +846,7 @@ export const auditLogChangeTable = table("audit_log_changes")
 export const pullRequestsTable = table("pull_requests")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     prId: number(),
     workflowExecutionId: string().optional(),
@@ -815,6 +872,7 @@ export const prThreadLinkTable = table("pr_thread_links")
     repositorySlug: string(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     messageId: string(),
     workspaceId: string(),
     createdAt: number(),
@@ -999,6 +1057,7 @@ export const invitationTable = table("invitations")
     entityId: string().optional(),
     entityType: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
     isOrgApproved: boolean().optional(),
     inviteEmailSentAt: number().optional(),
     createdAt: number(),
@@ -1121,6 +1180,22 @@ export const channelTable = table("channels")
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(),
+    agentProactivityMode: string(),
+    connectId: string().optional(),
+  })
+  .primaryKey("id");
+
+export const channelPublishedTabTable = table("channel_published_tabs")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    channelConnectId: string().optional(),
+    entityType: string(),
+    entityId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -1128,6 +1203,7 @@ export const channelBoardMappingTable = table("channel_board_mappings")
   .columns({
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     boardId: string(),
     workspaceId: string(),
     isDefault: boolean(),
@@ -1137,9 +1213,25 @@ export const channelBoardMappingTable = table("channel_board_mappings")
   })
   .primaryKey("id");
 
+export const connectGroupTable = table("connect_group")
+  .columns({
+    id: string(),
+    entityType: string(),
+    entityId: string(),
+    hostWorkspaceId: string(),
+    invitedEntityId: string().optional(),
+    invitedWorkspaceId: string().optional(),
+    connectId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const channelStatsTable = table("channel_stats")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     channelId: string(),
     lastActivityAt: number(),
     participantCount: number(),
@@ -1151,6 +1243,7 @@ export const channelStatsTable = table("channel_stats")
 export const channelParticipantTable = table("channel_participants")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1166,6 +1259,7 @@ export const channelParticipantTable = table("channel_participants")
 export const channelUserStatusTable = table("channel_user_status")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1214,6 +1308,7 @@ export const conversationTable = table("conversations")
     createdBy: string(),
     initialMessageId: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1235,6 +1330,7 @@ export const conversationTable = table("conversations")
 export const conversationParticipantTable = table("conversation_participants")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     conversationId: string(),
     userId: string(),
@@ -1261,6 +1357,7 @@ export const emailTable = table("emails")
     replyTo: json<string[]>(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     externalThreadId: string(),
     externalMessageId: string(),
     sentByUserId: string().optional(),
@@ -1280,6 +1377,7 @@ export const emailDraftTable = table("email_drafts")
     conversationId: string().optional(),
     userId: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(),
     draftContent: string(),
     subject: string().optional(),
     fromAddress: string().optional(),
@@ -1296,6 +1394,7 @@ export const emailDraftTable = table("email_drafts")
 export const emailReadTable = table("email_reads")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -1313,6 +1412,7 @@ export const conversationLabelTable = table("conversation_labels")
     name: string(),
     color: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(),
     projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
@@ -1328,6 +1428,7 @@ export const conversationLabelMappingTable = table("conversation_label_mappings"
     labelName: string(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1342,6 +1443,7 @@ export const deskAutoLabelRuleReferenceTable = table("desk_auto_label_rule_refer
     workspaceId: string(),
     ownerId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     filterFingerprint: string(),
     createdAt: number(),
   })
@@ -1353,6 +1455,7 @@ export const ticketUserMailboxTable = table("ticket_user_mailbox")
     ticketId: string(),
     userId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     workspaceId: string(),
     state: string().optional(),
     starred: boolean(),
@@ -1377,6 +1480,7 @@ export const emailSignatureTable = table("email_signatures")
 export const emailChannelPreferenceTable = table("email_channel_preferences")
   .columns({
     channelId: string(),
+    channelConnectId: string().optional(),
     ownerUserId: string().optional(),
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
@@ -1400,12 +1504,14 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     metricsGuestVisibility: string().optional(),
+    metricsMinAccess: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: string().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1414,6 +1520,7 @@ export const classificationMappingTable = table("classification_mappings")
     workspaceId: string(),
     id: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     category: string(),
     subCategory: string().optional(),
     userGroupId: string(),
@@ -1446,6 +1553,7 @@ export const messageTable = table("messages")
     childConversationId: string().optional(),
     senderId: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     content: string(),
     msgType: string(),
     hasAttachment: boolean(),
@@ -1467,6 +1575,7 @@ export const messageArtifactTable = table("message_artifacts")
   .columns({
     id: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     messageId: string(),
     channelId: string(),
     conversationId: string(),
@@ -1486,6 +1595,7 @@ export const messageAttachmentTable = table("message_attachments")
     entityType: string(),
     entityId: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     storageProvider: string(),
     originalFilename: string(),
     mimetype: string(),
@@ -1509,6 +1619,7 @@ export const messageAttachmentTable = table("message_attachments")
 export const reactionTable = table("reactions")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -1520,6 +1631,7 @@ export const reactionTable = table("reactions")
 export const reactionCountTable = table("reaction_counts")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -1544,6 +1656,7 @@ export const activityTable = table("activities")
     id: string(),
     userId: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     actorAction: string(),
     actionSource: string(),
     actionSourceId: string(),
@@ -1589,6 +1702,7 @@ export const userExternalTokenTable = table("user_external_tokens")
 export const externalMessageTable = table("external_messages")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     externalSourceId: string(),
     externalId: string(),
@@ -1605,6 +1719,7 @@ export const externalMessageTable = table("external_messages")
 export const proactiveNudgeTable = table("proactive_nudges")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     messageId: string(),
     type: string(),
@@ -1640,6 +1755,7 @@ export const surfaceNudgeTable = table("surface_nudges")
 export const surfaceNudgeCountTable = table("surface_nudge_counts")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     nudgeCount: number(),
     userId: string().optional(),
@@ -1709,6 +1825,7 @@ export const browserNotificationSubscriptionTable = table("browser_notification_
 export const callTable = table("calls")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     externalId: string(),
     title: string().optional(),
@@ -1754,6 +1871,7 @@ export const entityAccessTable = table("entity_access")
   .columns({
     id: string(),
     workspaceId: string(),
+    channelConnectId: string().optional(),
     shareableEntityType: string(),
     entityId: string(),
     userId: string().optional(),
@@ -1785,6 +1903,7 @@ export const summaryTemplateTable = table("summary_templates")
 export const callParticipantTable = table("call_participants")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     callId: string(),
     userId: string(),
@@ -1806,6 +1925,7 @@ export const callParticipantTable = table("call_participants")
 export const callRecordingTable = table("call_recordings")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     callId: string(),
     egressId: string().optional(),
@@ -1827,6 +1947,7 @@ export const callRecordingTable = table("call_recordings")
 export const recurringCallSeriesTable = table("recurring_call_series")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     title: string(),
     description: string().optional(),
@@ -1850,6 +1971,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
 export const recurringCallParticipantTable = table("recurring_call_participants")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
@@ -1871,6 +1993,7 @@ export const canvasFolderTable = table("canvas_folders")
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
     name: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1906,6 +2029,8 @@ export const canvasTable = table("canvases")
     entryFile: string().optional(),
     quartoDocumentType: string().optional(),
     gcsPath: string().optional(),
+    connectId: string().optional(),
+    channelConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1920,6 +2045,7 @@ export const canvasVersionTable = table("canvas_versions")
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1937,6 +2063,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
     statusUpdatedAt: number().optional(),
     createdBy: string(),
     createdAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1953,6 +2080,7 @@ export const canvasCommentTable = table("canvas_comments")
     editedAt: number().optional(),
     deletedAt: number().optional(),
     createdAt: number(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1967,6 +2095,8 @@ export const canvasParticipantTable = table("canvas_participants")
     role: string(),
     joinedAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(),
+    channelConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -1979,6 +2109,7 @@ export const canvasUserStatusTable = table("canvas_user_status")
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    canvasConnectId: string().optional(),
   })
   .primaryKey("id");
 
@@ -2000,6 +2131,7 @@ export const bookmarkTable = table("bookmarks")
 export const linkTable = table("links")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     url: string(),
     title: string(),
@@ -2016,6 +2148,7 @@ export const linkTable = table("links")
 export const linkAccessTable = table("link_access")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     linkId: string(),
     userId: string(),
@@ -2054,6 +2187,7 @@ export const repoTable = table("repos")
     createdBy: string(),
     projectId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
     vcsCredentialId: string().optional(),
@@ -2066,6 +2200,7 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
     workspaceId: string(),
     repoId: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2097,6 +2232,8 @@ export const sdlcItemCommentTable = table("sdlc_item_comments")
 export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
+    canvasConnectId: string().optional(),
     artifactId: string(),
     repoId: string().optional(),
     artifactType: string(),
@@ -2116,6 +2253,7 @@ export const sdlcFolderTable = table("sdlc_folders")
     workspaceId: string(),
     id: string(),
     name: string(),
+    icon: string().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -2125,10 +2263,12 @@ export const sdlcFolderTable = table("sdlc_folders")
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     repoId: string().optional(),
     name: string(),
     description: string().optional(),
+    icon: string().optional(),
     status: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2269,6 +2409,7 @@ export const merchantTable = table("merchants")
 export const draftMessageTable = table("draft_messages")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -2358,6 +2499,7 @@ export const collectionPermissionTable = table("collection_permissions")
     userId: string().optional(),
     userGroupId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
     role: string(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -2389,8 +2531,10 @@ export const applicationTable = table("applications")
     boardId: string(),
     mainReleaseBoardId: string().optional(),
     channelId: string().optional(),
+    channelConnectId: string().optional(),
     regex: string(),
     repoUrl: string(),
+    repoId: string().optional(),
     deployedCommit: string().optional(),
     deployedVersion: string().optional(),
     lastDeployedAt: number().optional(),
@@ -2408,6 +2552,7 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     id: string(),
     applicationReleaseId: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     releaseId: string(),
     testedBy: string().optional(),
     testedAt: number().optional(),
@@ -2423,6 +2568,7 @@ export const releaseRepositoryTable = table("release_repositories")
     workspaceId: string(),
     id: string(),
     releaseId: string(),
+    channelConnectId: string().optional(),
     mainReleaseBoardId: string(),
     branch: string(),
     deployedCommit: string(),
@@ -2444,6 +2590,7 @@ export const releaseEventTable = table("release_events")
     userId: string().optional(),
     userName: string().optional(),
     channelId: string(),
+    channelConnectId: string().optional(),
     conversationId: string(),
     payload: json().optional(),
     createdAt: number(),
@@ -2455,6 +2602,7 @@ export const releaseChangeTable = table("release_changes")
     workspaceId: string(),
     id: string(),
     releaseId: string(),
+    channelConnectId: string().optional(),
     applicationReleaseId: string().optional(),
     applicationId: string().optional(),
     approvedBy: string().optional(),
@@ -2470,6 +2618,7 @@ export const releaseChangeTypeTable = table("release_change_types")
     applicationId: string(),
     changeType: string(),
     releaseId: string().optional(),
+    channelConnectId: string().optional(),
     applicationReleaseId: string().optional(),
     devTicketXyneId: string().optional(),
     commitId: string().optional(),
@@ -2483,6 +2632,7 @@ export const ticketStageRequestTable = table("ticket_stage_requests")
     workspaceId: string(),
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     stageId: string(),
     formId: string().optional(),
     status: string(),
@@ -2501,6 +2651,7 @@ export const rcaTable = table("rcas")
     id: string(),
     title: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     ownerId: string(),
     summary: string().optional(),
     rootCause: string().optional(),
@@ -2520,6 +2671,7 @@ export const impactTable = table("impacts")
     workspaceId: string(),
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     rcaId: string().optional(),
     impactTypeId: string(),
     impact: string(),
@@ -2532,6 +2684,7 @@ export const coeTable = table("coes")
     workspaceId: string(),
     id: string(),
     rcaId: string(),
+    channelConnectId: string().optional(),
     ownerId: string(),
     actionTypeId: string(),
     action: string(),
@@ -2547,6 +2700,7 @@ export const releaseAttributionTable = table("release_attributions")
     workspaceId: string(),
     id: string(),
     ticketId: string(),
+    channelConnectId: string().optional(),
     releaseId: string(),
     releaseApplicationId: string().optional(),
     rootCauseTicketId: string().optional(),
@@ -2570,6 +2724,7 @@ export const recapTable = table("recaps")
 export const channelDailyRecapTable = table("channel_daily_recaps")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2581,6 +2736,7 @@ export const channelDailyRecapTable = table("channel_daily_recaps")
 export const channelRecapTable = table("channel_recaps")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2669,6 +2825,7 @@ export const appIncomingWebhookTable = table("app_incoming_webhooks")
     id: string(),
     installedAppId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     boardId: string().optional(),
     name: string(),
     type: string(),
@@ -2741,6 +2898,7 @@ export const viewAccessTable = table("view_access")
 export const delayedMessageTable = table("delayed_messages")
   .columns({
     workspaceId: string(),
+    channelConnectId: string().optional(),
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -3064,6 +3222,7 @@ export const executionItemTable = table("execution_items")
     id: string(),
     conversationId: string(),
     channelId: string(),
+    channelConnectId: string().optional(),
     sourceMessageId: string(),
     title: string(),
     contextSummary: string().optional(),
@@ -3081,6 +3240,7 @@ export const executionThreadStateTable = table("execution_thread_states")
   .columns({
     workspaceId: string(),
     conversationId: string(),
+    channelConnectId: string().optional(),
     watermarkCreatedAt: number(),
     watermarkMsgId: string(),
     consecutiveFailures: number(),
@@ -3094,6 +3254,7 @@ export const executionItemMutationTable = table("execution_item_mutations")
     id: string(),
     itemId: string(),
     conversationId: string(),
+    channelConnectId: string().optional(),
     op: string(),
     actorType: string(),
     actorId: string().optional(),
@@ -3108,6 +3269,7 @@ export const executionRunLogTable = table("execution_run_logs")
     workspaceId: string(),
     id: string(),
     conversationId: string(),
+    channelConnectId: string().optional(),
     gatePassed: boolean(),
     gateReason: string(),
     windowSize: number(),
@@ -3124,6 +3286,21 @@ export const executionRunLogTable = table("execution_run_logs")
   })
   .primaryKey("id");
 
+export const radarPrLinkTable = table("radar_pr_links")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    prUrl: string(),
+    scopeKey: string(),
+    channelId: string(),
+    channelConnectId: string().optional(),
+    conversationId: string(),
+    messageId: string(),
+    postedAt: number(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const radarRuleTable = table("radar_rules")
   .columns({
     workspaceId: string(),
@@ -3132,6 +3309,56 @@ export const radarRuleTable = table("radar_rules")
     conditions: json(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const agentProactivityDecisionTable = table("agent_proactivity_decisions")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    channelId: string(),
+    senderId: string(),
+    kind: string(),
+    mode: string(),
+    messageIds: json<string[]>(),
+    conversationId: string().optional(),
+    parentEpisodeId: string().optional(),
+    gate: string(),
+    agentSlug: string().optional(),
+    outcome: string().optional(),
+    reason: string().optional(),
+    score: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const agentProactivityXorCallTable = table("agent_proactivity_xor_calls")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    decisionId: string(),
+    channelId: string(),
+    step: string(),
+    agentSlug: string().optional(),
+    input: string(),
+    durationMs: number(),
+    failed: boolean(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const agentProactivityXorQuestionTable = table("agent_proactivity_xor_questions")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    callId: string(),
+    channelId: string(),
+    key: string(),
+    instructions: string(),
+    criteriaTrue: string().optional(),
+    criteriaFalse: string().optional(),
+    probability: number().optional(),
   })
   .primaryKey("id");
 
@@ -3641,6 +3868,22 @@ export const userSessionTableRelationships = relationships(userSessionTable, ({ 
     sourceField: ["userId"],
     destField: ["id"],
     destSchema: userTable,
+  })
+}));
+
+export const authSessionTableRelationships = relationships(authSessionTable, ({ many }) => ({
+  workspaceAccess: many({
+    sourceField: ["id"],
+    destField: ["authSessionId"],
+    destSchema: authSessionWorkspaceAccessTable,
+  })
+}));
+
+export const authSessionWorkspaceAccessTableRelationships = relationships(authSessionWorkspaceAccessTable, ({ one }) => ({
+  authSession: one({
+    sourceField: ["authSessionId"],
+    destField: ["id"],
+    destSchema: authSessionTable,
   })
 }));
 
@@ -4278,6 +4521,11 @@ export const stageTransitionTableRelationships = relationships(stageTransitionTa
 }));
 
 export const channelTableRelationships = relationships(channelTable, ({ one, many }) => ({
+  connectGroups: many({
+    sourceField: ["id"],
+    destField: ["entityId"],
+    destSchema: connectGroupTable,
+  }),
   conversations: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -4375,6 +4623,19 @@ export const channelBoardMappingTableRelationships = relationships(channelBoardM
     sourceField: ["boardId"],
     destField: ["id"],
     destSchema: boardTable,
+  })
+}));
+
+export const connectGroupTableRelationships = relationships(connectGroupTable, ({ one }) => ({
+  canvasEntity: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: canvasTable,
+  }),
+  channelEntity: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -4712,6 +4973,11 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ["id"],
     destField: ["artifactId"],
     destSchema: sdlcArtifactTable,
+  }),
+  connectGroups: many({
+    sourceField: ["id"],
+    destField: ["entityId"],
+    destSchema: connectGroupTable,
   })
 }));
 
@@ -4820,6 +5086,11 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["repoId"],
     destSchema: sdlcTrackTable,
+  }),
+  applications: many({
+    sourceField: ["id"],
+    destField: ["repoId"],
+    destSchema: applicationTable,
   })
 }));
 
@@ -4963,6 +5234,11 @@ export const applicationTableRelationships = relationships(applicationTable, ({ 
     sourceField: ["mainReleaseBoardId"],
     destField: ["id"],
     destSchema: boardTable,
+  }),
+  repo: one({
+    sourceField: ["repoId"],
+    destField: ["id"],
+    destSchema: repoTable,
   })
 }));
 
@@ -5303,6 +5579,8 @@ export const schema = createSchema(
       roleTable,
       userRoleMappingTable,
       userSessionTable,
+      authSessionTable,
+      authSessionWorkspaceAccessTable,
       userTable,
       userPreferenceTable,
       userSkillTable,
@@ -5338,7 +5616,9 @@ export const schema = createSchema(
       stagePrStatusMappingTable,
       stageTransitionTable,
       channelTable,
+      channelPublishedTabTable,
       channelBoardMappingTable,
+      connectGroupTable,
       channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
@@ -5460,7 +5740,11 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
+      radarPrLinkTable,
       radarRuleTable,
+      agentProactivityDecisionTable,
+      agentProactivityXorCallTable,
+      agentProactivityXorQuestionTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5490,6 +5774,8 @@ export const schema = createSchema(
       roleTableRelationships,
       userRoleMappingTableRelationships,
       userSessionTableRelationships,
+      authSessionTableRelationships,
+      authSessionWorkspaceAccessTableRelationships,
       userTableRelationships,
       userGroupMappingTableRelationships,
       userAssignmentStateTableRelationships,
@@ -5518,6 +5804,7 @@ export const schema = createSchema(
       stageTransitionTableRelationships,
       channelTableRelationships,
       channelBoardMappingTableRelationships,
+      connectGroupTableRelationships,
       channelStatsTableRelationships,
       channelParticipantTableRelationships,
       channelUserStatusTableRelationships,
@@ -5621,6 +5908,8 @@ export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type Role = Row<typeof schema.tables.roles>;
 export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserSession = Row<typeof schema.tables.user_sessions>;
+export type AuthSession = Row<typeof schema.tables.auth_sessions>;
+export type AuthSessionWorkspaceAccess = Row<typeof schema.tables.auth_session_workspace_access>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;
@@ -5656,7 +5945,9 @@ export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelPublishedTab = Row<typeof schema.tables.channel_published_tabs>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ConnectGroup = Row<typeof schema.tables.connect_group>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
@@ -5778,4 +6069,8 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
+export type RadarPrLink = Row<typeof schema.tables.radar_pr_links>;
 export type RadarRule = Row<typeof schema.tables.radar_rules>;
+export type AgentProactivityDecision = Row<typeof schema.tables.agent_proactivity_decisions>;
+export type AgentProactivityXorCall = Row<typeof schema.tables.agent_proactivity_xor_calls>;
+export type AgentProactivityXorQuestion = Row<typeof schema.tables.agent_proactivity_xor_questions>;

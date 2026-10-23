@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  createDesignSystem,
   deleteDesignSystem,
   fetchConversationDesignSystem,
   fetchDesignSystems,
@@ -62,12 +63,18 @@ export function useDesignSystemActions() {
     onSuccess: invalidate,
   });
 
+  const create = useMutation({
+    mutationFn: (input: { name: string; designMd: string; tokensCss: string; source: string }) =>
+      createDesignSystem(input),
+    onSuccess: invalidate,
+  });
+
   const setDefault = useMutation({
     mutationFn: ({ agentSlug, designSystemId }: { agentSlug: string; designSystemId: string }) =>
       setAgentDesignSystem(agentSlug, designSystemId),
   });
 
-  return { remove, update, setDefault };
+  return { create, remove, update, setDefault };
 }
 
 export function useConversationDesignSystem(conversationId: string | undefined) {

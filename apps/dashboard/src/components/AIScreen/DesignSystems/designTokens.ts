@@ -112,10 +112,25 @@ function isColorValue(value: string): boolean {
   return /^(#|rgba?\(|hsla?\(|oklch\(|color\()/i.test(value.trim());
 }
 
+const ROLE_ALIASES: Record<string, PaletteRole> = {
+  bg: 'background',
+  fg: 'text',
+  foreground: 'text',
+  warn: 'warning',
+  error: 'danger',
+  negative: 'danger',
+  positive: 'success',
+};
+
 function roleOf(token: string): PaletteRole | null {
   const lower = token.toLowerCase();
   for (const role of PALETTE_ROLES) if (lower === role) return role;
+  const alias = ROLE_ALIASES[lower];
+  if (alias) return alias;
   for (const role of PALETTE_ROLES) if (lower.endsWith(`-${role}`)) return role;
+  for (const [name, role] of Object.entries(ROLE_ALIASES)) {
+    if (lower.endsWith(`-${name}`)) return role;
+  }
   for (const role of PALETTE_ROLES) if (lower.includes(`-${role}-`)) return role;
   return null;
 }

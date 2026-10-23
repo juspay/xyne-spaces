@@ -18,6 +18,8 @@ import { useSelectedAgent } from '@/hooks/useSelectedAgent';
 import { useDesignSystemActions, useDesignSystems } from '@/hooks/useDesignSystems';
 import type { DesignSystemRecord } from '@/services/XyneAI/XyneAIDesignSystemsService';
 import { SpecimenView } from './SpecimenView';
+import { StarterGallery } from './StarterGallery';
+import type { StarterSystem } from './starters';
 import { formatCreatedAt, sourceLabel } from './designTokens';
 
 const MAX_DESIGN_MD_CHARS = 32_000;
@@ -25,6 +27,7 @@ const MAX_DESIGN_MD_CHARS = 32_000;
 const TABS: readonly TabItem[] = [
   { id: 'specimen', label: 'Specimen' },
   { id: 'markdown', label: 'DESIGN.md' },
+  { id: 'starters', label: 'Templates & starters' },
 ];
 
 function Meta({ system }: { system: DesignSystemRecord }): ReactElement {
@@ -114,7 +117,7 @@ function EmptyState({ message }: { message: string }): ReactElement {
 
 export function DesignSystemsScreen(): ReactElement {
   const { systems, isLoading, isError } = useDesignSystems();
-  const { remove, setDefault } = useDesignSystemActions();
+  const { create, remove, setDefault } = useDesignSystemActions();
   const { selectedAgentSlug } = useSelectedAgent();
   const { data: agent } = useClawAgentDetail(selectedAgentSlug ?? undefined);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -135,6 +138,33 @@ export function DesignSystemsScreen(): ReactElement {
       {
         onSuccess: () => toast.success(`${active.name} is now the default for ${agentName}`),
         onError: () => toast.error('Could not set the default'),
+      },
+    );
+  };
+
+  const uniqueName = (base: string): string => {
+    const taken = new Set(systems.map(system => system.name));
+    if (!taken.has(base)) return base;
+    let suffix = 2;
+    while (taken.has(`${base} ${suffix}`)) suffix += 1;
+    return `${base} ${suffix}`;
+  };
+
+  const onUseStarter = (starter: StarterSystem): void => {
+    create.mutate(
+      {
+        name: uniqueName(starter.name),
+        designMd: starter.designMd,
+        tokensCss: starter.tokensCss,
+        source: 'library',
+      },
+      {
+        onSuccess: created => {
+          setActiveId(created.id);
+          setTab('specimen');
+          toast.success(`${created.name} added to your design systems`);
+        },
+        onError: () => toast.error('Could not add that starter'),
       },
     );
   };
@@ -164,7 +194,7 @@ export function DesignSystemsScreen(): ReactElement {
               Palettes, type and scale a /design run is held to
             </p>
           </div>
-          {systems.length > 0 && (
+          {tab !== 'starters' && systems.length > 0 && (
             <Select value={active?.id ?? ''} onValueChange={setActiveId}>
               <SelectTrigger
                 className='w-auto max-w-[16rem] shrink-0 gap-2 focus-visible:border-ring focus-visible:ring-0'
@@ -183,15 +213,15 @@ export function DesignSystemsScreen(): ReactElement {
           )}
         </div>
 
-        {active && (
-          <div className='mt-4 flex flex-wrap items-center justify-between gap-3'>
-            <Tabs
-              items={TABS}
-              activeId={tab}
-              onSelect={setTab}
-              trackCategory='XyneAI'
-              trackPrefix='Design systems tab'
-            />
+        <div className='mt-4 flex flex-wrap items-center justify-between gap-3'>
+          <Tabs
+            items={TABS}
+            activeId={tab}
+            onSelect={setTab}
+            trackCategory='XyneAI'
+            trackPrefix='Design systems tab'
+          />
+          {active && tab !== 'starters' && (
             <div className='flex shrink-0 items-center gap-2'>
               {selectedAgentSlug && (
                 <Button
@@ -216,17 +246,19 @@ export function DesignSystemsScreen(): ReactElement {
                 Delete
               </Button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className='no-scrollbar relative min-h-0 flex-1 overflow-auto'>
-        {isLoading ? (
+        {tab === 'starters' ? (
+          <StarterGallery onUse={onUseStarter} isUsing={create.isPending} />
+        ) : isLoading ? (
           <EmptyState message='Loading design systems…' />
         ) : isError ? (
           <EmptyState message='Could not load design systems. Refresh to try again.' />
         ) : !active ? (
-          <EmptyState message='No design systems yet. Extract one from a website or a repository, or save one from a /design run.' />
+          <EmptyState message='No design systems yet. Start from a template, or extract one from a website or repository.' />
         ) : (
           <div className='pt-5'>
             <Meta system={active} />
