@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { AppState, Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Animated, {
   type SharedValue,
   useAnimatedStyle,
@@ -137,12 +137,6 @@ import {
   type ChatOpenPaintSource,
 } from '@/src/features/chat/v2/chatOpenTimingLogger';
 import { Event, logger } from '@/src/utils/logger';
-import {
-  describeUnreadBoundaryRows,
-  getUnreadDiagOpenRecord,
-  logUnreadDiag,
-  resolveUnreadDiagVerdict,
-} from '@/src/utils/unreadDiagnostics';
 import {
   reportActivityChatSkeletonShown,
   reportActivityListReady,
@@ -1078,8 +1072,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     () => displayRows.findIndex(row => row.type === 'unread-divider'),
     [displayRows],
   );
-  const unreadBelowDividerRowId =
-    unreadDividerRowIndex >= 0 ? displayRows[unreadDividerRowIndex + 1]?.id : undefined;
   const hasUnreadInitialScrollTarget = hasUnreadOpenAnchor && unreadDividerRowIndex >= 0;
   const hasScrollTarget = hasRequestedAnchor && targetRowIndex !== null;
   const isMissingRouteAnchor =
@@ -1232,9 +1224,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     localSendOwnsTailRef.current = false;
     setShouldMaintainTail(false);
     setLocalSendOwnsTail(false);
-    if (unreadDiagRef.current) {
-      unreadDiagRef.current.lateDividerScrollMs = getElapsedMs(openCycleState.startedAtMs);
-    }
     void listRef.current?.scrollToIndex({
       index: unreadDividerRowIndex,
       viewOffset: UNREAD_DIVIDER_TOP_OFFSET,
@@ -1266,343 +1255,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     initialScrollIndex !== undefined &&
     !listInstanceLoadedRef.current &&
     (!hasRequestedAnchor || anchorScrollIssuedKey !== anchorScrollKey);
-  // TEMPORARY unread diagnostics (revert before merging): one summary per open,
-  // so a missing divider can be explained from Grafana.
-  const unreadDiagRef = useRef<{
-    key: string;
-    maxRows: number;
-    dividerFirstSeenMs: number | null;
-    dividerEverPresent: boolean;
-    rowCountChanges: number;
-    lastRowCount: number;
-    dividerEverOnScreen: boolean;
-    dividerFirstOnScreenMs: number | null;
-    dividerLastTopPx: number | null;
-    revealedAtMs: number | null;
-    dividerDrawChecks: number;
-    dividerEverDrawn: boolean;
-    dividerFirstDrawnMs: number | null;
-    dividerMaxMismatchPx: number | null;
-    dividerDrawSamples: (number | null)[][];
-    drawnEmptyBelowStreak: number;
-    dividerDrawnWithoutMessageBelow: boolean;
-    dividerEverHadContainer: boolean;
-    dividerListIndexMismatchChecks: number;
-    tailFallbackOnHoldExpiry: boolean;
-    lateDividerScrollMs: number | null;
-  } | null>(null);
-  if (unreadDiagRef.current?.key !== openIdentityKey) {
-    unreadDiagRef.current = {
-      key: openIdentityKey,
-      maxRows: 0,
-      dividerFirstSeenMs: null,
-      dividerEverPresent: false,
-      rowCountChanges: 0,
-      lastRowCount: 0,
-      dividerEverOnScreen: false,
-      dividerFirstOnScreenMs: null,
-      dividerLastTopPx: null,
-      revealedAtMs: null,
-      dividerDrawChecks: 0,
-      dividerEverDrawn: false,
-      dividerFirstDrawnMs: null,
-      dividerMaxMismatchPx: null,
-      dividerDrawSamples: [],
-      drawnEmptyBelowStreak: 0,
-      dividerDrawnWithoutMessageBelow: false,
-      dividerEverHadContainer: false,
-      dividerListIndexMismatchChecks: 0,
-      tailFallbackOnHoldExpiry: false,
-      lateDividerScrollMs: null,
-    };
-  }
-  const unreadDiagOpenRecord = getUnreadDiagOpenRecord(channelId, openStartedAtMs);
-  const unreadDiagBase = {
-    cycleId: openCycleState.cycleId,
-    channelId,
-    openStartedAtMs,
-    entryPoint,
-    elapsedMs: getElapsedMs(openCycleState.startedAtMs),
-    isUnreadOpen: !!isUnreadOpen,
-    isNotificationOpen: !!isNotificationOpen,
-    hasRouteAnchor,
-    hasUnreadOpenAnchor,
-    unreadCount,
-    openPhase,
-    isInitialLoadComplete,
-    initialLoadError: initialLoadError ? String(initialLoadError) : null,
-    linkedAnchorStatus,
-    initialScrollMode,
-    unreadPlacement,
-    holdExpired: hasUnreadHoldExpired,
-    hasMoreBefore,
-    hasMoreAfter,
-    shouldPaintLatestTail,
-    didListInitialLoadComplete,
-    didUserScroll,
-  };
-  const describeUnreadRows = (): Record<string, unknown> =>
-    // A plain open has no boundary of its own; measure against the tapped
-    // row's last view so a badge without a divider still gets a breakdown.
-    describeUnreadBoundaryRows(
-      displayRows,
-      unreadBoundaryLastViewedAt ?? unreadDiagOpenRecord?.rowLastViewedAt,
-      unreadBoundaryLastViewedConversationId,
-    );
-  const unreadDiagSnapshotRef = useRef<() => Record<string, unknown>>(() => ({}));
-  unreadDiagSnapshotRef.current = (): Record<string, unknown> => ({
-    ...unreadDiagBase,
-    rowLooksUnread: unreadDiagOpenRecord?.rowLooksUnread ?? null,
-    routeUnreadOpen: unreadDiagOpenRecord?.unreadOpen,
-    routeUnreadOpenOffReason: unreadDiagOpenRecord?.unreadOpenOffReason,
-    rowReadStaleByMs: unreadDiagOpenRecord?.rowReadStaleByMs,
-    ...describeUnreadRows(),
-  });
-  useEffect(() => {
-    const diag = unreadDiagRef.current;
-    if (!diag) return;
-    if (displayRows.length !== diag.lastRowCount) {
-      diag.rowCountChanges += 1;
-      diag.lastRowCount = displayRows.length;
-    }
-    diag.maxRows = Math.max(diag.maxRows, displayRows.length);
-    if (unreadDividerRowIndex >= 0 && !diag.dividerEverPresent) {
-      diag.dividerEverPresent = true;
-      diag.dividerFirstSeenMs = getElapsedMs(openCycleState.startedAtMs);
-    }
-    if (openCycleState.awaitsLateUnreadDivider) diag.tailFallbackOnHoldExpiry = true;
-  });
-  const isUnreadDiagRevealed = revealedChatListIdentityKey === openIdentityKey;
-  // The divider's native view, measured to see where iOS really draws it.
-  const unreadDividerViewRef = useRef<View>(null);
-  const unreadBelowDividerViewRef = useRef<View>(null);
-  // Where the divider sits in the viewport right now; on screen only when the
-  // whole row is inside the list's visible frame (not merely rendered).
-  // The row under the divider must be a message that is rendered with real
-  // height inside the viewport whenever there is room below the divider.
-  const readUnreadDividerViewport = (): {
-    index: number;
-    topPx: number | null;
-    onScreen: boolean;
-  } => {
-    const state = listRef.current?.getState?.();
-    const index = rowsRef.current.findIndex(row => row.type === 'unread-divider');
-    if (!state || index < 0) return { index, topPx: null, onScreen: false };
-    const topPx = Math.round(state.positionAtIndex(index) - state.scroll);
-    const size = state.sizeAtIndex(index) ?? 0;
-    const onScreen = topPx >= 0 && topPx + size <= state.scrollLength;
-    return { index, topPx, onScreen };
-  };
-  useEffect(() => {
-    const diag = unreadDiagRef.current;
-    if (!diag || !isUnreadDiagRevealed) return;
-    diag.revealedAtMs ??= getElapsedMs(openCycleState.startedAtMs);
-    // Sampled for the whole open, so a divider the user scrolls to still counts.
-    const sample = (): void => {
-      const { topPx, onScreen } = readUnreadDividerViewport();
-      if (topPx === null) return;
-      diag.dividerLastTopPx = topPx;
-      if (onScreen && !diag.dividerEverOnScreen) {
-        diag.dividerEverOnScreen = true;
-        diag.dividerFirstOnScreenMs = getElapsedMs(openCycleState.startedAtMs);
-      }
-    };
-    // What iOS really drew, next to what the list predicts. Each sample is
-    // [atMs, predictedTopPx, drawnTopPx, drawnHeightPx, belowTopPx, belowHeightPx,
-    // revealOpacity, listHeightPx, listIndexDelta, containerTopPx, containerHeightPx];
-    // "below" is the first message under the divider, and drawn values are null
-    // when that view is not mounted. The last three come from LegendList itself:
-    // where its own data holds the divider (0 = same index as ours, null = absent)
-    // and the container it assigned to that row (null = no container).
-    type Frame = { y: number; height: number } | null;
-    const measureFrame = (node: View | null, done: (frame: Frame) => void): void => {
-      if (!node) {
-        done(null);
-        return;
-      }
-      node.measureInWindow((_x: number, y: number, _w: number, height: number) =>
-        done({ y, height }),
-      );
-    };
-    const drawSample = (): void => {
-      const predicted = readUnreadDividerViewport();
-      if (predicted.index < 0) return;
-      const scrollNode = listRef.current?.getNativeScrollRef?.() as unknown as View | undefined;
-      if (!scrollNode?.measureInWindow) return;
-      const dividerNode = unreadDividerViewRef.current;
-      const belowNode = unreadBelowDividerViewRef.current;
-      const listState = listRef.current?.getState?.();
-      const dividerId = rowsRef.current[predicted.index]?.id;
-      const listIndex = dividerId !== undefined ? listState?.indexByKey(dividerId) : undefined;
-      const listIndexDelta = listIndex === undefined ? null : listIndex - predicted.index;
-      const containerNode =
-        listIndex === undefined
-          ? null
-          : ((listState?.elementAtIndex(listIndex) as View | null | undefined) ?? null);
-      const record = (
-        listY: number,
-        listH: number,
-        divider: Frame,
-        below: Frame,
-        container: Frame,
-      ): void => {
-        const atMs = getElapsedMs(openCycleState.startedAtMs);
-        const opacity = Math.round(chatListRevealOpacity.value * 100) / 100;
-        const drawnTopPx = divider === null ? null : Math.round(divider.y - listY);
-        const drawnHeightPx = divider === null ? null : Math.round(divider.height);
-        const belowTopPx = below === null ? null : Math.round(below.y - listY);
-        const belowHeightPx = below === null ? null : Math.round(below.height);
-        diag.dividerDrawChecks += 1;
-        if (container !== null) diag.dividerEverHadContainer = true;
-        if (listIndexDelta !== 0) diag.dividerListIndexMismatchChecks += 1;
-        if (drawnTopPx !== null && predicted.topPx !== null) {
-          const mismatch = Math.abs(drawnTopPx - predicted.topPx);
-          diag.dividerMaxMismatchPx = Math.max(diag.dividerMaxMismatchPx ?? 0, mismatch);
-        }
-        const isDrawnOnScreen =
-          drawnTopPx !== null &&
-          drawnHeightPx !== null &&
-          drawnHeightPx > 0 &&
-          opacity > 0.5 &&
-          drawnTopPx >= -2 &&
-          drawnTopPx + drawnHeightPx <= listH + 2;
-        if (isDrawnOnScreen && !diag.dividerEverDrawn) {
-          diag.dividerEverDrawn = true;
-          diag.dividerFirstDrawnMs = atMs;
-        }
-        // Drawn divider with room under it, but no drawn message right below:
-        // the "NEW MESSAGES over a blank" case, as the screen really shows it.
-        const dividerBottomPx = (drawnTopPx ?? 0) + (drawnHeightPx ?? 0);
-        const isBelowDrawn =
-          belowTopPx !== null &&
-          belowHeightPx !== null &&
-          belowHeightPx >= 8 &&
-          belowTopPx < listH &&
-          belowTopPx - dividerBottomPx <= 48;
-        const isDrawnEmptyBelow = isDrawnOnScreen && listH - dividerBottomPx >= 48 && !isBelowDrawn;
-        diag.drawnEmptyBelowStreak = isDrawnEmptyBelow ? diag.drawnEmptyBelowStreak + 1 : 0;
-        if (diag.drawnEmptyBelowStreak >= 3 && !diag.dividerDrawnWithoutMessageBelow) {
-          diag.dividerDrawnWithoutMessageBelow = true;
-        }
-        const next = [
-          atMs,
-          predicted.topPx,
-          drawnTopPx,
-          drawnHeightPx,
-          belowTopPx,
-          belowHeightPx,
-          opacity,
-          Math.round(listH),
-          listIndexDelta,
-          container === null ? null : Math.round(container.y - listY),
-          container === null ? null : Math.round(container.height),
-        ];
-        const last = diag.dividerDrawSamples[diag.dividerDrawSamples.length - 1];
-        // Only changes, capped, so one open stays one readable line.
-        if (last && last.slice(1).join() === next.slice(1).join()) return;
-        if (diag.dividerDrawSamples.length < 40) diag.dividerDrawSamples.push(next);
-      };
-      scrollNode.measureInWindow((_x: number, listY: number, _w: number, listH: number) =>
-        measureFrame(dividerNode, divider =>
-          measureFrame(belowNode, below =>
-            measureFrame(containerNode, container =>
-              record(listY, listH, divider, below, container),
-            ),
-          ),
-        ),
-      );
-    };
-    sample();
-    drawSample();
-    const interval = setInterval(() => {
-      sample();
-      drawSample();
-    }, 150);
-    // The landing settles within seconds; stop measuring native views after that.
-    const stopTimer = setTimeout(() => clearInterval(interval), 20_000);
-    return (): void => {
-      clearInterval(interval);
-      clearTimeout(stopTimer);
-    };
-    // Once per reveal; the snapshot ref carries the latest values.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUnreadDiagRevealed, openIdentityKey]);
-  type UnreadDiagState = NonNullable<typeof unreadDiagRef.current>;
-  const logUnreadDiagSummaryRef = useRef<(trigger: string, diag: UnreadDiagState) => void>(
-    () => undefined,
-  );
-  logUnreadDiagSummaryRef.current = (trigger: string, diag: UnreadDiagState): void => {
-    const snapshot = unreadDiagSnapshotRef.current();
-    const outcome = resolveUnreadDiagVerdict({
-      rowLooksUnread: (snapshot['rowLooksUnread'] as boolean | null) ?? null,
-      isUnreadOpen: snapshot['isUnreadOpen'] === true,
-      hasUnreadOpenAnchor: snapshot['hasUnreadOpenAnchor'] === true,
-      dividerEverPresent: diag.dividerEverPresent,
-      dividerEverOnScreen: diag.dividerEverOnScreen,
-      dividerShownWithoutMessageBelow: diag.dividerDrawnWithoutMessageBelow,
-      dividerDrawChecks: diag.dividerDrawChecks,
-      dividerEverDrawn: diag.dividerEverDrawn,
-      rowsAfterBoundary: (snapshot['rowsAfterBoundary'] as number) ?? 0,
-      rowsAfterBoundaryEligible: (snapshot['rowsAfterBoundaryEligible'] as number) ?? 0,
-      rowReadStaleByMs: unreadDiagOpenRecord?.rowReadStaleByMs,
-      isLiveWindowLoaded:
-        snapshot['isInitialLoadComplete'] === true && snapshot['hasMoreAfter'] !== true,
-    });
-    const newestRowAt = snapshot['newestRowAt'];
-    const summary = {
-      ...snapshot,
-      trigger,
-      ...outcome,
-      dividerShown: diag.dividerEverOnScreen,
-      openDurationMs: getElapsedMs(openCycleState.startedAtMs),
-      maxRows: diag.maxRows,
-      rowCountChanges: diag.rowCountChanges,
-      dividerEverPresent: diag.dividerEverPresent,
-      dividerFirstSeenMs: diag.dividerFirstSeenMs,
-      dividerEverOnScreen: diag.dividerEverOnScreen,
-      dividerFirstOnScreenMs: diag.dividerFirstOnScreenMs,
-      dividerLastTopPx: diag.dividerLastTopPx,
-      // Where iOS really drew the divider, not just where the list put it.
-      dividerDrawChecks: diag.dividerDrawChecks,
-      dividerEverDrawn: diag.dividerEverDrawn,
-      dividerFirstDrawnMs: diag.dividerFirstDrawnMs,
-      dividerMaxMismatchPx: diag.dividerMaxMismatchPx,
-      dividerDrawnWithoutMessageBelow: diag.dividerDrawnWithoutMessageBelow,
-      // Which layer lost the divider: LegendList's data, its container, or the row view.
-      dividerEverHadContainer: diag.dividerEverHadContainer,
-      dividerListIndexMismatchChecks: diag.dividerListIndexMismatchChecks,
-      ...(outcome.verdict.startsWith('BUG_')
-        ? { dividerDrawSamplesJson: JSON.stringify(diag.dividerDrawSamples) }
-        : {}),
-      tailFallbackOnHoldExpiry: diag.tailFallbackOnHoldExpiry,
-      lateDividerScrollMs: diag.lateDividerScrollMs,
-      // How long the shimmer covered this open, and how many cached rows it began with.
-      shimmerMs: diag.revealedAtMs,
-      seedRows: openCycleState.initialSeedRows,
-      unreadLastActivityAt,
-      // > 0: the channel's activity time is newer than every loaded message.
-      activityAheadOfNewestRowMs:
-        unreadLastActivityAt !== undefined && typeof newestRowAt === 'number'
-          ? unreadLastActivityAt - newestRowAt
-          : undefined,
-      isUnreadCacheCurrent,
-    };
-    logUnreadDiag('unread_diag_list_summary', summary);
-  };
-  // The summary also goes out when the app leaves the foreground, so an open
-  // that ends with the app killed in the chat is still traceable.
-  useEffect(() => {
-    // Captured here: by cleanup time a new open may already own the ref.
-    const openDiag = unreadDiagRef.current;
-    if (!openDiag) return;
-    const subscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'background') logUnreadDiagSummaryRef.current('app_background', openDiag);
-    });
-    return (): void => {
-      subscription.remove();
-      logUnreadDiagSummaryRef.current('leave', openDiag);
-    };
-  }, [openIdentityKey]);
   const usesInitialAnchorPlacement =
     !listInstanceLoadedRef.current &&
     hasRequestedAnchor &&
@@ -2534,14 +2186,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
         );
       }
       if (item.type === 'unread-divider') {
-        return (
-          <View ref={unreadDividerViewRef} collapsable={false}>
-            <UnreadMessagesDivider />
-          </View>
-        );
+        return <UnreadMessagesDivider />;
       }
       const animateEntrance = rowEntranceController.getPending().has(item.id);
-      const row = (
+      return (
         <ChatMessageListRow
           item={item}
           animateEntrance={animateEntrance}
@@ -2557,20 +2205,12 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           onMessagePress={onMessagePress}
         />
       );
-      // The first message under the divider, measured like the divider itself.
-      if (item.id !== unreadBelowDividerRowId) return row;
-      return (
-        <View ref={unreadBelowDividerViewRef} collapsable={false}>
-          {row}
-        </View>
-      );
     },
     // rowEntranceTick is intentionally included so this callback is recreated when
     // the set of pending entrance animations changes, even though the callback body
     // only reads the controller indirectly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      unreadBelowDividerRowId,
       currentUser,
       channelType,
       conversationsById,

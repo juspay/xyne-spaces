@@ -58,7 +58,6 @@ import {
 } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { sendMessage } from '@xyne/shared/messages';
 import { useChannelDisplayName } from '@/src/hooks/useChannels';
-import { logUnreadDiag, noteUnreadDiagChannelMarkedViewed } from '@/src/utils/unreadDiagnostics';
 import { useJoinableChannel } from '@/src/hooks/useJoinableChannel';
 import { useSelf } from '@/src/hooks/useUsers';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -360,7 +359,7 @@ const ChatChannelScreen = (): ReactElement => {
     () => queries.getChannelUserStatus({ channelId: channelId ?? '' }),
     [channelId],
   );
-  const [zeroChannelUserStatus, zeroChannelUserStatusDetails] = useQuery(channelUserStatusQuery, {
+  const [zeroChannelUserStatus] = useQuery(channelUserStatusQuery, {
     enabled: Boolean(channelId),
   });
   existingZeroDraftContentRef.current =
@@ -554,17 +553,6 @@ const ChatChannelScreen = (): ReactElement => {
   const frozenUnreadCount = isUnreadOpen
     ? (requestedUnreadCount ?? channelUserStatus?.unreadCount ?? undefined)
     : undefined;
-  // TEMPORARY unread diagnostics (revert before merging).
-  const leaveLogContextRef = useRef<Record<string, unknown>>({});
-  leaveLogContextRef.current = {
-    isUnreadOpen,
-    openStartedAtMs,
-    statusLastViewedAt: rawLastViewedAt,
-    statusLastViewedConversationId: channelUserStatus?.lastViewedConversationId,
-    channelLastActivityAt,
-    frozenUnreadBoundaryLastViewedAt,
-    zeroQueryResultType: zeroChannelUserStatusDetails.type,
-  };
   const isOpenRevealReady = postPaintReady && listInitialLoadComplete && keyboardShellReady;
   // The list is the only writer of shimmer visibility. Do not reset this to
   // true in a parent layout effect — that runs after the list reports "no
@@ -643,30 +631,13 @@ const ChatChannelScreen = (): ReactElement => {
   // "Not a channel participant" and rolls the leave flush back.
   useEffect(() => {
     if (!channelId) return;
-    const mountedAtMs = Date.now();
-    const logMarkViewedOnLeave = (outcome: string, timestamp?: number): void => {
-      logUnreadDiag('unread_diag_mark_viewed_on_leave', {
-        channelId,
-        outcome,
-        timestamp,
-        ...leaveLogContextRef.current,
-        wasScrolledUp: isScrolledUpRef.current,
-        openDurationMs: Date.now() - mountedAtMs,
-      });
-    };
     return (): void => {
       if (skipMarkAsReadRef.current) {
         skipMarkAsReadRef.current = false;
-        logMarkViewedOnLeave('skipped_mark_unread');
         return;
       }
-      if (!canMarkChannelAsViewedRef.current) {
-        logMarkViewedOnLeave('skipped_not_participant');
-        return;
-      }
+      if (!canMarkChannelAsViewedRef.current) return;
       const leaveTimestamp = Date.now();
-      logMarkViewedOnLeave('mark_attempted', leaveTimestamp);
-      noteUnreadDiagChannelMarkedViewed(channelId, leaveTimestamp);
       // The list reads statuses from the cached query, which takes Zero's write
       // only once the query is complete again — ~20s after a resume. Show the
       // channel as read now so the row and the next open agree with the server.

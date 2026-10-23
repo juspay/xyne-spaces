@@ -8,7 +8,6 @@ import { DmListItem } from './dm-list-item';
 import { DmListItemContextMenu } from './dm-list-item-context-menu';
 import { openBaseChatRoute } from '@/src/utils/openChatRoute';
 import { haptics } from '@/src/utils/haptics';
-import { logUnreadDiagRowPress } from '@/src/utils/unreadDiagnostics';
 
 type DmListRowProps = {
   item: DmListItemData;
@@ -42,7 +41,6 @@ function DmListRowComponent({
             onSelect(item.id);
             return;
           }
-          logUnreadDiagRowPress('dm_list_row', item.id, item);
           openBaseChatRoute(router, item.id, {
             surface: 'dms',
             unreadCount: item.unreadCount,

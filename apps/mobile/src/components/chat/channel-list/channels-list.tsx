@@ -34,7 +34,6 @@ import { useChannelGroupCollapse } from '@/src/hooks/useChannelGroupCollapse';
 import { CHANNEL_ROW_GUTTER } from './channel-list-layout';
 import { useCloseOnScreenBlur } from '@/src/hooks/useCloseOnScreenBlur';
 import type { ChannelSection } from '@xyne/shared';
-import { logUnreadDiagRowPress } from '@/src/utils/unreadDiagnostics';
 
 type ChannelsListProps = {
   headerTitleScrollY?: SharedValue<number> | undefined;
@@ -47,7 +46,6 @@ function ChannelListChannelRow({ item }: { item: ChannelListItemData }): ReactEl
       data={item}
       onPress={() => {
         haptics.buttonTap();
-        logUnreadDiagRowPress('channel_list_row', item.id, item);
         openBaseChatRoute(router, item.id, {
           surface: 'channels',
           unreadCount: item.messageUnreadCount ?? 0,
