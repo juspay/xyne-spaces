@@ -227,10 +227,10 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
   if (option === 'In the xyne-spaces repo') {
     return (
       <Text>
-        Nothing to do. The repo&apos;s <InlineCode>.mcp.json</InlineCode> registers the server and{' '}
-        <InlineCode>pnpm install</InlineCode> builds it from{' '}
-        <InlineCode>packages/xyne-spaces-mcp</InlineCode>, so an agent opened at the repo root
-        already has it, running the latest code. Go straight to signing in.
+        Nothing to do. The repo&apos;s <InlineCode>.mcp.json</InlineCode> registers the server and
+        runs the latest published <InlineCode>{MCP_PACKAGE}</InlineCode> with{' '}
+        <InlineCode>npx</InlineCode>. An agent opened at the repo root already has it, so go
+        straight to signing in.
       </Text>
     );
   }
