@@ -248,10 +248,20 @@ export function parseCssCustomProperties(css: string): CssTokens {
   const cleaned = stripCssComments(css);
 
   const seen = new Set<string>();
-  const selectorRe = /(?::root|@theme)[^{]*\{/g;
+  // The keyword is matched on its own and its brace is then found with
+  // indexOf. `/(?::root|@theme)[^{]*\{/g` expresses the same thing in one
+  // regex, but `[^{]*` rescans to the end of the input from every keyword when
+  // no brace follows one — quadratic on `:root:root:root…`, which is reachable
+  // input here (the CSS comes from whatever repository the user pointed at) and
+  // is what CodeQL flags as a polynomial ReDoS. indexOf visits each character
+  // once. The accepted shapes are unchanged: still the first brace after the
+  // keyword, so `:root, [data-theme="dark"] {` matches exactly as before.
+  const selectorRe = /:root|@theme/g;
   let selector: RegExpExecArray | null;
   while ((selector = selectorRe.exec(cleaned))) {
-    const openIndex = selector.index + selector[0].length - 1;
+    const openIndex = cleaned.indexOf("{", selector.index + selector[0].length);
+    // No brace after this keyword means none after any later one either.
+    if (openIndex === -1) break;
     const body = matchBraces(cleaned, openIndex);
     if (body === null) continue;
 

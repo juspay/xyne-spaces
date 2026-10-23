@@ -179,6 +179,22 @@ describe("parseTailwindConfig — v3", () => {
 });
 
 describe("parseCssCustomProperties", () => {
+  it("stays linear on a file of selector keywords with no block", () => {
+    // `/(?::root|@theme)[^{]*\{/g` rescanned to the end of the input from every
+    // keyword, so this took quadratic time — CodeQL's js/polynomial-redos. The
+    // CSS comes from whatever repository the user pointed at, so this is
+    // reachable input, not a contrived one.
+    const pathological = ":root".repeat(50_000);
+    const started = Date.now();
+    expect(parseCssCustomProperties(pathological).variables).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("still reads a block after a run of bare keywords", () => {
+    const tokens = parseCssCustomProperties(`${":root".repeat(500)} :root { --primary: #111111; }`);
+    expect(tokens.variables).toEqual([{ name: "primary", value: "#111111" }]);
+  });
+
   it("reads Tailwind v4 @theme tokens", () => {
     const tokens = parseCssCustomProperties(TAILWIND_V4);
     const byName = Object.fromEntries(tokens.variables.map((v) => [v.name, v.value]));
