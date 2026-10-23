@@ -50,6 +50,19 @@ export const chatProjectsLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+export const designSharesLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many share requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 15,
