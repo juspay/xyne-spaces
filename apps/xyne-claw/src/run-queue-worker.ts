@@ -15,7 +15,7 @@ import {
   unfenceSession,
   warmOwnershipClient,
 } from "./run-ownership.js";
-import { inspectAffinity, recordAffinity, AFFINITY_DEFER_MS } from "./conversation-affinity.js";
+import { inspectAffinity, recordAffinity, publishPodCapacity, AFFINITY_DEFER_MS } from "./conversation-affinity.js";
 import { startRunControlSubscriber } from "./run-control.js";
 import { RUN_TIMED_OUT, maxRunMs, raceRunDeadline } from "./run-deadline.js";
 import { createLogger } from "./logger.js";
@@ -318,6 +318,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
 
   let pressurePaused = false;
   setInterval(() => {
+    void publishPodCapacity(!drainPaused && !pressurePaused && getActiveRunCount() < concurrency && !isUnderPressure());
     if (drainPaused) return;
     if (!pressurePaused && overHighWater()) {
       pressurePaused = true;
