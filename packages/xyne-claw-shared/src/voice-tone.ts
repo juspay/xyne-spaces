@@ -73,6 +73,18 @@ export interface VoiceRules {
   numberDateFormats?: VoiceNumberDateFormats;
 }
 
+/**
+ * A backstop on the line fed to any regex.
+ *
+ * The collapse in `ingest` removes the quadratic case this was found through,
+ * but a bound belongs here too: a model-written DESIGN.md is untrusted input
+ * and this parser runs inside an HTTP handler. Generous on purpose — a
+ * legitimate `- **Avoid:**` line can hold 100 entries of 80 characters, so the
+ * limit is above that and TRUNCATES rather than skipping, leaving a long list
+ * parsed as far as the cap instead of dropped whole.
+ */
+const MAX_LINE_CHARS = 12_000;
+
 /** A phrase longer than this is prose, not a term, and is dropped. */
 const MAX_PHRASE_CHARS = 80;
 /**
@@ -425,8 +437,16 @@ export function parseVoiceSection(designMd: string): VoiceRules {
   let numbers: string | null = null;
   let dates: string | null = null;
 
-  const ingest = (field: VoiceField, value: string): void => {
-    if (!value.trim()) return;
+  const ingest = (field: VoiceField, rawValue: string): void => {
+    // Runs of whitespace collapsed FIRST. Nothing downstream treats a run of
+    // spaces as meaningful — lists split on commas, pairs on a separator word,
+    // notes are one-liners — but every one of those patterns has a `\s+` that
+    // backtracks across the run. Measured 8 / 27 / 102 / 401 ms for 2k / 4k /
+    // 8k / 16k embedded spaces, a clean 4x per doubling, and the
+    // /voice-rules route accepts a 256 KB DESIGN.md. Collapsing makes it one
+    // forward pass.
+    const value = rawValue.replace(/\s+/g, " ").trim();
+    if (!value) return;
     switch (field) {
       case "tone":
         toneWords.push(...splitList(value));
@@ -467,7 +487,8 @@ export function parseVoiceSection(designMd: string): VoiceRules {
   let currentIndent = -1;
   let fenced = false;
 
-  for (const raw of section.split(/\r?\n/)) {
+  for (const line of section.split(/\r?\n/)) {
+    const raw = line.length > MAX_LINE_CHARS ? line.slice(0, MAX_LINE_CHARS) : line;
     if (FENCE.test(raw)) {
       fenced = !fenced;
       continue;
