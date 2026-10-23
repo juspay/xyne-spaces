@@ -4,6 +4,7 @@ import { getRequesterId, getOrgId, isClawAdmin, isOrgAdmin , requireRequester} f
 import { asyncHandler, ok, badRequest, unauthorized, forbidden } from "../lib/http.js";
 import { createLogger } from "../logger.js";
 import { CONFIG } from "../config.js";
+import { setDailyBriefWhatsappEnabled } from "../services/dailyBriefWhatsapp.js";
 import {
   userAgentInstructionRepository,
   generatedContentRepository,
@@ -30,24 +31,48 @@ const MAX_INSTRUCTIONS = 8000;
 
 const router = Router();
 
-/** GET /config — the user's Daily Brief enable flag + custom instructions. */
-router.get("/config", asyncHandler(async (req: Request, res: Response) => {
-  const userId = getRequesterId(req);
-  const orgId = getOrgId(req);
-  if (!userId || !orgId) throw unauthorized();
-  const [user, instruction] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { dailyBriefEnabled: true } }),
+/** Whether this user has somewhere on WhatsApp the brief could go. Best-effort:
+ *  a lookup failure reads as "not linked" rather than failing the settings page. */
+async function hasWhatsappTarget(userId: string, orgId: string): Promise<boolean> {
+  try {
+    const { findNotifyTarget } = await import("../surfaces/messaging/agent-tools.js");
+    return (await findNotifyTarget(userId, orgId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** The shape GET and PUT /config both answer with. */
+async function briefConfigView(userId: string, orgId: string) {
+  const [user, instruction, whatsappLinked] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { dailyBriefEnabled: true, dailyBriefWhatsappEnabled: true },
+    }),
     userAgentInstructionRepository.findByUserAndAgent(userId, orgId, DAILY_BRIEF_SLUG),
+    hasWhatsappTarget(userId, orgId),
   ]);
-  ok(res, {
+  return {
     enabled: user?.dailyBriefEnabled ?? false,
     instructions: instruction?.instructions ?? "",
     instructionsEnabled: instruction ? instruction.enabled : true,
     updatedAt: instruction?.updatedAt ?? null,
-  });
+    /** Send the scheduled brief to WhatsApp too (opt-out, default on). */
+    whatsappEnabled: user?.dailyBriefWhatsappEnabled ?? true,
+    /** Whether a WhatsApp target exists; the UI hints at linking when false. */
+    whatsappLinked,
+  };
+}
+
+/** GET /config — the user's Daily Brief enable flag, WhatsApp opt-out + custom instructions. */
+router.get("/config", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!userId || !orgId) throw unauthorized();
+  ok(res, await briefConfigView(userId, orgId));
 }));
 
-/** PUT /config — toggle the brief on/off and/or set custom instructions. */
+/** PUT /config — toggle the brief on/off, its WhatsApp copy, and/or set custom instructions. */
 router.put("/config", asyncHandler(async (req: Request, res: Response) => {
   const userId = getRequesterId(req);
   const orgId = getOrgId(req);
@@ -56,10 +81,26 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
     enabled?: unknown;
     instructions?: unknown;
     instructionsEnabled?: unknown;
+    whatsappEnabled?: unknown;
   };
 
+  // Validate everything before writing anything, so a bad field never leaves
+  // a half-applied update behind.
+  if (body.whatsappEnabled !== undefined && typeof body.whatsappEnabled !== "boolean") {
+    throw badRequest("whatsappEnabled must be a boolean");
+  }
   if (body.instructionsEnabled !== undefined && typeof body.instructionsEnabled !== "boolean") {
     throw badRequest("instructionsEnabled must be a boolean");
+  }
+  if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+    throw badRequest("enabled must be a boolean");
+  }
+  if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== "string") {
+    throw badRequest("instructions must be a string or null");
+  }
+
+  if (typeof body.whatsappEnabled === "boolean") {
+    await setDailyBriefWhatsappEnabled(userId, body.whatsappEnabled, "settings");
   }
 
   if (body.enabled !== undefined) {
@@ -100,16 +141,7 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
     await userAgentInstructionRepository.upsert(userId, orgId, DAILY_BRIEF_SLUG, data);
   }
 
-  const [user, instruction] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { dailyBriefEnabled: true } }),
-    userAgentInstructionRepository.findByUserAndAgent(userId, orgId, DAILY_BRIEF_SLUG),
-  ]);
-  ok(res, {
-    enabled: user?.dailyBriefEnabled ?? false,
-    instructions: instruction?.instructions ?? "",
-    instructionsEnabled: instruction ? instruction.enabled : true,
-    updatedAt: instruction?.updatedAt ?? null,
-  });
+  ok(res, await briefConfigView(userId, orgId));
 }));
 
 /** GET /latest — today's stored brief (falls back to the most recent one). */

@@ -7,6 +7,7 @@ import { generateDailyBrief } from "../services/dailyBrief.js";
 import { withDailyBriefLlmSlot } from "../lib/daily-brief-slot.js";
 import { prisma } from "../db.js";
 import { DAILY_BRIEF_QUEUE_NAME, type DailyBriefJobData } from "./daily-brief-queue.js";
+import { enqueueBriefWhatsappDelivery } from "./daily-brief-delivery-queue.js";
 
 const log = createLogger("daily-brief-worker");
 
@@ -30,7 +31,15 @@ async function processJob(job: Job<DailyBriefJobData>): Promise<void> {
   // (BullMQ concurrency/limiter are per-instance) — the real provider-rate guard
   // for a mass fan-out. If no slot frees within the wait window the gate throws
   // and BullMQ retries the job later.
-  await withDailyBriefLlmSlot(() => generateDailyBrief(userId, { trigger: "scheduled" }));
+  const result = await withDailyBriefLlmSlot(() => generateDailyBrief(userId, { trigger: "scheduled" }));
+  // Only the scheduled brief goes to WhatsApp (a manual regenerate is read in
+  // the app). Handed to its own queue so a send retry never re-runs the LLM.
+  // Best-effort: a failed enqueue must not fail (and so re-run) generation.
+  if (result) {
+    await enqueueBriefWhatsappDelivery(userId, result.dateBucket).catch((err) =>
+      log.warn(`[daily-brief-worker] could not enqueue WhatsApp delivery for ${userId}: ${errMsg(err)}`),
+    );
+  }
 }
 
 /**

@@ -370,24 +370,44 @@ export async function notifyUser(input: {
   orgId?: string | null;
   text: string;
   attachments?: OutboxAttachment[];
-}): Promise<{ ok: true; viaTemplate: boolean } | { ok: false; error: string }> {
+  /** Which account-configured template to prefer outside the 24h window.
+   *  "dailyBrief" uses dailyBriefTemplate, falling back to notificationTemplate. */
+  templateKind?: "notification" | "dailyBrief";
+  /** What fills the template's single `{{1}}` when the window is shut.
+   *  Defaults to the message text. */
+  templateText?: string;
+}): Promise<
+  | { ok: true; viaTemplate: boolean }
+  | { ok: false; error: string; reason: "no_target" | "window_closed" | "failed" }
+> {
   const target = await findNotifyTarget(input.userId, input.orgId);
   if (!target) {
-    return { ok: false, error: "This person has no WhatsApp linked to Claw, so they can't be messaged there." };
+    return {
+      ok: false,
+      reason: "no_target",
+      error: "This person has no WhatsApp linked to Claw, so they can't be messaged there.",
+    };
   }
+  const template =
+    input.templateKind === "dailyBrief"
+      ? ((target.account.channelConfig as { dailyBriefTemplate?: MessageTemplate } | null)?.dailyBriefTemplate ??
+        target.template)
+      : target.template;
   // A long report arrives as its lead plus a PDF, not as a wall of texts.
   const long = await asLeadAndDocument(input.text, "Update").catch(() => null);
+  const templateText = input.templateText ?? (long ? input.text : undefined);
   const reply = await enqueueAndWait(target.account.id, {
     kind: "text",
     chatId: target.chatId,
     text: long?.text ?? input.text,
-    ...(target.template ? { template: target.template, ...(long ? { templateText: input.text } : {}) } : {}),
+    ...(template ? { template, ...(templateText ? { templateText } : {}) } : {}),
   });
   if (!reply.ok) {
     const closed = /24|window|re-engagement/i.test(reply.error);
     log.warn(`[notify] send failed account=${target.account.id} user=${input.userId}: ${reply.error}`);
     return {
       ok: false,
+      reason: closed ? "window_closed" : "failed",
       error: closed
         ? "They haven't messaged in over 24 hours, so WhatsApp won't deliver a free-form message, and no notification template is set up for this number."
         : reply.error,

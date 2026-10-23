@@ -177,6 +177,57 @@ export function recordDailyBriefOptInChange(enabled: boolean): void {
   }
 }
 
+// Daily Brief WhatsApp delivery — labels: outcome
+export type DailyBriefWhatsappOutcome =
+  | "sent"
+  | "template"
+  | "no_target"
+  | "opted_out"
+  | "window_closed"
+  | "failed"
+  | "duplicate_skipped"
+  | "disabled";
+let _whatsappDelivery: Counter | null = null;
+function getWhatsappDelivery(): Counter {
+  if (!_whatsappDelivery) {
+    _whatsappDelivery = getMeter().createCounter("daily_brief_whatsapp_delivery_total", {
+      description: "Scheduled briefs offered to WhatsApp, by what happened",
+      unit: "1",
+    });
+  }
+  return _whatsappDelivery;
+}
+
+/** Count one WhatsApp delivery decision for a scheduled brief. */
+export function recordDailyBriefWhatsappDelivery(outcome: DailyBriefWhatsappOutcome): void {
+  try {
+    getWhatsappDelivery().add(1, { outcome });
+  } catch {
+    // metrics must never break delivery
+  }
+}
+
+// Daily Brief WhatsApp opt-in/out changes — labels: action, source
+let _whatsappOptChanges: Counter | null = null;
+function getWhatsappOptChanges(): Counter {
+  if (!_whatsappOptChanges) {
+    _whatsappOptChanges = getMeter().createCounter("daily_brief_whatsapp_opt_changes_total", {
+      description: "Users turning the WhatsApp copy of their brief on or off, by where they did it",
+      unit: "1",
+    });
+  }
+  return _whatsappOptChanges;
+}
+
+/** Count one change to a user's WhatsApp brief preference. */
+export function recordDailyBriefWhatsappOptChange(enabled: boolean, source: "settings" | "chat"): void {
+  try {
+    getWhatsappOptChanges().add(1, { action: enabled ? "opted_in" : "opted_out", source });
+  } catch {
+    // metrics must never break a request
+  }
+}
+
 // Daily Brief Regeneration Attempts — labels: attempt (1 | 2 | 3 | 4+), origin
 let _regenerationAttempts: Counter | null = null;
 function getRegenerationAttempts(): Counter {

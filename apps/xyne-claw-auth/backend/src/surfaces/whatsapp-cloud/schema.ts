@@ -37,6 +37,18 @@ export const whatsappCloudConfigSchema = z
       })
       .optional(),
     /**
+     * Optional template for the scheduled Daily Brief, same one-`{{1}}` shape.
+     * A brief is a different message from an agent update, so it may have its
+     * own approved wording ("Your brief for today: {{1}}"). Falls back to
+     * notificationTemplate when unset.
+     */
+    dailyBriefTemplate: z
+      .object({
+        name: z.string().trim().min(1).max(512),
+        language: z.string().trim().min(2).max(15).default("en"),
+      })
+      .optional(),
+    /**
      * A published WhatsApp Flow built from questionFormFlowJson(). With it, a
      * multi-part question arrives as one native form; without it, as a
      * sequence of buttons and lists.
