@@ -531,6 +531,36 @@ export const resolveUnreadPlacement = ({
     : 'pending';
 };
 
+export type UnreadOpenOutcome =
+  | 'divider_shown'
+  | 'divider_off_screen'
+  | 'divider_missing'
+  | 'no_new_messages'
+  | 'messages_not_loaded';
+
+/**
+ * How an unread open ended. `no_new_messages` is expected: the channel's
+ * activity moved without a new main-chat message from someone else (a call or
+ * bot reply in a thread, or only own or system messages). The others besides
+ * `divider_shown` mean the user never saw the divider.
+ */
+export const resolveUnreadOpenOutcome = ({
+  wasDividerSeen,
+  hasDivider,
+  hasNewMessages,
+  hasLoadedLatest,
+}: {
+  wasDividerSeen: boolean;
+  hasDivider: boolean;
+  hasNewMessages: boolean;
+  hasLoadedLatest: boolean;
+}): UnreadOpenOutcome => {
+  if (wasDividerSeen) return 'divider_shown';
+  if (hasDivider) return 'divider_off_screen';
+  if (hasNewMessages) return 'divider_missing';
+  return hasLoadedLatest ? 'no_new_messages' : 'messages_not_loaded';
+};
+
 export const SCROLL_TO_BOTTOM_THRESHOLD = 1000;
 export const NEAR_END_AUTO_SCROLL_THRESHOLD = 200;
 export const FLOATING_PILL_FADE_OUT_MS = 1200;

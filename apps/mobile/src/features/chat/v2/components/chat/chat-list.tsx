@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { AppState, Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Animated, {
   type SharedValue,
   useAnimatedStyle,
@@ -47,6 +47,7 @@ import {
   getChatListEstimatedItemSize,
   getChatRowFixedSize,
   hasLoadedTimestampBoundaryCoverage,
+  hasUnreadEligibleMessageAfter,
   useChatListRows,
   type ChatRow,
   type UnreadBoundaryCursor,
@@ -105,6 +106,7 @@ import {
   type ConversationDataState,
   type ChatOpenCase,
   type ChatInitialScrollMode,
+  resolveUnreadOpenOutcome,
   resolveUnreadPlacement,
   UNREAD_OPEN_MAX_HOLD_MS,
 } from '@/src/features/chat/v2/components/chat/chat-list-policy';
@@ -178,6 +180,7 @@ type ChatOpenCycleState = {
   initialScrollMode: ChatInitialScrollMode | null;
   // Landed at the tail only because the unread hold ran out; the divider may still arrive.
   awaitsLateUnreadDivider: boolean;
+  didLogUnreadOutcome: boolean;
   didLogFinalLivePaint: boolean;
   initialSeedRows: number | null;
   lastOpenStateSignature: string | null;
@@ -228,6 +231,7 @@ const createChatOpenCycleState = (
   identityKey,
   initialScrollMode: null,
   awaitsLateUnreadDivider: false,
+  didLogUnreadOutcome: false,
   didLogFinalLivePaint: false,
   initialSeedRows: null,
   lastOpenStateSignature: null,
@@ -370,7 +374,6 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     typeof unreadBoundaryLastViewedAt === 'number' &&
     Number.isFinite(unreadBoundaryLastViewedAt) &&
     unreadBoundaryLastViewedAt > 0;
-  void unreadCount;
   const unreadBoundaryCursor = useMemo<UnreadBoundaryCursor | undefined>(() => {
     if (!hasUnreadOpenAnchor) return undefined;
     return {
@@ -1370,6 +1373,73 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       }),
     };
   }, [composerTotalHeight, targetConversationId]);
+  // Unread opens log one outcome: as soon as the revealed divider is on screen
+  // above the composer, or why it never was when the user leaves the chat or the app.
+  const trackUnreadOpenRef = useRef<(isFinal: boolean) => void>(() => undefined);
+  useLayoutEffect(() => {
+    trackUnreadOpenRef.current = (isFinal: boolean): void => {
+      if (!shouldAnchorToUnreadBoundary || openCycleState.didLogUnreadOutcome) return;
+      const dividerRow = displayRows[unreadDividerRowIndex];
+      const state = listRef.current?.getState?.();
+      const wasDividerSeen =
+        !!dividerRow &&
+        !!state &&
+        revealedChatListIdentityKey === openIdentityKey &&
+        isMeasuredRowVisible({
+          state,
+          key: dividerRow.id,
+          index: unreadDividerRowIndex,
+          readableTop: 0,
+          readableBottom: state.scrollLength - composerTotalHeight.value,
+        });
+      if (!wasDividerSeen && !isFinal) return;
+      openCycleState.didLogUnreadOutcome = true;
+      const outcome = resolveUnreadOpenOutcome({
+        wasDividerSeen,
+        hasDivider: !!dividerRow,
+        hasNewMessages: hasUnreadEligibleMessageAfter(displayRows, unreadBoundaryLastViewedAt ?? 0),
+        hasLoadedLatest:
+          (isInitialLoadComplete && openPhase === 'liveFresh' && !hasMoreAfter) ||
+          isUnreadCacheCurrent,
+      });
+      const isExpected = outcome === 'divider_shown' || outcome === 'no_new_messages';
+      logger[isExpected ? 'info' : 'warn'](Event.LOTUS_CHAT_OPEN_TIMING, {
+        milestone: 'unread_open_outcome',
+        outcome,
+        cycleId: openCycleState.cycleId,
+        channelId,
+        unreadCount,
+        lastViewedAt: unreadBoundaryLastViewedAt,
+        lastActivityAt: unreadLastActivityAt,
+        scrollMode: openCycleState.initialScrollMode,
+        holdExpired: hasUnreadHoldExpired,
+        loadError: initialLoadError !== null,
+        openPhase,
+        rows: displayRows.length,
+        openLatencyMs: getElapsedMs(openCycleState.startedAtMs),
+      });
+    };
+  });
+  useLayoutEffect(() => {
+    return (): void => trackUnreadOpenRef.current(true);
+  }, [openIdentityKey]);
+  useEffect(() => {
+    if (!shouldAnchorToUnreadBoundary) return;
+    const subscription = AppState.addEventListener('change', appState => {
+      if (appState === 'background') trackUnreadOpenRef.current(true);
+    });
+    return (): void => subscription.remove();
+  }, [shouldAnchorToUnreadBoundary]);
+  useEffect(() => {
+    if (revealedChatListIdentityKey !== openIdentityKey || !didListInitialLoadComplete) return;
+    const frame = requestAnimationFrame(() => trackUnreadOpenRef.current(false));
+    return (): void => cancelAnimationFrame(frame);
+  }, [
+    didListInitialLoadComplete,
+    openIdentityKey,
+    revealedChatListIdentityKey,
+    unreadDividerRowIndex,
+  ]);
   const isTargetLandingConfirmed = useCallback((): boolean => {
     return getTargetLandingSnapshot()?.visible === true;
   }, [getTargetLandingSnapshot]);
@@ -1989,6 +2059,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   const onScroll = useCallback((): void => {
     const state = listRef.current?.getState();
     if (!state) return;
+    trackUnreadOpenRef.current(false);
 
     const distanceFromBottom = state.contentLength - (state.scroll + state.scrollLength);
     scrollStateRef.current.distanceFromBottom = distanceFromBottom;

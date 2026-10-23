@@ -110,6 +110,12 @@ const isUnreadEligibleMessageRow = (row: ChatRow | undefined): row is ChatMessag
   return true;
 };
 
+export const hasUnreadEligibleMessageAfter = (
+  rows: readonly ChatRow[],
+  boundaryCreatedAt: number,
+): boolean =>
+  rows.some(row => isUnreadEligibleMessageRow(row) && row.paint.createdAt > boundaryCreatedAt);
+
 export const hasLoadedTimestampBoundaryCoverage = (
   rows: readonly ChatRow[],
   boundaryCreatedAt: number | undefined,
