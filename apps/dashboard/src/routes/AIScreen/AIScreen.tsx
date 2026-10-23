@@ -27,6 +27,7 @@ import {
 } from '../../components/AIScreen/AIComposer';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
+import { pendingProjectFromUrl } from '../../components/AIScreen/ProjectHome/projectHome.utils';
 import { CitationDocsProvider, useCitationDocs } from '../../components/AIScreen/citationDocs';
 import {
   DesignStudioProvider,
@@ -436,7 +437,7 @@ const AIScreen = (): ReactElement => {
   }, []);
 
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get('projectId'),
+    pendingProjectFromUrl(routeSessionId, window.location.search),
   );
   const attemptedFileIdsRef = useRef<Set<string>>(new Set());
 

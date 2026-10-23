@@ -18,12 +18,30 @@ export function ProjectInstructionsCard({ project }: { project: ChatProject }): 
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const timerRef = useRef<number | null>(null);
   const savedRef = useRef(project.instructions);
+  const draftRef = useRef(project.instructions);
+  /** The draft holds keystrokes the server has not acknowledged yet. */
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     setDraft(project.instructions);
+    draftRef.current = project.instructions;
     savedRef.current = project.instructions;
+    dirtyRef.current = false;
     setStatus('idle');
-  }, [project.id, project.instructions]);
+    // Switching project adopts its text outright; a changed `instructions` on
+    // the SAME project is handled below, where unsaved keystrokes win.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+
+  useEffect(() => {
+    // Our own save echoing back through the cache, or an edit from another tab.
+    // Adopting it while newer keystrokes are outstanding would retype the older
+    // copy over them, so take it only when the draft is settled.
+    if (dirtyRef.current) return;
+    setDraft(project.instructions);
+    draftRef.current = project.instructions;
+    savedRef.current = project.instructions;
+  }, [project.instructions]);
 
   useEffect(() => {
     return () => {
@@ -40,6 +58,8 @@ export function ProjectInstructionsCard({ project }: { project: ChatProject }): 
       try {
         await updateProject(project.id, { instructions: value });
         savedRef.current = value;
+        // Settled only if nothing was typed while this was in flight.
+        if (draftRef.current === value) dirtyRef.current = false;
         setStatus('saved');
       } catch {
         setStatus('idle');
@@ -51,6 +71,8 @@ export function ProjectInstructionsCard({ project }: { project: ChatProject }): 
 
   const onChange = (value: string): void => {
     setDraft(value);
+    draftRef.current = value;
+    dirtyRef.current = true;
     setStatus('idle');
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     if (value.length > PROJECT_INSTRUCTIONS_MAX_CHARS) return;

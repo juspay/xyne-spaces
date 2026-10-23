@@ -18,6 +18,21 @@ export function instructionsCounter(value: string): {
   };
 }
 
+/**
+ * The project a chat screen should file its conversation into, from the URL.
+ *
+ * Applies ONLY to a new chat: on an existing thread the filing guard passes for
+ * any `chat-` id, so honouring the param there refiled a chat the user had
+ * merely opened.
+ */
+export function pendingProjectFromUrl(
+  routeSessionId: string | null | undefined,
+  search: string,
+): string | null {
+  if (routeSessionId && routeSessionId !== 'new') return null;
+  return new URLSearchParams(search).get('projectId');
+}
+
 const KNOWLEDGE_TYPE_LABELS: Record<ChatProjectKnowledgeType, string> = {
   file: 'File',
   kb_collection: 'Knowledge base',

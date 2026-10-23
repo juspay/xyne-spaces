@@ -6,6 +6,7 @@ import {
   formatKnowledgeSize,
   instructionsCounter,
   knowledgeTypeLabel,
+  pendingProjectFromUrl,
 } from './projectHome.utils';
 
 describe('instructionsCounter', () => {
@@ -91,5 +92,31 @@ describe('knowledgeTypeLabel', () => {
 
   it('falls back to the raw type it does not know', () => {
     expect(knowledgeTypeLabel('workflow')).toBe('workflow');
+  });
+});
+
+describe('pendingProjectFromUrl', () => {
+  it('files a new chat into the project the link names', () => {
+    expect(pendingProjectFromUrl('new', '?projectId=proj-1')).toBe('proj-1');
+    expect(pendingProjectFromUrl(undefined, '?projectId=proj-1')).toBe('proj-1');
+  });
+
+  // The filing guard downstream passes for ANY `chat-` id, so honouring the
+  // param on an existing thread refiled a chat the user had merely opened.
+  it('ignores the project on a chat that already exists', () => {
+    expect(pendingProjectFromUrl('chat-abc', '?projectId=proj-1')).toBeNull();
+  });
+
+  it('ignores it for any other route id, not just chat- ones', () => {
+    expect(pendingProjectFromUrl('thread-9', '?projectId=proj-1')).toBeNull();
+  });
+
+  it('returns null when the link names no project', () => {
+    expect(pendingProjectFromUrl('new', '')).toBeNull();
+    expect(pendingProjectFromUrl('new', '?agent=assistant')).toBeNull();
+  });
+
+  it('reads the project alongside other query parameters', () => {
+    expect(pendingProjectFromUrl('new', '?agent=assistant&projectId=proj-2')).toBe('proj-2');
   });
 });

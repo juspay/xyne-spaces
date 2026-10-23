@@ -1741,22 +1741,19 @@ export interface ClawChatProjectInput {
   defaultAgentSlug?: string | null;
 }
 
-export interface ClawChatProjectKnowledge {
-  id: string;
-  projectId: string;
-  type: 'file' | 'kb_collection' | 'channel' | 'ticket' | 'canvas';
-  refId: string;
-  title: string;
-  mimeType: string | null;
-  size: number | null;
-  createdAt: string;
-}
 
 export interface ClawChatProjectKnowledgeInput {
   type: string;
   refId: string;
   title?: string;
 }
+
+import {
+  toClawChatProjectKnowledge,
+  type ClawChatProjectKnowledge,
+} from './clawProjectKnowledgeDto';
+
+export { toClawChatProjectKnowledge, type ClawChatProjectKnowledge };
 
 const CHAT_PROJECTS_PATH = '/claw/api/v1/agent-chat/chat/projects';
 
@@ -1924,12 +1921,16 @@ export async function listClawProjectKnowledge(
   req: { headers?: { cookie?: string }; userId: string },
   projectId: string
 ): Promise<{ success: boolean; data: ClawChatProjectKnowledge[] }> {
-  return clawProjectRequest(
+  const response = await clawProjectRequest<{ success: boolean; data?: unknown[] }>(
     req,
     knowledgePath(projectId),
     { method: 'GET' },
     'Failed to list project knowledge'
   );
+  return {
+    success: response.success,
+    data: (response.data ?? []).map(toClawChatProjectKnowledge),
+  };
 }
 
 export async function addClawProjectKnowledge(
@@ -1937,12 +1938,13 @@ export async function addClawProjectKnowledge(
   projectId: string,
   input: ClawChatProjectKnowledgeInput
 ): Promise<{ success: boolean; data: ClawChatProjectKnowledge }> {
-  return clawProjectRequest(
+  const response = await clawProjectRequest<{ success: boolean; data?: unknown }>(
     req,
     knowledgePath(projectId),
     { method: 'POST', body: input },
     'Failed to attach project knowledge'
   );
+  return { success: response.success, data: toClawChatProjectKnowledge(response.data) };
 }
 
 export async function deleteClawProjectKnowledge(

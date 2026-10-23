@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAIChatHandoff } from '../../../routes/AIScreen/useAIChatHandoff';
 import { useV2ChatProjects } from '../../../hooks/useAskAISessionsV2';
@@ -26,6 +26,20 @@ export function ProjectHome(): ReactElement {
 
   const project = projects.find(candidate => candidate.id === projectId) ?? null;
 
+  const chatBase = workspaceId ? `/${workspaceId}/ai/chat` : '/ai/chat';
+  // Deleting the project unmounts the dialog that would have redirected, and a
+  // delete from the sidebar or another tab never had one. Leave whenever a
+  // project we were showing goes away — but not for a URL that never resolved,
+  // which should keep saying so.
+  const hadProject = useRef(false);
+  useEffect(() => {
+    if (project) {
+      hadProject.current = true;
+      return;
+    }
+    if (hadProject.current) void navigate(`${chatBase}/new`, { replace: true });
+  }, [project, chatBase, navigate]);
+
   if (!projectId) return <Centered>No project selected.</Centered>;
   if (!project) {
     return isLoading ? (
@@ -34,8 +48,6 @@ export function ProjectHome(): ReactElement {
       <Centered>This project does not exist, or is no longer shared with you.</Centered>
     );
   }
-
-  const chatBase = workspaceId ? `/${workspaceId}/ai/chat` : '/ai/chat';
 
   const openNewChat = (): void => onCreateChat(project.id);
 
@@ -59,17 +71,7 @@ export function ProjectHome(): ReactElement {
         <div className='h-8' />
       </div>
 
-      <ProjectDialogs
-        kind={dialog}
-        project={project}
-        onClose={() => {
-          const wasDelete = dialog === 'delete';
-          setDialog(null);
-          if (wasDelete && !projects.some(candidate => candidate.id === project.id)) {
-            void navigate(`${chatBase}/new`);
-          }
-        }}
-      />
+      <ProjectDialogs kind={dialog} project={project} onClose={() => setDialog(null)} />
     </main>
   );
 }
