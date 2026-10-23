@@ -421,6 +421,7 @@ export class LiveKitWebhookController {
         const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
         const agentName = typeof roomMetadata.agentName === 'string' ? roomMetadata.agentName : undefined;
+        const sttModel = typeof roomMetadata.sttModel === 'string' ? roomMetadata.sttModel : undefined;
 
         if (!channelId) {
           logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
@@ -510,6 +511,7 @@ export class LiveKitWebhookController {
           ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
           agentName,
           dispatchStatus: agentName ? 'dispatched' : undefined,
+          sttModel,
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',

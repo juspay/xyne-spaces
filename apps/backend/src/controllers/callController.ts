@@ -1027,8 +1027,17 @@ export class CallController {
         // missing. Rooms recreated here (scheduled calls, rooms that hit emptyTimeout)
         // must carry the same keys as rooms created in initiateCall, otherwise the
         // agent silently transcribes with Azure Whisper instead of Google.
+        // Precedence: live room (deleted above) > persisted call record > google.
+        let liveRoomSttModel: unknown;
+        try {
+          liveRoomSttModel = roomInfo?.metadata ? JSON.parse(roomInfo.metadata).sttModel : undefined;
+        } catch {
+          liveRoomSttModel = undefined;
+        }
         const persistedSttModel = (activeCall.metadata as Record<string, unknown> | null)?.sttModel;
-        const roomSttModel = typeof persistedSttModel === 'string' && persistedSttModel ? persistedSttModel : 'google';
+        const roomSttModel = [liveRoomSttModel, persistedSttModel].find(
+          (m): m is string => typeof m === 'string' && m !== '',
+        ) ?? 'google';
 
         const roomMetadata = JSON.stringify({
           channelId: channel.id,

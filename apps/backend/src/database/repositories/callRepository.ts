@@ -1374,6 +1374,8 @@ export class CallRepository {
       /** Transcription agent this call was pinned to at creation time (from room metadata). */
       agentName?: string;
       dispatchStatus?: string;
+      /** STT engine chosen at call creation (from room metadata); read back when joinCall recreates the room. */
+      sttModel?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1393,6 +1395,7 @@ export class CallRepository {
       artifactMessageId,
       agentName,
       dispatchStatus,
+      sttModel,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1400,7 +1403,7 @@ export class CallRepository {
     // Prefer the caller-supplied workspaceId, else derive from the call's channel.
     const wsId = workspaceId ?? await repositories.channels.getWorkspaceId(channelId);
 
-    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, this, channelParticipants, joiningUserId);
+    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, sttModel, this, channelParticipants, joiningUserId);
 
     await messageMetadataService.syncInitialMessageMd(conversationId);
 
