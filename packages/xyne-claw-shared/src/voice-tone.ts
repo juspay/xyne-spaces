@@ -312,20 +312,29 @@ function splitList(value: string): string[] {
 /** `prefer over avoid`, `prefer instead of avoid`, `prefer not avoid`, and the
  *  arrow forms `avoid → prefer` / `avoid -> prefer`, which read the other way
  *  round. */
-const PAIR_OVER = /^(.*?)\s+(?:over|instead of|rather than|not)\s+(.*)$/i;
-const PAIR_ARROW = /^(.*?)\s*(?:→|=>|->|⇒)\s*(.*)$/;
+/**
+ * The separator only — the two sides are sliced off either end of it.
+ *
+ * `/^(.*?)\s+(?:over|…)\s+(.*)$/` had a lazy dot immediately followed by
+ * `\s+`, so the two backtracked against each other on a run of spaces: the
+ * same js/polynomial-redos as the heading pattern, and the one I missed when I
+ * fixed that. Matching the separator alone has no such pair, and `exec` still
+ * finds the FIRST one, so `"a over b over c"` splits where it always did.
+ */
+const PAIR_OVER_SEPARATOR = /\s+(?:over|instead of|rather than|not)\s+/i;
+const PAIR_ARROW_SEPARATOR = /\s*(?:→|=>|->|⇒)\s*/;
 
 function parsePair(piece: string): VoicePreferredWording | null {
-  const arrow = PAIR_ARROW.exec(piece);
+  const arrow = PAIR_ARROW_SEPARATOR.exec(piece);
   if (arrow) {
-    const avoid = cleanPhrase(arrow[1] ?? "");
-    const prefer = cleanPhrase(arrow[2] ?? "");
+    const avoid = cleanPhrase(piece.slice(0, arrow.index));
+    const prefer = cleanPhrase(piece.slice(arrow.index + arrow[0].length));
     return avoid && prefer ? { avoid, prefer } : null;
   }
-  const over = PAIR_OVER.exec(piece);
+  const over = PAIR_OVER_SEPARATOR.exec(piece);
   if (over) {
-    const prefer = cleanPhrase(over[1] ?? "");
-    const avoid = cleanPhrase(over[2] ?? "");
+    const prefer = cleanPhrase(piece.slice(0, over.index));
+    const avoid = cleanPhrase(piece.slice(over.index + over[0].length));
     return avoid && prefer ? { avoid, prefer } : null;
   }
   return null;
