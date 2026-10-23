@@ -289,15 +289,16 @@ const AIScreen = (): ReactElement => {
     // Back, Forward or a pasted link opens a chat the user did not start from a
     // project row. Without this, the project they picked earlier would still be
     // pending and the next conversation id to arrive — this existing chat —
-    // would be filed into it.
-    setPendingProjectId(new URLSearchParams(location.search).get('projectId'));
+    // would be filed into it. Through the same rule as the initial state: a
+    // link naming a project must not refile the existing chat it opens.
+    setPendingProjectId(pendingProjectFromUrl(routeSessionId, location.search));
     setActiveSessionId(sessionFromUrl);
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
     setInitialAttachments(undefined);
     setChatKey(prev => prev + 1);
     resetAssistant();
-  }, [sessionFromUrl, activeSessionId, location.search, resetAssistant]);
+  }, [sessionFromUrl, activeSessionId, routeSessionId, location.search, resetAssistant]);
 
   useEffect(() => {
     if (!workspaceId) return;

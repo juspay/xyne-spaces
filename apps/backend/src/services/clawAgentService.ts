@@ -17,6 +17,10 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
 import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
+import {
+  toClawChatProjectKnowledge,
+  type ClawChatProjectKnowledge,
+} from './clawProjectKnowledgeDto';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -1742,18 +1746,13 @@ export interface ClawChatProjectInput {
 }
 
 
+export { toClawChatProjectKnowledge, type ClawChatProjectKnowledge };
+
 export interface ClawChatProjectKnowledgeInput {
   type: string;
   refId: string;
   title?: string;
 }
-
-import {
-  toClawChatProjectKnowledge,
-  type ClawChatProjectKnowledge,
-} from './clawProjectKnowledgeDto';
-
-export { toClawChatProjectKnowledge, type ClawChatProjectKnowledge };
 
 const CHAT_PROJECTS_PATH = '/claw/api/v1/agent-chat/chat/projects';
 
