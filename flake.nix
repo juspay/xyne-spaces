@@ -1,6 +1,13 @@
 {
   description = "Xyne Spaces - Workflow Automation Platform";
 
+  # Pull from the shared OSS Attic cache (https://cache.nixos.asia/oss) that CI
+  # pushes every build to, so local `nix build`/`nix develop` reuse CI closures.
+  nixConfig = {
+    extra-substituters = "https://cache.nixos.asia/oss";
+    extra-trusted-public-keys = "oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=";
+  };
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     pyproject-nix = {
