@@ -55,6 +55,7 @@ export interface WorkerStartStreamMessage {
       tab?: string;
       /** Per-run thinking level (composer dropdown). Absent = agent default. */
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+      speed?: 'fast';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
       workflowContext?: {
@@ -217,6 +218,7 @@ async function executeStream(
         instant: requestBody.instant ?? false,
         ...(requestBody.tab && { tab: requestBody.tab }),
         ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
+        ...(requestBody.speed ? { speed: requestBody.speed } : {}),
         ...(requestBody.approvedAction ? { approvedAction: requestBody.approvedAction } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {

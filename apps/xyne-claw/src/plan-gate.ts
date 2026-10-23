@@ -28,9 +28,10 @@ export interface PlanGateDeps {
 const QUESTION: XorQuestion = {
   type: "noul",
   instructions:
-    "Handling the user's latest message takes real work over several steps — searching, reading, " +
-    "investigating, comparing, or calling tools more than once — rather than a direct reply the agent " +
-    "can give straight away, such as a greeting, a question about the agent itself, or a single quick lookup.",
+    "Handling the user's latest message needs at least five distinct steps — for example several separate " +
+    "searches or reads, investigating, comparing and then writing something up — rather than a direct reply " +
+    "or a short task of one to four tool calls, such as a greeting, a question about the agent itself, a " +
+    "single lookup, or finding and summarizing someone's messages.",
 };
 
 export function planGateForced(agentConfig: Record<string, unknown> | undefined): boolean {

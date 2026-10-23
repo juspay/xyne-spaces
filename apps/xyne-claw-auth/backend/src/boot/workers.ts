@@ -1,6 +1,7 @@
 import { createLogger } from "../logger.js";
 import { extension } from "../http/extension.js";
 import { initEvalSweeper, closeEvalSweeper } from "../queue/eval-sweeper.js";
+import { initFastDriftSweeper, closeFastDriftSweeper } from "../queue/fast-drift-sweeper.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { runner as errorPipelineRunner } from "../error-pipeline/runner/runner.js";
 import { connectDb } from "../db.js";
@@ -63,6 +64,7 @@ const WORKERS: WorkerEntry[] = [
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
   { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
   { name: "eval-sweeper", init: initEvalSweeper, close: closeEvalSweeper },
+  { name: "fast-drift-sweeper", init: initFastDriftSweeper, close: closeFastDriftSweeper },
   { name: "scheduled-jobs-queue", close: closeQueue },
   { name: "run-recovery-worker", init: initRunRecoveryWorker, close: closeRunRecoveryWorker },
   { name: "agent-run-queue", init: initAgentRunQueue, closeSync: closeAgentRunQueue },

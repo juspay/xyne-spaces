@@ -58,6 +58,7 @@ import type {
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type {
   ComposerAgentControl,
+  ComposerFastControl,
   ComposerModelControl,
   ComposerPlusControl,
   ComposerTrayItem,
@@ -122,6 +123,35 @@ export function ToolbarIconButton({
       {...rest}
     >
       {children}
+    </button>
+  );
+}
+
+export function FastModeToggle({ fast }: { fast: ComposerFastControl }): ReactElement {
+  const label = fast.enabled
+    ? 'Fast mode is on for this agent. Click to use its default speed.'
+    : "Fast mode: faster replies from the provider's fast tier";
+  return (
+    <button
+      type='button'
+      role='switch'
+      aria-checked={fast.enabled}
+      aria-label={label}
+      title={label}
+      onClick={fast.onToggle}
+      disabled={fast.disabled}
+      className={cn(
+        'inline-flex h-8 shrink-0 items-center gap-1 rounded-full text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        fast.enabled
+          ? 'bg-secondary px-2.5 font-medium text-status-pending hover:bg-secondary/70'
+          : 'w-8 justify-center text-muted-foreground hover:bg-secondary hover:text-foreground',
+      )}
+      data-track-category='XyneAI'
+      data-track-name={fast.enabled ? 'DISABLE_FAST_MODE' : 'ENABLE_FAST_MODE'}
+      data-testid='composer-fast-mode'
+    >
+      <Zap className='size-4 shrink-0' aria-hidden fill={fast.enabled ? 'currentColor' : 'none'} />
+      {fast.enabled && <span>Fast</span>}
     </button>
   );
 }

@@ -211,6 +211,7 @@ import {
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
+import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditionService';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
@@ -4841,6 +4842,9 @@ export function createMutators(
                       if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                         await deleteHeicRenditions(attachment.url);
                       }
+                      if (isVideoMimetype(attachment.mimetype)) {
+                        await deleteVideoRenditions(attachment.url);
+                      }
                     }
                   } catch (error) {
                     // Don't throw - continue deleting other files even if one fails
@@ -4879,6 +4883,9 @@ export function createMutators(
                   }
                   if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                     await deleteHeicRenditions(attachment.url);
+                  }
+                  if (isVideoMimetype(attachment.mimetype)) {
+                    await deleteVideoRenditions(attachment.url);
                   }
                 }
               } catch (error) {
@@ -4954,6 +4961,9 @@ export function createMutators(
                 }
                 if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
                   await deleteHeicRenditions(attachment.url);
+                }
+                if (isVideoMimetype(attachment.mimetype)) {
+                  await deleteVideoRenditions(attachment.url);
                 }
               }
             } catch (error) {
@@ -5421,6 +5431,8 @@ export function createMutators(
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
                   ringStatus: RingStatus.CALLING,
+                  // An explicit invite rings even if the call was scheduled not to.
+                  ringNotification: null,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,

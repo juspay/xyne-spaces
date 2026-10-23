@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { xor, xorConfig, xorEnabled, XOR_TIMEOUT_MS, type XorQuestion } from "../src/xor.js";
+import { clearXorCache, xor, xorConfig, xorEnabled, XOR_TIMEOUT_MS, type XorQuestion } from "../src/xor.js";
 import {
   beginJudgeRun,
   collectJudgeExchanges,
@@ -39,6 +39,7 @@ isolateEnv(ENV_KEYS, { clear: true });
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  clearXorCache();
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -321,5 +322,44 @@ describe("xor images", () => {
     fetchMock.mockResolvedValue(chatReply({ a: 0.9, b: 0.1 }));
     expect(await xor({ state: "s", questions: QUESTIONS, purpose: "p", images: [PNG] })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("xor cache and concurrency", () => {
+  it("answers an identical call from the cache, marks it, and still records it", async () => {
+    enable();
+    fetchMock.mockImplementation(async () => systemOneReply({ a: 0.9, b: 0.1 }));
+    const first = await xor({ state: "same", questions: QUESTIONS, purpose: "p", cache: true });
+    const second = await xor({ state: "same", questions: QUESTIONS, purpose: "p", cache: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+    const { isCachedAnswer } = await import("../src/xor.js");
+    expect(isCachedAnswer(first)).toBe(false);
+    expect(isCachedAnswer(second)).toBe(true);
+    await xor({ state: "different", questions: QUESTIONS, purpose: "p", cache: true });
+    await xor({ state: "same", questions: QUESTIONS, purpose: "p" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries once after a 429", async () => {
+    enable();
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 429 })).mockResolvedValueOnce(systemOneReply({ a: 0.9, b: 0.1 }));
+    const answers = await xor({ state: "rate limited", questions: QUESTIONS, purpose: "p" });
+    expect(answers?.["a"]?.noul).toBe(0.9);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never has more calls in flight than the cap", async () => {
+    enable();
+    const { xorInFlight } = await import("../src/xor.js");
+    let peak = 0;
+    fetchMock.mockImplementation(async () => {
+      peak = Math.max(peak, xorInFlight().active);
+      await new Promise((r) => setTimeout(r, 5));
+      return systemOneReply({ a: 0.9, b: 0.1 });
+    });
+    await Promise.all(Array.from({ length: 40 }, (_, i) => xor({ state: `s${i}`, questions: QUESTIONS, purpose: "p" })));
+    expect(peak).toBeLessThanOrEqual(xorInFlight().max);
+    expect(xorInFlight()).toMatchObject({ active: 0, waiting: 0 });
   });
 });

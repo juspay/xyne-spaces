@@ -73,7 +73,13 @@ class DecisionEvaluationQueue {
   /** Bull has no per-job TTL, so jobs left waiting or awaiting a retry past it are deleted here. */
   async removeExpired(): Promise<void> {
     if (!this.queue) return;
-    await Promise.all([this.queue.clean(JOB_TTL_MS, 'wait'), this.queue.clean(JOB_TTL_MS, 'delayed')]);
+    const [waiting, delayed] = await Promise.all([
+      this.queue.clean(JOB_TTL_MS, 'wait'),
+      this.queue.clean(JOB_TTL_MS, 'delayed'),
+    ]);
+    if (waiting.length + delayed.length > 0) {
+      logger.warn('[DECISION-EVALUATION] Dropped expired jobs', { waiting: waiting.length, delayed: delayed.length });
+    }
   }
 
   async close(): Promise<void> {

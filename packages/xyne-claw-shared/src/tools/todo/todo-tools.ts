@@ -71,7 +71,8 @@ export const todoWriteTool: ToolDefinition = {
     'call — it REPLACES the previous one. Each todo is {id, title, status} with status ∈ ' +
     'pending|in_progress|completed|failed. Keep EXACTLY ONE todo in_progress at a time, and mark a todo ' +
     'completed the moment it is done (do not batch). The list renders live to the user, so use clear, ' +
-    'user-facing titles. Skip this tool for trivial one-step requests.',
+    'user-facing titles. Use it only when the work clearly needs at least five distinct steps — including ' +
+    'when a task you started turns out bigger than expected; skip it for shorter requests.',
   inputSchema: {
     type: 'object',
     properties: {

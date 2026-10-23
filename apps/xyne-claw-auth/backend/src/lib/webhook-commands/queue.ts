@@ -1,4 +1,5 @@
 import { clearQueue, peekQueue, queueDepth } from "../message-queue.js";
+import { refreshQueueNotice } from "../queue-notice.js";
 import type { WebhookCommandCtx } from "./context.js";
 import { notice, pluralize, systemNote } from "../notice-format.js";
 
@@ -29,6 +30,7 @@ export async function handleQueueClear(ctx: WebhookCommandCtx): Promise<void> {
   const { agent, payload } = ctx;
   const convId = payload.conversationId;
   const discarded = convId ? await clearQueue(convId, agent.slug) : 0;
+  if (convId) await refreshQueueNotice({ conversationId: convId, agentSlug: agent.slug }, { kind: "cleared", discarded });
   const reply =
     discarded > 0
       ? notice(

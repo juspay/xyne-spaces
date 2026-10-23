@@ -1,5 +1,5 @@
 import { validateDecideQuestions, type DecideQuestion, type DecideType } from "xyne-claw-shared";
-import { xor, type XorAnswer, type XorAsk, type XorQuestion } from "./xor.js";
+import { isCachedAnswer, xor, type XorAnswer, type XorAsk, type XorQuestion } from "./xor.js";
 
 export type { DecideQuestion, DecideType };
 
@@ -40,6 +40,7 @@ export interface DecideResult {
   items: DecideItemResult[];
   summary: DecideQuestionSummary[];
   unavailable: number;
+  cached: number;
 }
 
 export const validateQuestions = validateDecideQuestions;
@@ -148,6 +149,7 @@ export async function decideBatch(input: {
   const ask = input.ask ?? xor;
   const xq = toXorQuestions(input.questions);
   let unavailable = 0;
+  let cached = 0;
   const items = await mapLimit(input.items, CONCURRENCY, async (item): Promise<DecideItemResult> => {
     const answers = await ask({
       state: itemState(item, input.context),
@@ -156,15 +158,17 @@ export async function decideBatch(input: {
       ...(item.image ? { images: [item.image] } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.model ? { model: input.model } : {}),
+      cache: true,
     }).catch(() => null);
     if (!answers) unavailable += 1;
+    else if (isCachedAnswer(answers)) cached += 1;
     return {
       id: item.id,
       answers: Object.fromEntries(input.questions.map((q) => [q.id, readAnswer(q, answers?.[q.id])])),
       ...(answers ? {} : { error: "xor unavailable" }),
     };
   });
-  return { items, summary: summarize(input.questions, items), unavailable };
+  return { items, summary: summarize(input.questions, items), unavailable, cached };
 }
 
 export function formatDecisions(questions: DecideQuestion[], result: DecideResult, maxRows = 60): string {

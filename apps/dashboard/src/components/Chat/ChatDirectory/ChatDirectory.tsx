@@ -1542,6 +1542,7 @@ const ChatDirectory = ({
                             void navigate('/chat/search?mode=channels');
                           }}
                           aria-label='Browse channels'
+                          data-testid='browse-channels-button'
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='BROWSE_CHANNELS'
                         >

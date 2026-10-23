@@ -36,3 +36,19 @@ describe("experiment toolsets", () => {
     expect(names(buildExperimentTools(ctx, vi.fn())).has("experiment-review")).toBe(false);
   });
 });
+
+describe("end-experiment by exit rule", () => {
+  const end = async (kind: ExperimentContext["kind"]) => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { markdown: "L", counts: { conjecture: 1, proved: 0, refuted: 0 }, deadlineAt: "", epoch: 2 } }), { status: 200 })) as never;
+    const tool = buildExperimentTools({ ...ctx, ...(kind ? { kind } : {}) }, vi.fn()).find((t) => t.name === "end-experiment")!;
+    return (await tool.execute("t", { report: "done" } as never, undefined as never, undefined as never, undefined as never)) as { details?: { refused?: boolean } };
+  };
+
+  it("lets a judge-gated /ui-test report pass end before the deadline", async () => {
+    expect((await end("ui-test")).details?.refused).toBeUndefined();
+  });
+
+  it("still refuses a time-boxed /experiment before its deadline", async () => {
+    expect((await end(undefined)).details?.refused).toBe(true);
+  });
+});

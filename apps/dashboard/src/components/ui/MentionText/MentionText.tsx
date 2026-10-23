@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Lock, Users, Clock, Hash } from 'lucide-react';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import { GroupHoverWrapper } from '../GroupMentionPopover/GroupMentionPopover';
@@ -8,16 +8,14 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { MentionTextProps } from './MentionText.types';
 import { useUser } from '../../../hooks/useUsers';
 import { useChannel } from '../../../hooks/useChannels';
-import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useUserGroupDialog } from '../../../store/useUserGroupDialogStore';
 
 export const MentionText: React.FC<MentionTextProps> = props => {
   const context = useAuthContextValues();
   const navigate = useNavigate();
-  const { baseRoute } = useRouteContext();
-  const { channelId: currentChannelId } = useParams<{ channelId: string }>();
   const user = useUser(props.type === 'user' ? props.userId : '');
   const channel = useChannel(props.type === 'channel' ? props.channelId : '');
   const isCurrentUser = context.userID === user?.id;
@@ -179,16 +177,15 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     );
   }
 
-  const handleGroupClick = (): void => {
-    if (currentChannelId) {
-      void navigate(`${baseRoute}/${currentChannelId}/group/${props.groupId}`);
-    }
+  const handleGroupClick = (event: React.SyntheticEvent): void => {
+    event.stopPropagation();
+    useUserGroupDialog.getState().open(props.groupId);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      handleGroupClick();
+      handleGroupClick(event);
     }
   };
 

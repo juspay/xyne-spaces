@@ -45,7 +45,7 @@ import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
-import { dispatchExperimentEpoch, dispatchExperimentChecker } from "../lib/experiment.js";
+import { continueExperimentAfterResult } from "../loop-graph/specs/experiment.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
 import { normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
@@ -57,6 +57,7 @@ import {
   enqueueMessage,
   dequeueMessage,
   clearQueue,
+  queueDepth,
   type QueuedMessage,
 } from "../lib/message-queue.js";
 import { createTraceId, createLogger } from "../logger.js";
@@ -496,6 +497,7 @@ import {
   AUTOMATION_RUN_DEDUP_TTL,
 } from "../lib/session-context.js";
 export { setSession, getSession, getSessionByConv, type SessionContext };
+import { listConversationPrBindings, prBindingsContextBlock } from "../lib/pr-binding-context.js";
 import {
   upsertWidgetBinding,
   findPrBindingByUrl,
@@ -555,6 +557,13 @@ import {
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
+import {
+  postDroppedNotice,
+  publishQueueNotice,
+  queueEventFor,
+  queueNoticeTargetFor,
+  refreshQueueNotice,
+} from "../lib/queue-notice.js";
 import { postGoalPhase, USE_EPHEMERAL_PROGRESS } from "../lib/goal-phase.js";
 import { postGeneratedMarkdownFile } from "../lib/spaces-generated-file.js";
 import { normalizeReviewRoomReason, reviewRoomFailureText } from "../lib/review-room-notice.js";
@@ -586,77 +595,6 @@ type PendingProviderSuggestions = {
 
 
 
-
-async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
-  const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
-  if (!active) return false;
-  if (active.currentSessionId && active.currentSessionId !== sessionId) return false;
-
-  const now = Date.now();
-  if (active.status === "finishing") {
-    await experimentRepository.update(active.id, { status: "done", lastEpochEndedAt: new Date() });
-    return false;
-  }
-
-  // Rapid-fail brake: an epoch that died within seconds of STARTING (model
-  // outage, misconfig) must NOT chain instantly — that's an unbounded tight
-  // dispatch loop. Measured against the session's own startedAt (not the
-  // experiment row's updatedAt, which ledger writes also bump). Deferring
-  // leaves the run inactive; the supervisor's stale sweep re-dispatches after
-  // its window, turning a hot loop into ~1 retry/10min.
-  const MIN_EPOCH_MS = 30_000;
-  const epochRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-  const epochRanMs = epochRun?.startedAt ? now - epochRun.startedAt.getTime() : Number.POSITIVE_INFINITY;
-  if (epochRanMs < MIN_EPOCH_MS) {
-    clog.warn(`[experiment] epoch for ${active.id} lived only ${Math.round(epochRanMs / 1000)}s — deferring next epoch to supervisor (rapid-fail brake)`);
-    await experimentRepository.update(active.id, { lastEpochEndedAt: new Date() }).catch(() => undefined);
-    return true; // treated as handled: keep this thread's queue-drain semantics unchanged
-  }
-
-  // Check the epoch that just ended, in parallel with the next one starting.
-  // Deliberately not awaited: the checker is advisory, and a slow or failing
-  // verification pass must never delay or block the experiment's own progress.
-  // Its verdicts land in the ledger and reach whichever epoch starts after.
-  void dispatchExperimentChecker(active, active.epoch).catch((err) => {
-    clog.warn("[experiment] checker dispatch threw", {
-      experimentId: active.id,
-      epoch: active.epoch,
-      error: errMsg(err),
-    });
-  });
-
-  // repo-history is COMMIT-bound, not time-bound: every commit from the initial
-  // sha to HEAD must be walked, so the deadline is NOT its stop condition — it
-  // keeps chaining epochs until the agent ends the run at HEAD (end-experiment,
-  // which flips the row out of "active" so this function returns early next
-  // time). The only backstop is an epoch-count cap, since a walk that never
-  // advances the cursor would otherwise loop forever — a time deadline would
-  // defeat the whole point. Other kinds keep the deadline as their safety cap.
-  const MAX_REPO_HISTORY_EPOCHS = 1000;
-  const keepGoing =
-    active.kind === "repo-history"
-      ? active.epoch < MAX_REPO_HISTORY_EPOCHS
-      : now < active.deadlineAt.getTime();
-  if (keepGoing) {
-    const next = await experimentRepository.update(active.id, {
-      epoch: { increment: 1 },
-      lastEpochEndedAt: new Date(),
-    });
-    await dispatchExperimentEpoch(next);
-    return true;
-  }
-  if (active.kind === "repo-history") {
-    clog.warn(`[experiment] repo-history ${active.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
-  }
-
-  const finishing = await experimentRepository.update(active.id, {
-    status: "finishing",
-    epoch: { increment: 1 },
-    lastEpochEndedAt: new Date(),
-  });
-  await dispatchExperimentEpoch(finishing);
-  return true;
-}
 
 function recordParam(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -1196,17 +1134,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       explicitQueueOnly,
     });
     if (gate.kind === "queued") {
-      await postAgentMessage(
-        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+      await publishQueueNotice(
         {
-          channelId: payload.channelId,
           conversationId: payload.conversationId,
-          markdownText: gate.notice,
-          metadata: { contentFormat: "markdown" },
-        }
-      ).catch((err) => {
-        log.warn("Failed to post queue notice", { error: errMsg(err) });
-      });
+          agentSlug: runAgentSlug,
+          channelId: payload.channelId,
+          orgId: agent.orgId,
+          spacesAppUserId: agent.spacesAppUserId,
+          appToken: agent.appToken,
+        },
+        queueEventFor(gate.enq, gate.interrupted),
+      );
       return;
     }
     slotToken = gate.slotToken;
@@ -1214,6 +1152,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   try {
     const history = await fetchConversationHistory(payload.conversationId, agent.appToken, agent.spacesAppUserId);
+    const prBindingsBlock = payload.conversationId
+      ? prBindingsContextBlock(
+          await listConversationPrBindings(payload.conversationId).catch((err: unknown) => {
+            log.warn("Failed to load PR bindings for run context", { error: errMsg(err) });
+            return [];
+          }),
+          runAgentSlug,
+        )
+      : "";
     const agentRow = await agentRepository.findBySlugWithRelations(agent.slug, agent.orgId ?? undefined);
     const agentSkills = agentRow?.skills?.map((s) => ({
       name: s.skill.name,
@@ -1449,7 +1396,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // "acknowledging the AI provider card" to questions that never asked for it.
     // suggest-providers decides during the run, and its tool result tells the
     // agent exactly what will render.
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock]
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock, prBindingsBlock]
       .filter(Boolean)
       .join("\n\n");
 
@@ -1908,6 +1855,7 @@ export async function reconcileStoppedRuns(conversationId: string, targetAgentSl
   const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
     .filter((run) => run.agentSlug === targetAgentSlug);
   const queued = await clearQueue(conversationId, targetAgentSlug);
+  await refreshQueueNotice({ conversationId, agentSlug: targetAgentSlug }, { kind: "cleared", discarded: queued });
 
   const summary: StopReconcileSummary = {
     stopped: 0,
@@ -2128,6 +2076,7 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
     return;
   }
+  const noticeScope = { conversationId, agentSlug, twinUserScopeId };
   try {
     // Twin and messaging-channel FIFO entries carry a fully-built replay blob
     // (dispatchPayload + sessionContext) and are replayed VERBATIM (approval
@@ -2144,9 +2093,15 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     // time from the run that just finished.
     await refreshSlot(conversationId, agentSlug, undefined, twinUserScopeId);
     clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${twinUserScopeId ? ` owner ${twinUserScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
+    const remaining = await queueDepth(conversationId, agentSlug, twinUserScopeId);
+    await refreshQueueNotice(noticeScope, remaining > 0 ? { kind: "queued", depth: remaining } : { kind: "drained" });
   } catch (err) {
     clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
+    const target = await queueNoticeTargetFor(next);
+    if (target) await postDroppedNotice(target, 1, "It could not be started after the previous reply finished.");
+    const remaining = await queueDepth(conversationId, agentSlug, twinUserScopeId);
+    await refreshQueueNotice(noticeScope, remaining > 0 ? { kind: "queued", depth: remaining } : { kind: "cleared", discarded: 0 });
   }
 }
 
@@ -3513,7 +3468,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return;
     }
     if (ctx?.conversationId && ctx.agentSlug) {
-      experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
+      experimentContinues = await continueExperimentAfterResult(ctx.conversationId, sessionId, resultWithCitations).catch((err) => {
         clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
         return false;
       });

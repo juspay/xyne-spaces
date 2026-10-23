@@ -184,6 +184,21 @@ describe("persistRunStats", () => {
     expect(data).not.toHaveProperty("llmCalls");
   });
 
+  it("replaces the run's fast subagent rows and unreviewed review samples when invocations are passed", async () => {
+    const { tx, asTx } = mockTx();
+    const fast = {
+      fastSubagentCall: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }), createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      xorReviewSample: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }), createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    Object.assign(tx, fast);
+    const invocations = [{ toolName: "log-triage", toolCallId: "c1", durationMs: 900, isError: false, debug: { fastSubagent: { fast: true, xor: { items: 3, answers: 3, unsure: 1 }, review: [{ item: "x", questionId: "q", question: "Q?", value: "db", confidence: 0.9 }] } } }];
+    await persistRunStats(asTx, [{ run, summary, invocations }]);
+    expect(fast.fastSubagentCall.deleteMany).toHaveBeenCalledWith({ where: { runId: { in: ["run1"] } } });
+    expect(fast.fastSubagentCall.createMany.mock.calls[0]![0].data[0]).toMatchObject({ runId: "run1", subagentName: "log-triage", xorItems: 3, xorUnsure: 1 });
+    expect(fast.xorReviewSample.deleteMany).toHaveBeenCalledWith({ where: { runId: { in: ["run1"] }, verdict: null } });
+    expect(fast.xorReviewSample.createMany.mock.calls[0]![0].data[0]).toMatchObject({ subagentName: "log-triage", value: "db" });
+  });
+
   it("keeps no rows for an orphan-closed run: only its run row is deleted", async () => {
     const { tx, asTx } = mockTx();
     expect(await persistRunStats(asTx, [{ run: { ...run, error: "interrupted (orphaned run)" }, summary }])).toEqual(none);

@@ -1519,10 +1519,18 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 value={field.state.value}
                 onChange={value => field.handleChange(value as 'public' | 'private')}
               >
-                <Radio value='public' subtext='Anyone in the organization can view and join'>
+                <Radio
+                  data-testid='channel-visibility-public'
+                  value='public'
+                  subtext='Anyone in the organization can view and join'
+                >
                   Public
                 </Radio>
-                <Radio value='private' subtext='Only invited members can view and join'>
+                <Radio
+                  data-testid='channel-visibility-private'
+                  value='private'
+                  subtext='Only invited members can view and join'
+                >
                   Private
                 </Radio>
               </RadioGroup>

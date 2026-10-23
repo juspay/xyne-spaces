@@ -39,6 +39,10 @@ import {
   useSelectedAgent,
 } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
+import {
+  readFastModePreference,
+  writeFastModePreference,
+} from '../../services/XyneAI/fastModePreference';
 import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
 import { buddy } from '../Assistant/buddy';
@@ -241,6 +245,21 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const instant = selectedAgent?.instantAgent === true;
 
   const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const [fastMode, setFastMode] = useState(
+    () => seed.fast || readFastModePreference(modelAgentSlug),
+  );
+  const fastModeAgentSlug = useRef(modelAgentSlug);
+  useEffect(() => {
+    if (fastModeAgentSlug.current === modelAgentSlug) return;
+    fastModeAgentSlug.current = modelAgentSlug;
+    setFastMode(readFastModePreference(modelAgentSlug));
+  }, [modelAgentSlug]);
+  const effectiveFastMode = fastMode && !instant;
+  const toggleFastMode = (): void => {
+    const next = !fastMode;
+    setFastMode(next);
+    writeFastModePreference(modelAgentSlug, next);
+  };
   const {
     data: agentModelsData,
     isPlaceholderData: modelsArePreviousAgent,
@@ -315,6 +334,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           ? 'local-harness'
           : modelPinProvider,
       thinkingLevel: effectiveThinkingLevel,
+      fast: effectiveFastMode,
       sandboxMode,
     }),
     [
@@ -333,6 +353,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       sandboxMode,
       modelPinProvider,
       effectiveThinkingLevel,
+      effectiveFastMode,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -355,6 +376,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     model: null,
     modelProvider: null,
     thinkingLevel: null,
+    fast: false,
   });
 
   const handleFilesAdded = useCallback(
@@ -883,6 +905,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           loading: modelsArePreviousAgent || modelsLoading,
           disabled: pending,
         }}
+        fast={instant ? null : { enabled: fastMode, onToggle: toggleFastMode, disabled: pending }}
         onEnterVoiceMode={() => setVoiceMode(true)}
         onFilesPasted={files => void handleFilesAdded(files)}
       />

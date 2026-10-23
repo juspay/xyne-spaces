@@ -4781,6 +4781,83 @@ export interface SubagentTemplateSummary {
   screenshotSamples: boolean;
 }
 
+export interface FastSubagentStats {
+  subagentName: string;
+  fast: boolean;
+  models: string[];
+  calls: number;
+  errorRate: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  tokensOffloaded: number;
+  xorCalls: number;
+  xorItems: number;
+  unsureRate: number | null;
+  unavailableRate: number | null;
+  cacheHitRate: number | null;
+  escalations: number;
+  quotaBlocked: number;
+  daily: Array<{ day: string; calls: number; unsureRate: number | null }>;
+  costRows: Array<{ model: string | null; parentModel: string | null; calls: number; xorCalls: number; tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number }>;
+}
+
+export interface FastSubagentRow {
+  subagentName: string;
+  builtin: boolean;
+  calls: number;
+  stats: FastSubagentStats | null;
+  budget: { maxToolCalls?: number; xorItemsPerHour?: number } | null;
+  eval: { accuracy: number | null; confidentWrong: number | null; ranAt: string | null; stale: boolean } | null;
+  reviews: { pending: number; correct: number; wrong: number; wrongRate: number | null };
+}
+
+export interface FastSubagentAlert {
+  id: string;
+  subagentName: string;
+  kind: string;
+  baseline: number;
+  current: number;
+  samples: number;
+  message: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+}
+
+export interface XorReviewItem {
+  id: string;
+  subagentName: string;
+  item: string;
+  questionId: string;
+  question: string;
+  value: string;
+  confidence: number;
+  createdAt: string;
+}
+
+export async function getFastSubagentStats(days: number): Promise<{ days: number; subagents: FastSubagentRow[]; alerts: FastSubagentAlert[] }> {
+  const data = await request<{ success: boolean; data: { days: number; subagents: FastSubagentRow[]; alerts: FastSubagentAlert[] } }>(`${AUTH_API_URL}/api/v1/subagents/fast/stats?days=${days}`);
+  return data.data;
+}
+
+export async function runFastDriftCheck(): Promise<{ created: FastSubagentAlert[] }> {
+  const data = await request<{ success: boolean; data: { created: FastSubagentAlert[] } }>(`${AUTH_API_URL}/api/v1/subagents/fast/drift/check`, { method: "POST" });
+  return data.data;
+}
+
+export async function ackFastSubagentAlert(id: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/subagents/fast/alerts/${encodeURIComponent(id)}/ack`, { method: "POST" });
+}
+
+export async function listXorReviews(subagent?: string): Promise<XorReviewItem[]> {
+  const q = subagent ? `?subagent=${encodeURIComponent(subagent)}` : "";
+  const data = await request<{ success: boolean; data: XorReviewItem[] }>(`${AUTH_API_URL}/api/v1/subagents/fast/reviews${q}`);
+  return data.data;
+}
+
+export async function submitXorReview(id: string, verdict: "correct" | "wrong"): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/subagents/fast/reviews/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ verdict }) });
+}
+
 export async function listSubagentTemplates(): Promise<SubagentTemplateSummary[]> {
   const data = await request<{ success: boolean; data: SubagentTemplateSummary[] }>(`${AUTH_API_URL}/api/v1/subagents/templates`);
   return data.data;
@@ -8895,4 +8972,143 @@ export interface CuratorClassifierTrace {
     worth?: number;
     exchange: ClassifierExchange;
   }>;
+}
+
+export type LoopTemplateId = "deadline-checker" | "frontier" | "cursor-walk" | "until-condition" | "fix-retry" | "sequence";
+
+export interface LoopSequenceStep {
+  command: string;
+  args: string;
+}
+
+export interface LoopTemplateInfo {
+  id: LoopTemplateId;
+  title: string;
+  summary: string;
+  example: string;
+  exit: "deadline" | "frontier" | "judge";
+  question: { label: string; placeholder: string; retryWhen: boolean } | null;
+  deliverable: "required" | "optional" | "none";
+  defaultDurationMin: number;
+  maxDurationMin: number;
+  composite?: boolean;
+}
+
+export interface LoopTemplateCatalogue {
+  templates: LoopTemplateInfo[];
+  skillBundles: Array<{ id: string; label: string; summary: string }>;
+  providers: string[];
+  builtinLoops: Array<{ command: string; summary: string; positional: string | null }>;
+}
+
+export interface LoopCommandBody {
+  name?: string;
+  description: string;
+  template: LoopTemplateId;
+  instruction: string;
+  skills: string[];
+  subagents: string[];
+  provider?: string | null;
+  modelId?: string | null;
+  maxDurationMinutes: number;
+  maxPasses?: number | null;
+  deliverable?: "md" | "html" | null;
+  judgeQuestion?: string | null;
+  steps?: LoopSequenceStep[] | null;
+}
+
+export interface LoopCommandRow extends Required<Omit<LoopCommandBody, "name">> {
+  id: string;
+  name: string;
+  command: string;
+  published: boolean;
+  enabled: boolean;
+  mine: boolean;
+  createdByUserId: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface LoopCommandVersionInfo {
+  version: number;
+  createdAt: string;
+  createdByUserId: string;
+  current: boolean;
+  snapshot: Partial<LoopCommandBody>;
+}
+
+export async function listLoopCommandVersions(id: string): Promise<LoopCommandVersionInfo[]> {
+  const data = await request<{ success: boolean; data: LoopCommandVersionInfo[] }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/versions`);
+  return data.data;
+}
+
+export async function rollbackLoopCommand(id: string, version: number): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/rollback`, { method: "POST", body: JSON.stringify({ version }) });
+  return data.data;
+}
+
+export async function getLoopTemplates(): Promise<LoopTemplateCatalogue> {
+  const data = await request<{ success: boolean; data: LoopTemplateCatalogue }>(`${AUTH_API_URL}/api/v1/loop-commands/templates`);
+  return data.data;
+}
+
+export async function listLoopCommands(): Promise<LoopCommandRow[]> {
+  const data = await request<{ success: boolean; data: LoopCommandRow[] }>(`${AUTH_API_URL}/api/v1/loop-commands`);
+  return data.data;
+}
+
+export async function createLoopCommand(body: LoopCommandBody): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands`, { method: "POST", body: JSON.stringify(body) });
+  return data.data;
+}
+
+export async function updateLoopCommand(id: string, body: LoopCommandBody): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) });
+  return data.data;
+}
+
+export async function publishLoopCommand(id: string, published: boolean): Promise<LoopCommandRow> {
+  const data = await request<{ success: boolean; data: LoopCommandRow }>(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}/publish`, { method: "POST", body: JSON.stringify({ published }) });
+  return data.data;
+}
+
+export async function deleteLoopCommand(id: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/loop-commands/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export interface LoopCostRow {
+  model: string | null;
+  runs: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface LoopRunSummary {
+  runs: number;
+  outcomes: { completed: number; "no-report": number; stopped: number; running: number };
+  completionRate: number | null;
+  avgPasses: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+}
+
+export interface LoopCommandStats extends LoopRunSummary {
+  id: string;
+  name: string;
+  template: string;
+  version: number;
+  published: boolean;
+  composite: boolean;
+  findings: { proved: number; refuted: number; conjecture: number };
+  costRows: LoopCostRow[];
+  byVersion: Array<LoopRunSummary & { version: number }>;
+  daily: Array<{ day: string; runs: number }>;
+  recent: Array<{ id: string; version: number | null; status: string; passes: number; ms: number; createdAt: string; report: string | null }>;
+}
+
+export async function getLoopCommandStats(days: number): Promise<{ days: number; commands: LoopCommandStats[] }> {
+  const data = await request<{ success: boolean; data: { days: number; commands: LoopCommandStats[] } }>(`${AUTH_API_URL}/api/v1/loop-commands/stats?days=${days}`);
+  return data.data;
 }

@@ -17,6 +17,14 @@ describe("decidePlanTracking", () => {
     expect(d).toMatchObject({ plan: false, reason: "jev", probability: 0.08 });
   });
 
+  it("asks jev whether the request needs at least five distinct steps", async () => {
+    const ask = vi.fn(answer(0.2));
+    await decidePlanTracking("summarize my messages from today", {}, { enabled: () => true, ask });
+    const question = (ask.mock.calls[0]?.[0] as { questions: { multiStep: { instructions: string } } }).questions.multiStep.instructions;
+    expect(question).toContain("at least five distinct steps");
+    expect(question).toContain("finding and summarizing someone's messages");
+  });
+
   it("keeps the plan for multi-step work", async () => {
     const d = await decidePlanTracking("investigate why pods restart and fix the manifest", {}, { enabled: () => true, ask: answer(0.91) });
     expect(d).toMatchObject({ plan: true, reason: "jev" });

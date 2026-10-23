@@ -53,6 +53,7 @@ export interface StreamOverrides {
   modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Per-run thinking level. Absent = the agent's configured default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  speed?: 'fast';
   approvedAction?: ApprovedActionPayload;
   researchContext?: ResearchContext | null;
   ticketIds?: string[];
@@ -585,6 +586,7 @@ export const useXyneAIStream = ({
           ...(isV2 && eModel ? { model: eModel } : {}),
           ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
           ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
+          ...(isV2 && ov?.speed ? { speed: ov.speed } : {}),
           ...(ov?.approvedAction ? { approvedAction: ov.approvedAction } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
           ...(ov?.sandboxMode && ov.sandboxMode !== 'remote'
