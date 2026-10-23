@@ -66,15 +66,17 @@ function ActivityV2({
 }: ActivityV2Props): ReactElement | null {
   const { user } = useAuth();
   const users = useSelector(stateMachineActor, state => state.context.users);
+  const allChannels = useSelector(stateMachineActor, state => state.context.allChannels);
   const visibleChannels = useSelector(stateMachineActor, state => state.context.visibleChannels);
   const usersById = useMemo(
     () => new Map(users.map(candidate => [candidate.id, candidate])),
     [users],
   );
-  const visibleChannelsById = useMemo(
-    () => new Map(visibleChannels.map(candidate => [candidate.id, candidate])),
-    [visibleChannels],
-  );
+  const channelsById = useMemo(() => {
+    const byId = new Map(allChannels.map(candidate => [candidate.id, candidate]));
+    for (const candidate of visibleChannels) byId.set(candidate.id, candidate);
+    return byId;
+  }, [allChannels, visibleChannels]);
   const rowVm = useMemo(() => {
     const actorId = activity.actorId ?? activity.message?.senderId ?? 'system';
     const actor = usersById.get(actorId);
@@ -83,7 +85,7 @@ function ActivityV2({
       activity.ticket?.channelId ??
       activity.channelId ??
       '';
-    const channel = visibleChannelsById.get(channelId) ?? null;
+    const channel = channelsById.get(channelId) ?? null;
     const actorName =
       actor?.displayName || actor?.name || actor?.email || (activity.actorId ? undefined : 'Xyne');
     const channelLabel =
@@ -99,7 +101,7 @@ function ActivityV2({
       ...(channelLabel !== undefined ? { channelLabel } : {}),
       ...(actorName ? { actorName } : {}),
     });
-  }, [activity, user?.user_id, users, usersById, visibleChannelsById]);
+  }, [activity, user?.user_id, users, usersById, channelsById]);
 
   let content: ReactElement | null = null;
 

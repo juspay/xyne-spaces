@@ -138,6 +138,46 @@ describe('buildActivityRow', () => {
     assert.deepEqual(row.target, { kind: 'ticket', ticketId: 't1', selectedTab: 'activity' });
   });
 
+  it('opens a desk mention on the desk messages tab', () => {
+    const desk = { id: 'c1', name: 'test-lotus-dl', scopeType: 'DEFAULT', type: 'EMAIL' };
+    const deskCtx = {
+      ...ctx,
+      channelsById: new Map([[desk.id, desk]]),
+    } as unknown as ActivityRowContext;
+    const row = buildActivityRow(activity(), deskCtx);
+    assert.ok(row);
+    assert.equal(row.target.kind, 'desk');
+    if (row.target.kind !== 'desk') return;
+    assert.equal(row.target.channelId, 'c1');
+    assert.equal(row.target.tab, 'messages');
+    assert.equal(row.target.messageId, 'm1');
+  });
+
+  it('opens a desk ticket update on the desk ticket', () => {
+    const desk = { id: 'c1', name: 'test-lotus-dl', scopeType: 'DEFAULT', type: 'EMAIL' };
+    const deskCtx = {
+      ...ctx,
+      channelsById: new Map([[desk.id, desk]]),
+    } as unknown as ActivityRowContext;
+    const row = buildActivityRow(
+      activity({
+        actorId: null,
+        actorAction: 'ticket_status',
+        message: null,
+        ticketId: 't1',
+        ticket: { id: 't1', xyneId: 'XYN-241', title: 'Fix refund', channelId: 'c1' },
+      }),
+      deskCtx,
+    );
+    assert.ok(row);
+    assert.deepEqual(row.target, {
+      kind: 'desk',
+      channelId: 'c1',
+      xyneId: 'XYN-241',
+      ticketId: 't1',
+    });
+  });
+
   it('sends call activities to the calls tab', () => {
     const row = buildActivityRow(activity({ actorAction: 'call_reminder', message: null }), ctx);
     assert.deepEqual(row?.target, { kind: 'calls' });

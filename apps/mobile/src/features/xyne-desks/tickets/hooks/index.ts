@@ -22,4 +22,5 @@ export {
   type DeskDynamicFieldDef,
 } from './use-ticket-dynamic-field-filter-options';
 export { useGeneratedTagsConversationIds } from './use-generated-tags-conversation-ids';
+export { useOpenDeskConversation } from './use-open-desk-conversation';
 export { useDeskTicketSearch, type UseDeskTicketSearchReturn } from './use-desk-ticket-search';

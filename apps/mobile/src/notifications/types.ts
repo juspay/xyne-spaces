@@ -68,6 +68,16 @@ export type ChatRouteTarget = {
   createdAt?: string;
   scopeType?: string;
   ticketId?: string; // standalone TICKET_* taps and chat overlays open /ticket/[ticketId]
+  /** Dashboard `/support/` link, or a chat push on a desk channel. */
+  desk?: {
+    channelId: string;
+    xyneId?: string;
+    /** Internal ticket id when the push has no xyneId. */
+    ticketId?: string;
+    conversationId?: string;
+    messageId?: string;
+    tab?: 'email' | 'messages' | 'details';
+  };
   /** Server FCM `notificationId` — log identity only, not used for routing. */
   notificationId?: string;
   /** FCM `type` — log identity only, not used for routing. */

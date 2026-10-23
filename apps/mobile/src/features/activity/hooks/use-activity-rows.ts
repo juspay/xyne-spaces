@@ -84,7 +84,13 @@ export function useActivityRows({ screenReady }: { screenReady: boolean }): Acti
   const workspaceId = user?.workspaceId ?? null;
 
   const users = useSelector(stateMachineActor, state => state.context.users);
+  const allChannels = useSelector(stateMachineActor, state => state.context.allChannels);
   const visibleChannels = useSelector(stateMachineActor, state => state.context.visibleChannels);
+  const channels = useMemo(() => {
+    const byId = new Map(allChannels.map(channel => [channel.id, channel]));
+    for (const channel of visibleChannels) byId.set(channel.id, channel);
+    return [...byId.values()];
+  }, [allChannels, visibleChannels]);
 
   const actor = useMemo(
     () => actorFilterFrom({ actorKind, actorUserId }),
@@ -114,10 +120,10 @@ export function useActivityRows({ screenReady }: { screenReady: boolean }): Acti
   // The cache lives exactly as long as the context it was built under.
   const { context, cache } = useMemo(
     () => ({
-      context: createActivityRowContext(users, visibleChannels, currentUserId),
+      context: createActivityRowContext(users, channels, currentUserId),
       cache: new WeakMap<(typeof activities)[number], ActivityRowData | null>(),
     }),
-    [currentUserId, users, visibleChannels],
+    [currentUserId, users, channels],
   );
 
   const rows = useMemo(

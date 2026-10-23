@@ -44,7 +44,6 @@ import {
 } from './platform/messaging';
 import { requestNotificationPermission } from './platform/permissions';
 import { resolvePushToken } from './platform/pushToken';
-import { toRouteTargetFromMessage } from './tapCache';
 import type { ChatRouteTarget, DeliveryContext, ParsedMessage, RawPushMessage } from './types';
 import { subscribeToNotificationOpen } from './platform/messaging';
 import {
@@ -52,6 +51,7 @@ import {
   persistNavIntent,
   queueTapNavigation,
   queueNonChatNotificationNavigationFromData,
+  routeTargetFromParsedMessage,
 } from './tapNavigation';
 import {
   getRouteSnapshotPathname,
@@ -207,7 +207,7 @@ class NotificationService {
           try {
             await queueTapNavigation(message);
           } catch {
-            const target = toRouteTargetFromMessage(message);
+            const target = routeTargetFromParsedMessage(message);
             if (target) persistNavIntent(target);
           }
           // iOS APNS taps don't fire a tray DISMISS — clear after cache is warm.

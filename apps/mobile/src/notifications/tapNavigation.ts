@@ -27,7 +27,13 @@ import {
 } from './message/messageContext';
 import { launchIntentExtrasToNavData } from './launchIntentNav';
 import { matchesChatRouteTarget } from './navigation/navReadiness';
+import { getChannelById } from '@/src/hooks/useChannels';
+import {
+  isDeskActivityChannel,
+  openDeskRoute,
+} from '@/src/features/xyne-desks/navigation/openDeskRoute';
 import { toRouteTargetFromMessage } from './tapCache';
+import { supportDeepLinkFromNotificationData } from './supportDeepLink';
 import type { ChatRouteTarget, ParsedMessage } from './types';
 
 // ── Intent store (memory + MMKV for headless → main handoff) ─────────────────
@@ -135,6 +141,7 @@ function isPersistableNavIntent(
   target: ChatRouteTarget | null | undefined,
 ): target is ChatRouteTarget {
   if (!target) return false;
+  if (target.desk?.channelId?.trim()) return true;
   if (target.ticketId?.trim()) return true;
   return Boolean(target.channelId?.trim());
 }
@@ -205,8 +212,30 @@ export function performChatNavigation(
 ): void {
   triggerActivitySync('push_opened');
 
+  if (target.desk?.channelId) {
+    const fromThreadMessage = Boolean(target.threadId || target.messageId);
+    openDeskRoute({
+      ...target.desk,
+      ...(fromThreadMessage ? { tab: 'messages' as const } : {}),
+      ...(target.messageId && !target.desk.messageId ? { messageId: target.messageId } : {}),
+    });
+    return;
+  }
+
   if (target.ticketId) {
     const channelId = target.channelId?.trim() ?? '';
+    if (channelId && isDeskActivityChannel(getChannelById(channelId)?.type)) {
+      openDeskRoute({
+        channelId,
+        ticketId: target.ticketId,
+        tab: 'messages',
+        ...((target.threadId ?? target.conversationId)
+          ? { conversationId: target.threadId ?? target.conversationId }
+          : {}),
+        ...(target.messageId ? { messageId: target.messageId } : {}),
+      });
+      return;
+    }
     if (channelId) {
       restorePersistedChatWindow({
         channelId,
@@ -336,6 +365,22 @@ export function queueBookmarkNotificationNavigationFromData(data: Record<string,
   return true;
 }
 
+export function queueSupportNotificationNavigationFromData(data: Record<string, string>): boolean {
+  const desk = supportDeepLinkFromNotificationData(data);
+  if (!desk) return false;
+  if (wasLaunchAlreadyConsumed(data)) return false;
+
+  tapQueuedThisBoot = true;
+  persistNavIntent({
+    channelId: desk.channelId,
+    ...(desk.conversationId ? { conversationId: desk.conversationId } : {}),
+    ...(desk.messageId ? { messageId: desk.messageId } : {}),
+    desk,
+  });
+  rememberConsumedLaunchData(data);
+  return true;
+}
+
 export function queueTicketNotificationNavigationFromData(data: Record<string, string>): boolean {
   const target = extractTicketRouteTarget(data);
   if (!target) return false;
@@ -350,6 +395,7 @@ export function queueTicketNotificationNavigationFromData(data: Record<string, s
 /** Bookmark and standalone ticket taps — used when the payload is not a chat message. */
 export function queueNonChatNotificationNavigationFromData(data: Record<string, string>): boolean {
   if (queueBookmarkNotificationNavigationFromData(data)) return true;
+  if (queueSupportNotificationNavigationFromData(data)) return true;
   return queueTicketNotificationNavigationFromData(data);
 }
 
@@ -369,6 +415,9 @@ export function isAlreadyOnTarget(
 
 function navSignature(target: ChatRouteTarget): string {
   return [
+    target.desk?.channelId ?? '',
+    target.desk?.xyneId ?? '',
+    target.desk?.conversationId ?? '',
     target.ticketId ?? '',
     target.channelId ?? '',
     target.threadId ?? '',
@@ -377,11 +426,38 @@ function navSignature(target: ChatRouteTarget): string {
   ].join('|');
 }
 
+export function routeTargetFromParsedMessage(message: ParsedMessage): ChatRouteTarget | null {
+  const deskLink = supportDeepLinkFromNotificationData(message.rawData);
+  const target = toRouteTargetFromMessage(message);
+  if (!target && !deskLink) return null;
+
+  const channelId = (target?.channelId ?? deskLink?.channelId ?? '').trim();
+  const channelIsDesk =
+    channelId.length > 0 && isDeskActivityChannel(getChannelById(channelId)?.type);
+  if (!channelId || (!deskLink && !channelIsDesk)) return target;
+
+  const conversationId = deskLink?.conversationId ?? target?.threadId ?? target?.conversationId;
+  const messageId = deskLink?.messageId ?? target?.messageId;
+  const fromThreadMessage = Boolean(target?.threadId || target?.messageId);
+
+  return {
+    ...(target ?? { channelId }),
+    desk: {
+      channelId,
+      ...(channelIsDesk && target?.ticketId ? { ticketId: target.ticketId } : {}),
+      ...(deskLink?.xyneId ? { xyneId: deskLink.xyneId } : {}),
+      ...(conversationId ? { conversationId } : {}),
+      ...(messageId ? { messageId } : {}),
+      ...(channelIsDesk && fromThreadMessage ? { tab: 'messages' as const } : {}),
+    },
+  };
+}
+
 // ── Tap entry (tray + FCM open) ──────────────────────────────────────────────
 
 /** Called from trayEvents / messaging — never calls router directly. */
 export async function queueTapNavigation(message: ParsedMessage): Promise<void> {
-  const target = toRouteTargetFromMessage(message);
+  const target = routeTargetFromParsedMessage(message);
   if (!target) {
     return;
   }
@@ -405,6 +481,7 @@ async function queueChatOrTicketFromNotificationData(
     await queueTapNavigation(message);
     return true;
   }
+  if (queueSupportNotificationNavigationFromData(data)) return true;
   return queueTicketNotificationNavigationFromData(data);
 }
 

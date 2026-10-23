@@ -12,6 +12,8 @@ import {
 } from 'lucide-react-native';
 import { ActivityV2Card } from './activity-v2-card';
 import { CopyableValue } from '@/src/components/ui/copyable-value';
+import { openActivityOnDeskOr } from '@/src/features/xyne-desks/navigation/openDeskRoute';
+import { useChannelById } from '@/src/hooks/useChannels';
 import type { ActivityV2Props } from './activity-v2/activity-v2.types';
 
 type Config = {
@@ -106,6 +108,8 @@ const getConfig = (actorAction: string): Config => {
 export const TicketUpdateActivity = ({ activity }: ActivityV2Props): ReactElement | null => {
   const ticket = activity.ticket;
   const actorId = activity.actorId ?? 'system';
+  const channelId = ticket?.channelId ?? activity.channelId ?? '';
+  const channel = useChannelById(channelId);
   if (!ticket) return null;
   const ticketXyneId = ticket.xyneId ?? activity.ticketId ?? activity.actionSourceId ?? '';
   const config = getConfig(activity.actorAction ?? '');
@@ -120,12 +124,22 @@ export const TicketUpdateActivity = ({ activity }: ActivityV2Props): ReactElemen
       badgeColorClass={config.badgeColorClass}
       description={config.description}
       onPress={() => {
-        const ticketId = activity.ticketId ?? activity.actionSourceId ?? ticket.id;
-        if (!ticketId) return;
-        router.push({
-          pathname: '/ticket/[ticketId]',
-          params: { ticketId, selectedTab: 'activity' },
-        });
+        openActivityOnDeskOr(
+          channel?.type,
+          {
+            channelId,
+            ...(ticket.xyneId ? { xyneId: ticket.xyneId } : {}),
+            ...(ticket.id ? { ticketId: ticket.id } : {}),
+          },
+          () => {
+            const ticketId = activity.ticketId ?? activity.actionSourceId ?? ticket.id;
+            if (!ticketId) return;
+            router.push({
+              pathname: '/ticket/[ticketId]',
+              params: { ticketId, selectedTab: 'activity' },
+            });
+          },
+        );
       }}
     >
       <View className='gap-1'>

@@ -37,6 +37,8 @@ export type ChatRouteParams = {
   messageId?: string | string[] | undefined;
   createdAt?: string | string[] | undefined;
   ticketId?: string | string[] | undefined;
+  /** Internal ticket id on a Xyne desk ticket route. */
+  id?: string | string[] | undefined;
 };
 
 const normalizeRouteValue = (value: unknown): string | undefined => {
@@ -59,6 +61,39 @@ export const getChatRouteIdentity = (
     normalizeRouteValue(routeParams.createdAt) ?? '',
     normalizeRouteValue(routeParams.ticketId) ?? '',
   ].join('|');
+
+/** True when the open route is already this Xyne desk ticket, so a second tap should not stack it. */
+export function matchesDeskRouteTarget(
+  pathname: string | null | undefined,
+  desk: { channelId: string; xyneId?: string; ticketId?: string },
+  routeParams: ChatRouteParams = {},
+): boolean {
+  if (!pathname) return false;
+
+  const segments = pathname
+    .trim()
+    .replace(/^\/+/, '')
+    .split('/')
+    .map(segment => normalizeRouteValue(segment))
+    .filter((segment): segment is string => segment !== undefined);
+  const deskIndex = segments.lastIndexOf('xyne-desks');
+  if (deskIndex < 0) return false;
+  if (segments[deskIndex + 1] !== desk.channelId.trim()) return false;
+
+  const pathTicketId = segments[deskIndex + 2];
+  const wanted = [desk.xyneId, desk.ticketId]
+    .map(value => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  if (wanted.length === 0) return pathTicketId === undefined;
+
+  const routeTicketId = normalizeRouteValue(routeParams.ticketId);
+  const routeInternalId = normalizeRouteValue(routeParams.id);
+  return (
+    (pathTicketId !== undefined && wanted.includes(pathTicketId)) ||
+    (routeTicketId !== undefined && wanted.includes(routeTicketId)) ||
+    (routeInternalId !== undefined && routeInternalId === desk.ticketId?.trim())
+  );
+}
 
 export function matchesChatRouteTarget(
   pathname: string | null | undefined,

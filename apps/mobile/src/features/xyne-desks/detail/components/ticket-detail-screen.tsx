@@ -53,6 +53,8 @@ export default function TicketDetailScreen() {
     channelId: string;
     ticketId: string;
     id?: string;
+    tab?: string;
+    messageId?: string;
   }>();
 
   const channelId = paramString(params.channelId);
@@ -79,7 +81,13 @@ export default function TicketDetailScreen() {
     detail?.deskSource,
   );
 
-  const tabs = useTicketDetailTabs('email');
+  const requestedTab = paramString(params.tab);
+  const initialTab =
+    requestedTab === 'messages' || requestedTab === 'details' || requestedTab === 'email'
+      ? requestedTab
+      : 'email';
+  const tabs = useTicketDetailTabs(initialTab);
+  const focusMessageId = paramString(params.messageId) || undefined;
   const { starred, toggleStar } = useTicketMailboxStar({
     ticketId: detail?.id,
     channelId,
@@ -291,6 +299,7 @@ export default function TicketDetailScreen() {
           isMember={isMember}
           contentPaddingTop={contentPaddingTop}
           onParentTicketPress={handleParentTicketPress}
+          {...(focusMessageId ? { messageId: focusMessageId } : {})}
         />
       ) : null}
 
