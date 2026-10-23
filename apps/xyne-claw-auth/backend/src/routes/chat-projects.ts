@@ -19,7 +19,6 @@
  */
 
 import { Router, type Request, type Response } from "express";
-import { prisma } from "../db.js";
 import {
   chatProjectRepository,
   chatProjectKnowledgeRepository,
@@ -29,6 +28,7 @@ import {
 } from "../repositories/index.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
+import { orgIdForSpacesUser, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("chat-projects");
@@ -163,9 +163,10 @@ interface ProjectCaller {
 }
 
 /**
- * Projects are not conversation-scoped, so orgId cannot be taken from an owning
- * chat row the way title/pin do it. Use the header, falling back to the
- * caller's own org — the same order resolveCallbackOrgId uses.
+ * The Spaces proxy sends only the workspace-scoped SPACES id and no `x-org-id`,
+ * so the org must be resolved through the Spaces identity rather than matched
+ * against `users.id`, which holds CLAW ids.
+ *
  * Writes the error response itself and returns null when it cannot resolve.
  */
 async function requireProjectCaller(req: Request, res: Response): Promise<ProjectCaller | null> {
@@ -174,16 +175,21 @@ async function requireProjectCaller(req: Request, res: Response): Promise<Projec
     res.status(401).json({ success: false, error: "Authentication required" });
     return null;
   }
+  const spacesUserId = getRequesterId(req) ?? aliases[0]!;
   const headerOrgId = getOrgId(req);
-  const orgId = headerOrgId
-    ?? (await prisma.user
-      .findFirst({ where: { id: { in: aliases } }, select: { orgId: true } })
-      .catch(() => null))?.orgId;
+  const orgId =
+    headerOrgId ?? (await orgIdForSpacesUser(spacesUserId, "agent-chat").catch(() => undefined));
   if (!orgId) {
-    res.status(400).json({ success: false, error: "Organization context is required" });
+    res.status(400).json({
+      success: false,
+      error: "Could not resolve your organization for this workspace",
+    });
     return null;
   }
-  return { aliases, primaryUserId: getRequesterId(req) ?? aliases[0]!, orgId };
+  // Reads match either id form; writes keep using the id on the wire.
+  const canonicalId = await resolveClawUserIdForSpacesIdentity(spacesUserId).catch(() => undefined);
+  const lookupAliases = [...new Set([...aliases, ...(canonicalId ? [canonicalId] : [])])];
+  return { aliases: lookupAliases, primaryUserId: spacesUserId, orgId };
 }
 
 interface ProjectFields {

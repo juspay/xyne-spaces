@@ -217,6 +217,16 @@ vi.mock("../middleware/pin-user-id-param.js", () => ({
     ),
 }));
 
+vi.mock("../lib/users-jit.js", () => ({
+  orgIdForSpacesUser: vi.fn(
+    async (id: string) =>
+      state.users.find((u) => u["id"] === id || u["spacesUserId"] === id)?.["orgId"],
+  ),
+  resolveClawUserIdForSpacesIdentity: vi.fn(
+    async (id: string) => state.users.find((u) => u["spacesUserId"] === id)?.["id"],
+  ),
+}));
+
 vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -652,6 +662,36 @@ describe("chat project routes", () => {
     it("refuses when neither header nor user record yields an org", async () => {
       state.users = [];
       expect((await requestJson("GET", "/chat/projects", { orgId: null })).status).toBe(400);
+    });
+
+    // The proxy sends only the workspace-scoped Spaces id and no x-org-id, and
+    // that id is not what `users.id` holds — so a direct match on it resolved
+    // no org and every project route answered 400 for every caller.
+    it("resolves the org from a Spaces id that is not the Claw user id", async () => {
+      state.users = [{ id: CANONICAL, orgId: ORG, spacesUserId: SPACES_ALIAS }];
+      const got = await requestJson("GET", "/chat/projects", {
+        orgId: null,
+        userId: SPACES_ALIAS,
+      });
+      expect(got.status).toBe(200);
+    });
+
+    it("prefers the org header over resolving one", async () => {
+      state.users = [];
+      expect((await requestJson("GET", "/chat/projects", { orgId: ORG })).status).toBe(200);
+    });
+
+    it("finds a project owned under the canonical id when called with the Spaces id", async () => {
+      state.users = [{ id: CANONICAL, orgId: ORG, spacesUserId: SPACES_ALIAS }];
+      state.projects = [
+        { id: "p-1", ownerUserId: CANONICAL, orgId: ORG, name: "Owned", sortOrder: 0 },
+      ];
+      const got = await requestJson("GET", "/chat/projects", {
+        orgId: null,
+        userId: SPACES_ALIAS,
+      });
+      expect(got.status).toBe(200);
+      expect((got.body as { data: Array<{ id: string }> }).data.map((p) => p.id)).toContain("p-1");
     });
   });
 
