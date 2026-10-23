@@ -3,6 +3,8 @@ import { logger } from '../utils/logger';
 import { decodeUploadFilename } from '../utils/filename';
 import { isHeicBuffer } from '@xyne/shared';
 import { heicRenditionQueue } from '../queues/heicRenditionQueue';
+import { videoRenditionQueue } from '../queues/videoRenditionQueue';
+import { config } from '../config/env';
 
 export interface UploadedFileResult {
   originalName: string;
@@ -99,6 +101,12 @@ export async function uploadFiles(
 
       if (effectiveMimeType === 'image/heic') {
         void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
+      }
+
+      // Eager compatible-video rendition (opt-in). Without it the rendition is
+      // generated on the first /stream?variant=compat request instead.
+      if (config.videoRenditionOnUpload && effectiveMimeType.startsWith('video/')) {
+        void videoRenditionQueue.enqueue({ storagePath: filePath });
       }
 
       // Handle thumbnail for video and document files (frontend-generated)

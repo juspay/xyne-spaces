@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { buildSandboxStoreKey, getSandboxSession, sandboxConversationIdFromMeta, type DecideQuestion } from "xyne-claw-shared";
 import { xor } from "../xor.js";
+import { recordDebug } from "../citations.js";
 import { createLogger } from "../logger.js";
 import { metric } from "../metrics.js";
 import { DOM_AUDIT_SOURCE, ENDPOINT_TYPES_SOURCE, HARNESS_SOURCE } from "./harness.js";
@@ -10,6 +11,7 @@ import {
   formatReport,
   judgeVariation,
   standardQuestionsFrom,
+  CONFIDENT,
   type CustomCheck,
   type StandardKey,
   type StandardQuestion,
@@ -87,7 +89,7 @@ async function judgeAll(
     if (!visual || !r.screenshot) return judgeVariation(r, visual ? null : {}, standard);
     const image = await screenshotDataUrl(session, r.screenshot);
     const answers = image
-      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r, standard), purpose: "ui-tester", signal })
+      ? await xor({ state: VISUAL_STATE, images: [image], questions: buildQuestions(r, standard), purpose: "ui-tester", signal, cache: true })
       : null;
     return judgeVariation(r, answers, standard);
   });
@@ -181,6 +183,18 @@ function deliverables(verdicts: VariationVerdict[]): string[] {
   return [...videos, ...shots].slice(0, MAX_DELIVER);
 }
 
+export function visualStats(verdicts: VariationVerdict[]) {
+  const answers = verdicts.flatMap((v) => Object.values(v.visual));
+  return {
+    items: verdicts.filter((v) => Object.keys(v.visual).length > 0).length,
+    answers: answers.length,
+    unsure: answers.filter((a) => a.choice === null || (a.confidence ?? 0) < CONFIDENT).length,
+    unavailable: verdicts.filter((v) => v.findings.some((f) => f.message.startsWith("visual check unavailable"))).length,
+    cached: 0,
+    failedExpect: 0,
+  };
+}
+
 export interface UiTesterToolOptions {
   deliver?: ToolDefinition | undefined;
   checks?: DecideQuestion[] | undefined;
@@ -210,7 +224,7 @@ export function buildUiTesterTools(meta: Record<string, string>, options: UiTest
       },
       required: ["spec"],
     }),
-    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+    async execute(toolCallId: string, params: unknown, signal?: AbortSignal) {
       const p = (params ?? {}) as { spec?: unknown; runName?: unknown; visual?: unknown; deliver?: unknown };
       let spec = p.spec as Record<string, unknown> | undefined;
       if (typeof p.spec === "string") {
@@ -279,6 +293,7 @@ export function buildUiTesterTools(meta: Record<string, string>, options: UiTest
         await session.files.write(`${outDir}/verdicts.json`, Buffer.from(JSON.stringify(verdicts, null, 2), "utf8"));
         const counts = verdicts.reduce((m, v) => ((m[v.verdict] = (m[v.verdict] ?? 0) + 1), m), {} as Record<string, number>);
         metric.count("ui_tester_run", { variations: verdicts.length, fail: counts["fail"] ?? 0, unsure: counts["unsure"] ?? 0 });
+        recordDebug(toolCallId, { xor: visualStats(verdicts) });
         log.info(`[ui-tester] ${verdicts.length} variations in ${Date.now() - started}ms fail=${counts["fail"] ?? 0} unsure=${counts["unsure"] ?? 0}`);
         return text(`${formatReport(verdicts)}${contracts}${delivered}\n\nRun directory: ${runDir} (summary.json, verdicts.json, <id>.png in out/).`);
       } catch (err) {

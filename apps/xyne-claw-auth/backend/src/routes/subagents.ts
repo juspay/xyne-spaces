@@ -37,6 +37,8 @@ import {
 } from "../lib/subagent-resolver.js";
 import { SUBAGENT_DEFINITIONS, SUBAGENT_TEMPLATES, getSubagentTemplate, loadTemplateSamples, validateDecideQuestions } from "xyne-claw-shared";
 import { evalChecksViaClaw, tryChecksViaClaw } from "../services/xorTryClient.js";
+import { aggregateCalls } from "../lib/fast-subagent-ops.js";
+import { runDriftCheck } from "../queue/fast-drift-sweeper.js";
 import { runRegressionGate } from "../lib/subagent-eval-gate.js";
 import type { DecideQuestion } from "xyne-claw-shared";
 import type { SubagentSample } from "../lib/subagent-resolver.js";
@@ -179,6 +181,95 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
     }),
   ];
   ok(res, items);
+}));
+
+// ── GET /fast/stats — fast subagent dashboard ─────────────────────────────
+router.get("/fast/stats", asyncHandler(async (req: Request, res: Response) => {
+  if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const days = Math.min(30, Math.max(1, Number(req.query["days"]) || 7));
+  const now = Date.now();
+  const rows = await prisma.fastSubagentCall.findMany({
+    where: { orgId, completedAt: { gte: new Date(now - days * 86_400_000) } },
+    select: { subagentName: true, completedAt: true, durationMs: true, isError: true, fast: true, model: true, parentModel: true, tokensIn: true, tokensOut: true, tokensCacheRead: true, tokensCacheWrite: true, fallbacks: true, xorCalls: true, xorItems: true, xorAnswers: true, xorUnsure: true, xorUnavailable: true, xorCached: true, quotaBlocked: true },
+    orderBy: { completedAt: "desc" },
+    take: 50_000,
+  });
+  const stats = aggregateCalls(rows, days, now);
+  const defs = await prisma.subagentDefinition.findMany({
+    where: { orgId, enabled: true, fast: true },
+    select: { name: true, budget: true, evalReport: true, checksVersion: true },
+  });
+  const known = [...new Set(["ui-tester", ...defs.map((d) => d.name), ...stats.map((x) => x.subagentName)])];
+  const reviews = await prisma.xorReviewSample.groupBy({ by: ["subagentName", "verdict"], where: { orgId, subagentName: { in: known } }, _count: { _all: true } });
+  const alerts = await prisma.fastSubagentAlert.findMany({ where: { orgId }, orderBy: [{ acknowledgedAt: { sort: "asc", nulls: "first" } }, { createdAt: "desc" }], take: 30 });
+  const subagents = known.map((name) => {
+    const s = stats.find((x) => x.subagentName === name);
+    const def = defs.find((d) => d.name === name);
+    const r = (v: string | null) => reviews.find((x) => x.subagentName === name && x.verdict === v)?._count._all ?? 0;
+    const evalRep = def?.evalReport as { report?: { models?: Array<{ overall?: { accuracy?: number; confidentWrong?: number } }>; ranAt?: string }; checksVersion?: number } | null | undefined;
+    const reviewed = r("correct") + r("wrong");
+    return {
+      subagentName: name,
+      builtin: name === "ui-tester" && !def,
+      calls: s?.calls ?? 0,
+      stats: s ?? null,
+      budget: def?.budget ?? null,
+      eval: evalRep?.report?.models?.[0]?.overall ? { accuracy: evalRep.report.models[0].overall.accuracy ?? null, confidentWrong: evalRep.report.models[0].overall.confidentWrong ?? null, ranAt: evalRep.report.ranAt ?? null, stale: evalRep.checksVersion !== def?.checksVersion } : null,
+      reviews: { pending: r(null), correct: r("correct"), wrong: r("wrong"), wrongRate: reviewed > 0 ? Math.round((r("wrong") / reviewed) * 1000) / 10 : null },
+    };
+  });
+  ok(res, { days, subagents, alerts });
+}));
+
+// ── POST /fast/drift/check — run the drift check now (admin) ─────────────
+router.post("/fast/drift/check", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  if (!(await isClawAdmin(requesterId))) throw forbidden("Only claw admins can run the drift check");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  ok(res, { created: await runDriftCheck(orgId) });
+}));
+
+// ── POST /fast/alerts/:id/ack ─────────────────────────────────────────────
+router.post("/fast/alerts/:id/ack", asyncHandler(async (req: Request, res: Response) => {
+  if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  const { count } = await prisma.fastSubagentAlert.updateMany({ where: { id: String(req.params.id), ...(orgId ? { orgId } : { id: "__none__" }) }, data: { acknowledgedAt: new Date() } });
+  if (count === 0) throw notFound("alert not found");
+  ok(res);
+}));
+
+// ── GET /fast/reviews — confident xor answers waiting for a human verdict ─
+router.get("/fast/reviews", asyncHandler(async (req: Request, res: Response) => {
+  if (!getRequesterId(req)) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
+  const subagent = typeof req.query["subagent"] === "string" ? req.query["subagent"] : undefined;
+  const items = await prisma.xorReviewSample.findMany({
+    where: { orgId, verdict: null, ...(subagent ? { subagentName: subagent } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: { id: true, subagentName: true, item: true, questionId: true, question: true, value: true, confidence: true, createdAt: true },
+  });
+  ok(res, items);
+}));
+
+// ── POST /fast/reviews/:id — mark a confident answer right or wrong ──────
+router.post("/fast/reviews/:id", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("x-user-id header is required");
+  const orgId = getOrgId(req);
+  const verdict = (req.body as Record<string, unknown>)?.["verdict"];
+  if (verdict !== "correct" && verdict !== "wrong") throw badRequest('verdict must be "correct" or "wrong"');
+  const { count } = await prisma.xorReviewSample.updateMany({
+    where: { id: String(req.params.id), ...(orgId ? { orgId } : { id: "__none__" }) },
+    data: { verdict, reviewedBy: requesterId, reviewedAt: new Date() },
+  });
+  if (count === 0) throw notFound("review sample not found");
+  ok(res);
 }));
 
 // ── GET /templates — cloneable fast subagent templates ───────────────────

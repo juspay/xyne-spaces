@@ -11,6 +11,11 @@
       "email": "test-admin-email-2@xyne-test.local"
     },
     {
+      "alias": "admin-3",
+      "role": "admin",
+      "email": "test-admin-email-3@xyne-test.local"
+    },
+    {
       "alias": "user-1",
       "role": "user",
       "email": "test-user-email-1@xyne-test.local"
@@ -34,6 +39,47 @@
       "alias": "user-5",
       "role": "user",
       "email": "test-user-email-5@xyne-test.local"
+    },
+    {
+      "alias": "user-6",
+      "role": "user",
+      "email": "test-user-email-6@xyne-test.local"
+    },
+    {
+      "alias": "user-7",
+      "role": "user",
+      "email": "test-user-email-7@xyne-test.local"
+    },
+    {
+      "alias": "user-8",
+      "role": "user",
+      "email": "test-user-email-8@xyne-test.local"
+    },
+    {
+      "alias": "user-9",
+      "role": "user",
+      "email": "test-user-email-9@xyne-test.local"
+    },
+    {
+      "alias": "user-10",
+      "role": "user",
+      "email": "test-user-email-10@xyne-test.local",
+      "workspace": "secondary"
+    },
+    {
+      "alias": "user-11",
+      "role": "user",
+      "email": "test-user-email-11@xyne-test.local"
+    },
+    {
+      "alias": "user-12",
+      "role": "user",
+      "email": "test-user-email-12@xyne-test.local"
+    },
+    {
+      "alias": "user-13",
+      "role": "user",
+      "email": "test-user-email-13@xyne-test.local"
     }
   ]
 }

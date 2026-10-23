@@ -76,3 +76,20 @@ describe("/framework command", () => {
     expect(parseExperimentCommand("what frameworks do we use?")).toBeNull();
   });
 });
+
+describe("/ui-test command", () => {
+  it("takes the route as its positional argument", () => {
+    expect(parseExperimentCommand("/ui-test /settings/billing")).toMatchObject({ sub: "start", kind: "ui-test", focus: "/settings/billing" });
+    expect(parseExperimentCommand("/ui-test 30m /settings empty states")).toMatchObject({ sub: "start", kind: "ui-test", focus: "/settings empty states", durationMs: 30 * 60_000 });
+  });
+
+  it("asks for the route when it is missing", () => {
+    expect(parseExperimentCommand("/ui-test")).toEqual({ sub: "unknown", token: "", command: "/ui-test" });
+    expect(parseExperimentCommand("/ui-test 30m")).toEqual({ sub: "unknown", token: "", command: "/ui-test" });
+  });
+
+  it("shares the subcommands", () => {
+    expect(parseExperimentCommand("/ui-test status")).toEqual({ sub: "status" });
+    expect(parseExperimentCommand("/ui-test stop")).toEqual({ sub: "stop" });
+  });
+});

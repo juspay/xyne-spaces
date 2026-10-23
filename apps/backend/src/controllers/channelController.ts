@@ -131,7 +131,7 @@ export class ChannelController {
   }
 
   // Helper method to send system message for added/removed participants
-  private async sendAddAndRemoveParticipantsSystemMessage(
+  async sendAddAndRemoveParticipantsSystemMessage(
     channelId: string,
     newParticipants: Array<{ userId: string; userName: string }>,
     authData: { id: string; name: string },
@@ -246,6 +246,91 @@ export class ChannelController {
       logger.error('Operation type:', operationType);
       logger.error('Participants:', newParticipants);
       // Rethrow the error so the caller can handle it appropriately
+      throw error;
+    }
+  }
+
+  // One system message for a batch of role changes, so a big batch is one message, one reopen and one broadcast.
+  // A single change reads and carries metadata like the in-app updateParticipantRole mutator's message.
+  async sendRoleUpdatedSystemMessage(
+    channelId: string,
+    actor: { id: string; name: string },
+    changes: Array<{ userId: string; userName: string; oldRole: string; newRole: string }>
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    try {
+      // Names are user-supplied and the content is rendered as markup, so escape them.
+      const esc = (value: string): string =>
+        value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const MAX_NAMES = 10;
+      const list = (names: string[]): string => {
+        const shown = names.slice(0, MAX_NAMES).map(esc);
+        if (names.length > MAX_NAMES) shown.push(`${names.length - MAX_NAMES} others`);
+        return shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+      };
+
+      let content: string;
+      if (changes.length === 1) {
+        content = `changed ${esc(changes[0].userName)}'s role to ${changes[0].newRole}`;
+      } else {
+        const byRole = new Map<string, string[]>();
+        for (const change of changes) {
+          byRole.set(change.newRole, [...(byRole.get(change.newRole) ?? []), change.userName]);
+        }
+        const parts = [...byRole].map(([role, names]) => `${list(names)} to ${role}`);
+        content = `changed the roles of ${
+          parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+        }`;
+      }
+
+      const conversation = await this.conversationRepository.create({
+        channelId,
+        createdBy: actor.id,
+        initialMessageId: 'temp', // Will be updated after message creation
+      });
+      const createdMessage = await this.messageRepository.create({
+        conversationId: conversation.conversationId,
+        senderId: actor.id,
+        content,
+        msgType: MessageType.SYSTEM,
+        hasAttachment: false,
+        metadata: {
+          operationType: 'role_updated',
+          ...(changes.length === 1 && {
+            targetUserId: changes[0].userId,
+            targetUserName: changes[0].userName,
+            oldRole: changes[0].oldRole,
+            newRole: changes[0].newRole,
+          }),
+          changes,
+          updatedBy: actor.id,
+          updatedByName: actor.name,
+        },
+      });
+      await this.conversationRepository.update(conversation.conversationId, {
+        initialMessageId: createdMessage.messageId,
+      });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+      await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
+
+      const senderInfo = await this.getUserInfo(actor.id);
+      const conversationMessage = {
+        conversationId: conversation.conversationId,
+        channelId,
+        messageId: createdMessage.messageId,
+        senderId: createdMessage.senderId,
+        senderName: senderInfo.name,
+        senderPicture: senderInfo.picture,
+        content: createdMessage.content,
+        msgType: createdMessage.msgType,
+        hasAttachment: createdMessage.hasAttachment,
+        attachments: [],
+        createdAt: createdMessage.createdAt,
+      };
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+    } catch (error) {
+      logger.error('Error sending role-updated system message:', error);
       throw error;
     }
   }

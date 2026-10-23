@@ -31,9 +31,25 @@ export class JwtService {
   }
 
   /**
-   * Generate a JWT token with the specified payload
+   * Seconds a JWT may live: the configured lifetime, but never past `sessionExpiry`.
+   * Pass the result to both generateToken and the token cookie's maxAge so the two always match.
+   * Zero or negative once the session has expired: the JWT is born expired, the cookie deleted.
    */
-  generateToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>): string {
+  getAccessTokenLifetimeSeconds(sessionExpiry?: Date): number {
+    if (!sessionExpiry) return config.jwt.expirationSeconds;
+
+    const secondsUntilSessionExpiry = Math.floor((sessionExpiry.getTime() - Date.now()) / 1000);
+    return Math.min(config.jwt.expirationSeconds, secondsUntilSessionExpiry);
+  }
+
+  /**
+   * Generate a JWT token with the specified payload.
+   * @param expiresInSeconds From getAccessTokenLifetimeSeconds when renewing an existing session.
+   */
+  generateToken(
+    payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>,
+    expiresInSeconds: number = config.jwt.expirationSeconds
+  ): string {
     try {
       const token = jwt.sign(
         {
@@ -48,7 +64,7 @@ export class JwtService {
         },
         this.secret,
         {
-          expiresIn: config.jwt.expirationSeconds,
+          expiresIn: expiresInSeconds,
           issuer: this.issuer,
           audience: this.audience,
         }

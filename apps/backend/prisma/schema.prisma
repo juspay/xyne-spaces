@@ -2011,6 +2011,7 @@ model Channel {
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
+  agentProactivityMode String           @default("OFF") // Agents answering without a mention: OFF | ANSWER | SHADOW
   connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
   connectGroups   ConnectGroup[] @relation("ChannelConnectGroups")
 
@@ -3277,6 +3278,7 @@ model CallParticipant {
   email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
   ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
+  ringNotification String?         // DISABLED stops a scheduled call ringing this participant when it starts; null rings
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
@@ -3375,6 +3377,7 @@ model RecurringCallParticipant {
   displayName       String?             // Name for external users
   email             String?             // Email for external invitees
   isExternal        Boolean             @default(false)
+  ringNotification  String?             // DISABLED | null — copied onto each instance's call_participants row; null rings
 
   // Relations
   recurringSeries RecurringCallSeries @relation(fields: [recurringSeriesId], references: [id], onDelete: Cascade)
@@ -5505,3 +5508,69 @@ model RadarRule {
   @@schema("non_zero")
 }
 
+// What the policy decided about a person's burst in a channel, or a reply to an agent's
+// unprompted answer, once XOR judged it: why it stayed quiet, or what the agents did.
+// Ids, the outcome, the reason and XOR's probability behind it, never message or draft
+// text; readable by the channel's members.
+model AgentProactivityDecision {
+  workspaceId     String // denormalized tenant key (stamped on insert)
+  id              String   @id
+  channelId       String
+  senderId        String
+  kind            String // EPISODE | REPLY (in a conversation) | FOLLOW_UP
+  mode            String // the channel's mode when it ran
+  messageIds      String[] // the asker's messages it judged
+  conversationId  String? // the thread it answers in
+  parentEpisodeId String? // a follow-up's first answer, or the question a bump repeats
+  gate            String // open | quiet | bump (an "anyone?" with nothing earlier to answer)
+  agentSlug       String? // the agent that answered or 👍'd
+  outcome         String? // posted | reacted | held | shadow | quiet; null while drafting
+  reason          String? // the question or check that decided it
+  score           Float? // XOR's probability for the question `reason` names, when one decided it
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([channelId, createdAt])
+  @@index([channelId, senderId, createdAt])
+  @@index([conversationId])
+  @@index([parentEpisodeId])
+  @@index([messageIds], type: Gin) // why for a message
+  @@map("agent_proactivity_decisions")
+  @@schema("non_zero")
+}
+
+// One XOR request a proactivity decision made: what XOR read, for tracing a message's
+// whole journey. Its questions are in agent_proactivity_xor_questions.
+model AgentProactivityXorCall {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  decisionId  String
+  channelId   String
+  step        String // gate | bump_gate | route | before_posting | follow_up
+  agentSlug   String? // before_posting: whose draft was checked
+  input       String // what XOR read: the conversation, or the draft against it
+  durationMs  Int
+  failed      Boolean  @default(false) // XOR did not answer
+  createdAt   DateTime @default(now())
+
+  @@index([decisionId])
+  @@map("agent_proactivity_xor_calls")
+  @@schema("non_zero")
+}
+
+// One question in an XOR request, and XOR's probability that the answer is yes.
+model AgentProactivityXorQuestion {
+  workspaceId   String // denormalized tenant key (stamped on insert)
+  id            String  @id @default(cuid())
+  callId        String
+  channelId     String
+  key           String // e.g. m1_sensitive, agent_0, same_answer_r2
+  instructions  String
+  criteriaTrue  String?
+  criteriaFalse String?
+  probability   Float? // null when XOR did not answer
+
+  @@index([callId])
+  @@map("agent_proactivity_xor_questions")
+  @@schema("non_zero")
+}

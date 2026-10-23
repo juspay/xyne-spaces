@@ -258,7 +258,9 @@ Set `XYNE_SKIP_BASELINE_BOOTSTRAP=true` to disable bootstrap for fail-fast verif
 
 ## User catalog
 
-`fixtures/user-catalog.json` defines available test users. Currently: `admin-1`, `admin-2`, `user-1` through `user-4`.
+`fixtures/catalog.json` defines available test users. Currently: `admin-1` through `admin-3`, `user-1` through `user-13`. The chat permission specs (`05_messaging/15_`–`17_`) own `user-6` through `user-13` and `admin-3`; don't reuse them elsewhere.
+
+A catalog entry with `"workspace": "secondary"` (currently `user-10`) logs into a second test workspace ("Test Workspace 2", same test org) via `POST /api/test/auth/login?workspace=secondary`. Use it only for cross-workspace isolation tests.
 
 Use `getUserCatalogEntry(userAlias)` from `fixtures/user-catalog.ts` for catalog entries. Use `testContext.storedUsers.get(alias)` for runtime state (populated after login).
 
@@ -421,6 +423,7 @@ Enforced by `scripts/validation/validate-filename.ts`:
 | File | Scope | Key steps |
 |---|---|---|
 | `tests/shared/browser.steps.ts` | Shared | Browser session, navigation, click/type interactions (including typing/verifying stored message text), assertions, onboarding skip, switching to main browser, switching to temp browser, using browser with viewport |
+| `tests/shared/browser.steps.ts` (API section) | Shared | Requests as the active browser's user: `sending zero mutation <mutationName> with args <mutationArgs>` (via `/api/zero/push-fallback`, same mutators + ACL as the app) with `verifying zero mutation succeeded` / `was rejected with <expectedError>`; `sending POST to <urlPath> with args <requestArgs>`; draft attachment uploads; `creating dm <dmAlias> via API ...`; `storing id of stored user ... message ...`. Args are `key=value, key=value`; values resolve `user:` stored text, `$uuid`, `$now`, `[a\|b]` arrays. |
 | `tests/shared/hooks.steps.ts` | Shared | `BeforeSuite` baseline load, `BeforeStep`/`AfterStep` timing, `AfterScenario` cleanup, `AfterSuite` teardown |
 | `tests/shared/support/report-artifacts.ts` | Shared | Context snapshot writes at suite/scenario boundaries |
 | `fixtures/baseline.ts` | Shared | Baseline contract, registry, bootstrap, rehydration |

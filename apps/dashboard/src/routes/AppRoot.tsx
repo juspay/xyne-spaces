@@ -181,6 +181,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
+import { UserGroupDialog } from '../components/UserGroup/UserGroupDialog/UserGroupDialog';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { RoleManagementScreen } from './RoleManagementScreen';
@@ -195,6 +196,7 @@ import {
   MembersTab,
   RepositoryCredentialsTab,
   ToolbarTab,
+  AgentActivityTab,
 } from './WorkspaceManagementScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
@@ -979,6 +981,7 @@ const AppRoot = (): ReactElement => {
                       )}
                       <AttachmentGalleryModal />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                       <AttachmentCitationPreview />
                       <ErrorReportModal
@@ -1908,6 +1911,16 @@ export const router = createBrowserRouter(
                       ),
                     },
                     {
+                      path: 'agent-activity',
+                      element: (
+                        <OrganisationsSectionGuard section='agent-activity'>
+                          <OrganisationsPage wide>
+                            <AgentActivityTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
                       path: 'user-groups',
                       element: (
                         <OrganisationsSectionGuard section='user-groups'>
@@ -2111,6 +2124,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2165,6 +2179,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2194,6 +2209,7 @@ export const router = createBrowserRouter(
                       <CreateTicketWindow />
                     </div>
                     <AttachmentGalleryModal />
+                    <UserGroupDialog />
                   </EditProvider>
                 </InitialStateLoader>
               </ZeroFallbackProvider>

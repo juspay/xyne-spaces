@@ -109,6 +109,12 @@ export interface ComposerModelControl {
   disabled?: boolean;
 }
 
+export interface ComposerFastControl {
+  enabled: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}
+
 /** One knowledge-base scope: a collection, a folder in one, or a single file. */
 export interface KnowledgeScope {
   id: string;
@@ -173,6 +179,7 @@ export interface ComposerProps {
   plus: ComposerPlusControl;
   agent: ComposerAgentControl | null;
   model: ComposerModelControl | null;
+  fast?: ComposerFastControl | null;
 
   lastUserMessage?: string;
   onEnterVoiceMode?: () => void;

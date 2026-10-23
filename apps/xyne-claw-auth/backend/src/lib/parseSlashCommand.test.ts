@@ -56,6 +56,12 @@ describe("parseSlashCommand mention placement and composer artifacts", () => {
     expect(parseSlashCommand("/help @integration-planner")).toEqual({ kind: "help" });
   });
 
+  it("reads /help <command> as help for that command, but not a trailing mention", () => {
+    expect(parseSlashCommand("/help experiment")).toEqual({ kind: "help", command: "experiment" });
+    expect(parseSlashCommand("/help /security-scan")).toEqual({ kind: "help", command: "security-scan" });
+    expect(parseSlashCommand("/help @integration-planner")).toEqual({ kind: "help" });
+  });
+
   it("ignores zero-width characters around mention chips", () => {
     expect(parseSlashCommand("​@integration-planner /debug chain")).toEqual({ kind: "debug", scope: "chain" });
     expect(parseSlashCommand("@integration-planner​ /status﻿")).toEqual({ kind: "status" });

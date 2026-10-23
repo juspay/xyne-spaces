@@ -232,7 +232,7 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
@@ -1621,9 +1621,14 @@ export async function prepareRun(
     const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;
     mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
     // Sandbox tools see built-in profiles plus this workspace's own. Set last so a caller can't pick another.
-    const { workspaceId: _suppliedWorkspaceId, ...agentConfigWithoutWorkspace } = mergedAgentConfig;
+    const { workspaceId: _suppliedWorkspaceId, spacesUserId: _suppliedSpacesUserId, ...agentConfigWithoutWorkspace } = mergedAgentConfig;
     const runWorkspaceId = await getWorkspaceIdForUser(resolved.userId, "start-run").catch(() => null);
-    mergedAgentConfig = runWorkspaceId ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId } : agentConfigWithoutWorkspace;
+    const runSpacesUserId = runWorkspaceId
+      ? await spacesUserIdForClawUser(resolved.userId, runWorkspaceId).catch(() => null)
+      : null;
+    mergedAgentConfig = runWorkspaceId
+      ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId, ...(runSpacesUserId ? { spacesUserId: runSpacesUserId } : {}) }
+      : agentConfigWithoutWorkspace;
 
     const forwardBody = {
       sessionId,

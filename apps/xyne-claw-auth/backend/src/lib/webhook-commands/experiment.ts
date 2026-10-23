@@ -1,7 +1,10 @@
 import { errMsg } from "../errors.js";
+import { loopCommandFor } from "xyne-claw-shared";
+import { findCommand, renderCommandHelp } from "@xyne/shared/commands";
 import { experimentRepository } from "../../repositories/index.js";
 import { isClawAdmin } from "../../middleware/agent-acl.js";
 import {
+  type CustomCommandMatch,
   type ExperimentCommand,
   formatDuration,
   dispatchExperimentEpoch,
@@ -30,11 +33,17 @@ type ExperimentHandlers = {
   [K in ExperimentSub]: (
     ctx: WebhookCommandCtx,
     command: Extract<ExperimentCommand, { sub: K }>,
+    custom?: CustomCommandMatch | null,
   ) => Promise<void>;
 };
 
 const handlers: ExperimentHandlers = {
-  unknown: async (ctx) => {
+  unknown: async (ctx, experimentCommand) => {
+    const own = experimentCommand.command ? findCommand(experimentCommand.command) : undefined;
+    if (own) {
+      await ctx.reply(renderCommandHelp(own), REPLY_LABEL);
+      return;
+    }
     await ctx.reply([
       "/experiment <duration> [provider=…] [model=…] [focus…]",
       "/understanding [duration cap] [focus…] — coverage-gated: runs until the code-path frontier is exhausted",
@@ -48,14 +57,20 @@ const handlers: ExperimentHandlers = {
   status: async (ctx) => {
     const run = await experimentRepository.findActiveByConversation(ctx.payload.conversationId);
     const findings = run ? await experimentRepository.listFindings(run.id) : [];
-    await ctx.reply(formatExperimentStatus(run, findings), REPLY_LABEL);
+    const status = formatExperimentStatus(run, findings);
+    const { prisma } = await import("../../db.js");
+    const seq = run?.sequenceId ? await prisma.loopSequenceRun.findUnique({ where: { id: run.sequenceId } }).catch(() => null) : null;
+    const steps = Array.isArray(seq?.steps) ? seq.steps.length : 0;
+    await ctx.reply(seq ? `**/${seq.commandName}** · step ${seq.stepIndex + 1}/${steps} (${seq.status})\n\n${status}` : status, REPLY_LABEL);
   },
 
   stop: async (ctx) => {
     const { payload, log } = ctx;
     const run = await experimentRepository.findActiveByConversation(payload.conversationId);
+    const { stopSequencesInThread } = await import("../loop-sequence.js");
     if (!run) {
-      await ctx.reply("No active /experiment to stop.", REPLY_LABEL);
+      const stoppedSequences = await stopSequencesInThread(payload.conversationId);
+      await ctx.reply(stoppedSequences > 0 ? "Stopped the sequence (it was between steps)." : "No active /experiment to stop.", REPLY_LABEL);
       return;
     }
     const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
@@ -64,6 +79,7 @@ const handlers: ExperimentHandlers = {
       return;
     }
     await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
+    const stoppedSequence = run.sequenceId ? (await stopSequencesInThread(payload.conversationId)) > 0 : false;
     // Cancel in-flight CHECKER sessions too. They never claim
     // currentSessionId (claiming it would chain the next epoch off their
     // completion), so before this they survived stop and kept posting into
@@ -91,6 +107,7 @@ const handlers: ExperimentHandlers = {
       }
     }
     const stoppedParts = [
+      ...(stoppedSequence ? ["stopped the whole sequence, no further steps will start"] : []),
       ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
       ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
     ];
@@ -235,7 +252,7 @@ const handlers: ExperimentHandlers = {
     }
   },
 
-  start: async (ctx, experimentCommand) => {
+  start: async (ctx, experimentCommand, custom) => {
     const { agent, payload, log } = ctx;
     if (experimentCommand.invalidProvider !== undefined) {
       await ctx.reply([
@@ -260,21 +277,21 @@ const handlers: ExperimentHandlers = {
       provider: experimentCommand.provider ?? null,
       modelId: experimentCommand.model ?? null,
       kind: experimentCommand.kind ?? null,
+      commandId: experimentCommand.commandId ?? null,
+      commandVersion: custom && experimentCommand.commandId === custom.commandId ? custom.version ?? null : null,
       deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
     });
-    const isUnderstanding = experimentCommand.kind === "understanding";
+    const loop = custom && experimentCommand.commandId === custom.commandId ? custom.def : loopCommandFor(experimentCommand.kind);
     // Seed the frontier from a list the user already gave us (e.g. 57 table
     // names). Ground truth beats model enumeration: with the paths pre-recorded
     // the run cannot exit by imagining fewer of them.
-    const seededPaths = isUnderstanding
+    const seededPaths = loop.start.seedFrontier
       ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
       : 0;
     await ctx.reply([
-      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
-      isUnderstanding
-        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
-        : `Mode: time-boxed autonomous exploration`,
-      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
+      loop.start.title,
+      loop.start.mode,
+      `${loop.start.durationLabel}: ${formatDuration(experimentCommand.durationMs)}`,
       ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
       seededPaths > 0
         ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
@@ -303,10 +320,12 @@ const handlers: ExperimentHandlers = {
 export async function handleExperimentCommand(
   ctx: WebhookCommandCtx,
   command: ExperimentCommand,
+  custom?: CustomCommandMatch | null,
 ): Promise<void> {
   const handler = handlers[command.sub] as (
     ctx: WebhookCommandCtx,
     command: ExperimentCommand,
+    custom?: CustomCommandMatch | null,
   ) => Promise<void>;
-  await handler(ctx, command);
+  await handler(ctx, command, custom);
 }

@@ -48,6 +48,12 @@ export class TestAuthController {
   private static testOrgId: string | null = null;
   private static testWorkspaceId: string | null = null;
 
+  // Optional second workspace in the same test org, for cross-workspace isolation tests.
+  // Created lazily by the first `workspace=secondary` login; the promise dedupes
+  // concurrent first logins from parallel Gauge workers.
+  private static readonly SECONDARY_WORKSPACE_NAME = 'Test Workspace 2';
+  private static secondaryWorkspaceId: Promise<string> | null = null;
+
   static generateTestUser(index: number, role: 'admin' | 'user' = 'user'): TestUserData {
     return {
       googleId: `test-${role}-id-${index}`,
@@ -56,6 +62,54 @@ export class TestAuthController {
       picture: `https://ui-avatars.com/api/?name=${role === 'admin' ? 'Admin' : 'User'}+${index}&background=random`,
       role,
     };
+  }
+
+  /**
+   * Returns the id of the secondary test workspace, creating it (owned by `creator`)
+   * on first use. Recovers it by name after a server restart.
+   */
+  private ensureSecondaryWorkspace(
+    creator: {
+      id: string;
+      providerUserId: string;
+      email: string;
+      name: string;
+      picture?: string | null;
+      authProvider: AuthProvider;
+    },
+    requestId: string,
+  ): Promise<string> {
+    if (!TestAuthController.secondaryWorkspaceId) {
+      TestAuthController.secondaryWorkspaceId = (async () => {
+        const db = DatabaseClient.getInstance();
+        const existing = await db.workspace.findFirst({
+          where: {
+            orgId: TestAuthController.testOrgId!,
+            name: TestAuthController.SECONDARY_WORKSPACE_NAME,
+          },
+        });
+        if (existing) return existing.id;
+
+        logger.info(`[${requestId}] Creating secondary test workspace via ${creator.email}`);
+        const result = await this.userService.createWorkspaceInOrg(
+          {
+            userId: creator.id,
+            providerUserId: creator.providerUserId,
+            email: creator.email,
+            name: creator.name,
+            picture: creator.picture,
+            authProvider: creator.authProvider,
+          },
+          TestAuthController.SECONDARY_WORKSPACE_NAME,
+        );
+        return result.workspace.id as string;
+      })().catch((error: unknown) => {
+        // Let the next login retry instead of caching the failure.
+        TestAuthController.secondaryWorkspaceId = null;
+        throw error;
+      });
+    }
+    return TestAuthController.secondaryWorkspaceId;
   }
 
   static getTestUserByEmail(email: string): TestUserData | null {
@@ -110,6 +164,8 @@ export class TestAuthController {
           ? req.body.email
           : null;
       const isAdminFlag = req.body.isAdmin === true || req.query.isAdmin === 'true';
+      const useSecondaryWorkspace =
+        req.query.workspace === 'secondary' || req.body.workspace === 'secondary';
       let useFixedUser = req.query.fixed === 'true' || req.body.fixed === true;
 
       if (config.isSandboxTestMode) {
@@ -171,7 +227,10 @@ export class TestAuthController {
         });
         if (existingOrg) {
           const existingWorkspace = await db.workspace.findFirst({
-            where: { orgId: existingOrg.orgId },
+            where: {
+              orgId: existingOrg.orgId,
+              name: { not: TestAuthController.SECONDARY_WORKSPACE_NAME },
+            },
           });
           if (existingWorkspace) {
             TestAuthController.testOrgId = existingOrg.orgId;
@@ -254,6 +313,34 @@ export class TestAuthController {
               orgMember: { connect: { memberId: orgMember.memberId } },
             },
           });
+        }
+      }
+
+      if (useSecondaryWorkspace) {
+        // The user now has an org membership and a primary-workspace row; give them a
+        // separate row in the secondary workspace and issue the session for that one.
+        const secondaryWorkspaceId = await this.ensureSecondaryWorkspace(user, requestId);
+        workspace = await db.workspace.findUnique({ where: { id: secondaryWorkspaceId } });
+        const existingSecondaryUser = await db.user.findFirst({
+          where: { email: testUserData.email, workspaceId: secondaryWorkspaceId },
+        });
+        if (existingSecondaryUser) {
+          user = existingSecondaryUser;
+          isNewUser = false;
+        } else {
+          user = await db.user.create({
+            data: {
+              providerUserId: testUserData.googleId,
+              email: testUserData.email,
+              name: testUserData.name,
+              picture: testUserData.picture,
+              authProvider: AuthProvider.GOOGLE,
+              workspace: { connect: { id: secondaryWorkspaceId } },
+              role: WorkspaceRole.MEMBER,
+              orgMember: { connect: { email: testUserData.email } },
+            },
+          });
+          isNewUser = true;
         }
       }
 

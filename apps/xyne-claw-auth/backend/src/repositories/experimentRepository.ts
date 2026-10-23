@@ -48,6 +48,10 @@ export const experimentRepository = {
     provider?: string | null;
     modelId?: string | null;
     kind?: string | null;
+    commandId?: string | null;
+    commandVersion?: number | null;
+    sequenceId?: string | null;
+    sequenceStep?: number | null;
     deadlineAt: Date;
   }) {
     return prisma.experimentRun.create({
@@ -61,6 +65,9 @@ export const experimentRepository = {
         provider: args.provider ?? null,
         modelId: args.modelId ?? null,
         ...(args.kind ? { kind: args.kind } : {}),
+        ...(args.commandId ? { commandId: args.commandId } : {}),
+        ...(args.commandVersion ? { commandVersion: args.commandVersion } : {}),
+        ...(args.sequenceId ? { sequenceId: args.sequenceId, sequenceStep: args.sequenceStep ?? 0 } : {}),
         deadlineAt: args.deadlineAt,
       },
     });
@@ -204,6 +211,10 @@ export const experimentRepository = {
     // array would grow once per epoch for the life of the run.
     const merged = [...run.checkerSessionIds, sessionId].slice(-20);
     await prisma.experimentRun.update({ where: { id }, data: { checkerSessionIds: merged } });
+  },
+
+  async addEpochSession(id: string, sessionId: string): Promise<void> {
+    await prisma.experimentRun.update({ where: { id }, data: { epochSessionIds: { push: sessionId } } });
   },
 
   listFindingsByEpoch(experimentId: string, epoch: number) {
