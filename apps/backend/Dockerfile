@@ -1,4 +1,4 @@
-FROM node:22.22.3-slim AS base
+FROM node:22.23.4-slim AS base
 
 # Install build dependencies for native modules and OpenSSL
 RUN apt-get update && apt-get install -y \
@@ -56,7 +56,7 @@ RUN pnpm store prune || true
 # ---------------------------------------------------------------------------
 # Production image
 # ---------------------------------------------------------------------------
-FROM node:22.22.3-slim AS runner
+FROM node:22.23.4-slim AS runner
 WORKDIR /repo/apps/backend
 
 RUN apt-get update && apt-get install -y \

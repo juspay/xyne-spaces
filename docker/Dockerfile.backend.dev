@@ -1,7 +1,7 @@
 # Development Dockerfile for sandbox backend (hot-reload via volume mount)
 # Used by sandbox system for per-agent isolated backend instances
 
-FROM mirror.gcr.io/library/node:22.22.3-slim
+FROM mirror.gcr.io/library/node:22.23.4-slim
 
 WORKDIR /app
 
