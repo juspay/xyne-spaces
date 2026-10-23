@@ -326,6 +326,18 @@ describe("the token CSS entry point", () => {
     expect(everyKey).not.toContain("fast");
   });
 
+  it("stays linear on token CSS full of unclosed comments", () => {
+    // `/\/\*[\s\S]*?\*\//g` restarted its lazy scan at every `/*` and ran it to
+    // end of input — CodeQL's js/polynomial-redos. A saved system's token CSS
+    // is model-written, so this is reachable input.
+    const pathological = `${"a/*".repeat(40_000)}:root{--brand-primary:#0B5FFF}`;
+    const started = Date.now();
+    // An unterminated comment runs to end of file per the CSS spec, so the
+    // declaration after it is commented out.
+    expect(designTokensFromTokensCss(pathological).colors).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("ignores a commented-out declaration", () => {
     const tokens = designTokensFromTokensCss("/* --brand-primary: #FF0000; */ :root { --brand-primary: #0B5FFF; }");
     expect(tokens.colors).toEqual([{ key: "primary", hex: "#0B5FFF" }]);

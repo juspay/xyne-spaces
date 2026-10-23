@@ -252,8 +252,39 @@ export function designTokensFromBrandSummary(summary: BrandSummary): DesignToken
   };
 }
 
-const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
-const CSS_DECLARATION = /--([a-z0-9][a-z0-9_-]*)\s*:\s*([^;{}]+)\s*(?:;|$)/gi;
+/**
+ * Strip `/* … *\/` comments in one pass.
+ *
+ * Deliberately not a regex. `/\/\*[\s\S]*?\*\//g` restarts its lazy scan at every
+ * `/*` and runs it to the end of the input, so a file holding many unclosed
+ * ones costs quadratic time — CodeQL's js/polynomial-redos. A saved system's
+ * token CSS is model-written, so that is reachable input.
+ *
+ * An unterminated comment runs to end of file, which is what the CSS spec says
+ * and what a browser does. The regex left that text in place, where the parse
+ * below read commented-out declarations as live.
+ *
+ * The same scanner exists in brand-repo.ts (XYNE-66819). Both are deliberate
+ * copies while these PRs are independent; they fold into one module once the
+ * design-systems series has landed.
+ */
+function stripCssComments(css: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const start = css.indexOf("/*", from);
+    if (start === -1) return out + css.slice(from);
+    out += `${css.slice(from, start)} `;
+    const end = css.indexOf("*/", start + 2);
+    if (end === -1) return out;
+    from = end + 2;
+  }
+}
+
+/** The value runs to the `;` or `}` that ends it, and is trimmed in code. A
+ *  trailing `\s*(?:;|$)` would have competed with `([^;{}]+)` for the same
+ *  spaces — the second half of the same ReDoS. */
+const CSS_DECLARATION = /--([a-z0-9][a-z0-9_-]*)\s*:\s*([^;{}]*)/gi;
 
 /** Which group a custom property belongs in, from the name alone. Order
  *  matters: `--font-size-lg` is a type step, not a font family. */
@@ -304,7 +335,7 @@ export function designTokensFromTokensCss(css: string, name?: string): DesignTok
   const shadowKeys = new Set<string>();
   const seenFonts = new Set<DesignFontToken["key"]>();
 
-  for (const match of css.replace(CSS_COMMENT, " ").matchAll(CSS_DECLARATION)) {
+  for (const match of stripCssComments(css).matchAll(CSS_DECLARATION)) {
     const rawName = match[1];
     const rawValue = match[2];
     if (!rawName || !rawValue) continue;
