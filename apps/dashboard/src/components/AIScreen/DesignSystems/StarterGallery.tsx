@@ -97,6 +97,7 @@ export function StarterGallery({
             </div>
             <Button
               size='sm'
+              variant='outline'
               disabled={isUsing}
               onClick={() => onUse(selected)}
               data-track-category='XyneAI'
