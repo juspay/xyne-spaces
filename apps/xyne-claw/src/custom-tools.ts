@@ -8,7 +8,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, isDesignSystemRef, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
@@ -290,11 +290,19 @@ export function loadCustomTools(
       }
     : undefined;
 
+  // The design system claw-auth resolved for this run (XYNE-66827). Read off
+  // agentConfig like sandboxRepo above, rather than threaded as a 13th
+  // positional parameter through two call sites. Validated because it arrives
+  // in the dispatch body; anything malformed is treated as no system at all.
+  const designSystemRef = config["designSystemRef"];
+  const designSystem = isDesignSystemRef(designSystemRef) ? designSystemRef : undefined;
+
   const tools = customTools.map((ct) => {
     const resolvedConfig = resolveToolConfig(ct.configSchema, config);
     const context: ToolExecutionContext = {
       config: resolvedConfig,
       ...(toolMeta ? { meta: toolMeta } : {}),
+      ...(designSystem ? { designSystem } : {}),
       ...(providerConfig ? { providerConfig } : {}),
       ...(researchContext ? { researchContext } : {}),
       pendingQuestions: allPendingQuestions,

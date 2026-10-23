@@ -15,6 +15,7 @@ import {
   agentRunRepository,
   userProviderCredentialsRepository,
   userAgentInstructionRepository,
+  designSystemRepository,
 } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
@@ -1582,6 +1583,38 @@ export async function prepareRun(
     mergedAgentConfig = runWorkspaceId
       ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId, ...(runSpacesUserId ? { spacesUserId: runSpacesUserId } : {}) }
       : agentConfigWithoutWorkspace;
+
+    // The resolved design system, as structured data (XYNE-66827).
+    //
+    // designSystemRepository.resolveForAgent owns the only resolution order
+    // there is — a conversation's own pin beats the agent default beats the
+    // pre-migration `config.designSystem` text — and until now nothing on the
+    // run path called it, so a conversation pin changed no run and `tokensCss`
+    // reached no tool. Carried as a ref so the PDF and email surfaces get
+    // TOKENS; `designSystem` stays untouched for the prompt injection that
+    // already reads it.
+    //
+    // A throw is treated as "no system", which that repository's own note asks
+    // for: this is a DB read on the dispatch path and a blip must not fail the
+    // run.
+    const resolvedDesignSystem = await designSystemRepository
+      .resolveForAgent(
+        { orgId: agent.orgId, config: (agent.config ?? null) as Prisma.JsonValue },
+        conversationId,
+      )
+      .catch(() => null);
+    if (resolvedDesignSystem) {
+      mergedAgentConfig = {
+        ...mergedAgentConfig,
+        designSystemRef: {
+          id: resolvedDesignSystem.id,
+          name: resolvedDesignSystem.name,
+          designMd: resolvedDesignSystem.designMd,
+          tokensCss: resolvedDesignSystem.tokensCss,
+          origin: resolvedDesignSystem.origin,
+        },
+      };
+    }
 
     const forwardBody = {
       sessionId,

@@ -16,6 +16,7 @@ import { PDF_DESIGNER_SYSTEM_PROMPT } from "./prompt.js";
 
 import { createLogger } from "../../logger.js";
 import { buildHtmlDocument, sanitizeHtmlBody } from "../create-report/template.js";
+import { injectPdfBrandTokens, resolveVisualBranding, type VisualBranding } from "../../visual-branding.js";
 const log = createLogger("tools");
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
@@ -310,7 +311,7 @@ async function renderPdfBuffer(docConfig: {
   title?: string;
   style?: string;
   pages: unknown[];
-}): Promise<{ buffer: Buffer; title: string; pageCount: number }> {
+}, branding: VisualBranding = {}): Promise<{ buffer: Buffer; title: string; pageCount: number }> {
   const title = docConfig.title ?? "Document";
   const pages = docConfig.pages;
   
@@ -419,12 +420,16 @@ async function renderPdfBuffer(docConfig: {
   html += `</body></html>`;
 
   // Convert HTML to PDF using Playwright
-  const buffer = await convertHtmlToPdf(html);
+  const buffer = await convertHtmlToPdf(html, branding);
   
   return { buffer, title, pageCount: pages.length };
 }
 
-async function convertHtmlToPdf(html: string): Promise<Buffer> {
+/** Branding is applied HERE rather than in each caller: this is the one point
+ *  both the structured-document and the markdown path funnel through, so a PDF
+ *  cannot be rendered unbranded by adding a third caller. XYNE-66827. */
+async function convertHtmlToPdf(html: string, branding: VisualBranding = {}): Promise<Buffer> {
+  html = injectPdfBrandTokens(html, branding);
   // playwright is an optional runtime-only dep — present in the deployed
   // image's node_modules, not declared in xyne-claw-shared's package.json.
   // We cast through `any` so TS doesn't fail to resolve the module type at
@@ -481,10 +486,14 @@ function formatAttachmentResponse(
   );
 }
 
-async function renderMarkdownPdf(markdown: string, title: string): Promise<Buffer> {
+async function renderMarkdownPdf(
+  markdown: string,
+  title: string,
+  branding: VisualBranding = {},
+): Promise<Buffer> {
   const { marked } = await import("marked");
   const body = sanitizeHtmlBody(String(await Promise.resolve(marked.parse(markdown))));
-  return convertHtmlToPdf(buildHtmlDocument({ title, body }));
+  return convertHtmlToPdf(buildHtmlDocument({ title, body }), branding);
 }
 
 function markdownPdfResponse(buffer: Buffer, title: string): string {
@@ -535,7 +544,7 @@ export const createPdfTool: ToolDefinition = {
     if (content) {
       const title = (typeof params["title"] === "string" && params["title"].trim()) || "Full answer";
       try {
-        const buffer = await renderMarkdownPdf(content, title);
+        const buffer = await renderMarkdownPdf(content, title, resolveVisualBranding(context?.designSystem));
         log.info(`[create-pdf] rendered content (${(buffer.length / 1024).toFixed(0)}KB)`);
         return markdownPdfResponse(buffer, title);
       } catch (error) {
@@ -568,7 +577,7 @@ export const createPdfTool: ToolDefinition = {
       if (!docConfig.title) docConfig.title = query.slice(0, 60);
       if (!docConfig.style) docConfig.style = "professional";
 
-      const { buffer, title } = await renderPdfBuffer(docConfig);
+      const { buffer, title } = await renderPdfBuffer(docConfig, resolveVisualBranding(context?.designSystem));
       log.info(
         `[create-pdf] rendered (${(buffer.length / 1024).toFixed(0)}KB), pages=${docConfig.pages.length}`,
       );
@@ -665,7 +674,7 @@ export const editPdfTool: ToolDefinition = {
       if (!docConfig.title) docConfig.title = prevObj.title ?? "Document";
       if (!docConfig.style) docConfig.style = prevObj.style ?? "professional";
 
-      const { buffer, title } = await renderPdfBuffer(docConfig);
+      const { buffer, title } = await renderPdfBuffer(docConfig, resolveVisualBranding(context?.designSystem));
       log.info(
         `[edit-pdf] rendered (${(buffer.length / 1024).toFixed(0)}KB), pages=${docConfig.pages.length}`,
       );

@@ -5,6 +5,7 @@
 
 import type { Citation } from "../types/citation.js";
 import type { UiWidget, UserQuestion } from "../types/ui-widget.js";
+import type { DesignSystemRef } from "../visual-branding.js";
 
 export type { UiWidget, UserQuestion, UserQuestionType } from "../types/ui-widget.js";
 
@@ -85,6 +86,14 @@ export interface ToolExecutionContext {
    * run dispatcher to AbortController.abort().
    */
   abortRun?: () => void;
+  /**
+   * The design system resolved for this run — conversation pin, then agent
+   * default, then the pre-migration text (XYNE-66827). Carried as structured
+   * data because the PDF and email surfaces need the TOKENS; only the markdown
+   * ever travelled on `agentConfig.designSystem`. Absent when the run has no
+   * system, which every surface treats as "leave the document alone".
+   */
+  designSystem?: DesignSystemRef;
 }
 
 export interface ToolDefinition {
