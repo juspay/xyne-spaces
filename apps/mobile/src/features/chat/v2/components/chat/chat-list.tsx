@@ -1,4 +1,4 @@
-import type { LegendListRef } from '@legendapp/list/react-native';
+import type { LegendListRef, LegendListState } from '@legendapp/list/react-native';
 import { KeyboardAwareLegendList } from '@legendapp/list/keyboard';
 import {
   forwardRef,
@@ -180,6 +180,7 @@ type ChatOpenCycleState = {
   initialScrollMode: ChatInitialScrollMode | null;
   // Landed at the tail only because the unread hold ran out; the divider may still arrive.
   awaitsLateUnreadDivider: boolean;
+  didLandAfterUnreadHold: boolean;
   didLogUnreadOutcome: boolean;
   didLogFinalLivePaint: boolean;
   initialSeedRows: number | null;
@@ -231,6 +232,7 @@ const createChatOpenCycleState = (
   identityKey,
   initialScrollMode: null,
   awaitsLateUnreadDivider: false,
+  didLandAfterUnreadHold: false,
   didLogUnreadOutcome: false,
   didLogFinalLivePaint: false,
   initialSeedRows: null,
@@ -1179,6 +1181,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   });
   if (openCycleState.initialScrollMode === null && openingScrollMode !== null) {
     openCycleState.initialScrollMode = openingScrollMode;
+    openCycleState.didLandAfterUnreadHold = hasUnreadHoldExpired;
     openCycleState.awaitsLateUnreadDivider =
       openingScrollMode === 'tail' &&
       unreadPlacement === 'none' &&
@@ -1375,12 +1378,14 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   }, [composerTotalHeight, targetConversationId]);
   // Unread opens log one outcome: as soon as the revealed divider is on screen
   // above the composer, or why it never was when the user leaves the chat or the app.
-  const trackUnreadOpenRef = useRef<(isFinal: boolean) => void>(() => undefined);
+  const trackUnreadOpenRef = useRef<
+    (trigger: 'scroll' | 'reveal' | 'leave' | 'background', state?: LegendListState) => void
+  >(() => undefined);
   useLayoutEffect(() => {
-    trackUnreadOpenRef.current = (isFinal: boolean): void => {
+    trackUnreadOpenRef.current = (trigger, scrollState): void => {
       if (!shouldAnchorToUnreadBoundary || openCycleState.didLogUnreadOutcome) return;
       const dividerRow = displayRows[unreadDividerRowIndex];
-      const state = listRef.current?.getState?.();
+      const state = scrollState ?? listRef.current?.getState?.();
       const wasDividerSeen =
         !!dividerRow &&
         !!state &&
@@ -1392,7 +1397,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           readableTop: 0,
           readableBottom: state.scrollLength - composerTotalHeight.value,
         });
-      if (!wasDividerSeen && !isFinal) return;
+      if (!wasDividerSeen && (trigger === 'scroll' || trigger === 'reveal')) return;
       openCycleState.didLogUnreadOutcome = true;
       const outcome = resolveUnreadOpenOutcome({
         wasDividerSeen,
@@ -1403,36 +1408,46 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           isUnreadCacheCurrent,
       });
       const isExpected = outcome === 'divider_shown' || outcome === 'no_new_messages';
+      const unseenDividerPosition =
+        dividerRow && !wasDividerSeen ? state?.positionByKey(dividerRow.id) : undefined;
       logger[isExpected ? 'info' : 'warn'](Event.LOTUS_CHAT_OPEN_TIMING, {
         milestone: 'unread_open_outcome',
         outcome,
+        trigger,
         cycleId: openCycleState.cycleId,
         channelId,
         unreadCount,
         lastViewedAt: unreadBoundaryLastViewedAt,
         lastActivityAt: unreadLastActivityAt,
         scrollMode: openCycleState.initialScrollMode,
-        holdExpired: hasUnreadHoldExpired,
+        landedAfterHold: openCycleState.didLandAfterUnreadHold,
         loadError: initialLoadError !== null,
         openPhase,
         rows: displayRows.length,
+        // Where an unseen divider sat: negative is above the viewport.
+        ...(state && unseenDividerPosition !== undefined
+          ? {
+              dividerTopPx: Math.round(unseenDividerPosition - state.scroll),
+              viewportPx: Math.round(state.scrollLength),
+            }
+          : {}),
         openLatencyMs: getElapsedMs(openCycleState.startedAtMs),
       });
     };
   });
   useLayoutEffect(() => {
-    return (): void => trackUnreadOpenRef.current(true);
+    return (): void => trackUnreadOpenRef.current('leave');
   }, [openIdentityKey]);
   useEffect(() => {
     if (!shouldAnchorToUnreadBoundary) return;
     const subscription = AppState.addEventListener('change', appState => {
-      if (appState === 'background') trackUnreadOpenRef.current(true);
+      if (appState === 'background') trackUnreadOpenRef.current('background');
     });
     return (): void => subscription.remove();
   }, [shouldAnchorToUnreadBoundary]);
   useEffect(() => {
     if (revealedChatListIdentityKey !== openIdentityKey || !didListInitialLoadComplete) return;
-    const frame = requestAnimationFrame(() => trackUnreadOpenRef.current(false));
+    const frame = requestAnimationFrame(() => trackUnreadOpenRef.current('reveal'));
     return (): void => cancelAnimationFrame(frame);
   }, [
     didListInitialLoadComplete,
@@ -2059,7 +2074,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   const onScroll = useCallback((): void => {
     const state = listRef.current?.getState();
     if (!state) return;
-    trackUnreadOpenRef.current(false);
+    trackUnreadOpenRef.current('scroll', state);
 
     const distanceFromBottom = state.contentLength - (state.scroll + state.scrollLength);
     scrollStateRef.current.distanceFromBottom = distanceFromBottom;
