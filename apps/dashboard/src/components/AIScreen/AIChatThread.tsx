@@ -83,15 +83,19 @@ import {
 } from '../../services/XyneAI/XyneAISessionsV2Service';
 import {
   useCachedV2ConversationTitle,
+  useCachedV2Session,
   useV2SessionsList,
   useV2SessionInvalidator,
   useV2ChatProjects,
   useV2ChatProjectActions,
-  findCachedSessionByConversation,
 } from '../../hooks/useAskAISessionsV2';
 import { toast } from 'sonner';
 import { renderEmoji } from '../../utils/customEmojiUtils';
-import { DEFAULT_PROJECT_ICON, canFileSession } from './SidebarProjects/SidebarProjects.utils';
+import {
+  DEFAULT_PROJECT_ICON,
+  canFileSession,
+  sessionWithPendingProject,
+} from './SidebarProjects/SidebarProjects.utils';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import {
   DropdownMenu,
@@ -1903,19 +1907,31 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const { invalidateSessions } = useV2SessionInvalidator();
   const { projects: chatProjects } = useV2ChatProjects({ enabled: isV2 });
   const { moveChatToProject } = useV2ChatProjectActions();
-  // The unfiltered list above holds only its first page, so a chat opened from
-  // a project's own list is routinely absent from it. Falling back to the
-  // other cached views answers for those without a request of its own.
+  const cachedSession = useCachedV2Session(isV2 ? conversationId : null);
+  // The row leaves the old project's list the moment a move is applied, and the
+  // new project's list is usually not loaded — so between those two the chat is
+  // in no cached list at all. Keeping the last one answered stops the badge
+  // disappearing under the user mid-move.
+  const lastSessionRef = useRef<ConversationHistoryType | null>(null);
+  if (cachedSession) lastSessionRef.current = cachedSession;
+  else if (!conversationId) lastSessionRef.current = null;
+  const resolvedSession = cachedSession ?? lastSessionRef.current;
+  // What the user just picked, held until the lists agree with it.
+  const [movedProjectId, setMovedProjectId] = useState<string | null | undefined>(undefined);
+  useEffect(() => setMovedProjectId(undefined), [conversationId]);
+  useEffect(() => {
+    if (movedProjectId !== undefined && cachedSession?.projectId === movedProjectId) {
+      setMovedProjectId(undefined);
+    }
+  }, [movedProjectId, cachedSession?.projectId]);
   const activeSession = useMemo(() => {
     if (!isV2 || !conversationId) return null;
-    return (
-      v2Sessions.find(session => session.sessionId === conversationId) ??
-      findCachedSessionByConversation(queryClient, conversationId)
-    );
-  }, [isV2, v2Sessions, conversationId, queryClient]);
+    return sessionWithPendingProject(resolvedSession, movedProjectId);
+  }, [isV2, conversationId, resolvedSession, movedProjectId]);
   const handleMoveToProject = useCallback(
     (projectId: string | null): void => {
       if (!activeSession) return;
+      setMovedProjectId(projectId);
       void (async () => {
         try {
           await moveChatToProject(
@@ -1925,6 +1941,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             activeSession.agentSlug ?? null,
           );
         } catch {
+          setMovedProjectId(undefined);
           toast.error(projectId ? 'Could not move chat' : 'Could not remove chat from project');
         }
       })();

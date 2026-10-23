@@ -67,3 +67,21 @@ export function findSessionInCachedPages<T extends { sessionId: string }>(
   }
   return null;
 }
+
+/**
+ * The session the project badge should describe.
+ *
+ * `moved` is what the user just picked, honoured until the cached lists agree:
+ * applying a move drops the row from the old project's list while the new
+ * project's list is usually not loaded, so for a moment no list holds it.
+ * `undefined` means nothing is pending — distinct from `null`, which is a
+ * deliberate "remove from project".
+ */
+export function sessionWithPendingProject<T extends { projectId?: string | null }>(
+  resolved: T | null | undefined,
+  moved: string | null | undefined,
+): T | null {
+  if (!resolved) return null;
+  if (moved === undefined) return resolved;
+  return { ...resolved, projectId: moved };
+}

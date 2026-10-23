@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { canFileSession, findSessionInCachedPages } from './SidebarProjects.utils';
+import {
+  canFileSession,
+  findSessionInCachedPages,
+  sessionWithPendingProject,
+} from './SidebarProjects.utils';
 
 /**
  * The chat header has no conversation endpoint that returns projectId, so it
@@ -67,5 +71,62 @@ describe('canFileSession', () => {
   // PATCH answers 400 and the option must not be offered.
   it.each(['thread-1', 'conv-1', ''])('refuses a non-direct conversation (%s)', sessionId => {
     expect(canFileSession({ sessionId })).toBe(false);
+  });
+});
+
+describe('findSessionInCachedPages reference stability', () => {
+  // useCachedV2Session feeds this straight into useSyncExternalStore, which
+  // re-renders on every reference change. A fresh object per read would loop
+  // forever, so the row must come back by reference, never rebuilt.
+  const views = [[{ conversations: [{ sessionId: 'chat-1', projectId: 'proj-1' }] }]];
+
+  it('returns the same object on repeated reads of unchanged pages', () => {
+    const first = findSessionInCachedPages(views, 'chat-1');
+    const second = findSessionInCachedPages(views, 'chat-1');
+    expect(first).not.toBeNull();
+    expect(first).toBe(second);
+  });
+
+  it("returns the cache's own row, not a copy of it", () => {
+    const row = views[0]?.[0]?.conversations[0];
+    expect(findSessionInCachedPages(views, 'chat-1')).toBe(row);
+  });
+
+  it('returns null consistently for a chat no view holds', () => {
+    expect(findSessionInCachedPages(views, 'chat-absent')).toBeNull();
+    expect(findSessionInCachedPages(views, 'chat-absent')).toBeNull();
+  });
+});
+
+describe('sessionWithPendingProject', () => {
+  const session = { sessionId: 'chat-1', projectId: 'proj-old' };
+
+  it('passes the cached row through untouched when nothing is pending', () => {
+    expect(sessionWithPendingProject(session, undefined)).toBe(session);
+  });
+
+  it('shows the project the user just picked, before the lists agree', () => {
+    expect(sessionWithPendingProject(session, 'proj-new')).toEqual({
+      sessionId: 'chat-1',
+      projectId: 'proj-new',
+    });
+  });
+
+  // null is "remove from project" and must not be mistaken for "nothing pending".
+  it('shows no project after a removal', () => {
+    expect(sessionWithPendingProject(session, null)).toEqual({
+      sessionId: 'chat-1',
+      projectId: null,
+    });
+  });
+
+  it('does not mutate the cached row while overlaying', () => {
+    sessionWithPendingProject(session, 'proj-new');
+    expect(session.projectId).toBe('proj-old');
+  });
+
+  it('has nothing to describe when no row resolved at all', () => {
+    expect(sessionWithPendingProject(null, 'proj-new')).toBeNull();
+    expect(sessionWithPendingProject(undefined, undefined)).toBeNull();
   });
 });
