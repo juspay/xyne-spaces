@@ -110,30 +110,11 @@ const isUnreadEligibleMessageRow = (row: ChatRow | undefined): row is ChatMessag
   return true;
 };
 
-export const getUnreadJumpTargetRowIndex = (
+export const hasUnreadEligibleMessageAfter = (
   rows: readonly ChatRow[],
-  unreadDividerRowIndex: number,
-): number => {
-  if (unreadDividerRowIndex < 0) return -1;
-  for (let index = unreadDividerRowIndex + 1; index < rows.length; index += 1) {
-    if (rows[index]?.type === 'message') return index;
-  }
-  return unreadDividerRowIndex;
-};
-
-export const hasLoadedMessageAtOrBefore = (
-  rows: readonly ChatRow[],
-  beforeRowId: string,
   boundaryCreatedAt: number,
-): boolean => {
-  const boundaryIndex = rows.findIndex(row => row.id === beforeRowId);
-  if (boundaryIndex < 0) return false;
-  for (let index = 0; index < boundaryIndex; index += 1) {
-    const row = rows[index];
-    if (row?.type === 'message' && row.paint.createdAt <= boundaryCreatedAt) return true;
-  }
-  return false;
-};
+): boolean =>
+  rows.some(row => isUnreadEligibleMessageRow(row) && row.paint.createdAt > boundaryCreatedAt);
 
 export const hasLoadedTimestampBoundaryCoverage = (
   rows: readonly ChatRow[],

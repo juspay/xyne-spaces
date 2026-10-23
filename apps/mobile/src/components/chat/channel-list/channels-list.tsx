@@ -50,6 +50,7 @@ function ChannelListChannelRow({ item }: { item: ChannelListItemData }): ReactEl
           surface: 'channels',
           unreadCount: item.messageUnreadCount ?? 0,
           unreadLastViewedAt: item.lastViewedAt,
+          unreadLastActivityAt: item.lastActivityAt,
           unreadLastViewedConversationId: item.lastViewedConversationId,
         });
       }}

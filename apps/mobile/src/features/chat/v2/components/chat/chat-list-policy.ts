@@ -38,6 +38,7 @@ export const deriveConversationOpenState = ({
 };
 
 export type ChatInitialScrollMode = 'tail' | 'target' | 'unread';
+export type ChatUnreadPlacement = 'pending' | 'divider' | 'none';
 
 /**
  * Direct opens keep the latest tail as viewport owner while cached and live
@@ -476,18 +477,88 @@ export const resolveChatInitialScrollMode = ({
   hasTarget,
   targetIsAtTail,
   shouldAnchorToUnreadBoundary,
+  unreadPlacement,
 }: {
   hasRows: boolean;
   hasRouteAnchor: boolean;
   hasTarget: boolean;
   targetIsAtTail: boolean;
   shouldAnchorToUnreadBoundary: boolean;
+  unreadPlacement: ChatUnreadPlacement;
 }): ChatInitialScrollMode | null => {
   if (!hasRows) return null;
-  if (shouldAnchorToUnreadBoundary) return 'unread';
+  if (shouldAnchorToUnreadBoundary) {
+    if (unreadPlacement === 'pending') return null;
+    return unreadPlacement === 'divider' ? 'unread' : 'tail';
+  }
   if (!hasRouteAnchor) return 'tail';
   if (!hasTarget) return null;
   return targetIsAtTail ? 'tail' : 'target';
+};
+
+export const resolveUnreadPlacement = ({
+  shouldAnchorToUnreadBoundary,
+  isInitialLoadComplete,
+  isLiveFresh,
+  hasDivider,
+  hasBoundaryCoverage,
+  isCacheCurrent,
+  hasInitialLoadError,
+  hasHoldExpired,
+}: {
+  shouldAnchorToUnreadBoundary: boolean;
+  isInitialLoadComplete: boolean;
+  isLiveFresh: boolean;
+  hasDivider: boolean;
+  hasBoundaryCoverage: boolean;
+  isCacheCurrent: boolean;
+  hasInitialLoadError: boolean;
+  hasHoldExpired: boolean;
+}): ChatUnreadPlacement => {
+  if (!shouldAnchorToUnreadBoundary) return 'pending';
+  const isLiveWindow = isInitialLoadComplete && isLiveFresh;
+  // Rows on both sides of the boundary fix the divider's position, so a revisit
+  // with a warm cache lands without waiting for the network.
+  if (hasDivider) {
+    return isLiveWindow || hasBoundaryCoverage || hasInitialLoadError || hasHoldExpired
+      ? 'divider'
+      : 'pending';
+  }
+  // No divider is final once the rows reach the channel's last activity:
+  // nothing new is missing from them, so there is nothing to wait for.
+  return isLiveWindow || isCacheCurrent || hasInitialLoadError || hasHoldExpired
+    ? 'none'
+    : 'pending';
+};
+
+export type UnreadOpenOutcome =
+  | 'divider_shown'
+  | 'divider_off_screen'
+  | 'divider_missing'
+  | 'no_new_messages'
+  | 'messages_not_loaded';
+
+/**
+ * How an unread open ended. `no_new_messages` is expected: the channel's
+ * activity moved without a new main-chat message from someone else (a call or
+ * bot reply in a thread, or only own or system messages). The others besides
+ * `divider_shown` mean the user never saw the divider.
+ */
+export const resolveUnreadOpenOutcome = ({
+  wasDividerSeen,
+  hasDivider,
+  hasNewMessages,
+  hasLoadedLatest,
+}: {
+  wasDividerSeen: boolean;
+  hasDivider: boolean;
+  hasNewMessages: boolean;
+  hasLoadedLatest: boolean;
+}): UnreadOpenOutcome => {
+  if (wasDividerSeen) return 'divider_shown';
+  if (hasDivider) return 'divider_off_screen';
+  if (hasNewMessages) return 'divider_missing';
+  return hasLoadedLatest ? 'no_new_messages' : 'messages_not_loaded';
 };
 
 export const SCROLL_TO_BOTTOM_THRESHOLD = 1000;
@@ -501,6 +572,9 @@ export const CHAT_OPEN_STABLE_WINDOW_MS = 500;
 // Empty opens get a short terminal boundary; once rows exist, the list stays
 // visible and exact-target sync continues without covering it with a loader.
 export const CHAT_OPEN_SYNC_TIMEOUT_MS = 2_000;
+// A revisit lands on the divider in about 0.8-1.0 s on device. Past this, an
+// unread open lands with the rows it has instead of keeping the shimmer up.
+export const UNREAD_OPEN_MAX_HOLD_MS = 3_000;
 export const MAX_REASONABLE_ROUTE_OPEN_LATENCY_MS = 30_000;
 export const OPEN_PLACEHOLDER_ROW_COUNT = 4;
 export const OPEN_PLACEHOLDER_ROW_KEYS = Array.from(
@@ -508,19 +582,14 @@ export const OPEN_PLACEHOLDER_ROW_KEYS = Array.from(
   (_, index) => `open-placeholder-${index}`,
 );
 export const ROW_PROMOTION_NEAR_VISIBLE_BUFFER = 3;
-export const UNREAD_JUMP_PREFETCH_BEFORE = 4;
-export const UNREAD_JUMP_PREFETCH_AFTER = 16;
 export const FALLBACK_ROW_PROMOTION_BOTTOM_WINDOW = 12;
 export const ANCHOR_TOP_GAP = 12;
 export const ANCHOR_MESSAGE_VIEW_POSITION = 0.5;
-export const UNREAD_DIVIDER_VIEW_POSITION = 0.38;
-export const UNREAD_FIRST_MESSAGE_VIEW_POSITION = 0.44;
-export const UNREAD_JUMP_MAX_CORRECTION_PASSES = 24;
-export const UNREAD_JUMP_POSITION_TOLERANCE_PX = 32;
-export const UNREAD_JUMP_STABLE_HOLD_MS = 720;
+// The divider lands just below the floating date pill (8 pt margin + 25 pt pill),
+// so the pill never covers it and message heights cannot move it.
+export const UNREAD_DIVIDER_TOP_OFFSET = 40;
 export const CONTENT_EXPANSION_ANCHOR_RELEASE_MS = 220;
 export const MAX_ROUTE_ANCHOR_EXPANSION_PASSES = 4;
-export const MAX_UNREAD_BOUNDARY_EXPANSION_PASSES = 4;
 export const ANCHOR_LANDING_CONFIRMATION_PASSES = 8;
 
 /**
@@ -695,6 +764,3 @@ export const getRouteOpenLatencyMs = (
 
 export const getChatOpenPaintSource = (openPhase: ChatOpenPhase): ChatOpenPaintSource =>
   openPhase === 'liveFresh' ? 'backend' : openPhase === 'liveHydrating' ? 'local' : 'cache';
-
-export const getUnreadJumpViewPosition = (row: ChatRow | undefined): number =>
-  row?.type === 'message' ? UNREAD_FIRST_MESSAGE_VIEW_POSITION : UNREAD_DIVIDER_VIEW_POSITION;

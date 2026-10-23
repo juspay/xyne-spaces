@@ -217,6 +217,7 @@ function DmRowComponent({ id, children, onSelect }: DmRowProps): ReactElement {
       surface: 'dms',
       unreadCount: row?.unreadCount,
       unreadLastViewedAt: row?.lastViewedAt,
+      unreadLastActivityAt: row?.lastActivityAtMs,
       unreadLastViewedConversationId: row?.lastViewedConversationId,
     });
   }, [id, onSelect, row$, router]);
