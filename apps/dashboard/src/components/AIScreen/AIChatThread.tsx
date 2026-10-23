@@ -77,12 +77,34 @@ import {
   useDesignStudio,
   usePageSelection,
 } from './Workspace';
-import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import {
+  fetchV2ConversationMessages,
+  type ChatProject,
+} from '../../services/XyneAI/XyneAISessionsV2Service';
 import {
   useCachedV2ConversationTitle,
+  useCachedV2Session,
   useV2SessionsList,
   useV2SessionInvalidator,
+  useV2ChatProjects,
+  useV2ChatProjectActions,
 } from '../../hooks/useAskAISessionsV2';
+import { toast } from 'sonner';
+import { renderEmoji } from '../../utils/customEmojiUtils';
+import {
+  DEFAULT_PROJECT_ICON,
+  canFileSession,
+  rememberedSessionFor,
+  sessionWithPendingProject,
+} from './SidebarProjects/SidebarProjects.utils';
+import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '../ui/dropdown-menu';
 import { chatTitleOf } from '../Voice/voiceTranscript';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
@@ -125,7 +147,7 @@ import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
 import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
-import { SidebarLeftOpen } from '@xyne/icons';
+import { SidebarLeftOpen, FolderArrowRight, FolderRemove, CheckTickSingle } from '@xyne/icons';
 import {
   formatChatTurnSeparator,
   formatFullTimestamp,
@@ -282,16 +304,129 @@ const APPROVE_AND_CONTINUE_PROMPT = 'Continue with the approved result.';
 // Topbar
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * The project the open chat sits in, and the control that changes it.
+ *
+ * The sidebar row menu could already do this, but only for a row still on
+ * screen — scrolled away or reached by URL there was nothing to act on, and
+ * nothing saying which project the chat was even in. The label and the action
+ * are the same control so the answer and the way to change it sit together.
+ *
+ * Unfiled chats keep a muted "Add to project" in the same spot rather than
+ * nothing, otherwise filing the chat you are reading means going to find its
+ * row in the sidebar.
+ */
+function ChatProjectBadge({
+  session,
+  projects,
+  onMoveToProject,
+}: {
+  session: ConversationHistoryType;
+  projects: ChatProject[];
+  onMoveToProject: (projectId: string | null) => void;
+}): ReactElement | null {
+  if (!canFileSession(session)) {
+    return null;
+  }
+  const current = session.projectId
+    ? (projects.find(project => project.id === session.projectId) ?? null)
+    : null;
+  // A filed chat whose project has not loaded yet shows nothing rather than a
+  // flash of "Add to project", which would read as the chat being unfiled.
+  if (session.projectId && !current) {
+    return null;
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type='button'
+          aria-label={current ? `Project: ${current.name}. Change project` : 'Add chat to project'}
+          className={`flex h-8 min-w-0 max-w-[40vw] items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors sm:max-w-[16rem] ${
+            current
+              ? 'bg-secondary/60 text-foreground hover:bg-secondary'
+              : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          }`}
+          data-track-category='XyneAI'
+          data-track-name='OPEN_CHAT_PROJECT_MENU'
+        >
+          {current ? (
+            <>
+              <span className='shrink-0' aria-hidden>
+                {renderEmoji(current.icon ?? DEFAULT_PROJECT_ICON, 'w-3.5 h-3.5', 'text-xs')}
+              </span>
+              <span className='truncate'>{current.name}</span>
+            </>
+          ) : (
+            <>
+              <FolderArrowRight size={13} className='shrink-0' aria-hidden />
+              <span className='truncate'>Add to project</span>
+            </>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='start' className='w-56'>
+        {projects.length === 0 ? (
+          <DropdownMenuItem disabled>No projects yet</DropdownMenuItem>
+        ) : (
+          projects.map(project => (
+            <DropdownMenuItem
+              key={project.id}
+              className='gap-2'
+              onClick={() => onMoveToProject(project.id)}
+              data-track-category='XyneAI'
+              data-track-name='MOVE_TO_PROJECT'
+              data-track-metadata={JSON.stringify({
+                surface: 'chat-header',
+                projectId: project.id,
+              })}
+            >
+              <span className='shrink-0' aria-hidden>
+                {renderEmoji(project.icon ?? DEFAULT_PROJECT_ICON, 'w-4 h-4', 'text-sm')}
+              </span>
+              <span className='flex-1 truncate'>{project.name}</span>
+              {session.projectId === project.id && (
+                <CheckTickSingle size={14} className='shrink-0' aria-hidden />
+              )}
+            </DropdownMenuItem>
+          ))
+        )}
+        {session.projectId && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className='gap-2'
+              onClick={() => onMoveToProject(null)}
+              data-track-category='XyneAI'
+              data-track-name='REMOVE_FROM_PROJECT'
+              data-track-metadata={JSON.stringify({ surface: 'chat-header' })}
+            >
+              <FolderRemove size={14} className='shrink-0' aria-hidden />
+              <span className='flex-1'>Remove from project</span>
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ChatTopbar({
   onOpenSidebar,
   onToggleSidebar,
   sidebarCollapsed,
   agentInfo,
+  activeSession,
+  projects,
+  onMoveToProject,
 }: {
   onOpenSidebar?: () => void;
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
   agentInfo?: ReactNode;
+  activeSession?: ConversationHistoryType | null | undefined;
+  projects?: ChatProject[] | undefined;
+  onMoveToProject?: ((projectId: string | null) => void) | undefined;
 }): ReactElement {
   return (
     <header
@@ -326,6 +461,13 @@ function ChatTopbar({
         </button>
       )}
       {agentInfo}
+      {activeSession && onMoveToProject && (
+        <ChatProjectBadge
+          session={activeSession}
+          projects={projects ?? []}
+          onMoveToProject={onMoveToProject}
+        />
+      )}
     </header>
   );
 }
@@ -1764,6 +1906,59 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     enabled: isV2 && Boolean(conversationId),
   });
   const { invalidateSessions } = useV2SessionInvalidator();
+  const { projects: chatProjects } = useV2ChatProjects({ enabled: isV2 });
+  const { moveChatToProject } = useV2ChatProjectActions();
+  const cachedSession = useCachedV2Session(isV2 ? conversationId : null);
+  // The row leaves the old project's list the moment a move is applied, and the
+  // new project's list is usually not loaded — so between those two the chat is
+  // in no cached list at all. Keeping the last one answered stops the badge
+  // disappearing under the user mid-move.
+  const lastSessionRef = useRef<ConversationHistoryType | null>(null);
+  if (cachedSession) lastSessionRef.current = cachedSession;
+  // Only while it is still THIS chat's row: a chat no cached list holds would
+  // otherwise fall back to the previously open chat, naming the wrong chat's
+  // project and moving that chat instead of the one on screen.
+  const resolvedSession =
+    cachedSession ?? rememberedSessionFor(lastSessionRef.current, conversationId);
+  // What the user just picked, held until the lists agree with it. Carries the
+  // chat it belongs to, so opening another chat drops it in the same render
+  // rather than one render later — which would have shown the previous chat's
+  // pick on this one.
+  const [moved, setMoved] = useState<{ sessionId: string; projectId: string | null } | null>(null);
+  const movedProjectId = moved?.sessionId === conversationId ? moved.projectId : undefined;
+  useEffect(() => {
+    if (
+      moved &&
+      cachedSession?.sessionId === moved.sessionId &&
+      cachedSession.projectId === moved.projectId
+    ) {
+      setMoved(null);
+    }
+  }, [moved, cachedSession]);
+  const activeSession = useMemo(() => {
+    if (!isV2 || !conversationId) return null;
+    return sessionWithPendingProject(resolvedSession, movedProjectId);
+  }, [isV2, conversationId, resolvedSession, movedProjectId]);
+  const handleMoveToProject = useCallback(
+    (projectId: string | null): void => {
+      if (!activeSession) return;
+      setMoved({ sessionId: activeSession.sessionId, projectId });
+      void (async () => {
+        try {
+          await moveChatToProject(
+            activeSession.id,
+            activeSession.sessionId,
+            projectId,
+            activeSession.agentSlug ?? null,
+          );
+        } catch {
+          setMoved(null);
+          toast.error(projectId ? 'Could not move chat' : 'Could not remove chat from project');
+        }
+      })();
+    },
+    [activeSession, moveChatToProject],
+  );
   // Voice mode names the chat it is in, as the history does.
   const savedChatTitle = useCachedV2ConversationTitle(isV2 ? conversationId : null);
   const voiceChatTitle = useMemo(
@@ -2690,6 +2885,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               />
             ) : undefined
           }
+          activeSession={activeSession}
+          projects={chatProjects}
+          onMoveToProject={handleMoveToProject}
         />
 
         {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
