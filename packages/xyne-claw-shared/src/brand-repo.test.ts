@@ -207,6 +207,18 @@ describe("parseCssCustomProperties", () => {
     expect(tokens.variables.find((v) => v.name === "primary")?.value).toBe("#635BFF");
   });
 
+  it("does not let a /* inside a string swallow the rest of the file", () => {
+    // `content: "/*"` is a string, not a comment. Treating it as one ran to
+    // end of file and silently dropped every token after it. The CSS comes
+    // from whatever repository the user pointed at.
+    const tokens = parseCssCustomProperties(
+      ':root { --primary: #635BFF; --label: "/*"; --radius: 8px; }',
+    );
+    const byName = Object.fromEntries(tokens.variables.map((v) => [v.name, v.value]));
+    expect(byName["primary"]).toBe("#635BFF");
+    expect(byName["radius"]).toBe("8px");
+  });
+
   it("ignores commented-out declarations", () => {
     const tokens = parseCssCustomProperties(SHADCN_ROOT);
     expect(tokens.variables.some((v) => v.name === "color-ghost")).toBe(false);

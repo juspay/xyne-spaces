@@ -217,18 +217,45 @@ export interface CssTokens {
  * spec says and what a browser does. The regex left that text in place, where
  * the parser below would read the commented-out declarations as live — the one
  * thing this strip exists to prevent.
+ *
+ * Quote-aware because it has to be. `content: "/*"` is a string, not the start
+ * of a comment, and treating it as one ran to end of file and silently dropped
+ * every token after it. Found reviewing the copy of this scanner in
+ * design-export.ts (XYNE-66832), which had the same bug.
  */
 function stripCssComments(css: string): string {
   let out = "";
-  let from = 0;
-  for (;;) {
-    const start = css.indexOf("/*", from);
-    if (start === -1) return out + css.slice(from);
-    out += css.slice(from, start);
-    const end = css.indexOf("*/", start + 2);
-    if (end === -1) return out;
-    from = end + 2;
+  let index = 0;
+  let quote: string | null = null;
+  while (index < css.length) {
+    const char = css[index] as string;
+    if (quote) {
+      out += char;
+      if (char === "\\" && index + 1 < css.length) {
+        out += css[index + 1];
+        index += 2;
+        continue;
+      }
+      if (char === quote) quote = null;
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      out += char;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && css[index + 1] === "*") {
+      const end = css.indexOf("*/", index + 2);
+      if (end === -1) return out;
+      index = end + 2;
+      continue;
+    }
+    out += char;
+    index += 1;
   }
+  return out;
 }
 
 /**
