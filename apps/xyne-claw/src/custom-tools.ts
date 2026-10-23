@@ -8,7 +8,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, extractVoiceSection, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
@@ -282,13 +282,25 @@ export function loadCustomTools(
   // Injected so `sandbox-copy-in` can stream a skill's companion file into the
   // sandbox server-side, confined to this root (mirrors the agent's skill read root).
   const skillsRoot = sessionId ? join(PATHS.dataDir, "session-skills", sessionId) : "";
-  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo || skillsRoot)
-    ? {
-        ...(meta ?? {}),
-        ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
-        ...(skillsRoot ? { skillsRoot } : {}),
-      }
-    : undefined;
+  // The design system's `## Voice` section, for design-voice-check (XYNE-66830).
+  // The run already has the whole DESIGN.md in its prompt, but a tool cannot
+  // read a prompt — same reason sandboxRepo is pinned above. Only the Voice
+  // section travels, not the 32k contract: it is the only part a tool checks.
+  const designVoice = typeof agentConfig?.["designSystem"] === "string"
+    ? (() => {
+        const section = extractVoiceSection(agentConfig["designSystem"] as string);
+        return section ? `## Voice\n${section}` : "";
+      })()
+    : "";
+  const toolMeta: Record<string, string> | undefined =
+    (meta || pinnedSandboxRepo || skillsRoot || designVoice)
+      ? {
+          ...(meta ?? {}),
+          ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
+          ...(skillsRoot ? { skillsRoot } : {}),
+          ...(designVoice ? { designVoice } : {}),
+        }
+      : undefined;
 
   const tools = customTools.map((ct) => {
     const resolvedConfig = resolveToolConfig(ct.configSchema, config);

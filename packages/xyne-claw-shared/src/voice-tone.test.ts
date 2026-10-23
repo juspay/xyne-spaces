@@ -114,6 +114,44 @@ describe("parseVoiceSection", () => {
     });
   });
 
+  it("reads the built-in template, which used to parse to nothing", () => {
+    // Copied verbatim from DESIGN_SYSTEM_TEMPLATE in DesignSystemSheet.tsx —
+    // what the "Insert template" button pastes. Its voice section was prose
+    // ("Tone is concise, specific, and operational.") and therefore produced no
+    // rules at all, so every system created from it had no voice QA. Pinned
+    // here so it cannot quietly go back to prose.
+    const template = `## Voice
+- **Tone:** concise, specific, operational
+- **Prefer:** "sign in" over "login"; "use" over "utilize"
+- **Avoid:** delve, seamlessly, synergy, best-in-class, revolutionary
+- **Headings:** sentence case
+- **Buttons:** sentence case
+- **CTA style:** active first-person verb, e.g. "Start my trial"
+- **Numbers:** 1,000 — comma thousands separator
+- **Dates:** 3 Mar 2026 — day month year, no ordinals
+
+## Content Rules
+- Prefer concrete labels over marketing language.`;
+
+    const rules = parseVoiceSection(template);
+    expect(hasVoiceRules(rules)).toBe(true);
+    expect(rules.toneWords).toEqual(["concise", "specific", "operational"]);
+    expect(rules.bannedPhrases).toEqual([
+      "delve",
+      "seamlessly",
+      "synergy",
+      "best-in-class",
+      "revolutionary",
+    ]);
+    expect(rules.preferredWording).toEqual([
+      { avoid: "login", prefer: "sign in" },
+      { avoid: "utilize", prefer: "use" },
+    ]);
+    expect(rules.casing).toEqual({ headings: "sentence-case", buttons: "sentence-case" });
+    // The prose section after it is a sibling heading, so it is not swept in.
+    expect(rules.toneWords).not.toContain("Prefer concrete labels over marketing language");
+  });
+
   it("returns empty rules when the section is absent", () => {
     const rules = parseVoiceSection("# Acme\n\n## Palette\n\n- Primary: #0B5FFF\n");
     expect(rules).toEqual({

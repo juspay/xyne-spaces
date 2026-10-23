@@ -3216,6 +3216,49 @@ export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
  * Returns null when the attachment is not a valid summary (422) — the card
  * then says so rather than rendering a half-understood payload.
  */
+// --- Voice and tone (XYNE-66830) -------------------------------------------
+//
+// Render-only mirrors of packages/xyne-claw-shared/src/voice-tone.ts. The
+// PARSER is not mirrored and must not be: it is the prompt-injection boundary
+// for a DESIGN.md drafted from an untrusted page, so it stays server-side with
+// one implementation under test.
+
+export type VoiceCasing = "sentence-case" | "title-case" | "uppercase" | "preserve";
+
+export interface VoicePreferredWording {
+  avoid: string;
+  prefer: string;
+}
+
+export interface VoiceRules {
+  toneWords: string[];
+  preferredWording: VoicePreferredWording[];
+  bannedPhrases: string[];
+  casing: { headings?: VoiceCasing; buttons?: VoiceCasing };
+  ctaStyle?: string;
+  numberDateFormats?: { numbers?: string; dates?: string };
+}
+
+/**
+ * The voice rules stated in a delivered DESIGN.md.
+ *
+ * Empty rules are a legitimate answer, not a failure: the system may not state
+ * a voice, or may state it as prose the parser deliberately ignores. The card
+ * shows that as an empty state so the gap is visible instead of silent.
+ */
+export async function fetchVoiceRules(
+  attachmentId: string,
+  userId: string,
+): Promise<VoiceRules | null> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/voice-rules`,
+    { credentials: "include", headers: { "x-user-id": userId } },
+  );
+  if (!res.ok) return null;
+  const body = (await res.json()) as { success: boolean; data?: VoiceRules };
+  return body.data ?? null;
+}
+
 export interface BrandSummaryResult {
   summary: BrandSummary;
   /** Set once this brand.json has been saved, so the card stays saved across

@@ -8,11 +8,14 @@ import {
   createDesignSystem,
   fetchBrandSummary,
   fetchChatAttachmentText,
+  fetchVoiceRules,
   recordBrandSaved,
   type BrandColor,
   type BrandSummary,
   type ChatAttachmentMeta,
+  type VoiceRules,
 } from "../../lib/api";
+import { VoiceTonePreview } from "./VoiceTonePreview";
 
 /**
  * Review card for a brand extraction.
@@ -99,6 +102,10 @@ export function BrandReviewCard({
   const [designMd, setDesignMd] = useState<string>("");
   const [designMdOpen, setDesignMdOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Parsed server-side from the delivered DESIGN.md, so the reviewer can see
+  // which voice rules were actually understood BEFORE this becomes the standing
+  // instruction for the whole org. XYNE-66830.
+  const [voiceRules, setVoiceRules] = useState<VoiceRules | null>(null);
 
   useEffect(() => {
     if (!summaryId) return;
@@ -123,6 +130,11 @@ export function BrandReviewCard({
         if (files.designMd) {
           const text = await fetchChatAttachmentText(files.designMd.id, userId).catch(() => "");
           if (!cancelled) setDesignMd(text.slice(0, MAX_DESIGN_MD_CHARS));
+          // Parsed rather than read off the text above: the card cannot parse
+          // it, and a half-understood voice section is exactly what the preview
+          // exists to surface.
+          const voice = await fetchVoiceRules(files.designMd.id, userId).catch(() => null);
+          if (!cancelled) setVoiceRules(voice);
         }
       } catch {
         if (!cancelled) setLoadFailed(true);
@@ -266,6 +278,12 @@ export function BrandReviewCard({
             ))}
           </div>
         </section>
+      )}
+
+      {voiceRules && (
+        <div className="border-t border-xyne-border-subtle px-4 py-3">
+          <VoiceTonePreview rules={voiceRules} />
+        </div>
       )}
 
       {summary.gaps && summary.gaps.length > 0 && (
