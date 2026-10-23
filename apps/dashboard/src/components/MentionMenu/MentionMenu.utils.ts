@@ -120,10 +120,15 @@ const ENTITIES = new Map([
  */
 export function plainText(html: string | null | undefined, keepLines = false): string {
   if (!html) return '';
-  const text = html
+  let text = html
     // Breaks and block ends separate words; inline tags (highlights) don't.
-    .replace(/<\s*br\s*\/?>|<\/\s*(p|div|li|h[1-6]|blockquote|pre)\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
+    .replace(/<\s*br\s*\/?>|<\/\s*(p|div|li|h[1-6]|blockquote|pre)\s*>/gi, '\n');
+  // Until nothing changes: one pass leaves a tag behind when a tag sits inside another ("<scr<b>ipt>").
+  for (let previous = ''; previous !== text; ) {
+    previous = text;
+    text = text.replace(/<[^>]*>/g, '');
+  }
+  text = text
     .replace(/&(lt|gt|quot|#39|apos|nbsp);/g, entity => ENTITIES.get(entity) ?? entity)
     // Last, so "&amp;lt;" reads "&lt;" rather than "<".
     .replace(/&amp;/g, '&');
