@@ -6702,6 +6702,7 @@ export function createMutators(
           // StatusV2 pause/unpause handling:
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
+          //   Not when leaving straight to Completed/Cancelled - a finished ticket keeps its due date.
           // - When ETA is manually changed while PAUSED, reset statusUpdatedAt to restart the pause timer
           if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && params.boardId === undefined) {
             updateData.statusUpdatedAt = params.updatedAt;
@@ -6709,7 +6710,7 @@ export function createMutators(
             const isLeavingPaused =
               ticket.statusV2 === TicketStatusV2.PAUSED && params.statusV2 !== TicketStatusV2.PAUSED;
 
-            if (isLeavingPaused && params.eta === undefined && ticket.eta) {
+            if (isLeavingPaused && !isTerminalStatus(params.statusV2) && params.eta === undefined && ticket.eta) {
               const pausedAt = ticket.statusUpdatedAt ?? params.updatedAt;
               const pausedDurationMs = calculateWorkingDurationMs(
                 new Date(pausedAt),
@@ -19187,11 +19188,13 @@ export function createMutators(
             transition,
           });
           const { currentTicketEtaManagement } = etaCtx;
+          // Evaluate against the status this move writes below, not the pre-move one.
+          const targetStatusV2 = targetStage.defaultTicketStatusV2 ?? ticket.statusV2;
 
           const etaResult = evaluateEta({
             ticketId,
-            ticketStatus: ticket.statusV2,
-            isTerminal: isTerminalStatus(ticket.statusV2),
+            ticketStatus: targetStatusV2,
+            isTerminal: isTerminalStatus(targetStatusV2),
             currentTicketEta: msToDate(ticket.eta),
             currentTicketEtaManagement,
             boardType: board.boardType,

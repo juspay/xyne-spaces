@@ -24,6 +24,8 @@ export interface StageLike {
   id: string;
   sequenceNumber: number;
   eta: number | null | undefined;
+  /** Decides whether an unset `eta` blocks the forecast - see `isStageEtaOptional`. */
+  defaultTicketStatusV2: string | null | undefined;
 }
 
 export interface TransitionLike {

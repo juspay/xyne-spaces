@@ -1,4 +1,4 @@
-import { VisitSlaMode } from '@xyne/shared';
+import { VisitSlaMode, isStageEtaOptional } from '@xyne/shared';
 import type { StageLike, StepEstimate, TransitionLike } from './types';
 
 /**
@@ -17,14 +17,16 @@ import type { StageLike, StepEstimate, TransitionLike } from './types';
  *                                              NOT treated as a hard config error here)
  *   NONE                                    -> deliberately untracked, 0 hours, NOT an error
  *   STAGE_DEFAULT (or no transition)        -> Stage.eta, when positive
- *   no usable Stage.eta after the above     -> incomplete (missing estimate)
+ *   no usable Stage.eta after the above     -> incomplete (missing estimate), unless the
+ *                                              stage is a no-work stage (Completed/Cancelled/
+ *                                              Paused) - then 0 hours, untracked, like NONE
  *   required transition missing entirely    -> config error (incomplete) - only reachable
  *                                              via `requireExplicitTransition`, which only
  *                                              Standard Path route steps set (M5); ordinary
  *                                              linear/DEFAULT transitions never require this.
  */
 export function resolveStepEstimate(
-  stage: Pick<StageLike, 'id' | 'eta'>,
+  stage: Pick<StageLike, 'id' | 'eta' | 'defaultTicketStatusV2'>,
   transition: TransitionLike | null,
   opts: { requireExplicitTransition: boolean },
 ): StepEstimate {
@@ -67,7 +69,7 @@ export function resolveStepEstimate(
         hours: 0,
         source: 'TRANSITION_FIXED',
         deadlineTracked: false,
-        incomplete: true,
+        incomplete: !isStageEtaOptional(stage.defaultTicketStatusV2),
       };
     }
 
@@ -97,7 +99,7 @@ export function resolveStepEstimate(
         hours: 0,
         source: 'STAGE_DEFAULT',
         deadlineTracked: false,
-        incomplete: true,
+        incomplete: !isStageEtaOptional(stage.defaultTicketStatusV2),
       };
     }
   }

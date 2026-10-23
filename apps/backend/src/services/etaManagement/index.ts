@@ -67,7 +67,7 @@ export interface EvaluateEtaInput {
   boardType: string;
   boardEtaManagement: BoardEtaManagement;
   currentStageId: string;
-  stages: ReadonlyArray<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta'>>;
+  stages: ReadonlyArray<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta' | 'defaultTicketStatusV2'>>;
   transitions: ReadonlyArray<TransitionLike>;
   activeVisit: ActiveVisitContext;
   trigger: EtaChangeTrigger;
@@ -128,7 +128,9 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
 
   // Automatic extension only applies when the board has opted in; detection (below)
   // always runs regardless, per the Phase 1 (detect-only) / Phase 2 (auto-extend) split.
-  const etaDecision = boardEtaManagement.autoRecomputeEnabled
+  // A Completed/Cancelled ticket keeps its due date: extending it at completion would
+  // move it past the completion time and hide that the ticket was late.
+  const etaDecision = boardEtaManagement.autoRecomputeEnabled && !isTerminal
     ? decideEtaUpdate(currentTicketEta, forecast)
     : { newEta: currentTicketEta, changed: false };
 
