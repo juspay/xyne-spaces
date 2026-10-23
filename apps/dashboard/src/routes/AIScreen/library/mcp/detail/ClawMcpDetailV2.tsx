@@ -16,6 +16,7 @@ import {
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
 import Tooltip from '@/components/ui/Tooltip';
 import { openOAuthConsent } from '../../shared/pickers/mcp/openOAuthConsent';
+import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { McpConnectDialog } from './McpConnectDialog';
 import { McpDefinitionDialog } from './McpDefinitionDialog';
 import { Pill } from '../../shared/primitives/Pill';
@@ -79,6 +80,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [definitionOpen, setDefinitionOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const { data: isClawAdmin = false } = useIsClawAdmin();
   const entry = entries.find(candidate => candidate.slug === type);
   const server = entry?.server;
@@ -185,9 +187,9 @@ const ClawMcpDetailV2 = (): ReactElement => {
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
+                  <h1 className='truncate text-sm font-semibold leading-[22px] text-foreground'>
                     {entry.label}
-                  </span>
+                  </h1>
                   <Tooltip content={scopeHint(entry.scope)} side='top'>
                     <span className='flex'>
                       <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
@@ -253,8 +255,9 @@ const ClawMcpDetailV2 = (): ReactElement => {
                       <Button
                         size='sm'
                         variant='outline'
-                        onClick={(): void => void handleDisconnect()}
+                        onClick={(): void => setDisconnectOpen(true)}
                         disabled={connecting || !connection}
+                        className='border-destructive/30 text-destructive hover:bg-destructive/10'
                         data-track-category='Claw MCP'
                         data-track-name='DisconnectMcp'
                       >
@@ -395,6 +398,24 @@ const ClawMcpDetailV2 = (): ReactElement => {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={disconnectOpen}
+        onOpenChange={setDisconnectOpen}
+        title={`Disconnect ${entry?.label ?? 'this connector'}?`}
+        description={
+          credentialFields.length > 0
+            ? 'The credentials you entered are deleted, and agents using this connector lose its tools. You will have to enter them again to reconnect.'
+            : 'Agents using this connector lose its tools until you connect it again.'
+        }
+        confirmLabel='Disconnect'
+        danger
+        loading={connecting}
+        onConfirm={() => {
+          setDisconnectOpen(false);
+          void handleDisconnect();
+        }}
+      />
     </div>
   );
 };
