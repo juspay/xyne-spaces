@@ -8,7 +8,7 @@ import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } 
 import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
-import { resolveProjectInstructions } from "../lib/project-context.js";
+import { resolveProjectInstructions, resolveProjectKnowledge } from "../lib/project-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -1440,6 +1440,22 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
       orgId,
     );
+    // Same split as the instructions above: the forwarded body reaches
+    // prepareRun, which attaches the project's files and resolves its Spaces
+    // items itself, so nothing is added to that body here. Only the harness
+    // envelope below — which never reaches prepareRun — gets the manifest.
+    //
+    // Deferred: only a run that dispatches to the harness reads the manifest,
+    // and eligibility is decided further down. Resolving here spent the queries
+    // on server runs too, where prepareRun resolves the same rows again.
+    const resolveHarnessProjectKnowledge = CONFIG.localHarnessEnabled
+      ? () =>
+          resolveProjectKnowledge(
+            convId,
+            [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+            orgId,
+          )
+      : null;
     const aiScreenInstructions = withAiScreenPresentationInstructions(
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
     );
@@ -1678,24 +1694,33 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
     }
 
-    const harnessInstructionBlocks = [
-      typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
-      // A harness run builds its own context and never reaches prepareRun, so
-      // the project's instructions have to be added here or they never arrive.
-      projectInstructions ?? "",
-      designSelectionInstruction,
-      pageSelectionInstruction,
-      openItemsInstruction,
-    ].filter(Boolean);
-    const localSandboxContext = [
-      attachedContextPrefix,
-      designRevisionOnly && designArtifactAttachment
-        ? `Current design HTML (revise this):\n\`\`\`html\n${Buffer.from(designArtifactAttachment.data, "base64").toString("utf8")}\n\`\`\``
-        : "",
-      ...harnessInstructionBlocks,
-    ]
-      .filter(Boolean)
-      .join("\n\n") || null;
+    const buildLocalSandboxContext = async (): Promise<string | null> => {
+      const harnessProjectKnowledge = resolveHarnessProjectKnowledge
+        ? await resolveHarnessProjectKnowledge()
+        : null;
+      const harnessInstructionBlocks = [
+        typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+        // A harness run builds its own context and never reaches prepareRun, so
+        // the project's instructions have to be added here or they never arrive.
+        projectInstructions ?? "",
+        // The file-less wording: a harness run fetches attachments from the
+        // device bridge by id, which project knowledge has no row for, so the
+        // agent is told these items exist without being told it has them.
+        harnessProjectKnowledge?.manifestFilesUnavailable ?? "",
+        designSelectionInstruction,
+        pageSelectionInstruction,
+        openItemsInstruction,
+      ].filter(Boolean);
+      return [
+        attachedContextPrefix,
+        designRevisionOnly && designArtifactAttachment
+          ? `Current design HTML (revise this):\n\`\`\`html\n${Buffer.from(designArtifactAttachment.data, "base64").toString("utf8")}\n\`\`\``
+          : "",
+        ...harnessInstructionBlocks,
+      ]
+        .filter(Boolean)
+        .join("\n\n") || null;
+    };
     const attachmentsClear =
       (mergedAttachments.length === 0 && !(Array.isArray(attachments) && attachments.length > 0)) || designRevisionOnly;
     const workspaceRun = Boolean(localFolderWorkspace) && (!isTaskCommandRun || deviceSandboxMode);
@@ -1795,6 +1820,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       if (compactRequested) {
         await localHarnessSessionRepository.clearForConversation(convId).catch(() => 0);
       }
+      const localSandboxContext = await buildLocalSandboxContext();
       const dispatched = await dispatchLocalHarnessRun({
         target: localTarget,
         sessionId: runSessionId,

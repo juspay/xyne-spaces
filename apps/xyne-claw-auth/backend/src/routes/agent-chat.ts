@@ -59,7 +59,7 @@ import {
 } from "./chat-projects.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
-import { resolveProjectInstructions } from "../lib/project-context.js";
+import { resolveProjectInstructions, resolveProjectKnowledge } from "../lib/project-context.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -2187,6 +2187,17 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
               [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
               agent.orgId,
             ) ?? "",
+            // Named, not delivered: this envelope's attachments are fetched
+            // from the device bridge by id, and project knowledge has no such
+            // row. serverFallbackBody reaches prepareRun, which attaches the
+            // files properly if the run falls back to the server.
+            (
+              await resolveProjectKnowledge(
+                conversationId,
+                [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+                agent.orgId,
+              )
+            )?.manifestFilesUnavailable ?? "",
             designSelectionInstruction,
           ]
             .filter(Boolean)

@@ -45,3 +45,54 @@ describe("context picked from the composer's @ menu", () => {
     expect(interact).not.toHaveBeenCalled();
   });
 });
+
+describe("framing: project knowledge versus the user's own turn", () => {
+  beforeEach(() => interact.mockReset());
+
+  const items = [{ type: "channel" as const, id: "chan-1", title: "#design" }];
+
+  it("does not claim the user attached a project's items to their message", async () => {
+    const res = await buildAttachedContextPayload(items, undefined, {
+      framing: "project-knowledge",
+    });
+    expect(res.promptPrefix).toContain("# Project context");
+    expect(res.promptPrefix).toContain("attached to this chat's project");
+    expect(res.promptPrefix).not.toContain("I have attached the following item(s) with my message");
+  });
+
+  it("drops the demand to ground every answer in all of them", async () => {
+    const res = await buildAttachedContextPayload(items, undefined, {
+      framing: "project-knowledge",
+    });
+    expect(res.promptPrefix).not.toContain("ground your answer in all of them");
+    expect(res.promptPrefix).toContain("Do NOT fetch the ones my question does not touch");
+  });
+
+  it("still tells the agent how to fetch an item that does bear on the question", async () => {
+    const res = await buildAttachedContextPayload(items, undefined, {
+      framing: "project-knowledge",
+    });
+    expect(res.promptPrefix).toContain("spaces-");
+    expect(res.promptPrefix).toContain('Channel "#design" (id=chan-1)');
+  });
+
+  it("renders the user's own turn exactly as it did without the option", async () => {
+    const withoutOption = await buildAttachedContextPayload(items);
+    const explicitDefault = await buildAttachedContextPayload(items, undefined, {
+      framing: "user-attached",
+    });
+    expect(withoutOption.promptPrefix).toBe(explicitDefault.promptPrefix);
+    expect(withoutOption.promptPrefix).toContain(
+      "I have attached the following item(s) with my message",
+    );
+    expect(withoutOption.promptPrefix).toContain("ground your answer in all of them");
+  });
+
+  it("keeps the citation and don't-guess rules in the project block too", async () => {
+    const res = await buildAttachedContextPayload(items, undefined, {
+      framing: "project-knowledge",
+    });
+    expect(res.promptPrefix).toContain("Never state unverified information");
+    expect(res.promptPrefix).toContain("ask me before assuming");
+  });
+});

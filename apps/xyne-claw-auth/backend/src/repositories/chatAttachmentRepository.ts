@@ -47,6 +47,25 @@ export const chatAttachmentRepository = {
       where: { id: { in: attachmentIds }, uploaderUserId },
     }),
 
+  /** Uploader-scoped like findOwnedById: an id the caller did not upload is
+   *  absent from the map rather than an error. */
+  originalFilenamesByIds: async (
+    attachmentIds: string[],
+    uploaderUserIds: string | string[],
+  ): Promise<Map<string, string>> => {
+    if (attachmentIds.length === 0) return new Map();
+    const rows = await prisma.chatAttachment.findMany({
+      where: {
+        id: { in: attachmentIds },
+        ...(Array.isArray(uploaderUserIds)
+          ? { uploaderUserId: { in: uploaderUserIds } }
+          : { uploaderUserId: uploaderUserIds }),
+      },
+      select: { id: true, originalFilename: true },
+    });
+    return new Map(rows.map((row) => [row.id, row.originalFilename]));
+  },
+
   /**
    * One attachment the caller uploaded, matched across every id they are
    * verified under. Null when it does not exist or belongs to someone else, so

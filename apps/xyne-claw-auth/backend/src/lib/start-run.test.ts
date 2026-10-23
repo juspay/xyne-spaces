@@ -21,7 +21,8 @@ vi.mock("xyne-claw-shared", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
 }));
 
-const { startRun } = await import("./start-run.js");
+const { startRun, projectFilesToAttach } = await import("./start-run.js");
+type ProjectKnowledgeFile = Parameters<typeof projectFilesToAttach>[0][number];
 
 describe("startRun validation failures", () => {
   const input = (body: Record<string, unknown>) => ({
@@ -87,5 +88,49 @@ describe("startRun validation failures", () => {
       status: 403,
       error: "This token does not have the runs:write scope",
     });
+  });
+});
+
+describe("projectFilesToAttach", () => {
+  const projectFile = (over: Partial<ProjectKnowledgeFile> = {}): ProjectKnowledgeFile => ({
+    knowledgeId: "k-1",
+    fileName: "brand.pdf",
+    mimeType: "application/pdf",
+    storagePath: "chat-attachments/user-1/brand.pdf",
+    sizeBytes: 1024,
+    ...over,
+  });
+
+  it("forwards a project file the turn does not carry, as a reference", () => {
+    expect(projectFilesToAttach([projectFile()], [])).toEqual([
+      {
+        fileName: "brand.pdf",
+        mimeType: "application/pdf",
+        gcsRef: "chat-attachments/user-1/brand.pdf",
+        sizeBytes: 1024,
+      },
+    ]);
+  });
+
+  it("skips the project copy when the turn already carries that filename", () => {
+    const result = projectFilesToAttach([projectFile()], [{ fileName: "brand.pdf" }]);
+    expect(result).toEqual([]);
+  });
+
+  it("keeps the project files the turn does not carry", () => {
+    const result = projectFilesToAttach(
+      [projectFile(), projectFile({ knowledgeId: "k-2", fileName: "spec.md" })],
+      [{ fileName: "brand.pdf" }],
+    );
+    expect(result.map((file) => file.fileName)).toEqual(["spec.md"]);
+  });
+
+  it("matches on the exact delivered name, since that is what decides the write", () => {
+    const result = projectFilesToAttach([projectFile()], [{ fileName: "Brand.pdf" }]);
+    expect(result.map((file) => file.fileName)).toEqual(["brand.pdf"]);
+  });
+
+  it("returns nothing for a project with no files", () => {
+    expect(projectFilesToAttach([], [{ fileName: "brand.pdf" }])).toEqual([]);
   });
 });
