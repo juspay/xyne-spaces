@@ -167,11 +167,74 @@ function Loading() {
   );
 }
 
+/** Types the backend serves inline (see @xyne/shared safeAttachmentHeaders). */
+function isNativelyPreviewable(mimeType: string): boolean {
+  const mime = mimeType.split(";")[0]!.trim().toLowerCase();
+  return mime === "application/pdf" || mime === "text/plain";
+}
+
+/**
+ * Preview for a non-image attachment. The backend serves HTML/XML/unknown
+ * types as an opaque download (XYNE-65486), so an `<iframe src>` would just
+ * trigger a download. Instead the body is fetched as text and rendered via
+ * `srcDoc` in a fully sandboxed iframe — opaque origin, no scripts — so a
+ * malicious report cannot touch this origin's session. PDF / plain text are
+ * still served inline and load natively.
+ */
+function AttachmentFramePreview({ attachment }: { attachment: ChatAttachmentMeta }) {
+  const native = isNativelyPreviewable(attachment.mimeType);
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (native) return;
+    const controller = new AbortController();
+    setHtml(null);
+    setFailed(false);
+    fetch(chatAttachmentDownloadUrl(attachment.id), { credentials: "include", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        setHtml(await response.text());
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          console.warn("[error-pipeline] attachment preview failed", error);
+          setFailed(true);
+        }
+      });
+    return () => controller.abort();
+  }, [attachment.id, native]);
+
+  if (native) {
+    return (
+      <iframe
+        src={chatAttachmentDownloadUrl(attachment.id)}
+        title={attachment.originalFilename}
+        sandbox="allow-same-origin"
+        className="h-[60vh] w-full rounded bg-white"
+      />
+    );
+  }
+  if (failed) {
+    return <div className="py-6 text-center text-[12px] text-xyne-fg-muted">Preview unavailable — use ↗ to download.</div>;
+  }
+  if (html === null) return <Loading />;
+  return (
+    <iframe
+      srcDoc={html}
+      title={attachment.originalFilename}
+      sandbox=""
+      className="h-[60vh] w-full rounded bg-white"
+    />
+  );
+}
+
 /**
  * Inline attachment list with click-to-expand preview — used for BOTH the RCA
  * run's attachments and the files a follow-up turn attaches. Click expands the
- * file (accordion), ↗ opens it in a new tab. HTML/other render in a sandboxed
- * iframe on a white page (a report is a light-theme document); images inline.
+ * file (accordion), ↗ opens it in a new tab (non-allowlisted types download).
+ * HTML/other render in a sandboxed srcDoc iframe on a white page (a report is a
+ * light-theme document); images inline.
  */
 function AttachmentList({
   attachments,
@@ -222,12 +285,7 @@ function AttachmentList({
                 {a.mimeType.startsWith("image/") ? (
                   <img src={chatAttachmentDownloadUrl(a.id)} alt={a.originalFilename} className="mx-auto max-h-[60vh] max-w-full rounded" />
                 ) : (
-                  <iframe
-                    src={chatAttachmentDownloadUrl(a.id)}
-                    title={a.originalFilename}
-                    sandbox="allow-same-origin"
-                    className="h-[60vh] w-full rounded bg-white"
-                  />
+                  <AttachmentFramePreview attachment={a} />
                 )}
               </div>
             )}
