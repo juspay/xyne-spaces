@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Step } from 'gauge-ts';
 import { config } from '@/config';
-import { testContext } from '@/tests/shared/runtime/test-context';
+import { buildRandomSuffix, getStoredUser } from '@/fixtures/fixture-helpers';
+import { type StoredConversation, testContext } from '@/tests/shared/runtime/test-context';
 import {
   ensureBrowserSession,
   ensureNamedBrowserSession,
@@ -74,6 +76,76 @@ function messageBubbleIn(selector: string, messageText: string): Locator {
     .first()
     .locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`)
     .last();
+}
+
+// Parses step args written as `key=value, key=value` into a request body. Values resolve
+// `user:<alias>.<path>` stored text; `$uuid` and `$now` generate an id and a timestamp;
+// `true`/`false` become booleans; `[a|b]` becomes an array of resolved values.
+function parseStepArgs(args: string): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (args.trim() === '') return body;
+  for (const pair of args.split(/,\s+/)) {
+    const separator = pair.indexOf('=');
+    assert.ok(separator > 0, `Expected "key=value" in step args, got "${pair}".`);
+    const key = pair.slice(0, separator).trim();
+    const raw = pair.slice(separator + 1).trim();
+    body[key] =
+      raw.startsWith('[') && raw.endsWith(']')
+        ? raw
+            .slice(1, -1)
+            .split('|')
+            .filter((item) => item.length > 0)
+            .map(parseStepArgValue)
+        : parseStepArgValue(raw);
+  }
+  return body;
+}
+
+function parseStepArgValue(raw: string): unknown {
+  if (raw === '$uuid') return randomUUID();
+  if (raw === '$now') return Date.now();
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return resolveStoredText(raw);
+}
+
+function getStoredConversation(
+  userAlias: string,
+  conversationKind: 'channels' | 'dms',
+  conversationAlias: string
+): StoredConversation {
+  const conversation = getStoredUser(userAlias)[conversationKind][conversationAlias];
+  assert.ok(
+    conversation?.id,
+    `Expected stored ${conversationKind} "${conversationAlias}" with an id for user "${userAlias}".`
+  );
+  return conversation;
+}
+
+// Uploads a fixture file to the draft-attachment endpoint as the active browser's user,
+// with a caller-chosen attachment id (the endpoint keys the upload on it).
+async function uploadDraftAttachment(
+  channelId: string,
+  fileName: string,
+  attachmentId: string
+): Promise<void> {
+  const filePath = path.join(FIXTURE_FILES_DIR, fileName);
+  assert.ok(
+    fs.existsSync(filePath),
+    `Fixture file "${fileName}" not found in ${FIXTURE_FILES_DIR}.`
+  );
+  testContext.lastResponse = await testContext.activePage.request.post(
+    `${config.dashboard.baseUrl}/api/drafts/attachments/upload`,
+    {
+      multipart: {
+        channelId,
+        draftMessageId: randomUUID(),
+        attachmentIds: JSON.stringify([attachmentId]),
+        files: { name: fileName, mimeType: 'text/plain', buffer: fs.readFileSync(filePath) },
+      },
+      timeout: 60000,
+    }
+  );
 }
 
 // Sample uploads (image, video, PDF, ...) checked into the automation package.
@@ -736,6 +808,13 @@ export default class BrowserSteps {
     await container.getByText(text, { exact: true }).first().waitFor({
       state: 'visible',
     });
+  }
+
+  @Step('verifying text containing <text> is not visible in <selector>')
+  public async verifyTextNotVisibleInSelector(text: string, selector: string): Promise<void> {
+    const container = testContext.activePage.locator(selector).first();
+    await container.waitFor({ state: 'visible' });
+    await expect(container.getByText(resolveStoredText(text), { exact: false })).toHaveCount(0);
   }
 
   @Step('verifying <text> is visible in <selector>')
@@ -1473,5 +1552,244 @@ export default class BrowserSteps {
 
     // Refresh to apply changes - use domcontentloaded for faster reload
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  }
+
+  // ===========================================
+  // API AS THE ACTIVE BROWSER'S USER
+  // Requests go through the active page's request context, so they carry that
+  // browser's session cookies and act as whoever is logged in there.
+  // ===========================================
+
+  @Step(
+    'storing id of stored user <userAlias> channel <channelAlias> message <messageAlias> in <selector>'
+  )
+  public async storeChannelMessageId(
+    userAlias: string,
+    channelAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    assertValidMessageAlias(messageAlias);
+    await this.storeMessageId(userAlias, 'channels', channelAlias, messageAlias, selector);
+  }
+
+  @Step('storing id of stored user <userAlias> dm <dmAlias> message <messageAlias> in <selector>')
+  public async storeDmMessageId(
+    userAlias: string,
+    dmAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    assertValidMessageAlias(messageAlias);
+    await this.storeMessageId(userAlias, 'dms', dmAlias, messageAlias, selector);
+  }
+
+  private async storeMessageId(
+    userAlias: string,
+    conversationKind: 'channels' | 'dms',
+    conversationAlias: string,
+    messageAlias: string,
+    selector: string
+  ): Promise<void> {
+    const conversation = getStoredUser(userAlias)[conversationKind][conversationAlias];
+    const message = conversation?.messages[messageAlias];
+    assert.ok(message, `Expected stored message "${messageAlias}" in "${conversationAlias}".`);
+    const bubble = messageBubbleIn(selector, message.text);
+    await expect(bubble).toBeVisible({ timeout: config.timeout });
+    const messageId = await bubble.getAttribute('data-message-id');
+    assert.ok(messageId, `Expected message "${messageAlias}" to expose data-message-id.`);
+    message.id = messageId;
+  }
+
+  @Step('sending zero mutation <mutationName> with args <mutationArgs>')
+  public async sendZeroMutation(mutationName: string, mutationArgs: string): Promise<void> {
+    testContext.lastResponse = await testContext.activePage.request.post(
+      `${config.dashboard.baseUrl}/api/zero/push-fallback`,
+      { data: { name: mutationName, args: parseStepArgs(mutationArgs) }, timeout: 60000 }
+    );
+  }
+
+  @Step('verifying zero mutation succeeded')
+  public async verifyZeroMutationSucceeded(): Promise<void> {
+    const body = await this.readZeroMutationResult();
+    assert.equal(body.success, true, `Expected mutation to succeed, got ${JSON.stringify(body)}.`);
+  }
+
+  // `expectedError` may list alternatives as `a|b` when more than one guard can refuse first.
+  @Step('verifying zero mutation was rejected with <expectedError>')
+  public async verifyZeroMutationRejected(expectedError: string): Promise<void> {
+    const body = await this.readZeroMutationResult();
+    assert.equal(
+      body.success,
+      false,
+      `Expected mutation to be rejected, got ${JSON.stringify(body)}.`
+    );
+    const message = String(body.message ?? '');
+    assert.ok(
+      expectedError.split('|').some((expected) => message.includes(expected)),
+      `Expected rejection containing "${expectedError}", got "${message}".`
+    );
+  }
+
+  // push-fallback answers HTTP 200 and reports mutator/ACL rejections in the body.
+  private async readZeroMutationResult(): Promise<{ success?: boolean; message?: string }> {
+    const response = testContext.lastResponse;
+    assert.ok(response, 'Expected a zero mutation response to be available.');
+    assert.equal(
+      response.status(),
+      200,
+      `Expected push-fallback HTTP 200, got ${response.status()}.`
+    );
+    return (await response.json()) as { success?: boolean; message?: string };
+  }
+
+  @Step('sending POST to <urlPath> with args <requestArgs>')
+  public async sendPostAsActiveUser(urlPath: string, requestArgs: string): Promise<void> {
+    assertValidUrlPath(urlPath);
+    testContext.lastResponse = await testContext.activePage.request.post(
+      `${config.dashboard.baseUrl}${urlPath}`,
+      { data: parseStepArgs(requestArgs), timeout: 60000 }
+    );
+  }
+
+  @Step('creating dm <dmAlias> via API for user <userAlias> with user <participantAlias>')
+  public async createDmViaApi(
+    dmAlias: string,
+    userAlias: string,
+    participantAlias: string
+  ): Promise<void> {
+    assertValidDmAlias(dmAlias);
+    assertValidUserAlias(userAlias);
+    assertValidUserAlias(participantAlias);
+    const user = getStoredUser(userAlias);
+    const participant = getStoredUser(participantAlias);
+    const response = await testContext.activePage.request.post(
+      `${config.dashboard.baseUrl}/api/users/me/dms`,
+      {
+        data: { participantIds: [participant.id], message: `dm-seed-${buildRandomSuffix()}` },
+        timeout: 60000,
+      }
+    );
+    assert.equal(response.ok(), true, `Expected DM creation to succeed, got ${response.status()}.`);
+    const body = (await response.json()) as { id?: string };
+    assert.ok(body.id, `Expected DM creation response to contain id, got ${JSON.stringify(body)}.`);
+    user.dms[dmAlias] = {
+      id: body.id,
+      name: participant.name,
+      url: `${config.dashboard.baseUrl}/${user.workspaceId}/chat/dir/${body.id}`,
+      messages: {},
+    };
+  }
+
+  @Step(
+    'uploading fixture file <fileName> as attachment <attachmentAlias> for stored user <userAlias> channel <channelAlias>'
+  )
+  public async uploadChannelAttachment(
+    fileName: string,
+    attachmentAlias: string,
+    userAlias: string,
+    channelAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    await this.uploadAndStoreAttachment(
+      fileName,
+      attachmentAlias,
+      userAlias,
+      'channels',
+      channelAlias
+    );
+  }
+
+  @Step(
+    'uploading fixture file <fileName> as attachment <attachmentAlias> for stored user <userAlias> dm <dmAlias>'
+  )
+  public async uploadDmAttachment(
+    fileName: string,
+    attachmentAlias: string,
+    userAlias: string,
+    dmAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidDmAlias(dmAlias);
+    await this.uploadAndStoreAttachment(fileName, attachmentAlias, userAlias, 'dms', dmAlias);
+  }
+
+  private async uploadAndStoreAttachment(
+    fileName: string,
+    attachmentAlias: string,
+    userAlias: string,
+    conversationKind: 'channels' | 'dms',
+    conversationAlias: string
+  ): Promise<void> {
+    const conversation = getStoredConversation(userAlias, conversationKind, conversationAlias);
+    const attachmentId = randomUUID();
+    await uploadDraftAttachment(conversation.id as string, fileName, attachmentId);
+    const response = testContext.lastResponse;
+    assert.ok(response);
+    assert.equal(
+      response.ok(),
+      true,
+      `Expected attachment upload to succeed, got ${response.status()}.`
+    );
+    conversation.attachments = {
+      ...conversation.attachments,
+      [attachmentAlias]: { alias: attachmentAlias, id: attachmentId, fileName },
+    };
+  }
+
+  @Step(
+    'uploading fixture file <fileName> for stored user <userAlias> channel <channelAlias> with attachment id <attachmentId>'
+  )
+  public async uploadChannelAttachmentWithId(
+    fileName: string,
+    userAlias: string,
+    channelAlias: string,
+    attachmentId: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    assertValidChannelAlias(channelAlias);
+    const conversation = getStoredConversation(userAlias, 'channels', channelAlias);
+    await uploadDraftAttachment(
+      conversation.id as string,
+      fileName,
+      resolveStoredText(attachmentId)
+    );
+  }
+
+  @Step('verifying <elementSelector> is visible in <selector> for stored user <userAlias>')
+  public async verifyVisibleInUserRow(
+    elementSelector: string,
+    selector: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    const row = this.userRow(selector, userAlias);
+    await expect(row).toBeVisible({ timeout: config.timeout });
+    await row.hover();
+    await expect(row.locator(elementSelector).first()).toBeVisible({ timeout: config.timeout });
+  }
+
+  @Step('verifying <elementSelector> is not visible in <selector> for stored user <userAlias>')
+  public async verifyNotVisibleInUserRow(
+    elementSelector: string,
+    selector: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    const row = this.userRow(selector, userAlias);
+    await expect(row).toBeVisible({ timeout: config.timeout });
+    await row.hover();
+    await expect(row.locator(elementSelector)).toHaveCount(0);
+  }
+
+  // A row element carrying `data-user-id` for the stored user, e.g. a channel member row.
+  private userRow(selector: string, userAlias: string): Locator {
+    const userId = getStoredUser(userAlias).id;
+    return testContext.activePage.locator(`${selector}[data-user-id="${userId}"]`).first();
   }
 }

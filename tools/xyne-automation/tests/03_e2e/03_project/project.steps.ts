@@ -64,6 +64,9 @@ export default class ProjectSteps {
       email: catalogUser.email,
       setAsNewUser: String(setAsNewUser),
     });
+    if (catalogUser.workspace) {
+      params.set('workspace', catalogUser.workspace);
+    }
 
     const page = testContext.activePage;
     // Hit the test auth endpoint directly instead of clicking "Sign in with
