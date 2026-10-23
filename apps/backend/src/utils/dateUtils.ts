@@ -64,6 +64,36 @@ export function addHHMMDuration(startsAt: Date, startHHMM: string, endHHMM: stri
 }
 
 /**
+ * The instant at which the wall-clock time `hhmm` occurs, in `timeZone`, on the
+ * calendar day that `day` falls on in that same zone.
+ * e.g. (2026-08-24T07:30Z, "11:00", "Asia/Calcutta") → 2026-08-24T05:30Z
+ */
+export function atWallClockTime(day: Date, hhmm: string, timeZone: string): Date {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const partsOf = (date: Date) =>
+    Object.fromEntries(formatter.formatToParts(date).map(p => [p.type, Number(p.value)])) as
+      Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', number>;
+  // Zone offset at an instant: the zone's wall clock read as if it were UTC, minus the instant.
+  const offsetAt = (date: Date) => {
+    const p = partsOf(date);
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - date.getTime();
+  };
+
+  const { year, month, day: dayOfMonth } = partsOf(day);
+  const [h, m] = hhmm.split(':').map(Number);
+  const wallAsUtc = Date.UTC(year, month - 1, dayOfMonth, h!, m!);
+
+  // Second pass picks up the offset in force at the result, for days where the zone changes offset.
+  const firstGuess = wallAsUtc - offsetAt(new Date(wallAsUtc));
+  return new Date(wallAsUtc - offsetAt(new Date(firstGuess)));
+}
+
+/**
  * Format a date as a short human-readable date+time string.
  * e.g. "Mon, Feb 26, 4:30 PM"
  */
