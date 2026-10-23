@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChatCircleDotsIcon } from "@phosphor-icons/react";
-import { regenerateRoutingCard, updateAgent } from "../../../../lib/api";
+import { getAgentDetail, regenerateRoutingCard, updateAgent } from "../../../../lib/api";
 import type { Agent } from "../../../../lib/types";
 import { useSnackbar } from "../../ui/Snackbar";
 
 /** Same limit as the server's validator (agent-proactivity/config.ts). */
 const DESCRIPTION_MAX = 500;
+/** Writing the card is one LLM call; the server gives it up to 4 minutes. */
+const CARD_WAIT_MS = 270_000;
+const CARD_POLL_MS = 5_000;
 
 export interface ProactivitySettings {
   description: string;
   /** Written from the prompt and tools; routing reads it unless `description` is set. */
   card: string;
+  cardAt: string;
 }
 
 export function readProactivity(config: Record<string, unknown> | null | undefined): ProactivitySettings {
@@ -19,6 +23,7 @@ export function readProactivity(config: Record<string, unknown> | null | undefin
   return {
     description: typeof raw["description"] === "string" ? raw["description"] : "",
     card: typeof generated["text"] === "string" ? generated["text"] : "",
+    cardAt: typeof generated["generatedAt"] === "string" ? generated["generatedAt"] : "",
   };
 }
 
@@ -64,16 +69,29 @@ export function ProactivityTab({ agent, canEdit, onAgentUpdated }: Props) {
     }
   }, [agent.config, agent.slug, draft, onAgentUpdated, showSnackbar]);
 
+  // The server only starts the rewrite; poll the agent until a newer card lands.
   const regenerate = useCallback(async () => {
     setRegenerating(true);
     try {
-      setCard((await regenerateRoutingCard(agent.slug)).text);
+      await regenerateRoutingCard(agent.slug);
+      const deadline = Date.now() + CARD_WAIT_MS;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, CARD_POLL_MS));
+        const latest = await getAgentDetail(agent.slug).catch(() => null);
+        const next = latest && readProactivity(latest.config);
+        if (latest && next && next.cardAt !== saved.cardAt) {
+          setCard(next.card);
+          onAgentUpdated?.(latest);
+          return;
+        }
+      }
+      showSnackbar({ variant: "error", title: "Could not write the scope", description: "It took too long. Try again later." });
     } catch (err) {
       showSnackbar({ variant: "error", title: "Could not write the scope", description: err instanceof Error ? err.message : undefined });
     } finally {
       setRegenerating(false);
     }
-  }, [agent.slug, showSnackbar]);
+  }, [agent.slug, saved.cardAt, onAgentUpdated, showSnackbar]);
 
   return (
     <div className="flex flex-col gap-5 p-4 pb-24">
