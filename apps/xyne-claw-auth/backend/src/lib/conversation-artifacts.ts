@@ -308,6 +308,32 @@ export async function findArtifactsByRef(
   });
 }
 
+/** Kinds whose row points at a Claw sandbox (refService CLAW, refId = sandbox id). */
+export const SANDBOX_ARTIFACT_KINDS = ["PREVIEW", "DIFF"];
+
+/** A sandbox id is a Kubernetes object name. */
+export const SANDBOX_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+
+/**
+ * XYNE-66339: the sandboxes have ended, so mark their ACTIVE preview and
+ * code-changes rows STALE and refresh any open Workspace pane. Rows are kept,
+ * not deleted: routes/sandbox-access.ts authorizes /claw-preview|code|term
+ * from them. Returns the number of rows changed.
+ */
+export async function markSandboxArtifactsStale(sandboxIds: string[]): Promise<number> {
+  const ids = [...new Set(sandboxIds.filter((id) => SANDBOX_ID_RE.test(id)))];
+  if (ids.length === 0) return 0;
+  const where = { refService: "CLAW", refId: { in: ids }, kind: { in: SANDBOX_ARTIFACT_KINDS }, status: "ACTIVE" };
+  const rows: Array<{ conversationId: string }> = await prisma.conversationArtifact.findMany({
+    where,
+    select: { conversationId: true },
+  });
+  if (rows.length === 0) return 0;
+  const { count } = await prisma.conversationArtifact.updateMany({ where, data: { status: "STALE" } });
+  for (const conversationId of new Set(rows.map((row) => row.conversationId))) signalArtifacts(conversationId);
+  return count;
+}
+
 export function toOpenRef(artifact: ConversationArtifact): {
   kind: string;
   service: string;
