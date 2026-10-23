@@ -13,8 +13,8 @@
       "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
     },
     "xyne-spaces": {
-      "command": "node",
-      "args": ["packages/xyne-spaces-mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "@xyne/spaces-mcp@latest"]
     },
     "xyne-claw": {
       "command": "node",

@@ -19,10 +19,20 @@
  * so text that shows the shorthand is not turned into a ping.
  */
 
-const USER_MENTION_RE = /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
-const GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
-const SPECIAL_MENTION_RE = /(^|[^A-Za-z0-9_>])@(channel|here)\b/g;
+/**
+ * What may come right before the `@`: the start, a non-word character, or a
+ * bare tag such as `<p>`, `<li>`, `<strong>` or `<br/>`, since HTML bodies open
+ * with one. Any other `>` is refused: it ends the span this file writes
+ * (`class="…">@channel`), so excluding it keeps expansion idempotent.
+ */
+const PREFIX = String.raw`(^|[^A-Za-z0-9_>]|<(?!code\b|pre\b)[A-Za-z][A-Za-z0-9]*\s*\/?>)`;
+
+const USER_MENTION_RE = new RegExp(String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]`, 'g');
+const GROUP_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]`,
+  'g',
+);
+const SPECIAL_MENTION_RE = new RegExp(String.raw`${PREFIX}@(channel|here)\b`, 'g');
 
 /** Code regions, kept verbatim. Capturing, so `split` keeps them at odd indexes. */
 const CODE_REGION_RE = /(```[\s\S]*?```|<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>)/gi;
