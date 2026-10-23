@@ -45,6 +45,14 @@ import {
   publishClawDesignShare,
   getClawDesignShare,
   revokeClawDesignShare,
+  listClawDesignSystems,
+  getClawDesignSystem,
+  updateClawDesignSystem,
+  deleteClawDesignSystem,
+  getClawConversationDesignSystem,
+  pinClawConversationDesignSystem,
+  unpinClawConversationDesignSystem,
+  setClawAgentDesignSystem,
   type ClawRunRequest,
   type ClawChatProjectInput,
 } from '@/services/clawAgentService';
@@ -1561,6 +1569,158 @@ export class XyneAIControllerV2 {
       );
     } catch (error) {
       this.projectFailure(res, 'reorderChatProjects', error);
+    }
+  };
+
+  private designSystemCaller(req: Request, res: Response): string | null {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return null;
+    }
+    return userId;
+  }
+
+  listDesignSystems = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    try {
+      res.json(await listClawDesignSystems({ headers: req.headers, userId }));
+    } catch (error) {
+      this.projectFailure(res, 'listDesignSystems', error);
+    }
+  };
+
+  getDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+    try {
+      res.json(await getClawDesignSystem({ headers: req.headers, userId }, id));
+    } catch (error) {
+      this.projectFailure(res, 'getDesignSystem', error);
+    }
+  };
+
+  updateDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+    try {
+      res.json(
+        await updateClawDesignSystem(
+          { headers: req.headers, userId },
+          id,
+          (req.body ?? {}) as Record<string, unknown>
+        )
+      );
+    } catch (error) {
+      this.projectFailure(res, 'updateDesignSystem', error);
+    }
+  };
+
+  deleteDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+    try {
+      res.json(await deleteClawDesignSystem({ headers: req.headers, userId }, id));
+    } catch (error) {
+      this.projectFailure(res, 'deleteDesignSystem', error);
+    }
+  };
+
+  getConversationDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { conversationId } = req.params;
+    if (!conversationId) {
+      res.status(400).json({ success: false, error: 'conversationId is required' });
+      return;
+    }
+    try {
+      res.json(
+        await getClawConversationDesignSystem({ headers: req.headers, userId }, conversationId)
+      );
+    } catch (error) {
+      this.projectFailure(res, 'getConversationDesignSystem', error);
+    }
+  };
+
+  pinConversationDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { conversationId } = req.params;
+    const { designSystemId } = (req.body ?? {}) as { designSystemId?: unknown };
+    if (!conversationId) {
+      res.status(400).json({ success: false, error: 'conversationId is required' });
+      return;
+    }
+    if (typeof designSystemId !== 'string' || !designSystemId.trim()) {
+      res.status(400).json({ success: false, error: 'designSystemId is required' });
+      return;
+    }
+    try {
+      res.json(
+        await pinClawConversationDesignSystem(
+          { headers: req.headers, userId },
+          conversationId,
+          designSystemId
+        )
+      );
+    } catch (error) {
+      this.projectFailure(res, 'pinConversationDesignSystem', error);
+    }
+  };
+
+  unpinConversationDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { conversationId } = req.params;
+    if (!conversationId) {
+      res.status(400).json({ success: false, error: 'conversationId is required' });
+      return;
+    }
+    try {
+      res.json(
+        await unpinClawConversationDesignSystem({ headers: req.headers, userId }, conversationId)
+      );
+    } catch (error) {
+      this.projectFailure(res, 'unpinConversationDesignSystem', error);
+    }
+  };
+
+  setAgentDesignSystem = async (req: Request, res: Response): Promise<void> => {
+    const userId = this.designSystemCaller(req, res);
+    if (!userId) return;
+    const { slug } = req.params;
+    const { designSystemId } = (req.body ?? {}) as { designSystemId?: unknown };
+    if (!slug) {
+      res.status(400).json({ success: false, error: 'slug is required' });
+      return;
+    }
+    if (typeof designSystemId !== 'string' || !designSystemId.trim()) {
+      res.status(400).json({ success: false, error: 'designSystemId is required' });
+      return;
+    }
+    try {
+      res.json(
+        await setClawAgentDesignSystem({ headers: req.headers, userId }, slug, designSystemId)
+      );
+    } catch (error) {
+      this.projectFailure(res, 'setAgentDesignSystem', error);
     }
   };
 

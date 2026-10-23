@@ -114,6 +114,16 @@ router.get('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.a
 router.patch('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
 router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
 
+// `conversations/...` before `/:id`, or a conversation id is read as a system id.
+router.get('/v2/design-systems', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listDesignSystems);
+router.get('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getConversationDesignSystem);
+router.put('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.pinConversationDesignSystem);
+router.delete('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.unpinConversationDesignSystem);
+router.get('/v2/design-systems/:id', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getDesignSystem);
+router.patch('/v2/design-systems/:id', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateDesignSystem);
+router.delete('/v2/design-systems/:id', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteDesignSystem);
+router.patch('/v2/agents/:slug/design-system', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.setAgentDesignSystem);
+
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);
 

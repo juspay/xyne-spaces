@@ -1766,6 +1766,10 @@ async function clawProjectRequest<T>(
     throw new ClawRequestError(clawErrorMessage(errorText) ?? failure, response.status);
   }
 
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    return { success: true } as T;
+  }
+
   return (await response.json()) as T;
 }
 
@@ -1822,6 +1826,128 @@ export async function deleteClawChatProject(
     `${CHAT_PROJECTS_PATH}/${encodeURIComponent(projectId)}`,
     { method: 'DELETE' },
     'Failed to delete project'
+  );
+}
+
+export interface ClawDesignSystem {
+  id: string;
+  orgId: string;
+  name: string;
+  designMd: string;
+  tokensCss: string;
+  assets: unknown;
+  source: string;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourceCommit: string | null;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const DESIGN_SYSTEMS_PATH = '/claw/api/v1/design-systems';
+
+export async function listClawDesignSystems(req: {
+  headers?: { cookie?: string };
+  userId: string;
+}): Promise<{ success: boolean; data: ClawDesignSystem[] }> {
+  return clawProjectRequest(
+    req,
+    DESIGN_SYSTEMS_PATH,
+    { method: 'GET' },
+    'Failed to list design systems'
+  );
+}
+
+export async function getClawDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  id: string
+): Promise<{ success: boolean; data: ClawDesignSystem }> {
+  return clawProjectRequest(
+    req,
+    `${DESIGN_SYSTEMS_PATH}/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+    'Failed to fetch design system'
+  );
+}
+
+export async function updateClawDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  id: string,
+  input: Record<string, unknown>
+): Promise<{ success: boolean; data: ClawDesignSystem }> {
+  return clawProjectRequest(
+    req,
+    `${DESIGN_SYSTEMS_PATH}/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: input },
+    'Failed to update design system'
+  );
+}
+
+export async function deleteClawDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  id: string
+): Promise<{ success: boolean }> {
+  return clawProjectRequest(
+    req,
+    `${DESIGN_SYSTEMS_PATH}/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    'Failed to delete design system'
+  );
+}
+
+function conversationPinPath(conversationId: string): string {
+  return `${DESIGN_SYSTEMS_PATH}/conversations/${encodeURIComponent(conversationId)}`;
+}
+
+export async function getClawConversationDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  conversationId: string
+): Promise<{ success: boolean; data: ClawDesignSystem | null }> {
+  return clawProjectRequest(
+    req,
+    conversationPinPath(conversationId),
+    { method: 'GET' },
+    'Failed to fetch the pinned design system'
+  );
+}
+
+export async function pinClawConversationDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  conversationId: string,
+  designSystemId: string
+): Promise<{ success: boolean; data: unknown }> {
+  return clawProjectRequest(
+    req,
+    conversationPinPath(conversationId),
+    { method: 'PUT', body: { designSystemId } },
+    'Failed to pin the design system'
+  );
+}
+
+export async function unpinClawConversationDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  conversationId: string
+): Promise<{ success: boolean; data: unknown }> {
+  return clawProjectRequest(
+    req,
+    conversationPinPath(conversationId),
+    { method: 'DELETE' },
+    'Failed to unpin the design system'
+  );
+}
+
+export async function setClawAgentDesignSystem(
+  req: { headers?: { cookie?: string }; userId: string },
+  slug: string,
+  designSystemId: string
+): Promise<{ success: boolean; data: unknown }> {
+  return clawProjectRequest(
+    req,
+    `/claw/api/v1/agents/${encodeURIComponent(slug)}/design-system`,
+    { method: 'PATCH', body: { designSystemId } },
+    'Failed to set the agent default design system'
   );
 }
 

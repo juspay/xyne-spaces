@@ -30,6 +30,7 @@ import {
 import type { Message, UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { SANDBOX_MODE_OPTIONS, useSandboxMode } from './SandboxModeSwitch';
+import { DesignSystemChip } from './DesignSystems/DesignSystemChip';
 import { useDesignStudio } from './Workspace/design/designStudioContext';
 import { usePageSelection } from './Workspace/pageSelectionContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
@@ -110,6 +111,7 @@ interface AIComposerProps {
    *  the previous agent's model list. */
   onAgentChange?: ((slug: string | null, context: ComposerContext) => void) | undefined;
   showAgentSelector?: boolean;
+  conversationId?: string | undefined;
   /** Seeds the extra context/toggles (web search, deep research, collections,
    *  etc.) — used for the landing → chat handoff so the chat composer starts
    *  with whatever the user selected on the landing page. */
@@ -168,6 +170,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     hideDisclaimer,
     onAgentChange,
     showAgentSelector = true,
+    conversationId,
     initialExtras,
     onContextChange,
     anchor = 'bottom',
@@ -893,6 +896,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 },
               }
             : null
+        }
+        designSystem={
+          <DesignSystemChip
+            conversationId={conversationId}
+            returnFocus={() => composerRef.current?.focus()}
+          />
         }
         model={{
           models: modelsArePreviousAgent ? [] : (agentModelsData?.models ?? []),

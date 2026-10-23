@@ -251,6 +251,7 @@ import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapPro
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
 import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+import AIDesignSystemsScreen from './AIScreen/AIDesignSystemsScreen';
 import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
@@ -1169,6 +1170,7 @@ export const router = createBrowserRouter(
                     // screen visibly bounces between routes on every thread switch.
                     // With a single route, changing the param re-renders in place.
                     { path: 'chat/:sessionId', element: <AIScreen /> },
+                    { path: 'design-systems', element: <AIDesignSystemsScreen /> },
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },

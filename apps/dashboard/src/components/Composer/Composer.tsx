@@ -177,6 +177,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     plus,
     agent,
     model,
+    designSystem,
     fast,
     onEnterVoiceMode,
     hideToolbar = false,
@@ -802,6 +803,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               </div>
               <div className='flex shrink-0 items-center gap-1.5'>
                 {fast && <FastModeToggle fast={fast} />}
+                {designSystem}
                 {model && <ModelMenu model={model} returnFocus={returnFocus} side={menuSide} />}
                 <ToolbarIconButton
                   label={
