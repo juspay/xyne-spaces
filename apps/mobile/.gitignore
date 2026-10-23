@@ -67,3 +67,8 @@ assets/configs/*/GoogleService-Info.plist
 # Local env files hold real values; only the example is committed.
 .env.*
 !.env.example
+
+# Local Expo modules: build output
+modules/**/android/build/
+modules/**/android/.cxx/
+modules/**/android/.gradle/

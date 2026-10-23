@@ -128,17 +128,27 @@ export const TAB_BAR_SHADOW =
 
 export const ACTIVE_TAB_INDICATOR = '#0000000D';
 
+/** Width of the edge strokes on the bar's glass — Telegram's 0.4dp for its main tabs. */
+export const SURFACE_EDGE_WIDTH = 0.4;
+
 export type TabBarPalette = {
   background: string;
   icon: string;
   iconActive: string;
   activeIndicator: string;
   /**
-   * Hairline around the bar's surfaces. The drop shadow separates them from a
-   * light page on its own, but against a dark one it disappears and the panel
-   * runs into the screen behind it.
+   * The edge of the bar's glass, as Telegram draws its main tabs
+   * (`BlurredBackgroundProviderImpl.mainTabs`): a stroke along the top and a
+   * darker one along the bottom, each fading out down the rounded ends.
    */
-  surfaceBorder: string;
+  edgeTop: string;
+  edgeBottom: string;
+  /**
+   * Telegram's shadow under the glass: a 2.667dp shadow layer, 0.85dp down.
+   * Android's layer radius is a blur sigma of 0.577 × radius + 0.5; CSS blur is
+   * twice the sigma, hence about 4.1.
+   */
+  surfaceShadow: string;
   textPrimary: string;
   textSecondary: string;
   divider: string;
@@ -153,7 +163,9 @@ export function useTabBarPalette(): TabBarPalette {
       icon: '#8A8B8D',
       iconActive: '#F4F4F5',
       activeIndicator: '#FFFFFF14',
-      surfaceBorder: 'rgba(255, 255, 255, 0.10)',
+      edgeTop: 'rgba(255, 255, 255, 0.024)',
+      edgeBottom: 'rgba(255, 255, 255, 0.067)',
+      surfaceShadow: '0px 0.85px 4.1px 0px rgba(255, 255, 255, 0.016)',
       textPrimary: 'rgba(255, 255, 255, 0.92)',
       textSecondary: 'rgba(255, 255, 255, 0.45)',
       divider: 'rgba(255, 255, 255, 0.12)',
@@ -166,7 +178,9 @@ export function useTabBarPalette(): TabBarPalette {
     icon: '#A2A3A4',
     iconActive: '#17181C',
     activeIndicator: ACTIVE_TAB_INDICATOR,
-    surfaceBorder: 'rgba(18, 20, 28, 0.06)',
+    edgeTop: 'rgba(0, 0, 0, 0.067)',
+    edgeBottom: 'rgba(0, 0, 0, 0.125)',
+    surfaceShadow: '0px 0.85px 4.1px 0px rgba(0, 0, 0, 0.125)',
     textPrimary: '#111111',
     textSecondary: '#8E8E93',
     divider: 'rgba(18, 20, 28, 0.08)',

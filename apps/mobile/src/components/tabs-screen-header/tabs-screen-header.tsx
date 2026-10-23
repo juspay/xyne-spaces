@@ -19,6 +19,11 @@ type RootProps = {
   scrollY: SharedValue<number>;
   collapseDistance?: number;
   backgroundClassName?: string;
+  /**
+   * Drawn behind the header's content, filling it — a frosted surface in place
+   * of the solid `backgroundClassName`. Pass `backgroundClassName=''` with it.
+   */
+  backdrop?: ReactNode;
   className?: string;
 };
 
@@ -47,6 +52,7 @@ function Root({
   scrollY,
   collapseDistance = TABS_SEARCH_COLLAPSE_DISTANCE,
   backgroundClassName = 'bg-tabs-screen',
+  backdrop,
   className,
 }: RootProps): ReactElement {
   const { topSafeHeight, headerHeight, searchBarHeight, searchBarGap } = useHeaderHeight();
@@ -106,6 +112,7 @@ function Root({
           style={{ paddingTop: topSafeHeight, zIndex: 1000 }}
           pointerEvents='box-none'
         >
+          {backdrop}
           <Animated.View className={cn(className)} style={containerStyle}>
             <View
               className='z-10 flex-row items-center justify-between px-4'

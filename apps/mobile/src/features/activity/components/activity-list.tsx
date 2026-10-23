@@ -11,6 +11,7 @@ import { ListEmptyState } from '@/src/components/ui/empty-state';
 import { ScrollToTopButton } from '@/src/components/ui/scroll-to-top-button';
 import { useTabPageIsFocused } from '@/src/hooks/useTabPageFocus';
 import { useFabClearance } from '@/src/features/quick-actions';
+import { useScreenHeaderHeight } from '@/src/features/screen-header';
 import { useReportTabReady } from '@/src/observability/logging/hooks/navigation/useReportTabReady';
 
 import {
@@ -130,6 +131,7 @@ export function ActivityList(): ReactElement {
   const { theme } = useUniwind();
   const viewMode = useValue(appliedActivityPreferences$.viewMode);
   const bottomInset = useFabClearance();
+  const headerHeight = useScreenHeaderHeight();
   const scroll = useActivityScroll({ loadMore, isFocused });
 
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
@@ -184,12 +186,14 @@ export function ActivityList(): ReactElement {
           showsVerticalScrollIndicator={false}
           style={{ flex: 1 }}
           contentContainerStyle={{
+            // Clears the header, which floats over the list.
+            paddingTop: headerHeight,
             paddingBottom: bottomInset,
             flexGrow: order.length === 0 ? 1 : undefined,
           }}
         />
       </ActivityBodyEnvironment>
-      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} />
+      <ScrollToTopButton offset={scrollOffset} onPress={scrollToTop} topInset={headerHeight} />
     </View>
   );
 }
