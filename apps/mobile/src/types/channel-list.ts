@@ -4,6 +4,11 @@ export interface ChannelListItemData {
   id: string;
   name: string;
   visibility: ChannelVisibility;
+  /**
+   * Set only on a DM or group DM shown inside a custom section: who to draw in
+   * place of the channel glyph. Regular channel rows never carry it.
+   */
+  participantUserIds?: readonly string[];
   /** Activity-derived count shown in the channel directory, matching desktop. */
   unreadCount: number;
   /** Message count used only to preserve the in-chat unread landing contract. */

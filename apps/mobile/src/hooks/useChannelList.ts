@@ -35,12 +35,22 @@ import {
   bucketChannelsBySection,
   buildGroupedChannelRows,
 } from '@/src/components/chat/channel-list/section-utils';
+import { selectSectionedDms } from '@/src/components/chat/channel-list/section-dms';
+import { getChannelDisplayName, getDmAvatarUserIds } from '@/src/utils/channel-utils';
+import { useUsersById } from '@xyne/shared/hooks';
 
 const getLatestChannelActivityAt = (channels: readonly VisibleChannel[]): number =>
   channels.reduce(
     (latest, channel) => Math.max(latest, channel.channelStats?.lastActivityAt ?? 0),
     0,
   );
+
+type SectionedDms = {
+  channels: VisibleChannel[];
+  avatarIdsById: ReadonlyMap<string, string[]>;
+};
+
+const NO_SECTIONED_DMS: SectionedDms = { channels: [], avatarIdsById: new Map() };
 
 type UseChannelListResult = {
   rows: ChannelListRow[];
@@ -88,6 +98,32 @@ export function useChannelList(
     () => [...groupedWorkspaceChannels.starred, ...groupedWorkspaceChannels.channels],
     [groupedWorkspaceChannels],
   );
+
+  /**
+   * DMs the user filed into one of their sections, as web shows them. They
+   * only ever join a custom section: Starred, Channels, the filter pills and
+   * search stay channel-only, and an unsectioned DM stays on the DMs tab.
+   *
+   * A DM's `name` is its participant id list, so each is carried as a copy
+   * named for the people in it — the row, search-free sorting and the
+   * alphabetical section order all read `name`. The avatar ids are derived
+   * from the original before the rename.
+   */
+  const usersById = useUsersById();
+  const sectionedDms = useMemo<SectionedDms>(() => {
+    const dms = selectSectionedDms(visibleChannels, userChannelStatuses, sections);
+    // The shared empty value keeps `rows` memoised for the common user with no
+    // sectioned DMs, whatever else moved.
+    if (dms.length === 0) return NO_SECTIONED_DMS;
+
+    const viewerId = currentUserId ?? '';
+    const avatarIdsById = new Map<string, string[]>();
+    const channels = dms.map(channel => {
+      avatarIdsById.set(channel.id, getDmAvatarUserIds(channel, viewerId));
+      return { ...channel, name: getChannelDisplayName(channel, viewerId, usersById) };
+    });
+    return { channels, avatarIdsById };
+  }, [currentUserId, sections, userChannelStatuses, usersById, visibleChannels]);
 
   const { consumeIfNewer: consumeForegroundSyncIfNewer } = useForegroundListSyncProbe({
     enabled: highlightQuery.length === 0 && currentUserId !== null,
@@ -286,6 +322,28 @@ export function useChannelList(
 
     const toChannelRow = (channel: VisibleChannel): ChannelListChannelRow => {
       const status = statusByChannelId.get(channel.id);
+      const dmAvatarIds = sectionedDms.avatarIdsById.get(channel.id);
+
+      if (dmAvatarIds) {
+        // The DMs tab's unread rule: the message counter, and bold only when
+        // it is non-zero — so no `lastActivityAt` here.
+        return {
+          kind: 'channel',
+          id: channel.id,
+          data: {
+            id: channel.id,
+            name: channel.name,
+            visibility: channel.visibility,
+            participantUserIds: dmAvatarIds,
+            unreadCount: status?.unreadCount ?? 0,
+            messageUnreadCount: status?.unreadCount ?? 0,
+            ...(status?.lastViewedAt !== undefined ? { lastViewedAt: status.lastViewedAt } : {}),
+            ...(status?.lastViewedConversationId
+              ? { lastViewedConversationId: status.lastViewedConversationId }
+              : {}),
+          },
+        };
+      }
 
       return {
         kind: 'channel',
@@ -325,19 +383,31 @@ export function useChannelList(
      * Keep full membership for headers and badges. Saved filter/sort preferences
      * transform only expanded rows; search and the standalone pills stay independent.
      */
+    // Every DM passed in already has a live section, so `unsectioned` — the
+    // Channels group — is exactly what it was without them.
     const { sectioned, unsectioned } = bucketChannelsBySection(
-      filteredChannels,
+      [...filteredChannels, ...sectionedDms.channels],
       userChannelStatuses,
       sections,
     );
 
     const groupMentionChannelIds = getGroupMentionChannelIds(unreadActivities);
 
+    // Section totals and section filters read the same count the DM row shows.
+    let groupUnreadCounts: ReadonlyMap<string, number> = channelUnreadCounts;
+    if (sectionedDms.channels.length > 0) {
+      const merged = new Map(channelUnreadCounts);
+      for (const dm of sectionedDms.channels) {
+        merged.set(dm.id, statusByChannelId.get(dm.id)?.unreadCount ?? 0);
+      }
+      groupUnreadCounts = merged;
+    }
+
     return buildGroupedChannelRows({
       starred: filteredStarred,
       sectioned,
       unsectioned,
-      unreadCounts: channelUnreadCounts,
+      unreadCounts: groupUnreadCounts,
       isStarredCollapsed,
       isChannelsCollapsed,
       toChannelRow,
@@ -354,7 +424,7 @@ export function useChannelList(
               : channelsPreference,
           {
             statuses: statusByChannelId,
-            unreadCounts: channelUnreadCounts,
+            unreadCounts: groupUnreadCounts,
             mentionedChannelIds: groupMentionChannelIds,
             now: Date.now(),
           },
@@ -374,6 +444,7 @@ export function useChannelList(
     unreadActivities,
     sections,
     userChannelStatuses,
+    sectionedDms,
   ]);
 
   const channelCount = rows.filter(r => r.kind === 'channel').length;
@@ -384,7 +455,7 @@ export function useChannelList(
     isEmpty:
       highlightQuery.length > 0
         ? searchCandidateChannels.length === 0
-        : workspaceChannels.length === 0,
+        : workspaceChannels.length === 0 && sectionedDms.channels.length === 0,
     hasNoSearchResults: highlightQuery.length > 0 && channelCount === 0,
   };
 }

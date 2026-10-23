@@ -88,7 +88,7 @@ export function SectionOptionsView(): ReactElement {
             onPress={() => setView(RENAME_SECTION_VIEW)}
           />
           <OptionRow
-            label='Manage channels'
+            label='Manage Channels & DMs'
             leading={<ListChecks size={ICON_SIZE} color={foreground} strokeWidth={1.8} />}
             onPress={() => setView(MANAGE_CHANNELS_VIEW)}
           />

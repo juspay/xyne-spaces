@@ -1,9 +1,13 @@
 import { memo, useMemo, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { Check, Hash, Lock } from 'lucide-react-native';
+import { Check, Hash, Lock, MessageCircle } from 'lucide-react-native';
 import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
 import { useCSSVariable } from 'uniwind';
-import { useAllVisibleChannels } from '@/src/hooks/useChannels';
+import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
+import { useUsersById } from '@xyne/shared/hooks';
+import { useAuth } from '@/src/contexts/AuthContext';
+import { getChannelDisplayName } from '@/src/utils/channel-utils';
+import { selectSectionableDms } from './section-dms';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { cn } from '@/src/utils/cn';
 import { CHANNEL_ICON_GLYPH_SIZE } from './channel-list-layout';
@@ -14,19 +18,27 @@ const GLYPH_SIZE = CHANNEL_ICON_GLYPH_SIZE - 3;
 /** The shape the section sheets need from a channel — nothing more. */
 export type PickerChannel = {
   id: string;
+  /** What the row shows and search matches. A DM's is its people, never its id list. */
   name: string;
   visibility: ChannelVisibility;
+  /** A DM or group DM rather than a channel. */
+  isDm?: boolean;
 };
 
 /**
- * Channels a section can hold: real workspace channels the user can see,
- * including starred ones so they remain selectable from the picker.
+ * What a section can hold, as on web: real workspace channels the user can see
+ * (starred included, so they remain selectable), then their open DMs and group
+ * DMs, freshest first. The channel part is unchanged — DMs are only appended.
  */
 export function useSectionableChannels(): PickerChannel[] {
   const visibleChannels = useAllVisibleChannels();
+  const userChannelStatuses = useUserChannelStatuses();
+  const usersById = useUsersById();
+  const { user } = useAuth();
+  const currentUserId = user?.user_id ?? '';
 
   return useMemo(() => {
-    return visibleChannels
+    const channels: PickerChannel[] = visibleChannels
       .filter(channel => {
         if (channel.type === ChannelType.EMAIL) return false;
         if (channel.scopeType !== ChannelScopeType.DEFAULT) return false;
@@ -37,7 +49,20 @@ export function useSectionableChannels(): PickerChannel[] {
         name: channel.name,
         visibility: channel.visibility,
       }));
-  }, [visibleChannels]);
+
+    const dms = selectSectionableDms(visibleChannels, userChannelStatuses);
+    if (dms.length === 0) return channels;
+
+    return [
+      ...channels,
+      ...dms.map(channel => ({
+        id: channel.id,
+        name: getChannelDisplayName(channel, currentUserId, usersById),
+        visibility: channel.visibility,
+        isDm: true,
+      })),
+    ];
+  }, [currentUserId, userChannelStatuses, usersById, visibleChannels]);
 }
 
 /**
@@ -91,7 +116,9 @@ export const SectionChannelRow = memo(function SectionChannelRow({
       </View>
 
       <View className='w-5 items-center mr-1.5'>
-        {isPrivate ? (
+        {channel.isDm ? (
+          <MessageCircle size={GLYPH_SIZE} color={mutedColor} strokeWidth={2} />
+        ) : isPrivate ? (
           <Lock size={GLYPH_SIZE} color={mutedColor} strokeWidth={2} />
         ) : (
           <Hash size={GLYPH_SIZE} color={mutedColor} strokeWidth={2} />

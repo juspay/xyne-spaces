@@ -143,7 +143,7 @@ function ManageSectionSheetContent({
 
     void haptics.success();
     // No tone: the haptic above already reports the outcome.
-    pendingToastRef.current = `${section.name} channels updated successfully`;
+    pendingToastRef.current = `${section.name} updated successfully`;
     dismissSheet();
   }, [
     addChannelsToSection,
@@ -172,7 +172,7 @@ function ManageSectionSheetContent({
           withDivider
           leading='close'
           onLeadingPress={dismissSheet}
-          title='Manage channels'
+          title='Manage Channels & DMs'
           subtitle={subtitle}
           actionLabel='Save'
           onActionPress={handleSave}

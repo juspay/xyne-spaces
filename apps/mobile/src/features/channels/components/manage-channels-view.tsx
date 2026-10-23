@@ -65,19 +65,19 @@ export function ManageChannelsView(): ReactElement {
 
   return (
     <View className='px-3 pt-4 pb-3' style={{ flexShrink: 1 }}>
-      <BackHeader title={`Manage ${section?.name ?? ''} channels`} onBack={goBack} />
+      <BackHeader title={`Manage ${section?.name ?? ''} channels & DMs`} onBack={goBack} />
 
       <View className='h-11 flex-row items-center rounded-full bg-spaces-surface px-4'>
         <Search size={18} color={muted} strokeWidth={2} />
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder='Search channels'
+          placeholder='Search channels & DMs'
           placeholderTextColor={muted}
           autoCapitalize='none'
           autoCorrect={false}
           returnKeyType='search'
-          accessibilityLabel='Search channels'
+          accessibilityLabel='Search channels and DMs'
           className='ml-2 flex-1 text-[16px] text-spaces-foreground'
         />
       </View>

@@ -307,7 +307,7 @@ function SectionOptionsSheetContent({
                   />
                   <OptionRow
                     icon={<ListChecks size={19} color={foregroundColor} />}
-                    label='Manage channels'
+                    label='Manage Channels & DMs'
                     trailing={channelCount > 0 ? String(channelCount) : undefined}
                     onPress={handleManageChannels}
                   />

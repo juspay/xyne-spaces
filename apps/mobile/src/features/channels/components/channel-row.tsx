@@ -10,6 +10,7 @@ import { formatDmTimestamp } from '@/src/features/dms/model/timestamp';
 import { todayStart$ } from '@/src/features/dms/state/day-clock';
 import { ContextMenu } from '@/src/ui/context-menu';
 import { HashIcon } from '@/src/ui/icons';
+import { Avatar } from '@/src/ui/avatar';
 import { cn } from '@/src/utils/cn';
 import { formatCountLabel } from '@/src/utils/countLabel';
 import { haptics } from '@/src/utils/haptics';
@@ -33,14 +34,42 @@ import {
 import { channelRow$ } from '../state/rows-store';
 import { ChannelRowMenu } from './channel-row-menu';
 
+/** Module-level, so a row mid-teardown hands the avatar the same empty array. */
+const NO_USER_IDS: readonly string[] = [];
+
 /**
- * The glyph in its slot. Subscribed to visibility alone, so a channel
- * receiving messages all day never re-renders its icon.
+ * A DM filed into a section shows the person, as the DMs list does.
+ *
+ * Its own component so only DM rows subscribe to `avatarUserIds`. The store
+ * keeps that array's reference while the ids are unchanged, so a DM receiving
+ * messages never re-renders its picture.
+ */
+function DmAvatarSlot({ id }: { id: string }): ReactElement {
+  const userIds = useValue(() => channelRow$(id).avatarUserIds.get()) as
+    readonly string[] | undefined;
+
+  return (
+    <Avatar
+      userIds={userIds ?? NO_USER_IDS}
+      // `avatarUserIds` leaves the current user out, so the group bubble
+      // would read one short of the conversation's head count.
+      memberCount={(userIds?.length ?? 0) + 1}
+      size={CHANNEL_ICON_SLOT}
+    />
+  );
+}
+
+/**
+ * The glyph in its slot. Subscribed to visibility and DM-ness alone, so a
+ * channel receiving messages all day never re-renders its icon.
  */
 function IconSlot({ id }: { id: string }): ReactElement {
+  const isDm = useValue(() => channelRow$(id).isDm.get()) === true;
   const isPrivate = useValue(() => channelRow$(id).isPrivate.get());
   const muted = useCSSVariable('--color-spaces-muted') as string;
   const Glyph = isPrivate ? Lock : HashIcon;
+
+  if (isDm) return <DmAvatarSlot id={id} />;
 
   return (
     <View

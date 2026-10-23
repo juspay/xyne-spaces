@@ -18,6 +18,9 @@ import { useChannelGroupPreferences } from '@/src/hooks/useChannelGroupPreferenc
 import { useChannelSections } from '@/src/hooks/useChannelSections';
 import { groupWorkspaceChannels } from '@/src/hooks/useChannelList';
 import { useAllVisibleChannels, useUserChannelStatuses } from '@/src/hooks/useChannels';
+import { useUsersById } from '@xyne/shared/hooks';
+import { selectSectionableDms } from '@/src/components/chat/channel-list/section-dms';
+import { getChannelDisplayName, getDmAvatarUserIds } from '@/src/utils/channel-utils';
 
 import { buildChannelLayout, type ChannelRowData, type ChannelSectionData } from '../model/layout';
 import { channelFilter$, setChannelFilterCounts } from '../state/filter-store';
@@ -47,6 +50,8 @@ export function useChannelRows(): ChannelListMeta {
   const filter = useValue(channelFilter$);
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? null;
+  const currentUserId = user?.user_id ?? '';
+  const usersById = useUsersById();
 
   const visibleChannels = useAllVisibleChannels();
   const userChannelStatuses = useUserChannelStatuses();
@@ -55,8 +60,19 @@ export function useChannelRows(): ChannelListMeta {
   const { isChannelsCollapsed } = useChannelGroupCollapse();
   const { channels: channelsPreference } = useChannelGroupPreferences();
 
-  const channels = useMemo<ChannelRowData[]>(() => {
-    const statusById = new Map(userChannelStatuses.map(status => [status.channelId, status]));
+  const statusById = useMemo(
+    () => new Map(userChannelStatuses.map(status => [status.channelId, status] as const)),
+    [userChannelStatuses],
+  );
+
+  // The sidebar's wider Mentions set, which a group's Mentions filter reads —
+  // for channels and DMs alike.
+  const groupMentioned = useMemo(
+    () => getGroupMentionChannelIds(unreadActivities),
+    [unreadActivities],
+  );
+
+  const channelRows = useMemo<ChannelRowData[]>(() => {
     const unreadCounts = getUnreadChannelActivityCounts(unreadActivities, statusById);
 
     const mentioned = new Set<string>();
@@ -68,7 +84,6 @@ export function useChannelRows(): ChannelListMeta {
       if (!isUnreadChannelActivity(activity, statusById.get(channelId)?.lastViewedAt)) continue;
       mentioned.add(channelId);
     }
-    const groupMentioned = getGroupMentionChannelIds(unreadActivities);
 
     const { starred, channels: rest } = groupWorkspaceChannels(
       visibleChannels,
@@ -107,7 +122,50 @@ export function useChannelRows(): ChannelListMeta {
           };
         })
     );
-  }, [unreadActivities, userChannelStatuses, visibleChannels]);
+  }, [groupMentioned, statusById, unreadActivities, userChannelStatuses, visibleChannels]);
+
+  /**
+   * Open DMs ride along so a section can show the ones filed into it and the
+   * section pickers can offer them, as web does. The layout keeps them out
+   * of every other group and out of the filter counts. They use the DMs
+   * tab's unread rule: the message counter, unread only when non-zero.
+   *
+   * A memo of their own: DM names read the users list, and a users update
+   * must not re-derive every channel row.
+   */
+  const dmRows = useMemo<ChannelRowData[]>(
+    () =>
+      selectSectionableDms(visibleChannels, userChannelStatuses).map(channel => {
+        const status = statusById.get(channel.id);
+        const messageUnreadCount = status?.unreadCount ?? 0;
+        return {
+          id: channel.id,
+          name: getChannelDisplayName(channel, currentUserId, usersById),
+          isPrivate: false,
+          unreadCount: messageUnreadCount,
+          messageUnreadCount,
+          hasUnread: messageUnreadCount > 0,
+          isMentioned: false,
+          // A section's Mentions filter and sort read these for DMs as well.
+          hasGroupMention: groupMentioned.has(channel.id),
+          isMuted: status?.desktopNotificationLevel === NotificationLevel.NONE,
+          isStarred: status?.isStarred === true,
+          lastActivityAtMs: channel.channelStats?.lastActivityAt ?? 0,
+          lastViewedAt: status?.lastViewedAt ?? undefined,
+          lastViewedConversationId: status?.lastViewedConversationId ?? undefined,
+          sectionId: status?.sectionId ?? null,
+          sectionPosition: status?.sectionPosition ?? '',
+          isDm: true,
+          avatarUserIds: getDmAvatarUserIds(channel, currentUserId),
+        };
+      }),
+    [currentUserId, groupMentioned, statusById, userChannelStatuses, usersById, visibleChannels],
+  );
+
+  const channels = useMemo(
+    () => (dmRows.length === 0 ? channelRows : [...channelRows, ...dmRows]),
+    [channelRows, dmRows],
+  );
 
   const sectionData = useMemo<ChannelSectionData[]>(
     () =>
@@ -144,8 +202,16 @@ export function useChannelRows(): ChannelListMeta {
     setChannelFilterCounts(layout.counts);
   }, [layout.counts]);
 
+  // Empty means nothing to draw: no channels, and no DM sitting in a section.
+  const isEmpty = useMemo(() => {
+    if (channelRows.length > 0) return false;
+    if (dmRows.length === 0 || sectionData.length === 0) return true;
+    const sectionIds = new Set(sectionData.map(section => section.id));
+    return !dmRows.some(dm => dm.sectionId !== null && sectionIds.has(dm.sectionId));
+  }, [channelRows.length, dmRows, sectionData]);
+
   return {
-    isEmpty: channels.length === 0,
+    isEmpty,
     isFiltering: filter !== 'all',
   };
 }
