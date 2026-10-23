@@ -83,20 +83,27 @@ type ContrastOverrides = Record<string, { from: string; to: string }>;
 const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Point each overridden custom property at its corrected colour.
+ * Point one custom property at its corrected colour.
  *
  * Keyed by token NAME, not by colour value: `--brand-background` and
  * `--on-primary` are both `#FFFFFF` in a great many palettes, so a global hex
  * replace would darken the page background while fixing the button.
+ *
+ * FIRST declaration only, deliberately. The audit reads the first value of a
+ * token — a `.dark { --text: #EEE }` block is a variant, not the light set —
+ * so a global replace would have rewritten a value that was never checked, and
+ * fixing light text would have made dark-mode text dark too.
+ *
+ * Returns null when nothing matched, so a rewrite that silently failed cannot
+ * leave the card showing a colour that was never written.
  */
-function rewriteTokensCss(css: string, overrides: ContrastOverrides): string {
-  return Object.entries(overrides).reduce((current, [token, { to }]) => {
-    const declaration = new RegExp(
-      `(--${escapeForRegExp(token)}\\s*:\\s*)#(?:[0-9a-f]{6}|[0-9a-f]{3})\\b`,
-      "gi",
-    );
-    return current.replace(declaration, `$1${to}`);
-  }, css);
+function rewriteTokenValue(css: string, token: string, hex: string): string | null {
+  const declaration = new RegExp(
+    `(--${escapeForRegExp(token)}\\s*:\\s*)#(?:[0-9a-f]{6}|[0-9a-f]{3})\\b`,
+    "i",
+  );
+  if (!declaration.test(css)) return null;
+  return css.replace(declaration, `$1${hex}`);
 }
 
 /**
@@ -118,24 +125,6 @@ function contrastCorrectionsNote(overrides: ContrastOverrides): string {
     ...entries.map(([token, { from, to }]) => `- \`--${token}\`: ${from} → ${to}`),
     "",
   ].join("\n");
-}
-
-/** The palette the server last measured, as the slot map the audit endpoint
- *  takes. Rebuilt from the audit rather than from `colors`, so a re-audit asks
- *  about exactly the pairs the previous one answered. */
-function auditedTokens(audit: ContrastAudit): {
-  tokens: Partial<Record<ContrastSlot, string>>;
-  names: Partial<Record<ContrastSlot, string>>;
-} {
-  const tokens: Partial<Record<ContrastSlot, string>> = {};
-  const names: Partial<Record<ContrastSlot, string>> = {};
-  for (const pair of audit.pairs) {
-    if (pair.foregroundHex) tokens[pair.foreground] = pair.foregroundHex;
-    if (pair.backgroundHex) tokens[pair.background] = pair.backgroundHex;
-    if (pair.foregroundToken) names[pair.foreground] = pair.foregroundToken;
-    if (pair.backgroundToken) names[pair.background] = pair.backgroundToken;
-  }
-  return { tokens, names };
 }
 
 function sourceLabel(summary: BrandSummary): string {
@@ -170,6 +159,10 @@ export function BrandReviewCard({
   const [contrast, setContrast] = useState<ContrastAudit | null>(null);
   const [applyingPairId, setApplyingPairId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<ContrastOverrides>({});
+  // The token CSS as it will be STORED — fetched on load, rewritten by Apply,
+  // audited at every step, and saved verbatim. One artifact, so the card and
+  // the saved system cannot reach different verdicts.
+  const [tokensCss, setTokensCss] = useState<string>("");
 
   useEffect(() => {
     if (!summaryId) return;
@@ -187,11 +180,26 @@ export function BrandReviewCard({
           return;
         }
         setSummary(result.summary);
-        setContrast(result.contrast);
         setName(result.summary.name.slice(0, MAX_NAME_CHARS));
         // Already saved in an earlier session: show that instead of a Save
         // button, which would mint a duplicate for the whole org.
         if (result.savedDesignSystemId) setSavedName(result.summary.name);
+        // Fetched on load, not at save: this is the artifact the audit runs on
+        // and the one that gets stored, so the card has to hold it from the
+        // start rather than measuring something else and storing this.
+        if (files.tokensCss) {
+          const css = await fetchChatAttachmentText(files.tokensCss.id, userId).catch(() => "");
+          if (!cancelled) {
+            setTokensCss(css);
+            const audit = await auditContrastTokens({ tokensCss: css }).catch(() => null);
+            if (!cancelled) setContrast(audit);
+          }
+        } else {
+          // No token CSS means a saved system would store none, and audit to
+          // nothing. Saying so beats auditing brand.json and disagreeing later.
+          const audit = await auditContrastTokens({ tokensCss: "" }).catch(() => null);
+          if (!cancelled) setContrast(audit);
+        }
         if (files.designMd) {
           const text = await fetchChatAttachmentText(files.designMd.id, userId).catch(() => "");
           if (!cancelled) setDesignMd(text.slice(0, MAX_DESIGN_MD_CHARS));
@@ -221,12 +229,20 @@ export function BrandReviewCard({
       setApplyingPairId(fix.pairId);
       setError(null);
       try {
-        const { tokens, names } = auditedTokens(contrast);
-        for (const slot of Object.keys(tokens) as ContrastSlot[]) {
-          if (names[slot] === token) tokens[slot] = fix.to;
+        // Rewrite the CSS, then audit THAT — the same bytes that will be
+        // stored. Nothing is committed until the re-audit returns, so a failed
+        // request leaves the palette as it was rather than showing a fix that
+        // was never measured.
+        const rewritten = rewriteTokenValue(tokensCss, token, fix.to);
+        if (rewritten === null) {
+          setError(
+            `Could not apply the fix: no \`--${token}\` declaration found in this system's tokens.css.`,
+          );
+          return;
         }
-        const next = await auditContrastTokens({ tokens, names });
+        const next = await auditContrastTokens({ tokensCss: rewritten });
 
+        setTokensCss(rewritten);
         setContrast(next);
         setOverrides((current) => ({
           ...current,
@@ -254,7 +270,7 @@ export function BrandReviewCard({
         setApplyingPairId(null);
       }
     },
-    [contrast],
+    [contrast, tokensCss],
   );
 
   const save = useCallback(async (): Promise<void> => {
@@ -262,13 +278,9 @@ export function BrandReviewCard({
     setSaving(true);
     setError(null);
     try {
-      const delivered = files.tokensCss
-        ? await fetchChatAttachmentText(files.tokensCss.id, userId)
-        : "";
-      // An applied fix has to reach what is STORED, or Apply was cosmetic: the
-      // token CSS is what artifacts consume and DESIGN.md is what later runs
-      // are instructed with.
-      const tokensCss = rewriteTokensCss(delivered, overrides);
+      // Stored verbatim: this is the string the audit above ran on, already
+      // carrying every applied fix. Re-fetching and re-rewriting here is what
+      // let the card and the saved system diverge.
       const note = contrastCorrectionsNote(overrides);
       const created = await createDesignSystem({
         name: name.trim() || summary.name,

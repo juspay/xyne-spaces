@@ -687,7 +687,12 @@ export function contrastPaletteFromBrandColors(colors: readonly BrandColor[]): C
     const rgb = parseHexColor(color.hex);
     if (!rgb) return;
     tokens[slot] = toHexColor(rgb);
-    if (color.token) names[slot] = color.token.toLowerCase();
+    // Leading `--` stripped. The contract says `token` carries none, but it is
+    // model-written and only checked for being a string, so a `--brand-text`
+    // became the name `--brand-text` and a fix then looked for
+    // `----brand-text`, matched nothing, and left the card showing a colour
+    // that was never written.
+    if (color.token) names[slot] = color.token.trim().replace(/^--/, "").toLowerCase();
   };
 
   for (const color of colors) claim(matchContrastSlot(color.token), color);

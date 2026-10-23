@@ -500,6 +500,35 @@ describe("contrastPaletteFromBrandColors", () => {
     expect(audit.hasIssues).toBe(false);
   });
 
+  it("strips a leading -- from a token name", () => {
+    // The contract says `token` carries none, but it is model-written and only
+    // checked for being a string. A `--brand-text` became the name
+    // `--brand-text`, and a one-click fix then looked for `----brand-text`,
+    // matched nothing, and left the card showing a colour never written.
+    const { names } = contrastPaletteFromBrandColors([
+      color("#999999", "--brand-text", "text"),
+      color("#FFFFFF", "--brand-background", "background"),
+    ]);
+    expect(names.body).toBe("brand-text");
+    expect(names.background).toBe("brand-background");
+  });
+
+  it("has no role fallback on the token CSS path, and that is deliberate", () => {
+    // tokens.css carries no roles, so this path matches names only. The two
+    // paths therefore disagree for a token named outside the slot list — which
+    // is exactly why the review card audits the token CSS it is about to
+    // store, rather than brand.json. Do not "fix" this by inventing roles
+    // here; fix it by auditing one artifact.
+    const named = [
+      color("#FFFFFF", "brand-paper", "background"),
+      color("#999999", "brand-copy", "text"),
+    ];
+    expect(auditBrandColors(named).audited).toBe(1);
+    expect(
+      auditTokensCss(":root{--brand-paper:#FFFFFF;--brand-copy:#999999}").audited,
+    ).toBe(0);
+  });
+
   it("ignores a colour whose hex did not survive validation", () => {
     const { tokens } = contrastPaletteFromBrandColors([
       { hex: "not-a-colour", token: "brand-text", role: "text" } as BrandColor,

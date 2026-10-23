@@ -3277,12 +3277,18 @@ export interface ContrastAuditCounts {
   hasIssues: boolean;
 }
 
-/** Re-audit a palette that is still being edited. Used after a one-click fix:
- *  the changed token is in more than one pair, so the whole set is remeasured
- *  rather than the clicked row being marked fixed on its own. */
+/**
+ * Audit a palette that is still being edited.
+ *
+ * Takes the token CSS, not a slot map, because that is the artifact a saved
+ * DesignSystem stores and therefore the one its badge will be computed from.
+ * Auditing anything else lets the card and the saved system disagree — which
+ * they did: a token named outside the known slot list was checked on the card
+ * via its brand.json ROLE and then invisible once saved, so the warning badge
+ * vanished at exactly the moment it started to matter.
+ */
 export async function auditContrastTokens(input: {
-  tokens: Partial<Record<ContrastSlot, string>>;
-  names?: Partial<Record<ContrastSlot, string>>;
+  tokensCss: string;
 }): Promise<ContrastAudit> {
   const result = await request<{ success: true; data: ContrastAudit }>(
     `${AUTH_API_URL}/api/v1/design-systems/contrast-audit`,
@@ -3296,8 +3302,6 @@ export interface BrandSummaryResult {
   /** Set once this brand.json has been saved, so the card stays saved across
    *  a reload instead of offering to create a duplicate. */
   savedDesignSystemId: string | null;
-  /** The WCAG audit of the delivered palette, computed server-side. */
-  contrast: ContrastAudit | null;
 }
 
 export async function fetchBrandSummary(
@@ -3314,14 +3318,9 @@ export async function fetchBrandSummary(
     success: boolean;
     data: BrandSummary;
     savedDesignSystemId?: string | null;
-    contrast?: ContrastAudit | null;
   };
   if (!body.data) return null;
-  return {
-    summary: body.data,
-    savedDesignSystemId: body.savedDesignSystemId ?? null,
-    contrast: body.contrast ?? null,
-  };
+  return { summary: body.data, savedDesignSystemId: body.savedDesignSystemId ?? null };
 }
 
 /** Record the DesignSystem a brand.json was saved as. Returns the id that is
