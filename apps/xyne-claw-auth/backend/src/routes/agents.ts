@@ -3525,7 +3525,8 @@ router.get("/:slug/knowledge-base", async (req: Request<{ slug: string }>, res: 
 
 // ── Agent Skill attach/detach (mirrors tool pattern) ──────────────────
 
-// Regenerate the agent's routing card for answering without a mention, now.
+// Regenerate the agent's routing card for answering without a mention. Writing it is an
+// LLM call that can outlast the gateway, so this only starts it; the page polls the agent.
 router.post("/:slug/proactivity/card", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
@@ -3534,15 +3535,17 @@ router.post("/:slug/proactivity/card", requireAgentOwnerOrAdmin, async (req: Req
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const card = await refreshRoutingCard(agent.id, { force: true });
-    if (!card) {
+    if (!agent.spacesAppUserId) {
       res.status(400).json({ success: false, error: "This agent has no Spaces bot to answer as" });
       return;
     }
-    res.json({ success: true, data: card });
+    void refreshRoutingCard(agent.id, { force: true }).catch((err) =>
+      log.error(`[agents] routing card error for ${agent.slug}:`, err),
+    );
+    res.status(202).json({ success: true });
   } catch (err) {
     log.error("[agents] routing card error:", err);
-    res.status(502).json({ success: false, error: "Could not generate the routing card" });
+    res.status(500).json({ success: false, error: "Could not start writing the routing card" });
   }
 });
 
