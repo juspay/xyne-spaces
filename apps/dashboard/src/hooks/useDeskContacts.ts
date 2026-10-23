@@ -45,7 +45,8 @@ export const useDeskContacts = (channelId: string | undefined): DeskContact[] =>
 
   useEffect(() => {
     if (!channelId) {
-      setContacts([]);
+      // Keep the same array when already empty, so an idle caller doesn't render twice.
+      setContacts(prev => (prev.length ? [] : prev));
       return undefined;
     }
 

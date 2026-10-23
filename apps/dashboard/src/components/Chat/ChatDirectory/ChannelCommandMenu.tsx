@@ -32,15 +32,13 @@ import {
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
+import { Channel, ChannelVisibility } from '@xyne/shared';
 import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
   isGroupDMChannel,
   isOneToOneDMChannel,
-  getDMParticipantIdsToFetch,
   parseDMParticipantIds,
-  getDMNames,
   formatChannelLabel,
   resolveChannelLabel,
 } from './ChatDirectory.utils';
@@ -97,6 +95,21 @@ import { useAllChannels, useChannelByName } from '../../../hooks/useChannels';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
+import {
+  boardCandidates,
+  buildDmContactRecency,
+  buildSearchableChannels,
+  dateCandidates,
+  deskPeopleCandidates,
+  deskScopeChannelId,
+  dmCandidates,
+  dmDisplayName,
+  MENTION_GROUP_MAX,
+  MENTION_GROUP_PAGE,
+  priorityCandidates,
+  rankedPeopleCandidates,
+  regularChannelCandidates,
+} from '../../../search/mentionCandidates';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
@@ -147,7 +160,6 @@ import { LexicalSearchInput, type InitialQueryData, type InsertText } from './Le
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
 import {
-  filterChannelsBySearchableNames,
   rankUsersWithMfu,
   toChannelCandidates,
   toUserCandidates,
@@ -168,7 +180,6 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 import { TicketPreviewPanel } from './TicketPreviewPanel';
-import { DATE_RANGE_OPTIONS } from '../../../search/filterRegistry';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { DEFAULT_SEARCH_FILTERS, resolveDateKeyword } from '../../../search/filterModel';
@@ -418,10 +429,6 @@ const chipSummaryLabel = (mention: { type: ChipType; prefix?: string; name?: str
   if (mention.prefix) return `${mention.prefix} ${name}`.trim();
   return `${mention.type === ChipType.USER ? '@' : '#'}${name}`;
 };
-
-/** Rows shown per section before "Show more", and the ceiling once expanded. */
-const MENTION_GROUP_PAGE = 5;
-const MENTION_GROUP_MAX = 20;
 
 /** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
 const MERGED_CATEGORY = 'merged-people-channels';
@@ -881,47 +888,10 @@ const ChannelCommandMenuContent = ({
   }, [allUsers]);
 
   // Move 'allChannels' definition up here to pass to hook
-  const allChannels = useMemo(() => {
-    const result: Array<{
-      channel: Channel;
-      category: ChannelCategory;
-      searchableNames?: string[];
-      searchNames?: string[];
-    }> = [];
-
-    // Add starred channels
-    starred.forEach(channel => {
-      const dmNames = getDMNames(channel, currentUserID, usersById);
-      result.push({
-        channel,
-        category: ChannelCategory.STARRED,
-        searchableNames: dmNames.display,
-        searchNames: dmNames.search,
-      });
-    });
-
-    // Add regular channels
-    channels.forEach(channel => {
-      result.push({
-        channel,
-        category: ChannelCategory.CHANNELS,
-        searchableNames: [channel.name],
-      });
-    });
-
-    // Add direct messages
-    directMessages.forEach(channel => {
-      const dmNames = getDMNames(channel, currentUserID, usersById);
-      result.push({
-        channel,
-        category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: dmNames.display,
-        searchNames: dmNames.search,
-      });
-    });
-
-    return result;
-  }, [channels, starred, directMessages, usersById]);
+  const allChannels = useMemo(
+    () => buildSearchableChannels({ starred, channels, directMessages }, currentUserID, usersById),
+    [channels, starred, directMessages, usersById, currentUserID],
+  );
 
   const getResultChannelLabel = useCallback(
     (result: DisplaySearchResult): string | undefined => {
@@ -938,17 +908,10 @@ const ChannelCommandMenuContent = ({
   // used by the empty-state DIRECT MESSAGES section). `rankUsers` uses this
   // both as a "frequent contact" signal AND as a tie-breaker so the `from:`
   // typeahead's empty state mirrors the plain-search DM ordering.
-  const dmContactRecency = useMemo(() => {
-    const map = new Map<string, number>();
-    directMessages.forEach(channel => {
-      if (isOneToOneDMChannel(channel.scopeType)) {
-        const participants = parseDMParticipantIds(channel);
-        const otherUserId = participants.find(id => id !== currentUserID);
-        if (otherUserId && !map.has(otherUserId)) map.set(otherUserId, map.size);
-      }
-    });
-    return map;
-  }, [directMessages, currentUserID]);
+  const dmContactRecency = useMemo(
+    () => buildDmContactRecency(directMessages, currentUserID),
+    [directMessages, currentUserID],
+  );
 
   // Resolved enabled tabs — computed early so useEffects below can reference it
   const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;
@@ -2216,9 +2179,10 @@ const ChannelCommandMenuContent = ({
 
   const deskChannelId = useMemo(() => {
     const inMention = selectedMentions.find(m => m.type === ChipType.CHANNEL && m.prefix === 'in:');
-    if (!inMention) return undefined;
-    const match = allChannels.find(c => c.channel.id === inMention.id);
-    return match && isDeskChannelType(match.channel.type) ? inMention.id : undefined;
+    return deskScopeChannelId(
+      inMention?.id,
+      id => allChannels.find(c => c.channel.id === id)?.channel,
+    );
   }, [selectedMentions, allChannels]);
   const isDeskContext = !!deskChannelId || activeTab === TabType.DESK;
   const deskContacts = useDeskContacts(deskChannelId);
@@ -2235,37 +2199,13 @@ const ChannelCommandMenuContent = ({
     Array<{ id: string; name: string; status?: string; email?: string; displayName?: string }>
   >(() => {
     if (isDeskPeopleTrigger) {
-      const raw = mentionSearchQuery.trim();
-      const q = raw.toLowerCase();
-      const deskPool = userTrigger === 'to:' ? deskPeople.recipients : deskPeople.senders;
-      const byEmail = new Map<string, { email: string; name: string | null }>();
-      for (const p of deskPool) {
-        const e = p.email.toLowerCase();
-        if (!byEmail.has(e)) byEmail.set(e, { email: p.email, name: p.name });
-      }
-      for (const c of deskContacts) {
-        const e = c.email.toLowerCase();
-        const existing = byEmail.get(e);
-        if (!existing) byEmail.set(e, { email: c.email, name: c.name });
-        else if (!existing.name && c.name) existing.name = c.name;
-      }
-      const pool = Array.from(byEmail.values());
-      const matches = q
-        ? pool.filter(
-            p => p.email.toLowerCase().includes(q) || (p.name?.toLowerCase().includes(q) ?? false),
-          )
-        : pool;
-      const items = matches.slice(0, CMDK_USER_LIMIT).map(p => ({
-        id: p.email,
-        name: p.name || p.email,
-        email: p.email,
-      }));
-      const looksLikeEmail = /\S+@\S+\.\S+/.test(raw);
-      const exactMatch = items.some(i => i.email.toLowerCase() === q);
-      if (looksLikeEmail && !exactMatch) {
-        items.unshift({ id: raw, name: raw, email: raw });
-      }
-      return items;
+      return deskPeopleCandidates(
+        mentionSearchQuery,
+        userTrigger === 'to:' ? 'to:' : 'from:',
+        deskPeople,
+        deskContacts,
+        CMDK_USER_LIMIT,
+      );
     }
 
     // `to:` is desk-only and handled above; scoped to USER mode so a stale trigger from an
@@ -2280,15 +2220,7 @@ const ChannelCommandMenuContent = ({
     // `useUserSearch` slices to CMDK_USER_LIMIT *before* ranking, so a frequently-used
     // person can be dropped from `mentionUsers` entirely. `rankUsersWithMfu` recovers
     // MFU-weighted matches from the full `allUsers` list so they can float back up.
-    return rankUsersWithMfu(mentionUsers, allUsers, mentionSearchQuery, dmContactRecency).map(
-      user => ({
-        id: user.id,
-        name: user.name,
-        status: user.status,
-        ...(user.displayName && { displayName: user.displayName }),
-        ...(user.email && { email: user.email }),
-      }),
-    );
+    return rankedPeopleCandidates(mentionUsers, allUsers, mentionSearchQuery, dmContactRecency);
   }, [
     isDeskPeopleTrigger,
     userTrigger,
@@ -2314,68 +2246,15 @@ const ChannelCommandMenuContent = ({
     if (mentionSearchType !== ChipType.CHANNEL && mentionSearchType !== ChipType.MENTIONS)
       return [];
 
-    // Filter to only regular channels (no DMs), then scope by active tab
-    const regularChannels = allChannels.filter(({ channel }) => {
-      if (isDMChannel(channel.scopeType)) return false;
-      if (activeTab === TabType.DESK) return isDeskChannelType(channel.type);
-      return true;
+    return regularChannelCandidates(allChannels, mentionSearchQuery, {
+      deskTab: activeTab === TabType.DESK,
     });
-
-    // Apply search filtering
-    const filtered = filterChannelsBySearchableNames(regularChannels, mentionSearchQuery, {
-      excludeDMs: false, // Already filtered above
-    });
-
-    // Apply stricter filtering when there's a query
-    const query = mentionSearchQuery.toLowerCase().trim();
-    if (query) {
-      const queryParts = query.split(/[,\s]+/).filter(Boolean);
-      const strictlyFiltered = filtered.filter(({ channel }) => {
-        const nameLower = channel.name.toLowerCase();
-        return queryParts.every(part => nameLower.includes(part));
-      });
-      return strictlyFiltered.map(({ channel }) => ({ channel, displayName: channel.name }));
-    }
-
-    return filtered.map(({ channel }) => ({ channel, displayName: channel.name }));
   }, [allChannels, mentionSearchQuery, mentionSearchType, activeTab]);
 
   // Helper to get display name for a DM channel - includes self-DMs (notes to yourself)
   const getDMDisplayNameWithSelf = useCallback(
-    (channel: Channel, searchableNames?: string[]): string => {
-      if (!isDMChannel(channel.scopeType)) return channel.name;
-
-      // For DMs, use participant names if available
-      if (searchableNames && searchableNames.length > 0) {
-        return searchableNames.join(', ');
-      }
-
-      // Fallback: try to get names from usersById
-      const otherUserIds = getDMParticipantIdsToFetch(channel, currentUserID);
-
-      // Check if this is a self-DM (only current user)
-      const allParticipants = parseDMParticipantIds(channel);
-      const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUserID;
-
-      if (isSelfDM) {
-        // For self-DMs, show "You" or the user's own name
-        const currentUser = usersById.get(currentUserID);
-        const currentUserName = currentUser
-          ? currentUser.displayName || currentUser.name
-          : undefined;
-        return currentUserName ? `${currentUserName} (You)` : 'You';
-      }
-
-      // Regular DM with others
-      const otherNames = otherUserIds
-        .map(id => {
-          const u = usersById.get(id);
-          return u ? u.displayName || u.name : undefined;
-        })
-        .filter((n): n is string => !!n);
-
-      return otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat';
-    },
+    (channel: Channel, searchableNames?: string[]): string =>
+      dmDisplayName(channel, searchableNames, usersById, currentUserID),
     [usersById, currentUserID],
   );
 
@@ -2385,78 +2264,8 @@ const ChannelCommandMenuContent = ({
     if (mentionSearchType !== ChipType.CHANNEL) return [];
     if (activeTab === TabType.DESK) return [];
 
-    // Filter to only DM channels
-    const dmChannels = allChannels.filter(({ channel }) => isDMChannel(channel.scopeType));
-
-    // Apply search filtering
-    const filtered = filterChannelsBySearchableNames(dmChannels, mentionSearchQuery, {
-      excludeDMs: false,
-    });
-
-    // Apply stricter filtering when there's a query
-    const query = mentionSearchQuery.toLowerCase().trim();
-    if (query) {
-      const queryParts = query.split(/[,\s]+/).filter(Boolean);
-      const strictlyFiltered = filtered.filter(({ channel, searchableNames }) => {
-        // Check if this is a self-DM
-        const allParticipants = parseDMParticipantIds(channel);
-        const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUserID;
-
-        if (isSelfDM) {
-          // For self-DMs, check if query matches current user's name or "you"
-          const currentUserName = usersById.get(currentUserID)?.name?.toLowerCase() || '';
-          const selfDMNames = ['you', currentUserName].filter(Boolean);
-          return queryParts.every(part => selfDMNames.some(name => name.includes(part)));
-        }
-
-        // Get names to check: use searchableNames or fallback to usersById lookup
-        const namesToCheck =
-          searchableNames && searchableNames.length > 0
-            ? searchableNames
-            : getDMParticipantIdsToFetch(channel, currentUserID)
-                .map(id => usersById.get(id)?.name)
-                .filter((n): n is string => !!n);
-
-        if (namesToCheck.length === 0) return false;
-
-        const namesLower = namesToCheck.map(n => n.toLowerCase());
-        // All query parts must match at least one participant name
-        return queryParts.every(part => namesLower.some(name => name.includes(part)));
-      });
-
-      // Map to display format, filtering out DMs with no resolvable names
-      return strictlyFiltered
-        .map(({ channel, searchableNames }) => {
-          const displayName = getDMDisplayNameWithSelf(channel, searchableNames);
-          // Only include if we have actual participant names
-          if (displayName === 'Group Chat') {
-            return null;
-          }
-          return { channel, displayName };
-        })
-        .filter((item): item is { channel: Channel; displayName: string } => item !== null);
-    }
-
-    // No query: show all DMs including self-DMs (with proper display names)
-    return filtered
-      .map(({ channel, searchableNames }) => {
-        const displayName = getDMDisplayNameWithSelf(channel, searchableNames);
-        // Only include if we have actual participant names
-        if (displayName === 'Group Chat') {
-          return null;
-        }
-        return { channel, displayName };
-      })
-      .filter((item): item is { channel: Channel; displayName: string } => item !== null);
-  }, [
-    allChannels,
-    mentionSearchQuery,
-    mentionSearchType,
-    getDMDisplayNameWithSelf,
-    usersById,
-    currentUserID,
-    activeTab,
-  ]);
+    return dmCandidates(allChannels, mentionSearchQuery, currentUserID, usersById);
+  }, [allChannels, mentionSearchQuery, mentionSearchType, usersById, currentUserID, activeTab]);
 
   // Legacy export for backward compatibility (combines both)
   const availableChannels = useMemo(() => {
@@ -2558,22 +2367,17 @@ const ChannelCommandMenuContent = ({
   // dropdown label. The chip renders lowercase (buildChipText), so the two are decoupled.
   const availablePriorities = useMemo(() => {
     if (mentionSearchType !== ChipType.PRIORITY) return [];
-    const query = mentionSearchQuery.trim().toLowerCase();
-    return Object.values(TicketPriority)
-      .map(value => ({ id: value, name: value.charAt(0) + value.slice(1).toLowerCase() }))
-      .filter(({ id }) => (query ? id.toLowerCase().startsWith(query) : true));
+    return priorityCandidates(mentionSearchQuery);
   }, [mentionSearchType, mentionSearchQuery]);
 
   const [allBoardsForSearch] = useCachedQuery(queries.getAllBoardsList());
   /** Board candidates, filtered by name. The chip carries the id the backend matches on. */
   const availableBoards = useMemo(() => {
     if (mentionSearchType !== ChipType.BOARD) return [];
-    const query = mentionSearchQuery.trim().toLowerCase();
-    const boards = (allBoardsForSearch ?? []) as ReadonlyArray<{ id: string; name: string }>;
-    return boards
-      .filter(b => (query ? b.name?.toLowerCase().includes(query) : true))
-      .slice(0, 20)
-      .map(b => ({ id: b.id, name: b.name }));
+    return boardCandidates(
+      (allBoardsForSearch ?? []) as ReadonlyArray<{ id: string; name: string }>,
+      mentionSearchQuery,
+    );
   }, [mentionSearchType, mentionSearchQuery, allBoardsForSearch]);
 
   /**
@@ -2584,20 +2388,7 @@ const ChannelCommandMenuContent = ({
    */
   const availableDates = useMemo(() => {
     if (mentionSearchType !== ChipType.DATE) return [];
-    const query = mentionSearchQuery.trim().toLowerCase();
-    // The chip carries the *keyword*, not the window it resolves to: a preset means "last
-    // 7 days from whenever this runs", and freezing it to today's dates would quietly go
-    // stale in a restored search. Only offered when we can resolve it, so a chip never
-    // stands for a window the backend and the UI would compute differently.
-    const presets = DATE_RANGE_OPTIONS.filter(
-      opt => opt.value && resolveDateKeyword(opt.value),
-    ).map(opt => ({ id: opt.value, name: opt.label }));
-    // A typed date is always offered first, so an exact day never needs a preset.
-    const typed = /^\d{4}-\d{2}-\d{2}$/.test(query) ? [{ id: query, name: query }] : [];
-    return [
-      ...typed,
-      ...presets.filter(o => (query ? o.name.toLowerCase().includes(query) : true)),
-    ];
+    return dateCandidates(mentionSearchQuery);
   }, [mentionSearchType, mentionSearchQuery]);
 
   // The highlighted candidate in the open mention popup — the exact row Enter/click selects.

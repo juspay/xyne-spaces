@@ -1,5 +1,6 @@
 import { ReactElement, useEffect, useRef } from 'react';
 import { Minimize2, X } from 'lucide-react';
+import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 
 // Long enough to read the sentence and find the icon it points at (the design allows 6–8s).
 const AUTO_DISMISS_MS = 7000;
@@ -28,6 +29,8 @@ export function FullPageSnackbar({ onUndo, onDismiss }: FullPageSnackbarProps): 
     <div
       role='status'
       data-full-page-snackbar='true'
+      // Desktop app: it hangs below the header's drag strip, so its buttons opt out to stay clickable.
+      style={APP_NO_DRAG_STYLE}
       className='absolute top-full right-0 mt-2.5 z-40 w-[340px] flex items-start gap-3 rounded-xl bg-foreground text-background px-3.5 py-3 text-[13.5px] leading-normal shadow-[0_10px_30px_rgba(0,0,0,0.2)]'
     >
       {/* Pointer at the collapse button above. */}
