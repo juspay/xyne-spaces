@@ -27,15 +27,19 @@ export function openActivityOnDeskOr(
 }
 
 /** Opens the mobile desk screens for a dashboard `/support/` target. */
-export function openDeskRoute(target: DeskOpenTarget): void {
+export function openDeskRoute(
+  target: DeskOpenTarget,
+  mode: 'push' | 'replace' = 'push',
+): void {
   const channelId = target.channelId.trim();
   if (!channelId) return;
 
+  const navigate = mode === 'replace' ? router.replace : router.push;
   const xyneId = target.xyneId?.trim();
   const ticketId = target.ticketId?.trim();
   const pathId = xyneId || ticketId;
   if (pathId) {
-    router.push({
+    navigate({
       pathname: '/xyne-desks/[channelId]/[ticketId]',
       params: {
         channelId,
@@ -48,7 +52,7 @@ export function openDeskRoute(target: DeskOpenTarget): void {
     return;
   }
 
-  router.push({
+  navigate({
     pathname: '/xyne-desks/[channelId]',
     params: {
       channelId,

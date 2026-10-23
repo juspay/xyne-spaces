@@ -5,6 +5,7 @@ import {
   getChatRouteIdentity,
   isShellReadyForNotificationNav,
   matchesChatRouteTarget,
+  matchesDeskRouteTarget,
 } from '@/src/notifications/navigation/navReadiness';
 
 describe('isShellReadyForNotificationNav', (): void => {
@@ -138,6 +139,17 @@ describe('matchesChatRouteTarget', (): void => {
       matchesChatRouteTarget('/(protected)/ticket/ticket-1', { ticketId: 'ticket-2' }),
       false,
     );
+  });
+
+  it('matches a Xyne desk ticket already on screen', (): void => {
+    const desk = { channelId: 'desk-1', xyneId: 'XYN-1', ticketId: 'ticket-1' };
+    assert.equal(
+      matchesDeskRouteTarget('/xyne-desks/desk-1/XYN-1', desk, { id: 'ticket-1' }),
+      true,
+    );
+    assert.equal(matchesDeskRouteTarget('/xyne-desks/desk-1/ticket-1', desk), true);
+    assert.equal(matchesDeskRouteTarget('/ticket/ticket-1', desk, { ticketId: 'ticket-1' }), false);
+    assert.equal(matchesDeskRouteTarget('/xyne-desks/desk-2/XYN-1', desk), false);
   });
 
   it('uses normalized route identity for deduplication', (): void => {

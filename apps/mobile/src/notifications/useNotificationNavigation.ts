@@ -13,6 +13,7 @@ import {
   getChatRouteIdentity,
   isShellReadyForNotificationNav,
   matchesChatRouteTarget,
+  matchesDeskRouteTarget,
   type ChatRouteParams,
 } from './navigation/navReadiness';
 import {
@@ -81,23 +82,10 @@ export function useNotificationNavigation(): void {
 
     if (!intent) return;
 
-    if (intent.desk?.channelId) {
-      clearNavIntent();
-      try {
-        performChatNavigation(intent);
-      } catch {
-        resetNavDedup();
-        persistNavIntent(intent);
-      }
-      return;
-    }
-
-    if (matchesChatRouteTarget(pathname, intent, routeParams)) {
-      clearNavIntent();
-      return;
-    }
-
-    if (shouldSuppressNav(intent, routeIdentity)) {
+    const alreadyThere = intent.desk?.channelId
+      ? matchesDeskRouteTarget(pathname, intent.desk, routeParams)
+      : matchesChatRouteTarget(pathname, intent, routeParams);
+    if (alreadyThere || shouldSuppressNav(intent, routeIdentity)) {
       clearNavIntent();
       return;
     }

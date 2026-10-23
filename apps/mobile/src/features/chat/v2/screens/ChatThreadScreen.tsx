@@ -111,16 +111,18 @@ const ChatThreadScreen = (): ReactElement => {
 
   useEffect(() => {
     if (isResolverHost || !ticketId || redirectedOpenKeyRef.current === openKey) return;
-    if (!channel) return;
     redirectedOpenKeyRef.current = openKey;
-    if (isDeskActivityChannel(channel.type)) {
-      openDeskRoute({
-        channelId: resolvedChannelId,
-        ticketId,
-        tab: 'messages',
-        ...(resolvedThreadId ? { conversationId: resolvedThreadId } : {}),
-        ...(messageId ? { messageId } : {}),
-      });
+    if (channel && isDeskActivityChannel(channel.type)) {
+      openDeskRoute(
+        {
+          channelId: resolvedChannelId,
+          ticketId,
+          tab: 'messages',
+          ...(resolvedThreadId ? { conversationId: resolvedThreadId } : {}),
+          ...(messageId ? { messageId } : {}),
+        },
+        'replace',
+      );
       return;
     }
     router.replace({
