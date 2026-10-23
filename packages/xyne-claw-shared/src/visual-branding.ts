@@ -197,9 +197,31 @@ export function resolveVisualBranding(
   return branding;
 }
 
+/**
+ * A value that cannot leave the place it is written.
+ *
+ * Checked HERE, at every emission site, not only where the tokens were parsed.
+ * These values are written into a `<style>` block and into `style="…"`
+ * attributes, and a value carrying `</style>` or a double quote escapes both: a
+ * delivered HTML report gained a live `<script>`, and an email draft's link
+ * gained an `onload` attribute. XYNE-66832 now refuses these characters when it
+ * parses, which is the root fix — this is the guard that holds even for a
+ * DesignSystemRef that did not come through that parser, and the ref arrives on
+ * the run payload.
+ *
+ * A SINGLE quote is allowed, unlike in design-export's parser-side check:
+ * attributeSafeFont deliberately adds them around a multi-word family, and a
+ * `'` can neither close a double-quoted attribute nor open a tag. Everything
+ * that can — `<>"` — and everything that can end a declaration or block —
+ * `;{}` and a backslash — is refused rather than escaped, because no
+ * legitimate colour, font stack or radius contains one.
+ */
+const isEmittableValue = (value: string): boolean => !/[;{}<>"\\]/.test(value);
+
 const declarations = (pairs: ReadonlyArray<readonly [string, string | undefined]>): string =>
   pairs
     .filter((pair): pair is readonly [string, string] => Boolean(pair[1]))
+    .filter(([, value]) => isEmittableValue(value))
     .map(([property, value]) => `${property}: ${value};`)
     .join(" ");
 

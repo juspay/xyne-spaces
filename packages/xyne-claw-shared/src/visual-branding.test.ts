@@ -300,6 +300,49 @@ describe("injectEmailBrandStyles", () => {
   });
 });
 
+describe("a value cannot leave where it is written", () => {
+  /** What a model-written tokens.css could carry before XYNE-66832 refused
+   *  these characters. Constructed as a ref directly, which is how one arrives
+   *  on the run payload — so this guard has to hold on its own. */
+  const hostile = resolveVisualBranding({
+    id: "x",
+    name: "Acme",
+    designMd: "",
+    origin: "agent",
+    tokensCss:
+      ':root{--brand-primary:#2563EB;--radius-md:8px" onload="alert(1);' +
+      "--font-body:Inter</style><script>alert(2)</script>}",
+  });
+
+  it("does not let a font value close the brand style block", () => {
+    // This put a live <script> in a delivered HTML report.
+    const report = injectHtmlReportTheme(
+      "<html><head><style>body{}</style></head><body><h1>Q3</h1></body></html>",
+      hostile,
+    );
+    expect(report).not.toContain("<script>");
+    expect(report).not.toContain("</style><script");
+    const pdf = injectPdfBrandTokens(
+      "<html><head><style>body{}</style></head><body>x</body></html>",
+      hostile,
+    );
+    expect(pdf).not.toContain("<script>");
+  });
+
+  it("does not let a radius value close a style attribute", () => {
+    // This added an onload attribute to a link in an email draft sent from the
+    // user's own mailbox.
+    const email = injectEmailBrandStyles('<body><a class="btn" href="/x">Go</a></body>', hostile);
+    expect(email).not.toContain("onload");
+    expect(email).not.toContain('style="background-color: #2563EB; border-radius: 8px"');
+  });
+
+  it("still emits the safe declarations around a refused one", () => {
+    const email = injectEmailBrandStyles('<body><a class="btn" href="/x">Go</a></body>', hostile);
+    expect(email).toContain("background-color: #2563EB;");
+  });
+});
+
 describe("brandThemeCss", () => {
   it("is empty when there is nothing to apply", () => {
     expect(brandThemeCss(EMPTY)).toBe("");
