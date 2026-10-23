@@ -2743,7 +2743,7 @@ model PollQuestion {
   question     String
   position     Int
   responseType String   @default("SINGLE_CHOICE")
-  // Ordered [{ id, text, createdBy }]. Audience-added options are appended.
+  // Ordered [{ id, text }]. Audience-added options are appended.
   options      Json     @default("[]")
   createdAt    DateTime @default(now())
 

@@ -148,7 +148,8 @@ import {
   assertCompleteRanking,
   assertPollMessageActive,
   assertPollOpen,
-  assertPollScheduleAfter,
+  shiftPollSchedule,
+  type PollSchedule,
   ballotFieldsForResponse,
   buildPollMessageSummary,
   deletePollGraph,
@@ -260,7 +261,6 @@ import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 import { escapeHtml } from '@/utils/htmlEscape';
-import { lockRowForUpdate } from '@/bypassAcl/lockServices';
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -1134,23 +1134,17 @@ async function createNonParticipantSystemMessages(
 }
 
 /**
- * Recomputes a question's identity-free result row from its ballots. The row lock
- * serializes concurrent voters on one question; under READ COMMITTED the ballot read
- * that follows sees every ballot committed before the lock was granted.
+ * Recomputes a question's identity-free result row from its ballots. The first update
+ * row-locks the result row until commit, so concurrent voters on one question run one
+ * after another; under READ COMMITTED the ballot read that follows sees every ballot
+ * committed before the lock was granted.
  */
 async function refreshPollQuestionResult(
   tx: Transaction<Schema>,
   questionId: string,
   timestamp: number
 ): Promise<void> {
-  if (tx.location === 'server') {
-    await lockRowForUpdate(
-      tx.dbTransaction,
-      'poll_question_results',
-      questionId,
-      'serialize concurrent votes on one poll question while its result row is recomputed'
-    );
-  }
+  await tx.mutate.poll_question_results.update({ questionId, updatedAt: timestamp });
   const ballots = await tx.run(zql.poll_votes.where('questionId', '=', questionId));
   await tx.mutate.poll_question_results.update({
     questionId,
@@ -3862,15 +3856,12 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          // Lock the question row so concurrent additions append to the latest options.
-          if (tx.location === 'server') {
-            await lockRowForUpdate(
-              tx.dbTransaction,
-              'poll_questions',
-              args.questionId,
-              'serialize concurrent audience options appended to one poll question'
-            );
-          }
+          // Row-lock the question's result row first so concurrent additions append to the
+          // latest options.
+          await tx.mutate.poll_question_results.update({
+            questionId: args.questionId,
+            updatedAt: args.timestamp,
+          });
           const question = await tx.run(
             zql.poll_questions
               .where('id', '=', args.questionId)
@@ -18464,13 +18455,22 @@ export function createMutators(
           if (scheduled.status !== DelayedMessageStatus.PENDING) {
             throw new Error(`Cannot reschedule a message with status: ${scheduled.status}`);
           }
-          if (scheduled.pollDraft) {
-            assertPollScheduleAfter(scheduled.pollDraft, scheduledFor);
-          }
+          // Moving the publish time moves close and reminder times with it.
+          const scheduledPoll = scheduled.pollDraft as { schedule?: PollSchedule } | null;
+          const pollDraft = scheduledPoll
+            ? {
+                ...scheduledPoll,
+                schedule: shiftPollSchedule(
+                  scheduledPoll.schedule ?? {},
+                  scheduledFor - scheduled.scheduledFor,
+                ),
+              }
+            : undefined;
 
           await tx.mutate.delayed_messages.update({
             id,
             scheduledFor,
+            ...(pollDraft ? { pollDraft } : {}),
             updatedAt: timestamp,
           });
         },

@@ -9,11 +9,16 @@ export type PollLifecycleJobKind = 'CLOSE' | 'REMIND';
 export interface PollLifecycleJobData {
   pollId: string;
   kind: PollLifecycleJobKind;
+  workspaceId: string;
+  /** The poll's creator; the job acts on their behalf inside the workspace. */
+  createdBy: string;
 }
 
 /** The durable schedule of a poll, as stored on `polls.closesAt` / `polls.remindAt`. */
 export interface PollLifecycleSchedule {
   id: string;
+  workspaceId: string;
+  createdBy: string;
   closesAt: Date | null;
   remindAt: Date | null;
 }
@@ -46,7 +51,7 @@ export async function addPollLifecycleJobs(
     if (!runAt) continue;
     const delay = Math.max(0, runAt.getTime() - Date.now());
     await queue.add(
-      { pollId: poll.id, kind },
+      { pollId: poll.id, kind, workspaceId: poll.workspaceId, createdBy: poll.createdBy },
       { jobId: pollLifecycleJobId(kind, poll.id), delay },
     );
     logger.info(`[POLL-LIFECYCLE-QUEUE] Enqueued ${kind} pollId=${poll.id} delayMs=${delay}`);

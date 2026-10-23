@@ -45,6 +45,9 @@ export const ALLOWED_MODELS = new Set([
   'pollVote'
 ])
 
+// Relations that lead to poll ballots or aggregates; never filterable.
+const BLOCKED_RELATION_FILTERS = new Set(['votes', 'result', 'results', 'poll'])
+
 // Allowed operators for where conditions
 const ALLOWED_OPERATORS = new Set([
   'equals',
@@ -196,6 +199,12 @@ function validateWhereOperators(where: Record<string, unknown>): ValidationResul
         }
       }
       continue
+    }
+
+    // Row ACLs filter only the rows returned, not relation filters, so a filter through
+    // these relations would reveal anonymous ballots and hidden poll results.
+    if (BLOCKED_RELATION_FILTERS.has(key)) {
+      return { valid: false, error: `Filtering on relation "${key}" is not allowed` }
     }
 
     // Check nested operators

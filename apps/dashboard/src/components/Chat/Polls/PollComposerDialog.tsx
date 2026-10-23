@@ -8,6 +8,7 @@ import {
   POLL_RESULT_VISIBILITIES,
   isChoiceResponseType,
   isTextResponseType,
+  normalizePollChoice,
   usesPollOptions,
   type PollDraft,
   type PollResponseType,
@@ -69,6 +70,14 @@ const newQuestion = (): DraftQuestion => ({
     { id: uuidv4(), text: '' },
   ],
 });
+
+/** Same rule as pollQuestionDraftSchema: a later option matching an earlier one is a duplicate. */
+function isDuplicateChoice(choices: Array<{ text: string }>, index: number): boolean {
+  const text = normalizePollChoice(choices[index]!.text);
+  return (
+    !!text && choices.slice(0, index).some(choice => normalizePollChoice(choice.text) === text)
+  );
+}
 
 function resolvePollScheduleTime(
   mode: TimingMode,
@@ -192,7 +201,9 @@ export function PollComposerDialog({
         question.question.trim() &&
         (!usesPollOptions(question.responseType) ||
           (question.choices.length >= POLL_LIMITS.minOptions &&
-            question.choices.every(choice => choice.text.trim()))),
+            question.choices.every(
+              (choice, index) => choice.text.trim() && !isDuplicateChoice(question.choices, index),
+            ))),
     );
 
   // Anonymous ballots hide text answers from everyone, so text questions rule it out.
@@ -319,7 +330,11 @@ export function PollComposerDialog({
                               maxLength={POLL_LIMITS.maxOptionLength}
                               placeholder={`Option ${choiceIndex + 1}`}
                               aria-label={`Question ${questionIndex + 1}, option ${choiceIndex + 1}`}
-                              aria-invalid={showErrors && !choice.text.trim()}
+                              aria-invalid={
+                                showErrors &&
+                                (!choice.text.trim() ||
+                                  isDuplicateChoice(question.choices, choiceIndex))
+                              }
                               onChange={event =>
                                 updateQuestion(question.id, {
                                   choices: question.choices.map(item =>
@@ -349,6 +364,11 @@ export function PollComposerDialog({
                           {showErrors && !choice.text.trim() && (
                             <p className='text-xs text-destructive'>
                               Fill in this option or remove it
+                            </p>
+                          )}
+                          {showErrors && isDuplicateChoice(question.choices, choiceIndex) && (
+                            <p className='text-xs text-destructive'>
+                              This option is already in the list
                             </p>
                           )}
                         </div>

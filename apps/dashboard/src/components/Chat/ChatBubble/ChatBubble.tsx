@@ -1077,6 +1077,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       // Capability flags + content-copy handler for the centralized hover
       // keyboard shortcuts (mirror the old per-bubble `enabled:` expressions).
       canEditMessage,
+      canDeleteMessage: showOwnerActions,
       isMessageDeleted,
       onCopyContent: handleCopyContent,
       messageId: message.messageId,

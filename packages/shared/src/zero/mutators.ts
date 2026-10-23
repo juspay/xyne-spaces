@@ -135,7 +135,8 @@ import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import {
   appendPollOption,
   assertCompleteRanking,
-  assertPollScheduleAfter,
+  shiftPollSchedule,
+  type PollSchedule,
   ballotFieldsForResponse,
   assertPollMessageActive,
   assertPollOpen,
@@ -12812,13 +12813,22 @@ export const mutators = defineMutators({
         if (scheduled.status !== DelayedMessageStatus.PENDING) {
           throw new Error(`Cannot reschedule a message with status: ${scheduled.status}`);
         }
-        if (scheduled.pollDraft) {
-          assertPollScheduleAfter(scheduled.pollDraft, scheduledFor);
-        }
+        // Moving the publish time moves close and reminder times with it.
+        const scheduledPoll = scheduled.pollDraft as { schedule?: PollSchedule } | null;
+        const pollDraft = scheduledPoll
+          ? {
+              ...scheduledPoll,
+              schedule: shiftPollSchedule(
+                scheduledPoll.schedule ?? {},
+                scheduledFor - scheduled.scheduledFor,
+              ),
+            }
+          : undefined;
 
         await tx.mutate.delayed_messages.update({
           id,
           scheduledFor,
+          ...(pollDraft ? { pollDraft } : {}),
           updatedAt: timestamp,
         });
       },

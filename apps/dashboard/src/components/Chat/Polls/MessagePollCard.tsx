@@ -32,7 +32,7 @@ import { buildPollResponseDetails, buildPollVoterDetails } from './pollVoterDeta
 
 type LoadedPoll = NonNullable<QueryResultType<typeof queries.pollByMessageId>>;
 type PollResultRow = QueryResultType<typeof queries.pollQuestionResultsByPollId>[number];
-type OwnPollVote = QueryResultType<typeof queries.myPollVotesByPollId>[number];
+type OwnPollVote = QueryResultType<typeof queries.pollVotesByPollId>[number];
 
 export function MessagePollCard({
   messageId,
@@ -65,13 +65,12 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
   const [resultRows, resultDetails] = useQuery(
     queries.pollQuestionResultsByPollId({ pollId: poll.id, ...(channelId && { channelId }) }),
   );
-  const [myVotes] = useQuery(
-    queries.myPollVotesByPollId({ pollId: poll.id, ...(channelId && { channelId }) }),
-  );
+  // PollVotesACL returns the viewer's own ballots, plus everyone's to the creator of a
+  // non-anonymous poll, so one query serves both the vote state and voter details.
   const [voterBallots] = useQuery(
-    queries.pollVoterDetails({ pollId: poll.id, ...(channelId && { channelId }) }),
-    showVoterDetails,
+    queries.pollVotesByPollId({ pollId: poll.id, ...(channelId && { channelId }) }),
   );
+  const myVotes = voterBallots.filter(vote => vote.userId === zero.userID);
   const [newChoices, setNewChoices] = useState<Record<string, string>>({});
   // Ticks every minute and exactly at `closesAt`, so a passed close time closes the
   // card even before the lifecycle job writes `closedAt`.
@@ -86,12 +85,20 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
     !resultsVisible && resultDetails.type === 'complete' && poll.resultVisibility !== 'EVERYONE';
 
   const closePoll = async (): Promise<void> => {
-    const confirmed = await confirm({
-      title: 'Close this poll?',
-      description: 'Voting ends for everyone. A closed poll cannot be reopened.',
-      confirmLabel: 'Close poll',
-      variant: 'destructive',
-    });
+    const confirmed = await confirm(
+      isClosed
+        ? {
+            title: 'Reveal results?',
+            description: 'Voting has ended. Results set to show after close become visible.',
+            confirmLabel: 'Reveal results',
+          }
+        : {
+            title: 'Close this poll?',
+            description: 'Voting ends for everyone. A closed poll cannot be reopened.',
+            confirmLabel: 'Close poll',
+            variant: 'destructive',
+          },
+    );
     if (!confirmed) return;
     const mutation = zero.mutate(mutators.polls.close({ pollId: poll.id, timestamp: Date.now() }));
     void surfaceMutationError(mutation, 'Unable to close this poll');
@@ -163,7 +170,7 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
                       );
                       void surfaceMutationError(mutation, 'Unable to update your vote');
                     }}
-                    className='relative flex w-full items-center gap-2 overflow-hidden rounded-lg border border-border px-3 py-2 text-left hover:bg-accent'
+                    className='relative flex w-full items-center gap-2 overflow-hidden rounded-lg border border-border px-3 py-2 text-left hover:bg-accent disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent'
                   >
                     <span
                       className='absolute inset-y-0 left-0 bg-primary/10 transition-[width]'
@@ -350,7 +357,9 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
       {isCreator && poll.isAnonymous && (
         <p className='text-xs text-muted-foreground'>Voter identities are hidden for this poll.</p>
       )}
-      {isCreator && !isClosed && (
+      {/* Shown until closedAt is stored: a passed close time whose job has not run yet
+          still needs the creator to close it, or AFTER_CLOSE results stay hidden. */}
+      {isCreator && !poll.closedAt && (
         <Button
           type='button'
           data-prevent-thread
@@ -361,7 +370,7 @@ function LoadedMessagePollCard({ poll, channelId }: { poll: LoadedPoll; channelI
           data-track-name='CLOSE'
           onClick={() => void closePoll()}
         >
-          Close poll
+          {isClosed ? 'Reveal results' : 'Close poll'}
         </Button>
       )}
       <ConfirmDialog />

@@ -134,7 +134,7 @@ export const useMessageHoverShortcuts = (
     'message.delete',
     isOwner,
     resolveEntry,
-    entry => entry.canEditMessage && entry.onDeleteMessage !== undefined,
+    entry => entry.canDeleteMessage && entry.onDeleteMessage !== undefined,
     entry => entry.onDeleteMessage?.(),
   );
 

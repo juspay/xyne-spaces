@@ -1142,14 +1142,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ pollId: z.string(), channelId: z.string().optional() }),
     ({ args: { pollId } }) => zql.poll_question_results.where('pollId', '=', pollId)
   ),
-  myPollVotesByPollId: defineQuery(
-    z.object({ pollId: z.string(), channelId: z.string().optional() }),
-    ({ ctx, args: { pollId } }) =>
-      zql.poll_votes.where('pollId', '=', pollId).where('userId', '=', ctx.userID)
-  ),
-  pollVoterDetails: defineQuery(
-    // channelId is consumed by the ACL wrapper; PollVotesACL limits other people's
-    // ballots to the creator of a non-anonymous poll.
+  pollVotesByPollId: defineQuery(
+    // channelId is consumed by the ACL wrapper; PollVotesACL returns the viewer's own
+    // ballots, plus everyone's to the creator of a non-anonymous poll.
     z.object({ pollId: z.string(), channelId: z.string().optional() }),
     ({ args: { pollId } }) => zql.poll_votes.where('pollId', '=', pollId)
   ),

@@ -10,7 +10,14 @@ export class PollsSideEffectHandler extends BaseSideEffectHandler {
 
     const poll = await db.poll.findUnique({
       where: { id: pollId },
-      select: { id: true, closesAt: true, remindAt: true, closedAt: true },
+      select: {
+        id: true,
+        workspaceId: true,
+        createdBy: true,
+        closesAt: true,
+        remindAt: true,
+        closedAt: true,
+      },
     });
 
     if (!poll || poll.closedAt) {

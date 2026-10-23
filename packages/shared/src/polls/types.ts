@@ -40,16 +40,6 @@ export const isChoiceResponseType = (
 ): responseType is PollChoiceResponseType =>
   (POLL_CHOICE_RESPONSE_TYPES as readonly string[]).includes(responseType);
 
-export const POLL_NON_CHOICE_RESPONSE_TYPES = [
-  "SHORT_TEXT",
-  "RANKING",
-  "RATING_1_TO_5",
-  "Q_AND_A",
-] as const;
-
-export type PollNonChoiceResponseType =
-  (typeof POLL_NON_CHOICE_RESPONSE_TYPES)[number];
-
 export const POLL_RESULT_VISIBILITIES = [
   "EVERYONE",
   "CREATOR_ONLY",

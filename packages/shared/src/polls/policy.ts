@@ -1,4 +1,5 @@
 import { POLL_LIMITS, isChoiceResponseType, type PollOption } from "./types.js";
+import type { PollSchedule } from "./validation.js";
 
 type PollTiming = { closedAt?: number | null; closesAt?: number | null };
 
@@ -75,16 +76,18 @@ export function isPollMessageMetadata(metadata: unknown): boolean {
   );
 }
 
-/** A scheduled poll's close and reminder times must still fall after its publish time. */
-export function assertPollScheduleAfter(
-  pollDraft: unknown,
-  publishAt: number,
-): void {
-  const schedule = (pollDraft as { schedule?: { closeAt?: string | null; remindAt?: string | null } } | null)
-    ?.schedule;
-  for (const time of [schedule?.closeAt, schedule?.remindAt]) {
-    if (time && Date.parse(time) <= publishAt) {
-      throw new Error("Pick a time before the poll's close and reminder times");
-    }
-  }
+/**
+ * Close and reminder times are stored as clock times picked relative to the publish time.
+ * When the publish time moves (reschedule, Send now), move them by the same offset so the
+ * poll stays open for the duration the author picked.
+ */
+export function shiftPollSchedule(schedule: PollSchedule, offsetMs: number): PollSchedule {
+  if (offsetMs === 0) return schedule;
+  const shift = (value: string | null | undefined) =>
+    value ? new Date(Date.parse(value) + offsetMs).toISOString() : value;
+  return {
+    publishAt: shift(schedule.publishAt),
+    closeAt: shift(schedule.closeAt),
+    remindAt: shift(schedule.remindAt),
+  };
 }

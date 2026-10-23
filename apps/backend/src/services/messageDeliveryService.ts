@@ -7,7 +7,7 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { ConversationsSideEffectHandler } from '@/zero/side-effects/tables/conversations-handler';
 import type { QueryContext } from '@/zero/acl/core/types';
 import { cleanupSourceTransactionTx } from '@/bypassAcl/transactions/messageDeliveryService';
-import { deliverScheduledPollTx } from '@/bypassAcl/transactions/scheduledPollDelivery';
+import { deliverScheduledPoll } from '@/services/scheduledPollDeliveryService';
 import { pollLifecycleQueue } from '@/queues/pollLifecycleQueue';
 
 type DeliverySource =
@@ -216,15 +216,25 @@ export async function deliverDelayedServerMessage(params: {
   conversationId: string | null | undefined;
   senderId: string;
   content: string;
-  hasPollDraft?: boolean;
 }): Promise<DeliverServerMessageResult> {
-  if (params.hasPollDraft) {
-    const delivered = await deliverScheduledPollTx({
-      delayedMessageId: params.delayedMessageId,
-      expectedChannelId: params.channelId,
-      expectedSenderId: params.senderId,
-      timestamp: Date.now(),
-    });
+  const delayed = await db.delayedMessage.findUnique({
+    where: { id: params.delayedMessageId },
+    select: {
+      id: true,
+      workspaceId: true,
+      channelId: true,
+      conversationId: true,
+      senderId: true,
+      scheduledFor: true,
+      status: true,
+      pollDraft: true,
+    },
+  });
+  if (delayed?.pollDraft != null) {
+    if (delayed.channelId !== params.channelId || delayed.senderId !== params.senderId) {
+      throw new Error('Not authorized to deliver this scheduled poll');
+    }
+    const delivered = await deliverScheduledPoll(delayed, Date.now());
     if (delivered.createdPoll) {
       try {
         await pollLifecycleQueue.schedulePoll(delivered.createdPoll);

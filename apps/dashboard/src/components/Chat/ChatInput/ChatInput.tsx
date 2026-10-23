@@ -858,6 +858,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           { kind: 'channel', channelId },
           { content, type: MessageType.USER, timestamp, poll, pollSchedule },
         );
+        // Same as a normal send: jump to the latest messages so the new poll is visible.
+        dispatchChatMessageSentEvent(channelId);
       },
       [channelId, user?.id, zero],
     );
