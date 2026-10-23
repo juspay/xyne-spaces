@@ -384,6 +384,15 @@ export async function getAttachment(
   };
 }
 
+/**
+ * Create a Gmail draft.
+ *
+ * `bodyHtml` is optional and additive (XYNE-66827). Without it the message is
+ * the byte-identical `text/plain` single part it has always been; with it the
+ * message becomes `multipart/alternative` and `body` becomes the plain-text
+ * fallback, which every client needs and some readers prefer. A branded email
+ * has to be HTML, and there was no way to draft HTML before this.
+ */
 export async function createDraft(
   token: string,
   to: string,
@@ -392,16 +401,35 @@ export async function createDraft(
   cc?: string,
   inReplyTo?: string,
   threadId?: string,
+  bodyHtml?: string,
 ): Promise<string> {
-  const lines = [
+  const headers = [
     `To: ${to}`,
     ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${subject}`,
     ...(inReplyTo ? [`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`] : []),
-    "Content-Type: text/plain; charset=utf-8",
-    "",
-    body,
   ];
+  // The boundary must not occur in either part, so it carries a random suffix
+  // rather than a timestamp a body could coincidentally contain.
+  const boundary = `xyne_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const lines = bodyHtml?.trim()
+    ? [
+        ...headers,
+        `Content-Type: multipart/alternative; boundary="${boundary}"`,
+        "",
+        `--${boundary}`,
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        body,
+        "",
+        `--${boundary}`,
+        "Content-Type: text/html; charset=utf-8",
+        "",
+        bodyHtml,
+        "",
+        `--${boundary}--`,
+      ]
+    : [...headers, "Content-Type: text/plain; charset=utf-8", "", body];
   const raw = Buffer.from(lines.join("\r\n")).toString("base64url");
 
   const result = (await googleFetch(`${BASE}/drafts`, token, {

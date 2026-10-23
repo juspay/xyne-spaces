@@ -216,6 +216,17 @@ export type {
   DesignTypeToken,
 } from "./design-export.js";
 export {
+  EMPTY_VISUAL_BRANDING,
+  brandThemeCss,
+  hasVisualBranding,
+  injectEmailBrandStyles,
+  injectHtmlReportTheme,
+  injectPdfBrandTokens,
+  isDesignSystemRef,
+  resolveVisualBranding,
+} from "./visual-branding.js";
+export type { DesignSystemRef, VisualBranding } from "./visual-branding.js";
+export {
   matchesAttachmentType,
   isSupportedInboundAttachment,
   INBOUND_ATTACHMENT_FAMILIES,

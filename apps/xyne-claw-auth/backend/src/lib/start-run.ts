@@ -15,7 +15,9 @@ import {
   agentRunRepository,
   userProviderCredentialsRepository,
   userAgentInstructionRepository,
+  designSystemRepository,
 } from "../repositories/index.js";
+import type { ResolvedDesignSystem } from "../repositories/index.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import {
@@ -399,6 +401,46 @@ async function resolveAgent(
     agentConfig: stripPlatformConfigKeys(agent.config as Record<string, unknown>),
     config: agent.config,
     ...(skills.length > 0 ? { skills } : {}),
+  };
+}
+
+/**
+ * The run's design system ref, as a SERVER-OWNED value.
+ *
+ * `designSystemRepository.resolveForAgent` owns the only resolution order there
+ * is — a conversation's own pin beats the agent default beats the pre-migration
+ * `config.designSystem` text — and until XYNE-66827 nothing on the run path
+ * called it, so a conversation pin changed no run and `tokensCss` reached no
+ * tool. It travels as a ref because the PDF and email surfaces need TOKENS;
+ * `designSystem` is left alone for the prompt injection that already reads it.
+ *
+ * The strip is the security part, and it is not optional. `mergedAgentConfig`
+ * carries per-request overrides, so a caller passing
+ * `agentConfig.designSystemRef` would otherwise have it survive whenever the
+ * agent has no stored system — and that ref chooses the CSS branded into
+ * downloaded PDFs and inlined into email drafts sent from the user's own
+ * mailbox.
+ *
+ * TEMPORARY. XYNE-66821 lands `resolveDesignSystemRef` with the same strip;
+ * delete this function and its single call site then, rather than running two
+ * resolvers for one key. Kept as one exported function so that removal is a
+ * deletion and not an excavation.
+ */
+export function withServerOwnedDesignSystemRef(
+  config: Record<string, unknown>,
+  resolved: ResolvedDesignSystem | null,
+): Record<string, unknown> {
+  const { designSystemRef: _callerSupplied, ...serverOwned } = config;
+  if (!resolved) return serverOwned;
+  return {
+    ...serverOwned,
+    designSystemRef: {
+      id: resolved.id,
+      name: resolved.name,
+      designMd: resolved.designMd,
+      tokensCss: resolved.tokensCss,
+      origin: resolved.origin,
+    },
   };
 }
 
@@ -1582,6 +1624,21 @@ export async function prepareRun(
     mergedAgentConfig = runWorkspaceId
       ? { ...agentConfigWithoutWorkspace, workspaceId: runWorkspaceId, ...(runSpacesUserId ? { spacesUserId: runSpacesUserId } : {}) }
       : agentConfigWithoutWorkspace;
+
+    // The resolved design system, as structured data (XYNE-66827).
+    //
+    // A throw is treated as "no system", which designSystemRepository's own
+    // note asks for: this is a DB read on the dispatch path and a blip must
+    // not fail the run.
+    mergedAgentConfig = withServerOwnedDesignSystemRef(
+      mergedAgentConfig,
+      await designSystemRepository
+        .resolveForAgent(
+          { orgId: agent.orgId, config: (agent.config ?? null) as Prisma.JsonValue },
+          conversationId,
+        )
+        .catch(() => null),
+    );
 
     const forwardBody = {
       sessionId,

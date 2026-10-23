@@ -5,6 +5,7 @@
  */
 
 import type { ToolDefinition, ToolExecutionContext, ConfigField } from "../types.js";
+import { injectEmailBrandStyles, resolveVisualBranding } from "../../visual-branding.js";
 import {
   searchEmails,
   readEmail,
@@ -128,7 +129,12 @@ export const googleGmailDraft: ToolDefinition = {
     properties: {
       to: { type: "string", description: "Recipient email address" },
       subject: { type: "string", description: "Email subject line" },
-      body: { type: "string", description: "Email body (plain text)" },
+      body: { type: "string", description: "Email body (plain text). Always required — it is the fallback part when bodyHtml is supplied." },
+      bodyHtml: {
+        type: "string",
+        description:
+          "Optional HTML body. When given, the draft is multipart/alternative with `body` as the plain-text fallback, and the organisation's design system is applied to it automatically.",
+      },
       cc: { type: "string", description: "CC recipients (comma-separated)" },
       inReplyTo: { type: "string", description: "Message-ID header of the email being replied to" },
       threadId: { type: "string", description: "Gmail thread ID to reply in" },
@@ -137,6 +143,13 @@ export const googleGmailDraft: ToolDefinition = {
   },
   async execute(args, ctx) {
     const token = getToken(ctx);
+    // Branded here rather than being left to the model: email clients drop
+    // <style>, so the brand has to be inlined onto the elements, and asking a
+    // model to hand-inline a palette per draft is how drafts drift off-brand.
+    const suppliedHtml = typeof args["bodyHtml"] === "string" ? args["bodyHtml"] : undefined;
+    const brandedHtml = suppliedHtml
+      ? injectEmailBrandStyles(suppliedHtml, resolveVisualBranding(ctx?.designSystem))
+      : undefined;
     return createDraft(
       token,
       args["to"] as string,
@@ -145,6 +158,7 @@ export const googleGmailDraft: ToolDefinition = {
       args["cc"] as string | undefined,
       args["inReplyTo"] as string | undefined,
       args["threadId"] as string | undefined,
+      brandedHtml,
     );
   },
 };

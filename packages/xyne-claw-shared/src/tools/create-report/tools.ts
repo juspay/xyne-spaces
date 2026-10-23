@@ -26,6 +26,7 @@
 import { marked } from "marked";
 import type { ToolDefinition } from "../types.js";
 import { buildHtmlDocument, extractThemeStyles, sanitizeHtmlBody, sanitizeThemeCss } from "./template.js";
+import { injectHtmlReportTheme, resolveVisualBranding } from "../../visual-branding.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("tools");
@@ -232,7 +233,7 @@ export const createHtmlReportTool: ToolDefinition = {
     required: ["title", "summary", "detailsMarkdown"],
   },
 
-  async execute(params): Promise<string> {
+  async execute(params, context): Promise<string> {
     const title = typeof params["title"] === "string" ? params["title"].trim() : "";
     const summary = typeof params["summary"] === "string" ? params["summary"].trim() : "";
     const detailsMarkdown =
@@ -265,13 +266,19 @@ export const createHtmlReportTool: ToolDefinition = {
         typeof rawHtml === "string" ? rawHtml : String(rawHtml),
       );
 
-      const fullHtml = buildHtmlDocument({
-        title,
-        subtitle: `Length: ${detailsMarkdown.length.toLocaleString()} chars · Generated: ${new Date().toISOString()}`,
-        body: safeBodyHtml,
-        ...(themeCss ? { themeCss } : {}),
-        chrome: !fullDoc,
-      });
+      // Branded AFTER the document is built, so the brand block lands between
+      // the template's base CSS and the agent's own themeCss — the brand is the
+      // default and an agent that wrote a theme still wins. XYNE-66827.
+      const fullHtml = injectHtmlReportTheme(
+        buildHtmlDocument({
+          title,
+          subtitle: `Length: ${detailsMarkdown.length.toLocaleString()} chars · Generated: ${new Date().toISOString()}`,
+          body: safeBodyHtml,
+          ...(themeCss ? { themeCss } : {}),
+          chrome: !fullDoc,
+        }),
+        resolveVisualBranding(context?.designSystem),
+      );
 
       const fileName = safeFileName(title);
       const base64 = Buffer.from(fullHtml, "utf8").toString("base64");
