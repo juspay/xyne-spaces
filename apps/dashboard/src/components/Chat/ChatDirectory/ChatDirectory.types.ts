@@ -31,3 +31,12 @@ export interface SectionBucket {
   section: ChannelSection;
   channels: VisibleChannel[];
 }
+
+/** A bulk "mark as read" waiting on the sidebar's confirmation dialog. */
+export interface MarkReadTarget {
+  /** Shapes the copy: DMs are counted as conversations, every other group as channels. */
+  kind: 'dms' | 'channels';
+  /** The group or custom section the user acted on, named in the dialog body. */
+  label: string;
+  channelIds: string[];
+}

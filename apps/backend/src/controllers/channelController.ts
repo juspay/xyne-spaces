@@ -35,6 +35,7 @@ import {
   ActivityClassification,
   ActivityClassificationJobType, ChannelType, ChannelRole,
   normalizeHistoryScope,
+  MARK_READ_REQUEST_MAX_CHANNELS,
   type AddGroupDmParticipantsRequest,
   type AddGroupDmParticipantsResponse,
 } from '@xyne/shared';
@@ -1662,13 +1663,14 @@ export class ChannelController {
         return;
       }
 
-      // Bound the input so one request cannot issue an unbounded IN query. Generous versus
-      // the Zero mutator's 25, because the whole point here is to avoid chunking.
-      const MAX_CHANNEL_IDS = 1000;
-      if (channelIds.length > MAX_CHANNEL_IDS) {
+      // A payload bound, not a capacity one: the service costs a flat handful of
+      // statements however many channels it is given. Callers are not expected to hit
+      // this — useMarkChannelsAsRead splits larger sets into successive requests using
+      // the same constant — so a body over the bound means a caller that did not batch.
+      if (channelIds.length > MARK_READ_REQUEST_MAX_CHANNELS) {
         res.status(400).json({
           success: false,
-          error: `channelIds exceeds the maximum of ${MAX_CHANNEL_IDS}`,
+          error: `channelIds exceeds the maximum of ${MARK_READ_REQUEST_MAX_CHANNELS} per request`,
         });
         return;
       }
