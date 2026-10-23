@@ -23,11 +23,24 @@ import { errMsg } from "./errors.js";
 
 const log = createLogger("mention-transform");
 
-const USER_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
-const GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
-const SPECIAL_MENTION_RE = /(^|[^A-Za-z0-9_>])@(channel|here)\b/g;
+// What may come right before the `@`: the start, a non-word character, or a
+// bare tag such as `<p>`, `<li>`, `<strong>` or `<br/>`, since HTML bodies open
+// with one. Any other `>` is refused: it ends the spans written here
+// (`class="…">@channel`), so excluding it keeps expansion idempotent.
+// `<code>` and `<pre>` are refused too: only ``` fences are skipped here, and
+// `<code>@channel</code>` shows the text rather than pinging everyone.
+const BARE_TAG = String.raw`<(?!code\b|pre\b)[A-Za-z][A-Za-z0-9]*\s*\/?>`;
+const PREFIX = String.raw`(^|[^A-Za-z0-9_>]|${BARE_TAG})`;
+
+const USER_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]`,
+  "g",
+);
+const GROUP_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]`,
+  "g",
+);
+const SPECIAL_MENTION_RE = new RegExp(String.raw`${PREFIX}@(channel|here)\b`, "g");
 
 function escapeAttr(s: string): string {
   return s
@@ -102,15 +115,19 @@ export function expandSpacesMentions(input: string | undefined | null): string {
 // initial (e.g. "M S Dhoni", "A R Rahman") would otherwise be skipped entirely.
 // Over-broad single-letter candidates (e.g. a stray "@I") are harmless: the
 // resolver only rewrites a name that resolves to EXACTLY ONE user.
-const UNBOUND_USER_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Z][A-Za-z'\-]*(?:\s[A-Z][A-Za-z'\-]*){0,2})(?!\[|<\/|\.[A-Za-z0-9])\b/g;
+const UNBOUND_USER_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Z][A-Za-z'\-]*(?:\s[A-Z][A-Za-z'\-]*){0,2})(?!\[|<\/|\.[A-Za-z0-9])\b`,
+  "g",
+);
 
 // `@<email>` shorthand — e.g. `@jone.doe@gmail.com`. Same anti-collision
 // rules as the name pattern: NOT followed by `[`, NOT inside an HTML span.
 // We deliberately keep this loose (matching common-form emails) rather than
 // the full RFC 5322 grammar; downstream lookup tolerates a miss.
-const UNBOUND_EMAIL_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})(?!\[|<\/)\b/g;
+const UNBOUND_EMAIL_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})(?!\[|<\/)\b`,
+  "g",
+);
 
 // Dotted handle shorthand — e.g. `@bowmitha.c`, `@utkarsh.kumar`,
 // `@deepak.kushwaha`. This is the username form agents copy out of
@@ -122,15 +139,19 @@ const UNBOUND_EMAIL_MENTION_RE =
 // (`@jone.doe@gmail.com`) never matches; trailing lookahead excludes bracketed
 // mentions, full emails, and partial backtracking inside longer handle/email
 // tokens.
-const UNBOUND_HANDLE_MENTION_RE =
-  /(^|[^A-Za-z0-9_>@.])@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])/g;
+const UNBOUND_HANDLE_MENTION_RE = new RegExp(
+  String.raw`(^|[^A-Za-z0-9_>@.]|${BARE_TAG})@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])`,
+  "g",
+);
 
 // Group alias shorthand — e.g. `@data-intelligence` or `@spaces`. User
 // handles use dots and display-name mentions are capitalised, so lowercase
 // aliases (hyphenated or one word) can be resolved without colliding with
 // existing user paths; a token is tagged only when exactly one group owns it.
-const UNBOUND_GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|<\/|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])/g;
+const UNBOUND_GROUP_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|<\/|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])`,
+  "g",
+);
 
 const SPECIAL_NAMES = new Set(["channel", "here"]);
 
