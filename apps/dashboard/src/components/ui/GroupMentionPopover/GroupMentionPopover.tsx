@@ -3,8 +3,7 @@ import { Users, ExternalLink } from 'lucide-react';
 import { HoverCard } from '../HoverCard/HoverCard';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useUserGroupDialog } from '../../../store/useUserGroupDialogStore';
 
 interface GroupHoverWrapperProps {
   groupId: string;
@@ -12,9 +11,6 @@ interface GroupHoverWrapperProps {
 }
 
 export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, children }) => {
-  const navigate = useNavigate();
-  const { channelId } = useParams<{ channelId: string }>();
-  const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const [open, setOpen] = useState(false);
 
@@ -29,9 +25,8 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
   const userGroup = useUserGroupById(groupId);
 
   const handleViewGroup = (): void => {
-    if (channelId) {
-      void navigate(`${baseRoute}/${channelId}/group/${groupId}`);
-    }
+    setOpen(false);
+    useUserGroupDialog.getState().open(groupId);
   };
 
   if (!userGroup) return <>{children}</>;
@@ -111,7 +106,10 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
         {/* Footer */}
         <div className='flex justify-end px-4 py-3 border-t border-muted-foreground/20'>
           <button
-            onClick={handleViewGroup}
+            onClick={e => {
+              e.stopPropagation();
+              handleViewGroup();
+            }}
             data-track-category='MENTION'
             data-track-name='OPEN_GROUP_FROM_MENTION'
             className='inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-muted hover:bg-accent rounded-md transition-colors'

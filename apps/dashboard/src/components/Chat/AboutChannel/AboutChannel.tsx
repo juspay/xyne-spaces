@@ -255,6 +255,7 @@ const AboutChannel = ({
                     onKeyDown={handleNameKeyDown}
                     className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                     placeholder='channel-name'
+                    data-testid='channel-rename-input'
                     maxLength={80}
                     data-track-event='blur'
                     data-track-category='ABOUT_CHANNEL_FORM'
@@ -277,6 +278,7 @@ const AboutChannel = ({
                       variant='ghost'
                       size='sm'
                       onClick={() => void handleSaveName()}
+                      data-testid='channel-rename-save'
                       disabled={!!nameError || isSavingName}
                       data-track-category='ABOUT_CHANNEL_FORM'
                       data-track-name='Save_Name'
@@ -294,6 +296,7 @@ const AboutChannel = ({
             {canRename && !isEditingName && (
               <Button
                 aria-label='Edit channel name'
+                data-testid='channel-rename-edit'
                 className='absolute right-0 top-0'
                 variant='ghost'
                 size='sm'
@@ -325,6 +328,7 @@ const AboutChannel = ({
                   className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
                   placeholder='Add a description...'
+                  data-testid='channel-description-input'
                   data-track-event='blur'
                   data-track-category='ABOUT_CHANNEL_FORM'
                   data-track-name='Edit_Description_Input'
@@ -345,6 +349,7 @@ const AboutChannel = ({
                     variant='ghost'
                     size='sm'
                     onClick={() => void handleSaveDescription()}
+                    data-testid='channel-description-save'
                     data-track-category='ABOUT_CHANNEL_FORM'
                     data-track-name='Save_Description'
                     data-track-metadata={JSON.stringify({ channelId: channel?.id })}
@@ -365,6 +370,7 @@ const AboutChannel = ({
           {isParticipant && !isEditingDescription && (
             <Button
               aria-label='Edit channel description'
+              data-testid='channel-description-edit'
               className='absolute right-0 top-0'
               variant='ghost'
               size='sm'

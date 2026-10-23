@@ -2548,6 +2548,8 @@ export class CallController {
               data: {
                 response: InvitationResponse.INVITED,
                 ringStatus: RingStatus.CALLING,
+                // An explicit invite rings even if the call was scheduled not to.
+                ringNotification: null,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,

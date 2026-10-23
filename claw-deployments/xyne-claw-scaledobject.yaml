@@ -1,0 +1,76 @@
+# KEDA autoscaling for xyne-claw (XYNE-67291).
+#
+# Scales the xyne-claw run-harness Deployment on the BullMQ "run-execution"
+# queue in Redis (default "bull" prefix). Mirrors the live
+# conversation-flow-worker ScaledObject: same Redis endpoint, the shared
+# "redis-auth" TriggerAuthentication (secret xyne-core-secrets-v1), TLS,
+# AverageValue metrics.
+#
+# IMPORTANT companion change: remove the static `spec.replicas` field from the
+# xyne-claw Deployment before/when applying this. KEDA creates and owns an HPA
+# ("keda-hpa-xyne-claw"); a hardcoded replicas in the Deployment manifest will
+# be fought by the HPA on every `kubectl apply`. (Full manifest reconcile is
+# tracked in XYNE-67289.)
+#
+# Backlog signal note: jobs rescheduled under per-pod cap / memory pressure go
+# to the BullMQ `delayed` ZSET, which the Redis LLEN scaler does not read; they
+# re-enter `:wait` when their delay elapses, so they are picked up a beat later.
+#
+# Apply (prod write — run by an operator, not CI-less):
+#   kubectl apply -f claw-deployments/xyne-claw-scaledobject.yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: xyne-claw
+  namespace: xyne-apps
+  labels:
+    app.kubernetes.io/name: xyne-claw
+    app.kubernetes.io/managed-by: keda
+spec:
+  scaleTargetRef:
+    name: xyne-claw
+  # Current prod baseline is 5 fixed replicas; keep that as the floor so
+  # autoscaling never reduces steady-state capacity. Lower minReplicaCount
+  # (e.g. 3) later if idle cost matters. Peak observed cluster concurrency ~180
+  # => 15 * RUN_QUEUE_CONCURRENCY(40) = 600 gives ample headroom.
+  minReplicaCount: 5
+  maxReplicaCount: 15
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 4
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 600
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+  triggers:
+    # Utilisation: scale out when average in-flight runs per pod exceed 30
+    # (per-pod cap is RUN_QUEUE_CONCURRENCY=40, so 30 ~= 75% busy).
+    - type: redis
+      metricType: AverageValue
+      authenticationRef:
+        name: redis-auth
+      metadata:
+        address: 10.33.193.3:6378
+        enableTLS: "true"
+        listName: bull:run-execution:active
+        listLength: "30"
+    # Backlog: scale out when runs are waiting to be claimed.
+    - type: redis
+      metricType: AverageValue
+      authenticationRef:
+        name: redis-auth
+      metadata:
+        address: 10.33.193.3:6378
+        enableTLS: "true"
+        listName: bull:run-execution:wait
+        listLength: "5"

@@ -281,6 +281,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        ringNotification,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
 
@@ -333,7 +334,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId));
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId, ringNotification));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -418,6 +419,7 @@ export class ScheduleCallController {
         invitation,
         notifyParticipantsByEmail,
         summaryTemplateId,
+        ringNotification,
       } = ScheduleCallSchema.parse(req.body);
 
       if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
@@ -469,7 +471,7 @@ export class ScheduleCallController {
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
 
-      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId);
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId, ringNotification);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {
@@ -609,7 +611,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail, ringNotification } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -640,7 +642,8 @@ export class ScheduleCallController {
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
           normalizedExternalInvitees !== undefined ||
-          summaryTemplateId !== undefined,
+          summaryTemplateId !== undefined ||
+          ringNotification !== undefined,
         targetUserIds,
         // findParticipants already excludes external invitees.
         loadParticipants: () => repositories.calls.findParticipants(call.id),
@@ -757,6 +760,7 @@ export class ScheduleCallController {
         callUpdatesChannel: newCallUpdatesChannel,
         externalInvitees: normalizedExternalInvitees,
         summaryTemplateId,
+        ringNotification,
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.externalId} resolvedChannelId=${resolvedChannelId}`);
@@ -932,7 +936,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId, notifyParticipantsByEmail, ringNotification } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -967,7 +971,8 @@ export class ScheduleCallController {
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
           normalizedExternalInvitees !== undefined ||
-          summaryTemplateId !== undefined,
+          summaryTemplateId !== undefined ||
+          ringNotification !== undefined,
         targetUserIds,
         loadParticipants: () =>
           repositories.recurringCallParticipants.findInternalParticipants(series.id),
@@ -1083,7 +1088,7 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] seriesUpdate payload=${JSON.stringify(seriesUpdate)}`);
 
-      const updatedSeries = await updateRecurringSeriesTx(db, seriesId, seriesUpdate, recurringParticipantUserIds, series, userId, req, normalizedExternalInvitees);
+      const updatedSeries = await updateRecurringSeriesTx(db, seriesId, seriesUpdate, recurringParticipantUserIds, series, userId, req, normalizedExternalInvitees, ringNotification);
 
       logger.info(`[updateRecurringSeries] source transaction committed | newChannelId=${updatedSeries.channelId}`);
 
@@ -1244,6 +1249,14 @@ export class ScheduleCallController {
               externalInvitees: normalizedExternalInvitees,
             });
           }
+        }
+
+        // After the participant sync above, so invitees it just added are covered too.
+        if (ringNotification !== undefined) {
+          await repositories.calls.setInternalParticipantsRingNotification(
+            allScheduledInstances.map((i) => i.id),
+            ringNotification,
+          );
         }
 
         // Title / time / participant edits cascaded above; mirror them out.

@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces-mcp",
   "license": "Apache-2.0",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "MCP server for Xyne Spaces — channels, threads, messages, tickets, and search over the Spaces public API",
   "type": "module",
   "bin": {
@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@xyne/spaces-sdk": "0.1.5-next.0",
+    "@xyne/spaces-sdk": "0.2.0-next.0",
     "emoji-datasource": "^16.0.0"
   },
   "devDependencies": {

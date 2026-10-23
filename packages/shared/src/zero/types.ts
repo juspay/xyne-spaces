@@ -506,6 +506,13 @@ export enum RingStatus {
   BUSY = 'BUSY',
 }
 
+// Set on a participant of a scheduled call that should not ring once it starts. Null (the
+// default, and every ad-hoc call) rings.
+// @ts-ignore TS1294
+export enum CallRingNotification {
+  DISABLED = 'DISABLED',
+}
+
 // @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
